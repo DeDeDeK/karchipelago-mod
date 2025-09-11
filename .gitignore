@@ -1,2 +1,8 @@
 /build/
 /out/
+/iso/
+/extracted-iso/
+/externals/devkitpro/
+/externals/GeckoLoader/
+/externals/pyisotools/
+/riivolution/
