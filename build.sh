@@ -9,14 +9,14 @@ export DEVKITARM=./externals/devkitpro/devkitARM
 export DEVKITPPC=./externals/devkitpro/devkitPPC
 
 # build parent hoshi
-echo "building parent hoshi for hoshi.bin..."
-pushd externals/hoshi
-DEVKITPRO=../devkitpro DEVKITARM=../devkitpro/devkitARM DEVKITPPC=../devkitpro/devkitPPC make all
-popd
+#echo "building parent hoshi for hoshi.bin..."
+#pushd externals/hoshi
+#DEVKITPRO=../devkitpro DEVKITARM=../devkitpro/devkitARM DEVKITPPC=../devkitpro/devkitPPC BUILD=debug make all
+#popd
 
 # build hoshi AP mod
-echo "building hoshi AP mod..."
-make all
+echo "building hoshi AP mods..."
+BUILD=debug make all
 
 # extract iso
 # https://github.com/JoshuaMKW/pyisotools
@@ -53,5 +53,6 @@ cp 'iso/Kirby Air Ride (USA) (Hoshi).iso' ~/.var/app/org.DolphinEmu.dolphin-emu/
 
 # copy riivolution files to dolphin dir
 pushd riivolution
+rm -r ~/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/*
 cp -r * ~/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/
 popd

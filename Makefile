@@ -14,7 +14,7 @@ INC_DIR 		?= $(HOSHI_DIR)/include
 PACKTOOL_DIR 	?= $(HOSHI_DIR)/packtool
 OUT_DIR 		= out
 MODS_OUT_DIR 	= $(OUT_DIR)/mods
-MODS_ROOT_DIR 	= examples
+MODS_ROOT_DIR 	= mods
 
 # User-defined CFLAGS.
 CFLAGS = -O1 -mcpu=750 -meabi -msdata=none -mhard-float -ffreestanding \
