@@ -16,7 +16,7 @@ export DEVKITPPC=./externals/devkitpro/devkitPPC
 
 # build hoshi AP mod
 echo "building hoshi AP mods..."
-BUILD=debug make all
+make all
 
 # extract iso
 # https://github.com/JoshuaMKW/pyisotools
@@ -28,17 +28,17 @@ python -m pyisotools 'iso/Kirby Air Ride (USA).iso' E --dest="extracted-iso/"
 echo "patching main.dol of extracted iso with hoshi entrypoint gecko codes..."
 python externals/GeckoLoader/GeckoLoader.py extracted-iso/root/sys/main.dol externals/hoshi/entrypoint/out/codes.gct --hooktype=PAD --dest=extracted-iso/root/sys/main.dol
 
-# copy hoshi.bin into root/sys of extracted iso
-echo "copying hoshi.bin into root/sys of extracted iso..."
-cp externals/hoshi/out/release/hoshi.bin extracted-iso/root/sys/
+# copy hoshi.bin into root/files of extracted iso
+echo "copying hoshi.bin into root/files of extracted iso..."
+cp externals/hoshi/out/release/hoshi.bin extracted-iso/root/files/
 
 # copy hoshi.bin into riivolution folder
 echo "copying hoshi.bin into riivolution folder..."
 cp externals/hoshi/out/release/hoshi.bin riivolution/karap/
 
-# copy mod files into root/sys of extracted iso
-echo "copying mod .bin files into root/sys of extracted iso..."
-cp out/mods/*.bin extracted-iso/root/sys/
+# copy mod files into root/files of extracted iso
+echo "copying mod .bin files into root/files of extracted iso..."
+cp out/mods/*.bin extracted-iso/root/files/
 
 # copy mod files into riivolution folder
 echo "copying mod .bin files into riivolution folder..."
