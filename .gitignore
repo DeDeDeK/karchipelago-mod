@@ -1,9 +1,13 @@
 /build/
+/root/
 /out/
-/iso/
-/extracted-iso/
+/.temp/
+/install/
 /externals/devkitpro/
 /externals/GeckoLoader/
 /externals/pyisotools/
-/riivolution/
+/scripts/devkitpro/
 notes.txt
+kar.iso
+out.iso
+patch.xdelta
