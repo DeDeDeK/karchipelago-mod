@@ -4,16 +4,18 @@
 #include "game.h"
 #include "inline.h"
 
-#include "header.h"
+#include "main.h"
+#include "patches.h"
 #include "hoshi/settings.h"
 
-#define MOD_NAME "Basic Example"
+#define MOD_NAME "KARchipelago Base"
 
 u8 *alloc_arr;                    // pointer to an array allocated at runtime in OnBoot.
-int is_play_sfx_every_second = 0; // variable that is updated by the player in the in-game settings menu via the ModMenu defined below.
+int deathlink_enabled = 0; // variable that is updated by the player in the in-game settings menu via the ModMenu defined below.
+int energylink_enabled = 0;
 
 char ModName[] = MOD_NAME;      // Name of the mod.
-char ModAuthor[] = "Your Name"; // Creator of the mod.
+char ModAuthor[] = "DeDeDK"; // Creator of the mod.
 char ModVersion[] = "v1.0";     // Version of the mod.
 
 int ModSaveSize = sizeof(struct TemplateSave); // (optional) Size of the save data your mod uses. A pointer to the saved data is passed into OnSaveInit.
@@ -22,17 +24,28 @@ TemplateSave *ModSave;                         // Pointer to the mod's save data
 // Creates a menu that appears in the in-game Settings menu.
 // Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
 OptionDesc ModSettings = {
-    .name = "Template Menu",
+    .name = "Archipelago Settings",
     .description = "Interface with mod settings here.",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 2,
+        .option_num = 3,
         .options = {
             &(OptionDesc){
-                .name = "SFX Every Second",
-                .description = "Play a sfx every second, very annoying!",
+                .name = "Death Link",
+                .description = "Enable or Disable Death Link",
                 .kind = OPTKIND_VALUE,
-                .val = &is_play_sfx_every_second,
+                .val = &deathlink_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+            },
+            &(OptionDesc){
+                .name = "Energy Link",
+                .description = "Enable or Disable Energy Link",
+                .kind = OPTKIND_VALUE,
+                .val = &energylink_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -47,10 +60,10 @@ OptionDesc ModSettings = {
                     .option_num = 1,
                     .options = {
                         &(OptionDesc){
-                            .name = "Debug Menu",
-                            .description = "Enter the game's debug menu",
+                            .name = "Main Menu",
+                            .description = "Enter the game's main menu",
                             .kind = OPTKIND_SCENE,
-                            .major_idx = MJRKIND_DEBUG,
+                            .major_idx = MJRKIND_MENU,
                         },
                     },
                 },
@@ -60,13 +73,15 @@ OptionDesc ModSettings = {
 };
 
 // Runs immediately after the mod file is loaded.
-// Calls to HSD_MemAlloc in THIS function specifically wil persist throughout the entire runtime of the game.
+// Calls to HSD_MemAlloc in THIS function specifically will persist throughout the entire runtime of the game.
 // All calls to HSD_MemAlloc from elsewhere will return an allocation that exists only within the current scene.
 void OnBoot()
 {
     OSReport("Hello from boot\n");
 
     alloc_arr = HSD_MemAlloc(sizeof(u8) * 200); // persistently allocate an array of size 200
+
+    Patches_Apply();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
@@ -75,6 +90,7 @@ void OnSaveInit()
 {
     OSReport("save data for " MOD_NAME " created!\n");
     ModSave->boot_num = 0;
+    ModSave->item_received_index = 0;
 }
 
 // Runs on startup after any save data is loaded into memory.
@@ -83,6 +99,7 @@ void OnSaveLoaded()
 {
     ModSave->boot_num++;
     OSReport(MOD_NAME " present for [%d] boot cycles\n", ModSave->boot_num);
+    OSReport("item received index is [%d]\n", ModSave->item_received_index);
 }
 
 // Runs when entering the main menu.
@@ -104,7 +121,7 @@ void On3DLoad()
 {
     // determine the game mode
     char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
-    OSReport("Now starting %s game on map [%d].\n", mode_name, Gm_GetCurrentGrKind());
+    OSReport("Now starting %s game on map [%d]. StageKind: [%d]\n", mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
 
     // loop across all 5 potential players
     for (int i = 0; i < 5; i++)
@@ -119,7 +136,7 @@ void On3DLoad()
 
         // get this rider's machine kind
         MachineKind machine_kind = rd->starting_machine_idx;
-
+        
         // log some data on them
         OSReport("Player %d using rider [%d] color [%d] riding machine [%d].\n",
                  i + 1,
@@ -136,7 +153,7 @@ void On3DPause(int pause_ply)
 }
 
 // Runs when unpausing the match.
-void On3DUnpause()
+void On3DUnpause(int pause_ply)
 {
     OSReport("Resuming the game.\n");
 }
@@ -187,7 +204,7 @@ void OnFrame()
 void Func_PerFrame(GOBJ *g)
 {
     // Users can modify this value in the in-game settings menu
-    if (is_play_sfx_every_second == 0)
+    if (deathlink_enabled == 0)
         return;
 
     // Retrieve gobj's data
@@ -195,7 +212,11 @@ void Func_PerFrame(GOBJ *g)
 
     if (++gp->timer > 60)
     {
-        SFX_Play(FGMMENU_CS_KETTEI);
+        // // Kill player every second in the city if deathlink is enabled
+        // if (Gm_IsInCity())
+        HurtData *hd = HurtData_Create("died :(", HURTKIND_STAGE, HSD_OBJKIND_NONE, HSD_OBJKIND_NONE, HSD_OBJKIND_NONE);
+        
+        //Ply_AddDeath(0, );
         gp->timer = 0;
     }
 }
