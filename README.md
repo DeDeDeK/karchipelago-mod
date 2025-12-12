@@ -1,4 +1,10 @@
-This repository is a **template project** for building a Kirby Air Ride mod using the [Hoshi](https://github.com/UnclePunch/hoshi) modding framework.
+# karchipelago-mod
+
+This is the mod portion of the [Kirby Air Ride APWorld (KARchipelago)](https://github.com/DeDeDeK/KARchipelago) for [Archipelago](https://archipelago.gg/). 
+
+This repository is based off of a [**template project**](https://github.com/UnclePunch/hoshi-mod) for building a Kirby Air Ride mod using the [Hoshi](https://github.com/UnclePunch/hoshi) modding framework.
+
+This hosts the code for interfacing with the game via code hooks and other methods of accessing the game provided by hoshi. The goal is to provide the APWorld client with the needed game state to function. 
 
 # Build Instructions
 
@@ -19,6 +25,14 @@ This project depends on a script written in Python to pack the compiled `.o` fil
 * **Windows**: Download from [python.org](https://www.python.org/downloads/) and check the "Add to PATH" option during installation.
 * **Linux/macOS**: Use your package manager (e.g., `sudo apt install python3` or `brew install python`).
 
+#### Optional
+- [pyisotools](https://pypi.org/project/pyisotools/)
+- xdelta
+
+### 3. **Original NTSC Kirby Air Ride ISO**
+
+Place your unmodified Kirby Air Ride .iso file in the root directory of this repo and name it "kar.iso".
+
 ---
 
 ## Building the Project
@@ -26,17 +40,18 @@ This project depends on a script written in Python to pack the compiled `.o` fil
 Navigate to the root folder of the project and run:
 
 ```bash
-make all
+make package
 ```
 
 This will:
 
-* Compile and link the source files.
+* Compile all mod's source files.
 * Pack each mod into a hoshi compatible `.bin` file using the Python script.
-* Output `.bin` and asset `.dat` files to the `out/` directory.
+* Output a Riivolution folder for the mod.
+* Output an XDelta patch that can be used to create an .iso for the mod.
 
----
-
-## Output
-
-Built files are placed in the `/out` directory. These files should be placed in your hoshi iso.
+To automatically install the files to your iso filesystem after building the project, run:
+```bash
+make all install INSTALL_DIR="Path\To\Root\Folder"
+```
+where `"Path\To\Root\Folder"` points to your extracted ISO filesystem containing the `files` and `sys` folder.
