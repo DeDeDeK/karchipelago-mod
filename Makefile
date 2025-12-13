@@ -224,6 +224,7 @@ riivolution: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets
 	cp -a -r "$(HOSHI_DIR)/dol/out/Riivolution" "$(OUT_DIR)"
 	cp -a -r "$(ROOT_DIR)"/files/* "$(OUT_DIR)/Riivolution/KirbyAirRideDeluxe"
 	@echo "--- Copying Riivolution files into dolphin dir... ---"
+	#rm -rf "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/*"
 	cp -a -r "$(OUT_DIR)/Riivolution/"* "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/"
 
 # --- Clean Target ---

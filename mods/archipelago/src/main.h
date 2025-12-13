@@ -4,11 +4,18 @@ typedef struct TemplateSave
 {
     int boot_num;
     int item_received_index;
+
 } TemplateSave;
 
 typedef struct PerFrameFuncData
 {
     int timer;
 } PerFrameFuncData;
+
+
+typedef struct ArchipelagoData
+{
+    float energy;
+} ArchipelagoData;
 
 void Func_PerFrame(GOBJ *g);

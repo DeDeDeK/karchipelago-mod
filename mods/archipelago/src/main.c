@@ -8,18 +8,27 @@
 #include "patches.h"
 #include "hoshi/settings.h"
 
-#define MOD_NAME "KARchipelago Base"
+#include "textbox.h"
+#include "deathlink.h"
 
-u8 *alloc_arr;                    // pointer to an array allocated at runtime in OnBoot.
-int deathlink_enabled = 0; // variable that is updated by the player in the in-game settings menu via the ModMenu defined below.
+#define MOD_NAME "KARchipelago"
+
+// pointer to an array allocated at runtime in OnBoot.
+ArchipelagoData *archipelago_data;
+
+// Global variables for menu bindings. These are automatically loaded in by Hoshi on SaveLoaded
+int deathlink_enabled = 0;
 int energylink_enabled = 0;
 
-char ModName[] = MOD_NAME;      // Name of the mod.
-char ModAuthor[] = "DeDeDK"; // Creator of the mod.
-char ModVersion[] = "v1.0";     // Version of the mod.
-
+// Special Mod globals
+char ModName[] = MOD_NAME;      
+char ModAuthor[] = "DeDeDK";    
+char ModVersion[] = "v1.0";     
 int ModSaveSize = sizeof(struct TemplateSave); // (optional) Size of the save data your mod uses. A pointer to the saved data is passed into OnSaveInit.
 TemplateSave *ModSave;                         // Pointer to the mod's save data. Updated by hoshi at runtime.
+
+// variables from other files
+extern Text textbox_text;
 
 // Creates a menu that appears in the in-game Settings menu.
 // Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
@@ -53,8 +62,8 @@ OptionDesc ModSettings = {
                 },
             },
             &(OptionDesc){
-                .name = "Template Submenu",
-                .description = "More options in here.",
+                .name = "Energy Link Spend",
+                .description = "Spend your energy here.",
                 .kind = OPTKIND_MENU,
                 .menu_ptr = &(MenuDesc){
                     .option_num = 1,
@@ -79,9 +88,11 @@ void OnBoot()
 {
     OSReport("Hello from boot\n");
 
-    alloc_arr = HSD_MemAlloc(sizeof(u8) * 200); // persistently allocate an array of size 200
+    // persistently allocate memory for shared archipelago data
+    archipelago_data = HSD_MemAlloc(sizeof(ArchipelagoData)); 
 
     Patches_Apply();
+    DeathLinkPatchesApply();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
@@ -173,16 +184,7 @@ void OnSceneChange()
     // Log out the current scene information
     OSReport("We are now entering major %d / minor %d\n", Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
-    // Create a GObj with a process to run every frame.
-    GOBJ *g = GOBJ_EZCreator(0, 0, 0,                            // p_link 0 runs during 3d pause
-                             sizeof(PerFrameFuncData), HSD_Free, // initialize gobj's data
-                             HSD_OBJKIND_NONE, 0,                // gobj does not contain an hsd object
-                             Func_PerFrame, 0,                   // per frame process
-                             0, 0, 0);                           // not being rendered
-
-    // Init some data
-    PerFrameFuncData *gp = g->userdata;
-    gp->timer = 0;
+    //CreateTextBox_OnSceneChange();
 }
 
 // Runs every game tick, even when the game is paused normally or via debug mode.
@@ -195,28 +197,6 @@ void OnFrame()
 
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
-}
 
-////////////////////////////
-// User Defined Functions //
-////////////////////////////
-
-void Func_PerFrame(GOBJ *g)
-{
-    // Users can modify this value in the in-game settings menu
-    if (deathlink_enabled == 0)
-        return;
-
-    // Retrieve gobj's data
-    PerFrameFuncData *gp = g->userdata;
-
-    if (++gp->timer > 60)
-    {
-        // // Kill player every second in the city if deathlink is enabled
-        // if (Gm_IsInCity())
-        HurtData *hd = HurtData_Create("died :(", HURTKIND_STAGE, HSD_OBJKIND_NONE, HSD_OBJKIND_NONE, HSD_OBJKIND_NONE);
-        
-        //Ply_AddDeath(0, );
-        gp->timer = 0;
-    }
+    //DeathLinkOnFrame();
 }
