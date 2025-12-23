@@ -1,34 +1,17 @@
-#include "hsd.h"
 #include "os.h"
-#include "audio.h"
 #include "game.h"
 #include "inline.h"
 
 #include "main.h"
 #include "patches.h"
 #include "hoshi/settings.h"
+#include "hoshi/mod.h"
 
 #include "textbox.h"
 #include "deathlink.h"
 
-#define MOD_NAME "KARchipelago"
-
-// pointer to an array allocated at runtime in OnBoot.
-ArchipelagoData *archipelago_data;
-
-// Global variables for menu bindings. These are automatically loaded in by Hoshi on SaveLoaded
-int deathlink_enabled = 0;
-int energylink_enabled = 0;
-
-// Special Mod globals
-char ModName[] = MOD_NAME;      
-char ModAuthor[] = "DeDeDK";    
-char ModVersion[] = "v1.0";     
-int ModSaveSize = sizeof(struct TemplateSave); // (optional) Size of the save data your mod uses. A pointer to the saved data is passed into OnSaveInit.
-TemplateSave *ModSave;                         // Pointer to the mod's save data. Updated by hoshi at runtime.
-
-// variables from other files
-extern Text textbox_text;
+// Shared Archipelago data
+ArchipelagoData archipelago_data;
 
 // Creates a menu that appears in the in-game Settings menu.
 // Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
@@ -37,13 +20,13 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here.",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 3,
+        .option_num = 4,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
                 .description = "Enable or Disable Death Link",
                 .kind = OPTKIND_VALUE,
-                .val = &deathlink_enabled,
+                .val = &archipelago_data.deathlink_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -54,7 +37,7 @@ OptionDesc ModSettings = {
                 .name = "Energy Link",
                 .description = "Enable or Disable Energy Link",
                 .kind = OPTKIND_VALUE,
-                .val = &energylink_enabled,
+                .val = &archipelago_data.energylink_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -69,16 +52,46 @@ OptionDesc ModSettings = {
                     .option_num = 1,
                     .options = {
                         &(OptionDesc){
-                            .name = "Main Menu",
-                            .description = "Enter the game's main menu",
-                            .kind = OPTKIND_SCENE,
-                            .major_idx = MJRKIND_MENU,
+                            .name = "Energylink Spend",
+                            .description = "Spend energy",
+                            .kind = OPTKIND_NUM,
                         },
                     },
                 },
             },
+            &(OptionDesc){
+                .name = "AP Message Textbox",
+                .description = "Enable or Disable the in-game textbox for Archipelago Messages",
+                .kind = OPTKIND_VALUE,
+                .val = &archipelago_data.textbox_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+            },
         },
     },
+};
+
+ModDesc mod_desc = {
+    .name = "KARchipelago",                    // Name of the mod.
+    .author = "DeDeDK",                     // Creator of the mod.
+    .version.major = 1,                         // Version of the mod.
+    .version.minor = 0,
+    .save_size = sizeof(struct TemplateSave),   // (optional) Size of the save data your mod uses. A pointer to the saved data is passed into OnSaveInit.
+    .save_ptr = 0,                              // Pointer to the mod's save data. Updated by hoshi at runtime.
+    .option_desc = &ModSettings,                // Link to the settings menu
+    .OnBoot = OnBoot,
+    .OnSaveInit = OnSaveInit,
+    .OnSaveLoaded = OnSaveLoaded,
+    .OnMainMenuLoad = OnMainMenuLoad,
+    .OnPlayerSelectLoad = OnPlayerSelectLoad,
+    .On3DLoad = On3DLoad,
+    .On3DPause = On3DPause,
+    .On3DUnpause = On3DUnpause,
+    .On3DExit = On3DExit,
+    .OnSceneChange = OnSceneChange,
 };
 
 // Runs immediately after the mod file is loaded.
@@ -88,9 +101,7 @@ void OnBoot()
 {
     OSReport("Hello from boot\n");
 
-    // persistently allocate memory for shared archipelago data
-    archipelago_data = HSD_MemAlloc(sizeof(ArchipelagoData)); 
-
+    // Apply any patches
     Patches_Apply();
     DeathLinkPatchesApply();
 }
@@ -99,18 +110,20 @@ void OnBoot()
 // Initialize default save file values here.
 void OnSaveInit()
 {
-    OSReport("save data for " MOD_NAME " created!\n");
-    ModSave->boot_num = 0;
-    ModSave->item_received_index = 0;
+    TemplateSave *save = (TemplateSave *)mod_desc.save_ptr;
+    OSReport("save data for ", mod_desc.name, " created!\n");
+    save->boot_num = 0;
+    save->item_received_index = 0;
 }
 
 // Runs on startup after any save data is loaded into memory.
 // This callback is executed regardless of if a memory card is inserted or contained existing save data.
 void OnSaveLoaded()
 {
-    ModSave->boot_num++;
-    OSReport(MOD_NAME " present for [%d] boot cycles\n", ModSave->boot_num);
-    OSReport("item received index is [%d]\n", ModSave->item_received_index);
+    TemplateSave *save = (TemplateSave *)mod_desc.save_ptr;
+    save->boot_num++;
+    OSReport(mod_desc.name, " present for [%d] boot cycles\n", save->boot_num);
+    OSReport("item received index is [%d]\n", save->item_received_index);
 }
 
 // Runs when entering the main menu.
@@ -184,7 +197,13 @@ void OnSceneChange()
     // Log out the current scene information
     OSReport("We are now entering major %d / minor %d\n", Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
-    //CreateTextBox_OnSceneChange();
+    // Textbox
+    if (archipelago_data.textbox_enabled) {
+        CreateTextBox_OnSceneChange();
+    }
+
+    // Deathlink
+    DeathLink_OnSceneChange();
 }
 
 // Runs every game tick, even when the game is paused normally or via debug mode.
@@ -197,6 +216,4 @@ void OnFrame()
 
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
-
-    //DeathLinkOnFrame();
 }
