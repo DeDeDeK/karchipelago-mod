@@ -1,17 +1,19 @@
 #include "os.h"
 #include "game.h"
 #include "inline.h"
-
-#include "main.h"
-#include "patches.h"
 #include "hoshi/settings.h"
 #include "hoshi/mod.h"
 
+#include "main.h"
 #include "textbox.h"
 #include "deathlink.h"
+#include "city_trial_event.h"
+#include "item_queue.h"
 
-// Shared Archipelago data
-ArchipelagoData archipelago_data;
+// Define global variables
+ArchipelagoData *archipelago_data;
+HoshiMenuSettings hoshi_menu_settings;
+TemplateSave *save_data;
 
 // Creates a menu that appears in the in-game Settings menu.
 // Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
@@ -26,7 +28,7 @@ OptionDesc ModSettings = {
                 .name = "Death Link",
                 .description = "Enable or Disable Death Link",
                 .kind = OPTKIND_VALUE,
-                .val = &archipelago_data.deathlink_enabled,
+                .val = &hoshi_menu_settings.deathlink_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -37,7 +39,7 @@ OptionDesc ModSettings = {
                 .name = "Energy Link",
                 .description = "Enable or Disable Energy Link",
                 .kind = OPTKIND_VALUE,
-                .val = &archipelago_data.energylink_enabled,
+                .val = &hoshi_menu_settings.energylink_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -63,7 +65,7 @@ OptionDesc ModSettings = {
                 .name = "AP Message Textbox",
                 .description = "Enable or Disable the in-game textbox for Archipelago Messages",
                 .kind = OPTKIND_VALUE,
-                .val = &archipelago_data.textbox_enabled,
+                .val = &hoshi_menu_settings.textbox_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -75,23 +77,25 @@ OptionDesc ModSettings = {
 };
 
 ModDesc mod_desc = {
-    .name = "KARchipelago",                    // Name of the mod.
-    .author = "DeDeDK",                     // Creator of the mod.
+    .name = "KARchipelago",                     // Name of the mod.
+    .author = "DeDeDK",                         // Creator of the mod.
     .version.major = 1,                         // Version of the mod.
     .version.minor = 0,
     .save_size = sizeof(struct TemplateSave),   // (optional) Size of the save data your mod uses. A pointer to the saved data is passed into OnSaveInit.
-    .save_ptr = 0,                              // Pointer to the mod's save data. Updated by hoshi at runtime.
+    .save_ptr = 0,                              // Pointer to the mod's save data. Updated by hoshi at runtime. read-only! hoshi will write this pointer during installation.
     .option_desc = &ModSettings,                // Link to the settings menu
     .OnBoot = OnBoot,
     .OnSaveInit = OnSaveInit,
     .OnSaveLoaded = OnSaveLoaded,
     .OnMainMenuLoad = OnMainMenuLoad,
     .OnPlayerSelectLoad = OnPlayerSelectLoad,
-    .On3DLoad = On3DLoad,
+    .On3DLoadStart = On3DLoadStart,
+    .On3DLoadEnd = On3DLoadEnd,
     .On3DPause = On3DPause,
     .On3DUnpause = On3DUnpause,
     .On3DExit = On3DExit,
     .OnSceneChange = OnSceneChange,
+    .OnFrame = OnFrame,
 };
 
 // Runs immediately after the mod file is loaded.
@@ -101,29 +105,33 @@ void OnBoot()
 {
     OSReport("Hello from boot\n");
 
-    // Apply any patches
-    Patches_Apply();
-    DeathLinkPatchesApply();
+    // Persistently allocate archipelago_data
+    // persistent allocation of archipelago_data
+    archipelago_data = HSD_MemAlloc(sizeof(ArchipelagoData));
+
+    // place pointer to this allocation at a static address so python can access it
+    ArchipelagoData **static_ptr = (ArchipelagoData **)0x805d52d4;
+    (*static_ptr) = archipelago_data;
 }
 
 // Runs on boot when hoshi creates save data for the mod.
 // Initialize default save file values here.
 void OnSaveInit()
 {
-    TemplateSave *save = (TemplateSave *)mod_desc.save_ptr;
-    OSReport("save data for ", mod_desc.name, " created!\n");
-    save->boot_num = 0;
-    save->item_received_index = 0;
+    save_data = (TemplateSave *)mod_desc.save_ptr;
+    OSReport("save data for %s created!\n", mod_desc.name);
+    save_data->boot_num = 0;
+    save_data->item_received_index = 0;
 }
 
 // Runs on startup after any save data is loaded into memory.
 // This callback is executed regardless of if a memory card is inserted or contained existing save data.
 void OnSaveLoaded()
 {
-    TemplateSave *save = (TemplateSave *)mod_desc.save_ptr;
-    save->boot_num++;
-    OSReport(mod_desc.name, " present for [%d] boot cycles\n", save->boot_num);
-    OSReport("item received index is [%d]\n", save->item_received_index);
+    save_data = (TemplateSave *)mod_desc.save_ptr;
+    save_data->boot_num++;
+    OSReport("%s present for [%d] boot cycles\n", mod_desc.name, save_data->boot_num);
+    OSReport("item received index is [%d]\n", save_data->item_received_index);
 }
 
 // Runs when entering the main menu.
@@ -139,9 +147,15 @@ void OnPlayerSelectLoad()
     OSReport("Entering the city trial player select menu.\n");
 }
 
+// executes before the game is initialized
+void On3DLoadStart() {
+
+}
+
 // Runs upon entering a 3D game. Can be either Air Ride or City Trial. Must be explicity checked using Gm_IsInCity().
 // Players, riders, their machines, and the map have all been instantiated by the time this is executed.
-void On3DLoad()
+// executes after the game is initialized (riders, machines, stage, etc are all instantiated)
+void On3DLoadEnd()
 {
     // determine the game mode
     char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
@@ -167,6 +181,11 @@ void On3DLoad()
                  rd->kind,
                  rd->color_idx,
                  machine_kind);
+    }
+
+    // Deathlink
+    if (hoshi_menu_settings.deathlink_enabled) {
+        DeathLink_On3DLoadEnd();
     }
 }
 
@@ -198,12 +217,12 @@ void OnSceneChange()
     OSReport("We are now entering major %d / minor %d\n", Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
     // Textbox
-    if (archipelago_data.textbox_enabled) {
+    if (hoshi_menu_settings.textbox_enabled) {
         CreateTextBox_OnSceneChange();
     }
 
-    // Deathlink
-    DeathLink_OnSceneChange();
+    // Item Queue
+    ItemQueue_OnSceneChange();
 }
 
 // Runs every game tick, even when the game is paused normally or via debug mode.
@@ -216,4 +235,12 @@ void OnFrame()
 
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
+
+    // Check if DPAD-up was just pressed on controller port 0
+    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP) {
+        OSReport("Triggering event from DPAD...\n");
+        TextBox_AddMessage("Triggering event from DPAD...");
+        APItem item = {0, ITEM_KIND_CITY_TRIAL_EVENT, ITEM_CLASSIFICATION_PROGRESSION};
+        Item_Enqueue(item);
+    }
 }

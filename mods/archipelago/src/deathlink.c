@@ -1,50 +1,47 @@
 #include "game.h"
-#include "code_patch/code_patch.h"
+
 #include "deathlink.h"
 #include "text.h"
 #include "textbox.h"
 #include "main.h"
 
-// hook into the Ply_AddDeath function
-// we're actually hooking at the end of the function, just after the function "epilogue" where the typical function
-// cleanup begins. Our program cleans itself up, so the only thing left to do for the original function is to clean itself
-// up, which doesn't depend on any of the context we messed up when we injected into the function.
-CODEPATCH_HOOKCREATE(0x8022f880,     // Memory address to begin executing custom code
-                     "",             // ASM instructions to execute before calling our C function.
-                     ReceiveDeath,   // Pointer to our C function
-                     "",             // ASM instructions to execute after calling our C function.
-                     0);             // Return address. Use 0 to branch back to the injection site.
-
-void ReceiveDeath()
-{
-    // TODO: this currently fires for any death. We need to find a way to get the player index into our function
-    // by accepting an argument and then moving some data from whatever register holds the player index into the register
-    // that our function takes in. 
-    OSReport("Death received!\n");
-    TextBox_AddMessage("Death received");
-}
-
-void DeathLinkPerFrame(GOBJ *g) {
-    // read from the deathlink_give memory location once per second, and if it's 1, kill the player and reset to 0.
-    DeathLinkPerFrameData *dl = g->userdata;
-    if (++dl->framecounter > 60) {
-        if (archipelago_data.deathlink_give == 1) {
-            OSReport("Deathlink triggered!");
-            TextBox_AddMessage("Deathlink triggered");
-            //Ply_AddDeath();
+// TODO: test this with invincible candy, in the hydra/dragoon cutscene, and when traveling on a boost pad thingy (volcano and white square near the city/volcano intersection)
+void DeathLink_PerFrame(GOBJ *r) {
+    RiderData *rd = r->userdata;
+    GOBJ *mg = rd->machine_gobj;
+    // check if player is on a machine first
+    if (mg) {
+        MachineData *md = mg->userdata;
+        // check for death, and send deathlink if player is dead
+        if (md->hp <= 0) {
+            OSReport("Death detected, sending deathlink\n");
+            TextBox_AddMessage("Death detected, sending deathlink");
+            archipelago_data->deathlink_send = 1;
         }
-        dl->framecounter = 0;
+
+        // check for deathlink receive, and give death if it is 1
+        if (archipelago_data->deathlink_receive == 1) {
+            // set this as a self-destruct
+            DmgLog dl = md->dmg_log;
+            dl.attacker_ply = 0;
+            OSReport("Deathlink received!\n");
+            TextBox_AddMessage("Deathlink received!");
+            Ply_AddDeath(0, &dl, md->is_bike, md->kind);
+            Ply_SetHP(0, 0);
+            archipelago_data->deathlink_receive = 0;
+        }    
     }
 }
 
-void DeathLink_OnSceneChange() {
-    // creat GOBJ to hold our deathlink check function
-    GOBJ *g = GOBJ_EZCreator(0, 0, 0, sizeof(DeathLinkPerFrameData), HSD_Free, HSD_OBJKIND_NONE, 0, DeathLinkPerFrame, 0, 0, 0, 0);
-    DeathLinkPerFrameData *dl = g->userdata;
-    dl->framecounter = 0;
-}
-
-void DeathLinkPatchesApply() {
-    OSReport("Applying Deathlink patches...");
-    CODEPATCH_HOOKAPPLY(0x8022f880);
+void DeathLink_On3DLoadEnd() {
+    if (Gm_IsInCity()) {
+        // add the deathlink check to all human players
+        for (int i = 0; i < 4; i++) {
+            if (Ply_GetPKind(i) == PKIND_HMN) {
+                GOBJ *r = Ply_GetRiderGObj(i);
+                // RDPRI is set to after damage is applied
+                GObj_AddProc(r, DeathLink_PerFrame, RDPRI_DMGAPPLY + 1);
+            }
+        }
+    }    
 }

@@ -1,9 +1,4 @@
-void ReceiveDeath();
+#include "structs.h"
 
-typedef struct DeathLinkPerFrameData {
-    int framecounter; 
-} DeathLinkPerFrameData;
-
-void DeathLinkPerFrame(GOBJ *g);
-void DeathLinkPatchesApply();
-void DeathLink_OnSceneChange();
+void DeathLink_PerFrame(GOBJ *g);
+void DeathLink_On3DLoadEnd();

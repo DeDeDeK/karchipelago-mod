@@ -3,6 +3,7 @@
 #include "main.h"
 
 Text *textbox_text;
+TextBoxPerFrameData *textbox_data;
 
 void CreateTextBox_OnSceneChange() {
     // Create canvas, with sis_idx (font) = 1
@@ -10,8 +11,9 @@ void CreateTextBox_OnSceneChange() {
     Text *t = Text_CreateText(1, canvas_idx);
     t->kerning = 1;
     t->use_aspect = 1;
+    t->aspect = (Vec2){560, 32};
     t->trans = (Vec3){10, 10, 0};
-    t->scale = (Vec2){0.4, 0.4};
+    t->viewport_scale = (Vec2){0.4, 0.4};
     // start off transparent
     t->viewport_color = (GXColor){0, 0, 0, 0};
     // start off white, transparent
@@ -24,23 +26,28 @@ void CreateTextBox_OnSceneChange() {
     GOBJ *g = GOBJ_EZCreator(0, 0, 0, sizeof(TextBoxPerFrameData), HSD_Free, HSD_OBJKIND_NONE, 0, TextBox_PerFrame, 0, 0, 0, 0);
     TextBoxPerFrameData *gp = g->userdata;
     gp->framecounter = 0;
+    textbox_data = gp;
 }
 
 // Adds a message to the textbox.
 void TextBox_AddMessage(char *message) {
-    if (archipelago_data.textbox_enabled) {
+    if (hoshi_menu_settings.textbox_enabled) {
         TextBox_SetAlpha(200);
         // Use the first subtext to display the text data
         Text_SetText(textbox_text, 0, message);
-        
+
         // Get the width and height of the text
         float width = 0, height = 0;
         Text_GetWidthAndHeight(textbox_text, 0, &width, &height);
-        
-        // Set aspect to contain the text, with padding
-        float padding_x = 5.0f;
-        float padding_y = 2.0f;
-        textbox_text->aspect = (Vec2){width + padding_x * 2, height + padding_y * 2};
+                
+        //  // Set aspect to contain the text, with padding
+        // float padding_x = 10.0f;
+        // float padding_y = 5.0f;
+        // textbox_text->aspect = (Vec2){width + (padding_x * 2), height + (padding_y * 2)};
+        textbox_text->aspect = (Vec2){width, height};
+
+        // Reset the frame counter so the message displays for the full duration
+        textbox_data->framecounter = 0;
     }
 }
 
@@ -52,9 +59,8 @@ void TextBox_SetAlpha(u8 alpha) {
 
 void TextBox_PerFrame(GOBJ *g) {
     TextBoxPerFrameData *gp = g->userdata;
-
     // after 5 seconds, subtract from alpha value every frame until the textbox is transparent
-    if (++gp->framecounter > 600) {
+    if (++gp->framecounter > 300) {
         GXColor current_color = textbox_text->viewport_color;
         u8 alpha = current_color.a;
         if (alpha > 0) {
