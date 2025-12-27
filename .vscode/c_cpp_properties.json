@@ -26,7 +26,8 @@
                 "-fno-merge-constants", 
                 "-ffunction-sections", 
                 "-fdata-sections", 
-                "-MMD"
+                "-MMD",
+                "-Wno-flexible-array-extensions"
             ]
         }
     ],
