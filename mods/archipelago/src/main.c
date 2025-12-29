@@ -159,7 +159,7 @@ void On3DLoadEnd()
 {
     // determine the game mode
     char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
-    OSReport("Now starting %s game on map [%d]. StageKind: [%d]\n", mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
+    OSReport("Now starting %s game on GroundKind [%d]. \nStageKind: [%d]. \nCurrent CityMode: [%d]. \nCurrent StadiumKind: [%d]. \nCurrent Stadium Group: [%d].\n", mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(), Gm_GetCityMode(), Gm_GetCurrentStadiumKind(), Gm_GetCurrentStadiumGroup());
 
     // loop across all 5 potential players
     for (int i = 0; i < 5; i++)
@@ -238,9 +238,13 @@ void OnFrame()
 
     // Check if DPAD-up was just pressed on controller port 0
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP) {
-        OSReport("Triggering event from DPAD...\n");
-        TextBox_AddMessage("Triggering event from DPAD...");
-        APItem item = {0, ITEM_KIND_CITY_TRIAL_EVENT, ITEM_CLASSIFICATION_PROGRESSION};
-        Item_Enqueue(item);
+        // OSReport("Triggering event from DPAD...\n");
+        // TextBox_AddMessage("Triggering event from DPAD...");
+        // APItem item = {0, ITEM_KIND_CITY_TRIAL_EVENT, ITEM_CLASSIFICATION_PROGRESSION};
+        // Item_Enqueue(item);
+
+        OSReport("Triggering death from DPAD...\n");
+        TextBox_AddMessage("Triggering death from DPAD...");
+        archipelago_data->deathlink_receive = 1;
     }
 }

@@ -6,8 +6,7 @@
 #include "textbox.h"
 #include "item_queue.h"
 
-// TODO: this triggers the event successfully, but the event does not
-// happen, even after the in-game notification appears
+// TODO: for the FOG event, triggers it properly, but fog does not happen?
 int Event_Do(EventKind kind)
 {
     // check if event system is initialized

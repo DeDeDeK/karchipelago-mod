@@ -1,6 +1,8 @@
 #include "text.h"
 #include "textbox.h"
 #include "main.h"
+#include "text_joint/text_joint.h"
+#include <stdarg.h>
 
 Text *textbox_text;
 TextBoxPerFrameData *textbox_data;
@@ -30,20 +32,31 @@ void CreateTextBox_OnSceneChange() {
 }
 
 // Adds a message to the textbox.
-void TextBox_AddMessage(char *message) {
+void TextBox_AddMessage(char *format, ...) {
     if (hoshi_menu_settings.textbox_enabled) {
+        // Buffer to hold the formatted string
+        char buffer[256];
+        // Format the string with variable arguments
+        va_list args;
+        va_start(args, format);
+        vsnprintf(buffer, sizeof(buffer), format, args);
+        va_end(args);
+
+        // Convert ASCII to Shift-JIS for proper display
+        char sanitized_buffer[512];  // Needs to be larger as Shift-JIS uses 2 bytes per character
+        Text_Sanitize(buffer, sanitized_buffer, sizeof(sanitized_buffer));
+
+        // Set alpha to be more opaque - to be subtracted from later
         TextBox_SetAlpha(200);
+
         // Use the first subtext to display the text data
-        Text_SetText(textbox_text, 0, message);
+        Text_SetText(textbox_text, 0, sanitized_buffer);
 
         // Get the width and height of the text
         float width = 0, height = 0;
         Text_GetWidthAndHeight(textbox_text, 0, &width, &height);
-                
-        //  // Set aspect to contain the text, with padding
-        // float padding_x = 10.0f;
-        // float padding_y = 5.0f;
-        // textbox_text->aspect = (Vec2){width + (padding_x * 2), height + (padding_y * 2)};
+        
+        // Set aspect to contain text
         textbox_text->aspect = (Vec2){width, height};
 
         // Reset the frame counter so the message displays for the full duration

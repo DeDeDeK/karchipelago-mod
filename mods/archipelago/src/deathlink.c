@@ -26,8 +26,8 @@ void DeathLink_PerFrame(GOBJ *r) {
             dl.attacker_ply = 0;
             OSReport("Deathlink received!\n");
             TextBox_AddMessage("Deathlink received!");
-            Ply_AddDeath(0, &dl, md->is_bike, md->kind);
-            Ply_SetHP(0, 0);
+            Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);
+            Ply_SetHP(rd->ply, 0);
             archipelago_data->deathlink_receive = 0;
         }    
     }

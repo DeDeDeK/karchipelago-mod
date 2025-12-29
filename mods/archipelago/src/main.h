@@ -49,9 +49,9 @@ typedef struct ArchipelagoData
 
 // Global variables for menu bindings. These are automatically loaded in by Hoshi on SaveLoaded.
 typedef struct HoshiMenuSettings {
-    uint deathlink_enabled;
-    uint energylink_enabled;
-    uint textbox_enabled;
+    int deathlink_enabled;
+    int energylink_enabled;
+    int textbox_enabled;
 } HoshiMenuSettings;
 
 extern ArchipelagoData *archipelago_data;
