@@ -25,6 +25,7 @@ INSTALL_DIR 	?= install
 # --- File Paths ---
 ISO_PATH		= kar.iso
 HOSHI_BIN		= $(HOSHI_BIN_DIR)/hoshi.bin
+MOD_NAME		?= KARchipelago
 
 # --- Script Paths ---
 ISOPATCH_SCRIPT		= $(SCRIPT_DIR)/iso.py
@@ -110,7 +111,7 @@ MOD_ASSET_DIRS := $(foreach mod,$(MOD_NAMES),\
 
 # The 'all' target builds all final .bin files.
 all: 		$(MOD_BIN_FILES) hoshi assets
-package: 	all riivolution patch
+package: 	all riivolution
 
 # --- Directory Creation Rules ---
 # Rule to create the top-level build directory
@@ -135,7 +136,7 @@ $(ORIG_DOL):
 
 # --- hoshi target ---
 hoshi: $(ORIG_DOL)
-	$(MAKE) -C $(HOSHI_DIR)
+	$(MAKE) -C $(HOSHI_DIR) MOD_NAME="$(MOD_NAME)"
 
 # --- Generic Compilation Rule for C Source Files ---
 # This single pattern rule handles compiling ANY .c file into its corresponding .o file in BUILD_DIR.
@@ -222,7 +223,7 @@ riivolution: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets
 	@echo ""
 	@echo "--- Creating Riivolution Mod... ---"
 	cp -a -r "$(HOSHI_DIR)/dol/out/Riivolution" "$(OUT_DIR)"
-	cp -a -r "$(ROOT_DIR)"/files/* "$(OUT_DIR)/Riivolution/KirbyAirRideDeluxe"
+	cp -a -r "$(ROOT_DIR)"/files/* "$(OUT_DIR)/Riivolution/$(MOD_NAME)"
 	@echo "--- Copying Riivolution files into dolphin dir... ---"
 	#rm -rf "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/*"
 	cp -a -r "$(OUT_DIR)/Riivolution/"* "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/"

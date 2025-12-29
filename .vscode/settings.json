@@ -4,6 +4,7 @@
         "game.h": "c"
     },
     "C_Cpp.codeAnalysis.clangTidy.args": [
-    "-Wno-flexible-array-extensions",
-    "-Wno-gnu-variable-sized-type-not-at-end"]
+        "-Wno-flexible-array-extensions",
+        "-Wno-gnu-variable-sized-type-not-at-end"
+    ]
 }
