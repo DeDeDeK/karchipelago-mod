@@ -1,2 +1,10 @@
 /build/
+/root/
 /out/
+/.temp/
+/install/
+/externals/devkitpro/
+notes.txt
+kar.iso
+out.iso
+patch.xdelta

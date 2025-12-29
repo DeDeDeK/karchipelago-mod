@@ -1,0 +1,35 @@
+{
+    "configurations": [
+        {
+            "name": "Gamecube",
+            "includePath": [
+                "${default}",
+                "${workspaceFolder}/externals/devkitpro/libogc/include/**", 
+                "${workspaceFolder}/externals/devkitpro/devkitPPC/include/**", 
+                "${workspaceFolder}/externals/hoshi/include/**", 
+                "${workspaceFolder}/externals/hoshi/Lib/**"
+            ],
+            "defines": ["HW_DOL", "_DEBUG", "_UNICODE", "WIN32", "ARM7", "ARM9"],
+            "compilerPath": "${workspaceFolder}/externals/devkitpro/devkitPPC/bin/powerpc-eabi-gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-arm",
+            "compilerArgs": [
+                "-mcpu=750", 
+                "-meabi", 
+                "-msdata=none", 
+                "-mhard-float", 
+                "-ffreestanding", 
+                "-fno-unwind-tables", 
+                "-fno-exceptions",
+                "-fno-asynchronous-unwind-tables", 
+                "-fno-merge-constants", 
+                "-ffunction-sections", 
+                "-fdata-sections", 
+                "-MMD",
+                "-Wno-flexible-array-extensions"
+            ]
+        }
+    ],
+    "version": 4
+}
