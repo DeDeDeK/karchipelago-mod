@@ -4,9 +4,6 @@
 /.temp/
 /install/
 /externals/devkitpro/
-/externals/GeckoLoader/
-/externals/pyisotools/
-/scripts/devkitpro/
 notes.txt
 kar.iso
 out.iso
