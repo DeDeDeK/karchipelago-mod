@@ -40,11 +40,10 @@ int Event_Do(EventKind kind)
     return 1;
 }
 
-int Event_GiveItem(APItemKind kind) {
+int Event_GiveItem(EventKind kind) {
     if (Gm_GetCurrentGrKind() == GRKIND_CITY1) {
-        int i = HSD_Randi(15); // exclude EVKIND_NUM
-        OSReport("Attempting to trigger a random event: %d\n", i);
-        int ev_done = Event_Do(i);
+        OSReport("Attempting to trigger event kind: %d\n", kind);
+        int ev_done = Event_Do(kind);
         if (ev_done) {
             OSReport("Event triggered successfully!\n");
             TextBox_AddMessage("Event triggered successfully!");

@@ -9,6 +9,7 @@
 #include "deathlink.h"
 #include "city_trial_event.h"
 #include "item_queue.h"
+#include "patch_item.h"
 
 // Define global variables
 ArchipelagoData *archipelago_data;
@@ -112,6 +113,8 @@ void OnBoot()
     // place pointer to this allocation at a static address so python can access it
     ArchipelagoData **static_ptr = (ArchipelagoData **)0x805d52d4;
     (*static_ptr) = archipelago_data;
+
+    DeathLink_OnBoot();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
@@ -159,8 +162,7 @@ void On3DLoadEnd()
 {
     // determine the game mode
     char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
-    OSReport("Now starting %s game on GroundKind [%d]. \nStageKind: [%d]. \nCurrent CityMode: [%d]. \nCurrent StadiumKind: [%d]. \nCurrent Stadium Group: [%d].\n", mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(), Gm_GetCityMode(), Gm_GetCurrentStadiumKind(), Gm_GetCurrentStadiumGroup());
-
+    OSReport("Now starting %s game on GroundKind [%d]. \nStageKind: [%d]. \nCurrent CityMode: [%d]. \nCurrent StadiumKind: [%d]. \nCurrent Stadium Group: [%d].\n Damage Enabled: [%d].\n", mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(), Gm_GetCityMode(), Gm_GetCurrentStadiumKind(), Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled());
     // loop across all 5 potential players
     for (int i = 0; i < 5; i++)
     {
@@ -174,7 +176,7 @@ void On3DLoadEnd()
 
         // get this rider's machine kind
         MachineKind machine_kind = rd->starting_machine_idx;
-        
+
         // log some data on them
         OSReport("Player %d using rider [%d] color [%d] riding machine [%d].\n",
                  i + 1,
@@ -236,15 +238,48 @@ void OnFrame()
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
 
-    // Check if DPAD-up was just pressed on controller port 0
-    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP) {
-        // OSReport("Triggering event from DPAD...\n");
-        // TextBox_AddMessage("Triggering event from DPAD...");
-        // APItem item = {0, ITEM_KIND_CITY_TRIAL_EVENT, ITEM_CLASSIFICATION_PROGRESSION};
-        // Item_Enqueue(item);
+    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT) {
+        OSReport("Queueing ability item from DPAD LEFT...\n");
+        TextBox_AddMessage("Queueing ability item from DPAD LEFT...\n");
+        APItem item = {0, ITEM_KIND_ABILITY, ITEM_CLASSIFICATION_PROGRESSION};
+        Item_Enqueue(item);
+    }
 
-        OSReport("Triggering death from DPAD...\n");
-        TextBox_AddMessage("Triggering death from DPAD...");
+    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT) {
+        OSReport("Queueing event item from DPAD RIGHT...\n");
+        TextBox_AddMessage("Queueing event item from DPAD RIGHT...\n");
+        APItem item = {0, ITEM_KIND_CITY_TRIAL_EVENT, ITEM_CLASSIFICATION_PROGRESSION};
+        Item_Enqueue(item);
+    }
+
+    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_DOWN) {
+        OSReport("Setting deathlink receive from DPAD DOWN...\n");
+        TextBox_AddMessage("Setting deathlink receive from DPAD DOWN...");
         archipelago_data->deathlink_receive = 1;
+    }
+
+    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP) {
+        OSReport("Triggering patch item from DPAD...\n");
+        TextBox_AddMessage("Triggering patch item from DPAD...\n");
+        APItem item = {0, ITEM_KIND_PATCH, ITEM_CLASSIFICATION_PROGRESSION};
+        Item_Enqueue(item);
+        
+        // test for spawning an item
+        // if (Ply_GetPKind(0) == PKIND_HMN) {
+        //     GOBJ *rg = Ply_GetRiderGObj(0);
+        //     RiderData *rd = rg->userdata;
+
+        //     GOBJ *mg = Ply_GetMachineGObj(0);
+        //     MachineData *md = mg->userdata;
+
+        //     // Spawn at machine
+        //     Vec3 spawn_pos = md->pos;
+        //     spawn_pos.Y += 100.0f;
+
+        //     // Spawn the item
+        //     int i = HSD_Randi(68);
+        //     GOBJ *item_gobj = Patch_SpawnItem(i, &spawn_pos);
+
+        // }
     }
 }

@@ -1,28 +1,29 @@
+#include <stdarg.h>
 #include "text.h"
-#include "textbox.h"
 #include "main.h"
 #include "text_joint/text_joint.h"
-#include <stdarg.h>
+#include "hoshi/screen_cam.h"
+
+#include "textbox.h"
 
 Text *textbox_text;
 TextBoxPerFrameData *textbox_data;
 
 void CreateTextBox_OnSceneChange() {
-    // Create canvas, with sis_idx (font) = 1
-    int canvas_idx = Text_CreateCanvas(1, 0, 0, 0, 0, 63, 0, 63);
-    Text *t = Text_CreateText(1, canvas_idx);
+    Text *t = Hoshi_CreateScreenText();
     t->kerning = 1;
     t->use_aspect = 1;
-    t->aspect = (Vec2){560, 32};
     t->trans = (Vec3){10, 10, 0};
     t->viewport_scale = (Vec2){0.4, 0.4};
+    t->aspect = (Vec2){560, 32};
     // start off transparent
     t->viewport_color = (GXColor){0, 0, 0, 0};
     // start off white, transparent
     t->color = (GXColor){255, 255, 255, 0};
-    textbox_text = t;
     // Initialize first subtext
     Text_AddSubtext(t, 0, 0, "");
+
+    textbox_text = t;
 
     // init frame counter GOBJ
     GOBJ *g = GOBJ_EZCreator(0, 0, 0, sizeof(TextBoxPerFrameData), HSD_Free, HSD_OBJKIND_NONE, 0, TextBox_PerFrame, 0, 0, 0, 0);

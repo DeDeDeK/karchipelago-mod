@@ -19,6 +19,7 @@ typedef enum APItemKind
     ITEM_KIND_PATCH_CAP_INCREASE,
     ITEM_KIND_FILLER,
     ITEM_KIND_CITY_TRIAL_EVENT,
+    ITEM_KIND_ABILITY,
 } APItemKind;
 
 typedef enum APItemClassification

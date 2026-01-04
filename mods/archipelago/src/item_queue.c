@@ -4,6 +4,8 @@
 #include "item_queue.h"
 #include "textbox.h"
 #include "city_trial_event.h"
+#include "ability_item.h"
+#include "patch_item.h"
 
 
 int Item_Enqueue(APItem APItem) {
@@ -68,14 +70,16 @@ void ItemQueueGive_PerFrame(GOBJ *g) {
     }
 
     // apply items that require the player to be in city trial or a stadium
-    if (Gm_GetCurrentGrKind() == GRKIND_CITY1) {
+    GroundKind gk = Gm_GetCurrentGrKind();
+    if (gk == GRKIND_CITY1) {
         switch (item.kind) {
             case ITEM_KIND_CITY_TRIAL_EVENT:
-                if (Event_GiveItem(item.kind)) {
+                int event_kind = HSD_Randi(EVKIND_NUM -1);
+                if (Event_GiveItem(event_kind)) {
                     save_data->item_received_index++;
                     Item_Dequeue(&item);
+                    return;
                 } 
-                return;
             case ITEM_KIND_EFFECT:
                 Item_Dequeue(&item);
                 return;
@@ -83,8 +87,25 @@ void ItemQueueGive_PerFrame(GOBJ *g) {
                 Item_Dequeue(&item);
                 return;
             case ITEM_KIND_PATCH:
-                Item_Dequeue(&item);
-                return;
+                int patch_kind = HSD_Randi(PATCHKIND_NUM - 1);
+                if (Patch_GiveItem(patch_kind, 1)) {
+                    save_data->item_received_index++;
+                    Item_Dequeue(&item);
+                    return;
+                }
+                // if (Patch_AllUp_GiveItem(1)) {
+                //     save_data->item_received_index++;
+                //     Item_Dequeue(&item);
+                //     return;
+                // }
+            case ITEM_KIND_ABILITY:
+                int ability_kind = HSD_Randi(COPYKIND_NUM - 1);
+                if (Ability_GiveItem(ability_kind)) {
+                    save_data->item_received_index++;
+                    Item_Dequeue(&item);
+                    return;
+                }
+                break;
             default:
                 OSReport("Unknown ItemKind: %d\n", item.kind);
                 Item_Dequeue(&item);
