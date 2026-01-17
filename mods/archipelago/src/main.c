@@ -3,13 +3,14 @@
 #include "inline.h"
 #include "hoshi/settings.h"
 #include "hoshi/mod.h"
+#include "stage.h"
 
 #include "main.h"
 #include "textbox.h"
 #include "deathlink.h"
 #include "city_trial_event.h"
 #include "item_queue.h"
-#include "patch_item.h"
+#include "energylink.h"
 
 // Define global variables
 ArchipelagoData *archipelago_data;
@@ -143,12 +144,91 @@ void OnMainMenuLoad()
     OSReport("Entering the main menu.\n");
 }
 
+
 // Runs when entering the player select menu.
 // Currently only executes when entering city trial player select.
 void OnPlayerSelectLoad()
 {
     OSReport("Entering the city trial player select menu.\n");
+
+    // Debug: Check the reward lookup structure
+    OSReport("\n=== Reward Lookup Table Debug ===\n");
+    OSReport("stc_reward_lookup address: 0x%08x\n", (u32)stc_reward_lookup);
+
+    // Dump raw memory at 0x805d51d0
+    OSReport("Raw memory at 0x805d51d0:\n");
+    u8 *raw_mem = (u8 *)0x805d51d0;
+    for (int i = 0; i < 32; i++) {
+        if (i % 16 == 0) OSReport("  %08x: ", 0x805d51d0 + i);
+        OSReport("%02x ", raw_mem[i]);
+        if (i % 16 == 15) OSReport("\n");
+    }
+
+    // Try calling the function directly to see what happens
+    OSReport("\nTesting ClearChecker_GetClearKindFromRewardKind:\n");
+    for (int reward = 0; reward < 5; reward++) {
+        int clear_kind = ClearChecker_GetClearKindFromRewardKind(GMMODE_CITYTRIAL, reward);
+        OSReport("  City Trial Reward %d -> Clear %d\n", reward, clear_kind);
+    }
+
+    // Analyze all game modes
+    const char *mode_names[] = {"Air Ride", "Top Ride", "City Trial"};
+
+    for (int gm = 0; gm < GMMODE_NUM; gm++) {
+        int num_rewards = ClearChecker_GetRewardNum(gm);
+        int unlocked_count = 0;
+        int visible_count = 0;
+        int filler_count = 0;
+        int flagged_count = 0;
+
+        OSReport("\n=== %s Checklist ===\n", mode_names[gm]);
+        OSReport("Total reward checkboxes: %d\n", num_rewards);
+
+        for (int reward_kind = 0; reward_kind < num_rewards; reward_kind++) {
+            int clear_kind = ClearChecker_GetClearKindFromRewardKind(gm, reward_kind);
+            u8 clear_data = ClearChecker_GetClearData(gm, clear_kind);
+
+            // Decode flags using updated field names
+            int is_visible = (clear_data & 0x10) != 0;
+            int has_reward = (clear_data & 0x08) != 0;
+            int is_unlocked = (clear_data & 0x04) != 0;
+            int is_filler = (clear_data & 0x02) != 0;
+            int is_flagged_unlock = (clear_data & 0x01) != 0;
+
+            // Update counters
+            if (is_unlocked) unlocked_count++;
+            if (is_visible) visible_count++;
+            if (is_filler) filler_count++;
+            if (is_flagged_unlock) flagged_count++;
+            
+            // Determine box type
+            const char *box_type = "Unknown";
+            if (is_filler && has_reward) {
+                box_type = "Purple/Filler";
+            } else if (has_reward && is_unlocked) {
+                box_type = "Red/Reward";
+            } else if (is_unlocked) {
+                box_type = "Green/Complete";
+            } else if (is_visible) {
+                box_type = "Visible/Locked";
+            }
+
+            OSReport("  Reward %2d -> Clear %3d [%s%s%s%s%s] 0x%02x %s\n",
+                reward_kind, clear_kind,
+                is_visible ? "V" : "-",        // V = Visible
+                has_reward ? "R" : "-",        // R = has Reward
+                is_unlocked ? "U" : "-",       // U = Unlocked
+                is_filler ? "F" : "-",         // F = Filler
+                is_flagged_unlock ? "N" : "-", // N = New/flagged
+                clear_data,
+                box_type);
+        }
+
+        OSReport("Stats: %d unlocked, %d visible, %d filler, %d flagged\n",
+                 unlocked_count, visible_count, filler_count, flagged_count);
+    }
 }
+
 
 // executes before the game is initialized
 void On3DLoadStart() {
@@ -185,9 +265,14 @@ void On3DLoadEnd()
                  machine_kind);
     }
 
-    // Deathlink
+    // DeathLink
     if (hoshi_menu_settings.deathlink_enabled) {
         DeathLink_On3DLoadEnd();
+    }
+
+    // EnergyLink
+    if (hoshi_menu_settings.energylink_enabled) {
+        EnergyLink_On3DLoadEnd();
     }
 }
 
@@ -240,46 +325,59 @@ void OnFrame()
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT) {
         OSReport("Queueing ability item from DPAD LEFT...\n");
-        TextBox_AddMessage("Queueing ability item from DPAD LEFT...\n");
+        TextBox_Enqueue("Queueing ability item from DPAD LEFT...\n");
         APItem item = {0, ITEM_KIND_ABILITY, ITEM_CLASSIFICATION_PROGRESSION};
         Item_Enqueue(item);
     }
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT) {
-        OSReport("Queueing event item from DPAD RIGHT...\n");
-        TextBox_AddMessage("Queueing event item from DPAD RIGHT...\n");
-        APItem item = {0, ITEM_KIND_CITY_TRIAL_EVENT, ITEM_CLASSIFICATION_PROGRESSION};
-        Item_Enqueue(item);
+        // OSReport("Queueing event item from DPAD RIGHT...\n");
+        // TextBox_Enqueue("Queueing event item from DPAD RIGHT...\n");
+        // APItem item = {0, ITEM_KIND_CITY_TRIAL_EVENT, ITEM_CLASSIFICATION_PROGRESSION};
+        // Item_Enqueue(item);
+        OSReport("Triggering patch drop...\n");
+        TextBox_Enqueue("Triggering patch drop...\n");
+        if (Ply_GetPKind(0) == PKIND_HMN) {
+            GOBJ *rg = Ply_GetRiderGObj(0);
+            RiderData *rd = rg->userdata;
+            GOBJ *mg = Ply_GetMachineGObj(0);
+            MachineData *md = mg->userdata;
+            if (mg) {
+                int mode = HSD_Randi(3);
+                OSReport("Calling patch drop with mode %d...\n", mode);
+                Rider_DropPatches(rd, rd->stats.values, mode);
+            }
+        }
     }
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_DOWN) {
         OSReport("Setting deathlink receive from DPAD DOWN...\n");
-        TextBox_AddMessage("Setting deathlink receive from DPAD DOWN...");
+        TextBox_Enqueue("Setting deathlink receive from DPAD DOWN...");
         archipelago_data->deathlink_receive = 1;
     }
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP) {
-        OSReport("Triggering patch item from DPAD...\n");
-        TextBox_AddMessage("Triggering patch item from DPAD...\n");
-        APItem item = {0, ITEM_KIND_PATCH, ITEM_CLASSIFICATION_PROGRESSION};
-        Item_Enqueue(item);
+        // OSReport("Triggering patch item from DPAD...\n");
+        // TextBox_Enqueue("Triggering patch item from DPAD...\n");
+        // APItem item = {0, ITEM_KIND_PATCH, ITEM_CLASSIFICATION_PROGRESSION};
+        // Item_Enqueue(item);
         
         // test for spawning an item
-        // if (Ply_GetPKind(0) == PKIND_HMN) {
-        //     GOBJ *rg = Ply_GetRiderGObj(0);
-        //     RiderData *rd = rg->userdata;
-
-        //     GOBJ *mg = Ply_GetMachineGObj(0);
-        //     MachineData *md = mg->userdata;
-
-        //     // Spawn at machine
-        //     Vec3 spawn_pos = md->pos;
-        //     spawn_pos.Y += 100.0f;
-
-        //     // Spawn the item
-        //     int i = HSD_Randi(68);
-        //     GOBJ *item_gobj = Patch_SpawnItem(i, &spawn_pos);
-
-        // }
+        if (Ply_GetPKind(0) == PKIND_HMN) {
+            GOBJ *mg = Ply_GetMachineGObj(0);
+            MachineData *md = mg->userdata;
+            if (mg) {
+                Vec3 spawn_pos = {
+                    .X = md->pos.X,
+                    .Y = md->pos.Y,
+                    .Z = md->pos.Z
+                };
+                ItemDesc item_desc;
+                ItemKind it_kind = HSD_Randi(ITKIND_NUM - 1);
+                Item_InitDesc(&item_desc, it_kind, 1.0, 0, &spawn_pos, &md->up, &md->forward, -1, -1);
+                GOBJ *item_gobj = Item_Create(&item_desc);
+                ItemData *id = item_gobj->userdata;
+                Machine_OnTouchItem(md, id);
+        }
     }
 }

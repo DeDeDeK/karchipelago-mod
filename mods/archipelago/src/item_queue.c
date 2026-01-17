@@ -74,7 +74,7 @@ void ItemQueueGive_PerFrame(GOBJ *g) {
     if (gk == GRKIND_CITY1) {
         switch (item.kind) {
             case ITEM_KIND_CITY_TRIAL_EVENT:
-                int event_kind = HSD_Randi(EVKIND_NUM -1);
+                int event_kind = HSD_Randi(EVKIND_NUM);
                 if (Event_GiveItem(event_kind)) {
                     save_data->item_received_index++;
                     Item_Dequeue(&item);
@@ -87,7 +87,7 @@ void ItemQueueGive_PerFrame(GOBJ *g) {
                 Item_Dequeue(&item);
                 return;
             case ITEM_KIND_PATCH:
-                int patch_kind = HSD_Randi(PATCHKIND_NUM - 1);
+                int patch_kind = HSD_Randi(PATCHKIND_NUM);
                 if (Patch_GiveItem(patch_kind, 1)) {
                     save_data->item_received_index++;
                     Item_Dequeue(&item);
@@ -99,7 +99,7 @@ void ItemQueueGive_PerFrame(GOBJ *g) {
                 //     return;
                 // }
             case ITEM_KIND_ABILITY:
-                int ability_kind = HSD_Randi(COPYKIND_NUM - 1);
+                int ability_kind = HSD_Randi(COPYKIND_NUM);
                 if (Ability_GiveItem(ability_kind)) {
                     save_data->item_received_index++;
                     Item_Dequeue(&item);

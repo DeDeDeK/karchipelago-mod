@@ -1,10 +1,10 @@
 #include "game.h"
 #include "code_patch/code_patch.h"
 
+#include "main.h"
 #include "deathlink.h"
 #include "text.h"
 #include "textbox.h"
-#include "main.h"
 
 // function to detect death and set deathlink_send if deathlink is enabled
 // currently, only one global deathlink_send for all players
@@ -15,7 +15,7 @@ void Rider_OnDeath(RiderData *rd)
     if (hoshi_menu_settings.deathlink_enabled) {
         if (Ply_CheckIfHMN(rd->ply)) {
             OSReport("Death detected for human player [%d]. Sending deathlink...\n", rd->ply);
-            TextBox_AddMessage("Death detected for human player [%d]. Sending deathlink...\n", rd->ply);
+            TextBox_Enqueue("Death detected for human player [%d]. Sending deathlink...\n", rd->ply);
             archipelago_data->deathlink_send = 1;
         }
     }
@@ -36,7 +36,7 @@ void DeathLink_PerFrame(GOBJ *r) {
             DmgLog dl = md->dmg_log;
             dl.attacker_ply = 0;
             OSReport("Deathlink received! Adding death for player %d\n", rd->ply);
-            TextBox_AddMessage("Deathlink received! Adding death for player %d\n", rd->ply);
+            TextBox_Enqueue("Deathlink received! Adding death for player %d\n", rd->ply);
             Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);
             Ply_SetHP(rd->ply, 0);
             archipelago_data->deathlink_receive = 0;

@@ -46,11 +46,11 @@ int Event_GiveItem(EventKind kind) {
         int ev_done = Event_Do(kind);
         if (ev_done) {
             OSReport("Event triggered successfully!\n");
-            TextBox_AddMessage("Event triggered successfully!");
+            TextBox_Enqueue("Event triggered successfully!");
             return 1;
         } else {
             OSReport("Failed to trigger event\n");
-            TextBox_AddMessage("Failed to trigger event");
+            TextBox_Enqueue("Failed to trigger event");
         }
     }
     return 0;

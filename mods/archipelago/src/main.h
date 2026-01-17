@@ -4,6 +4,10 @@
 #include "structs.h"
 #include "event.h"
 
+#define TEXTBOX_QUEUE_SIZE 5
+#define TEXTBOX_MESSAGE_SIZE 256
+#define ITEM_QUEUE_SIZE 50
+
 typedef struct TemplateSave
 {
     uint boot_num;
@@ -36,16 +40,25 @@ typedef struct APItem {
     APItemClassification classification;
 } APItem;
 
+#include "textbox.h"
+#include "item_queue.h"
+
 // Shared data struct that is stored at a static location in memory.
 typedef struct ArchipelagoData
 {
-    float energy;
+    float energy_give;
+    float energy_receive;
     uint deathlink_receive;
     uint deathlink_send;
-    APItem item_queue[500];   // FIFO queue for items
+    APItem item_queue[ITEM_QUEUE_SIZE];   // FIFO queue for items
     uint item_queue_head;     // Index to dequeue from (read position)
     uint item_queue_tail;     // Index to enqueue to (write position)
     uint item_queue_count;    // Number of items currently in queue
+    TextBoxMessage textbox_queue[TEXTBOX_QUEUE_SIZE];  // FIFO queue for TextBoxMessage objects
+    uint textbox_queue_head;      // Index to dequeue from (read position)
+    uint textbox_queue_tail;      // Index to enqueue to (write position)
+    uint textbox_queue_count;     // Number of Text objects currently in queue
+    uint textbox_framecounter;    // Frame counter for textbox fade timing
 } ArchipelagoData;
 
 // Global variables for menu bindings. These are automatically loaded in by Hoshi on SaveLoaded.
