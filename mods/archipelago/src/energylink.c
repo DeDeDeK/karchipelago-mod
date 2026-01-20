@@ -12,8 +12,8 @@ void EnergyLink_PerFrame(GOBJ *rg) {
     RiderData *rd = rg->userdata;
 
     // objects destroyed
-    int diff = stc_playerdata[rd->ply].objectsDestroyed - prev_obj_destroyed;
-    prev_obj_destroyed = stc_playerdata[rd->ply].objectsDestroyed;
+    int diff = stc_playerdata[rd->ply].objects_destroyed_num - prev_obj_destroyed;
+    prev_obj_destroyed = stc_playerdata[rd->ply].objects_destroyed_num;
     if (diff > 0) {
         OSReport("generated %d energy from destroying objects\n", diff);
         archipelago_data->energy_give += diff;

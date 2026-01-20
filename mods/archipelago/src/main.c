@@ -97,7 +97,8 @@ ModDesc mod_desc = {
     .On3DUnpause = On3DUnpause,
     .On3DExit = On3DExit,
     .OnSceneChange = OnSceneChange,
-    .OnFrame = OnFrame,
+    .OnFrameStart = OnFrameStart,
+    .OnFrameEnd = OnFrameEnd,
 };
 
 // Runs immediately after the mod file is loaded.
@@ -313,7 +314,7 @@ void OnSceneChange()
 }
 
 // Runs every game tick, even when the game is paused normally or via debug mode.
-void OnFrame()
+void OnFrameStart()
 {
     GameData *gd = Gm_GetGameData();
 
@@ -378,6 +379,11 @@ void OnFrame()
                 GOBJ *item_gobj = Item_Create(&item_desc);
                 ItemData *id = item_gobj->userdata;
                 Machine_OnTouchItem(md, id);
+           }
         }
     }
+}
+
+void OnFrameEnd() {
+    
 }

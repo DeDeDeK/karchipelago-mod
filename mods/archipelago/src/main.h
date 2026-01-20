@@ -83,6 +83,7 @@ void On3DPause(int pause_ply);
 void On3DUnpause(int pause_ply);
 void On3DExit();
 void OnSceneChange();
-void OnFrame();
+void OnFrameStart();
+void OnFrameEnd();
 
 #endif // ARCHIPELAGO_MAIN_H

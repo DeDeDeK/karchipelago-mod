@@ -13,7 +13,7 @@
 void Rider_OnDeath(RiderData *rd)
 {
     if (hoshi_menu_settings.deathlink_enabled) {
-        if (Ply_CheckIfHMN(rd->ply)) {
+        if (!Ply_CheckIfCPU(rd->ply)) {
             OSReport("Death detected for human player [%d]. Sending deathlink...\n", rd->ply);
             TextBox_Enqueue("Death detected for human player [%d]. Sending deathlink...\n", rd->ply);
             archipelago_data->deathlink_send = 1;
@@ -60,5 +60,6 @@ void DeathLink_On3DLoadEnd() {
 // apply patches needed for deathlink
 void DeathLink_OnBoot() {
     OSReport("Applying deathlink patches...\n");
+    // insert into Rider_CheckToDieOnMachine
     CODEPATCH_HOOKAPPLY(0x801a06d0);
 }
