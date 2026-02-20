@@ -10,20 +10,20 @@ LD = $(DEVKITPPC)/bin/powerpc-eabi-ld
 BUILD_DIR 		= build
 SCRIPT_DIR 		?= scripts
 HOSHI_DIR		= externals/hoshi
-LIB_ROOT_DIR 	= $(HOSHI_DIR)/Lib
+LIB_ROOT_DIR 		= $(HOSHI_DIR)/Lib
 INC_DIR 		?= $(HOSHI_DIR)/include
-PACKTOOL_DIR 	?= $(HOSHI_DIR)/packtool
-HOSHI_BIN_DIR	= $(HOSHI_DIR)/out/release
+PACKTOOL_DIR 		?= $(HOSHI_DIR)/packtool
+HOSHI_BIN_DIR		= $(HOSHI_DIR)/out/release
 ORIG_DOL		= $(HOSHI_DIR)/dol/kar.dol
 ROOT_DIR 		= root
 ISO_DIR		 	?= iso
 OUT_DIR 		= out
-MODS_OUT_DIR 	= $(ROOT_DIR)/files/mods
-ISO_OUT_DIR 	= 
-INSTALL_DIR 	?= install
+MODS_OUT_DIR 		= $(ROOT_DIR)/files/mods
+ISO_OUT_DIR 		= 
+INSTALL_DIR 		?= install
 
 # --- File Paths ---
-ISO_PATH		= kar.iso
+ISO_PATH		?= kar.iso
 HOSHI_BIN		= $(HOSHI_BIN_DIR)/hoshi.bin
 MOD_NAME		?= KARchipelago
 

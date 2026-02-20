@@ -45,7 +45,8 @@ Text* CreateTextBox(char* message, Vec3 pos, Vec2 scale, uint lifetime) {
 void CreateTextBox_OnSceneChange() {
     // re-create any Text objects that are still in the queue, for persistent message display across scenes
     if (!TextBoxQueue_IsEmpty()) {
-        for (int i = 0; i < archipelago_data->textbox_queue_count; i++) {
+        int count = TextBoxQueue_Count();
+        for (int i = 0; i < count; i++) {
             TextBoxMessage *text_box_message = TextBoxQueue_GetAt(i);
             if (text_box_message) {
                 text_box_message->text = CreateTextBox(text_box_message->message, text_box_message->pos, text_box_message->scale, text_box_message->lifetime);
@@ -70,8 +71,10 @@ void TextBox_SetAlpha(Text* text, u8 alpha) {
 
 // Repositions all messages in the queue by moving older messages down
 void TextBoxQueue_RepositionAll() {
+    int count = TextBoxQueue_Count();
+
     // No need to reposition if queue is empty
-    if (archipelago_data->textbox_queue_count == 0) {
+    if (count == 0) {
         return;
     }
 
@@ -80,7 +83,7 @@ void TextBoxQueue_RepositionAll() {
 
     // Iterate from newest (index count-1) to oldest (index 0)
     // Newest message stays at top, older messages stack below
-    for (int i = archipelago_data->textbox_queue_count - 1; i >= 0; i--) {
+    for (int i = count - 1; i >= 0; i--) {
         TextBoxMessage *t = TextBoxQueue_GetAt(i);
         if (t && t->text) {
             t->pos.Y = y_offset;
@@ -163,7 +166,6 @@ int TextBox_Enqueue(char *format, ...) {
     // Add the TextBoxMessage to the queue
     archipelago_data->textbox_queue[archipelago_data->textbox_queue_tail] = text_box_message;
     archipelago_data->textbox_queue_tail = (archipelago_data->textbox_queue_tail + 1) % TEXTBOX_QUEUE_SIZE;
-    archipelago_data->textbox_queue_count++;
 
     // Reposition all messages so they stack properly with newest at top
     TextBoxQueue_RepositionAll();
@@ -180,7 +182,6 @@ int TextBox_Dequeue(TextBoxMessage *text_out) {
 
     *text_out = archipelago_data->textbox_queue[archipelago_data->textbox_queue_head];
     archipelago_data->textbox_queue_head = (archipelago_data->textbox_queue_head + 1) % TEXTBOX_QUEUE_SIZE;
-    archipelago_data->textbox_queue_count--;
     OSReport("TextBox dequeued.\n");
 
     // Destroy the Text object and free the TextBoxMessage
@@ -191,20 +192,24 @@ int TextBox_Dequeue(TextBoxMessage *text_out) {
     return 1;
 }
 
-// Check if the textbox queue is empty
 int TextBoxQueue_IsEmpty() {
-    return archipelago_data->textbox_queue_count == 0;
+    return archipelago_data->textbox_queue_head == archipelago_data->textbox_queue_tail;
 }
 
-// Check if the textbox queue is full
 int TextBoxQueue_IsFull() {
-    return archipelago_data->textbox_queue_count >= TEXTBOX_QUEUE_SIZE;
+    uint next_tail = (archipelago_data->textbox_queue_tail + 1) % TEXTBOX_QUEUE_SIZE;
+    return next_tail == archipelago_data->textbox_queue_head;
 }
 
-// Get a Text object at a specific index in the queue (for iteration)
-// Index 0 is the head (oldest), count-1 is the newest
+// Derive count from head and tail indices
+int TextBoxQueue_Count() {
+    return (archipelago_data->textbox_queue_tail - archipelago_data->textbox_queue_head + TEXTBOX_QUEUE_SIZE) % TEXTBOX_QUEUE_SIZE;
+}
+
+// Get a TextBoxMessage at a specific index in the queue (for iteration).
+// Index 0 is the head (oldest), count-1 is the newest.
 TextBoxMessage* TextBoxQueue_GetAt(int index) {
-    if (index < 0 || index >= archipelago_data->textbox_queue_count) {
+    if (index < 0 || index >= TextBoxQueue_Count()) {
         return NULL;
     }
     int actual_index = (archipelago_data->textbox_queue_head + index) % TEXTBOX_QUEUE_SIZE;

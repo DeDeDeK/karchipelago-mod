@@ -19,6 +19,7 @@ int TextBox_Enqueue(char *format, ...);
 int TextBox_Dequeue(TextBoxMessage *text_out);
 int TextBoxQueue_IsEmpty();
 int TextBoxQueue_IsFull();
+int TextBoxQueue_Count();
 TextBoxMessage* TextBoxQueue_GetAt(int index);
 void TextBoxQueue_RepositionAll();
 

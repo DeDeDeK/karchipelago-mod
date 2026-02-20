@@ -22,39 +22,36 @@ void Rider_OnDeath(RiderData *rd)
 }
 CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", Rider_OnDeath, "", 0)
 
-// check for deathlink receive, and give death if it is 1
-// TODO: test this with invincible candy, in the hydra/dragoon cutscene, 
-// and when traveling on a boost pad thingy (volcano and white square near the city/volcano intersection)
-void DeathLink_PerFrame(GOBJ *r) {
-    RiderData *rd = r->userdata;
-    GOBJ *mg = rd->machine_gobj;
-    // check if player is on a machine first
-    if (mg) {
-        MachineData *md = mg->userdata;
-        if (archipelago_data->deathlink_receive == 1) {
-            // set this as a self-destruct
-            DmgLog dl = md->dmg_log;
-            dl.attacker_ply = 0;
-            OSReport("Deathlink received! Adding death for player %d\n", rd->ply);
-            TextBox_Enqueue("Deathlink received! Adding death for player %d\n", rd->ply);
-            Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);
-            Ply_SetHP(rd->ply, 0);
-            archipelago_data->deathlink_receive = 0;
-        }
+// Check for deathlink receive and kill all human players
+void DeathLink_PerFrame(GOBJ *g) {
+    if (archipelago_data->deathlink_receive != 1) {
+        return;
     }
+
+    for (int i = 0; i < 5; i++) {
+        if (Ply_GetPKind(i) != PKIND_HMN) continue;
+
+        GOBJ *rg = Ply_GetRiderGObj(i);
+        if (!rg) continue;
+        RiderData *rd = rg->userdata;
+
+        GOBJ *mg = rd->machine_gobj;
+        if (!mg) continue;
+        MachineData *md = mg->userdata;
+
+        DmgLog dl = md->dmg_log;
+        dl.attacker_ply = 0;
+        OSReport("Deathlink received! Killing player %d\n", rd->ply);
+        Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);
+        Ply_SetHP(rd->ply, 0);
+    }
+
+    TextBox_Enqueue("Deathlink received!");
+    archipelago_data->deathlink_receive = 0;
 }
 
 void DeathLink_On3DLoadEnd() {
-    // add the deathlink check to all human players
-    for (int i = 0; i < 4; i++) {
-        if (Ply_GetPKind(i) == PKIND_HMN) {
-            GOBJ *r = Ply_GetRiderGObj(i);
-            if (r) {
-                // RDPRI is set to after damage is applied
-                GObj_AddProc(r, DeathLink_PerFrame, RDPRI_DMGAPPLY + 1);
-            }
-        }
-    }    
+    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_PerFrame, 0, 0, 0, 0);
 }
 
 // apply patches needed for deathlink

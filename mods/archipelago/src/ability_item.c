@@ -4,7 +4,7 @@
 
 // give copy ability to every human rider
 int Ability_GiveItem(CopyKind copy_kind) {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (Ply_GetPKind(i) == PKIND_HMN) {
             GOBJ *rg = Ply_GetRiderGObj(i);
             RiderData *rd = rg->userdata;
