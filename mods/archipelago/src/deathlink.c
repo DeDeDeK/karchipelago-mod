@@ -24,6 +24,10 @@ CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", Rider_OnDeath, "", 0)
 
 // Check for deathlink receive and kill all human players
 void DeathLink_PerFrame(GOBJ *g) {
+    if (Gm_GetIntroState() != GMINTRO_END) {
+        return;
+    }
+
     if (archipelago_data->deathlink_receive != 1) {
         return;
     }

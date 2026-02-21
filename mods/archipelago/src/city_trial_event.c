@@ -4,7 +4,7 @@
 #include "main.h"
 #include "city_trial_event.h"
 #include "textbox.h"
-#include "item_queue.h"
+#include "ap_item_handler.h"
 
 // TODO: for the FOG event, triggers it properly, but fog does not happen?
 int Event_Do(EventKind kind)

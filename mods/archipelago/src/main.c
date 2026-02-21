@@ -9,7 +9,7 @@
 #include "textbox.h"
 #include "deathlink.h"
 #include "city_trial_event.h"
-#include "item_queue.h"
+#include "ap_item_handler.h"
 #include "energylink.h"
 #include "traplink.h"
 #include "spawn_item.h"
@@ -139,7 +139,10 @@ void OnSaveInit()
     save_data = (TemplateSave *)mod_desc.save_ptr;
     OSReport("save data for %s created!\n", mod_desc.name);
     save_data->boot_num = 0;
-    save_data->item_received_index = 0;
+    save_data->item_received_count = 0;
+    save_data->unprocessed_count = 0;
+    memset(save_data->received_items, 0, sizeof(save_data->received_items));
+    memset(save_data->unprocessed_items, 0, sizeof(save_data->unprocessed_items));
 }
 
 // Runs on startup after any save data is loaded into memory.
@@ -149,10 +152,10 @@ void OnSaveLoaded()
     save_data = (TemplateSave *)mod_desc.save_ptr;
     save_data->boot_num++;
     OSReport("%s present for [%d] boot cycles\n", mod_desc.name, save_data->boot_num);
-    OSReport("item received index is [%d]\n", save_data->item_received_index);
+    OSReport("items received: [%d]\n", save_data->item_received_count);
 
-    // Sync received index to archipelago_data so the AP client can read it
-    archipelago_data->item_received_index = save_data->item_received_index;
+    // Sync received count to archipelago_data so the AP client can read it
+    archipelago_data->item_received_index = save_data->item_received_count;
 }
 
 // Runs when entering the main menu.
@@ -253,7 +256,7 @@ void OnSceneChange()
     }
 
     // Item Queue
-    ItemQueue_OnSceneChange();
+    APItems_OnSceneChange();
 }
 
 // Runs every game tick, even when the game is paused normally or via debug mode.
@@ -268,16 +271,28 @@ void OnFrameStart()
         OSReport("Game is paused via in-game!\n");
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT) {
-        // Simulate AP client writing to the mailbox (blue box = 100 + ITKIND_BOXBLUE)
-        OSReport("Writing test item (blue box) to mailbox from DPAD LEFT...\n");
-        TextBox_Enqueue("Writing test item (blue box) to mailbox...\n");
-        archipelago_data->incoming_item_id = 100 + ITKIND_BOXBLUE;
+        OSReport("Setting traplink_receive...\n");
+        TextBox_Enqueue("Setting traplink_receive...\n");
+        archipelago_data->traplink_receive = 1;
     }
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT) {
-        ItemKind random_kind = Gm_GetRandomItem(BOXKIND_ALL, ITGROUP_ALL, 0);
-        OSReport("Spawning random item kind %d from DPAD RIGHT...\n", random_kind);
-        SpawnItemHumans(random_kind);
+        // Pick a random AP item ID from the full enum
+        #define STANDALONE_COUNT 7  // AP_ITEM_CHECKBOX_FILLER(1) through AP_ITEM_ALL_DOWN(7)
+        int total = STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM + ITKIND_NUM;
+        int r = HSD_Randi(total);
+        uint ap_id;
+        if (r < STANDALONE_COUNT) {
+            ap_id = 1 + r;
+        } else if (r < STANDALONE_COUNT + PATCHKIND_NUM) {
+            ap_id = AP_PERM_PATCH_BASE + (r - STANDALONE_COUNT);
+        } else if (r < STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM) {
+            ap_id = AP_EVENT_BASE + (r - STANDALONE_COUNT - PATCHKIND_NUM);
+        } else {
+            ap_id = AP_ITKIND_BASE + (r - STANDALONE_COUNT - PATCHKIND_NUM - EVKIND_NUM);
+        }
+        OSReport("Setting incoming_item_id to random AP ID %d from DPAD RIGHT...\n", ap_id);
+        archipelago_data->incoming_item_id = ap_id;
     }
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_DOWN) {
