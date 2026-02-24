@@ -6,7 +6,12 @@
 
 #define TEXTBOX_QUEUE_SIZE 6
 #define TEXTBOX_MESSAGE_SIZE 256
-#define MAX_RECEIVED_ITEMS 1000
+#define MAX_RECEIVED_ITEMS 512
+
+#define REWARD_COUNT_AIRRIDE   46
+#define REWARD_COUNT_TOPRIDE   33
+#define REWARD_COUNT_CITYTRIAL 44
+
 
 // ==========================================================================
 // AP Item ID Definitions
@@ -15,7 +20,9 @@
 // ==========================================================================
 typedef enum APItemId {
     // Standalone items (1-99)
-    AP_ITEM_CHECKBOX_FILLER = 1,
+    AP_ITEM_CHECKBOX_FILLER_AIRRIDE = 1,
+    AP_ITEM_CHECKBOX_FILLER_TOPRIDE,
+    AP_ITEM_CHECKBOX_FILLER_CITYTRIAL,
     AP_ITEM_PROGRESSIVE_STADIUM,
     AP_ITEM_PATCH_CAP_INCREASE,
     AP_ITEM_1_HP_TRAP,
@@ -125,15 +132,51 @@ typedef enum APItemId {
     AP_ITKIND_GLIDEFAKE,            // ITKIND_GLIDEFAKE
     AP_ITKIND_CHARGEFAKE,           // ITKIND_CHARGEFAKE
     AP_ITKIND_WEIGHTFAKE,           // ITKIND_WEIGHTFAKE
+
+    // Stadium unlock items (400-423, aligned to StadiumKind)
+    AP_STADIUM_BASE = 400,
+    AP_STADIUM_DRAG1 = 400,         // STKIND_DRAG1
+    AP_STADIUM_DRAG2,               // STKIND_DRAG2
+    AP_STADIUM_DRAG3,               // STKIND_DRAG3
+    AP_STADIUM_DRAG4,               // STKIND_DRAG4
+    AP_STADIUM_AIRGLIDER,           // STKIND_AIRGLIDER
+    AP_STADIUM_TARGETFLIGHT,        // STKIND_TARGETFLIGHT
+    AP_STADIUM_HIGHJUMP,            // STKIND_HIGHJUMP
+    AP_STADIUM_MELEE1,              // STKIND_MELEE1
+    AP_STADIUM_MELEE2,              // STKIND_MELEE2
+    AP_STADIUM_DESTRUCTION1,        // STKIND_DESTRUCTION1
+    AP_STADIUM_DESTRUCTION2,        // STKIND_DESTRUCTION2
+    AP_STADIUM_DESTRUCTION3,        // STKIND_DESTRUCTION3
+    AP_STADIUM_DESTRUCTION4,        // STKIND_DESTRUCTION4
+    AP_STADIUM_DESTRUCTION5,        // STKIND_DESTRUCTION5
+    AP_STADIUM_SINGLERACE1,         // STKIND_SINGLERACE1
+    AP_STADIUM_SINGLERACE2,         // STKIND_SINGLERACE2
+    AP_STADIUM_SINGLERACE3,         // STKIND_SINGLERACE3
+    AP_STADIUM_SINGLERACE4,         // STKIND_SINGLERACE4
+    AP_STADIUM_SINGLERACE5,         // STKIND_SINGLERACE5
+    AP_STADIUM_SINGLERACE6,         // STKIND_SINGLERACE6
+    AP_STADIUM_SINGLERACE7,         // STKIND_SINGLERACE7
+    AP_STADIUM_SINGLERACE8,         // STKIND_SINGLERACE8
+    AP_STADIUM_SINGLERACE9,         // STKIND_SINGLERACE9
+    AP_STADIUM_VSKINGDEDEDE,        // STKIND_VSKINGDEDEDE
+
 } APItemId;
 
 typedef struct TemplateSave
 {
+    // Small critical fields first (ensure they fit within card save limits)
     uint boot_num;
     uint item_received_count;                           // Total items received from AP client
+    uint unprocessed_count;                             // Number of items in the unprocessed list
+    u32 stadium_unlocked_mask;                          // Bitmask of AP-unlocked stadiums (bit N = StadiumKind N)
+    u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
+    u8 rewards_shuffled;                                // Nonzero if reward tables have been shuffled and saved
+    u8 shuffled_airride_rewards[REWARD_COUNT_AIRRIDE];      // Saved clear_kind values for Air Ride
+    u8 shuffled_topride_rewards[REWARD_COUNT_TOPRIDE];      // Saved clear_kind values for Top Ride
+    u8 shuffled_citytrial_rewards[REWARD_COUNT_CITYTRIAL];  // Saved clear_kind values for City Trial
+    // Large arrays last
     uint received_items[MAX_RECEIVED_ITEMS];            // Ordered list of all received AP item IDs
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
-    uint unprocessed_count;                             // Number of items in the unprocessed list
 } TemplateSave;
 
 #include "textbox.h"

@@ -4,7 +4,7 @@
 #include "main.h"
 
 int APItems_HandleItem(uint ap_item_id);
-void APItems_CheckMailbox();
+int APItems_CheckMailbox();
 void APItems_PerFrame(GOBJ *g);
 void APItems_OnSceneChange();
 

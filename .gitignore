@@ -4,8 +4,9 @@
 /.temp/
 /install/
 /externals/devkitpro/
+/docs/
+/.claude/
 notes.txt
 kar.iso
 out.iso
 patch.xdelta
-gamecube-decomp-reference.md

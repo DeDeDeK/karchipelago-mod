@@ -1,5 +1,7 @@
 #include "game.h"
 #include "inline.h"
+#include "stadium.h"
+#include "hoshi/func.h"
 
 #include "ap_item_handler.h"
 #include "textbox.h"
@@ -7,21 +9,23 @@
 #include "ability_item.h"
 #include "patch_item.h"
 #include "spawn_item.h"
+#include "patch_cap.h"
 
 // Check the mailbox for an incoming item from the AP client.
 // Store it in the persistent received list, add to unprocessed list,
 // and immediately acknowledge receipt.
-void APItems_CheckMailbox() {
+// Returns 1 if an item was received, 0 otherwise.
+int APItems_CheckMailbox() {
     uint incoming = archipelago_data->incoming_item_id;
     if (incoming == 0) {
-        return;
+        return 0;
     }
 
     uint idx = save_data->item_received_count;
     if (idx >= MAX_RECEIVED_ITEMS) {
         OSReport("APItems_CheckMailbox: received list is full!\n");
         archipelago_data->incoming_item_id = 0;
-        return;
+        return 0;
     }
 
     // Store in persistent received list
@@ -39,20 +43,40 @@ void APItems_CheckMailbox() {
 
     // Clear the mailbox so the client can write the next item
     archipelago_data->incoming_item_id = 0;
+    return 1;
 }
 
 // Handle an AP item by its raw ID. Maps the ID directly to game behavior.
 // Returns 1 if the item was successfully applied, 0 if it can't be applied yet
 // (e.g., player is not in the right scene, or an event is already active).
 int APItems_HandleItem(uint ap_item_id) {
+    // Checkbox filler items (one per mode, apply immediately)
+    if (ap_item_id >= AP_ITEM_CHECKBOX_FILLER_AIRRIDE &&
+        ap_item_id <= AP_ITEM_CHECKBOX_FILLER_CITYTRIAL) {
+        GameMode mode = ap_item_id - AP_ITEM_CHECKBOX_FILLER_AIRRIDE;
+        Checklist_GrantFiller(mode);
+        OSReport("Checkbox filler granted for mode %d.\n", mode);
+        return 1;
+    }
+
     // Items that apply immediately (no map required)
     switch (ap_item_id) {
-        case AP_ITEM_CHECKBOX_FILLER:
         case AP_ITEM_PROGRESSIVE_STADIUM:
+            return 1;
         case AP_ITEM_PATCH_CAP_INCREASE:
+            PatchCap_Increment();
             return 1;
         default:
             break;
+    }
+
+    // Stadium unlock items (AP_STADIUM_BASE + StadiumKind)
+    if (ap_item_id >= AP_STADIUM_BASE && ap_item_id < AP_STADIUM_BASE + STKIND_NUM) {
+        StadiumKind kind = ap_item_id - AP_STADIUM_BASE;
+        save_data->stadium_unlocked_mask |= (1 << kind);
+        Gm_StadiumSetUnlockedDirect(kind);
+        Gm_StadiumSetNewLabelDirect(kind);
+        return 1;
     }
 
     // All remaining items require being in an actual 3D game scene
@@ -115,9 +139,10 @@ void APItems_OnSceneChange() {
 // are skipped, allowing items behind them to process out of order.
 void APItems_PerFrame(GOBJ *g) {
     // Pull from mailbox into persistent list
-    APItems_CheckMailbox();
+    int item_received = APItems_CheckMailbox();
 
     // Scan unprocessed items for one we can handle
+    int item_applied = 0;
     for (uint i = 0; i < save_data->unprocessed_count; i++) {
         uint item_id = save_data->unprocessed_items[i];
         if (APItems_HandleItem(item_id)) {
@@ -125,7 +150,13 @@ void APItems_PerFrame(GOBJ *g) {
             // Remove by swapping with last element
             save_data->unprocessed_count--;
             save_data->unprocessed_items[i] = save_data->unprocessed_items[save_data->unprocessed_count];
-            return;
+            item_applied = 1;
+            break;
         }
+    }
+
+    // Flush save data to memcard if anything changed
+    if (item_received || item_applied) {
+        Hoshi_WriteSave();
     }
 }

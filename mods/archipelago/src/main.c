@@ -4,6 +4,7 @@
 #include "hoshi/settings.h"
 #include "hoshi/mod.h"
 #include "stage.h"
+#include "stadium.h"
 
 #include "main.h"
 #include "textbox.h"
@@ -13,6 +14,9 @@
 #include "energylink.h"
 #include "traplink.h"
 #include "spawn_item.h"
+#include "shuffle_rewards.h"
+#include "stadium_lock.h"
+#include "patch_cap.h"
 
 // Define global variables
 ArchipelagoData *archipelago_data;
@@ -129,6 +133,16 @@ void OnBoot()
     ArchipelagoData **static_ptr = (ArchipelagoData **)0x805d52d4;
     (*static_ptr) = archipelago_data;
 
+    // Shuffle checklist reward tables
+    ShuffleRewards_OnBoot();
+
+    // Patches for stadium unlocks
+    StadiumLock_OnBoot();
+
+    // Patches for patch cap
+    PatchCap_OnBoot();
+
+    // Patches for deathlink
     DeathLink_OnBoot();
 }
 
@@ -141,8 +155,16 @@ void OnSaveInit()
     save_data->boot_num = 0;
     save_data->item_received_count = 0;
     save_data->unprocessed_count = 0;
+    save_data->stadium_unlocked_mask = 0;
+    save_data->patch_cap_count = 0;
     memset(save_data->received_items, 0, sizeof(save_data->received_items));
     memset(save_data->unprocessed_items, 0, sizeof(save_data->unprocessed_items));
+    save_data->rewards_shuffled = 0;
+    memset(save_data->shuffled_airride_rewards, 0, sizeof(save_data->shuffled_airride_rewards));
+    memset(save_data->shuffled_topride_rewards, 0, sizeof(save_data->shuffled_topride_rewards));
+    memset(save_data->shuffled_citytrial_rewards, 0, sizeof(save_data->shuffled_citytrial_rewards));
+
+    ShuffleRewards_OnSaveInit();
 }
 
 // Runs on startup after any save data is loaded into memory.
@@ -156,12 +178,19 @@ void OnSaveLoaded()
 
     // Sync received count to archipelago_data so the AP client can read it
     archipelago_data->item_received_index = save_data->item_received_count;
+
+    // Apply or generate shuffled reward tables
+    ShuffleRewards_OnSaveLoaded();
+
+    // On first boot, lock all stadiums (bypasses checklist cache with direct writes)
+    StadiumLock_OnSaveLoaded();
 }
 
 // Runs when entering the main menu.
 void OnMainMenuLoad()
 {
     OSReport("Entering the main menu.\n");
+
 }
 
 // Runs when entering the player select menu.
@@ -271,14 +300,13 @@ void OnFrameStart()
         OSReport("Game is paused via in-game!\n");
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT) {
-        OSReport("Setting traplink_receive...\n");
-        TextBox_Enqueue("Setting traplink_receive...\n");
-        archipelago_data->traplink_receive = 1;
+        OSReport("Granting patch cap increase via DPAD LEFT...\n");
+        archipelago_data->incoming_item_id = AP_ITEM_PATCH_CAP_INCREASE;
     }
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT) {
         // Pick a random AP item ID from the full enum
-        #define STANDALONE_COUNT 7  // AP_ITEM_CHECKBOX_FILLER(1) through AP_ITEM_ALL_DOWN(7)
+        #define STANDALONE_COUNT 9  // AP_ITEM_CHECKBOX_FILLER_AIRRIDE(1) through AP_ITEM_ALL_DOWN(9)
         int total = STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM + ITKIND_NUM;
         int r = HSD_Randi(total);
         uint ap_id;
@@ -302,13 +330,21 @@ void OnFrameStart()
     }
 
     if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP) {
-        if (Gm_IsInCity()) {
-            GOBJ *mg = Ply_GetMachineGObj(0);
-            if (mg) {
-                MachineData *md = mg->userdata;
-                OSReport("Giving candy to P0...\n");
-                Rider_SetCandyTimer(md->rider_gobj, 300);
+        // Pick a random locked stadium and unlock it
+        int locked[STKIND_NUM];
+        int locked_count = 0;
+        for (int i = 0; i < STKIND_NUM; i++) {
+            if (!(save_data->stadium_unlocked_mask & (1 << i))) {
+                locked[locked_count++] = i;
             }
+        }
+        if (locked_count > 0) {
+            int pick = locked[HSD_Randi(locked_count)];
+            uint ap_id = AP_STADIUM_BASE + pick;
+            OSReport("Unlocking stadium %d via DPAD UP...\n", pick);
+            archipelago_data->incoming_item_id = ap_id;
+        } else {
+            OSReport("All stadiums already unlocked.\n");
         }
     }
 }
