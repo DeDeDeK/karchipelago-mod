@@ -1,3 +1,0 @@
-pyelftools
-pyisotools
-dolreader

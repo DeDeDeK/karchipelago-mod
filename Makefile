@@ -1,10 +1,12 @@
-ifeq ($(strip $(DEVKITPPC)),)
-$(error "Please set DEVKITPPC in your environment.")
-endif
+DEVKITPRO ?= $(CURDIR)/externals/devkitpro
+DEVKITARM ?= $(DEVKITPRO)/devkitARM
+DEVKITPPC ?= $(DEVKITPRO)/devkitPPC
+export DEVKITPRO DEVKITARM DEVKITPPC
 
 # --- Compiler and Flags ---
 CC = $(DEVKITPPC)/bin/powerpc-eabi-gcc
 LD = $(DEVKITPPC)/bin/powerpc-eabi-ld
+PYTHON = uv run --with pyelftools --with pyisotools python
 
 # --- Directories ---
 BUILD_DIR 		= build
@@ -132,11 +134,11 @@ $(OBJ_DIRS):
 
 # Rule to extract the original dol from the iso
 $(ORIG_DOL):
-	python $(DOLEXTRACT_SCRIPT) $(ISO_PATH) $(ORIG_DOL)
+	$(PYTHON) $(DOLEXTRACT_SCRIPT) $(ISO_PATH) $(ORIG_DOL)
 
 # --- hoshi target ---
 hoshi: $(ORIG_DOL)
-	$(MAKE) -C $(HOSHI_DIR) MOD_NAME="$(MOD_NAME)"
+	$(MAKE) -C $(HOSHI_DIR) MOD_NAME="$(MOD_NAME)" PYTHON="$(PYTHON)"
 
 # --- Generic Compilation Rule for C Source Files ---
 # This single pattern rule handles compiling ANY .c file into its corresponding .o file in BUILD_DIR.
@@ -182,7 +184,7 @@ $(MODS_OUT_DIR)/$(1).bin: $(BUILD_DIR)/$(1).modlink | $(MODS_OUT_DIR)
 	@echo ""
 	@echo "--- Creating '$(1)' bin file ---"
 	@echo ""
-	python $(PACKTOOL_DIR)/main.py $$< -m gbFunction -o $$@
+	$(PYTHON) $(PACKTOOL_DIR)/main.py $$< -m gbFunction -o $$@
 
 endef
 
@@ -208,7 +210,7 @@ assets: hoshi
 # Copies the files from $(ROOT_DIR) to $(INSTALL_DIR)
 install: $(MOD_BIN_FILES) hoshi assets 
 	@echo ""
-	$(MAKE) -C $(HOSHI_DIR) install INSTALL_DIR="$(INSTALL_DIR)"
+	$(MAKE) -C $(HOSHI_DIR) install INSTALL_DIR="$(INSTALL_DIR)" PYTHON="$(PYTHON)"
 	@echo "--- Installing files to "$(INSTALL_DIR)" ---"
 	cp -a -r "$(ROOT_DIR)"/* "$(strip $(INSTALL_DIR))/"
 	@echo ""
@@ -217,7 +219,7 @@ install: $(MOD_BIN_FILES) hoshi assets
 patch: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets
 	@echo ""
 	@echo "--- Creating ISO Patch... ---"
-	python $(ISOPATCH_SCRIPT) $(ISO_PATH) $(ROOT_DIR) $(OUT_DIR)/patch.xdelta
+	$(PYTHON) $(ISOPATCH_SCRIPT) $(ISO_PATH) $(ROOT_DIR) $(OUT_DIR)/patch.xdelta
 
 riivolution: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets
 	@echo ""
@@ -230,7 +232,7 @@ riivolution: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets
 # --- Clean Target ---
 clean:
 	@echo "Cleaning build and output directories..."
-	$(MAKE) -C $(HOSHI_DIR) clean
+	$(MAKE) -C $(HOSHI_DIR) clean PYTHON="$(PYTHON)"
 	rm -rf $(ORIG_DOL) $(ROOT_DIR) $(OUT_DIR) $(BUILD_DIR)
 	@echo "Cleaning Dolphin Riivolution dir..."
 	trash-put -f "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/"*

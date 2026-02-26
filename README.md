@@ -14,20 +14,17 @@ This project is written in **C** and uses `make` to manage the build process. It
 
 ## Prerequisites
 
-### 1. **[devkitPPC](https://devkitpro.org/wiki/Getting_Started)** 
+### 1. **[devkitPPC](https://devkitpro.org/wiki/Getting_Started)**
 
-This contains the required PowerPC compiler. After installing, make sure the DEVKITPPC environment variable is set. You can verify this by typing `echo %DEVKITPPC%` in the Windows command prompt.
+This contains the required PowerPC compiler. Install devkitPro and place (or symlink) it at `externals/devkitpro/` so the Makefile can find it automatically. Alternatively, you can set the `DEVKITPPC` environment variable to point to your installation.
 
-### 2. **Python 3**
+### 2. **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
 
-This project depends on a script written in Python to pack the compiled `.o` file into a `.bin` file to be used by the game. Make sure Python 3 is installed and available in your PATH.
+This project uses [uv](https://docs.astral.sh/uv/) to manage Python dependencies (`pyelftools`, `pyisotools`). Python scripts are invoked via `uv run`, so no manual dependency installation is needed — `uv` handles it automatically.
 
-* **Windows**: Download from [python.org](https://www.python.org/downloads/) and check the "Add to PATH" option during installation.
-* **Linux/macOS**: Use your package manager (e.g., `sudo apt install python3` or `brew install python`).
+### 3. **[trash-cli](https://github.com/andreafrancia/trash-cli)** (Linux only, optional)
 
-#### Optional
-- [pyisotools](https://pypi.org/project/pyisotools/)
-- xdelta
+The `make clean` target uses `trash-put` to safely remove Dolphin Riivolution and memory card files instead of permanently deleting them.
 
 ### 3. **Original NTSC Kirby Air Ride ISO**
 
