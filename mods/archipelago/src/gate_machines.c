@@ -1,0 +1,320 @@
+#include "game.h"
+#include "menu.h"
+#include "os.h"
+#include "code_patch/code_patch.h"
+
+#include "main.h"
+#include "gate_machines.h"
+#include "textbox.h"
+
+static const char *machine_names[VCKIND_NUM] = {
+    [VCKIND_WARP]           = "Warp Star",
+    [VCKIND_COMPACT]        = "Compact Star",
+    [VCKIND_WINGED]         = "Winged Star",
+    [VCKIND_SHADOW]         = "Shadow Star",
+    [VCKIND_HYDRA]          = "Hydra",
+    [VCKIND_BULK]           = "Bulk Star",
+    [VCKIND_SLICK]          = "Slick Star",
+    [VCKIND_FORMULA]        = "Formula Star",
+    [VCKIND_DRAGOON]        = "Dragoon",
+    [VCKIND_WAGON]          = "Wagon Star",
+    [VCKIND_ROCKET]         = "Rocket Star",
+    [VCKIND_SWERVE]         = "Swerve Star",
+    [VCKIND_TURBO]          = "Turbo Star",
+    [VCKIND_JET]            = "Jet Star",
+    [VCKIND_FLIGHT]         = "Flight Warp Star",
+    [VCKIND_FREE]           = "Free Star",
+    [VCKIND_STEER]          = "Steer Star",
+    [VCKIND_WINGKIRBY]      = "Wing Kirby",
+    [VCKIND_WINGMETAKNIGHT] = "Wing Meta Knight",
+    [VCKIND_WHEELNORMAL]    = "Wheel",
+    [VCKIND_WHEELKIRBY]     = "Wheel Kirby",
+    [VCKIND_WHEELIEBIKE]    = "Wheelie Bike",
+    [VCKIND_REXWHEELIE]     = "Rex Wheelie",
+    [VCKIND_WHEELIESCOOTER] = "Wheelie Scooter",
+    [VCKIND_WHEELDEDEDE]    = "Dedede Wheelie",
+    [VCKIND_WHEELVSDEDEDE]  = "VS Dedede Wheelie",
+};
+
+// Replace the vanilla spawn selection logic entirely.
+// Adapted from KAR Deluxe (UnclePunch/KAR-Deluxe, machines.c).
+// Reads the spawn chance table, zeros out locked machines, gives unlocked
+// machines with 0 base chance a minimum weight, reduces history size for
+// low unlock counts, and does a weighted random selection.
+int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
+{
+    u32 unlocked_mask = save_data->machine_unlocked_mask;
+    vcDataCommon *vc_data_common = (*stc_vcDataCommon);
+
+    // Find spawn table entry for current match progress
+    int spawn_table_idx = 0;
+    while (match_progress > vc_data_common->x20->spawn_desc[spawn_table_idx].match_progress)
+        spawn_table_idx++;
+
+    // Make local copy of spawn chances
+    float spawn_chances[VCKIND_NUM];
+    for (int i = 0; i < VCKIND_NUM; i++)
+        spawn_chances[i] = vc_data_common->x20->spawn_desc[spawn_table_idx].chance[i];
+
+    // Count unlocked machines
+    int unlocked_count = 0;
+    for (int i = 0; i < VCKIND_NUM; i++)
+    {
+        if (unlocked_mask & (1 << i))
+            unlocked_count++;
+    }
+
+    // Modify spawn chances based on unlock state
+    if (unlocked_count > 0)
+    {
+        for (int i = 0; i < VCKIND_NUM; i++)
+        {
+            if (!(unlocked_mask & (1 << i)))
+                spawn_chances[i] = 0;          // locked: zero out
+            else if (spawn_chances[i] == 0)
+                spawn_chances[i] = 10;         // unlocked but zero weight: give base chance
+        }
+    }
+
+    // Reduce history size when few machines are available to prevent
+    // the only unlocked machine from being excluded by its own history
+    int history_size = (unlocked_count <= 4) ? (unlocked_count - 1) : 4;
+
+    // Remove recently spawned machines from candidates
+    for (int i = 0; i < VCKIND_NUM; i++)
+    {
+        for (int j = 0; j < history_size; j++)
+        {
+            if (i == msd->prev_machine_kind[j])
+                spawn_chances[i] = 0;
+        }
+    }
+
+    // Weighted random selection
+    int machine_kind = 0;
+    float chance_total = 0;
+    for (int i = 0; i < VCKIND_NUM; i++)
+        chance_total += spawn_chances[i];
+
+    float random_chance = HSD_Randf() * chance_total;
+    chance_total = 0;
+    for (int i = 0; i < VCKIND_NUM; i++)
+    {
+        chance_total += spawn_chances[i];
+        if (random_chance < chance_total)
+        {
+            machine_kind = i;
+            break;
+        }
+    }
+
+    // History writes are handled by the vanilla code after our skip target
+    // (0x801df220 / 0x801df630), which writes r31 to the history buffer.
+    return machine_kind;
+}
+
+// Filter the City Trial select screen machine list to only include
+// unlocked machines. Call this after the machine list is populated.
+void GateMachines_FilterSelectList()
+{
+    GameData *gd = Gm_GetGameData();
+    if (!gd)
+        return;
+
+    u8 *arr = gd->city_select_ply.machine_select.c_kind_arr;
+    u8 num = gd->city_select_ply.machine_select.num;
+    u32 mask = save_data->machine_unlocked_mask;
+    u8 write = 0;
+
+    for (u8 read = 0; read < num; read++)
+    {
+        CharacterDesc *desc = Character_GetDesc(arr[read]);
+        if (!desc)
+            continue;
+
+        if (!(mask & (1 << desc->machine_kind)))
+            continue;
+
+        if (write != read)
+            arr[write] = arr[read];
+        write++;
+    }
+
+    // Ensure at least one machine is selectable
+    if (write == 0 && num > 0)
+    {
+        arr[0] = arr[0]; // keep first entry as fallback
+        write = 1;
+    }
+
+    gd->city_select_ply.machine_select.num = write;
+}
+
+// Replace the spawn selection in CityMachineSpawn_DecideAndSpawn (0x801defac).
+// At 0x801df00c: r30 = MachineSpawnData*, f1 = match_progress.
+// Prologue: pass r30 as r3 (first arg); f1 passes through as float arg.
+// Epilogue: result (machine_kind) in r3 → r31 for subsequent code.
+// Skip to 0x801df220: past vanilla selection, where r31 is used for history
+// write and CityMachineSpawn_Create.
+CODEPATCH_HOOKCREATE(0x801df00c,
+    "mr 3, 30\n\t",
+    GateMachines_SelectSpawn,
+    "mr 31, 3\n\t",
+    0x801df220
+)
+
+// Replace the spawn selection in cityTrialSpawnFormationStar (0x801df408).
+// Same register layout as DecideAndSpawn at its hook point.
+CODEPATCH_HOOKCREATE(0x801df44c,
+    "mr 3, 30\n\t",
+    GateMachines_SelectSpawn,
+    "mr 31, 3\n\t",
+    0x801df630
+)
+
+// ==========================================================================
+// City Trial Free Run — Select Screen Gating
+// ==========================================================================
+
+// Check if a CharacterKind's machine is unlocked.
+static int IsCKindUnlocked(CharacterKind ckind)
+{
+    CharacterDesc *desc = Character_GetDesc(ckind);
+    if (!desc)
+        return 0;
+    return (save_data->machine_unlocked_mask & (1 << desc->machine_kind)) ? 1 : 0;
+}
+
+// Count unlocked characters for Free Run mode.
+// Replaces the mode 2 counting pass in CitySelect_CreateMachineIcons.
+// Iterates all 20 CharacterKinds and counts those whose machines are unlocked.
+int GateMachines_CountCTFreeRunAvailable()
+{
+    int count = 0;
+    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
+    {
+        if (IsCKindUnlocked(ckind))
+            count++;
+    }
+    return count;
+}
+
+// Build the filtered character array for Free Run mode.
+// Replaces the mode 2 array-building pass in CitySelect_CreateMachineIcons.
+// Iterates the 2×10 icon grid and writes only unlocked characters into the
+// two-row local arrays used by the subsequent reordering code.
+// Parameters are pointers to the function's stack locals:
+//   char_arr  = local_41 (r29, 20-byte array: row0[0..9] at +0, row1[0..9] at +10)
+//   row_counts = local_48 (r28, row_counts[0] and row_counts[1])
+void GateMachines_BuildCTFreeRunArray(u8 *char_arr, u8 *row_counts)
+{
+    row_counts[0] = 0;
+    row_counts[1] = 0;
+
+    for (int row = 0; row < 2; row++)
+    {
+        for (int col = 0; col < 10; col++)
+        {
+            CharacterKind ckind = SelIcon_GetCKind(row, col);
+            if (IsCKindUnlocked(ckind))
+            {
+                char_arr[row * 10 + row_counts[row]] = (u8)ckind;
+                row_counts[row]++;
+            }
+        }
+    }
+}
+
+// Hook at 0x8002e5c0: mode 2 counting pass in CitySelect_CreateMachineIcons.
+// At entry: r24 = loop iterator (about to be initialized to 0).
+// We replace the entire counting loop. Result goes to r27 (total count).
+// Clobbered: li r24, 0 (harmless, r24 is not needed after we skip the loop).
+// Exit to 0x8002e670: past the counting loop, where mode is rechecked before
+// the array-building pass.
+CODEPATCH_HOOKCREATE(0x8002e5c0,
+    "",
+    GateMachines_CountCTFreeRunAvailable,
+    "mr 27, 3\n\t",
+    0x8002e670
+)
+
+// Hook at 0x8002e738: mode 2 array-building pass in CitySelect_CreateMachineIcons.
+// At entry: r29 = local_41 (char array), r28 = local_48 (row counts).
+// We replace the entire array-building loop with our filtered version.
+// Clobbered: or r26, r29, r29 (mr r26, r29 — harmless for the reordering code
+// which reads from stack, not r26).
+// Exit to 0x8002e820: into the reordering code that reads from the stack arrays.
+CODEPATCH_HOOKCREATE(0x8002e738,
+    "mr 3, 29\n\t"
+    "mr 4, 28\n\t",
+    GateMachines_BuildCTFreeRunArray,
+    "",
+    0x8002e820
+)
+
+// ==========================================================================
+// Air Ride Mode — Select Screen Gating
+// ==========================================================================
+
+// Replace AirRide_CheckCharacterAvailable (0x8002090c).
+// Called from AirRide_PopulateSelectIcons (0x80020a08) to determine which
+// characters appear on the Air Ride character select screen.
+// Vanilla checks checklist reward indices; we check machine_unlocked_mask.
+int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
+{
+    // Dragoon, Hydra, and Flight Warp Star are City Trial-only (never selectable)
+    if (ckind == CKIND_DRAGOON || ckind == CKIND_HYDRA || ckind == CKIND_FLIGHT)
+        return 0;
+
+    CharacterDesc *desc = Character_GetDesc(ckind);
+    if (!desc)
+        return 0;
+
+    return (save_data->machine_unlocked_mask & (1 << desc->machine_kind)) ? 1 : 0;
+}
+
+// Replace AirRide_CheckMachineUnlocked (0x8000c364).
+// Called from AirRide_SelectRandomMachine (0x8000daa0) for CPU random
+// machine assignment. The second parameter (machine_id) is the MachineKind.
+int GateMachines_CheckAirRideMachineUnlocked(s8 machine_class, s8 machine_id)
+{
+    if (machine_id < 0 || machine_id >= VCKIND_NUM)
+        return 0;
+
+    return (save_data->machine_unlocked_mask & (1 << machine_id)) ? 1 : 0;
+}
+
+void GateMachines_OnBoot()
+{
+    // City Trial spawn hooks
+    CODEPATCH_HOOKAPPLY(0x801df00c);
+    CODEPATCH_HOOKAPPLY(0x801df44c);
+
+    // Air Ride select screen: replace character availability check
+    CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
+
+    // Air Ride random machine: replace machine unlock check
+    CODEPATCH_REPLACEFUNC(AirRide_CheckMachineUnlocked, GateMachines_CheckAirRideMachineUnlocked);
+
+    // City Trial Free Run select screen: replace both the counting pass and
+    // array-building pass in CitySelect_CreateMachineIcons (0x8002e3c4) for
+    // mode 2. This gates ALL characters (normal + special) against
+    // machine_unlocked_mask, ensuring both the visual icons and the backing
+    // selection data only include unlocked machines.
+    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // counting pass
+    CODEPATCH_HOOKAPPLY(0x8002e738);  // array-building pass
+
+    OSReport("Machine gating hooks installed (CT spawn + CT Free Run + AR select)\n");
+}
+
+int GateMachines_UnlockMachine(MachineKind kind)
+{
+    if (kind >= VCKIND_NUM)
+        return 0;
+
+    save_data->machine_unlocked_mask |= (1 << kind);
+    OSReport("Machine %d (%s) unlocked (mask = 0x%08x)\n",
+             kind, machine_names[kind], save_data->machine_unlocked_mask);
+    TextBox_Enqueue(machine_names[kind]);
+    return 1;
+}

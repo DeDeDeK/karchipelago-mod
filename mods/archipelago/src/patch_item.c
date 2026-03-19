@@ -6,32 +6,38 @@
 #include "machine.h"
 #include "os.h"
 
-// give PatchKind to every human rider on a machine
-int Patch_GiveItem(PatchKind kind, int num) {
-    for (int i = 0; i < 4; i++) {
-        if (Ply_GetPKind(i) == PKIND_HMN) {
+// Give PatchKind to every human rider on a machine
+int Patch_GiveItem(PatchKind kind, int num)
+{
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) == PKIND_HMN)
+        {
             GOBJ *mg = Ply_GetMachineGObj(i);
-            if (mg) {
+            if (mg)
+            {
                 MachineData *md = mg->userdata;
                 Machine_GivePatch(md, kind, num);
                 OSReport("Giving %d patches of kind %d to player %d...\n", num, kind, i);
-                TextBox_Enqueue("Giving %d patches of kind %d to player %d...\n", num, kind, i);
             }
         }
     }
     return 1;
 }
 
-// give num of AllUp to every human rider on a machine
-int Patch_AllUp_GiveItem(int num) {
-    for (int i = 0; i < 4; i++) {
-        if (Ply_GetPKind(i) == PKIND_HMN) {
+// Give num of AllUp to every human rider on a machine
+int Patch_AllUp_GiveItem(int num)
+{
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) == PKIND_HMN)
+        {
             GOBJ *mg = Ply_GetMachineGObj(i);
-            if (mg) {
+            if (mg)
+            {
                 MachineData *md = mg->userdata;
                 Machine_GiveAllUp(md, num);
                 OSReport("Giving %d all ups to player %d...\n", num, i);
-                TextBox_Enqueue("Giving %d all ups to player %d...\n", num, i);
             }
         }
     }

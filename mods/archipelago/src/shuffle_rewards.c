@@ -24,36 +24,25 @@ static void InitSaveArrayPtrs()
     save_arrays[GMMODE_CITYTRIAL] = save_data->shuffled_citytrial_rewards;
 }
 
-// Shuffle clear_kind values within a reward table using Fisher-Yates
-static void ShuffleRewardTable(RewardEntry *table, int count)
-{
-    for (int i = count - 1; i > 0; i--) {
-        int j = HSD_Randi(i + 1);
-        u8 tmp = table[i].clear_kind;
-        table[i].clear_kind = table[j].clear_kind;
-        table[j].clear_kind = tmp;
-    }
-}
-
-// Shuffle all tables and store the results to save data
-static void ShuffleAndStore()
+// Clear all reward tables and mark as initialized in save data.
+// The AP client assigns reward mappings via ChecklistRewards_ApplyLocations;
+// the game side just starts with a blank slate.
+static void InitAndStore()
 {
     InitSaveArrayPtrs();
-    for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++) {
-        ShuffleRewardTable(new_tables[mode], reward_counts[mode]);
-        for (int i = 0; i < reward_counts[mode]; i++) {
-            save_arrays[mode][i] = new_tables[mode][i].clear_kind;
-        }
-    }
+    ShuffleRewards_ClearAll();
     save_data->rewards_shuffled = 1;
-    OSReport("Shuffled reward tables and saved to memory card\n");
+    OSReport("Reward tables cleared and marked initialized\n");
 }
 
 // Allocate new reward tables, copy originals, and redirect pointers.
+// The copies allow the AP client to reassign clear_kind values without
+// modifying the original ROM data.
 // Must be called from OnBoot so allocations persist for the entire runtime.
 void ShuffleRewards_OnBoot()
 {
-    for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++) {
+    for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++)
+    {
         int size = reward_counts[mode] * sizeof(RewardEntry);
         new_tables[mode] = HSD_MemAlloc(size);
         memcpy(new_tables[mode], stc_reward_table_ptrs[mode], size);
@@ -62,26 +51,62 @@ void ShuffleRewards_OnBoot()
     OSReport("Reward tables allocated and pointers redirected\n");
 }
 
-// First boot: shuffle and store. Called from OnSaveInit.
+// First boot: clear tables and store. Called from OnSaveInit.
 void ShuffleRewards_OnSaveInit()
 {
-    ShuffleAndStore();
+    InitAndStore();
 }
 
-// Subsequent boots: load saved shuffle data. Called from OnSaveLoaded.
+// Set all clear_kind values to 0 across every mode's reward table.
+// clear_kind=0 is a safe sentinel (valid index, no OOB or assert crash).
+// Our hooks on CheckUnlocked and SetRewardFlagOnUnlocks prevent all issues:
+//   - CheckUnlocked gates on has_local_location (returns 0 for unassigned rewards)
+//   - SetRewardFlagOnUnlocks hook skips rewards without has_local_location
+// Does not write to save data — for testing only.
+void ShuffleRewards_ClearAll()
+{
+    for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++)
+    {
+        for (int i = 0; i < reward_counts[mode]; i++)
+            new_tables[mode][i].clear_kind = 0;
+    }
+    OSReport("Cleared all reward clear_kinds (no rewards mode)\n");
+}
+
+// Subsequent boots: load saved reward data. Called from OnSaveLoaded.
 void ShuffleRewards_OnSaveLoaded()
 {
     InitSaveArrayPtrs();
-    if (save_data->rewards_shuffled) {
+    if (save_data->rewards_shuffled)
+    {
         // Restore saved clear_kind values into our allocated tables
-        for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++) {
-            for (int i = 0; i < reward_counts[mode]; i++) {
+        for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++)
+        {
+            for (int i = 0; i < reward_counts[mode]; i++)
                 new_tables[mode][i].clear_kind = save_arrays[mode][i];
-            }
         }
-        OSReport("Loaded shuffled reward tables from save\n");
-    } else {
-        // Fallback: if OnSaveInit didn't run, shuffle now
-        ShuffleAndStore();
+        OSReport("Loaded reward tables from save\n");
     }
+    else
+    {
+        // Fallback: if OnSaveInit didn't run, initialize now
+        InitAndStore();
+    }
+}
+
+// Sets the is_visible bit on every checkbox across all 3 modes.
+// The game persists checklist state in its own save, so this only needs to run once.
+void RevealAllChecklists()
+{
+    for (int mode = 0; mode < GMMODE_NUM; mode++)
+    {
+        GameClearData *clear_data = gmGetClearcheckerTypeP(mode);
+        for (int i = 0; i < 120; i++)
+        {
+            clear_data->clear[i].is_visible = 1;
+            // debug also unlock so we can see the rewards
+            clear_data->clear[i].is_unlocked = 1;
+        }
+    }
+    OSReport("All checklist squares revealed (%d modes x 120 squares)\n", GMMODE_NUM);
 }

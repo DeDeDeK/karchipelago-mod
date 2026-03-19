@@ -3,6 +3,7 @@
 #include "inline.h"
 #include "hoshi/settings.h"
 #include "hoshi/mod.h"
+#include "hoshi/func.h"
 #include "stage.h"
 #include "stadium.h"
 
@@ -15,13 +16,24 @@
 #include "traplink.h"
 #include "spawn_item.h"
 #include "shuffle_rewards.h"
+#include "checklist_rewards.h"
 #include "stadium_lock.h"
 #include "patch_cap.h"
+#include "gate_events.h"
+#include "gate_abilities.h"
+#include "gate_boxes.h"
+#include "gate_patches.h"
+#include "gate_items.h"
+#include "gate_machines.h"
+#include "gate_airride_stages.h"
+#include "gate_topride_stages.h"
+#include "gate_colors.h"
+#include "weather_control.h"
 
 // Define global variables
 ArchipelagoData *archipelago_data;
-HoshiMenuSettings hoshi_menu_settings;
-TemplateSave *save_data;
+APMenuSettings hoshi_menu_settings;
+KARSave *save_data;
 
 // Creates a menu that appears in the in-game Settings menu.
 // Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
@@ -30,7 +42,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here.",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 5,
+        .option_num = 6,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -91,6 +103,33 @@ OptionDesc ModSettings = {
                     "On",
                 },
             },
+            &(OptionDesc){
+                .name = "City Trial Weather",
+                .description = "Choose the sky/lighting preset for City Trial",
+                .kind = OPTKIND_VALUE,
+                .val = &hoshi_menu_settings.weather_control,
+                .value_num = 18,
+                .value_names = (char *[]){
+                    "Shuffle",
+                    "Day",
+                    "Midnight",
+                    "Light Fog",
+                    "Dusk 2",
+                    "Dusky Clouds",
+                    "Dark Vignette",
+                    "Day 2",
+                    "Blue Sky",
+                    "Pink Sky",
+                    "Dense Fog",
+                    "Foggy",
+                    "Dusk",
+                    "Night",
+                    "Gray Sky",
+                    "Dark Purple",
+                    "Red Vignette",
+                    "Dark Low Vis",
+                },
+            },
         },
     },
 };
@@ -100,8 +139,8 @@ ModDesc mod_desc = {
     .author = "DeDeDK",                         // Creator of the mod.
     .version.major = 1,                         // Version of the mod.
     .version.minor = 0,
-    .save_size = sizeof(struct TemplateSave),   // (optional) Size of the save data your mod uses. A pointer to the saved data is passed into OnSaveInit.
-    .save_ptr = 0,                              // Pointer to the mod's save data. Updated by hoshi at runtime. read-only! hoshi will write this pointer during installation.
+    .save_size = sizeof(struct KARSave),        // Size of the save data your mod uses.
+    .save_ptr = 0,                              // Updated by hoshi at runtime. read-only!
     .option_desc = &ModSettings,                // Link to the settings menu
     .OnBoot = OnBoot,
     .OnSaveInit = OnSaveInit,
@@ -125,16 +164,22 @@ void OnBoot()
 {
     OSReport("Running OnBoot for %s\n", mod_desc.name);
 
-    // persistent allocation of archipelago_data
+    // Persistent allocation of archipelago_data
     archipelago_data = HSD_MemAlloc(sizeof(ArchipelagoData));
     memset(archipelago_data, 0, sizeof(ArchipelagoData));
+    OSReport("ArchipelagoData allocated at 0x%08x (%d bytes)\n",
+             (uint)archipelago_data, sizeof(ArchipelagoData));
 
-    // place pointer to this allocation at a static address so python can access it externally
+    // Place pointer to this allocation at a static address so the Python client can find it
     ArchipelagoData **static_ptr = (ArchipelagoData **)0x805d52d4;
     (*static_ptr) = archipelago_data;
+    OSReport("Static pointer at 0x805d52d4 set to 0x%08x\n", (uint)archipelago_data);
 
     // Shuffle checklist reward tables
     ShuffleRewards_OnBoot();
+
+    // Replace ClearChecker_CheckUnlocked with AP bitfield hook
+    ChecklistRewards_OnBoot();
 
     // Patches for stadium unlocks
     StadiumLock_OnBoot();
@@ -144,46 +189,163 @@ void OnBoot()
 
     // Patches for deathlink
     DeathLink_OnBoot();
+
+    // Patches for city trial event gating
+    GateEvents_OnBoot();
+
+    // Patches for copy ability gating
+    GateAbilities_OnBoot();
+
+    // Patches for item spawn gating (legendary pieces)
+    GateItems_OnBoot();
+
+    // Patches for box type gating
+    GateBoxes_OnBoot();
+
+    // Patches for machine spawn gating
+    GateMachines_OnBoot();
+
+    // Patches for Air Ride stage gating
+    GateAirRideStages_OnBoot();
+
+    // Patches for Top Ride stage gating (WIP)
+    GateTopRideStages_OnBoot();
+
+    // Patches for Kirby color gating
+    GateColors_OnBoot();
+
+    // Hook for City Trial weather/sky control
+    WeatherControl_OnBoot();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
 // Initialize default save file values here.
 void OnSaveInit()
 {
-    save_data = (TemplateSave *)mod_desc.save_ptr;
+    save_data = (KARSave *)mod_desc.save_ptr;
     OSReport("save data for %s created!\n", mod_desc.name);
-    save_data->boot_num = 0;
-    save_data->item_received_count = 0;
-    save_data->unprocessed_count = 0;
-    save_data->stadium_unlocked_mask = 0;
-    save_data->patch_cap_count = 0;
-    memset(save_data->received_items, 0, sizeof(save_data->received_items));
-    memset(save_data->unprocessed_items, 0, sizeof(save_data->unprocessed_items));
-    save_data->rewards_shuffled = 0;
-    memset(save_data->shuffled_airride_rewards, 0, sizeof(save_data->shuffled_airride_rewards));
-    memset(save_data->shuffled_topride_rewards, 0, sizeof(save_data->shuffled_topride_rewards));
-    memset(save_data->shuffled_citytrial_rewards, 0, sizeof(save_data->shuffled_citytrial_rewards));
+    memset(save_data, 0, sizeof(*save_data));
 
     ShuffleRewards_OnSaveInit();
+}
+
+// Debug: unlock exactly 1 random item per gate category for standalone testing.
+// Called from OnSaveLoaded when no AP client options have been received.
+static void DebugInitGateMasks()
+{
+    // Events: 1 of EVKIND_NUM
+    save_data->event_unlocked_mask = 1 << HSD_Randi(EVKIND_NUM);
+    // Copy abilities: 1 of COPYKIND_NUM
+    save_data->ability_unlocked_mask = 1 << HSD_Randi(COPYKIND_NUM);
+    // Patch types: 1 of PATCHKIND_NUM
+    save_data->patch_unlocked_mask = 1 << HSD_Randi(PATCHKIND_NUM);
+    // Items: 1 of ITUNLOCK_NUM
+    save_data->item_unlocked_mask = 1 << HSD_Randi(ITUNLOCK_NUM);
+    // Box types: 1 of BOXKIND_NUM
+    save_data->box_unlocked_mask = 1 << HSD_Randi(BOXKIND_NUM);
+    // Machines: 1 random from the 17 Air Ride-selectable machines
+    // (excludes city-spawn-only: FREE, STEER, WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE
+    //  and Air Ride-unselectable: HYDRA, DRAGOON, FLIGHT)
+    {
+        static const MachineKind ar_selectable[] = {
+            VCKIND_WARP, VCKIND_COMPACT, VCKIND_WINGED, VCKIND_SHADOW, VCKIND_BULK,
+            VCKIND_SLICK, VCKIND_FORMULA, VCKIND_WAGON, VCKIND_ROCKET, VCKIND_SWERVE,
+            VCKIND_TURBO, VCKIND_JET, VCKIND_WINGMETAKNIGHT, VCKIND_WHEELIEBIKE,
+            VCKIND_REXWHEELIE, VCKIND_WHEELIESCOOTER, VCKIND_WHEELDEDEDE,
+        };
+        save_data->machine_unlocked_mask = 1 << ar_selectable[HSD_Randi(17)];
+    }
+    // Air Ride stages: 1 of AIRRIDE_NUM
+    save_data->airride_stage_unlocked_mask = 1 << HSD_Randi(AIRRIDE_NUM);
+    // Top Ride courses: 1 of TOPRIDE_NUM
+    save_data->topride_stage_unlocked_mask = 1 << HSD_Randi(TOPRIDE_NUM);
+    // Kirby colors: 1 random
+    save_data->color_unlocked_mask = 1 << HSD_Randi(KIRBYCOLOR_NUM);
+    // Stadiums: 1 of STKIND_NUM
+    int stadium = HSD_Randi(STKIND_NUM);
+    save_data->stadium_unlocked_mask = 1 << stadium;
+    Gm_StadiumSetUnlockedDirect(stadium);
+
+    OSReport("Debug gate masks initialized (1 random unlock per category):\n");
+    OSReport("  events=0x%04x abilities=0x%04x patches=0x%04x items=0x%08x\n",
+             save_data->event_unlocked_mask, save_data->ability_unlocked_mask,
+             save_data->patch_unlocked_mask, save_data->item_unlocked_mask);
+    OSReport("  boxes=0x%02x machines=0x%08x ar_stages=0x%04x tr_stages=0x%04x stadiums=0x%08x colors=0x%02x\n",
+             save_data->box_unlocked_mask, save_data->machine_unlocked_mask,
+             save_data->airride_stage_unlocked_mask, save_data->topride_stage_unlocked_mask,
+             save_data->stadium_unlocked_mask, save_data->color_unlocked_mask);
 }
 
 // Runs on startup after any save data is loaded into memory.
 // This callback is executed regardless of if a memory card is inserted or contained existing save data.
 void OnSaveLoaded()
 {
-    save_data = (TemplateSave *)mod_desc.save_ptr;
+    save_data = (KARSave *)mod_desc.save_ptr;
     save_data->boot_num++;
     OSReport("%s present for [%d] boot cycles\n", mod_desc.name, save_data->boot_num);
     OSReport("items received: [%d]\n", save_data->item_received_count);
 
     // Sync received count to archipelago_data so the AP client can read it
     archipelago_data->item_received_index = save_data->item_received_count;
+    OSReport("Synced item_received_index = %d\n", save_data->item_received_count);
+    OSReport("AP slot options %s in save data\n",
+             save_data->options_received ? "found" : "not yet received");
 
-    // Apply or generate shuffled reward tables
+    // Debug: when running standalone (no AP client), set up minimal gate masks for testing
+    if (!save_data->options_received)
+        DebugInitGateMasks();
+
+    // Apply or generate shuffled reward tables (restores clear_kind values in RewardEntry tables)
     ShuffleRewards_OnSaveLoaded();
+
+    // Restore received checklist rewards from save (must run after ShuffleRewards_OnSaveLoaded)
+    ChecklistRewards_OnSaveLoaded();
 
     // On first boot, lock all stadiums (bypasses checklist cache with direct writes)
     StadiumLock_OnSaveLoaded();
+
+    // Signal to the AP client that the mod is fully initialized
+    archipelago_data->game_ready = 1;
+    OSReport("game_ready set — waiting for AP client connection\n");
+}
+
+// Check if the AP client has written slot options to ArchipelagoData.
+// On first detection, copy them to save data (one-time transfer).
+// Options are immutable per AP slot, so this only runs once per save file.
+static void APOptions_TransferToSave()
+{
+    // Already received options for this slot
+    if (save_data->options_received)
+        return;
+    // Client hasn't written options yet
+    if (!archipelago_data->options_valid)
+        return;
+
+    // One-time transfer: copy options to save data
+    OSReport("AP client connected — transferring slot options to save data\n");
+    memcpy(&save_data->options, &archipelago_data->options, sizeof(APSlotOptions));
+    save_data->options_received = 1;
+
+    // Set initial menu toggle values from AP slot options
+    hoshi_menu_settings.deathlink_enabled = save_data->options.death_link;
+    hoshi_menu_settings.energylink_enabled = save_data->options.energy_link;
+    hoshi_menu_settings.traplink_enabled = save_data->options.traplink;
+    OSReport("Menu toggles set — DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
+             save_data->options.death_link, save_data->options.energy_link, save_data->options.traplink);
+    OSReport("Goals — CityTrial: %d, AirRide: %d, TopRide: %d\n",
+             save_data->options.city_trial_goal, save_data->options.air_ride_goal, save_data->options.top_ride_goal);
+    OSReport("CityTrial — PermanentPatches: %d, ProgressivePatchCaps: %d (start: %d), ProgressiveStadiums: %d\n",
+             save_data->options.city_trial_permanent_patches,
+             save_data->options.city_trial_progressive_patch_caps,
+             save_data->options.city_trial_patch_cap_amount,
+             save_data->options.city_trial_progressive_stadiums);
+    OSReport("RevealChecklists: %d\n", save_data->options.reveal_checklists);
+
+    if (save_data->options.reveal_checklists)
+        RevealAllChecklists();
+
+    Hoshi_WriteSave();
+    OSReport("AP slot options saved to memory card\n");
 }
 
 // Runs when entering the main menu.
@@ -191,6 +353,8 @@ void OnMainMenuLoad()
 {
     OSReport("Entering the main menu.\n");
 
+    // Check for AP slot options (one-time transfer to save)
+    APOptions_TransferToSave();
 }
 
 // Runs when entering the player select menu.
@@ -198,58 +362,49 @@ void OnMainMenuLoad()
 void OnPlayerSelectLoad()
 {
     OSReport("Entering the city trial player select menu.\n");
+
+    // Filter locked machines from the City Trial select screen
+    GateMachines_FilterSelectList();
+
+    // Force any locked Kirby colors to default (Pink)
+    GateColors_ForceDefaultColors();
 }
 
-// executes before the game is initialized
-void On3DLoadStart() {
-
+// Runs before the game is initialized.
+void On3DLoadStart()
+{
+    // Empty stub — hook point reserved for future use.
 }
 
-// Runs upon entering a 3D game. Can be either Air Ride or City Trial. Must be explicity checked using Gm_IsInCity().
-// Players, riders, their machines, and the map have all been instantiated by the time this is executed.
-// executes after the game is initialized (riders, machines, stage, etc are all instantiated)
+// Runs upon entering a 3D game (Air Ride, Top Ride, or City Trial).
+// Players, riders, their machines, and the map have all been instantiated.
 void On3DLoadEnd()
 {
-    // determine the game mode
     char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
-    OSReport("Now starting %s game on GroundKind [%d]. \nStageKind: [%d]. \nCurrent CityMode: [%d]. \nCurrent StadiumKind: [%d]. \nCurrent Stadium Group: [%d].\n Damage Enabled: [%d].\n", mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(), Gm_GetCityMode(), Gm_GetCurrentStadiumKind(), Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled());
-    // loop across all 5 potential players
+    OSReport("Now starting %s game on GroundKind [%d]. \nStageKind: [%d]. \nCurrent CityMode: [%d]. \nCurrent StadiumKind: [%d]. \nCurrent Stadium Group: [%d].\n Damage Enabled: [%d].\n",
+             mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(), Gm_GetCityMode(),
+             Gm_GetCurrentStadiumKind(), Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled());
+
     for (int i = 0; i < 5; i++)
     {
-        // skip non-present players
         if (Ply_GetPKind(i) == PKIND_NONE)
             continue;
 
-        // get this rider's data
         GOBJ *rg = Ply_GetRiderGObj(i);
         RiderData *rd = rg->userdata;
-
-        // get this rider's machine kind
         MachineKind machine_kind = rd->starting_machine_idx;
-
-        // log some data on them
         OSReport("Player %d using rider [%d] color [%d] riding machine [%d].\n",
-                 i + 1,
-                 rd->kind,
-                 rd->color_idx,
-                 machine_kind);
+                 i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
-    // DeathLink
-    if (hoshi_menu_settings.deathlink_enabled) {
+    if (hoshi_menu_settings.deathlink_enabled)
         DeathLink_On3DLoadEnd();
-    }
 
-    // EnergyLink
-    if (hoshi_menu_settings.energylink_enabled) {
+    if (hoshi_menu_settings.energylink_enabled)
         EnergyLink_On3DLoadEnd();
-    }
 
-    // TrapLink
-    if (hoshi_menu_settings.traplink_enabled) {
+    if (hoshi_menu_settings.traplink_enabled)
         TrapLink_On3DLoadEnd();
-    }
-
 }
 
 // Runs when pausing the match. The index of the pausing player is passed in as an argument.
@@ -276,16 +431,73 @@ void On3DExit()
 // This hook can be used to recreate processes/objects that should always be running.
 void OnSceneChange()
 {
-    // Log out the current scene information
-    OSReport("We are now entering major %d / minor %d\n", Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
+    OSReport("We are now entering major %d / minor %d\n",
+             Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
-    // Textbox
-    if (hoshi_menu_settings.textbox_enabled) {
+    if (hoshi_menu_settings.textbox_enabled)
         CreateTextBox_OnSceneChange();
+
+    APItems_OnSceneChange();
+}
+
+// Number of standalone AP items (IDs 1 through AP_ITEM_ALL_DOWN inclusive).
+// Used only by the debug D-pad controls below.
+#define DEBUG_STANDALONE_COUNT 9
+
+// Simulate the AP client sending location data by filling the ArchipelagoData
+// location arrays with a random shuffle. ~50% of rewards are assigned to local
+// checkboxes (with unique clear_kinds), the rest are marked as remote (0xFF).
+// The existing OnFrameStart logic detects location_data_valid and calls
+// ChecklistRewards_ApplyLocations() on the next frame.
+static void DebugSimulateLocationData()
+{
+    static const int counts[GMMODE_NUM] = {
+        [GMMODE_AIRRIDE]   = REWARD_COUNT_AIRRIDE,
+        [GMMODE_TOPRIDE]   = REWARD_COUNT_TOPRIDE,
+        [GMMODE_CITYTRIAL] = REWARD_COUNT_CITYTRIAL,
+    };
+    u8 *loc_arrays[GMMODE_NUM] = {
+        archipelago_data->location_airride,
+        archipelago_data->location_topride,
+        archipelago_data->location_citytrial,
+    };
+
+    for (int mode = 0; mode < GMMODE_NUM; mode++)
+    {
+        int count = counts[mode];
+
+        // Build a shuffled pool of all 120 possible clear_kinds
+        u8 pool[120];
+        for (int i = 0; i < 120; i++)
+            pool[i] = (u8)i;
+        for (int i = 119; i > 0; i--)
+        {
+            int j = HSD_Randi(i + 1);
+            u8 tmp = pool[i];
+            pool[i] = pool[j];
+            pool[j] = tmp;
+        }
+
+        // Assign each reward: ~50% local (unique clear_kind from pool), ~50% remote
+        int pool_idx = 0;
+        int local_count = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (HSD_Randi(2))
+            {
+                loc_arrays[mode][i] = pool[pool_idx++];
+                local_count++;
+            }
+            else
+            {
+                loc_arrays[mode][i] = 0xFF;
+            }
+        }
+        OSReport("  Mode %d: %d local, %d remote\n", mode, local_count, count - local_count);
     }
 
-    // Item Queue
-    APItems_OnSceneChange();
+    archipelago_data->location_data_valid = 1;
+    OSReport("Debug: location data written, will apply next frame\n");
 }
 
 // Runs every game tick, even when the game is paused normally or via debug mode.
@@ -299,56 +511,66 @@ void OnFrameStart()
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
 
-    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT) {
-        OSReport("Granting patch cap increase via DPAD LEFT...\n");
-        archipelago_data->incoming_item_id = AP_ITEM_PATCH_CAP_INCREASE;
-    }
+    // Apply AP location assignment when the client signals it is ready.
+    if (archipelago_data->location_data_valid)
+        ChecklistRewards_ApplyLocations();
 
-    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT) {
-        // Pick a random AP item ID from the full enum
-        #define STANDALONE_COUNT 9  // AP_ITEM_CHECKBOX_FILLER_AIRRIDE(1) through AP_ITEM_ALL_DOWN(9)
-        int total = STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM + ITKIND_NUM;
-        int r = HSD_Randi(total);
-        uint ap_id;
-        if (r < STANDALONE_COUNT) {
-            ap_id = 1 + r;
-        } else if (r < STANDALONE_COUNT + PATCHKIND_NUM) {
-            ap_id = AP_PERM_PATCH_BASE + (r - STANDALONE_COUNT);
-        } else if (r < STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM) {
-            ap_id = AP_EVENT_BASE + (r - STANDALONE_COUNT - PATCHKIND_NUM);
-        } else {
-            ap_id = AP_ITKIND_BASE + (r - STANDALONE_COUNT - PATCHKIND_NUM - EVKIND_NUM);
+    // Debug controls — only write to the mailbox when it is empty
+    if (archipelago_data->incoming_item_id == 0)
+    {
+        if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT)
+        {
+            OSReport("Granting machine formation event via DPAD LEFT...\n");
+            //archipelago_data->incoming_item_id = AP_EVENT_MACHINEFORMATION;
+            Event_GiveItem(EVKIND_MACHINEFORMATION);
         }
-        OSReport("Setting incoming_item_id to random AP ID %d from DPAD RIGHT...\n", ap_id);
-        archipelago_data->incoming_item_id = ap_id;
-    }
-
-    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_DOWN) {
-        OSReport("Setting deathlink receive from DPAD DOWN...\n");
-        TextBox_Enqueue("Setting deathlink receive from DPAD DOWN...");
-        archipelago_data->deathlink_receive = 1;
-    }
-
-    if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP) {
-        // Pick a random locked stadium and unlock it
-        int locked[STKIND_NUM];
-        int locked_count = 0;
-        for (int i = 0; i < STKIND_NUM; i++) {
-            if (!(save_data->stadium_unlocked_mask & (1 << i))) {
-                locked[locked_count++] = i;
-            }
-        }
-        if (locked_count > 0) {
-            int pick = locked[HSD_Randi(locked_count)];
-            uint ap_id = AP_STADIUM_BASE + pick;
-            OSReport("Unlocking stadium %d via DPAD UP...\n", pick);
+        else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT)
+        {
+            int total = DEBUG_STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM + ITKIND_NUM;
+            int r = HSD_Randi(total);
+            uint ap_id;
+            if (r < DEBUG_STANDALONE_COUNT)
+                ap_id = 1 + r;
+            else if (r < DEBUG_STANDALONE_COUNT + PATCHKIND_NUM)
+                ap_id = AP_PERM_PATCH_BASE + (r - DEBUG_STANDALONE_COUNT);
+            else if (r < DEBUG_STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM)
+                ap_id = AP_EVENT_BASE + (r - DEBUG_STANDALONE_COUNT - PATCHKIND_NUM);
+            else
+                ap_id = AP_ITKIND_BASE + (r - DEBUG_STANDALONE_COUNT - PATCHKIND_NUM - EVKIND_NUM);
+            OSReport("Setting incoming_item_id to random AP ID %d from DPAD RIGHT...\n", ap_id);
             archipelago_data->incoming_item_id = ap_id;
-        } else {
-            OSReport("All stadiums already unlocked.\n");
+        }
+        else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_DOWN)
+        {
+            OSReport("Simulating AP location assignment via DPAD DOWN...\n");
+            DebugSimulateLocationData();
+            RevealAllChecklists();
+        }
+        else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP)
+        {
+            int locked[STKIND_NUM];
+            int locked_count = 0;
+            for (int i = 0; i < STKIND_NUM; i++)
+            {
+                if (!(save_data->stadium_unlocked_mask & (1 << i)))
+                    locked[locked_count++] = i;
+            }
+            if (locked_count > 0)
+            {
+                int pick = locked[HSD_Randi(locked_count)];
+                OSReport("Unlocking stadium %d via DPAD UP...\n", pick);
+                archipelago_data->incoming_item_id = AP_STADIUM_BASE + pick;
+            }
+            else
+            {
+                OSReport("All stadiums already unlocked.\n");
+            }
         }
     }
 }
 
-void OnFrameEnd() {
-    
+// Runs every game tick after the frame has been processed.
+void OnFrameEnd()
+{
+    // Empty stub — hook point reserved for future use.
 }
