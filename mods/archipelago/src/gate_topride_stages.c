@@ -6,9 +6,6 @@
 #include "gate_topride_stages.h"
 #include "textbox.h"
 
-// WIP — hooks disabled pending audio heap crash on Top Ride re-entry.
-// The crash is pre-existing (reproduces without these patches) and unrelated to our hooks.
-
 static const char *topride_stage_names[TOPRIDE_NUM] = {
     [TOPRIDE_GRASS]  = "Grass",
     [TOPRIDE_SAND]   = "Sand",
@@ -27,43 +24,87 @@ static int GateTopRideStages_CheckCourseUnlocked(int course)
     return (save_data->topride_stage_unlocked_mask & (1 << course)) ? 1 : 0;
 }
 
-// REPLACECALL target for TopRide_PreGameThink (0x8002c628).
-// Vanilla passes (mode=1, clear_kind) — we ignore both, check AP mask directly.
-int GateTopRideStages_CheckCourse_PreGame(int mode, int clear_kind)
+// Adjusts the cursor at GameData[0xf8] to skip locked courses.
+// Scans forward (wrapping 0-7) until an unlocked course or the random
+// button (position 7) is found.
+static void AdjustCursorToUnlocked(void)
 {
-    int course = TopRide_GetSelectedCourse();
-    return GateTopRideStages_CheckCourseUnlocked(course);
+    u8 *cursor_ptr = &((u8 *)Gm_GetGameData())[0xf8];
+    int pos = *cursor_ptr;
+
+    // Random button (pos 7+) is always valid
+    if (pos >= TOPRIDE_NUM)
+        return;
+
+    // Already on an unlocked course
+    if (GateTopRideStages_CheckCourseUnlocked(pos))
+        return;
+
+    // Scan forward, wrapping through all 8 positions
+    for (int i = 1; i <= 8; i++)
+    {
+        int next = (pos + i) % 8;
+        if (next >= TOPRIDE_NUM || GateTopRideStages_CheckCourseUnlocked(next))
+        {
+            *cursor_ptr = (u8)next;
+            return;
+        }
+    }
+    // Fallback (all courses locked) — land on random button
+    *cursor_ptr = 7;
 }
 
-// HOOKCONDITIONALCREATE target for TopRide_OnCourseSelect (0x8002cc78).
-// Returns 0 = allow (unlocked), 1 = block (locked, skip to browsing).
-int GateTopRideStages_CanLaunch(void)
+// --- Course Select Screen (minor scene 7, zz_8003c8bc_) ---
+// Grid has 8 positions: 0-6 = courses, 7 = random button.
+// Grid-to-course table at 0x805d51a8: identity for 0-6, position 7 = value 8.
+
+// Hook 1: A-button launch (0x8003ca78: andi. r0, r7, 0x1160).
+// Returns 0 = allow (unlocked or random), 1 = block (locked).
+int GateTopRideStages_CourseSelectCanLaunch(void)
 {
-    int course = TopRide_GetSelectedCourse();
-    return GateTopRideStages_CheckCourseUnlocked(course) ? 0 : 1;
+    int cursor_pos = ((u8 *)Gm_GetGameData())[0xf8];
+    if (cursor_pos >= TOPRIDE_NUM)
+        return 0;
+    return GateTopRideStages_CheckCourseUnlocked(cursor_pos) ? 0 : 1;
 }
 
 CODEPATCH_HOOKCONDITIONALCREATE(
-    0x8002cc78,                         // dol_addr: rlwinm. r0, r0, 0, 19, 19 (START button test)
-    "stwu 1, -16(1)\n\t"               // prologue: create mini stack frame (16 bytes)
-    "stw 0, 0x8(1)\n\t",               //           save r0 (pad trigger data) into our frame
-    GateTopRideStages_CanLaunch,        // func: returns 0=allow, 1=block
-    "lwz 0, 0x8(1)\n\t"                // epilogue: restore r0 for clobbered rlwinm.
+    0x8003ca78,                         // dol_addr: andi. r0, r7, 0x1160 (A-button test)
+    "stwu 1, -16(1)\n\t"               // prologue: create mini stack frame
+    "stw 7, 0x8(1)\n\t",               //           save r7 (combined pad data)
+    GateTopRideStages_CourseSelectCanLaunch,
+    "lwz 7, 0x8(1)\n\t"                // epilogue: restore r7 for clobbered andi.
     "addi 1, 1, 16\n\t",               //           pop mini stack frame
-    0,                                  // exit_addr: normal exit (run clobbered instruction)
-    0x8002cddc                          // exit_addr_alt: skip to browsing path (locked)
+    0,                                  // exit_addr: normal exit (run clobbered andi.)
+    0x8003cc18                          // exit_addr_alt: skip to cursor movement (locked)
+);
+
+// Hook 2: Cursor movement convergence (0x8003cd18: lbz r0, 0x2(r31)).
+// All D-pad movement paths write to GameData[0xf8] then converge here.
+// We adjust the cursor before the game reads it, so locked positions are
+// skipped and the visual update highlights the corrected position.
+void GateTopRideStages_SkipLockedCursor(void)
+{
+    AdjustCursorToUnlocked();
+}
+
+CODEPATCH_HOOKCREATE(
+    0x8003cd18,                         // dol_addr: lbz r0, 0x2(r31) (read new cursor)
+    "",                                 // prologue: none needed
+    GateTopRideStages_SkipLockedCursor,
+    "",                                 // epilogue: none needed
+    0                                   // exit_addr: normal exit (run clobbered lbz)
 );
 
 void GateTopRideStages_OnBoot()
 {
-    // WIP: Top Ride stage gating — disabled pending audio heap crash on Top Ride re-entry.
-    // The crash is pre-existing (reproduces without these patches) and unrelated to our hooks.
-    // Call site 1: character-select launch path (0x8002c628)
-    // CODEPATCH_REPLACECALL(0x8002c628, GateTopRideStages_CheckCourse_PreGame);
-    // Call site 2: course-select launch path (0x8002cc78)
-    // CODEPATCH_HOOKAPPLY(0x8002cc78);
+    // Course select screen: block A-button when course is locked.
+    CODEPATCH_HOOKAPPLY(0x8003ca78);
 
-    OSReport("Top Ride stage gating: WIP (hooks disabled)\n");
+    // Course select screen: skip locked courses during cursor movement.
+    CODEPATCH_HOOKAPPLY(0x8003cd18);
+
+    OSReport("Top Ride stage gating installed\n");
 }
 
 int GateTopRideStages_UnlockStage(int course)

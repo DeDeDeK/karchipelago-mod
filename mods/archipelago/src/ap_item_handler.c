@@ -19,6 +19,7 @@
 #include "gate_machines.h"
 #include "gate_airride_stages.h"
 #include "gate_topride_stages.h"
+#include "gate_topride_items.h"
 #include "gate_colors.h"
 
 // Check the mailbox for an incoming item from the AP client.
@@ -160,6 +161,14 @@ int APItems_HandleItem(uint ap_item_id)
     {
         int course = ap_item_id - AP_STAGE_UNLOCK_TOPRIDE_BASE;
         return GateTopRideStages_UnlockStage(course);
+    }
+
+    // Top Ride item unlock items (AP_TOPRIDE_ITEM_UNLOCK_BASE + TopRideItemKind)
+    if (ap_item_id >= AP_TOPRIDE_ITEM_UNLOCK_BASE &&
+        ap_item_id < AP_TOPRIDE_ITEM_UNLOCK_BASE + TRITEM_NUM)
+    {
+        TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_UNLOCK_BASE;
+        return GateTopRideItems_UnlockItem(kind);
     }
 
     // Stadium unlock items (AP_STADIUM_BASE + StadiumKind)

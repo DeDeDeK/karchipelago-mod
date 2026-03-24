@@ -26,6 +26,7 @@
 #include "gate_machines.h"
 #include "gate_airride_stages.h"
 #include "gate_topride_stages.h"
+#include "gate_topride_items.h"
 #include "gate_colors.h"
 #include "weather_control.h"
 
@@ -204,8 +205,11 @@ void OnBoot()
     // Patches for Air Ride stage gating
     GateAirRideStages_OnBoot();
 
-    // Patches for Top Ride stage gating (WIP)
+    // Patches for Top Ride stage gating
     GateTopRideStages_OnBoot();
+
+    // Patches for Top Ride item gating
+    GateTopRideItems_OnBoot();
 
     // Patches for Kirby color gating
     GateColors_OnBoot();
@@ -255,6 +259,8 @@ static void DebugInitGateMasks()
     save_data->airride_stage_unlocked_mask = 1 << HSD_Randi(AIRRIDE_NUM);
     // Top Ride courses: 1 of TOPRIDE_NUM
     save_data->topride_stage_unlocked_mask = 1 << HSD_Randi(TOPRIDE_NUM);
+    // Top Ride items: 1 of TRITEM_NUM
+    save_data->topride_item_unlocked_mask = 1 << HSD_Randi(TRITEM_NUM);
     // Kirby colors: 1 random
     save_data->color_unlocked_mask = 1 << HSD_Randi(KIRBYCOLOR_NUM);
     // Stadiums: 1 of STKIND_NUM
@@ -266,10 +272,11 @@ static void DebugInitGateMasks()
     OSReport("  events=0x%04x abilities=0x%04x patches=0x%04x items=0x%08x\n",
              save_data->event_unlocked_mask, save_data->ability_unlocked_mask,
              save_data->patch_unlocked_mask, save_data->item_unlocked_mask);
-    OSReport("  boxes=0x%02x machines=0x%08x ar_stages=0x%04x tr_stages=0x%04x stadiums=0x%08x colors=0x%02x\n",
+    OSReport("  boxes=0x%02x machines=0x%08x ar_stages=0x%04x tr_stages=0x%04x tr_items=0x%08x stadiums=0x%08x colors=0x%02x\n",
              save_data->box_unlocked_mask, save_data->machine_unlocked_mask,
              save_data->airride_stage_unlocked_mask, save_data->topride_stage_unlocked_mask,
-             save_data->stadium_unlocked_mask, save_data->color_unlocked_mask);
+             save_data->topride_item_unlocked_mask, save_data->stadium_unlocked_mask,
+             save_data->color_unlocked_mask);
 }
 
 static void DebugSimulateLocationData(void); // forward declaration

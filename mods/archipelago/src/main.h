@@ -266,6 +266,9 @@ typedef enum APItemId
     // Top Ride stage unlock items (890-896, one per course)
     AP_STAGE_UNLOCK_TOPRIDE_BASE = 890,
 
+    // Top Ride item unlock items (900-922, aligned to TopRideItemKind)
+    AP_TOPRIDE_ITEM_UNLOCK_BASE = 900,
+
 } APItemId;
 
 // ==========================================================================
@@ -323,6 +326,7 @@ typedef struct KARSave
     u32 machine_unlocked_mask;                          // Bitmask of AP-unlocked machines (bit N = MachineKind N)
     u16 airride_stage_unlocked_mask;                    // Bitmask of AP-unlocked Air Ride stages (bit N = StageKind N)
     u16 topride_stage_unlocked_mask;                    // Bitmask of AP-unlocked Top Ride courses (bit N = course N)
+    u32 topride_item_unlocked_mask;                     // Bitmask of AP-unlocked Top Ride items (bit N = TopRideItemKind N)
     u8 color_unlocked_mask;                             // Bitmask of AP-unlocked Kirby colors (bit N = KirbyColor N)
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
     u8 rewards_shuffled;                                // Nonzero if reward tables have been shuffled and saved

@@ -67,6 +67,25 @@ void GateColors_ValidateAirRideColors(void)
     }
 }
 
+// Validate the 4 Top Ride color[] entries in GameData.
+// The TR lobby init functions (zz_8002d0ec_ / zz_8002d9e8_) set
+// color[0..3] = {0,1,2,3} which may contain locked colors.
+void GateColors_ValidateTopRideColors(void)
+{
+    GameData *gd = Gm_GetGameData();
+    if (!gd)
+        return;
+
+    int fallback = first_unlocked_color();
+    u8 *colors = gd->topride_select_ply.color;
+
+    for (int i = 0; i < 4; i++)
+    {
+        if (!GateColors_IsColorUnlocked(colors[i]))
+            colors[i] = fallback;
+    }
+}
+
 // Pick a random unlocked color. Replaces HSD_Randi call in loadCPU
 // for Air Ride CPU color assignment.
 int GateColors_GetRandomUnlockedColor(int unused)
@@ -149,6 +168,39 @@ CODEPATCH_HOOKCREATE(0x800295e8,
     0
 )
 
+// Hook for Top Ride general data reset (zz_8002cfd8_).
+// At 0x8002d06c (li r3, 0): convergence after the loop that sets
+// color[0..3] = {0,1,2,3}. Called from MainMenu_InitAllVariables,
+// Gm_ResetAllData, and scene transitions.
+// Clobbered instruction is li r3, 0 — re-executed after.
+CODEPATCH_HOOKCREATE(0x8002d06c,
+    "",
+    GateColors_ValidateTopRideColors,
+    "",
+    0
+)
+
+// Hook for Top Ride Free Run init (zz_8002d0ec_).
+// At 0x8002d704 (li r7, 0): convergence after the conditional color reset
+// block that sets color[0..3] = {0,1,2,3}. Fires BEFORE the visual loop
+// reads the colors, so the corrected values are used for display.
+CODEPATCH_HOOKCREATE(0x8002d704,
+    "",
+    GateColors_ValidateTopRideColors,
+    "",
+    0
+)
+
+// Hook for Top Ride Time Attack init (zz_8002d9e8_).
+// At 0x8002db8c (li r28, 0): right after unconditional color assignment,
+// before the visual loop. Same purpose as above.
+CODEPATCH_HOOKCREATE(0x8002db8c,
+    "",
+    GateColors_ValidateTopRideColors,
+    "",
+    0
+)
+
 // Hook for Air Ride CSS color[] init in zz_80029bd8_ (Free Run / Time Attack).
 // The CSS dispatcher (zz_8002a1b0_) calls zz_80029bd8_ instead of zz_80028888_
 // when airride_mode != RACE. This alternate CSS has its own color init block at
@@ -187,6 +239,12 @@ void GateColors_OnBoot()
     // Free Run / Time Attack use zz_80029bd8_ (hook at 0x80029e34).
     CODEPATCH_HOOKAPPLY(0x800295e8);
     CODEPATCH_HOOKAPPLY(0x80029e34);
+
+    // Top Ride: validate colors after all init paths that reset to {0,1,2,3}.
+    // Hooks fire INSIDE the init functions, before the visual loop reads colors.
+    CODEPATCH_HOOKAPPLY(0x8002d06c);  // general data reset (zz_8002cfd8_)
+    CODEPATCH_HOOKAPPLY(0x8002d704);  // Free Run init (zz_8002d0ec_)
+    CODEPATCH_HOOKAPPLY(0x8002db8c);  // Time Attack init (zz_8002d9e8_)
 
     OSReport("Color gating hooks installed\n");
 }
