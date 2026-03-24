@@ -327,9 +327,9 @@ typedef struct KARSave
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
     u8 rewards_shuffled;                                // Nonzero if reward tables have been shuffled and saved
     u8 options_received;                                // Nonzero if AP slot options have been saved
-    u8 shuffled_airride_rewards[REWARD_COUNT_AIRRIDE];      // Saved clear_kind values for Air Ride
-    u8 shuffled_topride_rewards[REWARD_COUNT_TOPRIDE];      // Saved clear_kind values for Top Ride
-    u8 shuffled_citytrial_rewards[REWARD_COUNT_CITYTRIAL];  // Saved clear_kind values for City Trial
+    u16 shuffled_airride_rewards[REWARD_COUNT_AIRRIDE];     // Saved location assignment for Air Ride: (target_mode << 8) | clear_kind
+    u16 shuffled_topride_rewards[REWARD_COUNT_TOPRIDE];     // Saved location assignment for Top Ride: (target_mode << 8) | clear_kind
+    u16 shuffled_citytrial_rewards[REWARD_COUNT_CITYTRIAL]; // Saved location assignment for City Trial: (target_mode << 8) | clear_kind
     u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received for that mode
     u64 has_local_location[3];                          // [GMMODE_NUM] bit N = reward_index N is assigned to a local checkpoint
     APSlotOptions options;                              // AP slot options (copied from ArchipelagoData on first connect)
@@ -355,10 +355,10 @@ typedef struct KARSave
 //   0x024  u32      options_valid             — client sets to 1 after writing all options fields
 //   0x028  APSlotOptions options              — slot options from AP server (56 bytes)
 //   0x060  u32      location_data_valid       — client sets to 1 after writing location arrays; game clears after reading
-//   0x064  u8[46]   location_airride          — clear_kind per Air Ride reward_index; 0xFF = no local slot
-//   0x092  u8[33]   location_topride          — clear_kind per Top Ride reward_index; 0xFF = no local slot
-//   0x0B3  u8[44]   location_citytrial        — clear_kind per City Trial reward_index; 0xFF = no local slot
-//   0x0DF  (end, total 223 bytes)
+//   0x064  u16[46]  location_airride          — (target_mode << 8) | clear_kind per AR reward_index; 0xFFFF = no local slot
+//   0x0C0  u16[33]  location_topride          — (target_mode << 8) | clear_kind per TR reward_index; 0xFFFF = no local slot
+//   0x102  u16[44]  location_citytrial        — (target_mode << 8) | clear_kind per CT reward_index; 0xFFFF = no local slot
+//   0x15A  (end, total 346 bytes)
 typedef struct ArchipelagoData
 {
     float energy_give;
@@ -373,13 +373,15 @@ typedef struct ArchipelagoData
     u32 options_valid;        // Client sets to 1 after writing all options fields
     APSlotOptions options;    // Slot options from AP server
 
-    // Location assignment: which local checklist slot (clear_kind) each reward_index is placed at.
+    // Location assignment: which checklist slot each reward_index is placed at.
     // Written by the AP client once per session after the server reveals placement.
-    // 0xFF means the reward has no local slot (it will arrive from another world via the mailbox).
-    u32 location_data_valid;                        // Client sets to 1; game clears after applying
-    u8 location_airride[REWARD_COUNT_AIRRIDE];      // clear_kind per Air Ride reward_index
-    u8 location_topride[REWARD_COUNT_TOPRIDE];      // clear_kind per Top Ride reward_index
-    u8 location_citytrial[REWARD_COUNT_CITYTRIAL];  // clear_kind per City Trial reward_index
+    // Encoding: (target_mode << 8) | clear_kind. target_mode selects which mode's
+    // checklist the reward appears in (enables cross-mode reward shuffling).
+    // 0xFFFF means the reward has no local slot (it will arrive from another world via the mailbox).
+    u32 location_data_valid;                         // Client sets to 1; game clears after applying
+    u16 location_airride[REWARD_COUNT_AIRRIDE];      // location per Air Ride reward_index
+    u16 location_topride[REWARD_COUNT_TOPRIDE];      // location per Top Ride reward_index
+    u16 location_citytrial[REWARD_COUNT_CITYTRIAL];  // location per City Trial reward_index
 } ArchipelagoData;
 
 // In-game menu toggle state. Bound to the Settings menu via OptionDesc.

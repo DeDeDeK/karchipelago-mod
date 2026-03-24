@@ -12,7 +12,7 @@ if [ $# -ne 2 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MEM1="$SCRIPT_DIR/../docs/mem1.raw"
+MEM1="$SCRIPT_DIR/mem1.raw"
 ADDR=$1
 LEN=$2
 

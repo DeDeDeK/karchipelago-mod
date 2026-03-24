@@ -15,7 +15,6 @@
 #include "energylink.h"
 #include "traplink.h"
 #include "spawn_item.h"
-#include "shuffle_rewards.h"
 #include "checklist_rewards.h"
 #include "stadium_lock.h"
 #include "patch_cap.h"
@@ -175,9 +174,6 @@ void OnBoot()
     (*static_ptr) = archipelago_data;
     OSReport("Static pointer at 0x805d52d4 set to 0x%08x\n", (uint)archipelago_data);
 
-    // Shuffle checklist reward tables
-    ShuffleRewards_OnBoot();
-
     // Replace ClearChecker_CheckUnlocked with AP bitfield hook
     ChecklistRewards_OnBoot();
 
@@ -226,7 +222,7 @@ void OnSaveInit()
     OSReport("save data for %s created!\n", mod_desc.name);
     memset(save_data, 0, sizeof(*save_data));
 
-    ShuffleRewards_OnSaveInit();
+    ChecklistRewards_OnSaveInit();
 }
 
 // Debug: unlock exactly 1 random item per gate category for standalone testing.
@@ -276,6 +272,8 @@ static void DebugInitGateMasks()
              save_data->stadium_unlocked_mask, save_data->color_unlocked_mask);
 }
 
+static void DebugSimulateLocationData(void); // forward declaration
+
 // Runs on startup after any save data is loaded into memory.
 // This callback is executed regardless of if a memory card is inserted or contained existing save data.
 void OnSaveLoaded()
@@ -295,14 +293,16 @@ void OnSaveLoaded()
     if (!save_data->options_received)
         DebugInitGateMasks();
 
-    // Apply or generate shuffled reward tables (restores clear_kind values in RewardEntry tables)
-    ShuffleRewards_OnSaveLoaded();
-
-    // Restore received checklist rewards from save (must run after ShuffleRewards_OnSaveLoaded)
+    // Restore reward tables and received checklist rewards from save
     ChecklistRewards_OnSaveLoaded();
 
     // On first boot, lock all stadiums (bypasses checklist cache with direct writes)
     StadiumLock_OnSaveLoaded();
+
+    // Debug: reveal all checklists and simulate location data for testing
+    RevealAllChecklists();
+    DebugSimulateLocationData();
+    ChecklistRewards_ApplyLocations();  // Apply immediately (normally happens on next frame)
 
     // Signal to the AP client that the mod is fully initialized
     archipelago_data->game_ready = 1;
@@ -355,25 +355,30 @@ void OnMainMenuLoad()
 
     // Check for AP slot options (one-time transfer to save)
     APOptions_TransferToSave();
+
+    // Pre-fix all color fields so they're correct before any select
+    // screen initializes. This mirrors what CT's OnPlayerSelectLoad
+    // does, ensuring AR icon/color data is valid from the start.
+    GateColors_ForceDefaultColors();
 }
 
-// Runs when entering the player select menu.
-// Currently only executes when entering city trial player select.
+// Runs when entering the player select menu (Air Ride or City Trial).
 void OnPlayerSelectLoad()
 {
-    OSReport("Entering the city trial player select menu.\n");
+    OSReport("Entering player select (minor %d).\n", Scene_GetCurrentMinor());
 
     // Filter locked machines from the City Trial select screen
-    GateMachines_FilterSelectList();
+    if (Scene_GetCurrentMinor() == MNRKIND_CITYPLYSELECT)
+        GateMachines_FilterSelectList();
 
-    // Force any locked Kirby colors to default (Pink)
+    // Force any locked Kirby colors to default
     GateColors_ForceDefaultColors();
 }
 
 // Runs before the game is initialized.
 void On3DLoadStart()
 {
-    // Empty stub — hook point reserved for future use.
+
 }
 
 // Runs upon entering a 3D game (Air Ride, Top Ride, or City Trial).
@@ -396,6 +401,8 @@ void On3DLoadEnd()
         OSReport("Player %d using rider [%d] color [%d] riding machine [%d].\n",
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
+
+    GateAbilities_On3DLoadEnd();
 
     if (hoshi_menu_settings.deathlink_enabled)
         DeathLink_On3DLoadEnd();
@@ -445,8 +452,10 @@ void OnSceneChange()
 #define DEBUG_STANDALONE_COUNT 9
 
 // Simulate the AP client sending location data by filling the ArchipelagoData
-// location arrays with a random shuffle. ~50% of rewards are assigned to local
-// checkboxes (with unique clear_kinds), the rest are marked as remote (0xFF).
+// location arrays with a random shuffle. Rewards are distributed:
+//   ~33% same-mode (reward stays in its own mode's checklist)
+//   ~33% cross-mode (reward placed in a different mode's checklist)
+//   ~33% remote (sent to another world, no local checkbox)
 // The existing OnFrameStart logic detects location_data_valid and calls
 // ChecklistRewards_ApplyLocations() on the next frame.
 static void DebugSimulateLocationData()
@@ -456,44 +465,67 @@ static void DebugSimulateLocationData()
         [GMMODE_TOPRIDE]   = REWARD_COUNT_TOPRIDE,
         [GMMODE_CITYTRIAL] = REWARD_COUNT_CITYTRIAL,
     };
-    u8 *loc_arrays[GMMODE_NUM] = {
+    u16 *loc_arrays[GMMODE_NUM] = {
         archipelago_data->location_airride,
         archipelago_data->location_topride,
         archipelago_data->location_citytrial,
     };
 
-    for (int mode = 0; mode < GMMODE_NUM; mode++)
+    // Build per-mode shuffled pools of clear_kinds (0-119)
+    u8 pools[GMMODE_NUM][120];
+    int pool_idxs[GMMODE_NUM] = {0, 0, 0};
+    for (int m = 0; m < GMMODE_NUM; m++)
     {
-        int count = counts[mode];
-
-        // Build a shuffled pool of all 120 possible clear_kinds
-        u8 pool[120];
         for (int i = 0; i < 120; i++)
-            pool[i] = (u8)i;
+            pools[m][i] = (u8)i;
         for (int i = 119; i > 0; i--)
         {
             int j = HSD_Randi(i + 1);
-            u8 tmp = pool[i];
-            pool[i] = pool[j];
-            pool[j] = tmp;
+            u8 tmp = pools[m][i];
+            pools[m][i] = pools[m][j];
+            pools[m][j] = tmp;
         }
+    }
 
-        // Assign each reward: ~50% local (unique clear_kind from pool), ~50% remote
-        int pool_idx = 0;
-        int local_count = 0;
+    for (int mode = 0; mode < GMMODE_NUM; mode++)
+    {
+        int count = counts[mode];
+        int local_count = 0, cross_count = 0;
+
         for (int i = 0; i < count; i++)
         {
-            if (HSD_Randi(2))
+            int roll = HSD_Randi(3);
+            if (roll == 0 && pool_idxs[mode] < 120)
             {
-                loc_arrays[mode][i] = pool[pool_idx++];
+                // Same-mode: reward stays in its own checklist
+                u8 ck = pools[mode][pool_idxs[mode]++];
+                loc_arrays[mode][i] = ((u16)mode << 8) | ck;
                 local_count++;
+            }
+            else if (roll == 1)
+            {
+                // Cross-mode: reward placed in a different mode's checklist
+                int target = (mode + 1 + HSD_Randi(2)) % GMMODE_NUM;
+                if (pool_idxs[target] < 120)
+                {
+                    u8 ck = pools[target][pool_idxs[target]++];
+                    loc_arrays[mode][i] = ((u16)target << 8) | ck;
+                    cross_count++;
+                }
+                else
+                {
+                    loc_arrays[mode][i] = 0xFFFF;
+                }
             }
             else
             {
-                loc_arrays[mode][i] = 0xFF;
+                // Remote
+                loc_arrays[mode][i] = 0xFFFF;
             }
         }
-        OSReport("  Mode %d: %d local, %d remote\n", mode, local_count, count - local_count);
+        OSReport("  Mode %d: %d same, %d cross, %d remote\n",
+                 mode, local_count, cross_count,
+                 count - local_count - cross_count);
     }
 
     archipelago_data->location_data_valid = 1;
@@ -511,18 +543,14 @@ void OnFrameStart()
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
 
-    // Apply AP location assignment when the client signals it is ready.
-    if (archipelago_data->location_data_valid)
-        ChecklistRewards_ApplyLocations();
-
     // Debug controls — only write to the mailbox when it is empty
     if (archipelago_data->incoming_item_id == 0)
     {
         if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT)
         {
-            OSReport("Granting machine formation event via DPAD LEFT...\n");
-            //archipelago_data->incoming_item_id = AP_EVENT_MACHINEFORMATION;
-            Event_GiveItem(EVKIND_MACHINEFORMATION);
+            EventKind ev = HSD_Randi(EVKIND_NUM);
+            OSReport("Triggering random event kind %d via DPAD LEFT...\n", ev);
+            Event_GiveItem(ev);
         }
         else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT)
         {
@@ -542,9 +570,8 @@ void OnFrameStart()
         }
         else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_DOWN)
         {
-            OSReport("Simulating AP location assignment via DPAD DOWN...\n");
-            DebugSimulateLocationData();
-            RevealAllChecklists();
+            OSReport("Triggering deathlink receive via DPAD DOWN...\n");
+            archipelago_data->deathlink_receive = 1;
         }
         else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP)
         {
@@ -572,5 +599,5 @@ void OnFrameStart()
 // Runs every game tick after the frame has been processed.
 void OnFrameEnd()
 {
-    // Empty stub — hook point reserved for future use.
+    
 }

@@ -6,7 +6,9 @@
 #include "textbox.h"
 #include "ap_item_handler.h"
 
-// TODO: for the FOG event, triggers it properly, but fog does not happen?
+// Trigger a specific event. Similar to the game's CityEvent_ForceStart (0x800ee778),
+// but adds the event to prev_kind[] history (prevents natural re-occurrence stacking)
+// and does not use the reserve queue (AP item handler retries via returning 0 instead).
 int Event_Do(EventKind kind)
 {
     // Check if event system is initialized
@@ -35,6 +37,10 @@ int Event_Do(EventKind kind)
     {
         Gm_FadeOutMusic(ev_chk->data->event->music_fadeout_frames);    // fade out music
         SFX_Play(0x130002);                                             // event siren
+
+        int sky_preset = ev_chk->data->bgm_sky[kind].sky_preset;
+        if (sky_preset != -1)
+            Sky_TransitionGlobal(sky_preset);
     }
 
     return 1;

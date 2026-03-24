@@ -8,11 +8,14 @@
 // stats independently and don't corrupt each other's delta calculations.
 static int prev_obj_destroyed[5];
 static float prev_stats[5][PATCHKIND_NUM];
+static float prev_charge_value[5];
 
 // Shared accumulator — contributions from all players pool into one value
 static float energy_give_accumulator;
 
-// TODO: charging a machine gives energy, receiving energy charges machine
+// Scale factor for charge energy: a full 0→1 charge is worth this many energy units
+#define CHARGE_ENERGY_SCALE 5.0f
+
 void EnergyLink_PerFrame(GOBJ *rg)
 {
     RiderData *rd = rg->userdata;
@@ -42,6 +45,21 @@ void EnergyLink_PerFrame(GOBJ *rg)
         energy_give_accumulator += sum;
     }
 
+    // Charge gained from holding A — snapshot BEFORE applying received energy
+    GOBJ *mg = rd->machine_gobj;
+    if (mg)
+    {
+        MachineData *md = mg->userdata;
+        float charge_diff = md->charge_value - prev_charge_value[ply];
+        if (charge_diff > 0)
+        {
+            float charge_energy = charge_diff * CHARGE_ENERGY_SCALE;
+            OSReport("generated %f energy from charging\n", charge_energy);
+            energy_give_accumulator += charge_energy;
+        }
+        prev_charge_value[ply] = md->charge_value;
+    }
+
     // Flush accumulated energy to shared field when client has cleared it
     if (energy_give_accumulator > 0 && archipelago_data->energy_give == 0)
     {
@@ -50,19 +68,24 @@ void EnergyLink_PerFrame(GOBJ *rg)
         energy_give_accumulator = 0;
     }
 
-    // Check for received energy and apply it to vehicle charge
+    // Apply received energy to vehicle charge
     float energy_received = archipelago_data->energy_receive;
-    if (energy_received > 0)
+    if (energy_received > 0 && mg)
     {
-        GOBJ *mg = rd->machine_gobj;
-        if (mg)
-        {
-            MachineData *md = mg->userdata;
-            // TODO: clamp to 10 max value (overcharge unleashes all extra as a large boost)
-            OSReport("adding energy received (%f) to machine charge...\n", energy_received);
-            md->charge_value += energy_received;
-        }
-        // Clear so client can write the next value
+        MachineData *md = mg->userdata;
+        OSReport("adding energy received (%f) to machine charge...\n", energy_received);
+        md->charge_value += energy_received;
+        if (md->charge_value > 1.0f)
+            md->charge_value = 1.0f;
+
+        // Update prev so the injected charge is not re-counted as send energy next frame
+        prev_charge_value[ply] = md->charge_value;
+
+        archipelago_data->energy_receive = 0;
+    }
+    else if (energy_received > 0)
+    {
+        // No machine available, clear so client isn't stuck
         archipelago_data->energy_receive = 0;
     }
 }
@@ -73,6 +96,7 @@ void EnergyLink_On3DLoadEnd()
     for (int i = 0; i < 5; i++)
     {
         prev_obj_destroyed[i] = 0;
+        prev_charge_value[i] = 0.0f;
         for (int j = 0; j < PATCHKIND_NUM; j++)
             prev_stats[i][j] = 0.0f;
     }

@@ -36,6 +36,17 @@ static const char *machine_names[VCKIND_NUM] = {
     [VCKIND_WHEELVSDEDEDE]  = "VS Dedede Wheelie",
 };
 
+// Convert CharacterDesc fields to the actual MachineKind (VCKIND).
+// For non-bikes, machine_kind IS the VCKIND directly.
+// For bikes, machine_kind is a bike-relative index; the actual VCKIND
+// is VCKIND_WHEELNORMAL + machine_kind.
+static MachineKind CharacterDesc_GetMachineKind(CharacterDesc *desc)
+{
+    if (desc->is_bike)
+        return VCKIND_WHEELNORMAL + desc->machine_kind;
+    return desc->machine_kind;
+}
+
 // Replace the vanilla spawn selection logic entirely.
 // Adapted from KAR Deluxe (UnclePunch/KAR-Deluxe, machines.c).
 // Reads the spawn chance table, zeros out locked machines, gives unlocked
@@ -132,7 +143,8 @@ void GateMachines_FilterSelectList()
         if (!desc)
             continue;
 
-        if (!(mask & (1 << desc->machine_kind)))
+        MachineKind vckind = CharacterDesc_GetMachineKind(desc);
+        if (!(mask & (1 << vckind)))
             continue;
 
         if (write != read)
@@ -182,13 +194,15 @@ static int IsCKindUnlocked(CharacterKind ckind)
     CharacterDesc *desc = Character_GetDesc(ckind);
     if (!desc)
         return 0;
-    return (save_data->machine_unlocked_mask & (1 << desc->machine_kind)) ? 1 : 0;
+    MachineKind vckind = CharacterDesc_GetMachineKind(desc);
+    return (save_data->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
-// Count unlocked characters for Free Run mode.
-// Replaces the mode 2 counting pass in CitySelect_CreateMachineIcons.
+// Count unlocked characters for City Trial select screens.
+// Replaces the mode 1 (Stadium) and mode 2 (Free Run) counting passes
+// in CitySelect_CreateMachineIcons.
 // Iterates all 20 CharacterKinds and counts those whose machines are unlocked.
-int GateMachines_CountCTFreeRunAvailable()
+int GateMachines_CountCTSelectAvailable()
 {
     int count = 0;
     for (int ckind = 0; ckind < CKIND_NUM; ckind++)
@@ -199,14 +213,15 @@ int GateMachines_CountCTFreeRunAvailable()
     return count;
 }
 
-// Build the filtered character array for Free Run mode.
-// Replaces the mode 2 array-building pass in CitySelect_CreateMachineIcons.
-// Iterates the 2×10 icon grid and writes only unlocked characters into the
+// Build the filtered character array for City Trial select screens.
+// Replaces the mode 1 (Stadium) and mode 2 (Free Run) array-building passes
+// in CitySelect_CreateMachineIcons.
+// Iterates the 2x10 icon grid and writes only unlocked characters into the
 // two-row local arrays used by the subsequent reordering code.
 // Parameters are pointers to the function's stack locals:
 //   char_arr  = local_41 (r29, 20-byte array: row0[0..9] at +0, row1[0..9] at +10)
 //   row_counts = local_48 (r28, row_counts[0] and row_counts[1])
-void GateMachines_BuildCTFreeRunArray(u8 *char_arr, u8 *row_counts)
+void GateMachines_BuildCTSelectArray(u8 *char_arr, u8 *row_counts)
 {
     row_counts[0] = 0;
     row_counts[1] = 0;
@@ -225,7 +240,31 @@ void GateMachines_BuildCTFreeRunArray(u8 *char_arr, u8 *row_counts)
     }
 }
 
-// Hook at 0x8002e5c0: mode 2 counting pass in CitySelect_CreateMachineIcons.
+// Hook at 0x8002e4d0: mode 1 (Stadium) counting pass in CitySelect_CreateMachineIcons.
+// At entry: r3 = 0 (loop iterator init), r27 = 0 (count init).
+// We replace the entire counting loop. Result goes to r27 (total count).
+// Exit to 0x8002e670: past the counting loop, where mode is rechecked before
+// the array-building pass.
+CODEPATCH_HOOKCREATE(0x8002e4d0,
+    "",
+    GateMachines_CountCTSelectAvailable,
+    "mr 27, 3\n\t",
+    0x8002e670
+)
+
+// Hook at 0x8002e67c: mode 1 (Stadium) array-building pass.
+// At entry: r29 = local_41 (char array), r28 = local_48 (row counts).
+// r26 and r31 are set from r29/r28 inside the loop, but we skip the loop entirely.
+// Exit to 0x8002e820: into the reordering code that reads from the stack arrays.
+CODEPATCH_HOOKCREATE(0x8002e67c,
+    "mr 3, 29\n\t"
+    "mr 4, 28\n\t",
+    GateMachines_BuildCTSelectArray,
+    "",
+    0x8002e820
+)
+
+// Hook at 0x8002e5c0: mode 2 (Free Run) counting pass in CitySelect_CreateMachineIcons.
 // At entry: r24 = loop iterator (about to be initialized to 0).
 // We replace the entire counting loop. Result goes to r27 (total count).
 // Clobbered: li r24, 0 (harmless, r24 is not needed after we skip the loop).
@@ -233,12 +272,12 @@ void GateMachines_BuildCTFreeRunArray(u8 *char_arr, u8 *row_counts)
 // the array-building pass.
 CODEPATCH_HOOKCREATE(0x8002e5c0,
     "",
-    GateMachines_CountCTFreeRunAvailable,
+    GateMachines_CountCTSelectAvailable,
     "mr 27, 3\n\t",
     0x8002e670
 )
 
-// Hook at 0x8002e738: mode 2 array-building pass in CitySelect_CreateMachineIcons.
+// Hook at 0x8002e738: mode 2 (Free Run) array-building pass.
 // At entry: r29 = local_41 (char array), r28 = local_48 (row counts).
 // We replace the entire array-building loop with our filtered version.
 // Clobbered: or r26, r29, r29 (mr r26, r29 — harmless for the reordering code
@@ -247,7 +286,7 @@ CODEPATCH_HOOKCREATE(0x8002e5c0,
 CODEPATCH_HOOKCREATE(0x8002e738,
     "mr 3, 29\n\t"
     "mr 4, 28\n\t",
-    GateMachines_BuildCTFreeRunArray,
+    GateMachines_BuildCTSelectArray,
     "",
     0x8002e820
 )
@@ -270,7 +309,8 @@ int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
     if (!desc)
         return 0;
 
-    return (save_data->machine_unlocked_mask & (1 << desc->machine_kind)) ? 1 : 0;
+    MachineKind vckind = CharacterDesc_GetMachineKind(desc);
+    return (save_data->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
 // Replace AirRide_CheckMachineUnlocked (0x8000c364).
@@ -278,10 +318,18 @@ int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
 // machine assignment. The second parameter (machine_id) is the MachineKind.
 int GateMachines_CheckAirRideMachineUnlocked(s8 machine_class, s8 machine_id)
 {
-    if (machine_id < 0 || machine_id >= VCKIND_NUM)
+    // machine_class = CharacterDesc.is_bike, machine_id = CharacterDesc.machine_kind.
+    // For bikes, machine_kind is a bike-relative index, not the VCKIND.
+    int vckind;
+    if (machine_class)
+        vckind = VCKIND_WHEELNORMAL + machine_id;
+    else
+        vckind = machine_id;
+
+    if (vckind < 0 || vckind >= VCKIND_NUM)
         return 0;
 
-    return (save_data->machine_unlocked_mask & (1 << machine_id)) ? 1 : 0;
+    return (save_data->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
 void GateMachines_OnBoot()
@@ -296,15 +344,18 @@ void GateMachines_OnBoot()
     // Air Ride random machine: replace machine unlock check
     CODEPATCH_REPLACEFUNC(AirRide_CheckMachineUnlocked, GateMachines_CheckAirRideMachineUnlocked);
 
-    // City Trial Free Run select screen: replace both the counting pass and
+    // City Trial Stadium select screen: replace both the counting pass and
     // array-building pass in CitySelect_CreateMachineIcons (0x8002e3c4) for
-    // mode 2. This gates ALL characters (normal + special) against
-    // machine_unlocked_mask, ensuring both the visual icons and the backing
-    // selection data only include unlocked machines.
-    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // counting pass
-    CODEPATCH_HOOKAPPLY(0x8002e738);  // array-building pass
+    // mode 1. Vanilla mode 1 only checks ckind ranges (0-14 available,
+    // 15/16/18/19 special characters unavailable) — no unlock mask check.
+    CODEPATCH_HOOKAPPLY(0x8002e4d0);  // mode 1 counting pass
+    CODEPATCH_HOOKAPPLY(0x8002e67c);  // mode 1 array-building pass
 
-    OSReport("Machine gating hooks installed (CT spawn + CT Free Run + AR select)\n");
+    // City Trial Free Run select screen: same treatment for mode 2.
+    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // mode 2 counting pass
+    CODEPATCH_HOOKAPPLY(0x8002e738);  // mode 2 array-building pass
+
+    OSReport("Machine gating hooks installed (CT spawn + CT Stadium + CT Free Run + AR select)\n");
 }
 
 int GateMachines_UnlockMachine(MachineKind kind)

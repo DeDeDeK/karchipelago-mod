@@ -18,6 +18,7 @@ typedef enum KirbyColor
 void GateColors_OnBoot();
 int GateColors_IsColorUnlocked(int color_idx);
 int GateColors_UnlockColor(int color_idx);
+int GateColors_GetRandomUnlockedColor(int unused);
 void GateColors_ForceDefaultColors();
 
 #endif

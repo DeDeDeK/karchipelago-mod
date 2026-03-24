@@ -6,7 +6,9 @@
 /externals/devkitpro/
 /docs/
 /.claude/
+mem1.raw
 notes.txt
 kar.iso
 out.iso
+/iso/root/
 patch.xdelta
