@@ -118,36 +118,30 @@ void StadiumLock_DecideStadium()
     gd->city.stadium_kind = selected;
 }
 
+// Replacement for both Gm_StadiumIsDefaultUnlocked and Gm_StadiumIsUnlocked.
+// Checks our save mask directly — the game's internal bitfield and checklist
+// system are completely bypassed.
+static int StadiumLock_IsUnlocked(StadiumKind kind)
+{
+    if (!save_data || kind < 0 || kind >= STKIND_NUM)
+        return 0;
+    return (save_data->stadium_unlocked_mask & (1 << kind)) != 0;
+}
+
 // Apply patches needed for stadium locking
 void StadiumLock_OnBoot()
 {
     OSReport("Applying stadium lock patches...\n");
-    // Replace Gm_StadiumIsDefaultUnlocked (hardcoded switch for 18 stadiums)
-    // with Gm_StadiumCheckUnlocked (reads the runtime bitfield). This makes
-    // any remaining callers respect our AP unlock state.
-    CODEPATCH_REPLACEFUNC(Gm_StadiumIsDefaultUnlocked, Gm_StadiumCheckUnlocked);
+    // Replace all three stadium unlock check functions with our mask check.
+    // Gm_StadiumIsDefaultUnlocked (0x8000C148): hardcoded switch for default stadiums.
+    // Gm_StadiumIsUnlocked (0x8000C17C): checklist-based check.
+    // Gm_StadiumCheckUnlocked (0x80007EE4): reads game's internal bitfield at 0x80536EE8.
+    CODEPATCH_REPLACEFUNC(Gm_StadiumIsDefaultUnlocked, StadiumLock_IsUnlocked);
+    CODEPATCH_REPLACEFUNC(Gm_StadiumIsUnlocked, StadiumLock_IsUnlocked);
+    CODEPATCH_REPLACEFUNC(Gm_StadiumCheckUnlocked, StadiumLock_IsUnlocked);
 
     // Replace CityTrial_DecideStadium entirely to fix history buffer overflow
     // and use our AP mask as the sole unlock source.
     CODEPATCH_REPLACEFUNC(CityTrial_DecideStadium, StadiumLock_DecideStadium);
 }
 
-// Sync the game's stadium bitfield to match our saved unlock mask.
-// The game persists the bitfield in its own save data, but we override it
-// from our own saved mask to ensure AP unlocks are correctly applied.
-void StadiumLock_OnSaveLoaded()
-{
-    OSReport("Syncing stadium unlocks from save (mask=0x%08X).\n", save_data->stadium_unlocked_mask);
-    for (int i = 0; i < STKIND_NUM; i++)
-    {
-        if (save_data->stadium_unlocked_mask & (1 << i))
-        {
-            Gm_StadiumSetUnlockedDirect(i);
-        }
-        else
-        {
-            Gm_StadiumClearUnlockedDirect(i);
-            Gm_StadiumClearNewLabelDirect(i);
-        }
-    }
-}

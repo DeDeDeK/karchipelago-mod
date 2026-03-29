@@ -21,6 +21,9 @@
 #include "gate_topride_stages.h"
 #include "gate_topride_items.h"
 #include "gate_colors.h"
+#include "spawn_enemy.h"
+#include "custom_events.h"
+#include "airride_speed.h"
 
 // Check the mailbox for an incoming item from the AP client.
 // Store it in the persistent received list, add to unprocessed list,
@@ -80,10 +83,11 @@ int APItems_HandleItem(uint ap_item_id)
     // Items that apply immediately with no scene requirement
     switch (ap_item_id)
     {
-        case AP_ITEM_PROGRESSIVE_STADIUM:
-            return 1;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
+            return 1;
+        case AP_ITEM_AIRRIDE_SPEED_BOOST:
+            AirRideSpeed_Increment();
             return 1;
     }
 
@@ -149,7 +153,7 @@ int APItems_HandleItem(uint ap_item_id)
     }
 
     // Kirby color unlock items (AP_COLOR_UNLOCK_BASE + KirbyColor)
-    if (ap_item_id > AP_COLOR_UNLOCK_BASE && ap_item_id < AP_COLOR_UNLOCK_BASE + KIRBYCOLOR_NUM)
+    if (ap_item_id >= AP_COLOR_UNLOCK_BASE && ap_item_id < AP_COLOR_UNLOCK_BASE + KIRBYCOLOR_NUM)
     {
         int color = ap_item_id - AP_COLOR_UNLOCK_BASE;
         return GateColors_UnlockColor(color);
@@ -193,18 +197,26 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id >= AP_PERM_PATCH_BASE && ap_item_id < AP_PERM_PATCH_BASE + PATCHKIND_NUM)
     {
         PatchKind kind = ap_item_id - AP_PERM_PATCH_BASE;
-        return Patch_GiveItem(kind, 1);
+        return PermanentPatch_GiveItem(kind);
     }
 
     // Permanent +1 All Up
     if (ap_item_id == AP_ITEM_PERM_PATCH_ALL_UP)
-        return Patch_AllUp_GiveItem(1);
+        return PermanentPatch_GiveAllUp();
 
     // City Trial events (AP_EVENT_BASE + EventKind)
     if (ap_item_id >= AP_EVENT_BASE && ap_item_id < AP_EVENT_BASE + EVKIND_NUM)
     {
         EventKind kind = ap_item_id - AP_EVENT_BASE;
         return Event_GiveItem(kind);
+    }
+
+    // Custom City Trial event
+    if (ap_item_id == AP_ITEM_EVENT_CUSTOM)
+    {
+        if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
+            return CustomEvent_Do(CUSTOM_EVKIND_GRAVITY_CHANGE);
+        return 0;
     }
 
     // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
@@ -221,6 +233,16 @@ int APItems_HandleItem(uint ap_item_id)
         SpawnItemHumans(ITKIND_ALLUP);
         return 1;
     }
+
+    // Meteor trap — spawn a meteor directly above each human player
+    if (ap_item_id == AP_ITEM_METEOR_TRAP)
+        return SpawnEnemy_MeteorTrap();
+
+    // Legendary machine assembly — give assembled Dragoon/Hydra via cinematic
+    if (ap_item_id == AP_ITEM_GIVE_DRAGOON)
+        return GateMachines_GiveLegendaryMachine(0);
+    if (ap_item_id == AP_ITEM_GIVE_HYDRA)
+        return GateMachines_GiveLegendaryMachine(1);
 
     // TODO items — scene gate already passed, acknowledged immediately as stubs
     switch (ap_item_id)
@@ -250,7 +272,6 @@ void APItems_PerFrame(GOBJ *g)
     int item_received = APItems_CheckMailbox();
 
     // Scan unprocessed items for one we can handle
-    int item_applied = 0;
     for (uint i = 0; i < save_data->unprocessed_count; i++)
     {
         uint item_id = save_data->unprocessed_items[i];
@@ -260,12 +281,8 @@ void APItems_PerFrame(GOBJ *g)
             // Remove by swapping with last element
             save_data->unprocessed_count--;
             save_data->unprocessed_items[i] = save_data->unprocessed_items[save_data->unprocessed_count];
-            item_applied = 1;
             break;
         }
     }
 
-    // Flush save data to memcard if anything changed
-    if (item_received || item_applied)
-        Hoshi_WriteSave();
 }

@@ -154,10 +154,6 @@ CODEPATCH_HOOKCONDITIONALCREATE(
     0x8017e064
 )
 
-// ===========================================================================
-// UI Hooks: Multi-SIS loading and cross-mode text display
-// ===========================================================================
-
 // SIS file names per mode (indexed by GameMode).
 static const char *sis_filenames[GMMODE_NUM] = {
     "SisClrChk3D.dat",  // GMMODE_AIRRIDE
@@ -374,10 +370,6 @@ CODEPATCH_HOOKCREATE(
     0
 )
 
-// ===========================================================================
-// Reward table management
-// ===========================================================================
-
 static void InitSaveArrayPtrs(void)
 {
     save_arrays[GMMODE_AIRRIDE]   = save_data->shuffled_airride_rewards;
@@ -445,7 +437,6 @@ static void RestoreRewardTablesFromSave(void)
     }
     else
     {
-        InitSaveArrayPtrs();
         ClearAllRewardTables();
         save_data->rewards_shuffled = 1;
         OSReport("Reward tables cleared and marked initialized\n");
@@ -466,10 +457,6 @@ void RevealAllChecklists(void)
     }
     OSReport("All checklist squares revealed (%d modes x 120 squares)\n", GMMODE_NUM);
 }
-
-// ===========================================================================
-// Lifecycle entry points
-// ===========================================================================
 
 // Install all checklist hooks. Call from OnBoot.
 void ChecklistRewards_OnBoot()

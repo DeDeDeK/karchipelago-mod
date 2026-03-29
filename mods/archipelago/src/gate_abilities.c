@@ -9,6 +9,7 @@
 #include "gate_items.h"
 #include "gate_boxes.h"
 #include "textbox.h"
+#include "traplink.h"
 
 static const char *ability_names[COPYKIND_NUM] = {
     [COPYKIND_FIRE]    = "Fire",
@@ -120,6 +121,10 @@ int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
     if (kind >= 0 && kind < COPYKIND_NUM && !IsAbilityUnlocked(kind))
         return 0;
 
+    // Traplink send: getting sleep from an enemy/item is a natural trap
+    if (kind == COPYKIND_SLEEP && !Ply_CheckIfCPU(rd->ply))
+        TrapLink_Send();
+
     return Rider_GiveAbility(rd, kind);
 }
 
@@ -144,6 +149,10 @@ static int RandomUnlockedAbility()
 // Replacement for randomAbility_giveAbility (0x801a61d4).
 // Gates copy abilities from the copy chance wheel. If the wheel lands on a
 // locked ability, picks a random unlocked one instead.
+// The callers (randomAbility_aPress/autoSelect) originally called
+// Rider_MarkCopyAbilityObtained after this function with the original wheel
+// kind. We NOP those calls and do it ourselves with the (possibly substituted)
+// kind so the obtained-abilities bitmask tracks correctly.
 int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 {
     if (kind == -1)
@@ -158,6 +167,7 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
     Rider_AbilityRemoveModel(rd);
     Rider_AbilityRemoveUnk(rd);
     Rider_RecordCopyAbility(rd->ply, kind);
+    Rider_MarkCopyAbilityObtained(rd->ply, kind);
     stc_ability_init_table[kind](rd);
     return 1;
 }
@@ -184,8 +194,6 @@ CODEPATCH_HOOKCREATE(0x800ed7f0,
 // data_index identifies the enemy type (archive to load).
 // flags selects the tier variant (0=base, 1=enhanced, 2/3/4=special).
 #define ENEMY_DATA_TABLE ((int *)0x804b22b4)
-#define ENEMY_ID_COUNT 79
-
 // Maps enemy_id → ability theme (CopyKind). Used to filter ability-themed enemies
 // from spawn tables when their ability is locked. The copy chance wheel is random
 // for all enemies — this table is about visual theming, not actual granted abilities.
@@ -203,7 +211,7 @@ CODEPATCH_HOOKCREATE(0x800ed7f0,
 #define T0(slot) (slot)
 #define T1(slot) (24 + (slot))
 #define T2(slot) (48 + (slot))
-static const s8 enemy_id_to_copykind[ENEMY_ID_COUNT] = {
+static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
     // Tier 0 (IDs 0-23, base enemies)
     [T0(0)]  = COPYKIND_NONE,    // Broom Hatter
     [T0(1)]  = COPYKIND_NONE,    // Broom Hatter (dup)
@@ -305,7 +313,7 @@ static const s8 enemy_id_to_copykind[ENEMY_ID_COUNT] = {
 // Check if enemy_id is themed around a locked ability. Returns 1 if locked, 0 if allowed.
 static int IsEnemyAbilityLocked(int enemy_id)
 {
-    if (enemy_id < 0 || enemy_id >= ENEMY_ID_COUNT)
+    if (enemy_id < 0 || enemy_id >= ACTORID_NUM)
         return 0;
     CopyKind ck = (CopyKind)enemy_id_to_copykind[enemy_id];
     return (ck != COPYKIND_NONE && !IsAbilityUnlocked(ck));
@@ -440,6 +448,11 @@ void GateAbilities_OnBoot()
 {
     CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility);
     CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility);
+    // NOP the Rider_MarkCopyAbilityObtained calls in randomAbility_aPress and
+    // randomAbility_autoSelect — our replacement calls it with the correct
+    // (possibly substituted) kind instead of the original wheel kind.
+    CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
+    CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained
     CODEPATCH_REPLACECALL(0x800f1e14, GateAbilities_SpawnActor);
     CODEPATCH_HOOKAPPLY(0x800eb558);
     CODEPATCH_HOOKAPPLY(0x800ed7f0);

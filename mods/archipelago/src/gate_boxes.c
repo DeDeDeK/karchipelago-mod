@@ -71,12 +71,7 @@ int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
         total += chances[i];
 
     if (total == 0)
-    {
-        // All boxes locked or empty — fall back to blue small
-        *box_color = 0;
-        *box_size = 0;
-        return 0;
-    }
+        return -1;
 
     // Weighted random selection
     int roll = HSD_Randi(total);

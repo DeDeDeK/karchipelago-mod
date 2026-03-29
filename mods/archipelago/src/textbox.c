@@ -146,7 +146,7 @@ void TextBox_PerFrame(GOBJ *g)
 }
 
 // Enqueue a message to the textbox queue by creating a Text object
-int TextBox_Enqueue(char *format, ...)
+int TextBox_Enqueue(const char *format, ...)
 {
     if (!hoshi_menu_settings.textbox_enabled)
         return 0;

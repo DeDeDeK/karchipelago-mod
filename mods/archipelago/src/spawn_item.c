@@ -15,6 +15,8 @@ void SpawnItemPlayer(int ply_int, ItemKind item_kind)
     ItemDesc item_desc;
     Item_InitDesc(&item_desc, item_kind, 1.0, 0, &spawn_pos, &md->up, &md->forward, -1, -1);
     GOBJ *item_gobj = Item_Create(&item_desc);
+    if (!item_gobj)
+        return;
     ItemData *id = item_gobj->userdata;
     Machine_OnTouchItem(md, id);
 }

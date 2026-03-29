@@ -21,7 +21,7 @@ void CreateTextBox_OnSceneChange();
 void TextBox_SetAlpha(Text *text, u8 alpha);
 void TextBox_PerFrame(GOBJ *g);
 
-int TextBox_Enqueue(char *format, ...);
+int TextBox_Enqueue(const char *format, ...);
 int TextBox_Dequeue(TextBoxMessage *text_out);
 int TextBoxQueue_IsEmpty();
 int TextBoxQueue_IsFull();

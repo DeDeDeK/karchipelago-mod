@@ -12,23 +12,25 @@
 
 #define PATCH_STAT_MAX 18
 
-// ==========================================================================
 // AP Item ID Definitions
 // These must match the item IDs defined in the APWorld Python code.
 // ID 0 is reserved as the "empty" sentinel for the mailbox.
-// ==========================================================================
 typedef enum APItemId
 {
     // Standalone items (1-99)
     AP_ITEM_CHECKBOX_FILLER_AIRRIDE = 1,
     AP_ITEM_CHECKBOX_FILLER_TOPRIDE,
     AP_ITEM_CHECKBOX_FILLER_CITYTRIAL,
-    AP_ITEM_PROGRESSIVE_STADIUM,
     AP_ITEM_PATCH_CAP_INCREASE,
     AP_ITEM_1_HP_TRAP,
+    AP_ITEM_METEOR_TRAP,
     AP_ITEM_PERM_PATCH_ALL_UP,
     AP_ITEM_ALL_UP,
     AP_ITEM_ALL_DOWN,
+    AP_ITEM_GIVE_DRAGOON,
+    AP_ITEM_GIVE_HYDRA,
+    AP_ITEM_EVENT_CUSTOM,
+    AP_ITEM_AIRRIDE_SPEED_BOOST,
 
     // Permanent +1 patch items (100-199, aligned to PatchKind)
     AP_PERM_PATCH_BASE = 100,
@@ -253,8 +255,8 @@ typedef enum APItemId
     AP_STAGE_UNLOCK_AIRRIDE_BASE = 870,
 
     // Kirby color unlock items (880-887, aligned to KirbyColor)
-    // Pink (0) has no unlock item — it's always available.
     AP_COLOR_UNLOCK_BASE = 880,
+    AP_COLOR_UNLOCK_PINK = 880,         // KIRBYCOLOR_PINK
     AP_COLOR_UNLOCK_YELLOW = 881,       // KIRBYCOLOR_YELLOW
     AP_COLOR_UNLOCK_BLUE,               // KIRBYCOLOR_BLUE
     AP_COLOR_UNLOCK_RED,                // KIRBYCOLOR_RED
@@ -271,11 +273,9 @@ typedef enum APItemId
 
 } APItemId;
 
-// ==========================================================================
 // AP Slot Options
 // Written by the Python client to ArchipelagoData on connect, then copied
 // to save data once. All fields are u32 for 4-byte alignment (atomic on PPC).
-// ==========================================================================
 
 typedef enum GoalKind
 {
@@ -329,6 +329,8 @@ typedef struct KARSave
     u32 topride_item_unlocked_mask;                     // Bitmask of AP-unlocked Top Ride items (bit N = TopRideItemKind N)
     u8 color_unlocked_mask;                             // Bitmask of AP-unlocked Kirby colors (bit N = KirbyColor N)
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
+    u8 airride_speed_boost_count;                       // Number of Air Ride speed boost items received
+    u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-18)
     u8 rewards_shuffled;                                // Nonzero if reward tables have been shuffled and saved
     u8 options_received;                                // Nonzero if AP slot options have been saved
     u16 shuffled_airride_rewards[REWARD_COUNT_AIRRIDE];     // Saved location assignment for Air Ride: (target_mode << 8) | clear_kind
@@ -347,8 +349,8 @@ typedef struct KARSave
 // All fields are 4-byte aligned. Reads/writes are atomic on PPC at this alignment.
 //
 // Layout (offsets relative to struct base):
-//   0x000  float    energy_give               — game writes, client reads and clears
-//   0x004  float    energy_receive            — client writes, game reads and clears
+//   0x000  float    energy_balance             — client writes current pool total, game reads
+//   0x004  float    energy_send               — game writes (positive=deposit, negative=withdraw), client reads and clears
 //   0x008  u32      deathlink_receive         — client writes, game reads and clears
 //   0x00C  u32      deathlink_send            — game writes, client reads and clears
 //   0x010  u32      traplink_receive          — client writes, game reads and clears
@@ -365,8 +367,8 @@ typedef struct KARSave
 //   0x15A  (end, total 346 bytes)
 typedef struct ArchipelagoData
 {
-    float energy_give;
-    float energy_receive;
+    float energy_balance;
+    float energy_send;
     uint deathlink_receive;
     uint deathlink_send;
     uint traplink_receive;
@@ -395,6 +397,7 @@ typedef struct APMenuSettings
 {
     int deathlink_enabled;
     int energylink_enabled;
+    int energylink_autocharge;
     int traplink_enabled;
     int textbox_enabled;
     int weather_control;

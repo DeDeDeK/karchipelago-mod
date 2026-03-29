@@ -7,6 +7,9 @@
 #include "gate_machines.h"
 #include "textbox.h"
 
+static int IsCKindUnlocked(CharacterKind ckind);
+CharacterKind GateMachines_GetDefaultCKind();
+
 static const char *machine_names[VCKIND_NUM] = {
     [VCKIND_WARP]           = "Warp Star",
     [VCKIND_COMPACT]        = "Compact Star",
@@ -75,17 +78,18 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
             unlocked_count++;
     }
 
-    // Modify spawn chances based on unlock state
-    if (unlocked_count > 0)
+    // Zero locked machines, give unlocked-but-zero-weight machines a base chance
+    for (int i = 0; i < VCKIND_NUM; i++)
     {
-        for (int i = 0; i < VCKIND_NUM; i++)
-        {
-            if (!(unlocked_mask & (1 << i)))
-                spawn_chances[i] = 0;          // locked: zero out
-            else if (spawn_chances[i] == 0)
-                spawn_chances[i] = 10;         // unlocked but zero weight: give base chance
-        }
+        if (!(unlocked_mask & (1 << i)))
+            spawn_chances[i] = 0;          // locked: zero out
+        else if (spawn_chances[i] == 0)
+            spawn_chances[i] = 10;         // unlocked but zero weight: give base chance
     }
+
+    // No machines unlocked — return Compact Star as a safe fallback
+    if (unlocked_count == 0)
+        return VCKIND_COMPACT;
 
     // Reduce history size when few machines are available to prevent
     // the only unlocked machine from being excluded by its own history
@@ -102,7 +106,7 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
     }
 
     // Weighted random selection
-    int machine_kind = 0;
+    int machine_kind = VCKIND_COMPACT;
     float chance_total = 0;
     for (int i = 0; i < VCKIND_NUM; i++)
         chance_total += spawn_chances[i];
@@ -160,6 +164,21 @@ void GateMachines_FilterSelectList()
     }
 
     gd->city_select_ply.machine_select.num = write;
+
+    // City Trial mode 0: fix the initial ply_icon_ckind for all players.
+    // CitySelect_LoadCityTrial hardcodes it to CKIND_COMPACT (0); override
+    // with the correct default so the CSS icon matches the starting machine.
+    // Note: Gm_GetCityMode() reads GameData[0x399] which isn't set during CSS;
+    // use city_select_ply.x1d0 (GameData[0x1D0]) which is set by the CSS loader.
+    if (gd->city_select_ply.x1d0 == CITYMODE_TRIAL)
+    {
+        CharacterKind default_ckind = GateMachines_GetDefaultCKind();
+        for (int i = 0; i < 4; i++)
+        {
+            if (!IsCKindUnlocked(gd->city_select_ply.ply_icon_ckind[i]))
+                gd->city_select_ply.ply_icon_ckind[i] = default_ckind;
+        }
+    }
 }
 
 // Replace the spawn selection in CityMachineSpawn_DecideAndSpawn (0x801defac).
@@ -183,10 +202,6 @@ CODEPATCH_HOOKCREATE(0x801df44c,
     "mr 31, 3\n\t",
     0x801df630
 )
-
-// ==========================================================================
-// City Trial Free Run — Select Screen Gating
-// ==========================================================================
 
 // Check if a CharacterKind's machine is unlocked.
 static int IsCKindUnlocked(CharacterKind ckind)
@@ -291,9 +306,91 @@ CODEPATCH_HOOKCREATE(0x8002e738,
     0x8002e820
 )
 
-// ==========================================================================
-// Air Ride Mode — Select Screen Gating
-// ==========================================================================
+// Get the first unlocked MachineKind, or VCKIND_COMPACT as absolute fallback.
+static MachineKind GetFirstUnlockedMachine()
+{
+    u32 mask = save_data->machine_unlocked_mask;
+    for (int i = 0; i < VCKIND_NUM; i++)
+    {
+        if (mask & (1 << i))
+            return i;
+    }
+    return VCKIND_COMPACT;
+}
+
+// Get the default CharacterKind for City Trial mode 0.
+// Prefers Compact Star (vanilla default); falls back to a random unlocked machine.
+CharacterKind GateMachines_GetDefaultCKind()
+{
+    if (IsCKindUnlocked(CKIND_COMPACT))
+        return CKIND_COMPACT;
+
+    // Build list of unlocked CKinds and pick one at random
+    CharacterKind unlocked[CKIND_NUM];
+    int count = 0;
+    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
+    {
+        if (IsCKindUnlocked(ckind))
+            unlocked[count++] = ckind;
+    }
+
+    if (count > 0)
+    {
+        CharacterKind chosen = unlocked[HSD_Randi(count)];
+        OSReport("GateMachines_GetDefaultCKind: Compact locked, chose ckind %d from %d unlocked (mask=0x%08x)\n",
+                 chosen, count, save_data->machine_unlocked_mask);
+        return chosen;
+    }
+
+    OSReport("GateMachines_GetDefaultCKind: no machines unlocked, fallback to Compact\n");
+    return CKIND_COMPACT;
+}
+
+// Replace the respawn machine assignment in Rider_ResetStartingMachine.
+// Vanilla hardcodes VCKIND_COMPACT; we use the rider's starting_machine_idx
+// if unlocked, otherwise the first unlocked machine.
+void GateMachines_ResetStartingMachine(RiderData *rd)
+{
+    u8 ply = rd->ply;
+    MachineKind vckind = rd->starting_machine_idx;
+
+    if (!(save_data->machine_unlocked_mask & (1 << vckind)))
+        vckind = GetFirstUnlockedMachine();
+
+    if (vckind >= VCKIND_WHEELNORMAL)
+    {
+        Ply_SetMachineIsBike(ply, 1);
+        Ply_SetMachineKind(ply, vckind - VCKIND_WHEELNORMAL);
+    }
+    else
+    {
+        Ply_SetMachineIsBike(ply, 0);
+        Ply_SetMachineKind(ply, vckind);
+    }
+}
+
+// Hook at 0x8002de80 in CitySelect_InitPlayerMachines.
+// Vanilla hardcodes ply_icon_ckind = 0 (CKIND_COMPACT) for City Trial mode 0.
+// We replace it with the first unlocked CharacterKind so players start on an
+// unlocked machine. r28 = city_select_ply + player_offset (callee-saved).
+// Skipped instructions: stb r0,97(r28) and b 0x8002dea0 — we handle both.
+CODEPATCH_HOOKCREATE(0x8002de80,
+    "",
+    GateMachines_GetDefaultCKind,
+    "stb 3, 97(28)\n\t",
+    0x8002dea0
+)
+
+// Hook at 0x801952c8 in Rider_ResetStartingMachine.
+// At entry: r31 = RiderData*. Replaces the two Ply_Set calls (is_bike=0,
+// machine_kind=COMPACT) with our validated selection.
+// Skip to 0x801952e0: the function epilogue.
+CODEPATCH_HOOKCREATE(0x801952c8,
+    "mr 3, 31\n\t",
+    GateMachines_ResetStartingMachine,
+    "",
+    0x801952e0
+)
 
 // Replace AirRide_CheckCharacterAvailable (0x8002090c).
 // Called from AirRide_PopulateSelectIcons (0x80020a08) to determine which
@@ -355,7 +452,13 @@ void GateMachines_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8002e5c0);  // mode 2 counting pass
     CODEPATCH_HOOKAPPLY(0x8002e738);  // mode 2 array-building pass
 
-    OSReport("Machine gating hooks installed (CT spawn + CT Stadium + CT Free Run + AR select)\n");
+    // City Trial mode 0: replace hardcoded Compact Star default with first unlocked machine
+    CODEPATCH_HOOKAPPLY(0x8002de80);
+
+    // Respawn machine validation: use starting machine instead of hardcoded Compact
+    CODEPATCH_HOOKAPPLY(0x801952c8);
+
+    OSReport("Machine gating hooks installed (CT spawn + CT mode 0 default + CT Stadium + CT Free Run + AR select + respawn)\n");
 }
 
 int GateMachines_UnlockMachine(MachineKind kind)
@@ -368,4 +471,42 @@ int GateMachines_UnlockMachine(MachineKind kind)
              kind, machine_names[kind], save_data->machine_unlocked_mask);
     TextBox_Enqueue(machine_names[kind]);
     return 1;
+}
+
+// Give a player the assembled legendary machine via the cinematic.
+// machine_index: 0 = Dragoon, 1 = Hydra.
+// Returns 1 if started, 0 if not in City Trial or no machine to swap from.
+int GateMachines_GiveLegendaryMachine(int machine_index)
+{
+    if (!Gm_IsInCity())
+        return 0;
+
+    int given = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) != PKIND_HMN)
+            continue;
+
+        GOBJ *machine_gobj = Ply_GetMachineGObj(i);
+        if (!machine_gobj)
+            continue;
+
+        MachineData *md = (MachineData *)machine_gobj->userdata;
+        if (!md)
+            continue;
+
+        LegendaryAssemblyParams params;
+        params.machine_index = machine_index;
+        params.ply = i;
+        params.pos = md->pos;
+        params.up = md->up;
+        params.forward = md->forward;
+
+        LegendaryMachine_StartAssembly(&params);
+        OSReport("Legendary machine %s assembly started for player %d\n",
+                 machine_index == 0 ? "Dragoon" : "Hydra", i);
+        given = 1;
+    }
+
+    return given;
 }
