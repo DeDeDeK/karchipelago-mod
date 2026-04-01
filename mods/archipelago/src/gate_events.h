@@ -4,6 +4,7 @@
 #include "event.h"
 
 void GateEvents_OnBoot();
-int GateEvents_UnlockEvent(EventKind kind);
+void GateEvents_LogEnabledEvents(void);
+int GateEvents_UnlockEvent(int kind);
 
 #endif

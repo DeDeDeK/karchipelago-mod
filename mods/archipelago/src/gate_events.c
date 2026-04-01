@@ -4,6 +4,7 @@
 
 #include "main.h"
 #include "gate_events.h"
+#include "custom_events.h"
 #include "textbox.h"
 
 static const char *event_names[EVKIND_NUM] = {
@@ -51,8 +52,17 @@ void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
     // larger than the number of enabled events, no event can ever trigger.
     // Cap history at ~62.5% of enabled events (matches KAR Deluxe formula).
     int max_history = (enabled_count * 5) / 8;
+    int old_history = ev_chk->prev_kind_num;
     if (ev_chk->prev_kind_num > max_history)
         ev_chk->prev_kind_num = max_history;
+
+    OSReport("[Events] CityEvent_Decide called: mask=0x%04X, enabled=%d, history=%d->%d\n",
+             mask, enabled_count, old_history, ev_chk->prev_kind_num);
+    for (int i = 0; i < EVKIND_NUM; i++)
+    {
+        if (chance_arr[i] > 0)
+            OSReport("  [%2d] %s: weight=%d\n", i, event_names[i], chance_arr[i]);
+    }
 }
 
 // Hook at 0x800ede24 in CityEvent_Decide.
@@ -68,20 +78,43 @@ CODEPATCH_HOOKCREATE(0x800ede24,
     0
 )
 
+void GateEvents_LogEnabledEvents(void)
+{
+    u32 mask = save_data->event_unlocked_mask;
+    OSReport("[Events] Enabled events (mask=0x%05X):\n", mask);
+    for (int i = 0; i < EVKIND_NUM; i++)
+    {
+        if (mask & (1 << i))
+            OSReport("  [%2d] %s\n", i, event_names[i]);
+    }
+    for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
+    {
+        int bit = EVKIND_NUM + i;
+        OSReport("  [%2d] %s: %s\n", bit, custom_event_names[i],
+                 (mask & (1 << bit)) ? "enabled" : "disabled");
+    }
+}
+
 void GateEvents_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800ede24);
     OSReport("Event gating hook installed at CityEvent_Decide\n");
 }
 
-int GateEvents_UnlockEvent(EventKind kind)
+int GateEvents_UnlockEvent(int kind)
 {
-    if (kind >= EVKIND_NUM)
+    const char *name;
+
+    if (kind < EVKIND_NUM)
+        name = event_names[kind];
+    else if (kind < CUSTOM_EVKIND_NUM)
+        name = custom_event_names[kind - EVKIND_NUM];
+    else
         return 0;
 
     save_data->event_unlocked_mask |= (1 << kind);
-    OSReport("Event %d (%s) unlocked (mask = 0x%04x)\n",
-             kind, event_names[kind], save_data->event_unlocked_mask);
-    TextBox_Enqueue(event_names[kind]);
+    OSReport("Event %d (%s) unlocked (mask = 0x%05x)\n",
+             kind, name, save_data->event_unlocked_mask);
+    TextBox_Enqueue(name);
     return 1;
 }

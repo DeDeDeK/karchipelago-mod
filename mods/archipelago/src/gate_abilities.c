@@ -79,6 +79,8 @@ static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_n
 // populate the spawn tables. Removes locked copy abilities from all item pools.
 void GateAbilities_FilterSpawnTables()
 {
+    OSReport("[SpawnFilter] FilterSpawnTables called (GrKind=%d, StageKind=%d)\n",
+             Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
     if (!obj)
         return;
@@ -442,6 +444,16 @@ void GateAbilities_On3DLoadEnd()
         return;
 
     FilterEnemySpawnWeights();
+
+    // For stadium modes, the CityItemSpawn system doesn't run its init path
+    // (CityItemSpawn_InitItemFallChances), so our hooks at 0x800eb558/0x800ed7f0
+    // never fire. Filter the spawn tables here if grBoxGeneObj exists.
+    if (*stc_grBoxGeneObj)
+    {
+        OSReport("[SpawnFilter] Filtering spawn tables for stadium (GrKind=%d)\n",
+                 Gm_GetCurrentGrKind());
+        GateAbilities_FilterSpawnTables();
+    }
 }
 
 void GateAbilities_OnBoot()

@@ -406,7 +406,10 @@ void On3DLoadEnd()
 
     // Initialize custom event SIS text entries when in City Trial
     if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
+    {
         CustomEvents_InitSis();
+        GateEvents_LogEnabledEvents();
+    }
 
     GateAbilities_On3DLoadEnd();
     PermanentPatch_On3DLoadEnd();

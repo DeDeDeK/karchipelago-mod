@@ -3,6 +3,8 @@
 #include "inline.h"
 #include "text.h"
 #include "audio.h"
+#include "stage.h"
+#include "code_patch/code_patch.h"
 
 #include "main.h"
 #include "custom_events.h"
@@ -12,12 +14,19 @@
 
 #define SIS_CITYTRIAL_ENTRY_COUNT 42
 
+const char *custom_event_names[CUSTOM_EVENT_COUNT] = {
+    [CUSTOM_EVKIND_TEST - EVKIND_NUM]            = "Waddle Dee Swarm",
+    [CUSTOM_EVKIND_GRAVITY_CHANGE - EVKIND_NUM]   = "Gravity Change",
+    [CUSTOM_EVKIND_SCALE_CHANGE - EVKIND_NUM]     = "Scale Change",
+};
+
 static CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
     [CUSTOM_EVKIND_TEST - EVKIND_NUM] = {
         .duration = 600,   // ~10 seconds
         .is_siren = 1,
         .sky_preset = 5,   // Dark Vignette
         .bgm_file = 0x34,  // Runamok BGM
+        .weight = 20,
         .name = "Waddle Dee swarm incoming!",
     },
     [CUSTOM_EVKIND_GRAVITY_CHANGE - EVKIND_NUM] = {
@@ -25,6 +34,7 @@ static CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 8,   // Pink Sky
         .bgm_file = 0x31,  // Meteor BGM
+        .weight = 20,
         .name = "Gravity is changing!",
     },
     [CUSTOM_EVKIND_SCALE_CHANGE - EVKIND_NUM] = {
@@ -32,6 +42,7 @@ static CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 3,   // Dusk 2
         .bgm_file = 0x32,  // Dyna Blade BGM
+        .weight = 20,
         .name = "The world is growing!",
     },
 };
@@ -167,6 +178,8 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
 {
     if (ev_chk->cur_kind < EVKIND_NUM)
     {
+        if (ev_chk->timer == 0)
+            OSReport("[Events] Vanilla event %d started (state 1)\n", ev_chk->cur_kind);
         orig_state1(ev_chk);
         return;
     }
@@ -275,6 +288,67 @@ static void CustomEvent_State3Wrapper(EventCheckData *ev_chk)
     OSReport("Custom event cleanup complete, next delay = %d frames\n", delay);
 }
 
+// Replaces the Gm_Roll(chance_arr, 16) call inside CityEvent_Decide at 0x800ee098.
+// Extends the roll to include custom events alongside vanilla events.
+// If a custom event wins the roll, triggers it via CustomEvent_Do and returns -1
+// to vanilla code (which interprets -1 as "no event selected, set new delay").
+static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
+{
+    // Sum vanilla weights (already filtered by gate + history + once-only)
+    int vanilla_total = 0;
+    for (int i = 0; i < count; i++)
+        vanilla_total += chance_arr[i];
+
+    // Sum custom event weights (gated by unlock mask)
+    u32 mask = save_data->event_unlocked_mask;
+    int custom_weights[CUSTOM_EVENT_COUNT];
+    int custom_total = 0;
+    for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
+    {
+        int bit = EVKIND_NUM + i;
+        custom_weights[i] = (mask & (1 << bit)) ? custom_params[i].weight : 0;
+        custom_total += custom_weights[i];
+    }
+
+    int grand_total = vanilla_total + custom_total;
+    if (grand_total == 0)
+        return -1;
+
+    int roll = HSD_Randi(grand_total);
+
+    if (roll < vanilla_total)
+    {
+        // Vanilla event won — delegate to Gm_Roll for proper weighted selection
+        int result = Gm_Roll(chance_arr, count);
+        OSReport("[Events] ExtendedRoll: vanilla event %d (roll=%d, vanilla=%d, custom=%d)\n",
+                 result, roll, vanilla_total, custom_total);
+        return result;
+    }
+
+    // Custom event won — find which one
+    roll -= vanilla_total;
+    for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
+    {
+        roll -= custom_weights[i];
+        if (roll < 0)
+        {
+            int kind = EVKIND_NUM + i;
+            if (CustomEvent_Do(kind))
+            {
+                OSReport("[Events] ExtendedRoll: custom event %d (%s) selected (vanilla=%d, custom=%d)\n",
+                         kind, custom_event_names[i], vanilla_total, custom_total);
+                return -1;
+            }
+            // CustomEvent_Do failed (e.g. another event active) — fall back to vanilla
+            OSReport("[Events] ExtendedRoll: custom event %d failed, falling back to vanilla\n", kind);
+            return Gm_Roll(chance_arr, count);
+        }
+    }
+
+    // Should not reach here
+    return Gm_Roll(chance_arr, count);
+}
+
 void CustomEvents_OnBoot(void)
 {
     // Replace state handler function pointers in the dispatch table.
@@ -289,7 +363,12 @@ void CustomEvents_OnBoot(void)
     state_table[2] = CustomEvent_State2Wrapper;
     state_table[3] = CustomEvent_State3Wrapper;
 
+    // Replace Gm_Roll call in CityEvent_Decide with extended roll
+    // that includes custom events in the selection pool.
+    CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll);
+
     OSReport("Custom event state handler wrappers installed\n");
+    OSReport("Custom event extended roll installed at CityEvent_Decide+0x3A0\n");
 }
 
 int CustomEvent_Do(int kind)

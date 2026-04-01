@@ -22,6 +22,7 @@ typedef struct CustomEventParam
     int is_siren;     // play siren + fade music + change sky
     int sky_preset;   // sky transition (-1 = no change)
     int bgm_file;     // secondary BGM file index (0 = no music)
+    int weight;       // selection weight for natural occurrence (0 = never naturally occurs)
     const char *name; // HUD display name
 } CustomEventParam;
 
@@ -33,6 +34,9 @@ typedef struct CustomEventFunc
     void (*end2)(EventCheckData *ev_chk);
     int (*check)(EventCheckData *ev_chk);
 } CustomEventFunc;
+
+// Names of custom events (indexed by kind - EVKIND_NUM).
+extern const char *custom_event_names[CUSTOM_EVENT_COUNT];
 
 // Called from OnBoot to install state handler wrappers.
 void CustomEvents_OnBoot(void);

@@ -8,12 +8,12 @@
 
 static const char *airride_stage_names[AIRRIDE_NUM] = {
     [AIRRIDE_FANTASY_MEADOWS]  = "Fantasy Meadows",
-    [AIRRIDE_CELESTIAL_VALLEY] = "Celestial Valley",
-    [AIRRIDE_FROZEN_HILLSIDE]  = "Frozen Hillside",
     [AIRRIDE_MAGMA_FLOWS]      = "Magma Flows",
-    [AIRRIDE_BEANSTALK_PARK]   = "Beanstalk Park",
-    [AIRRIDE_MACHINE_PASSAGE]  = "Machine Passage",
     [AIRRIDE_SKY_SANDS]        = "Sky Sands",
+    [AIRRIDE_FROZEN_HILLSIDE]  = "Frozen Hillside",
+    [AIRRIDE_BEANSTALK_PARK]   = "Beanstalk Park",
+    [AIRRIDE_CELESTIAL_VALLEY] = "Celestial Valley",
+    [AIRRIDE_MACHINE_PASSAGE]  = "Machine Passage",
     [AIRRIDE_CHECKER_KNIGHTS]  = "Checker Knights",
     [AIRRIDE_NEBULA_BELT]      = "Nebula Belt",
 };
@@ -22,11 +22,14 @@ static const char *airride_stage_names[AIRRIDE_NUM] = {
 // The vanilla function only checks stage_kind 8 (Nebula Belt) against the
 // checklist. Our replacement checks ALL stages against the AP unlock mask.
 // Returns 1 if the stage is unlocked, 0 if locked.
-// Stage kinds outside 0-8 (e.g., 9 = random button) return 1 (always available).
+// Stage kind 9 (random button) is only available if at least one stage is unlocked,
+// to prevent a soft-lock in AirRide_RandomStageSelect when no candidates exist.
 int GateAirRideStages_CheckCourseUnlocked(s8 stage_kind)
 {
-    if (stage_kind < 0 || stage_kind >= AIRRIDE_NUM)
-        return 1;
+    if (stage_kind < 0)
+        return 0;
+    if (stage_kind >= AIRRIDE_NUM)
+        return save_data->airride_stage_unlocked_mask != 0 ? 1 : 0;
     return (save_data->airride_stage_unlocked_mask & (1 << stage_kind)) ? 1 : 0;
 }
 

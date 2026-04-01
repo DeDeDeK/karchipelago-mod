@@ -108,38 +108,43 @@ int GateColors_GetRandomUnlockedColor(int unused)
     return result;
 }
 
-// Hook for CSS_airRide_colorChanger (0x80021654).
-// At 0x80021704 (cmpwi r0, 0): reached for colors 0-3 only.
-// Clobbered instruction is the cmpwi (only sets CR, doesn't touch r3).
-// r23 = current color index being tested.
-// Result expected in r3; convergence at 0x8002176c checks r3.
-CODEPATCH_HOOKCREATE(0x80021704,
-    "extsb 3, 23\n\t",
-    GateColors_IsColorUnlocked,
+// Filter the availability result at the convergence point of each CSS
+// color changer. All code paths (colors 0-3 hardcoded, colors 4-7
+// checklist) merge here. We AND the vanilla result with our mask.
+static int GateColors_FilterResult(int vanilla_result, int color_idx)
+{
+    (void)vanilla_result;
+    return GateColors_IsColorUnlocked(color_idx) ? 1 : 0;
+}
+
+// Hook for CSS_airRide_colorChanger convergence (0x8002176c).
+// Clobbered: extsb. r0, r3. r23 = candidate color, r3 = vanilla result.
+// All color paths (0-3 hardcoded available, 4-7 checklist) land here.
+CODEPATCH_HOOKCREATE(0x8002176c,
+    "extsb 4, 23\n\t",
+    GateColors_FilterResult,
     "",
-    0x8002176c
+    0
 )
 
-// Hook for CSS_topRide_colorChanger (0x8002a400).
-// At 0x8002a4b0 (cmpwi r0, 0): reached for colors 0-3 only.
-// r23 = current color index.
-// Result expected in r0; convergence at 0x8002a510 checks r0.
-CODEPATCH_HOOKCREATE(0x8002a4b0,
-    "extsb 3, 23\n\t",
-    GateColors_IsColorUnlocked,
+// Hook for CSS_topRide_colorChanger convergence (0x8002a510).
+// Clobbered: extsb. r0, r0. r23 = candidate color, r0 = vanilla result.
+// Need to pass r0 as first arg and get result back in r0.
+CODEPATCH_HOOKCREATE(0x8002a510,
+    "mr 3, 0\n\t"
+    "extsb 4, 23\n\t",
+    GateColors_FilterResult,
     "mr 0, 3\n\t",
-    0x8002a510
+    0
 )
 
-// Hook for CitySelect_ChangeColor (0x8002f238).
-// At 0x8002f2e8 (cmpwi r0, 0): reached for colors 0-3 only.
-// r30 = current color index.
-// Result expected in r3; convergence at 0x8002f350 checks r3.
-CODEPATCH_HOOKCREATE(0x8002f2e8,
-    "extsb 3, 30\n\t",
-    GateColors_IsColorUnlocked,
+// Hook for CitySelect_ChangeColor convergence (0x8002f350).
+// Clobbered: extsb. r0, r3. r30 = candidate color, r3 = vanilla result.
+CODEPATCH_HOOKCREATE(0x8002f350,
+    "extsb 4, 30\n\t",
+    GateColors_FilterResult,
     "",
-    0x8002f350
+    0
 )
 
 // Hook for machine-lookup color assignment in zz_80028888_ (Air Ride CSS).
@@ -219,9 +224,9 @@ CODEPATCH_HOOKCREATE(0x80029e34,
 
 void GateColors_OnBoot()
 {
-    CODEPATCH_HOOKAPPLY(0x80021704);
-    CODEPATCH_HOOKAPPLY(0x8002a4b0);
-    CODEPATCH_HOOKAPPLY(0x8002f2e8);
+    CODEPATCH_HOOKAPPLY(0x8002176c);
+    CODEPATCH_HOOKAPPLY(0x8002a510);
+    CODEPATCH_HOOKAPPLY(0x8002f350);
 
     // Air Ride CPU color: replace all HSD_Randi calls that assign random
     // colors to CPU slots. Three call sites across different CSS functions.

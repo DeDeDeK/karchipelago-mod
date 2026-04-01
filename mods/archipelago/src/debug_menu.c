@@ -15,13 +15,14 @@
 #include "gate_items.h"
 #include "gate_topride_items.h"
 #include "gate_colors.h"
+#include "custom_events.h"
 
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
 
 static int machine_state[VCKIND_NUM];
 static int ability_state[COPYKIND_NUM];
-static int event_state[EVKIND_NUM];
+static int event_state[CUSTOM_EVKIND_NUM];
 static int patch_state[PATCHKIND_NUM];
 static int item_state[ITUNLOCK_NUM];
 static int box_state[BOXKIND_NUM];
@@ -37,12 +38,14 @@ static int stadium_state[STKIND_NUM];
         type m = 0; \
         for (int i = 0; i < (count); i++) \
             if (arr[i]) m |= ((type)1 << i); \
+        if (save_data->field != m) \
+            OSReport("[Debug] " #field " = 0x%X\n", (u32)m); \
         save_data->field = m; \
     }
 
 DEF_SYNC(SyncMachines,  u32, machine_unlocked_mask,       machine_state,  VCKIND_NUM)
 DEF_SYNC(SyncAbilities, u16, ability_unlocked_mask,        ability_state,  COPYKIND_NUM)
-DEF_SYNC(SyncEvents,    u32, event_unlocked_mask,          event_state,    EVKIND_NUM)
+DEF_SYNC(SyncEvents,    u32, event_unlocked_mask,          event_state,    CUSTOM_EVKIND_NUM)
 DEF_SYNC(SyncPatches,   u16, patch_unlocked_mask,          patch_state,    PATCHKIND_NUM)
 DEF_SYNC(SyncItems,     u32, item_unlocked_mask,           item_state,     ITUNLOCK_NUM)
 DEF_SYNC(SyncBoxes,     u8,  box_unlocked_mask,            box_state,      BOXKIND_NUM)
@@ -54,6 +57,7 @@ DEF_SYNC(SyncStadiums,  u32, stadium_unlocked_mask,        stadium_state,  STKIN
 
 void DebugMenu_ApplyToSave(void)
 {
+    OSReport("[Debug] ApplyToSave: syncing all gate masks\n");
     SyncMachines(0);
     SyncAbilities(0);
     SyncEvents(0);
@@ -73,19 +77,21 @@ void DebugMenu_ApplyToSave(void)
             save_data->field |= ((type)1 << i); \
             arr[i] = 1; \
         } \
+        OSReport("[Debug] Unlock all " label ": " #field " = 0x%X\n", (u32)save_data->field); \
         TextBox_Enqueue("All " label " unlocked"); \
         return 1; \
     } \
     static int prefix##LockAll(void) { \
         save_data->field = 0; \
         for (int i = 0; i < (count); i++) arr[i] = 0; \
+        OSReport("[Debug] Lock all " label ": " #field " = 0x0\n"); \
         TextBox_Enqueue("All " label " locked"); \
         return 1; \
     }
 
 DEF_ALL(Mch, u32, machine_unlocked_mask,       machine_state,  VCKIND_NUM,       "machines")
 DEF_ALL(Abl, u16, ability_unlocked_mask,        ability_state,  COPYKIND_NUM,     "abilities")
-DEF_ALL(Evt, u32, event_unlocked_mask,          event_state,    EVKIND_NUM,       "events")
+DEF_ALL(Evt, u32, event_unlocked_mask,          event_state,    CUSTOM_EVKIND_NUM, "events")
 DEF_ALL(Pch, u16, patch_unlocked_mask,          patch_state,    PATCHKIND_NUM,    "patch types")
 DEF_ALL(Itm, u32, item_unlocked_mask,           item_state,     ITUNLOCK_NUM,     "items")
 DEF_ALL(Box, u8,  box_unlocked_mask,            box_state,      BOXKIND_NUM,      "boxes")
@@ -97,9 +103,12 @@ DEF_ALL(Std, u32, stadium_unlocked_mask,        stadium_state,  STKIND_NUM,     
 
 #define GIVE_FN(name, id) \
     static int name(void) { \
-        if (save_data->unprocessed_count >= MAX_RECEIVED_ITEMS) \
+        if (save_data->unprocessed_count >= MAX_RECEIVED_ITEMS) { \
+            OSReport("[Debug] Give item " #id " (%d) failed: queue full\n", id); \
             return 1; \
+        } \
         save_data->unprocessed_items[save_data->unprocessed_count++] = id; \
+        OSReport("[Debug] Give item " #id " (%d), queue count = %d\n", id, save_data->unprocessed_count); \
         return 1; \
     }
 
@@ -267,7 +276,7 @@ static MenuDesc abilities_menu = {
 };
 
 static MenuDesc events_menu = {
-    .option_num = 18,
+    .option_num = 21,
     .options = {
         A("Unlock All", "Unlock all events", EvtUnlockAll),
         A("Lock All",   "Lock all events",   EvtLockAll),
@@ -287,6 +296,9 @@ static MenuDesc events_menu = {
         G("Bounce",             event_state, EVKIND_BOUNCE,           SyncEvents),
         G("Fog",                event_state, EVKIND_FOG,              SyncEvents),
         G("Fake Powerups",      event_state, EVKIND_FAKEPOWERUPS,     SyncEvents),
+        G("Waddle Dee Swarm",   event_state, CUSTOM_EVKIND_TEST,           SyncEvents),
+        G("Gravity Change",     event_state, CUSTOM_EVKIND_GRAVITY_CHANGE, SyncEvents),
+        G("Scale Change",       event_state, CUSTOM_EVKIND_SCALE_CHANGE,   SyncEvents),
     },
 };
 
@@ -363,12 +375,12 @@ static MenuDesc ar_stages_menu = {
         A("Unlock All", "Unlock all AR stages", ArsUnlockAll),
         A("Lock All",   "Lock all AR stages",   ArsLockAll),
         G("Fantasy Meadows",  ar_stage_state, AIRRIDE_FANTASY_MEADOWS,  SyncARStages),
-        G("Celestial Valley", ar_stage_state, AIRRIDE_CELESTIAL_VALLEY, SyncARStages),
-        G("Frozen Hillside",  ar_stage_state, AIRRIDE_FROZEN_HILLSIDE,  SyncARStages),
         G("Magma Flows",      ar_stage_state, AIRRIDE_MAGMA_FLOWS,      SyncARStages),
-        G("Beanstalk Park",   ar_stage_state, AIRRIDE_BEANSTALK_PARK,   SyncARStages),
-        G("Machine Passage",  ar_stage_state, AIRRIDE_MACHINE_PASSAGE,  SyncARStages),
         G("Sky Sands",        ar_stage_state, AIRRIDE_SKY_SANDS,        SyncARStages),
+        G("Frozen Hillside",  ar_stage_state, AIRRIDE_FROZEN_HILLSIDE,  SyncARStages),
+        G("Beanstalk Park",   ar_stage_state, AIRRIDE_BEANSTALK_PARK,   SyncARStages),
+        G("Celestial Valley", ar_stage_state, AIRRIDE_CELESTIAL_VALLEY, SyncARStages),
+        G("Machine Passage",  ar_stage_state, AIRRIDE_MACHINE_PASSAGE,  SyncARStages),
         G("Checker Knights",  ar_stage_state, AIRRIDE_CHECKER_KNIGHTS,  SyncARStages),
         G("Nebula Belt",      ar_stage_state, AIRRIDE_NEBULA_BELT,      SyncARStages),
     },

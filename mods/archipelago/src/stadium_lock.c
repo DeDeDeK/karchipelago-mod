@@ -121,27 +121,55 @@ void StadiumLock_DecideStadium()
 // Replacement for both Gm_StadiumIsDefaultUnlocked and Gm_StadiumIsUnlocked.
 // Checks our save mask directly — the game's internal bitfield and checklist
 // system are completely bypassed.
+static u32 stl_last_logged_mask = 0xDEADBEEF;
+
 static int StadiumLock_IsUnlocked(StadiumKind kind)
 {
     if (!save_data || kind < 0 || kind >= STKIND_NUM)
         return 0;
-    return (save_data->stadium_unlocked_mask & (1 << kind)) != 0;
+    u32 mask = save_data->stadium_unlocked_mask;
+    if (mask != stl_last_logged_mask)
+    {
+        OSReport("[Stadium] IsUnlocked called, mask=0x%08X (was 0x%08X)\n", mask, stl_last_logged_mask);
+        stl_last_logged_mask = mask;
+    }
+    return (mask & (1 << kind)) != 0;
 }
 
 // Apply patches needed for stadium locking
 void StadiumLock_OnBoot()
 {
     OSReport("Applying stadium lock patches...\n");
-    // Replace all three stadium unlock check functions with our mask check.
+    // Replace all four stadium unlock check functions with our mask check.
     // Gm_StadiumIsDefaultUnlocked (0x8000C148): hardcoded switch for default stadiums.
     // Gm_StadiumIsUnlocked (0x8000C17C): checklist-based check.
+    // Gm_StadiumIsAvailable (0x8000C228): composite check (default + checklist + bitfield).
     // Gm_StadiumCheckUnlocked (0x80007EE4): reads game's internal bitfield at 0x80536EE8.
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsDefaultUnlocked, StadiumLock_IsUnlocked);
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsUnlocked, StadiumLock_IsUnlocked);
+    CODEPATCH_REPLACEFUNC(Gm_StadiumIsAvailable, StadiumLock_IsUnlocked);
     CODEPATCH_REPLACEFUNC(Gm_StadiumCheckUnlocked, StadiumLock_IsUnlocked);
 
     // Replace CityTrial_DecideStadium entirely to fix history buffer overflow
     // and use our AP mask as the sole unlock source.
     CODEPATCH_REPLACEFUNC(CityTrial_DecideStadium, StadiumLock_DecideStadium);
+
+    // Patch CityTrial_BuildStadiumList to remove two vanilla fallback paths
+    // that bypass our mask check:
+    //
+    // 1) Phase 1 auto-unlock loop (0x80046e1c): vanilla checks a progress
+    //    condition and force-unlocks all stadiums via Gm_StadiumWriteUnlocked
+    //    if our mask check returns 0. Always skip this loop.
+    //    Original: blt 0x80046e6c (skip if progress < 3)
+    //    Replace:  b 0x80046e6c (always skip)
+    CODEPATCH_REPLACEINSTRUCTION(0x80046e1c, 0x48000050); // b 0x80046e6c
+
+    // 2) Phase 2 checklist fallback (0x80046ef8): when our mask says locked,
+    //    vanilla falls through to ClearChecker_CheckUnlocked and adds the
+    //    stadium anyway if the checklist says unlocked. Redirect "locked"
+    //    to the next loop iteration instead of the fallback.
+    //    Original: beq 0x80046f44 (if locked -> checklist fallback)
+    //    Replace:  beq 0x80046fc4 (if locked -> next iteration)
+    CODEPATCH_REPLACEINSTRUCTION(0x80046ef8, 0x418200CC); // beq 0x80046fc4
 }
 

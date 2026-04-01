@@ -25,16 +25,25 @@ void WeatherControl_OverrideSky(GrObj *grobj)
     Sky_SetPresetIndex(grobj, preset);
 }
 
-// Hook at 0x8010f1a4: start of the City Trial random selection block in Sky_Init.
-// At this point r30 = grobj, r31 = stage data block.
+// Hook at 0x8010f1a4: start of the City Trial (stage kind 9) random selection
+// block in Sky_Init. At this point r30 = grobj, r31 = stage data block.
 // We handle the entire sky selection and exit past the original setSkyIndex call.
 CODEPATCH_HOOKCREATE(0x8010f1a4,
     "mr 3, 30\n\t",
     WeatherControl_OverrideSky,
     "", 0x8010f1d0);
 
+// Hook at 0x8010f224: City Trial Free Run (stage kind 52) sky init path.
+// Vanilla hardcodes preset 0 (Day). Same register state: r30 = grobj.
+// Exit to 0x8010f230 to skip the vanilla li r4,0 + bl Sky_SetPresetIndex.
+CODEPATCH_HOOKCREATE(0x8010f224,
+    "mr 3, 30\n\t",
+    WeatherControl_OverrideSky,
+    "", 0x8010f230);
+
 void WeatherControl_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x8010f1a4);
-    OSReport("Weather control hook installed at Sky_Init\n");
+    CODEPATCH_HOOKAPPLY(0x8010f224);
+    OSReport("Weather control hooks installed at Sky_Init (Trial + Free Run)\n");
 }
