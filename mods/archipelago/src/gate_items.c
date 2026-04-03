@@ -41,7 +41,6 @@ static const char *item_names[ITUNLOCK_NUM] = {
     [ITUNLOCK_DRAGOON1]         = "Dragoon Piece 1",
     [ITUNLOCK_DRAGOON2]         = "Dragoon Piece 2",
     [ITUNLOCK_DRAGOON3]         = "Dragoon Piece 3",
-    [ITUNLOCK_HP]               = "HP Recovery",
 };
 
 // Map non-patch, non-copy ItemKinds to their individual unlock bit.
@@ -80,7 +79,6 @@ static int ItemKindToUnlockBit(u8 it_kind)
         case ITKIND_DRAGOON1:         return ITUNLOCK_DRAGOON1;
         case ITKIND_DRAGOON2:         return ITUNLOCK_DRAGOON2;
         case ITKIND_DRAGOON3:         return ITUNLOCK_DRAGOON3;
-        case ITKIND_HP:               return ITUNLOCK_HP;
         default:                      return -1;
     }
 }
@@ -131,6 +129,29 @@ void GateItems_FilterSpawnTables()
         obj->subsequent_it_kind,
         obj->subsequent_chance,
         &obj->subsequent_num);
+}
+
+void GateItems_FilterEventDropTables()
+{
+    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
+    if (!info || !info->item_desc)
+        return;
+
+    u32 mask = save_data->item_unlocked_mask;
+
+    for (int i = 0; i < info->item_desc->x18_num; i++)
+    {
+        int bit = ItemKindToUnlockBit(info->item_desc->x18[i].it_kind);
+        if (bit >= 0 && !(mask & (1 << bit)))
+        {
+            info->item_desc->x18[i].chance_misc = 0;
+            info->item_desc->x18[i].chance_tac = 0;
+            info->item_desc->x18[i].chance_meteor = 0;
+            info->item_desc->x18[i].chance_pilar = 0;
+            info->item_desc->x18[i].chance_chamber = 0;
+            info->item_desc->x18[i].chance_ufo = 0;
+        }
+    }
 }
 
 // Disable legendary piece spawns when all pieces of a type are locked.

@@ -1,6 +1,7 @@
 #include "os.h"
 #include "game.h"
 #include "inline.h"
+#include "code_patch/code_patch.h"
 #include "hoshi/settings.h"
 #include "hoshi/mod.h"
 #include "hoshi/func.h"
@@ -181,6 +182,46 @@ ModDesc mod_desc = {
     .OnFrameEnd = OnFrameEnd,
 };
 
+// Central spawn table filter — called from hooks after the game populates
+// item spawn tables (CityItemSpawn_InitItemFallChances, CityEvent_ModifyItemFallDesc).
+// Each gate file filters its own item categories from both box pools and event drop pools.
+void FilterAllSpawnTables()
+{
+    OSReport("[SpawnFilter] FilterAllSpawnTables called (GrKind=%d, StageKind=%d)\n",
+             Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
+
+    // Box spawn pools (grBoxGeneObj)
+    GateAbilities_FilterSpawnTables();
+    GatePatches_FilterSpawnTables();
+    GateItems_FilterSpawnTables();
+
+    // Event drop pools (grBoxGeneInfo — Tac, meteor, pillar, chamber, UFO, misc)
+    GateAbilities_FilterEventDropTables();
+    GatePatches_FilterEventDropTables();
+    GateItems_FilterEventDropTables();
+
+    // Update which box types still have valid items after filtering
+    GateBoxes_UpdateItemAvailability();
+}
+
+// Hook at end of CityItemSpawn_InitItemFallChances (0x800eb558).
+// Clobbered instruction: lwz r0, 0x34(r1)
+CODEPATCH_HOOKCREATE(0x800eb558,
+    "",
+    FilterAllSpawnTables,
+    "",
+    0
+)
+
+// Hook at end of CityEvent_ModifyItemFallDesc (0x800ed7f0).
+// Clobbered instruction: lwz r0, 0x14(r1)
+CODEPATCH_HOOKCREATE(0x800ed7f0,
+    "",
+    FilterAllSpawnTables,
+    "",
+    0
+)
+
 // Runs immediately after the mod file is loaded.
 // Calls to HSD_MemAlloc in THIS function specifically will persist throughout the entire runtime of the game.
 // All calls to HSD_MemAlloc from elsewhere will return an allocation that exists only within the current scene.
@@ -249,6 +290,10 @@ void OnBoot()
 
     // Traplink send hooks
     TrapLink_OnBoot();
+
+    // Spawn table filtering hooks (covers all gate categories)
+    CODEPATCH_HOOKAPPLY(0x800eb558);
+    CODEPATCH_HOOKAPPLY(0x800ed7f0);
 }
 
 // Runs on boot when hoshi creates save data for the mod.
@@ -336,8 +381,7 @@ static void APOptions_TransferToSave()
              save_data->options.death_link, save_data->options.energy_link, save_data->options.traplink);
     OSReport("Goals — CityTrial: %d, AirRide: %d, TopRide: %d\n",
              save_data->options.city_trial_goal, save_data->options.air_ride_goal, save_data->options.top_ride_goal);
-    OSReport("CityTrial — PermanentPatches: %d, ProgressivePatchCaps: %d (start: %d), ProgressiveStadiums: %d\n",
-             save_data->options.city_trial_permanent_patches,
+    OSReport("CityTrial — ProgressivePatchCaps: %d (start: %d), ProgressiveStadiums: %d\n",
              save_data->options.city_trial_progressive_patch_caps,
              save_data->options.city_trial_patch_cap_amount,
              save_data->options.city_trial_progressive_stadiums);
@@ -412,9 +456,18 @@ void On3DLoadEnd()
     }
 
     GateAbilities_On3DLoadEnd();
+
+    // For stadium/Air Ride modes, the CityItemSpawn init path doesn't run,
+    // so the hooks at 0x800eb558/0x800ed7f0 never fire. Filter here instead.
+    if (!Gm_IsInCity() && *stc_grBoxGeneObj)
+    {
+        OSReport("[SpawnFilter] Filtering spawn tables for non-CT mode (GrKind=%d)\n",
+                 Gm_GetCurrentGrKind());
+        FilterAllSpawnTables();
+    }
+
     PermanentPatch_On3DLoadEnd();
     AirRideSpeed_On3DLoadEnd();
-
     if (hoshi_menu_settings.deathlink_enabled)
         DeathLink_On3DLoadEnd();
 
@@ -456,10 +509,6 @@ void OnSceneChange()
 
     APItems_OnSceneChange();
 }
-
-// Number of standalone AP items (IDs 1 through AP_ITEM_ALL_DOWN inclusive).
-// Used only by the debug D-pad controls below.
-#define DEBUG_STANDALONE_COUNT 10
 
 // Simulate the AP client sending location data by filling the ArchipelagoData
 // location arrays with a random shuffle. Rewards are distributed:
@@ -553,42 +602,19 @@ void OnFrameStart()
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
 
-    // Debug controls — only write to the mailbox when it is empty
-    if (archipelago_data->incoming_item_id == 0)
+    // Debug: dpad-left = waddle dee swarm, dpad-right = meteor trap
+    HSD_Pad *pad = &stc_engine_pads[0];
+    if (pad->down & PAD_BUTTON_DPAD_LEFT)
     {
-        if (Pad_GetDown(0) & PAD_BUTTON_DPAD_LEFT)
-        {
-            // Debug: spawn a random enemy near player 0 with spline path-following
-            GOBJ *mg = Ply_GetMachineGObj(0);
-            if (mg)
-                SpawnEnemy_Random(mg, 1);
-        }
-        else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_RIGHT)
-        {
-            int total = DEBUG_STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM + ITKIND_NUM;
-            int r = HSD_Randi(total);
-            uint ap_id;
-            if (r < DEBUG_STANDALONE_COUNT)
-                ap_id = 1 + r;
-            else if (r < DEBUG_STANDALONE_COUNT + PATCHKIND_NUM)
-                ap_id = AP_PERM_PATCH_BASE + (r - DEBUG_STANDALONE_COUNT);
-            else if (r < DEBUG_STANDALONE_COUNT + PATCHKIND_NUM + EVKIND_NUM)
-                ap_id = AP_EVENT_BASE + (r - DEBUG_STANDALONE_COUNT - PATCHKIND_NUM);
-            else
-                ap_id = AP_ITKIND_BASE + (r - DEBUG_STANDALONE_COUNT - PATCHKIND_NUM - EVKIND_NUM);
-            OSReport("Setting incoming_item_id to random AP ID %d from DPAD RIGHT...\n", ap_id);
-            archipelago_data->incoming_item_id = ap_id;
-        }
-        else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_DOWN)
-        {
-            OSReport("Triggering meteor event via DPAD DOWN...\n");
-            archipelago_data->incoming_item_id = AP_EVENT_METEOR;
-        }
-        else if (Pad_GetDown(0) & PAD_BUTTON_DPAD_UP)
-        {
-            archipelago_data->incoming_item_id = AP_ITEM_EVENT_CUSTOM;
-        }
+        if (CustomEvent_Do(CUSTOM_EVKIND_TEST))
+            OSReport("Debug: triggered Waddle Dee Swarm\n");
     }
+    if ((pad->down & PAD_BUTTON_DPAD_RIGHT) && archipelago_data->incoming_item_id == 0)
+    {
+        archipelago_data->incoming_item_id = AP_ITEM_METEOR_TRAP;
+        OSReport("Debug: wrote AP_ITEM_METEOR_TRAP to mailbox\n");
+    }
+
 }
 
 // Runs every game tick after the frame has been processed.

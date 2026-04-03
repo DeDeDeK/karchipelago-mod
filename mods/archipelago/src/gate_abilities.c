@@ -5,9 +5,6 @@
 
 #include "main.h"
 #include "gate_abilities.h"
-#include "gate_patches.h"
-#include "gate_items.h"
-#include "gate_boxes.h"
 #include "textbox.h"
 #include "traplink.h"
 
@@ -75,12 +72,30 @@ static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_n
     *pool_num = write;
 }
 
-// Called after CityItemSpawn_InitItemFallChances and CityEvent_ModifyItemFallDesc
-// populate the spawn tables. Removes locked copy abilities from all item pools.
+void GateAbilities_FilterEventDropTables()
+{
+    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
+    if (!info || !info->item_desc)
+        return;
+
+    for (int i = 0; i < info->item_desc->x18_num; i++)
+    {
+        CopyKind ck = ItemKindToCopyKind(info->item_desc->x18[i].it_kind);
+        if (ck != COPYKIND_NONE && !IsAbilityUnlocked(ck))
+        {
+            info->item_desc->x18[i].chance_misc = 0;
+            info->item_desc->x18[i].chance_tac = 0;
+            info->item_desc->x18[i].chance_meteor = 0;
+            info->item_desc->x18[i].chance_pilar = 0;
+            info->item_desc->x18[i].chance_chamber = 0;
+            info->item_desc->x18[i].chance_ufo = 0;
+        }
+    }
+}
+
+// Removes locked copy abilities from all box spawn pools.
 void GateAbilities_FilterSpawnTables()
 {
-    OSReport("[SpawnFilter] FilterSpawnTables called (GrKind=%d, StageKind=%d)\n",
-             Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
     if (!obj)
         return;
@@ -102,13 +117,6 @@ void GateAbilities_FilterSpawnTables()
         obj->subsequent_it_kind,
         obj->subsequent_chance,
         &obj->subsequent_num);
-
-    // Chain to other spawn table filters that share these hook points
-    GatePatches_FilterSpawnTables();
-    GateItems_FilterSpawnTables();
-
-    // After all filtering, update which box types still have valid items
-    GateBoxes_UpdateItemAvailability();
 }
 
 // Replacement for Rider_CheckAndGiveAbility (0x80192650).
@@ -174,28 +182,10 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
     return 1;
 }
 
-// Hook at end of CityItemSpawn_InitItemFallChances (0x800eb558).
-// Clobbered instruction: lwz r0, 0x34(r1)
-CODEPATCH_HOOKCREATE(0x800eb558,
-    "",
-    GateAbilities_FilterSpawnTables,
-    "",
-    0
-)
-
-// Hook at end of CityEvent_ModifyItemFallDesc (0x800ed7f0).
-// Clobbered instruction: lwz r0, 0x14(r1)
-CODEPATCH_HOOKCREATE(0x800ed7f0,
-    "",
-    GateAbilities_FilterSpawnTables,
-    "",
-    0
-)
 
 // Enemy data table at 0x804b22b4. Each entry is {int data_index, int flags}.
 // data_index identifies the enemy type (archive to load).
 // flags selects the tier variant (0=base, 1=enhanced, 2/3/4=special).
-#define ENEMY_DATA_TABLE ((int *)0x804b22b4)
 // Maps enemy_id → ability theme (CopyKind). Used to filter ability-themed enemies
 // from spawn tables when their ability is locked. The copy chance wheel is random
 // for all enemies — this table is about visual theming, not actual granted abilities.
@@ -224,7 +214,7 @@ static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
     [T0(6)]  = COPYKIND_NONE,    // Cappy
     [T0(7)]  = COPYKIND_NONE,    // Cappy (flags=4)
     [T0(8)]  = COPYKIND_WHEEL,   // Wheelie
-    [T0(9)]  = COPYKIND_NONE,    // Phan Phan
+    [T0(9)]  = COPYKIND_FIRE,    // Phan Phan (same Fire ability as T1 Heat Phan-Phan; shares data_index 6)
     [T0(10)] = COPYKIND_SLEEP,   // Noddy
     [T0(11)] = COPYKIND_ICE,     // Chilly
     [T0(12)] = COPYKIND_BIRD,    // Flappy
@@ -310,7 +300,6 @@ static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
 // Per-entry layout (Air Ride / mode 1):
 //   +0x1e: short enemy_ids[4]
 //   +0x26: short weights[4]  (-1 terminated)
-#define ENEMY_SPAWN_DATA (*(char **)0x805dd710)
 
 // Check if enemy_id is themed around a locked ability. Returns 1 if locked, 0 if allowed.
 static int IsEnemyAbilityLocked(int enemy_id)
@@ -336,36 +325,11 @@ static int FilterSecondarySubTable(short *sub_table)
     return has_valid;
 }
 
-// Wrapper for Enemy_SpawnActor called from Enemy_SpawnerDecide (Air Ride mode).
-// Blocks meta-enemy variant spawns when ANY ability is locked, since variant enemies
-// gain ability themes that we can't strip (the appearance/ability is determined by
-// mechanisms beyond the variant byte passed to Enemy_SpawnActor).
-static void GateAbilities_SpawnActor(int spawn_slot, int enemy_id_packed, int position_index)
-{
-    int base_id = enemy_id_packed & 0xFF;
-    int variant = enemy_id_packed >> 8;
-
-    OSReport("[SpawnActor] slot=%d id_packed=0x%04x base=%d variant=%d\n",
-             spawn_slot, enemy_id_packed, base_id, variant);
-
-    if (variant > 0 && save_data->ability_unlocked_mask != ((1 << COPYKIND_NUM) - 1))
-    {
-        OSReport("[SpawnActor] BLOCKED variant=%d (not all abilities unlocked, mask=0x%04x)\n",
-                 variant, save_data->ability_unlocked_mask);
-        // Not all abilities unlocked — skip this variant enemy spawn entirely.
-        // Pass -1 to trigger respawn delay without creating an enemy.
-        Enemy_SpawnActor(spawn_slot, -1, position_index);
-        return;
-    }
-
-    Enemy_SpawnActor(spawn_slot, enemy_id_packed, position_index);
-}
-
 // Zero spawn weights for enemies whose copy ability is locked.
 // Modifies the .dat data in-place; it is reloaded from disc each stage load.
 static void FilterEnemySpawnWeights()
 {
-    char *spawn_data = ENEMY_SPAWN_DATA;
+    char *spawn_data = *stc_enemy_spawn_data;
     if (!spawn_data)
         return;
 
@@ -382,9 +346,6 @@ static void FilterEnemySpawnWeights()
         return;
 
     char *secondary = (char *)(*(int *)(spawn_data + 0x0C));
-
-    OSReport("[FilterEnemy] mode=%d spawn_count=%d secondary=%p mask=0x%04x\n",
-             mode, spawn_count, secondary, save_data->ability_unlocked_mask);
 
     // Per-meta-enemy filter results: 1 = has valid enemies, 0 = all zeroed, -1 = not yet processed
     s8 meta_valid[15];
@@ -405,9 +366,6 @@ static void FilterEnemySpawnWeights()
             int enemy_id = ids[slot];
             if (enemy_id < 0)
                 continue;
-
-            OSReport("[FilterEnemy] entry[%d] slot[%d]: id=%d weight=%d locked=%d\n",
-                     i, slot, enemy_id, weights[slot], IsEnemyAbilityLocked(enemy_id));
 
             // Meta-enemy IDs (0x50-0x5E): filter secondary sub-table, then zero
             // primary weight if no valid enemies remain in the sub-table.
@@ -444,16 +402,6 @@ void GateAbilities_On3DLoadEnd()
         return;
 
     FilterEnemySpawnWeights();
-
-    // For stadium modes, the CityItemSpawn system doesn't run its init path
-    // (CityItemSpawn_InitItemFallChances), so our hooks at 0x800eb558/0x800ed7f0
-    // never fire. Filter the spawn tables here if grBoxGeneObj exists.
-    if (*stc_grBoxGeneObj)
-    {
-        OSReport("[SpawnFilter] Filtering spawn tables for stadium (GrKind=%d)\n",
-                 Gm_GetCurrentGrKind());
-        GateAbilities_FilterSpawnTables();
-    }
 }
 
 void GateAbilities_OnBoot()
@@ -465,9 +413,6 @@ void GateAbilities_OnBoot()
     // (possibly substituted) kind instead of the original wheel kind.
     CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
     CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained
-    CODEPATCH_REPLACECALL(0x800f1e14, GateAbilities_SpawnActor);
-    CODEPATCH_HOOKAPPLY(0x800eb558);
-    CODEPATCH_HOOKAPPLY(0x800ed7f0);
     OSReport("Copy ability gating hooks installed\n");
 }
 

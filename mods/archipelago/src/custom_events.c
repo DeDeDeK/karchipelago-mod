@@ -14,6 +14,13 @@
 
 #define SIS_CITYTRIAL_ENTRY_COUNT 42
 
+// Offset for custom event SIS IDs in the event name lookup table (0x804a7b98).
+// Must be placed AFTER the prediction stadium name range. The vanilla prediction
+// event remaps event kind 10 to sis_id_table[stadium_kind + EVKIND_NUM], which
+// spans indices 16 through 16+STKIND_NUM-1 (=38). Placing custom entries at
+// EVKIND_NUM + STKIND_NUM avoids colliding with stadium name lookups.
+#define CUSTOM_SIS_TABLE_OFFSET (EVKIND_NUM + STKIND_NUM)
+
 const char *custom_event_names[CUSTOM_EVENT_COUNT] = {
     [CUSTOM_EVKIND_TEST - EVKIND_NUM]            = "Waddle Dee Swarm",
     [CUSTOM_EVKIND_GRAVITY_CHANGE - EVKIND_NUM]   = "Gravity Change",
@@ -22,7 +29,7 @@ const char *custom_event_names[CUSTOM_EVENT_COUNT] = {
 
 static CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
     [CUSTOM_EVKIND_TEST - EVKIND_NUM] = {
-        .duration = 600,   // ~10 seconds
+        .duration = 1800,   // ~30 seconds
         .is_siren = 1,
         .sky_preset = 5,   // Dark Vignette
         .bgm_file = 0x34,  // Runamok BGM
@@ -153,13 +160,14 @@ void CustomEvents_InitSis(void)
     stc_sis_data[0] = (SISData *)extended_sis_ptrs;
 
     // Write custom SIS IDs into the event name lookup table at 0x804a7b98.
-    // Vanilla events use indices 0-15; indices 16+ are never read by vanilla
-    // code, so this is safe. The IDs must persist because stadiumPrediction
-    // stores event_kind in a control struct and a per-frame update re-reads
-    // the table to refresh the HUD text.
-    int *sis_id_table = (int *)0x804a7b98;
+    // Indices 0-15 are vanilla event names. Indices 16-38 are used by the
+    // vanilla prediction event (kind 10) as stadium name lookups: it stores
+    // (stadium_kind + EVKIND_NUM) into the HUD control and the per-frame
+    // update re-reads the table. We must place custom entries AFTER the
+    // stadium range to avoid collision.
+    int *sis_id_table = stc_event_sis_id_table;
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
-        sis_id_table[EVKIND_NUM + i] = custom_sis_ids[i];
+        sis_id_table[CUSTOM_SIS_TABLE_OFFSET + i] = custom_sis_ids[i];
 
     OSReport("CustomEvents_InitSis: extended SIS array with %d custom entries\n",
              CUSTOM_EVENT_COUNT);
@@ -200,9 +208,11 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
     // Show HUD text via the vanilla popup pipeline.
     // CityEvent_ShowHudText → stadiumPrediction manages the popup frame,
     // slide-in animation, and timing. It reads the SIS ID from the table
-    // at 0x804a7b98[event_kind], which we pre-populated in InitSis.
+    // at 0x804a7b98[kind], which we pre-populated in InitSis.
+    // Pass the remapped SIS table index (not the raw event kind) so
+    // stadiumPrediction reads our custom entry, not a stadium name slot.
     int hud_frames = ev_chk->data->event->hud_display_frames;
-    CityEvent_ShowHudText(ev_chk->cur_kind, hud_frames);
+    CityEvent_ShowHudText(CUSTOM_SIS_TABLE_OFFSET + idx, hud_frames);
 
     // Play secondary BGM if specified (pauses main BGM)
     if (custom_params[idx].bgm_file != 0)
@@ -352,8 +362,7 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
 void CustomEvents_OnBoot(void)
 {
     // Replace state handler function pointers in the dispatch table.
-    // Table at 0x804a5604: [state0, state1, state2, state3]
-    StateHandler *state_table = (StateHandler *)0x804a5604;
+    StateHandler *state_table = (StateHandler *)stc_event_state_table;
 
     orig_state1 = state_table[1];
     orig_state2 = state_table[2];

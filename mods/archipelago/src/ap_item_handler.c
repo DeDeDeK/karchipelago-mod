@@ -66,7 +66,7 @@ int APItems_CheckMailbox()
 // (e.g., player is not in the right scene, or an event is already active).
 int APItems_HandleItem(uint ap_item_id)
 {
-    // Checkbox filler items — one per mode, acknowledged immediately
+    // Items that apply immediately with no scene requirement
     switch (ap_item_id)
     {
         case AP_ITEM_CHECKBOX_FILLER_AIRRIDE:
@@ -78,11 +78,6 @@ int APItems_HandleItem(uint ap_item_id)
         case AP_ITEM_CHECKBOX_FILLER_CITYTRIAL:
             Checklist_GrantFiller(GMMODE_CITYTRIAL);
             return 1;
-    }
-
-    // Items that apply immediately with no scene requirement
-    switch (ap_item_id)
-    {
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
             return 1;
@@ -186,9 +181,14 @@ int APItems_HandleItem(uint ap_item_id)
     }
 
     // All remaining items require being in an actual 3D game scene
-    // with the intro/countdown finished
+    // with the intro/countdown finished.
+    // Check minor == MNRKIND_3D (not just major) because the CSS and other
+    // non-gameplay minors run under the same major, and intro_state defaults
+    // to 0 (GMINTRO_END) when not in 3D, bypassing that check.
     MajorKind major = Scene_GetCurrentMajor();
     if (major != MJRKIND_CITY && major != MJRKIND_AIR && major != MJRKIND_TOP)
+        return 0;
+    if (Scene_GetCurrentMinor() != MNRKIND_3D)
         return 0;
     if (Gm_GetIntroState() != GMINTRO_END)
         return 0;
@@ -220,17 +220,13 @@ int APItems_HandleItem(uint ap_item_id)
     }
 
     // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
+    // City Trial only — item data tables aren't loaded in Air Ride / Top Ride.
     if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
+        if (!Gm_IsInCity())
+            return 0;
         ItemKind it_kind = ap_item_id - AP_ITKIND_BASE;
         SpawnItemHumans(it_kind);
-        return 1;
-    }
-
-    // Non-permanent All Up (spawns ITKIND_ALLUP for all human players)
-    if (ap_item_id == AP_ITEM_ALL_UP)
-    {
-        SpawnItemHumans(ITKIND_ALLUP);
         return 1;
     }
 
@@ -244,13 +240,26 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id == AP_ITEM_GIVE_HYDRA)
         return GateMachines_GiveLegendaryMachine(1);
 
-    // TODO items — scene gate already passed, acknowledged immediately as stubs
-    switch (ap_item_id)
+    // All Down — lower all stats by 1 for each human player
+    if (ap_item_id == AP_ITEM_ALL_DOWN)
+        return Patch_AllUp_GiveItem(-1);
+
+    // 1 HP trap — set each human player's HP to 1
+    if (ap_item_id == AP_ITEM_1_HP_TRAP)
     {
-        case AP_ITEM_1_HP_TRAP:  // TODO: damage player by 1 HP
-        case AP_ITEM_ALL_DOWN:   // TODO: stat down all stats
-            OSReport("AP item ID %d: TODO, acknowledged.\n", ap_item_id);
-            return 1;
+        for (int i = 0; i < 5; i++)
+        {
+            if (Ply_GetPKind(i) != PKIND_HMN)
+                continue;
+            GOBJ *mg = Ply_GetMachineGObj(i);
+            if (!mg)
+                continue;
+            MachineData *md = mg->userdata;
+            float damage = md->hp - 1.0f;
+            if (damage > 0.0f)
+                Machine_GiveDamage(md, damage, mg);
+        }
+        return 1;
     }
 
     OSReport("Unknown AP item ID: %d\n", ap_item_id);

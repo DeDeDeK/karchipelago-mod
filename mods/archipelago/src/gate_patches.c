@@ -84,6 +84,29 @@ void GatePatches_FilterSpawnTables()
         &obj->subsequent_num);
 }
 
+void GatePatches_FilterEventDropTables()
+{
+    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
+    if (!info || !info->item_desc)
+        return;
+
+    u16 mask = save_data->patch_unlocked_mask;
+
+    for (int i = 0; i < info->item_desc->x18_num; i++)
+    {
+        int pk = ItemKindToPatchKind(info->item_desc->x18[i].it_kind);
+        if (pk >= 0 && !(mask & (1 << pk)))
+        {
+            info->item_desc->x18[i].chance_misc = 0;
+            info->item_desc->x18[i].chance_tac = 0;
+            info->item_desc->x18[i].chance_meteor = 0;
+            info->item_desc->x18[i].chance_pilar = 0;
+            info->item_desc->x18[i].chance_chamber = 0;
+            info->item_desc->x18[i].chance_ufo = 0;
+        }
+    }
+}
+
 int GatePatches_UnlockPatch(PatchKind kind)
 {
     if (kind >= PATCHKIND_NUM)

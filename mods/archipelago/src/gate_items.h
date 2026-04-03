@@ -33,12 +33,12 @@ typedef enum ItemUnlockKind
     ITUNLOCK_DRAGOON1,
     ITUNLOCK_DRAGOON2,
     ITUNLOCK_DRAGOON3,
-    ITUNLOCK_HP,
     ITUNLOCK_NUM,
 } ItemUnlockKind;
 
 void GateItems_OnBoot();
 void GateItems_FilterSpawnTables();
+void GateItems_FilterEventDropTables();
 int GateItems_UnlockItem(ItemUnlockKind kind);
 
 #endif

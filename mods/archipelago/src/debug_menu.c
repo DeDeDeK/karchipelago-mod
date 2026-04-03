@@ -122,7 +122,7 @@ GIVE_FN(GiveGlide,    AP_ITKIND_GLIDE)
 GIVE_FN(GiveOffense,  AP_ITKIND_OFFENSE)
 GIVE_FN(GiveDefense,  AP_ITKIND_DEFENSE)
 GIVE_FN(GiveWeight,   AP_ITKIND_WEIGHT)
-GIVE_FN(GiveAllUp,    AP_ITEM_ALL_UP)
+GIVE_FN(GiveAllUp,    AP_ITKIND_ALLUP)
 
 // Permanent patches
 GIVE_FN(GivePermHP,      AP_PERM_PATCH_HP)
@@ -174,9 +174,9 @@ GIVE_FN(GiveChargeMax,   AP_ITKIND_CHARGEMAX)
 GIVE_FN(GiveDragoonA,  AP_ITKIND_DRAGOON1)
 GIVE_FN(GiveDragoonB,  AP_ITKIND_DRAGOON2)
 GIVE_FN(GiveDragoonC,  AP_ITKIND_DRAGOON3)
-GIVE_FN(GiveHydraS,    AP_ITKIND_HYDRA1)
-GIVE_FN(GiveHydraL,    AP_ITKIND_HYDRA2)
-GIVE_FN(GiveHydraR,    AP_ITKIND_HYDRA3)
+GIVE_FN(GiveHydraX,    AP_ITKIND_HYDRA1)
+GIVE_FN(GiveHydraY,    AP_ITKIND_HYDRA2)
+GIVE_FN(GiveHydraZ,    AP_ITKIND_HYDRA3)
 
 // Traps & events
 GIVE_FN(GiveMeteorTrap,  AP_ITEM_METEOR_TRAP)
@@ -320,7 +320,7 @@ static MenuDesc patches_menu = {
 };
 
 static MenuDesc items_menu = {
-    .option_num = 33,
+    .option_num = 32,
     .options = {
         A("Unlock All", "Unlock all CT items", ItmUnlockAll),
         A("Lock All",   "Lock all CT items",   ItmLockAll),
@@ -354,7 +354,6 @@ static MenuDesc items_menu = {
         G("Dragoon Piece 1", item_state, ITUNLOCK_DRAGOON1,       SyncItems),
         G("Dragoon Piece 2", item_state, ITUNLOCK_DRAGOON2,       SyncItems),
         G("Dragoon Piece 3", item_state, ITUNLOCK_DRAGOON3,       SyncItems),
-        G("HP Recovery",    item_state, ITUNLOCK_HP,              SyncItems),
     },
 };
 
@@ -402,22 +401,21 @@ static MenuDesc tr_stages_menu = {
 };
 
 static MenuDesc tr_items_menu = {
-    .option_num = 25,
+    .option_num = 24,
     .options = {
         A("Unlock All", "Unlock all TR items", TriUnlockAll),
         A("Lock All",   "Lock all TR items",   TriLockAll),
-        G("Mystery",        tr_item_state, TRITEM_MYSTERY,      SyncTRItems),
         G("Hammer",         tr_item_state, TRITEM_HAMMER,       SyncTRItems),
         G("Grow",           tr_item_state, TRITEM_GROW,         SyncTRItems),
         G("Speed Up",       tr_item_state, TRITEM_SPEEDUP,      SyncTRItems),
         G("Speed Down",     tr_item_state, TRITEM_SPEEDDOWN,    SyncTRItems),
-        G("Missile",        tr_item_state, TRITEM_MISSILE,      SyncTRItems),
+        G("Boost Saw",      tr_item_state, TRITEM_BOOST_SAW,    SyncTRItems),
         G("Charge Boost",   tr_item_state, TRITEM_CHARGEBOOST,  SyncTRItems),
         G("Invincible",     tr_item_state, TRITEM_INVINCIBLE,   SyncTRItems),
         G("Buzz Saw",       tr_item_state, TRITEM_BUZZSAW,      SyncTRItems),
         G("Spear",          tr_item_state, TRITEM_SPEAR,        SyncTRItems),
         G("Freeze",         tr_item_state, TRITEM_FREEZE,       SyncTRItems),
-        G("Missile Alt",    tr_item_state, TRITEM_MISSILE_ALT,  SyncTRItems),
+        G("Missile",        tr_item_state, TRITEM_MISSILE,      SyncTRItems),
         G("Fire",           tr_item_state, TRITEM_FIRE,         SyncTRItems),
         G("Needle",         tr_item_state, TRITEM_NEEDLE,       SyncTRItems),
         G("Bomb",           tr_item_state, TRITEM_BOMB,         SyncTRItems),
@@ -564,9 +562,9 @@ static MenuDesc give_legendary_menu = {
         A("Dragoon Part A", "Give Dragoon Part A", GiveDragoonA),
         A("Dragoon Part B", "Give Dragoon Part B", GiveDragoonB),
         A("Dragoon Part C", "Give Dragoon Part C", GiveDragoonC),
-        A("Hydra Part S",   "Give Hydra Part S",   GiveHydraS),
-        A("Hydra Part L",   "Give Hydra Part L",   GiveHydraL),
-        A("Hydra Part R",   "Give Hydra Part R",   GiveHydraR),
+        A("Hydra Part X",   "Give Hydra Part X",   GiveHydraX),
+        A("Hydra Part Y",   "Give Hydra Part Y",   GiveHydraY),
+        A("Hydra Part Z",   "Give Hydra Part Z",   GiveHydraZ),
         A("Give Dragoon",   "Assemble full Dragoon", GiveDragoon),
         A("Give Hydra",     "Assemble full Hydra",   GiveHydra),
     },

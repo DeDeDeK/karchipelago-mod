@@ -7,25 +7,19 @@
 #include "gate_topride_items.h"
 #include "textbox.h"
 
-// ItemMgr singleton pointer (set during Top Ride 3D scene init)
-#define TOPRIDE_ITEMMGR_PTR (*(u32 **)0x805ddba4)
-
-// Offset of the enabled items bitmask within ItemMgr (param_9[9] = 0x24)
-#define ITEMMGR_ENABLED_MASK_OFFSET 0x24
 
 static const char *topride_item_names[TRITEM_NUM] = {
-    [TRITEM_MYSTERY]      = "TR Mystery",
     [TRITEM_HAMMER]       = "TR Hammer",
     [TRITEM_GROW]         = "TR Grow",
     [TRITEM_SPEEDUP]      = "TR Speed Up",
     [TRITEM_SPEEDDOWN]    = "TR Speed Down",
-    [TRITEM_MISSILE]      = "TR Missile",
+    [TRITEM_BOOST_SAW]    = "TR Boost Saw",
     [TRITEM_CHARGEBOOST]  = "TR Charge Boost",
     [TRITEM_INVINCIBLE]   = "TR Invincible Candy",
     [TRITEM_BUZZSAW]      = "TR Buzz Saw",
     [TRITEM_SPEAR]        = "TR Spear",
     [TRITEM_FREEZE]       = "TR Freeze",
-    [TRITEM_MISSILE_ALT]  = "TR Missile Alt",
+    [TRITEM_MISSILE]      = "TR Missile",
     [TRITEM_FIRE]         = "TR Fire",
     [TRITEM_NEEDLE]       = "TR Needle",
     [TRITEM_BOMB]         = "TR Bomb",
@@ -43,19 +37,18 @@ static const char *topride_item_names[TRITEM_NUM] = {
 // Called via hook right after TopRideItem_MgrInit returns.
 void GateTopRideItems_ApplyMask()
 {
-    u32 *mgr = TOPRIDE_ITEMMGR_PTR;
+    TopRideItemMgr *mgr = *stc_topride_itemmgr;
     if (!mgr)
         return;
 
-    u32 *enabled = (u32 *)((u8 *)mgr + ITEMMGR_ENABLED_MASK_OFFSET);
-    u32 before = *enabled;
-    *enabled &= save_data->topride_item_unlocked_mask;
+    u32 before = mgr->enabled_mask;
+    mgr->enabled_mask &= save_data->topride_item_unlocked_mask;
     OSReport("TopRide items: enabled mask 0x%08x -> 0x%08x (unlock mask 0x%08x)\n",
-             before, *enabled, save_data->topride_item_unlocked_mask);
+             before, mgr->enabled_mask, save_data->topride_item_unlocked_mask);
 }
 
 // Hook at 0x802db05c — right after TopRideItem_MgrInit (0x8034b5f4) returns
-// in the Top Ride 3D scene setup function (zz_802dafb4_).
+// in TopRide_FielderInit (0x802dafb4).
 // Clobbered instruction: lwz r6, 4(r30)
 CODEPATCH_HOOKCREATE(0x802db05c,
     "",

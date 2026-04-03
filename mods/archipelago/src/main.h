@@ -25,7 +25,6 @@ typedef enum APItemId
     AP_ITEM_1_HP_TRAP,
     AP_ITEM_METEOR_TRAP,
     AP_ITEM_PERM_PATCH_ALL_UP,
-    AP_ITEM_ALL_UP,
     AP_ITEM_ALL_DOWN,
     AP_ITEM_GIVE_DRAGOON,
     AP_ITEM_GIVE_HYDRA,
@@ -297,7 +296,6 @@ typedef struct APSlotOptions
     // City Trial
     u32 city_trial_goal;                   // GoalKind — completion condition
     u32 city_trial_checklist_amount;       // 1-120 — threshold for GOAL_N_CHECKLIST
-    u32 city_trial_permanent_patches;      // 0 or 1 — apply accumulated permanent patches at round start
     u32 city_trial_progressive_patch_caps; // 0 or 1 — patch cap starts low, items raise it
     u32 city_trial_patch_cap_amount;       // 1-17 — starting cap when progressive is on
     u32 city_trial_progressive_stadiums;   // 0 or 1 — stadiums locked until items received

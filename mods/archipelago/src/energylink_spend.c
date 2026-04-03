@@ -27,7 +27,7 @@ static SpendEntry stat_patches[] = {
     {AP_ITKIND_OFFENSE,      5, "Offense Patch"},
     {AP_ITKIND_DEFENSE,      5, "Defense Patch"},
     {AP_ITKIND_WEIGHT,       5, "Weight Patch"},
-    {AP_ITEM_ALL_UP,        40, "All Up"},
+    {AP_ITKIND_ALLUP,       40, "All Up"},
 };
 
 static SpendEntry permanent_patches[] = {

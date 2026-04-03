@@ -150,10 +150,10 @@ GOBJ *SpawnEnemy_Random(GOBJ *machine_gobj, int use_splines)
 }
 
 // Spawn a meteor above a single player.
-// We point meteor event globals at fake data with zone_speed set, so BehaviorInit
-// (which runs during EventActor_Create) computes correct position and fall velocity.
-// Vanilla flow from there: state 15 (falling) → ground collision → HitTransition →
-// state 16 (impact VFX) → MeteorDespawnProc timer → EventActor_Destroy.
+// Saves/restores meteor event globals around creation so an active meteor event
+// is not corrupted. Calls Meteor_BehaviorInit to enter state 15 (physics-driven
+// falling) with correct velocity, then manually enables rendering since we skip
+// state 14's boundary check which normally handles that.
 static GOBJ *SpawnMeteorOnPlayer(int ply_idx)
 {
     GOBJ *rg = Ply_GetRiderGObj(ply_idx);
@@ -177,16 +177,40 @@ static GOBJ *SpawnMeteorOnPlayer(int ply_idx)
     desc.spawn_slot = -1;
     desc.bounds_flag = -1.0f;
 
-    // Point meteor event globals at fake data so BehaviorInit reads valid
-    // zone_speed and zero offset. Left set for deferred BehaviorInit.
+    // Save real meteor event globals (may be live during meteor event)
+    volatile int saved_meteor_data = *stc_meteor_data;
+    volatile int saved_meteor_event_data = *stc_meteor_event_data;
+
+    // Point at fake data so BehaviorInit reads valid zone_speed
     *stc_meteor_data = 1;
     *stc_meteor_event_data = (int)&s_fake_event_data;
 
     GOBJ *meteor = EventActor_Create(&desc);
     if (!meteor)
+    {
+        *stc_meteor_data = saved_meteor_data;
+        *stc_meteor_event_data = saved_meteor_event_data;
         return NULL;
+    }
 
     EnemyData *ed = meteor->userdata;
+
+    // BehaviorInit transitions to state 15 with physics velocity (vel.Y = -speed).
+    // State 14's animation-driven motion doesn't work for standalone spawns.
+    Meteor_BehaviorInit(ed);
+
+    // Restore real globals immediately after BehaviorInit reads them
+    *stc_meteor_data = saved_meteor_data;
+    *stc_meteor_event_data = saved_meteor_event_data;
+
+    // BehaviorInit disables rendering. Clear all visibility flags.
+    EventActor_EnableRendering(meteor);
+    *((u8 *)&ed->render_flags) &= ~0x80;
+    // Also clear JOBJ_HIDDEN on the model's JObj tree.
+    JOBJ *root_jobj = (JOBJ *)meteor->hsd_object;
+    if (root_jobj)
+        JObj_ClearFlagsAll(root_jobj, JOBJ_HIDDEN);
+
     ed->lifetime_counter = 0; // frame counter for MeteorDespawnProc
     ed->spawn_index = 0; // impact frame timestamp (0 = not yet impacted)
 

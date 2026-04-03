@@ -1,43 +1,41 @@
 // Waddle Dee Swarm — custom City Trial event
 //
-// Waddle Dee State Machine Reference
-// ===================================
-// Actors start at state 0 (memset). The animation script bytecode drives
-// transitions through common states, eventually reaching per-type state 0x0E.
-// All common-to-0x0E-to-0x0F transitions happen atomically within priority 1
-// (ProcUpdate), so our priority-10 proc never observes state 0x0E.
-//
-// Common states (shared by all enemy types):
-//   0x00-0x08  Normal behavioral  func1=AnimEnter func2=AnimTick func3=AnimExit
-//              AnimTick has a death counter (ed+0xA28) that destroys the actor
-//              after ~31 frames if state doesn't advance to a per-type state.
-//   0x09       Death/despawn      Cleanup, death FX, sound
-//   0x0A       Inhaled            Being sucked in by Kirby
-//   0x0B       Knockback          Hit reaction, launch trajectory
-//   0x0C       Launched/airborne  Spline projectile motion
-//   0x0D       Grounded/sliding   Friction deceleration, recovery
+// Waddle Dee State Machine
+// ========================
+// Actors start at state 0 (memset). The animation bytecode drives transitions
+// through common states (0x00-0x0D), eventually reaching per-type states.
+// The 0x0E→0x0F transition completes atomically within priority 1 (ProcUpdate),
+// so our priority 10 proc never observes state 0x0E.
 //
 // Per-type states (Waddle Dee, actor 0x17):
-//   State  Anim  func1        func2        func3        func4
-//   0x0E   -1    0x80219638   NULL         NULL         NULL
-//          Idle. func1 calls SetVisibility, re-inits path following
-//          (snaps pos to nearest spline!), then EnemyStateChange to 0x0F.
-//   0x0F   14    NULL         NULL         0x802196E0   0x80219704
-//          Walk A. func3=ground path walk, func4=orientation+step counter.
-//   0x10   15    0x802197AC   0x802197E8   0x802197EC   NULL
-//          Walk B variant.
-//   0x11   16    0x80219908   0x80219988   0x80219A48   0x80219A84
-//          Turn/walk left.
-//   0x12   17    0x80219B4C   NULL         0x80219C40   0x80219C64
-//          Turn/walk right.
+//   0x0E  Idle. func1 calls SetVisibility, re-inits path (snaps pos to
+//         nearest spline!), then immediately transitions to 0x0F.
+//   0x0F  Walk A. Ground path walk + orientation.
+//   0x10  Walk B variant.
+//   0x11  Turn/walk left.
+//   0x12  Turn/walk right.
 //
-// Chase override strategy:
-//   We can't intercept the 0x0E→0x0F transition (it completes within
-//   priority 1 before our priority-10 proc runs). The path re-init in
-//   state 0x0E func1 teleports standalone-spawned actors to the nearest
-//   spline. To fix this, we save the intended spawn position (pos_initial)
-//   and restore it on the first frame where state >= 0x0E, undoing the
-//   teleport. Then we override func1-4 every frame for chase behavior.
+// Spline Snap Problem
+// ===================
+// Every vanilla state transition (0x0F→0x10→0x11→0x12→...) snaps the actor's
+// position to the nearest spline point via func1 at priority 1. This teleports
+// standalone-spawned waddle dees back to a spline path.
+//
+// The snap happens inside `EnemyStateChange` → new func1 call, all within
+// priority 1, BEFORE our priority 10 proc runs. We cannot prevent it.
+//
+// Fix: At priority 10, detect state changes by comparing ed->state to the
+// saved state from last frame. On change, restore pos from saved_pos
+// (the last known good position from end of previous frame). This undoes
+// the spline snap while preserving chase movement.
+//
+// Chase Override
+// ==============
+// We override func2/func3/func4 every frame at priority 10:
+//   func2 = WaddleDeeChaseMovement (velocity toward nearest player)
+//   func3 = WaddleDeeChaseGroundSnap (snap Y to ground)
+//   func4 = WaddleDeeChaseOrientation (face toward target)
+// func1 is left alone — vanilla walk animations continue playing.
 
 #include "game.h"
 #include "os.h"
@@ -53,6 +51,9 @@
 #define WADDLE_DEE_FADE_FRAMES  20
 
 static GOBJ *test_event_enemies[WADDLE_DEE_MAX_COUNT];
+static Vec3 saved_pos[WADDLE_DEE_MAX_COUNT];   // last known good position (end of chase proc)
+static int saved_state[WADDLE_DEE_MAX_COUNT];  // state at end of last chase proc frame
+static int chase_active[WADDLE_DEE_MAX_COUNT]; // 1 once chase callbacks are installed
 static int fade_timer[WADDLE_DEE_MAX_COUNT];   // >0 = fading out, 0 = normal
 static float fade_scale0[WADDLE_DEE_MAX_COUNT]; // scale at fade start
 static int spawn_timer;
@@ -103,10 +104,10 @@ static void WaddleDeeChaseMovement(EnemyData *ed)
 
 // Custom func3 (priority 5): snap to ground each frame.
 // Same pattern as the vanilla Waddle Dee walk state (0x80219A48).
-// ed->x3c0 is the movement speed parameter (float stored as int field).
+// ed->param_move_speed is the movement speed parameter.
 static void WaddleDeeChaseGroundSnap(EnemyData *ed)
 {
-    float scale = *(float *)&ed->x3c0;
+    float scale = ed->param_move_speed;
     EventActor_GroundSnap(ed, scale);
 }
 
@@ -132,12 +133,14 @@ static int WaddleDeeFindSlot(GOBJ *gobj)
     return -1;
 }
 
+
 static void WaddleDeeUntrack(GOBJ *gobj)
 {
     int slot = WaddleDeeFindSlot(gobj);
     if (slot >= 0)
     {
         test_event_enemies[slot] = NULL;
+        chase_active[slot] = 0;
         fade_timer[slot] = 0;
     }
 }
@@ -188,11 +191,37 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
     if (ed->state < 0x0E)
         return;
 
+    int slot = WaddleDeeFindSlot(gobj);
+    if (slot < 0)
+        return;
+
+    if (!chase_active[slot])
+    {
+        // First frame past init — undo the initial state 0x0E spline snap.
+        ed->pos = saved_pos[slot]; // saved_pos was init'd to desc.position
+        saved_state[slot] = ed->state;
+        chase_active[slot] = 1;
+        if (is_debug)
+            OSReport("[WD] chase active, restored pos to (%.1f,%.1f,%.1f)\n",
+                     ed->pos.X, ed->pos.Y, ed->pos.Z);
+    }
+    else if (ed->state != saved_state[slot])
+    {
+        // Vanilla state transition occurred (animation end → new walk state).
+        // The new state's func1 snapped pos to the nearest spline point.
+        // Restore from saved_pos (last known good position from end of previous frame).
+        if (is_debug)
+            OSReport("[WD] state %d→%d snap fix: (%.1f,%.1f,%.1f)→(%.1f,%.1f,%.1f)\n",
+                     saved_state[slot], ed->state,
+                     ed->pos.X, ed->pos.Y, ed->pos.Z,
+                     saved_pos[slot].X, saved_pos[slot].Y, saved_pos[slot].Z);
+        ed->pos = saved_pos[slot];
+        saved_state[slot] = ed->state;
+    }
+
     ed->state_func2 = (void *)WaddleDeeChaseMovement;
     ed->state_func3 = (void *)WaddleDeeChaseGroundSnap;
     ed->state_func4 = (void *)WaddleDeeChaseOrientation;
-
-    int slot = WaddleDeeFindSlot(gobj);
 
     // Handle fade-out animation
     if (slot >= 0 && fade_timer[slot] > 0)
@@ -227,6 +256,10 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
             return;
         }
     }
+
+    // Save position and state for next frame's spline-snap detection.
+    saved_pos[slot] = ed->pos;
+    saved_state[slot] = ed->state;
 }
 
 // Spawn one waddle dee near a random human player. Returns true if spawned.
@@ -285,6 +318,8 @@ static int WaddleDeeSpawnOne(void)
         return 0;
 
     test_event_enemies[slot] = actor;
+    saved_pos[slot] = desc.position;
+    chase_active[slot] = 0;
     GObj_AddProc(actor, WaddleDeeChaseProc, 10);
     if (slot == WD_DEBUG_SLOT)
     {

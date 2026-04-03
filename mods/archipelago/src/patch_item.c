@@ -129,8 +129,6 @@ static void PermanentPatch_PerFrame(GOBJ *g)
 // Called from On3DLoadEnd to set up the per-frame GObj for round-start application.
 void PermanentPatch_On3DLoadEnd()
 {
-    if (!save_data->options.city_trial_permanent_patches)
-        return;
     if (!Gm_IsInCity())
         return;
 
