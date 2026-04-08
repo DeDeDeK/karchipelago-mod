@@ -78,17 +78,17 @@ void GateAbilities_FilterEventDropTables()
     if (!info || !info->item_desc)
         return;
 
-    for (int i = 0; i < info->item_desc->x18_num; i++)
+    for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
     {
-        CopyKind ck = ItemKindToCopyKind(info->item_desc->x18[i].it_kind);
+        CopyKind ck = ItemKindToCopyKind(info->item_desc->event_source_drop[i].it_kind);
         if (ck != COPYKIND_NONE && !IsAbilityUnlocked(ck))
         {
-            info->item_desc->x18[i].chance_misc = 0;
-            info->item_desc->x18[i].chance_tac = 0;
-            info->item_desc->x18[i].chance_meteor = 0;
-            info->item_desc->x18[i].chance_pilar = 0;
-            info->item_desc->x18[i].chance_chamber = 0;
-            info->item_desc->x18[i].chance_ufo = 0;
+            info->item_desc->event_source_drop[i].chance_misc = 0;
+            info->item_desc->event_source_drop[i].chance_tac = 0;
+            info->item_desc->event_source_drop[i].chance_meteor = 0;
+            info->item_desc->event_source_drop[i].chance_pilar = 0;
+            info->item_desc->event_source_drop[i].chance_chamber = 0;
+            info->item_desc->event_source_drop[i].chance_ufo = 0;
         }
     }
 }
@@ -296,10 +296,11 @@ static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
 // Pointer stored at 0x805dd710.
 //   +0x00: short spawn_count
 //   +0x04: int*  spawn_entries (stride 0x38 per entry)
-//   +0x10: int*  config (mode short at config+0x28; mode 1 = Air Ride)
-// Per-entry layout (Air Ride / mode 1):
-//   +0x1e: short enemy_ids[4]
-//   +0x26: short weights[4]  (-1 terminated)
+//   +0x0C: int*  secondary_tables (meta-enemy sub-tables)
+//   +0x10: int*  config (mode short at config+0x28)
+// Per-entry layout varies by mode:
+//   Mode 1 (Air Ride):  ids at +0x1e short[4], weights at +0x26 short[4]
+//   Mode 3 (Stadium):   ids at +0x06 short[5], weights at +0x10 short[5]
 
 // Check if enemy_id is themed around a locked ability. Returns 1 if locked, 0 if allowed.
 static int IsEnemyAbilityLocked(int enemy_id)
@@ -325,21 +326,11 @@ static int FilterSecondarySubTable(short *sub_table)
     return has_valid;
 }
 
-// Zero spawn weights for enemies whose copy ability is locked.
-// Modifies the .dat data in-place; it is reloaded from disc each stage load.
-static void FilterEnemySpawnWeights()
+// Mode 1 (Air Ride) / Mode 3 (Stadium variant):
+// Per-entry has ids[max_slots] and weights[max_slots] at known offsets.
+// Zero weights for locked-ability enemies, filter meta-enemy sub-tables.
+static void FilterMode1Or3(char *spawn_data, int ids_offset, int weights_offset, int max_slots)
 {
-    char *spawn_data = *stc_enemy_spawn_data;
-    if (!spawn_data)
-        return;
-
-    int *config = *(int **)(spawn_data + 0x10);
-    if (!config)
-        return;
-    short mode = *(short *)((char *)config + 0x28);
-    if (mode != 1)
-        return;
-
     short spawn_count = *(short *)spawn_data;
     char *entries = (char *)(*(int *)(spawn_data + 4));
     if (!entries || spawn_count <= 0)
@@ -355,10 +346,10 @@ static void FilterEnemySpawnWeights()
     for (int i = 0; i < spawn_count; i++)
     {
         char *entry = entries + i * 0x38;
-        short *ids = (short *)(entry + 0x1e);
-        short *weights = (short *)(entry + 0x26);
+        short *ids = (short *)(entry + ids_offset);
+        short *weights = (short *)(entry + weights_offset);
 
-        for (int slot = 0; slot < 4; slot++)
+        for (int slot = 0; slot < max_slots; slot++)
         {
             if (weights[slot] == -1)
                 break;
@@ -396,10 +387,127 @@ static void FilterEnemySpawnWeights()
     }
 }
 
+// Mode 2 (Stadium — Kirby Melee, etc.):
+// Two-stage selection: first picks a meta-enemy category from secondary[0],
+// then picks an individual enemy from that category's weight column in the entries.
+// Per-entry: enemy_id at +0x06, weight columns at +0x08 (one per category).
+// Zero all weight columns for entries whose enemy has a locked ability.
+// Also filter secondary[0] sub-table to remove categories where all enemies are locked.
+static void FilterMode2(char *spawn_data)
+{
+    short spawn_count = *(short *)spawn_data;
+    char *entries = (char *)(*(int *)(spawn_data + 4));
+    if (!entries || spawn_count <= 0)
+        return;
+
+    char *secondary_base = (char *)(*(int *)(spawn_data + 0x0C));
+    if (!secondary_base)
+        return;
+
+    short *sub_table = (short *)(*(int *)secondary_base);
+    if (!sub_table)
+        return;
+
+    // Count meta-enemy categories in secondary[0]
+    int num_categories = 0;
+    while (sub_table[num_categories * 2] != -1)
+        num_categories++;
+
+    if (num_categories == 0)
+        return;
+
+    // Zero all weight columns for entries with locked-ability enemies
+    for (int i = 0; i < spawn_count; i++)
+    {
+        char *entry = entries + i * 0x38;
+        int enemy_id = *(short *)(entry + 0x06);
+
+        if (enemy_id < 0)
+            continue;
+
+        if (IsEnemyAbilityLocked(enemy_id))
+        {
+            short *weights = (short *)(entry + 0x08);
+            for (int col = 0; col < num_categories; col++)
+                weights[col] = 0;
+            OSReport("[GateAbilities] Mode2: zeroed weights for entry %d (enemy_id=%d)\n", i, enemy_id);
+        }
+    }
+
+    // Filter secondary[0] sub-table: zero category weight if ALL entries in that
+    // category's column have been zeroed (no valid enemies remain).
+    for (int cat = 0; cat < num_categories; cat++)
+    {
+        int has_valid = 0;
+        for (int i = 0; i < spawn_count; i++)
+        {
+            short *weights = (short *)(entries + i * 0x38 + 0x08);
+            if (weights[cat] > 0)
+            {
+                has_valid = 1;
+                break;
+            }
+        }
+        if (!has_valid)
+        {
+            sub_table[cat * 2 + 1] = 0;
+            OSReport("[GateAbilities] Mode2: zeroed category %d (meta_id=0x%02x) in sub-table\n",
+                     cat, sub_table[cat * 2]);
+        }
+    }
+}
+
+// Zero spawn weights for enemies whose copy ability is locked.
+// Modifies the .dat data in-place; it is reloaded from disc each stage load.
+static void FilterEnemySpawnWeights()
+{
+    char *spawn_data = *stc_enemy_spawn_data;
+    if (!spawn_data)
+        return;
+
+    int *config = *(int **)(spawn_data + 0x10);
+    if (!config)
+        return;
+    short mode = *(short *)((char *)config + 0x28);
+
+    switch (mode)
+    {
+        case 1:
+            FilterMode1Or3(spawn_data, 0x1e, 0x26, 4);
+            break;
+        case 2:
+            FilterMode2(spawn_data);
+            break;
+        case 3:
+            FilterMode1Or3(spawn_data, 0x06, 0x10, 5);
+            break;
+    }
+}
+
 void GateAbilities_On3DLoadEnd()
 {
-    if (Gm_IsInCity())
+    // City Trial free roam has its own spawn filtering via FilterAllSpawnTables hooks.
+    // Stadiums are part of City Trial but need enemy spawn weight filtering.
+    int in_city = Gm_IsInCity();
+    int in_stadium = CityTrial_IsInStadium();
+    OSReport("[GateAbilities] On3DLoadEnd: InCity=%d InStadium=%d\n", in_city, in_stadium);
+
+    if (in_city && !in_stadium)
         return;
+
+    char *spawn_data = *stc_enemy_spawn_data;
+    if (spawn_data)
+    {
+        int *config = *(int **)(spawn_data + 0x10);
+        short mode = config ? *(short *)((char *)config + 0x28) : -1;
+        short spawn_count = *(short *)spawn_data;
+        OSReport("[GateAbilities] spawn_data=%p config=%p mode=%d spawn_count=%d\n",
+                 spawn_data, config, mode, spawn_count);
+    }
+    else
+    {
+        OSReport("[GateAbilities] spawn_data is NULL\n");
+    }
 
     FilterEnemySpawnWeights();
 }

@@ -4,7 +4,6 @@
 
 #include "main.h"
 #include "gate_events.h"
-#include "custom_events.h"
 #include "textbox.h"
 
 static const char *event_names[EVKIND_NUM] = {
@@ -87,12 +86,29 @@ void GateEvents_LogEnabledEvents(void)
         if (mask & (1 << i))
             OSReport("  [%2d] %s\n", i, event_names[i]);
     }
-    for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
+    if (custom_events)
     {
-        int bit = EVKIND_NUM + i;
-        OSReport("  [%2d] %s: %s\n", bit, custom_event_names[i],
-                 (mask & (1 << bit)) ? "enabled" : "disabled");
+        for (int i = 0; i < custom_events->event_count; i++)
+        {
+            int bit = EVKIND_NUM + i;
+            OSReport("  [%2d] %s: %s\n", bit, custom_events->params[i].label,
+                     (mask & (1 << bit)) ? "enabled" : "disabled");
+        }
     }
+}
+
+// Weight filter: gates custom events by AP unlock mask
+static int APEventWeightFilter(int event_index, int default_weight)
+{
+    int bit = EVKIND_NUM + event_index;
+    if (!(save_data->event_unlocked_mask & (1 << bit)))
+        return 0;
+    return default_weight;
+}
+
+CustomEventWeightFilter GateEvents_GetWeightFilter(void)
+{
+    return APEventWeightFilter;
 }
 
 void GateEvents_OnBoot()
@@ -107,8 +123,8 @@ int GateEvents_UnlockEvent(int kind)
 
     if (kind < EVKIND_NUM)
         name = event_names[kind];
-    else if (kind < CUSTOM_EVKIND_NUM)
-        name = custom_event_names[kind - EVKIND_NUM];
+    else if (custom_events && kind < CUSTOM_EVKIND_NUM)
+        name = custom_events->params[kind - EVKIND_NUM].label;
     else
         return 0;
 

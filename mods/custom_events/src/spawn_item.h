@@ -3,8 +3,6 @@
 
 #include "item.h"
 
-void SpawnItemHumans(ItemKind item_kind);
 void SpawnItemPlayer(int ply_int, ItemKind item_kind);
-void SpawnItem_OnBoot();
 
 #endif // SPAWN_ITEM_H

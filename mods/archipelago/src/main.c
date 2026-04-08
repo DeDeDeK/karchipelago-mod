@@ -32,7 +32,7 @@
 #include "gate_colors.h"
 #include "weather_control.h"
 #include "spawn_enemy.h"
-#include "custom_events.h"
+#include "custom_events_api.h"
 #include "airride_speed.h"
 #include "energylink_spend.h"
 #include "debug_menu.h"
@@ -41,6 +41,7 @@
 ArchipelagoData *archipelago_data;
 APMenuSettings hoshi_menu_settings;
 KARSave *save_data;
+CustomEventsAPI *custom_events;
 
 // Creates a menu that appears in the in-game Settings menu.
 // Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
@@ -276,6 +277,9 @@ void OnBoot()
     // Patches for Top Ride item gating
     GateTopRideItems_OnBoot();
 
+    // Patches for fake item effects outside fake items event
+    SpawnItem_OnBoot();
+
     // Patches for Kirby color gating
     GateColors_OnBoot();
 
@@ -284,9 +288,6 @@ void OnBoot()
 
     // Null-safe patches for standalone enemy spawning
     SpawnEnemy_OnBoot();
-
-    // Custom event state handler wrappers
-    CustomEvents_OnBoot();
 
     // Traplink send hooks
     TrapLink_OnBoot();
@@ -317,6 +318,23 @@ void OnSaveLoaded()
 {
     save_data = (KARSave *)mod_desc.save_ptr;
     save_data->boot_num++;
+
+    // Import custom events API (deferred from OnBoot — all mods are loaded by now)
+    if (!custom_events)
+    {
+        custom_events = Hoshi_ImportMod("custom_events",
+                                        CUSTOM_EVENTS_API_MAJOR,
+                                        CUSTOM_EVENTS_API_MINOR);
+        if (custom_events)
+        {
+            custom_events->SetWeightFilter(GateEvents_GetWeightFilter());
+            OSReport("Custom events API imported, weight filter installed\n");
+        }
+        else
+        {
+            OSReport("Custom events mod not found, custom events disabled\n");
+        }
+    }
     OSReport("%s present for [%d] boot cycles\n", mod_desc.name, save_data->boot_num);
     OSReport("items received: [%d]\n", save_data->item_received_count);
 
@@ -448,12 +466,8 @@ void On3DLoadEnd()
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
-    // Initialize custom event SIS text entries when in City Trial
     if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
-    {
-        CustomEvents_InitSis();
         GateEvents_LogEnabledEvents();
-    }
 
     GateAbilities_On3DLoadEnd();
 
@@ -591,7 +605,63 @@ static void DebugSimulateLocationData()
     OSReport("Debug: location data written, will apply next frame\n");
 }
 
-// Runs every game tick, even when the game is paused normally or via debug mode.
+// Debug: visualize spline paths as colored lines in 3D.
+#define HOTDOG_CITY_RADIUS (350.0f * 350.0f) // used by spline vis
+static GOBJ *spline_vis_gobj;
+
+static void SplineVis_GXCallback(GOBJ *gobj, int pass)
+{
+    int spline_count = Spline_GetCount();
+    GXColor green = {0, 255, 0, 255};
+    GXColor red = {255, 0, 0, 255};
+
+    for (int seg = 0; seg < spline_count; seg++)
+    {
+        void *spline = Spline_GetForward(seg);
+        if (!spline)
+            continue;
+
+        // Check if midpoint is within city radius
+        Vec3 mid;
+        splGetSplinePoint(&mid, spline, 0.5f);
+        float dx = mid.X - 15.0f;
+        float dz = mid.Z - (-267.4f);
+        int in_city = (dx * dx + dz * dz < HOTDOG_CITY_RADIUS);
+
+        // Draw line strip: 5 segments per spline
+        for (int step = 0; step < 5; step++)
+        {
+            Vec3 a, b;
+            float t0 = (float)step / 5.0f;
+            float t1 = (float)(step + 1) / 5.0f;
+            splGetSplinePoint(&a, spline, t0);
+            splGetSplinePoint(&b, spline, t1);
+            GX_DrawLine(&a, &b, 10, in_city ? &green : &red);
+        }
+    }
+}
+
+static void Debug_ToggleSplineVis(void)
+{
+    if (spline_vis_gobj)
+    {
+        GObj_Destroy(spline_vis_gobj);
+        spline_vis_gobj = NULL;
+        OSReport("[SplineVis] Off\n");
+        return;
+    }
+
+    if (!Gm_IsInCity())
+    {
+        OSReport("[SplineVis] Not in City Trial\n");
+        return;
+    }
+
+    spline_vis_gobj = GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0,
+                                      0, 0, SplineVis_GXCallback, 8, 0);
+    OSReport("[SplineVis] On (%d splines)\n", Spline_GetCount());
+}
+
 void OnFrameStart()
 {
     GameData *gd = Gm_GetGameData();
@@ -602,17 +672,40 @@ void OnFrameStart()
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
 
-    // Debug: dpad-left = waddle dee swarm, dpad-right = meteor trap
+    // Debug: dpad-left = spawn random patch, dpad-right = meteor trap
     HSD_Pad *pad = &stc_engine_pads[0];
     if (pad->down & PAD_BUTTON_DPAD_LEFT)
     {
-        if (CustomEvent_Do(CUSTOM_EVKIND_TEST))
-            OSReport("Debug: triggered Waddle Dee Swarm\n");
+        GOBJ *mg = Ply_GetMachineGObj(0);
+        if (mg)
+        {
+            MachineData *md = mg->userdata;
+            ItemKind kind = ITKIND_ACCELFAKE + HSD_Randi(ITKIND_WEIGHTFAKE - ITKIND_ACCELFAKE + 1);
+            Vec3 spawn_pos = {
+                .X = md->pos.X + md->forward.X * 30.0f,
+                .Y = md->pos.Y + md->forward.Y * 30.0f,
+                .Z = md->pos.Z + md->forward.Z * 30.0f
+            };
+            ItemDesc desc;
+            Item_InitDesc(&desc, kind, 1.0f, 0, &spawn_pos, &md->up, &md->forward, -1, -1, 1, 3, -1, -1);
+            Item_Create(&desc);
+            OSReport("Debug: spawned patch item %d at (%.1f, %.1f, %.1f)\n",
+                     kind, spawn_pos.X, spawn_pos.Y, spawn_pos.Z);
+        }
     }
     if ((pad->down & PAD_BUTTON_DPAD_RIGHT) && archipelago_data->incoming_item_id == 0)
     {
         archipelago_data->incoming_item_id = AP_ITEM_METEOR_TRAP;
         OSReport("Debug: wrote AP_ITEM_METEOR_TRAP to mailbox\n");
+    }
+    if (pad->down & PAD_BUTTON_DPAD_DOWN)
+    {
+        if (custom_events && custom_events->Do(CUSTOM_EVKIND_WADDLE_DEE_SWARM))
+            OSReport("Debug: triggered Waddle Dee Swarm\n");
+    }
+    if (pad->down & PAD_BUTTON_DPAD_UP)
+    {
+        Debug_ToggleSplineVis();
     }
 
 }

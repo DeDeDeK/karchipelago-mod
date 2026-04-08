@@ -11,31 +11,6 @@
 // Machine_SetFallDead or Ply_SetHP from the receive path.
 static int applying_deathlink = 0;
 
-// Find a valid dead-zone ground handle for Machine_SetFallDead.
-// Ground entries at *(GrObj+0x74), 0x140 bytes each, count at GrObj+0x78.
-// Type at entry+0x24: (value & 0x1FFFFFF) == 0x19 means dead zone.
-// Returns the first dead-zone handle found, or -1 if none exist.
-static int FindDeadZoneGroundHandle(void)
-{
-    char *grobj = (char *)*stc_grobj;
-    if (!grobj)
-        return -1;
-
-    char *entries_base = *(char **)(grobj + 0x74);
-    int max_handles = *(int *)(grobj + 0x78);
-    if (!entries_base || max_handles <= 0)
-        return -1;
-
-    for (int i = 0; i < max_handles; i++)
-    {
-        int type = *(int *)(entries_base + i * 0x140 + 0x24) & 0x1FFFFFF;
-        if (type == 0x19)
-            return i;
-    }
-
-    return -1;
-}
-
 // Shared helper — sends deathlink for a human player.
 static void SendDeathLink(int ply)
 {
@@ -95,13 +70,13 @@ static void KillPlayer(RiderData *rd, MachineData *md)
     else
     {
         // Air Ride / Top Ride: trigger fall-off-course death.
-        // Try surface-specific handle first, then any dead zone on the stage.
-        // Fallback to -1 is valid — the game does this in Machine_CheckFallDeath's
-        // OOB distance branch (global dead zone system handles respawn).
-        int ground_handle = Machine_GetGroundHandle(md->surface_id);
-        if (ground_handle < 0)
-            ground_handle = FindDeadZoneGroundHandle();
-        Machine_SetFallDead(md, ground_handle, md->respawn_pos);
+        // respawn_pos contains spline params {segment, progress, y_offset}
+        // updated per-frame by the checkpoint system. Use backup_respawn_pos
+        // when xc37 bit 6 is set (spline lookup failed), matching the vanilla
+        // Machine_CheckFallDeath OOB-distance path. Pass -1 for ground_handle
+        // (vanilla does this when no dead zone surface is found).
+        float *pos = (md->xc37 & 0x40) ? md->backup_respawn_pos : md->respawn_pos;
+        Machine_SetFallDead(md, -1, pos);
     }
 }
 

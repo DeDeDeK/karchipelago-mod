@@ -50,7 +50,7 @@
 #define WADDLE_DEE_SPAWN_INTERVAL 20  // frames between spawn attempts
 #define WADDLE_DEE_FADE_FRAMES  20
 
-static GOBJ *test_event_enemies[WADDLE_DEE_MAX_COUNT];
+static GOBJ *swarm_gobjs[WADDLE_DEE_MAX_COUNT];
 static Vec3 saved_pos[WADDLE_DEE_MAX_COUNT];   // last known good position (end of chase proc)
 static int saved_state[WADDLE_DEE_MAX_COUNT];  // state at end of last chase proc frame
 static int chase_active[WADDLE_DEE_MAX_COUNT]; // 1 once chase callbacks are installed
@@ -128,7 +128,7 @@ static void WaddleDeeChaseOrientation(EnemyData *ed)
 static int WaddleDeeFindSlot(GOBJ *gobj)
 {
     for (int i = 0; i < WADDLE_DEE_MAX_COUNT; i++)
-        if (test_event_enemies[i] == gobj)
+        if (swarm_gobjs[i] == gobj)
             return i;
     return -1;
 }
@@ -139,26 +139,20 @@ static void WaddleDeeUntrack(GOBJ *gobj)
     int slot = WaddleDeeFindSlot(gobj);
     if (slot >= 0)
     {
-        test_event_enemies[slot] = NULL;
+        swarm_gobjs[slot] = NULL;
         chase_active[slot] = 0;
         fade_timer[slot] = 0;
     }
 }
 
-// Debug: only log slot 0 to avoid spam
-#define WD_DEBUG_SLOT 0
-static int wd_debug_frame;
-
 // GOBJProc (priority 10): installs chase callbacks, checks for hit → despawn.
 static void WaddleDeeChaseProc(GOBJ *gobj)
 {
     EnemyData *ed = gobj->userdata;
-    int is_debug = (test_event_enemies[WD_DEBUG_SLOT] == gobj);
 
     // Event ended: self-destruct
     if (!swarm_active)
     {
-        if (is_debug) OSReport("[WD] destroyed: event ended\n");
         WaddleDeeUntrack(gobj);
         EventActor_Destroy(gobj);
         return;
@@ -167,24 +161,8 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
     // If inhaled/dying, untrack
     if (ed->state == 0x09 || ed->state == 0x0A)
     {
-        if (is_debug) OSReport("[WD] untrack: state=0x%02X (dying/inhaled)\n", ed->state);
         WaddleDeeUntrack(gobj);
         return;
-    }
-
-    if (is_debug)
-    {
-        OSReport("[WD] f=%d state=0x%02X pos=(%.1f,%.1f,%.1f) vel=(%.1f,%.1f,%.1f) "
-                 "flags=%02X pathflag=%.1f f1=%p f2=%p f3=%p f4=%p\n",
-                 wd_debug_frame,
-                 ed->state,
-                 ed->pos.X, ed->pos.Y, ed->pos.Z,
-                 ed->vel.X, ed->vel.Y, ed->vel.Z,
-                 *(unsigned char *)((char *)ed + 0xB08),
-                 ed->path_active_flag,
-                 ed->state_func1, ed->state_func2,
-                 ed->state_func3, ed->state_func4);
-        wd_debug_frame++;
     }
 
     // Wait for vanilla init to complete.
@@ -201,20 +179,12 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
         ed->pos = saved_pos[slot]; // saved_pos was init'd to desc.position
         saved_state[slot] = ed->state;
         chase_active[slot] = 1;
-        if (is_debug)
-            OSReport("[WD] chase active, restored pos to (%.1f,%.1f,%.1f)\n",
-                     ed->pos.X, ed->pos.Y, ed->pos.Z);
     }
     else if (ed->state != saved_state[slot])
     {
         // Vanilla state transition occurred (animation end → new walk state).
         // The new state's func1 snapped pos to the nearest spline point.
         // Restore from saved_pos (last known good position from end of previous frame).
-        if (is_debug)
-            OSReport("[WD] state %d→%d snap fix: (%.1f,%.1f,%.1f)→(%.1f,%.1f,%.1f)\n",
-                     saved_state[slot], ed->state,
-                     ed->pos.X, ed->pos.Y, ed->pos.Z,
-                     saved_pos[slot].X, saved_pos[slot].Y, saved_pos[slot].Z);
         ed->pos = saved_pos[slot];
         saved_state[slot] = ed->state;
     }
@@ -224,7 +194,7 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
     ed->state_func4 = (void *)WaddleDeeChaseOrientation;
 
     // Handle fade-out animation
-    if (slot >= 0 && fade_timer[slot] > 0)
+    if (fade_timer[slot] > 0)
     {
         fade_timer[slot]--;
         if (fade_timer[slot] <= 0)
@@ -243,13 +213,12 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
     }
 
     // Despawn on contact: start fade-out
-    // TODO: Add custom damage/knockback. Direct Machine_GiveDamage + Machine_EnterHitReaction
-    // didn't produce visible results — needs more investigation into the machine hit reaction
-    // pipeline and timing. See docs/hurtdata-system.md for the full system overview.
+    // TODO: Add custom damage/knockback — needs investigation into machine hit
+    // reaction pipeline. See docs/hurtdata-system.md for the full system overview.
     if (ed->target_player_idx >= 0)
     {
         float dist = EnemyActor_DistToPlayer(ed->target_player_idx, &ed->pos.X);
-        if (dist < WADDLE_DEE_HIT_RADIUS && slot >= 0)
+        if (dist < WADDLE_DEE_HIT_RADIUS)
         {
             fade_timer[slot] = WADDLE_DEE_FADE_FRAMES;
             fade_scale0[slot] = ed->final_scale;
@@ -269,7 +238,7 @@ static int WaddleDeeSpawnOne(void)
     int slot = -1;
     for (int i = 0; i < WADDLE_DEE_MAX_COUNT; i++)
     {
-        if (!test_event_enemies[i])
+        if (!swarm_gobjs[i])
         {
             slot = i;
             break;
@@ -317,17 +286,10 @@ static int WaddleDeeSpawnOne(void)
     if (!actor)
         return 0;
 
-    test_event_enemies[slot] = actor;
+    swarm_gobjs[slot] = actor;
     saved_pos[slot] = desc.position;
     chase_active[slot] = 0;
     GObj_AddProc(actor, WaddleDeeChaseProc, 10);
-    if (slot == WD_DEBUG_SLOT)
-    {
-        EnemyData *ed = actor->userdata;
-        wd_debug_frame = 0;
-        OSReport("[WD] spawned slot %d at (%.1f,%.1f,%.1f) state=0x%02X pathflag=%.1f\n",
-                 slot, ed->pos.X, ed->pos.Y, ed->pos.Z, ed->state, ed->path_active_flag);
-    }
     return 1;
 }
 
@@ -354,6 +316,4 @@ void WaddleDeeSwarm_End2(EventCheckData *ev_chk)
     // here — pointers may be stale if vanilla already destroyed the enemy
     // (OOB kill, etc.). The chase procs will destroy themselves next frame.
     swarm_active = 0;
-    for (int i = 0; i < WADDLE_DEE_MAX_COUNT; i++)
-        test_event_enemies[i] = NULL;
 }

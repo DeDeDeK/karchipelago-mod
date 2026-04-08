@@ -22,7 +22,7 @@
 #include "gate_topride_items.h"
 #include "gate_colors.h"
 #include "spawn_enemy.h"
-#include "custom_events.h"
+#include "main.h"
 #include "airride_speed.h"
 
 // Check the mailbox for an incoming item from the AP client.
@@ -214,8 +214,8 @@ int APItems_HandleItem(uint ap_item_id)
     // Custom City Trial event
     if (ap_item_id == AP_ITEM_EVENT_CUSTOM)
     {
-        if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
-            return CustomEvent_Do(CUSTOM_EVKIND_GRAVITY_CHANGE);
+        if (custom_events && Gm_GetCurrentGrKind() == GRKIND_CITY1)
+            return custom_events->Do(CUSTOM_EVKIND_GRAVITY_CHANGE);
         return 0;
     }
 

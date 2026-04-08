@@ -5,12 +5,13 @@
 #include "audio.h"
 #include "stage.h"
 #include "code_patch/code_patch.h"
+#include "hoshi/mod.h"
 
-#include "main.h"
 #include "custom_events.h"
 #include "event_waddle_dee_swarm.h"
 #include "event_gravity_change.h"
 #include "event_scale_change.h"
+#include "event_gourmet_race.h"
 
 #define SIS_CITYTRIAL_ENTRY_COUNT 42
 
@@ -21,20 +22,15 @@
 // EVKIND_NUM + STKIND_NUM avoids colliding with stadium name lookups.
 #define CUSTOM_SIS_TABLE_OFFSET (EVKIND_NUM + STKIND_NUM)
 
-const char *custom_event_names[CUSTOM_EVENT_COUNT] = {
-    [CUSTOM_EVKIND_TEST - EVKIND_NUM]            = "Waddle Dee Swarm",
-    [CUSTOM_EVKIND_GRAVITY_CHANGE - EVKIND_NUM]   = "Gravity Change",
-    [CUSTOM_EVKIND_SCALE_CHANGE - EVKIND_NUM]     = "Scale Change",
-};
-
-static CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
-    [CUSTOM_EVKIND_TEST - EVKIND_NUM] = {
+CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
+    [CUSTOM_EVKIND_WADDLE_DEE_SWARM - EVKIND_NUM] = {
         .duration = 1800,   // ~30 seconds
         .is_siren = 1,
         .sky_preset = 5,   // Dark Vignette
         .bgm_file = 0x34,  // Runamok BGM
         .weight = 20,
-        .name = "Waddle Dee swarm incoming!",
+        .label = "Waddle Dee Swarm",
+        .hud_text = "Waddle Dee swarm incoming!",
     },
     [CUSTOM_EVKIND_GRAVITY_CHANGE - EVKIND_NUM] = {
         .duration = 900,   // ~15 seconds
@@ -42,7 +38,8 @@ static CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .sky_preset = 8,   // Pink Sky
         .bgm_file = 0x31,  // Meteor BGM
         .weight = 20,
-        .name = "Gravity is changing!",
+        .label = "Gravity Change",
+        .hud_text = "Gravity is changing!",
     },
     [CUSTOM_EVKIND_SCALE_CHANGE - EVKIND_NUM] = {
         .duration = 900,   // ~15 seconds
@@ -50,12 +47,22 @@ static CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .sky_preset = 3,   // Dusk 2
         .bgm_file = 0x32,  // Dyna Blade BGM
         .weight = 20,
-        .name = "The world is growing!",
+        .label = "Scale Change",
+        .hud_text = "The world is growing!",
+    },
+    [CUSTOM_EVKIND_GOURMET_RACE - EVKIND_NUM] = {
+        .duration = 3600,  // ~60 seconds
+        .is_siren = 1,
+        .sky_preset = -1,  // No sky change
+        .bgm_file = 0x34,  // Runamok BGM
+        .weight = 20,
+        .label = "Gourmet Race",
+        .hud_text = "Gourmet Race!",
     },
 };
 
 static CustomEventFunc custom_functions[CUSTOM_EVENT_COUNT] = {
-    [CUSTOM_EVKIND_TEST - EVKIND_NUM] = {
+    [CUSTOM_EVKIND_WADDLE_DEE_SWARM - EVKIND_NUM] = {
         .start = WaddleDeeSwarm_Start,
         .active = WaddleDeeSwarm_Active,
         .end2 = WaddleDeeSwarm_End2,
@@ -70,6 +77,11 @@ static CustomEventFunc custom_functions[CUSTOM_EVENT_COUNT] = {
         .active = ScaleChange_Active,
         .end2 = ScaleChange_End2,
     },
+    [CUSTOM_EVKIND_GOURMET_RACE - EVKIND_NUM] = {
+        .start = GourmetRace_Start,
+        .active = GourmetRace_Active,
+        .end2 = GourmetRace_End2,
+    },
 };
 
 // Extended pointer array: original 42 entries + our custom entries.
@@ -78,11 +90,17 @@ static void *extended_sis_ptrs[SIS_CITYTRIAL_ENTRY_COUNT + CUSTOM_EVENT_COUNT];
 // Pre-composed SIS binary text for each custom event.
 static u8 custom_sis_text[CUSTOM_EVENT_COUNT][128];
 
-// SIS ID for each custom event (index into the extended pointer array).
-static int custom_sis_ids[CUSTOM_EVENT_COUNT];
+// Weight filter callback (NULL = standalone mode, all events use default weights).
+static CustomEventWeightFilter weight_filter = NULL;
+
+static void SetWeightFilter(CustomEventWeightFilter filter)
+{
+    weight_filter = filter;
+    OSReport("CustomEvents: weight filter %s\n", filter ? "installed" : "removed");
+}
 
 // Compose a SIS-format text entry from a C string.
-static int ComposeSisText(u8 *buf, const char *str)
+static void ComposeSisText(u8 *buf, const char *str)
 {
     u8 *p = buf;
 
@@ -126,8 +144,6 @@ static int ComposeSisText(u8 *buf, const char *str)
     *p++ = 0x19;
     *p++ = 0x13;
     *p++ = 0x00; // TERMINATE
-
-    return (int)(p - buf);
 }
 
 // Called from On3DLoadEnd when in City Trial.
@@ -150,10 +166,9 @@ void CustomEvents_InitSis(void)
     // Compose and register custom event text entries
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
     {
-        ComposeSisText(custom_sis_text[i], custom_params[i].name);
+        ComposeSisText(custom_sis_text[i], custom_params[i].hud_text);
         int sis_idx = SIS_CITYTRIAL_ENTRY_COUNT + i;
         extended_sis_ptrs[sis_idx] = custom_sis_text[i];
-        custom_sis_ids[i] = sis_idx;
     }
 
     // Replace SIS data pointer so Text_FinalizeSisText can find our entries
@@ -167,7 +182,7 @@ void CustomEvents_InitSis(void)
     // stadium range to avoid collision.
     int *sis_id_table = stc_event_sis_id_table;
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
-        sis_id_table[CUSTOM_SIS_TABLE_OFFSET + i] = custom_sis_ids[i];
+        sis_id_table[CUSTOM_SIS_TABLE_OFFSET + i] = SIS_CITYTRIAL_ENTRY_COUNT + i;
 
     OSReport("CustomEvents_InitSis: extended SIS array with %d custom entries\n",
              CUSTOM_EVENT_COUNT);
@@ -179,7 +194,7 @@ static StateHandler orig_state1;
 static StateHandler orig_state2;
 static StateHandler orig_state3;
 
-// State 1 wrapper: handles the starting → active transition.
+// State 1 wrapper: handles the starting -> active transition.
 // For custom events: set state=2, show HUD text, call custom start.
 // For vanilla events: delegate to original handler.
 static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
@@ -192,7 +207,7 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
         return;
     }
 
-    // --- Custom event: state 1 → 2 transition ---
+    // --- Custom event: state 1 -> 2 transition ---
 
     // Wait for starting delay (siren period) before transitioning
     int starting_delay = ev_chk->data->event->starting_delay;
@@ -206,7 +221,7 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
     ev_chk->timer = 0;
 
     // Show HUD text via the vanilla popup pipeline.
-    // CityEvent_ShowHudText → stadiumPrediction manages the popup frame,
+    // CityEvent_ShowHudText -> stadiumPrediction manages the popup frame,
     // slide-in animation, and timing. It reads the SIS ID from the table
     // at 0x804a7b98[kind], which we pre-populated in InitSis.
     // Pass the remapped SIS table index (not the raw event kind) so
@@ -223,7 +238,7 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
         custom_functions[idx].start(ev_chk);
 
     OSReport("Custom event %d started (SIS index %d)\n",
-             ev_chk->cur_kind, custom_sis_ids[idx]);
+             ev_chk->cur_kind, SIS_CITYTRIAL_ENTRY_COUNT + idx);
 }
 
 // State 2 wrapper: active phase.
@@ -309,14 +324,15 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
     for (int i = 0; i < count; i++)
         vanilla_total += chance_arr[i];
 
-    // Sum custom event weights (gated by unlock mask)
-    u32 mask = save_data->event_unlocked_mask;
+    // Sum custom event weights (filtered by installed weight filter if any)
     int custom_weights[CUSTOM_EVENT_COUNT];
     int custom_total = 0;
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
     {
-        int bit = EVKIND_NUM + i;
-        custom_weights[i] = (mask & (1 << bit)) ? custom_params[i].weight : 0;
+        int w = custom_params[i].weight;
+        if (weight_filter)
+            w = weight_filter(i, w);
+        custom_weights[i] = w;
         custom_total += custom_weights[i];
     }
 
@@ -346,7 +362,7 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
             if (CustomEvent_Do(kind))
             {
                 OSReport("[Events] ExtendedRoll: custom event %d (%s) selected (vanilla=%d, custom=%d)\n",
-                         kind, custom_event_names[i], vanilla_total, custom_total);
+                         kind, custom_params[i].label, vanilla_total, custom_total);
                 return -1;
             }
             // CustomEvent_Do failed (e.g. another event active) — fall back to vanilla
@@ -358,6 +374,14 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
     // Should not reach here
     return Gm_Roll(chance_arr, count);
 }
+
+// Exported API instance.
+static CustomEventsAPI api = {
+    .Do = CustomEvent_Do,
+    .params = custom_params,
+    .event_count = CUSTOM_EVENT_COUNT,
+    .SetWeightFilter = SetWeightFilter,
+};
 
 void CustomEvents_OnBoot(void)
 {
@@ -376,8 +400,12 @@ void CustomEvents_OnBoot(void)
     // that includes custom events in the selection pool.
     CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll);
 
+    // Export API for other mods to use
+    Hoshi_ExportMod(&api);
+
     OSReport("Custom event state handler wrappers installed\n");
     OSReport("Custom event extended roll installed at CityEvent_Decide+0x3A0\n");
+    OSReport("Custom events API exported\n");
 }
 
 int CustomEvent_Do(int kind)

@@ -5,7 +5,18 @@
 
 #include "main.h"
 #include "gate_topride_items.h"
+#include "gate_abilities.h"
 #include "textbox.h"
+
+// Top Ride items that correspond to copy abilities.
+// These are additionally gated by ability_unlocked_mask.
+static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
+    { TRITEM_FREEZE, COPYKIND_ICE },
+    { TRITEM_FIRE,   COPYKIND_FIRE },
+    { TRITEM_NEEDLE, COPYKIND_NEEDLE },
+    { TRITEM_BOMB,   COPYKIND_BOMB },
+    { TRITEM_MIKE,   COPYKIND_MIC },
+};
 
 
 static const char *topride_item_names[TRITEM_NUM] = {
@@ -33,7 +44,13 @@ static const char *topride_item_names[TRITEM_NUM] = {
     [TRITEM_BACKWARD]     = "TR Backward",
 };
 
+// Bitmask of ability-themed TR items — these are not gated by topride_item_unlocked_mask.
+#define ABILITY_ITEM_BITS ( \
+    (1 << TRITEM_FREEZE) | (1 << TRITEM_FIRE) | (1 << TRITEM_NEEDLE) | \
+    (1 << TRITEM_BOMB) | (1 << TRITEM_MIKE))
+
 // Apply the unlock mask to the ItemMgr's enabled bitmask.
+// Ability-themed items bypass the TR item mask and are gated only by ability_unlocked_mask.
 // Called via hook right after TopRideItem_MgrInit returns.
 void GateTopRideItems_ApplyMask()
 {
@@ -42,9 +59,20 @@ void GateTopRideItems_ApplyMask()
         return;
 
     u32 before = mgr->enabled_mask;
-    mgr->enabled_mask &= save_data->topride_item_unlocked_mask;
-    OSReport("TopRide items: enabled mask 0x%08x -> 0x%08x (unlock mask 0x%08x)\n",
-             before, mgr->enabled_mask, save_data->topride_item_unlocked_mask);
+
+    // Gate non-ability items by TR item unlock mask
+    mgr->enabled_mask &= save_data->topride_item_unlocked_mask | ABILITY_ITEM_BITS;
+
+    // Gate ability-themed items by ability unlock mask only
+    u16 ability_mask = save_data->ability_unlocked_mask;
+    for (int i = 0; i < (int)(sizeof(ability_items) / sizeof(ability_items[0])); i++)
+    {
+        if (!(ability_mask & (1 << ability_items[i].ability)))
+            mgr->enabled_mask &= ~(1 << ability_items[i].item);
+    }
+
+    OSReport("TopRide items: enabled mask 0x%08x -> 0x%08x (item mask 0x%08x, ability mask 0x%04x)\n",
+             before, mgr->enabled_mask, save_data->topride_item_unlocked_mask, ability_mask);
 }
 
 // Hook at 0x802db05c — right after TopRideItem_MgrInit (0x8034b5f4) returns

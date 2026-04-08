@@ -62,21 +62,13 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
 
     // Find spawn table entry for current match progress
     int spawn_table_idx = 0;
-    while (match_progress > vc_data_common->x20->spawn_desc[spawn_table_idx].match_progress)
+    while (match_progress > vc_data_common->spawn_data->spawn_desc[spawn_table_idx].match_progress)
         spawn_table_idx++;
 
     // Make local copy of spawn chances
     float spawn_chances[VCKIND_NUM];
     for (int i = 0; i < VCKIND_NUM; i++)
-        spawn_chances[i] = vc_data_common->x20->spawn_desc[spawn_table_idx].chance[i];
-
-    // Count unlocked machines
-    int unlocked_count = 0;
-    for (int i = 0; i < VCKIND_NUM; i++)
-    {
-        if (unlocked_mask & (1 << i))
-            unlocked_count++;
-    }
+        spawn_chances[i] = vc_data_common->spawn_data->spawn_desc[spawn_table_idx].chance[i];
 
     // Zero locked machines, give unlocked-but-zero-weight machines a base chance
     for (int i = 0; i < VCKIND_NUM; i++)
@@ -87,13 +79,32 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
             spawn_chances[i] = 10;         // unlocked but zero weight: give base chance
     }
 
-    // No machines unlocked — return Compact Star as a safe fallback
-    if (unlocked_count == 0)
+    // Exclude machines that don't naturally spawn in CT (Top Ride stars,
+    // wing transformations, debug wheelie kinds). Must be after the unlock
+    // loop to override the base chance fallback.
+    spawn_chances[VCKIND_FREE] = 0;
+    spawn_chances[VCKIND_STEER] = 0;
+    spawn_chances[VCKIND_WINGKIRBY] = 0;
+    spawn_chances[VCKIND_WHEELNORMAL] = 0;
+    spawn_chances[VCKIND_WHEELKIRBY] = 0;
+    spawn_chances[VCKIND_WHEELDEDEDE] = 0;
+    spawn_chances[VCKIND_WHEELVSDEDEDE] = 0;
+
+    // Count spawnable machines (nonzero chance after exclusions)
+    int spawnable_count = 0;
+    for (int i = 0; i < VCKIND_NUM; i++)
+    {
+        if (spawn_chances[i] > 0)
+            spawnable_count++;
+    }
+
+    // No spawnable machines — return Compact Star as a safe fallback
+    if (spawnable_count == 0)
         return VCKIND_COMPACT;
 
     // Reduce history size when few machines are available to prevent
     // the only unlocked machine from being excluded by its own history
-    int history_size = (unlocked_count <= 4) ? (unlocked_count - 1) : 4;
+    int history_size = (spawnable_count <= 4) ? (spawnable_count - 1) : 4;
 
     // Remove recently spawned machines from candidates
     for (int i = 0; i < VCKIND_NUM; i++)

@@ -15,7 +15,6 @@
 #include "gate_items.h"
 #include "gate_topride_items.h"
 #include "gate_colors.h"
-#include "custom_events.h"
 
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
@@ -296,7 +295,7 @@ static MenuDesc events_menu = {
         G("Bounce",             event_state, EVKIND_BOUNCE,           SyncEvents),
         G("Fog",                event_state, EVKIND_FOG,              SyncEvents),
         G("Fake Powerups",      event_state, EVKIND_FAKEPOWERUPS,     SyncEvents),
-        G("Waddle Dee Swarm",   event_state, CUSTOM_EVKIND_TEST,           SyncEvents),
+        G("Waddle Dee Swarm",   event_state, CUSTOM_EVKIND_WADDLE_DEE_SWARM, SyncEvents),
         G("Gravity Change",     event_state, CUSTOM_EVKIND_GRAVITY_CHANGE, SyncEvents),
         G("Scale Change",       event_state, CUSTOM_EVKIND_SCALE_CHANGE,   SyncEvents),
     },
@@ -401,7 +400,7 @@ static MenuDesc tr_stages_menu = {
 };
 
 static MenuDesc tr_items_menu = {
-    .option_num = 24,
+    .option_num = 19,
     .options = {
         A("Unlock All", "Unlock all TR items", TriUnlockAll),
         A("Lock All",   "Lock all TR items",   TriLockAll),
@@ -414,14 +413,9 @@ static MenuDesc tr_items_menu = {
         G("Invincible",     tr_item_state, TRITEM_INVINCIBLE,   SyncTRItems),
         G("Buzz Saw",       tr_item_state, TRITEM_BUZZSAW,      SyncTRItems),
         G("Spear",          tr_item_state, TRITEM_SPEAR,        SyncTRItems),
-        G("Freeze",         tr_item_state, TRITEM_FREEZE,       SyncTRItems),
         G("Missile",        tr_item_state, TRITEM_MISSILE,      SyncTRItems),
-        G("Fire",           tr_item_state, TRITEM_FIRE,         SyncTRItems),
-        G("Needle",         tr_item_state, TRITEM_NEEDLE,       SyncTRItems),
-        G("Bomb",           tr_item_state, TRITEM_BOMB,         SyncTRItems),
         G("Land Mine",      tr_item_state, TRITEM_LANDMINE,     SyncTRItems),
         G("Sensor Bomb",    tr_item_state, TRITEM_SENSORBOMB,   SyncTRItems),
-        G("Mike",           tr_item_state, TRITEM_MIKE,         SyncTRItems),
         G("Cracker",        tr_item_state, TRITEM_CRACKER,      SyncTRItems),
         G("Meta Knight",    tr_item_state, TRITEM_METAKNIGHT,   SyncTRItems),
         G("Smoke Screen",   tr_item_state, TRITEM_SMOKESCREEN,  SyncTRItems),

@@ -92,17 +92,17 @@ void GatePatches_FilterEventDropTables()
 
     u16 mask = save_data->patch_unlocked_mask;
 
-    for (int i = 0; i < info->item_desc->x18_num; i++)
+    for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
     {
-        int pk = ItemKindToPatchKind(info->item_desc->x18[i].it_kind);
+        int pk = ItemKindToPatchKind(info->item_desc->event_source_drop[i].it_kind);
         if (pk >= 0 && !(mask & (1 << pk)))
         {
-            info->item_desc->x18[i].chance_misc = 0;
-            info->item_desc->x18[i].chance_tac = 0;
-            info->item_desc->x18[i].chance_meteor = 0;
-            info->item_desc->x18[i].chance_pilar = 0;
-            info->item_desc->x18[i].chance_chamber = 0;
-            info->item_desc->x18[i].chance_ufo = 0;
+            info->item_desc->event_source_drop[i].chance_misc = 0;
+            info->item_desc->event_source_drop[i].chance_tac = 0;
+            info->item_desc->event_source_drop[i].chance_meteor = 0;
+            info->item_desc->event_source_drop[i].chance_pilar = 0;
+            info->item_desc->event_source_drop[i].chance_chamber = 0;
+            info->item_desc->event_source_drop[i].chance_ufo = 0;
         }
     }
 }

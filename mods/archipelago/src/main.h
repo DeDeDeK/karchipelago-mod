@@ -3,6 +3,7 @@
 
 #include "structs.h"
 #include "event.h"
+#include "custom_events_api.h"
 
 #define MAX_RECEIVED_ITEMS 512
 
@@ -404,6 +405,7 @@ typedef struct APMenuSettings
 extern ArchipelagoData *archipelago_data;
 extern APMenuSettings hoshi_menu_settings;
 extern KARSave *save_data;
+extern CustomEventsAPI *custom_events;
 
 void OnBoot();
 void OnSaveInit();

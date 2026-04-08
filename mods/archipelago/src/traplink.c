@@ -38,6 +38,7 @@ static uint trap_items[] = {
     AP_EVENT_FAKEPOWERUPS,
     AP_EVENT_RUNAMOK,
     AP_ITEM_1_HP_TRAP,
+    AP_ITKIND_WEIGHTFAKE,
 };
 #define TRAP_ITEM_COUNT (sizeof(trap_items) / sizeof(trap_items[0]))
 

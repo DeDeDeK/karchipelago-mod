@@ -14,7 +14,7 @@ static double EventActor_GetParentScale_Safe(GOBJ *gobj)
     if (!gobj)
         return 1.0;
     EnemyData *ed = gobj->userdata;
-    return (double)*(float *)&ed->xac; // 0xac: scale value read by parent followers
+    return (double)ed->scale;
 }
 
 // Null-safe replacement for splArcLengthPoint (0x80415958).
