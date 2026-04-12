@@ -96,7 +96,7 @@ static CustomEventWeightFilter weight_filter = NULL;
 static void SetWeightFilter(CustomEventWeightFilter filter)
 {
     weight_filter = filter;
-    OSReport("CustomEvents: weight filter %s\n", filter ? "installed" : "removed");
+    OSReport("[CustomEvents] Weight filter %s\n", filter ? "installed" : "removed");
 }
 
 // Compose a SIS-format text entry from a C string.
@@ -155,7 +155,7 @@ void CustomEvents_InitSis(void)
     void **original = (void *)stc_sis_data[0];
     if (!original)
     {
-        OSReport("CustomEvents_InitSis: stc_sis_data[0] is NULL\n");
+        OSReport("[CustomEvents] InitSis: stc_sis_data[0] is NULL\n");
         return;
     }
 
@@ -184,7 +184,7 @@ void CustomEvents_InitSis(void)
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
         sis_id_table[CUSTOM_SIS_TABLE_OFFSET + i] = SIS_CITYTRIAL_ENTRY_COUNT + i;
 
-    OSReport("CustomEvents_InitSis: extended SIS array with %d custom entries\n",
+    OSReport("[CustomEvents] InitSis: extended SIS array with %d custom entries\n",
              CUSTOM_EVENT_COUNT);
 }
 
@@ -202,7 +202,7 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
     if (ev_chk->cur_kind < EVKIND_NUM)
     {
         if (ev_chk->timer == 0)
-            OSReport("[Events] Vanilla event %d started (state 1)\n", ev_chk->cur_kind);
+            OSReport("[CustomEvents] Vanilla event %d started\n", ev_chk->cur_kind);
         orig_state1(ev_chk);
         return;
     }
@@ -237,7 +237,7 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
     if (custom_functions[idx].start)
         custom_functions[idx].start(ev_chk);
 
-    OSReport("Custom event %d started (SIS index %d)\n",
+    OSReport("[CustomEvents] Event %d started (SIS index %d)\n",
              ev_chk->cur_kind, SIS_CITYTRIAL_ENTRY_COUNT + idx);
 }
 
@@ -310,7 +310,7 @@ static void CustomEvent_State3Wrapper(EventCheckData *ev_chk)
     ev_chk->cur_kind = -1;
     ev_chk->timer = 0;
 
-    OSReport("Custom event cleanup complete, next delay = %d frames\n", delay);
+    OSReport("[CustomEvents] Cleanup complete, next delay = %d frames\n", delay);
 }
 
 // Replaces the Gm_Roll(chance_arr, 16) call inside CityEvent_Decide at 0x800ee098.
@@ -346,7 +346,7 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
     {
         // Vanilla event won — delegate to Gm_Roll for proper weighted selection
         int result = Gm_Roll(chance_arr, count);
-        OSReport("[Events] ExtendedRoll: vanilla event %d (roll=%d, vanilla=%d, custom=%d)\n",
+        OSReport("[CustomEvents] ExtendedRoll: vanilla event %d (roll=%d, vanilla=%d, custom=%d)\n",
                  result, roll, vanilla_total, custom_total);
         return result;
     }
@@ -361,12 +361,12 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
             int kind = EVKIND_NUM + i;
             if (CustomEvent_Do(kind))
             {
-                OSReport("[Events] ExtendedRoll: custom event %d (%s) selected (vanilla=%d, custom=%d)\n",
+                OSReport("[CustomEvents] ExtendedRoll: custom event %d (%s) selected (vanilla=%d, custom=%d)\n",
                          kind, custom_params[i].label, vanilla_total, custom_total);
                 return -1;
             }
             // CustomEvent_Do failed (e.g. another event active) — fall back to vanilla
-            OSReport("[Events] ExtendedRoll: custom event %d failed, falling back to vanilla\n", kind);
+            OSReport("[CustomEvents] ExtendedRoll: custom event %d failed, falling back to vanilla\n", kind);
             return Gm_Roll(chance_arr, count);
         }
     }
@@ -403,9 +403,7 @@ void CustomEvents_OnBoot(void)
     // Export API for other mods to use
     Hoshi_ExportMod(&api);
 
-    OSReport("Custom event state handler wrappers installed\n");
-    OSReport("Custom event extended roll installed at CityEvent_Decide+0x3A0\n");
-    OSReport("Custom events API exported\n");
+    OSReport("[CustomEvents] Hooks installed\n");
 }
 
 int CustomEvent_Do(int kind)
@@ -445,6 +443,6 @@ int CustomEvent_Do(int kind)
             Sky_TransitionGlobal(custom_params[idx].sky_preset);
     }
 
-    OSReport("Custom event %d triggered (state 1)\n", kind);
+    OSReport("[CustomEvents] Event %d triggered\n", kind);
     return 1;
 }

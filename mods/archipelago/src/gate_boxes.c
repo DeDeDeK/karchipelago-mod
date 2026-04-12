@@ -5,6 +5,7 @@
 
 #include "main.h"
 #include "gate_boxes.h"
+#include "mask_fmt.h"
 #include "textbox.h"
 
 // Tracks whether each box type has at least one item with chance > 0
@@ -95,7 +96,7 @@ int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
 void GateBoxes_OnBoot()
 {
     CODEPATCH_REPLACEFUNC(GrBoxGeneratorDetermine, GateBoxes_DetermineBoxType);
-    OSReport("Box type gating hook installed\n");
+    OSReport("[GateBoxes] Box type gating hook installed\n");
 }
 
 int GateBoxes_UnlockBox(BoxKind kind)
@@ -104,8 +105,8 @@ int GateBoxes_UnlockBox(BoxKind kind)
         return 0;
 
     ap_save->box_unlocked_mask |= (1 << kind);
-    OSReport("Box %d (%s) unlocked (mask = 0x%02x)\n",
-             kind, box_names[kind], ap_save->box_unlocked_mask);
+    OSReport("[GateBoxes] Box %d (%s) unlocked (mask = %s)\n",
+             kind, box_names[kind], MaskBits(ap_save->box_unlocked_mask, 8));
     TextBox_Enqueue(box_names[kind]);
     return 1;
 }

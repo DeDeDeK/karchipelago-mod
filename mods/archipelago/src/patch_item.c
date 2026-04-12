@@ -19,7 +19,7 @@ int Patch_GiveItem(PatchKind kind, int num)
             {
                 MachineData *md = mg->userdata;
                 Machine_GivePatch(md, kind, num);
-                OSReport("Giving %d patches of kind %d to player %d...\n", num, kind, i);
+                OSReport("[PatchItem] Giving %d patches of kind %d to player %d...\n", num, kind, i);
             }
         }
     }
@@ -38,7 +38,7 @@ int Patch_AllUp_GiveItem(int num)
             {
                 MachineData *md = mg->userdata;
                 Machine_GiveAllUp(md, num);
-                OSReport("Giving %d all ups to player %d...\n", num, i);
+                OSReport("[PatchItem] Giving %d all ups to player %d...\n", num, i);
             }
         }
     }
@@ -52,7 +52,7 @@ int PermanentPatch_GiveItem(PatchKind kind)
     if (ap_save->permanent_patches[kind] < PATCH_STAT_MAX)
         ap_save->permanent_patches[kind]++;
 
-    OSReport("Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
+    OSReport("[PatchItem] Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
     return Patch_GiveItem(kind, 1);
 }
 
@@ -66,7 +66,7 @@ int PermanentPatch_GiveAllUp()
             ap_save->permanent_patches[i]++;
     }
 
-    OSReport("Permanent all-up received.\n");
+    OSReport("[PatchItem] Permanent all-up received.\n");
     return Patch_AllUp_GiveItem(1);
 }
 
@@ -89,7 +89,7 @@ static void PermanentPatch_DoApply()
     for (int i = 0; i < PATCHKIND_NUM; i++)
         total += ap_save->permanent_patches[i];
 
-    OSReport("Applying permanent patches (all-up: %d, total: %d)...\n", min_patches, total);
+    OSReport("[PatchItem] Applying permanent patches (all-up: %d, total: %d)...\n", min_patches, total);
 
     for (int p = 0; p < 5; p++)
     {

@@ -6,6 +6,7 @@
 #include "main.h"
 #include "gate_machines.h"
 #include "textbox.h"
+#include "mask_fmt.h"
 
 static int IsCKindUnlocked(CharacterKind ckind);
 CharacterKind GateMachines_GetDefaultCKind();
@@ -348,12 +349,12 @@ CharacterKind GateMachines_GetDefaultCKind()
     if (count > 0)
     {
         CharacterKind chosen = unlocked[HSD_Randi(count)];
-        OSReport("GateMachines_GetDefaultCKind: Compact locked, chose ckind %d from %d unlocked (mask=0x%08x)\n",
-                 chosen, count, ap_save->machine_unlocked_mask);
+        OSReport("[GateMachines] GateMachines_GetDefaultCKind: Compact locked, chose ckind %d from %d unlocked (mask=%s)\n",
+                 chosen, count, MaskBits(ap_save->machine_unlocked_mask, 32));
         return chosen;
     }
 
-    OSReport("GateMachines_GetDefaultCKind: no machines unlocked, fallback to Compact\n");
+    OSReport("[GateMachines] GateMachines_GetDefaultCKind: no machines unlocked, fallback to Compact\n");
     return CKIND_COMPACT;
 }
 
@@ -469,7 +470,7 @@ void GateMachines_OnBoot()
     // Respawn machine validation: use starting machine instead of hardcoded Compact
     CODEPATCH_HOOKAPPLY(0x801952c8);
 
-    OSReport("Machine gating hooks installed (CT spawn + CT mode 0 default + CT Stadium + CT Free Run + AR select + respawn)\n");
+    OSReport("[GateMachines] Machine gating hooks installed (CT spawn + CT mode 0 default + CT Stadium + CT Free Run + AR select + respawn)\n");
 }
 
 int GateMachines_UnlockMachine(MachineKind kind)
@@ -478,8 +479,8 @@ int GateMachines_UnlockMachine(MachineKind kind)
         return 0;
 
     ap_save->machine_unlocked_mask |= (1 << kind);
-    OSReport("Machine %d (%s) unlocked (mask = 0x%08x)\n",
-             kind, machine_names[kind], ap_save->machine_unlocked_mask);
+    OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n",
+             kind, machine_names[kind], MaskBits(ap_save->machine_unlocked_mask, 32));
     TextBox_Enqueue(machine_names[kind]);
     return 1;
 }
@@ -514,7 +515,7 @@ int GateMachines_GiveLegendaryMachine(int machine_index)
         params.forward = md->forward;
 
         LegendaryMachine_StartAssembly(&params);
-        OSReport("Legendary machine %s assembly started for player %d\n",
+        OSReport("[GateMachines] Legendary machine %s assembly started for player %d\n",
                  machine_index == 0 ? "Dragoon" : "Hydra", i);
         given = 1;
     }

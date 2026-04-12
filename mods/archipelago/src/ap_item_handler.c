@@ -38,7 +38,7 @@ int APItems_CheckMailbox()
     uint idx = ap_save->item_received_count;
     if (idx >= MAX_RECEIVED_ITEMS)
     {
-        OSReport("APItems_CheckMailbox: received list is full!\n");
+        OSReport("[APItems] APItems_CheckMailbox: received list is full!\n");
         ap_data->incoming_item_id = 0;
         return 0;
     }
@@ -54,7 +54,7 @@ int APItems_CheckMailbox()
     // Sync received count to shared memory so AP client can read it
     ap_data->item_received_index = ap_save->item_received_count;
 
-    OSReport("AP item ID %d received (index %d).\n", incoming, idx);
+    OSReport("[APItems] AP item ID %d received (index %d).\n", incoming, idx);
 
     // Clear the mailbox so the client can write the next item
     ap_data->incoming_item_id = 0;
@@ -271,7 +271,7 @@ int APItems_HandleItem(uint ap_item_id)
         return 1;
     }
 
-    OSReport("Unknown AP item ID: %d\n", ap_item_id);
+    OSReport("[APItems] Unknown AP item ID: %d\n", ap_item_id);
     return 0;
 }
 
@@ -295,7 +295,7 @@ void APItems_PerFrame(GOBJ *g)
         uint item_id = ap_save->unprocessed_items[i];
         if (APItems_HandleItem(item_id))
         {
-            OSReport("AP item ID %d applied.\n", item_id);
+            OSReport("[APItems] AP item ID %d applied.\n", item_id);
             // Remove by swapping with last element
             ap_save->unprocessed_count--;
             ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];

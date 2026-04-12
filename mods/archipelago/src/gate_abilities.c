@@ -7,6 +7,7 @@
 #include "gate_abilities.h"
 #include "textbox.h"
 #include "traplink.h"
+#include "mask_fmt.h"
 
 static const char *ability_names[COPYKIND_NUM] = {
     [COPYKIND_FIRE]    = "Fire",
@@ -417,6 +418,7 @@ static void FilterMode2(char *spawn_data)
         return;
 
     // Zero all weight columns for entries with locked-ability enemies
+    int zeroed_entries = 0;
     for (int i = 0; i < spawn_count; i++)
     {
         char *entry = entries + i * 0x38;
@@ -430,12 +432,13 @@ static void FilterMode2(char *spawn_data)
             short *weights = (short *)(entry + 0x08);
             for (int col = 0; col < num_categories; col++)
                 weights[col] = 0;
-            OSReport("[GateAbilities] Mode2: zeroed weights for entry %d (enemy_id=%d)\n", i, enemy_id);
+            zeroed_entries++;
         }
     }
 
     // Filter secondary[0] sub-table: zero category weight if ALL entries in that
     // category's column have been zeroed (no valid enemies remain).
+    int zeroed_categories = 0;
     for (int cat = 0; cat < num_categories; cat++)
     {
         int has_valid = 0;
@@ -451,10 +454,11 @@ static void FilterMode2(char *spawn_data)
         if (!has_valid)
         {
             sub_table[cat * 2 + 1] = 0;
-            OSReport("[GateAbilities] Mode2: zeroed category %d (meta_id=0x%02x) in sub-table\n",
-                     cat, sub_table[cat * 2]);
+            zeroed_categories++;
         }
     }
+    OSReport("[GateAbilities] Mode2: zeroed %d/%d entries, %d/%d categories\n",
+             zeroed_entries, spawn_count, zeroed_categories, num_categories);
 }
 
 // Zero spawn weights for enemies whose copy ability is locked.
@@ -470,6 +474,11 @@ static void FilterEnemySpawnWeights()
         return;
     short mode = *(short *)((char *)config + 0x28);
 
+    static const char *mode_names[] = {
+        [1] = "AirRide", [2] = "Stadium", [3] = "StadiumAlt"
+    };
+    const char *mode_name = (mode >= 1 && mode <= 3) ? mode_names[mode] : "Unknown";
+
     switch (mode)
     {
         case 1:
@@ -482,6 +491,8 @@ static void FilterEnemySpawnWeights()
             FilterMode1Or3(spawn_data, 0x06, 0x10, 5);
             break;
     }
+    OSReport("[GateAbilities] Filtered %s enemy table (%d entries)\n",
+             mode_name, *(short *)spawn_data);
 }
 
 void GateAbilities_On3DLoadEnd()
@@ -490,25 +501,11 @@ void GateAbilities_On3DLoadEnd()
     // Stadiums are part of City Trial but need enemy spawn weight filtering.
     int in_city = Gm_IsInCity();
     int in_stadium = CityTrial_IsInStadium();
-    OSReport("[GateAbilities] On3DLoadEnd: InCity=%d InStadium=%d\n", in_city, in_stadium);
-
     if (in_city && !in_stadium)
         return;
 
-    char *spawn_data = *stc_enemy_spawn_data;
-    if (spawn_data)
-    {
-        int *config = *(int **)(spawn_data + 0x10);
-        short mode = config ? *(short *)((char *)config + 0x28) : -1;
-        short spawn_count = *(short *)spawn_data;
-        OSReport("[GateAbilities] spawn_data=%p config=%p mode=%d spawn_count=%d\n",
-                 spawn_data, config, mode, spawn_count);
-    }
-    else
-    {
-        OSReport("[GateAbilities] spawn_data is NULL\n");
-    }
-
+    OSReport("[GateAbilities] Filtering enemy spawns (stadium=%d, ability_mask=%s)\n",
+             in_stadium, MaskBits(ap_save->ability_unlocked_mask, 16));
     FilterEnemySpawnWeights();
 }
 
@@ -521,7 +518,7 @@ void GateAbilities_OnBoot()
     // (possibly substituted) kind instead of the original wheel kind.
     CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
     CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained
-    OSReport("Copy ability gating hooks installed\n");
+    OSReport("[GateAbilities] Copy ability gating hooks installed\n");
 }
 
 int GateAbilities_UnlockAbility(CopyKind kind)
@@ -530,8 +527,8 @@ int GateAbilities_UnlockAbility(CopyKind kind)
         return 0;
 
     ap_save->ability_unlocked_mask |= (1 << kind);
-    OSReport("Ability %d (%s) unlocked (mask = 0x%04x)\n",
-             kind, ability_names[kind], ap_save->ability_unlocked_mask);
+    OSReport("[GateAbilities] Ability %d (%s) unlocked (mask = %s)\n",
+             kind, ability_names[kind], MaskBits(ap_save->ability_unlocked_mask, 16));
     TextBox_Enqueue(ability_names[kind]);
     return 1;
 }

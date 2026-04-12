@@ -74,7 +74,7 @@ void CreateTextBox_OnSceneChange()
                     text_box_message->lifetime);
                 if (!text_box_message->text)
                 {
-                    OSReport("Failed to recreate textbox on scene change for message: %s\n",
+                    OSReport("[TextBox] Failed to recreate textbox on scene change for message: %s\n",
                              text_box_message->message);
                 }
             }
@@ -158,7 +158,7 @@ int TextBox_Enqueue(const char *format, ...)
         TextBox_Dequeue(&removed_text);
         // Reset framecounter so the next oldest message gets a fresh 5-second timer
         textbox_state.framecounter = 0;
-        OSReport("TextBox_Enqueue: Queue full, auto-dequeued oldest message.\n");
+        OSReport("[TextBox] TextBox_Enqueue: Queue full, auto-dequeued oldest message.\n");
     }
 
     // Reset framecounter if adding to an empty queue
@@ -181,7 +181,7 @@ int TextBox_Enqueue(const char *format, ...)
         buffer, text_box_message.pos, text_box_message.scale, text_box_message.lifetime);
     if (!text_box_message.text)
     {
-        OSReport("TextBox_Enqueue: Failed to create Text object!\n");
+        OSReport("[TextBox] TextBox_Enqueue: Failed to create Text object!\n");
         return 0;
     }
 
@@ -195,7 +195,6 @@ int TextBox_Enqueue(const char *format, ...)
     // Reposition all messages so they stack properly with newest at top
     TextBoxQueue_RepositionAll();
 
-    OSReport("TextBox message queued.\n");
     return 1;
 }
 
@@ -207,7 +206,6 @@ int TextBox_Dequeue(TextBoxMessage *text_out)
 
     *text_out = textbox_state.queue[textbox_state.head];
     textbox_state.head = (textbox_state.head + 1) % TEXTBOX_QUEUE_SIZE;
-    OSReport("TextBox dequeued.\n");
 
     if (text_out->text)
         Text_Destroy(text_out->text);

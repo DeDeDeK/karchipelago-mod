@@ -274,21 +274,6 @@ static void ExtendPresetArray(GrObj *grobj)
     memcpy(extended_presets, vanilla_array,
            WEATHER_VANILLA_NUM * sizeof(SkyPresetEntry));
 
-    // Dump vanilla preset values for tuning reference
-    for (int i = 0; i < WEATHER_VANILLA_NUM; i++)
-    {
-        SkyPresetEntry *p = &extended_presets[i];
-        OSReport("[CustomWeather] Vanilla[%2d] tf=%3d fog=0x%08x start=%.0f end=%.0f fade=0x%08x sky=0x%08x\n",
-                 i, p->transition_frames,
-                 p->fog_color, p->fog_start, p->fog_end,
-                 p->fade_color, p->sky_ambient_color);
-        AreaLightData *al = &p->area_light;
-        OSReport("[CustomWeather]   light=0x%08x hw=0x%08x dir=(%.2f,%.2f,%.2f) intensity=%d flags=0x%02x vis=%d\n",
-                 al->light_color, al->light_hw_color,
-                 al->light_dir_x, al->light_dir_y, al->light_dir_z,
-                 al->light_intensity, al->flags, p->light_vis_flag);
-    }
-
     // Build each custom preset by cloning its base then overriding colors/fog/light
     for (int i = 0; i < WEATHER_CUSTOM_NUM; i++)
     {

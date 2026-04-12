@@ -6,6 +6,7 @@
 
 #include "main.h"
 #include "stadium_lock.h"
+#include "mask_fmt.h"
 
 // Vanilla uses 4 of the 5 prev_stadium_kind entries for history exclusion
 #define STADIUM_HISTORY_SIZE 4
@@ -130,7 +131,7 @@ static int StadiumLock_IsUnlocked(StadiumKind kind)
     u32 mask = ap_save->stadium_unlocked_mask;
     if (mask != stl_last_logged_mask)
     {
-        OSReport("[Stadium] IsUnlocked called, mask=0x%08X (was 0x%08X)\n", mask, stl_last_logged_mask);
+        OSReport("[Stadium] IsUnlocked called, mask=%s (was %s)\n", MaskBits(mask, 32), MaskBits(stl_last_logged_mask, 32));
         stl_last_logged_mask = mask;
     }
     return (mask & (1 << kind)) != 0;
@@ -139,7 +140,7 @@ static int StadiumLock_IsUnlocked(StadiumKind kind)
 // Apply patches needed for stadium locking
 void StadiumLock_OnBoot()
 {
-    OSReport("Applying stadium lock patches...\n");
+    OSReport("[Stadium] Applying stadium lock patches...\n");
     // Replace all four stadium unlock check functions with our mask check.
     // Gm_StadiumIsDefaultUnlocked (0x8000C148): hardcoded switch for default stadiums.
     // Gm_StadiumIsUnlocked (0x8000C17C): checklist-based check.

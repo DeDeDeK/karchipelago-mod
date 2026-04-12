@@ -84,12 +84,6 @@ static void MeteorDespawnProc(GOBJ *gobj)
     EnemyData *ed = gobj->userdata;
     ed->lifetime_counter++;
 
-    if (ed->lifetime_counter <= 5 || ed->lifetime_counter % 60 == 0)
-    {
-        OSReport("Meteor[%d]: state=%d pos.Y=%.1f vel.Y=%.4f\n",
-                 ed->lifetime_counter, ed->state, ed->pos.Y, ed->vel.Y);
-    }
-
     if (ed->state == 16)
     {
         if (ed->spawn_index == 0)
@@ -97,7 +91,7 @@ static void MeteorDespawnProc(GOBJ *gobj)
 
         if (ed->lifetime_counter - ed->spawn_index >= METEOR_LANDING_FRAMES)
         {
-            OSReport("Meteor[%d]: despawn after landing\n", ed->lifetime_counter);
+            OSReport("[SpawnEnemy] Meteor[%d]: despawn after landing\n", ed->lifetime_counter);
             // Vanilla state 16 func3 runs these before destroying. Cleans up
             // collision sphere (xB74) and VFX handles that persist otherwise.
             EventActor_CleanupCollisionSphere(ed);
@@ -144,7 +138,7 @@ GOBJ *SpawnEnemy_Random(GOBJ *machine_gobj, int use_splines)
         }
     }
 
-    OSReport("Spawned actor ID 0x%02X GOBJ=%p at (%.1f, %.1f, %.1f) splines=%d\n",
+    OSReport("[SpawnEnemy] Spawned actor ID 0x%02X GOBJ=%p at (%.1f, %.1f, %.1f) splines=%d\n",
              id, actor, desc.position.X, desc.position.Y, desc.position.Z, use_splines);
     return actor;
 }
@@ -220,7 +214,7 @@ static GOBJ *SpawnMeteorOnPlayer(int ply_idx)
 
     GObj_AddProc(meteor, MeteorDespawnProc, 0x14);
 
-    OSReport("Meteor trap: spawned above player %d at (%.1f, %.1f, %.1f)\n",
+    OSReport("[SpawnEnemy] Meteor trap: spawned above player %d at (%.1f, %.1f, %.1f)\n",
              ply_idx + 1, desc.position.X, desc.position.Y, desc.position.Z);
     return meteor;
 }

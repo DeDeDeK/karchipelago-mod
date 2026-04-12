@@ -170,10 +170,8 @@ static void ScoreHUD_BGRender(GOBJ *gobj, int pass)
 static void ScoreHUD_Create(void)
 {
     HSD_Archive **arch = Gm_GetIfAllCityArchive();
-    OSReport("[GourmetRace] HUD archive: %p -> %p\n", arch, arch ? *arch : 0);
     JOBJSet **gauge_sets = Archive_GetPublicAddress(*arch, "ScInfPausegaugect_scene_models");
     JOBJSet **plynum_sets = Archive_GetPublicAddress(*arch, "ScInfPlynum_scene_models");
-    OSReport("[GourmetRace] gauge_sets=%p, plynum_sets=%p\n", gauge_sets, plynum_sets);
     if (!gauge_sets || !plynum_sets)
     {
         OSReport("[GourmetRace] Failed to load HUD archives!\n");
@@ -195,9 +193,6 @@ static void ScoreHUD_Create(void)
     // Background rectangle GOBJ on BG link (renders behind everything)
     hud_bg_gobj = GObj_Create(0, 0, 0);
     GObj_AddGXLink(hud_bg_gobj, ScoreHUD_BGRender, GOURMET_HUD_BG_GXLINK, 0);
-
-    OSReport("[GourmetRace] Custom HUD camera created: gobj=%p cobj=%p\n",
-             hud_camera_gobj, cam_cobj);
 
     num_score_huds = 0;
 
@@ -254,12 +249,6 @@ static void ScoreHUD_Create(void)
 
         hud->prev_score = 0;
         num_score_huds++;
-
-        OSReport("[GourmetRace] HUD[%d] ply=%d label=%p gauge=%p pos=(%.1f, %.1f)\n",
-                 num_score_huds - 1, i, hud->label_gobj, hud->gauge_gobj,
-                 HUD_X, y);
-        OSReport("[GourmetRace]   ones=%p tens=%p sign=%p bar=%p\n",
-                 hud->ones_j, hud->tens_j, hud->sign_j, hud->bar_j);
     }
 
     OSReport("[GourmetRace] Score HUD created for %d players\n", num_score_huds);

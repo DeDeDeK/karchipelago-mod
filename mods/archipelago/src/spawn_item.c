@@ -27,7 +27,7 @@ void SpawnItemPlayer(int ply_int, ItemKind item_kind)
 // Spawn the given item for all human players
 void SpawnItemHumans(ItemKind item_kind)
 {
-    OSReport("Spawning item kind %d for all human players...\n", item_kind);
+    OSReport("[SpawnItem] Spawning item kind %d for all human players...\n", item_kind);
     for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) == PKIND_HMN)

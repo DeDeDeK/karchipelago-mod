@@ -492,7 +492,6 @@ void CheckDetection_OnSaveLoaded(void)
 void CheckDetection_OnBoot(void)
 {
     CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlock, CheckDetection_SetNewUnlockReplacement);
-    OSReport("[Check] ClearChecker_SetNewUnlock replaced for check detection\n");
 
     // Meta auto-unlock hooks inside Checklist_ProcessUnlock.
     CODEPATCH_HOOKAPPLY(0x8017efc0);  // AR 100-checklist
@@ -500,12 +499,11 @@ void CheckDetection_OnBoot(void)
     CODEPATCH_HOOKAPPLY(0x8017f030);  // CT 100-checklist
     CODEPATCH_HOOKAPPLY(0x8017f0ac);  // CT Dragoon assembly
     CODEPATCH_HOOKAPPLY(0x8017f120);  // CT Hydra assembly
-    OSReport("[Check] Meta auto-unlock hooks installed\n");
 
     // Filler gate: replace vanilla's 3 hardcoded immediate rejects with a
     // goal-aware check.
     CODEPATCH_HOOKAPPLY(0x80180a64);
-    OSReport("[Check] Filler gate hook installed\n");
+    OSReport("[Check] Hooks installed\n");
 }
 
 void CheckDetection_DebugClearAll(void)

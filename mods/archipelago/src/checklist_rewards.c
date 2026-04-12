@@ -445,7 +445,7 @@ static void AllocateRewardTables(void)
         memcpy(new_tables[mode], stc_reward_table_ptrs[mode], size);
         stc_reward_table_ptrs[mode] = new_tables[mode];
     }
-    OSReport("Reward tables allocated and pointers redirected\n");
+    OSReport("[Checklist] Reward tables allocated and pointers redirected\n");
 }
 
 // Restore saved reward data from memory card. Rebuilds clear_kind values for
@@ -477,7 +477,7 @@ static void RestoreRewardTablesFromSave(void)
             }
         }
     }
-    OSReport("Loaded reward tables from save\n");
+    OSReport("[Checklist] Loaded reward tables from save\n");
 }
 
 // Debug: simulate the AP client sending location data by filling the
@@ -542,13 +542,13 @@ void ChecklistRewards_DebugSimulateLocationData(void)
                 ap_data->locations[mode][i] = 0xFFFF;
             }
         }
-        OSReport("  Mode %d: %d same, %d cross, %d remote\n",
+        OSReport("[Checklist]   Mode %d: %d same, %d cross, %d remote\n",
                  mode, local_count, cross_count,
                  count - local_count - cross_count);
     }
 
     ap_data->location_data_valid = 1;
-    OSReport("Debug: simulated location data written\n");
+    OSReport("[Checklist] Debug: simulated location data written\n");
 
     // Apply immediately so the result is visible without waiting for the
     // next frame's AP client poll.
@@ -644,7 +644,7 @@ void RevealAllChecklists(void)
             //clear_data->clear[i].is_unlocked = 1;
         }
     }
-    OSReport("All checklist squares revealed (%d modes x 120 squares)\n", GMMODE_NUM);
+    OSReport("[Checklist] All checklist squares revealed (%d modes x 120 squares)\n", GMMODE_NUM);
 }
 
 // Install all checklist hooks. Call from OnBoot.
@@ -656,7 +656,6 @@ void ChecklistRewards_OnBoot()
     CODEPATCH_REPLACEFUNC(ClearChecker_CheckUnlocked, ChecklistRewards_CheckUnlocked);
     CODEPATCH_HOOKAPPLY(0x8017dfd8);  // Skip remote rewards in SetRewardFlagOnUnlocks
     CODEPATCH_HOOKAPPLY(0x8017e07c);  // Post-reward-loop: apply cross-mode has_reward
-    OSReport("ClearChecker_CheckUnlocked replaced with AP checklist hook\n");
 
     // Multi-SIS loading: NOP the 3 original per-mode Text_LoadSisFile calls,
     // and hook the convergence point to load all 3 SIS files.
@@ -664,14 +663,13 @@ void ChecklistRewards_OnBoot()
     CODEPATCH_REPLACEINSTRUCTION(0x8018238c, 0x60000000); // NOP: TR bl Text_LoadSisFile
     CODEPATCH_REPLACEINSTRUCTION(0x801823a0, 0x60000000); // NOP: CT bl Text_LoadSisFile
     CODEPATCH_HOOKAPPLY(0x801823c4);  // Load all 3 SIS files
-    OSReport("Checklist multi-SIS loading installed\n");
 
     // Checklist_UpdateCellInfo hooks for cross-mode reward display
     CODEPATCH_HOOKAPPLY(0x80181ee4);  // Cross-mode reward lookup
     CODEPATCH_HOOKAPPLY(0x8018201c);  // Cross-mode reward text display
     CODEPATCH_HOOKAPPLY(0x80181f8c);  // Blank text sis_id fix
     CODEPATCH_HOOKAPPLY(0x80182170);  // Cross-mode reward type icon
-    OSReport("Checklist cross-mode UI hooks installed\n");
+    OSReport("[Checklist] Hooks installed\n");
 
     ChecklistRewards_ClearCrossModeSlots();
 }
@@ -682,7 +680,7 @@ void ChecklistRewards_OnSaveLoaded(void)
 {
     RestoreRewardTablesFromSave();
     RegrantAllReceivedRewards();
-    OSReport("Checklist rewards restored from save\n");
+    OSReport("[Checklist] Checklist rewards restored from save\n");
 }
 
 // Apply the AP location assignment written by the Python client to APData.
@@ -742,5 +740,5 @@ void ChecklistRewards_ApplyLocations()
 
     ap_data->location_data_valid = 0;
     Hoshi_WriteSave();
-    OSReport("AP location assignment applied to checklist reward tables\n");
+    OSReport("[Checklist] AP location assignment applied to checklist reward tables\n");
 }

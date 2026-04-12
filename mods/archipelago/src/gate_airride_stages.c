@@ -5,6 +5,7 @@
 #include "main.h"
 #include "gate_airride_stages.h"
 #include "textbox.h"
+#include "mask_fmt.h"
 
 static const char *airride_stage_names[AIRRIDE_NUM] = {
     [AIRRIDE_FANTASY_MEADOWS]  = "Fantasy Meadows",
@@ -70,7 +71,7 @@ void GateAirRideStages_OnBoot()
     CODEPATCH_REPLACEINSTRUCTION(0x8005207c, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x80052080, 0x60000000); // nop
 
-    OSReport("Air Ride stage gating installed (%d patches)\n", 14);
+    OSReport("[AirRideStages] Air Ride stage gating installed (%d patches)\n", 14);
 }
 
 int GateAirRideStages_UnlockStage(int stage_kind)
@@ -79,8 +80,8 @@ int GateAirRideStages_UnlockStage(int stage_kind)
         return 0;
 
     ap_save->airride_stage_unlocked_mask |= (1 << stage_kind);
-    OSReport("Air Ride stage %d (%s) unlocked (mask = 0x%04x)\n",
-             stage_kind, airride_stage_names[stage_kind], ap_save->airride_stage_unlocked_mask);
+    OSReport("[AirRideStages] Air Ride stage %d (%s) unlocked (mask = %s)\n",
+             stage_kind, airride_stage_names[stage_kind], MaskBits(ap_save->airride_stage_unlocked_mask, 16));
     TextBox_Enqueue(airride_stage_names[stage_kind]);
     return 1;
 }

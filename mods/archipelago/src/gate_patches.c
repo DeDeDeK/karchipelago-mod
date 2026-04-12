@@ -3,6 +3,7 @@
 
 #include "main.h"
 #include "gate_patches.h"
+#include "mask_fmt.h"
 #include "textbox.h"
 
 static const char *patch_names[PATCHKIND_NUM] = {
@@ -113,8 +114,8 @@ int GatePatches_UnlockPatch(PatchKind kind)
         return 0;
 
     ap_save->patch_unlocked_mask |= (1 << kind);
-    OSReport("Patch %d (%s) unlocked (mask = 0x%04x)\n",
-             kind, patch_names[kind], ap_save->patch_unlocked_mask);
+    OSReport("[GatePatches] Patch %d (%s) unlocked (mask = %s)\n",
+             kind, patch_names[kind], MaskBits(ap_save->patch_unlocked_mask, 16));
     TextBox_Enqueue(patch_names[kind]);
     return 1;
 }

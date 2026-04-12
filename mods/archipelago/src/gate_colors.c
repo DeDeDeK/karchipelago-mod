@@ -4,6 +4,7 @@
 
 #include "main.h"
 #include "gate_colors.h"
+#include "mask_fmt.h"
 #include "textbox.h"
 
 static const char *color_names[KIRBYCOLOR_NUM] = {
@@ -43,7 +44,7 @@ int GateColors_ValidateColor(int color_idx)
     if (GateColors_IsColorUnlocked(color_idx))
         return color_idx;
     int fallback = first_unlocked_color();
-    OSReport("ValidateColor: %d locked, using %d\n", color_idx, fallback);
+    OSReport("[GateColors] ValidateColor: %d locked, using %d\n", color_idx, fallback);
     return fallback;
 }
 
@@ -103,8 +104,8 @@ int GateColors_GetRandomUnlockedColor(int unused)
         return 0;
 
     int result = unlocked[HSD_Randi(count)];
-    OSReport("GetRandomUnlockedColor: mask=0x%04x count=%d result=%d\n",
-             ap_save->color_unlocked_mask, count, result);
+    OSReport("[GateColors] GetRandomUnlockedColor: mask=%s count=%d result=%d\n",
+             MaskBits(ap_save->color_unlocked_mask, 8), count, result);
     return result;
 }
 
@@ -251,7 +252,7 @@ void GateColors_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8002d704);  // Free Run init (zz_8002d0ec_)
     CODEPATCH_HOOKAPPLY(0x8002db8c);  // Time Attack init (zz_8002d9e8_)
 
-    OSReport("Color gating hooks installed\n");
+    OSReport("[GateColors] Color gating hooks installed\n");
 }
 
 int GateColors_UnlockColor(int color_idx)
@@ -260,8 +261,8 @@ int GateColors_UnlockColor(int color_idx)
         return 0;
 
     ap_save->color_unlocked_mask |= (1 << color_idx);
-    OSReport("Color %d (%s) unlocked (mask = 0x%02x)\n",
-             color_idx, color_names[color_idx], ap_save->color_unlocked_mask);
+    OSReport("[GateColors] Color %d (%s) unlocked (mask = %s)\n",
+             color_idx, color_names[color_idx], MaskBits(ap_save->color_unlocked_mask, 8));
     TextBox_Enqueue(color_names[color_idx]);
     return 1;
 }
@@ -276,8 +277,8 @@ void GateColors_ForceDefaultColors()
 
     int fallback = first_unlocked_color();
 
-    OSReport("ForceDefaultColors: mask=0x%04x fallback=%d\n",
-             ap_save->color_unlocked_mask, fallback);
+    OSReport("[GateColors] ForceDefaultColors: mask=%s fallback=%d\n",
+             MaskBits(ap_save->color_unlocked_mask, 8), fallback);
 
     u8 *ar_colors = gd->airride_select_ply.color;
     u8 *ar_icons = gd->airride_select_ply.icon;
@@ -288,13 +289,13 @@ void GateColors_ForceDefaultColors()
     {
         if (!GateColors_IsColorUnlocked(ar_colors[i]))
         {
-            OSReport("  AR ply %d: color %d locked, forcing to %d\n",
+            OSReport("[GateColors]   AR ply %d: color %d locked, forcing to %d\n",
                      i, ar_colors[i], fallback);
             ar_colors[i] = fallback;
         }
         if (!GateColors_IsColorUnlocked(ar_icons[i]))
         {
-            OSReport("  AR ply %d: icon %d locked, forcing to %d\n",
+            OSReport("[GateColors]   AR ply %d: icon %d locked, forcing to %d\n",
                      i, ar_icons[i], fallback);
             ar_icons[i] = fallback;
         }

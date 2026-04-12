@@ -89,14 +89,14 @@ void PatchCap_Increment()
 {
     ap_save->patch_cap_count++;
     int cap = PatchCap_GetCap();
-    OSReport("Patch cap increased to %d.\n", cap);
+    OSReport("[PatchCap] Patch cap increased to %d.\n", cap);
     TextBox_Enqueue("Patch cap increased! (%d/%d)", cap, PATCH_STAT_MAX);
 }
 
 // Apply Machine_GivePatch and Machine_GiveAllUp hooks. Call from OnBoot.
 void PatchCap_OnBoot()
 {
-    OSReport("Applying patch cap hooks...\n");
+    OSReport("[PatchCap] Applying patch cap hooks...\n");
     CODEPATCH_REPLACEFUNC(Patch_GetMaxValue, PatchCap_GetMaxValue);
     CODEPATCH_REPLACEFUNC(Machine_GivePatch, PatchCap_GivePatch);
     CODEPATCH_REPLACEFUNC(Machine_GiveAllUp, PatchCap_GiveAllUp);

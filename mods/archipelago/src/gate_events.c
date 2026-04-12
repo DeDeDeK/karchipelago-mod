@@ -5,6 +5,7 @@
 #include "main.h"
 #include "gate_events.h"
 #include "textbox.h"
+#include "mask_fmt.h"
 
 static const char *event_names[EVKIND_NUM] = {
     [EVKIND_DYNABLADE]        = "Dyna Blade",
@@ -55,8 +56,8 @@ void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
     if (ev_chk->prev_kind_num > max_history)
         ev_chk->prev_kind_num = max_history;
 
-    OSReport("[Events] CityEvent_Decide called: mask=0x%04X, enabled=%d, history=%d->%d\n",
-             mask, enabled_count, old_history, ev_chk->prev_kind_num);
+    OSReport("[Events] CityEvent_Decide called: mask=%s, enabled=%d, history=%d->%d\n",
+             MaskBits(mask, 20), enabled_count, old_history, ev_chk->prev_kind_num);
     for (int i = 0; i < EVKIND_NUM; i++)
     {
         if (chance_arr[i] > 0)
@@ -80,7 +81,7 @@ CODEPATCH_HOOKCREATE(0x800ede24,
 void GateEvents_LogEnabledEvents(void)
 {
     u32 mask = ap_save->event_unlocked_mask;
-    OSReport("[Events] Enabled events (mask=0x%05X):\n", mask);
+    OSReport("[Events] Enabled events (mask=%s):\n", MaskBits(mask, 20));
     for (int i = 0; i < EVKIND_NUM; i++)
     {
         if (mask & (1 << i))
@@ -114,7 +115,7 @@ CustomEventWeightFilter GateEvents_GetWeightFilter(void)
 void GateEvents_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800ede24);
-    OSReport("Event gating hook installed at CityEvent_Decide\n");
+    OSReport("[Events] Event gating hook installed at CityEvent_Decide\n");
 }
 
 int GateEvents_UnlockEvent(int kind)
@@ -129,8 +130,8 @@ int GateEvents_UnlockEvent(int kind)
         return 0;
 
     ap_save->event_unlocked_mask |= (1 << kind);
-    OSReport("Event %d (%s) unlocked (mask = 0x%05x)\n",
-             kind, name, ap_save->event_unlocked_mask);
+    OSReport("[Events] Event %d (%s) unlocked (mask = %s)\n",
+             kind, name, MaskBits(ap_save->event_unlocked_mask, 20));
     TextBox_Enqueue(name);
     return 1;
 }

@@ -71,7 +71,7 @@ static int SpawnForAllHumans(ProjectileKind kind, float distance, const char *la
             continue;
         if (SpawnProjectileForPlayer(i, kind, distance))
         {
-            OSReport("%s: spawned on ply %d\n", label, i);
+            OSReport("[SpawnProjectile] %s: spawned on ply %d\n", label, i);
             spawned++;
         }
     }

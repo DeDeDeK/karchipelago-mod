@@ -31,7 +31,7 @@ static void FlushEnergy(void)
     if (energy_send_accumulator != 0 && ap_data->energy_send == 0)
     {
         ap_data->energy_send = energy_send_accumulator;
-        OSReport("flushed %f energy to energy_send\n", energy_send_accumulator);
+        OSReport("[EnergyLink] flushed %f energy to energy_send\n", energy_send_accumulator);
         energy_send_accumulator = 0;
     }
 }
@@ -68,7 +68,6 @@ void EnergyLink_PerFrame(GOBJ *rg)
     prev_obj_destroyed[ply] = stc_playerdata[ply].objects_destroyed_num;
     if (diff > 0)
     {
-        OSReport("generated %d energy from destroying objects\n", diff);
         energy_send_accumulator += diff;
     }
 
@@ -83,7 +82,6 @@ void EnergyLink_PerFrame(GOBJ *rg)
     }
     if (sum > 0)
     {
-        OSReport("generated %d energy from collecting patches\n", sum);
         energy_send_accumulator += sum;
     }
 
@@ -96,7 +94,6 @@ void EnergyLink_PerFrame(GOBJ *rg)
         if (charge_diff > 0)
         {
             float charge_energy = charge_diff * CHARGE_ENERGY_SCALE;
-            OSReport("generated %f energy from charging\n", charge_energy);
             energy_send_accumulator += charge_energy;
         }
         prev_charge_value[ply] = md->charge_value;
@@ -152,7 +149,6 @@ static void EnergyLink_TopRidePerFrame(GOBJ *g)
         if (charge_diff > 0)
         {
             float charge_energy = charge_diff * CHARGE_ENERGY_SCALE;
-            OSReport("generated %f energy from TR charging (ply %d)\n", charge_energy, i);
             energy_send_accumulator += charge_energy;
         }
         prev_charge_value[i] = charge;
@@ -176,6 +172,7 @@ static void ResetTracking(void)
 
 void EnergyLink_On3DLoadEnd()
 {
+    OSReport("[EnergyLink] Active\n");
     ResetTracking();
 
     // Add the energylink check to all human players in Air Ride / City Trial
@@ -203,7 +200,7 @@ void EnergyLink_OnTopRideLoad()
         needs_baseline[i] = 0;
 
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, EnergyLink_TopRidePerFrame, 0, 0, 0, 0);
-    OSReport("[EnergyLink] Top Ride charge tracking installed\n");
+    OSReport("[EnergyLink] Active (Top Ride)\n");
 }
 
 void EnergyLink_Withdraw(float amount)

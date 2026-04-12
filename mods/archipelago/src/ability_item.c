@@ -11,7 +11,7 @@ int Ability_GiveItem(CopyKind copy_kind)
         {
             GOBJ *rg = Ply_GetRiderGObj(i);
             RiderData *rd = rg->userdata;
-            OSReport("Giving ability %d to player %d...\n", copy_kind, rd->ply);
+            OSReport("[AbilityItem] Giving ability %d to player %d...\n", copy_kind, rd->ply);
             Rider_GiveAbility(rd, copy_kind);
         }
     }

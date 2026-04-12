@@ -5,6 +5,7 @@
 #include "main.h"
 #include "gate_topride_stages.h"
 #include "textbox.h"
+#include "mask_fmt.h"
 
 static const char *topride_stage_names[TOPRIDE_NUM] = {
     [TOPRIDE_GRASS]  = "Grass",
@@ -149,8 +150,8 @@ static int GateTopRideStages_RandomPick(int unused)
         return 0;
 
     int pick = candidates[HSD_Randi(count)];
-    OSReport("[TopRide] RandomPick: unlock=0x%02X, used=0x%02X, candidates=%d, pick=%d\n",
-             unlock, used, count, pick);
+    OSReport("[TopRideStages] RandomPick: unlock=%s, used=%s, candidates=%d, pick=%d\n",
+             MaskBits(unlock, 8), MaskBits(used, 8), count, pick);
     return pick;
 }
 
@@ -172,7 +173,7 @@ void GateTopRideStages_OnBoot()
     CODEPATCH_REPLACECALL(0x8003c798, GateTopRideStages_RandomPick);
     CODEPATCH_REPLACECALL(0x8003cac0, GateTopRideStages_RandomPick);
 
-    OSReport("Top Ride stage gating installed\n");
+    OSReport("[TopRideStages] Top Ride stage gating installed\n");
 }
 
 int GateTopRideStages_UnlockStage(int course)
@@ -181,8 +182,8 @@ int GateTopRideStages_UnlockStage(int course)
         return 0;
 
     ap_save->topride_stage_unlocked_mask |= (1 << course);
-    OSReport("Top Ride course %d (%s) unlocked (mask = 0x%04x)\n",
-             course, topride_stage_names[course], ap_save->topride_stage_unlocked_mask);
+    OSReport("[TopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
+             course, topride_stage_names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
     TextBox_Enqueue(topride_stage_names[course]);
     return 1;
 }

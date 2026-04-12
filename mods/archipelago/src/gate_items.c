@@ -5,6 +5,7 @@
 #include "main.h"
 #include "gate_items.h"
 #include "textbox.h"
+#include "mask_fmt.h"
 
 #define LEGENDARY_DRAGOON_ENABLE_OFFSET 0x38
 #define LEGENDARY_HYDRA_ENABLE_OFFSET   0x70
@@ -169,7 +170,7 @@ void GateItems_FilterLegendaryPieces()
     {
         u8 *status = (u8 *)lpd + LEGENDARY_DRAGOON_ENABLE_OFFSET;
         *status &= ~LEGENDARY_ENABLE_BIT;
-        OSReport("Legendary Dragoon disabled (no pieces unlocked)\n");
+        OSReport("[GateItems] Legendary Dragoon disabled (no pieces unlocked)\n");
     }
 
     u32 hydra_bits = (1 << ITUNLOCK_HYDRA1) | (1 << ITUNLOCK_HYDRA2) | (1 << ITUNLOCK_HYDRA3);
@@ -177,7 +178,7 @@ void GateItems_FilterLegendaryPieces()
     {
         u8 *status = (u8 *)lpd + LEGENDARY_HYDRA_ENABLE_OFFSET;
         *status &= ~LEGENDARY_ENABLE_BIT;
-        OSReport("Legendary Hydra disabled (no pieces unlocked)\n");
+        OSReport("[GateItems] Legendary Hydra disabled (no pieces unlocked)\n");
     }
 }
 
@@ -193,7 +194,7 @@ CODEPATCH_HOOKCREATE(0x800ec284,
 void GateItems_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800ec284);
-    OSReport("Legendary piece gating hook installed\n");
+    OSReport("[GateItems] Legendary piece gating hook installed\n");
 }
 
 int GateItems_UnlockItem(ItemUnlockKind kind)
@@ -202,8 +203,8 @@ int GateItems_UnlockItem(ItemUnlockKind kind)
         return 0;
 
     ap_save->item_unlocked_mask |= (1 << kind);
-    OSReport("Item %d (%s) unlocked (mask = 0x%08x)\n",
-             kind, item_names[kind], ap_save->item_unlocked_mask);
+    OSReport("[GateItems] Item %d (%s) unlocked (mask = %s)\n",
+             kind, item_names[kind], MaskBits(ap_save->item_unlocked_mask, 32));
     TextBox_Enqueue(item_names[kind]);
     return 1;
 }

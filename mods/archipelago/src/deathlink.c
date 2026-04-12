@@ -21,7 +21,7 @@ static void SendDeathLink(int ply)
     if (Ply_CheckIfCPU(ply))
         return;
 
-    OSReport("Death detected for human player [%d]. Sending deathlink...\n", ply);
+    OSReport("[DeathLink] Death detected for human player [%d]. Sending deathlink...\n", ply);
     ap_data->deathlink_send = 1;
 }
 
@@ -39,7 +39,7 @@ CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", Rider_OnDeath, "", 0)
 static void DeathLink_OnFallDeath(MachineData *md)
 {
     int ply = Machine_GetRiderPly(md);
-    OSReport("Fall death detected for player [%d]\n", ply);
+    OSReport("[DeathLink] Fall death detected for player [%d]\n", ply);
     SendDeathLink(ply);
 }
 CODEPATCH_HOOKCREATE(0x801e6540,
@@ -57,7 +57,7 @@ CODEPATCH_HOOKCREATE(0x801e6540,
 // Kill a player via HP death (City Trial) or fall death (Air Ride / Top Ride).
 static void KillPlayer(RiderData *rd, MachineData *md)
 {
-    OSReport("Deathlink received! Killing player %d\n", rd->ply);
+    OSReport("[DeathLink] Deathlink received! Killing player %d\n", rd->ply);
 
     if (Gm_IsInCity())
     {
@@ -118,13 +118,14 @@ void DeathLink_PerFrame(GOBJ *g)
 
 void DeathLink_On3DLoadEnd()
 {
+    OSReport("[DeathLink] Active\n");
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_PerFrame, 0, 0, 0, 0);
 }
 
 // Apply patches needed for deathlink
 void DeathLink_OnBoot()
 {
-    OSReport("Applying deathlink patches...\n");
+    OSReport("[DeathLink] Applying deathlink patches...\n");
     // HP death: hook in Rider_CheckToDieOnMachine
     CODEPATCH_HOOKAPPLY(0x801a06d0);
     // Fall death: hook in Machine_SetFallDead

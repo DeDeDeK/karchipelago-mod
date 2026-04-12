@@ -7,6 +7,7 @@
 #include "gate_topride_items.h"
 #include "gate_abilities.h"
 #include "textbox.h"
+#include "mask_fmt.h"
 
 // Top Ride items that correspond to copy abilities.
 // These are additionally gated by ability_unlocked_mask.
@@ -71,8 +72,8 @@ void GateTopRideItems_ApplyMask()
             mgr->enabled_mask &= ~(1 << ability_items[i].item);
     }
 
-    OSReport("TopRide items: enabled mask 0x%08x -> 0x%08x (item mask 0x%08x, ability mask 0x%04x)\n",
-             before, mgr->enabled_mask, ap_save->topride_item_unlocked_mask, ability_mask);
+    OSReport("[TopRideItems] TopRide items: enabled mask %s -> %s (item mask %s, ability mask %s)\n",
+             MaskBits(before, 23), MaskBits(mgr->enabled_mask, 23), MaskBits(ap_save->topride_item_unlocked_mask, 23), MaskBits(ability_mask, 16));
 }
 
 // Hook at 0x802db05c — right after TopRideItem_MgrInit (0x8034b5f4) returns
@@ -88,7 +89,7 @@ CODEPATCH_HOOKCREATE(0x802db05c,
 void GateTopRideItems_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x802db05c);
-    OSReport("Top Ride item gating hook installed\n");
+    OSReport("[TopRideItems] Top Ride item gating hook installed\n");
 }
 
 int GateTopRideItems_UnlockItem(TopRideItemKind kind)
@@ -97,8 +98,8 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind)
         return 0;
 
     ap_save->topride_item_unlocked_mask |= (1 << kind);
-    OSReport("Top Ride item %d (%s) unlocked (mask = 0x%08x)\n",
-             kind, topride_item_names[kind], ap_save->topride_item_unlocked_mask);
+    OSReport("[TopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
+             kind, topride_item_names[kind], MaskBits(ap_save->topride_item_unlocked_mask, 23));
     TextBox_Enqueue(topride_item_names[kind]);
     return 1;
 }

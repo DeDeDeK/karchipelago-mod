@@ -43,6 +43,17 @@ APMenuSettings ap_menu_settings;
 APSave *ap_save;
 CustomEventsAPI *custom_events;
 
+// Menu toggle callbacks
+static const char *stc_off_on[] = {"Off", "On"};
+
+static void OnToggleDeathLink(int val)      { OSReport("[Main] DeathLink toggled %s\n", stc_off_on[val]); }
+static void OnToggleEnergyLink(int val)     { OSReport("[Main] EnergyLink toggled %s\n", stc_off_on[val]); }
+static void OnToggleAutoCharge(int val)     { OSReport("[Main] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
+static void OnToggleTrapLink(int val)       { OSReport("[Main] TrapLink toggled %s\n", stc_off_on[val]); }
+static void OnToggleTextBox(int val)        { OSReport("[Main] AP Message Textbox toggled %s\n", stc_off_on[val]); }
+static void OnToggleCTPermanent(int val)    { OSReport("[Main] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
+static void OnToggleARPermanent(int val)    { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
+
 // Submenu: controls whether accumulated permanent stat patches are re-applied
 // at the start of each round/race. Receiving AP permanent-patch items still
 // increments save counters unconditionally — the toggles only gate round-start
@@ -61,6 +72,7 @@ static MenuDesc permanent_patches_menu = {
                 "Off",
                 "On",
             },
+            .on_change = OnToggleCTPermanent,
         },
         &(OptionDesc){
             .name = "Air Ride",
@@ -72,6 +84,7 @@ static MenuDesc permanent_patches_menu = {
                 "Off",
                 "On",
             },
+            .on_change = OnToggleARPermanent,
         },
     },
 };
@@ -95,6 +108,7 @@ OptionDesc ModSettings = {
                     "Off",
                     "On",
                 },
+                .on_change = OnToggleDeathLink,
             },
             &(OptionDesc){
                 .name = "Energy Link",
@@ -113,6 +127,7 @@ OptionDesc ModSettings = {
                                 "Off",
                                 "On",
                             },
+                            .on_change = OnToggleEnergyLink,
                         },
                         &(OptionDesc){
                             .name = "Auto-Charge",
@@ -124,6 +139,7 @@ OptionDesc ModSettings = {
                                 "Off",
                                 "On",
                             },
+                            .on_change = OnToggleAutoCharge,
                         },
                         &(OptionDesc){
                             .name = "Spend",
@@ -144,6 +160,7 @@ OptionDesc ModSettings = {
                     "Off",
                     "On",
                 },
+                .on_change = OnToggleTrapLink,
             },
             &(OptionDesc){
                 .name = "AP Message Textbox",
@@ -155,6 +172,7 @@ OptionDesc ModSettings = {
                     "Off",
                     "On",
                 },
+                .on_change = OnToggleTextBox,
             },
             &(OptionDesc){
                 .name = "Permanent Patches",
@@ -202,7 +220,7 @@ ModDesc mod_desc = {
 // All calls to HSD_MemAlloc from elsewhere will return an allocation that exists only within the current scene.
 void OnBoot()
 {
-    OSReport("Running OnBoot for %s\n", mod_desc.name);
+    OSReport("[Main] Running OnBoot for %s\n", mod_desc.name);
 
     // Default menu toggle values for first-boot (no hoshi save entry yet).
     // Hoshi's Mod_CopyFromSave overwrites these if it finds a saved hash.
@@ -213,13 +231,11 @@ void OnBoot()
     // Persistent allocation of ap_data
     ap_data = HSD_MemAlloc(sizeof(APData));
     memset(ap_data, 0, sizeof(APData));
-    OSReport("APData allocated at 0x%08x (%d bytes)\n",
-             (uint)ap_data, sizeof(APData));
+    OSReport("[Main] APData at 0x%08x (%d bytes)\n", (uint)ap_data, sizeof(APData));
 
     // Place pointer to this allocation at a static address so the Python client can find it
     APData **static_ptr = (APData **)0x805d52d4;
     (*static_ptr) = ap_data;
-    OSReport("Static pointer at 0x805d52d4 set to 0x%08x\n", (uint)ap_data);
 
     // Replace ClearChecker_CheckUnlocked with AP bitfield hook
     ChecklistRewards_OnBoot();
@@ -282,7 +298,7 @@ void OnBoot()
 void OnSaveInit()
 {
     ap_save = (APSave *)mod_desc.save_ptr;
-    OSReport("save data for %s created!\n", mod_desc.name);
+    OSReport("[Main] save data for %s created!\n", mod_desc.name);
     memset(ap_save, 0, sizeof(*ap_save));
 }
 
@@ -302,21 +318,19 @@ void OnSaveLoaded()
         if (custom_events)
         {
             custom_events->SetWeightFilter(GateEvents_GetWeightFilter());
-            OSReport("Custom events API imported, weight filter installed\n");
+            OSReport("[Main] Custom events API imported, weight filter installed\n");
         }
         else
         {
-            OSReport("Custom events mod not found, custom events disabled\n");
+            OSReport("[Main] Custom events mod not found, custom events disabled\n");
         }
     }
-    OSReport("%s present for [%d] boot cycles\n", mod_desc.name, ap_save->boot_num);
-    OSReport("items received: [%d]\n", ap_save->item_received_count);
+    OSReport("[Main] Boot #%d, %d items received, options %s\n",
+             ap_save->boot_num, ap_save->item_received_count,
+             ap_save->options_received ? "loaded" : "pending");
 
     // Sync received count to ap_data so the AP client can read it
     ap_data->item_received_index = ap_save->item_received_count;
-    OSReport("Synced item_received_index = %d\n", ap_save->item_received_count);
-    OSReport("AP slot options %s in save data\n",
-             ap_save->options_received ? "found" : "not yet received");
 
     // Apply hoshi-saved debug menu toggle states to save data masks.
     // Must happen before anything that reads gate masks (e.g. StadiumLock).
@@ -329,22 +343,9 @@ void OnSaveLoaded()
     // goal evaluation.
     CheckDetection_OnSaveLoaded();
 
-    OSReport("Debug gate masks applied:\n");
-    OSReport("  machines=0x%08x abilities=0x%04x events=0x%08x\n",
-             ap_save->machine_unlocked_mask, ap_save->ability_unlocked_mask,
-             ap_save->event_unlocked_mask);
-    OSReport("  patches=0x%04x items=0x%08x boxes=0x%02x\n",
-             ap_save->patch_unlocked_mask, ap_save->item_unlocked_mask,
-             ap_save->box_unlocked_mask);
-    OSReport("  ar_stages=0x%04x tr_stages=0x%04x tr_items=0x%08x\n",
-             ap_save->airride_stage_unlocked_mask, ap_save->topride_stage_unlocked_mask,
-             ap_save->topride_item_unlocked_mask);
-    OSReport("  colors=0x%02x stadiums=0x%08x\n",
-             ap_save->color_unlocked_mask, ap_save->stadium_unlocked_mask);
-
     // Signal to the AP client that the mod is fully initialized
     ap_data->game_ready = 1;
-    OSReport("game_ready set — waiting for AP client connection\n");
+    OSReport("[Main] game_ready set — waiting for AP client connection\n");
 }
 
 // Check if the AP client has written slot options to APData.
@@ -360,7 +361,7 @@ static void APOptions_TransferToSave()
         return;
 
     // One-time transfer: copy options to save data
-    OSReport("AP client connected — transferring slot options to save data\n");
+    OSReport("[Main] AP client connected — transferring slot options to save data\n");
     memcpy(&ap_save->options, &ap_data->options, sizeof(APSlotOptions));
     ap_save->options_received = 1;
 
@@ -368,35 +369,35 @@ static void APOptions_TransferToSave()
     ap_menu_settings.deathlink_enabled = ap_save->options.death_link_enabled;
     ap_menu_settings.energylink_enabled = ap_save->options.energy_link_enabled;
     ap_menu_settings.traplink_enabled = ap_save->options.trap_link_enabled;
-    OSReport("Menu toggles set — DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
+    OSReport("[Main] Menu toggles set — DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
              ap_save->options.death_link_enabled, ap_save->options.energy_link_enabled, ap_save->options.trap_link_enabled);
-    OSReport("Goals — AirRide: %d, TopRide: %d, CityTrial: %d\n",
+    OSReport("[Main] Goals — AirRide: %d, TopRide: %d, CityTrial: %d\n",
              ap_save->options.goal[GMMODE_AIRRIDE],
              ap_save->options.goal[GMMODE_TOPRIDE],
              ap_save->options.goal[GMMODE_CITYTRIAL]);
-    OSReport("CityTrial — ProgressivePatchCaps: %d (start: %d), ProgressiveStadiums: %d\n",
+    OSReport("[Main] CityTrial — ProgressivePatchCaps: %d (start: %d), ProgressiveStadiums: %d\n",
              ap_save->options.city_trial_progressive_patch_caps,
              ap_save->options.city_trial_patch_cap_amount,
              ap_save->options.city_trial_progressive_stadiums);
-    OSReport("RevealChecklists: %d\n", ap_save->options.reveal_checklists);
+    OSReport("[Main] RevealChecklists: %d\n", ap_save->options.reveal_checklists);
 
     if (ap_save->options.reveal_checklists)
         RevealAllChecklists();
 
     Hoshi_WriteSave();
-    OSReport("AP slot options saved to memory card\n");
+    OSReport("[Main] AP slot options saved to memory card\n");
 }
 
 // Runs when entering the main menu.
 void OnMainMenuLoad()
 {
-    OSReport("Entering the main menu.\n");
+    OSReport("[Main] Entering the main menu.\n");
 }
 
 // Runs when entering the player select menu (Air Ride or City Trial).
 void OnPlayerSelectLoad()
 {
-    OSReport("Entering player select (minor %d).\n", Scene_GetCurrentMinor());
+    OSReport("[Main] Entering player select (minor %d).\n", Scene_GetCurrentMinor());
 
     // City Trial select: filter locked machines and validate colors.
     // CT colors persist from prior sessions (no init block to hook like AR/TR),
@@ -419,9 +420,10 @@ void On3DLoadStart()
 void On3DLoadEnd()
 {
     char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
-    OSReport("Now starting %s game on GroundKind [%d]. \nStageKind: [%d]. \nCurrent CityMode: [%d]. \nCurrent StadiumKind: [%d]. \nCurrent Stadium Group: [%d].\n Damage Enabled: [%d].\n",
-             mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(), Gm_GetCityMode(),
-             Gm_GetCurrentStadiumKind(), Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled());
+    OSReport("[Main] Starting %s: Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d\n",
+             mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+             Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
+             Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled());
 
     for (int i = 0; i < 5; i++)
     {
@@ -431,7 +433,7 @@ void On3DLoadEnd()
         GOBJ *rg = Ply_GetRiderGObj(i);
         RiderData *rd = rg->userdata;
         MachineKind machine_kind = rd->starting_machine_idx;
-        OSReport("Player %d using rider [%d] color [%d] riding machine [%d].\n",
+        OSReport("[Main] Player %d using rider [%d] color [%d] riding machine [%d].\n",
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
@@ -471,7 +473,7 @@ void On3DLoadEnd()
 // Top Ride uses minor 19 (not 18), so On3DLoadEnd does not fire.
 void OnTopRideLoad()
 {
-    OSReport("Top Ride gameplay loaded.\n");
+    OSReport("[Main] Top Ride gameplay loaded.\n");
 
     if (ap_menu_settings.energylink_enabled)
         EnergyLink_OnTopRideLoad();
@@ -483,19 +485,17 @@ void OnTopRideLoad()
 // Runs when pausing the match. The index of the pausing player is passed in as an argument.
 void On3DPause(int pause_ply)
 {
-    OSReport("Player [%d] has paused the game.\n", pause_ply + 1);
 }
 
 // Runs when unpausing the match.
 void On3DUnpause(int pause_ply)
 {
-    OSReport("Resuming the game.\n");
 }
 
 // Runs when exiting a match.
 void On3DExit()
 {
-    OSReport("Exiting 3D.\n");
+    OSReport("[Main] Exiting 3D.\n");
 }
 
 // Runs every scene change.
@@ -504,7 +504,7 @@ void On3DExit()
 // This hook can be used to recreate processes/objects that should always be running.
 void OnSceneChange()
 {
-    OSReport("We are now entering major %d / minor %d\n",
+    OSReport("[Main] We are now entering major %d / minor %d\n",
              Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
     CreateTextBox_OnSceneChange();
@@ -523,10 +523,10 @@ void OnFrameStart()
     GameData *gd = Gm_GetGameData();
 
     if (gd->update.pause_kind & (1 << PAUSEKIND_SYS) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_SYS)))
-        OSReport("Game is paused via debug mode!\n");
+        OSReport("[Main] Game is paused via debug mode!\n");
 
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
-        OSReport("Game is paused via in-game!\n");
+        OSReport("[Main] Game is paused via in-game!\n");
 
     // debug pad handlers
     HSD_Pad *pad = &stc_engine_pads[0];
@@ -545,19 +545,19 @@ void OnFrameStart()
             ItemDesc desc;
             Item_InitDesc(&desc, kind, 1.0f, 0, &spawn_pos, &md->up, &md->forward, -1, -1, 1, 3, -1, -1);
             Item_Create(&desc);
-            OSReport("Debug: spawned patch item %d at (%.1f, %.1f, %.1f)\n",
+            OSReport("[Main] Debug: spawned patch item %d at (%.1f, %.1f, %.1f)\n",
                      kind, spawn_pos.X, spawn_pos.Y, spawn_pos.Z);
         }
     }
     if ((pad->down & PAD_BUTTON_DPAD_RIGHT) && ap_data->incoming_item_id == 0)
     {
         ap_data->incoming_item_id = AP_ITEM_METEOR_TRAP;
-        OSReport("Debug: wrote AP_ITEM_METEOR_TRAP to mailbox\n");
+        OSReport("[Main] Debug: wrote AP_ITEM_METEOR_TRAP to mailbox\n");
     }
     if (pad->down & PAD_BUTTON_DPAD_DOWN)
     {
         if (custom_events && custom_events->Do(CUSTOM_EVKIND_WADDLE_DEE_SWARM))
-            OSReport("Debug: triggered Waddle Dee Swarm\n");
+            OSReport("[Main] Debug: triggered Waddle Dee Swarm\n");
     }
     if (pad->down & PAD_BUTTON_DPAD_UP)
     {

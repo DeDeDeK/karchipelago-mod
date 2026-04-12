@@ -18,7 +18,7 @@ void TrapLink_Send(void)
     if (!ap_menu_settings.traplink_enabled)
         return;
 
-    OSReport("Traplink send triggered\n");
+    OSReport("[TrapLink] Traplink send triggered\n");
     ap_data->traplink_send = 1;
 }
 
@@ -76,12 +76,12 @@ static int ApplyCityTrialTrap(void)
 
     if (count == 0)
     {
-        OSReport("TrapLink: no eligible trap items, discarding\n");
+        OSReport("[TrapLink] no eligible trap items, discarding\n");
         return 1; // treat as handled so we clear the flag
     }
 
     uint trap_id = candidates[HSD_Randi(count)];
-    OSReport("Applying trap item (AP ID %d)...\n", trap_id);
+    OSReport("[TrapLink] Applying trap item (AP ID %d)...\n", trap_id);
     return APItems_HandleItem(trap_id);
 }
 
@@ -103,7 +103,7 @@ static int ApplyAirRideTrap(void)
         RiderData *rd = rg->userdata;
         if (!rd || rd->kind != RDKIND_KIRBY)
             continue;
-        OSReport("TrapLink: giving sleep ability to ply %d\n", i);
+        OSReport("[TrapLink] giving sleep ability to ply %d\n", i);
         Rider_GiveAbility(rd, COPYKIND_SLEEP);
         applied = 1;
     }
@@ -145,7 +145,7 @@ static int ApplyTopRideTrap(void)
             kirby->position.Y,
             kirby->position.Z,
         };
-        OSReport("TrapLink: spawning TR item %d at ply %d (%f, %f, %f)\n",
+        OSReport("[TrapLink] spawning TR item %d at ply %d (%f, %f, %f)\n",
                  kind, i, spawn_pos.X, spawn_pos.Y, spawn_pos.Z);
         TopRideItem_SpawnAtPosition(item_mgr, kind, &spawn_pos, &orient, 0, 1);
         applied = 1;
@@ -192,14 +192,15 @@ void TrapLink_PerFrame(GOBJ *g)
 
 void TrapLink_On3DLoadEnd()
 {
+    OSReport("[TrapLink] Active\n");
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
 }
 
 void TrapLink_OnTopRideLoad()
 {
+    OSReport("[TrapLink] Active (Top Ride)\n");
     // Top Ride has no rider GObjs, so install a standalone per-frame proc.
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
-    OSReport("[TrapLink] Top Ride receive proc installed\n");
 }
 
 // Hook in Machine_OnTouchItem after CityItem_IsGoodPatch returns 0 (bad patch).
@@ -278,7 +279,7 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
     if (picker->cpu_level != 0)
         return; // CPU picked it up — don't send
 
-    OSReport("TrapLink: TR ply %d picked up bad item %d\n", closest, item_kind);
+    OSReport("[TrapLink] TR ply %d picked up bad item %d\n", closest, item_kind);
     TrapLink_Send();
 }
 
@@ -293,5 +294,5 @@ void TrapLink_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x801DB504);
     CODEPATCH_HOOKAPPLY(0x8034C7DC);
-    OSReport("Traplink send hooks installed\n");
+    OSReport("[TrapLink] Hooks installed\n");
 }
