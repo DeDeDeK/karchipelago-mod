@@ -6,6 +6,10 @@
 #include "mask_fmt.h"
 #include "textbox.h"
 
+// Note: this file has no OnBoot. GatePatches_FilterSpawnTables and
+// GatePatches_FilterEventDropTables are invoked externally by item_spawn_filter.c
+// alongside the other gate filter functions (abilities, items).
+
 static const char *patch_names[PATCHKIND_NUM] = {
     [PATCHKIND_WEIGHT]   = "Weight Patch",
     [PATCHKIND_ACCEL]    = "Boost Patch",

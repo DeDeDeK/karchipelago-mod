@@ -18,7 +18,7 @@
 // Offset for custom event SIS IDs in the event name lookup table (0x804a7b98).
 // Must be placed AFTER the prediction stadium name range. The vanilla prediction
 // event remaps event kind 10 to sis_id_table[stadium_kind + EVKIND_NUM], which
-// spans indices 16 through 16+STKIND_NUM-1 (=38). Placing custom entries at
+// spans indices 16 through 16+STKIND_NUM-1 (=39). Placing custom entries at
 // EVKIND_NUM + STKIND_NUM avoids colliding with stadium name lookups.
 #define CUSTOM_SIS_TABLE_OFFSET (EVKIND_NUM + STKIND_NUM)
 

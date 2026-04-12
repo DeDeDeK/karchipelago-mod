@@ -138,9 +138,9 @@ typedef struct ScoreHUD
 {
     GOBJ *label_gobj;   // ScInfPlynum model
     GOBJ *gauge_gobj;   // ScInfPausegaugect model
-    JOBJ *ones_j;       // ones digit (child 6)
-    JOBJ *tens_j;       // tens digit (child 5)
-    JOBJ *sign_j;       // minus sign (child 4)
+    JOBJ *ones_j;       // ones digit (child 5)
+    JOBJ *tens_j;       // tens digit (child 4)
+    JOBJ *sign_j;       // minus sign (child 6)
     JOBJ *bar_j;        // fill bar (child 1)
     int prev_score;     // for change detection
 } ScoreHUD;

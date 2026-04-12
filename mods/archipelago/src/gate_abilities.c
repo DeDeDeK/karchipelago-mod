@@ -73,6 +73,9 @@ static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_n
     *pool_num = write;
 }
 
+// Removes locked copy abilities from the event-source drop table.
+// Zeroes all drop chances (misc/tac/meteor/pilar/chamber/ufo) for any entry
+// whose item kind maps to a locked ability. Called by item_spawn_filter.c.
 void GateAbilities_FilterEventDropTables()
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
@@ -221,7 +224,7 @@ static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
     [T0(12)] = COPYKIND_BIRD,    // Flappy
     [T0(13)] = COPYKIND_PLASMA,  // Plasma Wisp
     [T0(14)] = COPYKIND_NONE,    // Gordo
-    [T0(15)] = COPYKIND_BOMB,    // Bombbone
+    [T0(15)] = COPYKIND_BOMB,    // Bomber
     [T0(16)] = COPYKIND_NEEDLE,  // Pichikuri
     [T0(17)] = COPYKIND_NEEDLE,  // Pichikuri (dup)
     [T0(18)] = COPYKIND_FIRE,    // Dayl (fire enemy)
@@ -247,7 +250,7 @@ static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
     [T1(12)] = COPYKIND_BIRD,    // Flappy
     [T1(13)] = COPYKIND_PLASMA,  // Plasma Wisp
     [T1(14)] = COPYKIND_NONE,    // Gordo
-    [T1(15)] = COPYKIND_BOMB,    // Bombbone
+    [T1(15)] = COPYKIND_BOMB,    // Bomber
     [T1(16)] = COPYKIND_NEEDLE,  // Pichikuri
     [T1(17)] = COPYKIND_NEEDLE,  // Pichikuri (dup)
     [T1(18)] = COPYKIND_FIRE,    // Dayl
@@ -273,7 +276,7 @@ static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
     [T2(12)] = COPYKIND_BIRD,    // Flappy
     [T2(13)] = COPYKIND_PLASMA,  // Plasma Wisp
     [T2(14)] = COPYKIND_NONE,    // Gordo
-    [T2(15)] = COPYKIND_BOMB,    // Bombbone
+    [T2(15)] = COPYKIND_BOMB,    // Bomber
     [T2(16)] = COPYKIND_NEEDLE,  // Pichikuri
     [T2(17)] = COPYKIND_NEEDLE,  // Pichikuri (dup)
     [T2(18)] = COPYKIND_FIRE,    // Dayl

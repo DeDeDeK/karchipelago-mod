@@ -259,7 +259,7 @@ void OnBoot()
     // Patches for copy ability gating
     GateAbilities_OnBoot();
 
-    // Patches for item spawn gating (legendary pieces)
+    // Item category gating (all-ups, food, stat items, legendary pieces, etc.)
     GateItems_OnBoot();
 
     // Patches for box type gating

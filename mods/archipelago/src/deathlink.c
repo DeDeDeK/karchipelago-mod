@@ -25,7 +25,7 @@ static void SendDeathLink(int ply)
     ap_data->deathlink_send = 1;
 }
 
-// Hook on Rider_CheckToDieOnMachine (0x801a06d0) — fires when Machine_IsDead returns
+// Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0 — fires when Machine_IsDead returns
 // true (HP death). Does NOT fire for fall deaths (different bit in md->x0C35).
 void Rider_OnDeath(RiderData *rd)
 {

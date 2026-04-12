@@ -175,8 +175,8 @@ void EnergyLink_On3DLoadEnd()
     OSReport("[EnergyLink] Active\n");
     ResetTracking();
 
-    // Add the energylink check to all human players in Air Ride / City Trial
-    for (int i = 0; i < 4; i++)
+    // Add the energylink check to all human players in Air Ride / City Trial.
+    for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) == PKIND_HMN)
         {

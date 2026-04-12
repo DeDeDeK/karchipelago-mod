@@ -125,7 +125,7 @@ void TextBox_PerFrame(GOBJ *g)
 
     // After 5 seconds since the last removed message, subtract from the alpha
     // value of the oldest message until it reaches 0. When it hits 0, dequeue it.
-    if (++textbox_state.framecounter > 120)
+    if (++textbox_state.framecounter > 300)
     {
         TextBoxMessage *msg = TextBoxQueue_GetAt(0);
         if (msg && msg->text)

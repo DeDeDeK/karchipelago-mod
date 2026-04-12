@@ -61,7 +61,7 @@ void GateAirRideStages_OnBoot()
     CODEPATCH_REPLACEINSTRUCTION(0x8000ddc8, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x8000ddcc, 0x60000000); // nop
 
-    // Patch call site 4: gmLanMenu_RenderMainMenuUI (0x80052070)
+    // Call site 4: gmLanMenu_RenderMainMenuUI (0x80052028)
     // Slightly different layout: cmpwi r28, 8 / beq check / li r0, 1 / b past / li r3, 8
     // We NOP the guard and unconditional branch so all stages call the check.
     // Patched: mr r3, r28 / nop / nop / nop / nop
@@ -71,7 +71,7 @@ void GateAirRideStages_OnBoot()
     CODEPATCH_REPLACEINSTRUCTION(0x8005207c, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x80052080, 0x60000000); // nop
 
-    OSReport("[AirRideStages] Air Ride stage gating installed (%d patches)\n", 14);
+    OSReport("[AirRideStages] Air Ride stage gating installed (%d patches)\n", 15);
 }
 
 int GateAirRideStages_UnlockStage(int stage_kind)

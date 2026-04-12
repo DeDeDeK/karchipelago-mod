@@ -219,7 +219,7 @@ typedef enum APItemId
     AP_PATCH_UNLOCK_DEFENSE,               // PATCHKIND_DEFENSE
     AP_PATCH_UNLOCK_HP,                    // PATCHKIND_HP
 
-    // Individual item unlock items (790-820, aligned to ItemUnlockKind)
+    // Individual item unlock items (790-819, aligned to ItemUnlockKind)
     AP_ITEM_UNLOCK_BASE = 790,
 
     // Machine unlock items (830-855, aligned to MachineKind)
@@ -285,7 +285,7 @@ typedef enum APItemId
 
 typedef enum APGoalKind
 {
-    GOAL_100_CHECKLIST = 0,     // Complete 100% of checklist
+    GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
     GOAL_N_CHECKLIST,           // Complete N checklist squares
     GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
     GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium

@@ -73,7 +73,7 @@ void GateTopRideItems_ApplyMask()
     }
 
     OSReport("[TopRideItems] TopRide items: enabled mask %s -> %s (item mask %s, ability mask %s)\n",
-             MaskBits(before, 23), MaskBits(mgr->enabled_mask, 23), MaskBits(ap_save->topride_item_unlocked_mask, 23), MaskBits(ability_mask, 16));
+             MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM), MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM), MaskBits(ability_mask, 16));
 }
 
 // Hook at 0x802db05c — right after TopRideItem_MgrInit (0x8034b5f4) returns
@@ -99,7 +99,7 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind)
 
     ap_save->topride_item_unlocked_mask |= (1 << kind);
     OSReport("[TopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
-             kind, topride_item_names[kind], MaskBits(ap_save->topride_item_unlocked_mask, 23));
+             kind, topride_item_names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
     TextBox_Enqueue(topride_item_names[kind]);
     return 1;
 }

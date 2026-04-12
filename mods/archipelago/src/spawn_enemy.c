@@ -158,16 +158,14 @@ static GOBJ *SpawnMeteorOnPlayer(int ply_idx)
 
     Enemy_CheckAndLoad(ACTORID_METEOR);
 
-    // Lead the target: add 30 frames of current velocity to the spawn position.
-    // Meteors take about 30 frames to fall from +400 Y at METEOR_FALL_SPEED=5.0.
-    // Stationary players still get hit since self_vel is zero; moving players
-    // get hit in their path instead of behind them.
+    // Lead the target: offset spawn by ~80 frames of current velocity so the
+    // meteor lands on a moving player (400 / METEOR_FALL_SPEED=5.0 = 80 frames).
     EventActorDesc desc;
     memset(&desc, 0, sizeof(desc));
     desc.actor_id = ACTORID_METEOR;
-    desc.position.X = rd->pos.X + rd->self_vel.X * 30.0f;
+    desc.position.X = rd->pos.X + rd->self_vel.X * 80.0f;
     desc.position.Y = rd->pos.Y + 400.0f;
-    desc.position.Z = rd->pos.Z + rd->self_vel.Z * 30.0f;
+    desc.position.Z = rd->pos.Z + rd->self_vel.Z * 80.0f;
     desc.forward.Z = 1.0f;
     desc.up.Y = 1.0f;
     desc.scale = 1.0f;
