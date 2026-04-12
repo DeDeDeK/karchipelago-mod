@@ -32,6 +32,7 @@
 #include "gate_topride_items.h"
 #include "gate_colors.h"
 #include "spawn_enemy.h"
+#include "spawn_rate.h"
 #include "item_spawn_filter.h"
 #include "custom_events_api.h"
 #include "energylink_spend.h"
@@ -288,6 +289,9 @@ void OnBoot()
 
     // Traplink send hooks
     TrapLink_OnBoot();
+
+    // Item spawn rate scaling hooks (City Trial + Top Ride)
+    SpawnRate_OnBoot();
 
     // Item spawn table filtering hooks (covers all gate categories)
     ItemSpawnFilter_OnBoot();

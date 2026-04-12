@@ -37,6 +37,7 @@ typedef enum APItemId
     AP_ITEM_BOMB_TRAP,              // Spawn a Bomb projectile from each human
     AP_ITEM_GORDO_TRAP,             // Spawn a Gordo projectile from each human
     AP_ITEM_SENSORBOMB_TRAP,        // Spawn a Sensor Bomb projectile from each human
+    AP_ITEM_SPAWN_RATE_UP,          // Increase item spawn rate in City Trial and Top Ride
 
     // Permanent +1 patch items (100-199, aligned to PatchKind)
     AP_PERM_PATCH_BASE = 100,
@@ -334,6 +335,7 @@ typedef struct APSave
     u32 topride_item_unlocked_mask;                     // Bitmask of AP-unlocked Top Ride items (bit N = TopRideItemKind N)
     u8 color_unlocked_mask;                             // Bitmask of AP-unlocked Kirby colors (bit N = KirbyColor N)
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
+    u8 spawn_rate_level;                                // Number of Spawn Rate Up items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-18)
     u8 options_received;                                // Nonzero if AP slot options have been saved
     u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX];     // Saved location assignment per mode: (target_mode << 8) | clear_kind

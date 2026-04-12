@@ -23,6 +23,7 @@
 #include "gate_colors.h"
 #include "spawn_enemy.h"
 #include "spawn_projectile.h"
+#include "spawn_rate.h"
 #include "main.h"
 
 // Check the mailbox for an incoming item from the AP client.
@@ -80,6 +81,9 @@ int APItems_HandleItem(uint ap_item_id)
             return 1;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
+            return 1;
+        case AP_ITEM_SPAWN_RATE_UP:
+            SpawnRate_Increment();
             return 1;
     }
 

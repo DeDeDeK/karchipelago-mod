@@ -180,18 +180,31 @@ GIVE_FN(GiveHydraY,    AP_ITKIND_HYDRA2)
 GIVE_FN(GiveHydraZ,    AP_ITKIND_HYDRA3)
 
 // Traps & events
-GIVE_FN(GiveMeteorTrap,  AP_ITEM_METEOR_TRAP)
-GIVE_FN(Give1HPTrap,     AP_ITEM_1_HP_TRAP)
-GIVE_FN(GiveAllDown,     AP_ITEM_ALL_DOWN)
-GIVE_FN(GiveCustomEvt,   AP_ITEM_EVENT_CUSTOM)
-GIVE_FN(GiveDragoon,     AP_ITEM_GIVE_DRAGOON)
-GIVE_FN(GiveHydra,       AP_ITEM_GIVE_HYDRA)
+GIVE_FN(GiveMeteorTrap,     AP_ITEM_METEOR_TRAP)
+GIVE_FN(Give1HPTrap,        AP_ITEM_1_HP_TRAP)
+GIVE_FN(GiveAllDown,        AP_ITEM_ALL_DOWN)
+GIVE_FN(GiveCustomEvt,      AP_ITEM_EVENT_CUSTOM)
+GIVE_FN(GiveDragoon,        AP_ITEM_GIVE_DRAGOON)
+GIVE_FN(GiveHydra,          AP_ITEM_GIVE_HYDRA)
+GIVE_FN(GiveBombTrap,       AP_ITEM_BOMB_TRAP)
+GIVE_FN(GiveGordoTrap,      AP_ITEM_GORDO_TRAP)
+GIVE_FN(GiveSensorBombTrap, AP_ITEM_SENSORBOMB_TRAP)
 
 // Upgrades
-GIVE_FN(GivePatchCap,   AP_ITEM_PATCH_CAP_INCREASE)
-GIVE_FN(GiveFillerAR,   AP_ITEM_CHECKBOX_FILLER_AIRRIDE)
-GIVE_FN(GiveFillerTR,   AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
-GIVE_FN(GiveFillerCT,   AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
+GIVE_FN(GivePatchCap,    AP_ITEM_PATCH_CAP_INCREASE)
+GIVE_FN(GiveSpawnRateUp, AP_ITEM_SPAWN_RATE_UP)
+GIVE_FN(GiveFillerAR,    AP_ITEM_CHECKBOX_FILLER_AIRRIDE)
+GIVE_FN(GiveFillerTR,    AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
+GIVE_FN(GiveFillerCT,    AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
+
+// Energy Link debug
+static int GiveEnergy1000(void)
+{
+    ap_data->energy_balance += 1000.0f;
+    OSReport("[Debug] Added 1000 energy (balance = %f)\n", ap_data->energy_balance);
+    TextBox_Enqueue("Added 1000 energy");
+    return 1;
+}
 
 // Toggle option (gate enable/disable)
 #define G(label, arr, idx, cb) \
@@ -609,19 +622,24 @@ static MenuDesc give_legendary_menu = {
 };
 
 static MenuDesc give_traps_menu = {
-    .option_num = 4,
+    .option_num = 7,
     .options = {
-        A("Meteor Trap",   "Spawn meteor trap",     GiveMeteorTrap),
-        A("1 HP Trap",     "Set HP to 1",           Give1HPTrap),
-        A("All Down",      "All stats down",         GiveAllDown),
-        A("Custom Event",  "Trigger custom event",   GiveCustomEvt),
+        A("Meteor Trap",      "Spawn meteor trap",           GiveMeteorTrap),
+        A("1 HP Trap",        "Set HP to 1",                 Give1HPTrap),
+        A("All Down",         "All stats down",              GiveAllDown),
+        A("Bomb Trap",        "Spawn bomb projectile",       GiveBombTrap),
+        A("Gordo Trap",       "Spawn gordo projectile",      GiveGordoTrap),
+        A("Sensor Bomb Trap", "Spawn sensor bomb",           GiveSensorBombTrap),
+        A("Custom Event",     "Trigger custom event",        GiveCustomEvt),
     },
 };
 
 static MenuDesc give_upgrades_menu = {
-    .option_num = 4,
+    .option_num = 6,
     .options = {
         A("Patch Cap Increase",  "Increase patch cap",       GivePatchCap),
+        A("Spawn Rate Up",       "Increase item spawn rate", GiveSpawnRateUp),
+        A("Give 1000 Energy",    "Add 1000 to EnergyLink balance", GiveEnergy1000),
         A("AR Checkbox Filler",  "Fill AR checklist square", GiveFillerAR),
         A("TR Checkbox Filler",  "Fill TR checklist square", GiveFillerTR),
         A("CT Checkbox Filler",  "Fill CT checklist square", GiveFillerCT),
