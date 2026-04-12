@@ -1,4 +1,7 @@
 #include "game.h"
+#include "topride.h"
+#include "inline.h"
+#include "scene.h"
 
 #include "main.h"
 #include "textbox.h"
@@ -22,6 +25,19 @@ static float energy_send_accumulator;
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units
 #define CHARGE_ENERGY_SCALE 5.0f
 
+// Flush accumulated energy to the shared field when client has cleared it.
+static void FlushEnergy(void)
+{
+    if (energy_send_accumulator != 0 && ap_data->energy_send == 0)
+    {
+        ap_data->energy_send = energy_send_accumulator;
+        OSReport("flushed %f energy to energy_send\n", energy_send_accumulator);
+        energy_send_accumulator = 0;
+    }
+}
+
+// Per-frame proc attached to each human rider GOBJ in Air Ride / City Trial.
+// Tracks objects destroyed, patches collected, and machine charge.
 void EnergyLink_PerFrame(GOBJ *rg)
 {
     RiderData *rd = rg->userdata;
@@ -86,21 +102,14 @@ void EnergyLink_PerFrame(GOBJ *rg)
         prev_charge_value[ply] = md->charge_value;
     }
 
-    // Flush accumulated energy to shared field when client has cleared it.
-    // Accumulator can be positive (deposit) or negative (net withdrawal).
-    if (energy_send_accumulator != 0 && archipelago_data->energy_send == 0)
-    {
-        archipelago_data->energy_send = energy_send_accumulator;
-        OSReport("flushed %f energy to energy_send\n", energy_send_accumulator);
-        energy_send_accumulator = 0;
-    }
+    FlushEnergy();
 
     // Auto-charge: spend energy from pool to fill machine charge meter
-    if (hoshi_menu_settings.energylink_autocharge && mg)
+    if (ap_menu_settings.energylink_autocharge && mg)
     {
         MachineData *md = mg->userdata;
         float deficit = 1.0f - md->charge_value;
-        float balance = archipelago_data->energy_balance;
+        float balance = ap_data->energy_balance;
         if (deficit > 0 && balance > 0)
         {
             // Convert charge units to energy cost
@@ -117,17 +126,43 @@ void EnergyLink_PerFrame(GOBJ *rg)
             prev_charge_value[ply] = md->charge_value;
 
             // Deduct from balance and queue withdrawal through accumulator
-            archipelago_data->energy_balance -= energy_needed;
+            ap_data->energy_balance -= energy_needed;
             energy_send_accumulator -= energy_needed;
         }
     }
 }
 
-void EnergyLink_On3DLoadEnd()
+// Per-frame proc for Top Ride charge tracking.
+// Top Ride has its own player system (Kirby/Fielder) — no RiderData or MachineData.
+// Charge value is at TopRideKirby.charge.charge_value (see docs/topride-system.md).
+static void EnergyLink_TopRidePerFrame(GOBJ *g)
 {
-    // Reset per-player tracking so deltas are clean for the new round.
-    // Set needs_baseline so EnergyLink waits until intro ends and snapshots
-    // current stats (after permanent patches are applied) before tracking.
+    TopRideKirbyMgr *mgr = *stc_topride_kirbymgr;
+    if (!mgr)
+        return;
+
+    for (int i = 0; i < 4; i++)
+    {
+        TopRideKirby *kirby = mgr->kirbys[i];
+        if (!kirby || kirby->cpu_level != 0)
+            continue;
+
+        float charge = kirby->charge.charge_value;
+        float charge_diff = charge - prev_charge_value[i];
+        if (charge_diff > 0)
+        {
+            float charge_energy = charge_diff * CHARGE_ENERGY_SCALE;
+            OSReport("generated %f energy from TR charging (ply %d)\n", charge_energy, i);
+            energy_send_accumulator += charge_energy;
+        }
+        prev_charge_value[i] = charge;
+    }
+
+    FlushEnergy();
+}
+
+static void ResetTracking(void)
+{
     for (int i = 0; i < 5; i++)
     {
         prev_obj_destroyed[i] = 0;
@@ -137,23 +172,38 @@ void EnergyLink_On3DLoadEnd()
             prev_stats[i][j] = 0.0f;
     }
     energy_send_accumulator = 0;
+}
 
-    // Add the energylink check to all human players, in City Trial only
-    if (Gm_IsInCity())
+void EnergyLink_On3DLoadEnd()
+{
+    ResetTracking();
+
+    // Add the energylink check to all human players in Air Ride / City Trial
+    for (int i = 0; i < 4; i++)
     {
-        for (int i = 0; i < 4; i++)
+        if (Ply_GetPKind(i) == PKIND_HMN)
         {
-            if (Ply_GetPKind(i) == PKIND_HMN)
+            GOBJ *r = Ply_GetRiderGObj(i);
+            if (r)
             {
-                GOBJ *r = Ply_GetRiderGObj(i);
-                if (r)
-                {
-                    // RDPRI is set to after hit collision is applied
-                    GObj_AddProc(r, EnergyLink_PerFrame, RDPRI_HITCOLL + 1);
-                }
+                // RDPRI is set to after hit collision is applied
+                GObj_AddProc(r, EnergyLink_PerFrame, RDPRI_HITCOLL + 1);
             }
         }
     }
+}
+
+void EnergyLink_OnTopRideLoad()
+{
+    ResetTracking();
+
+    // Top Ride has no rider GOBJs, so create a standalone GOBJ for charge tracking.
+    // Baseline is not needed — Top Ride has no patches or intro sequence to skip.
+    for (int i = 0; i < 4; i++)
+        needs_baseline[i] = 0;
+
+    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, EnergyLink_TopRidePerFrame, 0, 0, 0, 0);
+    OSReport("[EnergyLink] Top Ride charge tracking installed\n");
 }
 
 void EnergyLink_Withdraw(float amount)

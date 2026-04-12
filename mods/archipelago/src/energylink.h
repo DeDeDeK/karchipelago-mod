@@ -5,6 +5,7 @@
 
 void EnergyLink_PerFrame(GOBJ *rg);
 void EnergyLink_On3DLoadEnd();
+void EnergyLink_OnTopRideLoad();
 
 // Queue a withdrawal through the send accumulator.
 // The next flush will include this amount as a negative delta.

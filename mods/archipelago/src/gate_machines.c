@@ -57,7 +57,7 @@ static MachineKind CharacterDesc_GetMachineKind(CharacterDesc *desc)
 // low unlock counts, and does a weighted random selection.
 int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
 {
-    u32 unlocked_mask = save_data->machine_unlocked_mask;
+    u32 unlocked_mask = ap_save->machine_unlocked_mask;
     vcDataCommon *vc_data_common = (*stc_vcDataCommon);
 
     // Find spawn table entry for current match progress
@@ -149,7 +149,7 @@ void GateMachines_FilterSelectList()
 
     u8 *arr = gd->city_select_ply.machine_select.c_kind_arr;
     u8 num = gd->city_select_ply.machine_select.num;
-    u32 mask = save_data->machine_unlocked_mask;
+    u32 mask = ap_save->machine_unlocked_mask;
     u8 write = 0;
 
     for (u8 read = 0; read < num; read++)
@@ -221,7 +221,7 @@ static int IsCKindUnlocked(CharacterKind ckind)
     if (!desc)
         return 0;
     MachineKind vckind = CharacterDesc_GetMachineKind(desc);
-    return (save_data->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
+    return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
 // Count unlocked characters for City Trial select screens.
@@ -320,7 +320,7 @@ CODEPATCH_HOOKCREATE(0x8002e738,
 // Get the first unlocked MachineKind, or VCKIND_COMPACT as absolute fallback.
 static MachineKind GetFirstUnlockedMachine()
 {
-    u32 mask = save_data->machine_unlocked_mask;
+    u32 mask = ap_save->machine_unlocked_mask;
     for (int i = 0; i < VCKIND_NUM; i++)
     {
         if (mask & (1 << i))
@@ -349,7 +349,7 @@ CharacterKind GateMachines_GetDefaultCKind()
     {
         CharacterKind chosen = unlocked[HSD_Randi(count)];
         OSReport("GateMachines_GetDefaultCKind: Compact locked, chose ckind %d from %d unlocked (mask=0x%08x)\n",
-                 chosen, count, save_data->machine_unlocked_mask);
+                 chosen, count, ap_save->machine_unlocked_mask);
         return chosen;
     }
 
@@ -365,7 +365,7 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     u8 ply = rd->ply;
     MachineKind vckind = rd->starting_machine_idx;
 
-    if (!(save_data->machine_unlocked_mask & (1 << vckind)))
+    if (!(ap_save->machine_unlocked_mask & (1 << vckind)))
         vckind = GetFirstUnlockedMachine();
 
     if (vckind >= VCKIND_WHEELNORMAL)
@@ -418,7 +418,7 @@ int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
         return 0;
 
     MachineKind vckind = CharacterDesc_GetMachineKind(desc);
-    return (save_data->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
+    return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
 // Replace AirRide_CheckMachineUnlocked (0x8000c364).
@@ -437,7 +437,7 @@ int GateMachines_CheckAirRideMachineUnlocked(s8 machine_class, s8 machine_id)
     if (vckind < 0 || vckind >= VCKIND_NUM)
         return 0;
 
-    return (save_data->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
+    return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
 void GateMachines_OnBoot()
@@ -477,9 +477,9 @@ int GateMachines_UnlockMachine(MachineKind kind)
     if (kind >= VCKIND_NUM)
         return 0;
 
-    save_data->machine_unlocked_mask |= (1 << kind);
+    ap_save->machine_unlocked_mask |= (1 << kind);
     OSReport("Machine %d (%s) unlocked (mask = 0x%08x)\n",
-             kind, machine_names[kind], save_data->machine_unlocked_mask);
+             kind, machine_names[kind], ap_save->machine_unlocked_mask);
     TextBox_Enqueue(machine_names[kind]);
     return 1;
 }

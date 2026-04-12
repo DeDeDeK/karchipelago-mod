@@ -16,13 +16,13 @@ static void SendDeathLink(int ply)
 {
     if (applying_deathlink)
         return;
-    if (!hoshi_menu_settings.deathlink_enabled)
+    if (!ap_menu_settings.deathlink_enabled)
         return;
     if (Ply_CheckIfCPU(ply))
         return;
 
     OSReport("Death detected for human player [%d]. Sending deathlink...\n", ply);
-    archipelago_data->deathlink_send = 1;
+    ap_data->deathlink_send = 1;
 }
 
 // Hook on Rider_CheckToDieOnMachine (0x801a06d0) — fires when Machine_IsDead returns
@@ -86,7 +86,7 @@ void DeathLink_PerFrame(GOBJ *g)
     if (Gm_GetIntroState() != GMINTRO_END)
         return;
 
-    if (archipelago_data->deathlink_receive != 1)
+    if (ap_data->deathlink_receive != 1)
         return;
 
     for (int i = 0; i < 5; i++)
@@ -113,7 +113,7 @@ void DeathLink_PerFrame(GOBJ *g)
     }
 
     TextBox_Enqueue("Deathlink received!");
-    archipelago_data->deathlink_receive = 0;
+    ap_data->deathlink_receive = 0;
 }
 
 void DeathLink_On3DLoadEnd()

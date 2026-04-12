@@ -13,9 +13,9 @@
 // When progressive patch caps are on, returns starting cap + items received.
 static int PatchCap_GetCap()
 {
-    if (!save_data->options.city_trial_progressive_patch_caps)
+    if (!ap_save->options.city_trial_progressive_patch_caps)
         return PATCH_STAT_MAX;
-    int cap = (int)save_data->options.city_trial_patch_cap_amount + (int)save_data->patch_cap_count;
+    int cap = (int)ap_save->options.city_trial_patch_cap_amount + (int)ap_save->patch_cap_count;
     if (cap > PATCH_STAT_MAX)
         cap = PATCH_STAT_MAX;
     return cap;
@@ -87,7 +87,7 @@ int PatchCap_GetMaxValue()
 // Increment the patch cap by 1.
 void PatchCap_Increment()
 {
-    save_data->patch_cap_count++;
+    ap_save->patch_cap_count++;
     int cap = PatchCap_GetCap();
     OSReport("Patch cap increased to %d.\n", cap);
     TextBox_Enqueue("Patch cap increased! (%d/%d)", cap, PATCH_STAT_MAX);

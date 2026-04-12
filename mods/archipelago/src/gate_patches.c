@@ -40,7 +40,7 @@ static void FilterPatchItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_
 {
     u8 num = *pool_num;
     u8 write = 0;
-    u16 mask = save_data->patch_unlocked_mask;
+    u16 mask = ap_save->patch_unlocked_mask;
 
     for (u8 read = 0; read < num; read++)
     {
@@ -90,7 +90,7 @@ void GatePatches_FilterEventDropTables()
     if (!info || !info->item_desc)
         return;
 
-    u16 mask = save_data->patch_unlocked_mask;
+    u16 mask = ap_save->patch_unlocked_mask;
 
     for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
     {
@@ -112,9 +112,9 @@ int GatePatches_UnlockPatch(PatchKind kind)
     if (kind >= PATCHKIND_NUM)
         return 0;
 
-    save_data->patch_unlocked_mask |= (1 << kind);
+    ap_save->patch_unlocked_mask |= (1 << kind);
     OSReport("Patch %d (%s) unlocked (mask = 0x%04x)\n",
-             kind, patch_names[kind], save_data->patch_unlocked_mask);
+             kind, patch_names[kind], ap_save->patch_unlocked_mask);
     TextBox_Enqueue(patch_names[kind]);
     return 1;
 }

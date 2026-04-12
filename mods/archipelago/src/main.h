@@ -10,6 +10,10 @@
 #define REWARD_COUNT_AIRRIDE   46
 #define REWARD_COUNT_TOPRIDE   33
 #define REWARD_COUNT_CITYTRIAL 44
+#define REWARD_COUNT_MAX       REWARD_COUNT_AIRRIDE  // Largest per-mode reward count (46)
+
+// Number of checkboxes per mode (clear_kind range 0..CLEAR_KIND_NUM-1).
+#define CLEAR_KIND_NUM 120
 
 #define PATCH_STAT_MAX 18
 
@@ -30,7 +34,9 @@ typedef enum APItemId
     AP_ITEM_GIVE_DRAGOON,
     AP_ITEM_GIVE_HYDRA,
     AP_ITEM_EVENT_CUSTOM,
-    AP_ITEM_AIRRIDE_SPEED_BOOST,
+    AP_ITEM_BOMB_TRAP,              // Spawn a Bomb projectile from each human
+    AP_ITEM_GORDO_TRAP,             // Spawn a Gordo projectile from each human
+    AP_ITEM_SENSORBOMB_TRAP,        // Spawn a Sensor Bomb projectile from each human
 
     // Permanent +1 patch items (100-199, aligned to PatchKind)
     AP_PERM_PATCH_BASE = 100,
@@ -274,43 +280,43 @@ typedef enum APItemId
 } APItemId;
 
 // AP Slot Options
-// Written by the Python client to ArchipelagoData on connect, then copied
+// Written by the Python client to APData on connect, then copied
 // to save data once. All fields are u32 for 4-byte alignment (atomic on PPC).
 
-typedef enum GoalKind
+typedef enum APGoalKind
 {
     GOAL_100_CHECKLIST = 0,     // Complete 100% of checklist
     GOAL_N_CHECKLIST,           // Complete N checklist squares
     GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
     GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
     GOAL_NONE,                  // No goal for this mode
-} GoalKind;
+    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
+} APGoalKind;
 
 typedef struct APSlotOptions
 {
     // General
-    u32 death_link;                        // 0 or 1 — sets initial deathlink menu toggle
-    u32 energy_link;                       // 0 or 1 — sets initial energylink menu toggle
-    u32 traplink;                          // 0 or 1 — sets initial traplink menu toggle
+    u32 death_link_enabled;                // 0 or 1 — sets initial deathlink menu toggle
+    u32 energy_link_enabled;               // 0 or 1 — sets initial energylink menu toggle
+    u32 trap_link_enabled;                 // 0 or 1 — sets initial traplink menu toggle
     u32 reveal_checklists;                 // 0 or 1 — reveal all checklist squares
 
-    // City Trial
-    u32 city_trial_goal;                   // GoalKind — completion condition
-    u32 city_trial_checklist_amount;       // 1-120 — threshold for GOAL_N_CHECKLIST
+    // Per-mode goal settings (indexed by GameMode)
+    u32 goal[GMMODE_NUM];                  // APGoalKind — completion condition per mode
+    u32 checklist_amount[GMMODE_NUM];      // 1-120 — threshold for GOAL_N_CHECKLIST per mode
+
+    // City Trial-specific
     u32 city_trial_progressive_patch_caps; // 0 or 1 — patch cap starts low, items raise it
     u32 city_trial_patch_cap_amount;       // 1-17 — starting cap when progressive is on
     u32 city_trial_progressive_stadiums;   // 0 or 1 — stadiums locked until items received
 
-    // Air Ride
-    u32 air_ride_goal;                     // GoalKind — completion condition (GOAL_100/N/NONE only)
-    u32 air_ride_checklist_amount;         // 1-120 — threshold for GOAL_N_CHECKLIST
-
-    // Top Ride
-    u32 top_ride_goal;                     // GoalKind — completion condition (GOAL_100/N/NONE only)
-    u32 top_ride_checklist_amount;         // 1-120 — threshold for GOAL_N_CHECKLIST
+    // GOAL_CHECKLIST_LIST: bitmask of required checkboxes per mode.
+    // Same encoding as sent_checks: bit (k % 64) of word (k / 64) for clear_kind k.
+    // Only consulted when the mode's goal is GOAL_CHECKLIST_LIST.
+    u64 goal_checks[GMMODE_NUM][2];
 } APSlotOptions;
 
-typedef struct KARSave
+typedef struct APSave
 {
     // Small critical fields first (ensure they fit within card save limits)
     uint boot_num;
@@ -328,43 +334,30 @@ typedef struct KARSave
     u32 topride_item_unlocked_mask;                     // Bitmask of AP-unlocked Top Ride items (bit N = TopRideItemKind N)
     u8 color_unlocked_mask;                             // Bitmask of AP-unlocked Kirby colors (bit N = KirbyColor N)
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
-    u8 airride_speed_boost_count;                       // Number of Air Ride speed boost items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-18)
-    u8 rewards_shuffled;                                // Nonzero if reward tables have been shuffled and saved
     u8 options_received;                                // Nonzero if AP slot options have been saved
-    u16 shuffled_airride_rewards[REWARD_COUNT_AIRRIDE];     // Saved location assignment for Air Ride: (target_mode << 8) | clear_kind
-    u16 shuffled_topride_rewards[REWARD_COUNT_TOPRIDE];     // Saved location assignment for Top Ride: (target_mode << 8) | clear_kind
-    u16 shuffled_citytrial_rewards[REWARD_COUNT_CITYTRIAL]; // Saved location assignment for City Trial: (target_mode << 8) | clear_kind
+    u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX];     // Saved location assignment per mode: (target_mode << 8) | clear_kind
     u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received for that mode
     u64 has_local_location[3];                          // [GMMODE_NUM] bit N = reward_index N is assigned to a local checkpoint
-    APSlotOptions options;                              // AP slot options (copied from ArchipelagoData on first connect)
+    // Authoritative record of which checkboxes the player has completed (in
+    // gameplay or via filler placement). Indexed [mode][word], 2 u64s per mode
+    // covers the 0..119 clear_kind range (bit (k%64) of word (k/64)).
+    u64 sent_checks[3][2];
+    u8 goal_complete;                                   // Sticky once set; persisted across boots
+    APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     // Large arrays last
     uint received_items[MAX_RECEIVED_ITEMS];            // Ordered list of all received AP item IDs
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
-} KARSave;
+} APSave;
 
 // Shared data struct stored at a static location in memory.
 // The Python AP client reads/writes this via dolphin-memory-engine.
 // All fields are 4-byte aligned. Reads/writes are atomic on PPC at this alignment.
 //
-// Layout (offsets relative to struct base):
-//   0x000  float    energy_balance             — client writes current pool total, game reads
-//   0x004  float    energy_send               — game writes (positive=deposit, negative=withdraw), client reads and clears
-//   0x008  u32      deathlink_receive         — client writes, game reads and clears
-//   0x00C  u32      deathlink_send            — game writes, client reads and clears
-//   0x010  u32      traplink_receive          — client writes, game reads and clears
-//   0x014  u32      traplink_send             — game writes, client reads and clears
-//   0x018  u32      incoming_item_id          — client writes AP item ID, game reads and clears
-//   0x01C  u32      item_received_index       — game writes (mirror of save count), client reads
-//   0x020  u32      game_ready                — game sets to 1 after save data is loaded
-//   0x024  u32      options_valid             — client sets to 1 after writing all options fields
-//   0x028  APSlotOptions options              — slot options from AP server (56 bytes)
-//   0x060  u32      location_data_valid       — client sets to 1 after writing location arrays; game clears after reading
-//   0x064  u16[46]  location_airride          — (target_mode << 8) | clear_kind per AR reward_index; 0xFFFF = no local slot
-//   0x0C0  u16[33]  location_topride          — (target_mode << 8) | clear_kind per TR reward_index; 0xFFFF = no local slot
-//   0x102  u16[44]  location_citytrial        — (target_mode << 8) | clear_kind per CT reward_index; 0xFFFF = no local slot
-//   0x15A  (end, total 346 bytes)
-typedef struct ArchipelagoData
+// Field offsets are computed by the compiler; the protocol doc
+// (docs/client-game-protocol.md) is the canonical reference for the Python
+// client. Field order in this struct is the source of truth.
+typedef struct APData
 {
     float energy_balance;
     float energy_send;
@@ -373,7 +366,7 @@ typedef struct ArchipelagoData
     uint traplink_receive;
     uint traplink_send;
     uint incoming_item_id;    // Mailbox: client writes AP item ID, game reads and clears to 0
-    uint item_received_index; // Mirror of save_data->item_received_count for client to read
+    uint item_received_index; // Mirror of ap_save->item_received_count for client to read
     u32 game_ready;           // Game sets to 1 after save data is loaded and mod is initialized
     u32 options_valid;        // Client sets to 1 after writing all options fields
     APSlotOptions options;    // Slot options from AP server
@@ -384,10 +377,23 @@ typedef struct ArchipelagoData
     // checklist the reward appears in (enables cross-mode reward shuffling).
     // 0xFFFF means the reward has no local slot (it will arrive from another world via the mailbox).
     u32 location_data_valid;                         // Client sets to 1; game clears after applying
-    u16 location_airride[REWARD_COUNT_AIRRIDE];      // location per Air Ride reward_index
-    u16 location_topride[REWARD_COUNT_TOPRIDE];      // location per Top Ride reward_index
-    u16 location_citytrial[REWARD_COUNT_CITYTRIAL];  // location per City Trial reward_index
-} ArchipelagoData;
+    u16 locations[GMMODE_NUM][REWARD_COUNT_MAX];      // location per reward_index, indexed by mode
+
+    // Check detection: mod-side authoritative record of completed checkboxes.
+    // sent_checks mirrors ap_save->sent_checks; bit (k%64) of word (k/64)
+    // is set when the player completes checkbox clear_kind k in mode m.
+    // The Python client polls this and forwards new bits as AP location checks.
+    u64 sent_checks[3][2];
+
+    // Client backfill: AP client writes bits here to back-fill checks the
+    // server already knows about (e.g., fresh-save / slot-takeover). Mod ORs
+    // them into sent_checks each frame and clears this field. Additive only.
+    u64 client_backfill[3][2];
+
+    // Goal completion: mod sets to 1 when the player satisfies the active
+    // goal. Sticky and persisted to save. Client reads and forwards victory.
+    u8 goal_complete;
+} APData;
 
 // In-game menu toggle state. Bound to the Settings menu via OptionDesc.
 // Initial values are set from APSlotOptions on first connect; the player
@@ -399,12 +405,13 @@ typedef struct APMenuSettings
     int energylink_autocharge;
     int traplink_enabled;
     int textbox_enabled;
-    int weather_control;
+    int ct_permanent_patches_enabled;
+    int ar_permanent_patches_enabled;
 } APMenuSettings;
 
-extern ArchipelagoData *archipelago_data;
-extern APMenuSettings hoshi_menu_settings;
-extern KARSave *save_data;
+extern APData *ap_data;
+extern APMenuSettings ap_menu_settings;
+extern APSave *ap_save;
 extern CustomEventsAPI *custom_events;
 
 void OnBoot();
@@ -418,6 +425,7 @@ void On3DPause(int pause_ply);
 void On3DUnpause(int pause_ply);
 void On3DExit();
 void OnSceneChange();
+void OnTopRideLoad();
 void OnFrameStart();
 void OnFrameEnd();
 

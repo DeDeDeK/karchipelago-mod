@@ -22,8 +22,8 @@
 #include "gate_topride_items.h"
 #include "gate_colors.h"
 #include "spawn_enemy.h"
+#include "spawn_projectile.h"
 #include "main.h"
-#include "airride_speed.h"
 
 // Check the mailbox for an incoming item from the AP client.
 // Store it in the persistent received list, add to unprocessed list,
@@ -31,33 +31,33 @@
 // Returns 1 if an item was received, 0 otherwise.
 int APItems_CheckMailbox()
 {
-    uint incoming = archipelago_data->incoming_item_id;
+    uint incoming = ap_data->incoming_item_id;
     if (incoming == 0)
         return 0;
 
-    uint idx = save_data->item_received_count;
+    uint idx = ap_save->item_received_count;
     if (idx >= MAX_RECEIVED_ITEMS)
     {
         OSReport("APItems_CheckMailbox: received list is full!\n");
-        archipelago_data->incoming_item_id = 0;
+        ap_data->incoming_item_id = 0;
         return 0;
     }
 
     // Store in persistent received list
-    save_data->received_items[idx] = incoming;
-    save_data->item_received_count++;
+    ap_save->received_items[idx] = incoming;
+    ap_save->item_received_count++;
 
     // Add to unprocessed list
-    save_data->unprocessed_items[save_data->unprocessed_count] = incoming;
-    save_data->unprocessed_count++;
+    ap_save->unprocessed_items[ap_save->unprocessed_count] = incoming;
+    ap_save->unprocessed_count++;
 
     // Sync received count to shared memory so AP client can read it
-    archipelago_data->item_received_index = save_data->item_received_count;
+    ap_data->item_received_index = ap_save->item_received_count;
 
     OSReport("AP item ID %d received (index %d).\n", incoming, idx);
 
     // Clear the mailbox so the client can write the next item
-    archipelago_data->incoming_item_id = 0;
+    ap_data->incoming_item_id = 0;
     return 1;
 }
 
@@ -80,9 +80,6 @@ int APItems_HandleItem(uint ap_item_id)
             return 1;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
-            return 1;
-        case AP_ITEM_AIRRIDE_SPEED_BOOST:
-            AirRideSpeed_Increment();
             return 1;
     }
 
@@ -174,7 +171,7 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id >= AP_STADIUM_BASE && ap_item_id < AP_STADIUM_BASE + STKIND_NUM)
     {
         StadiumKind kind = ap_item_id - AP_STADIUM_BASE;
-        save_data->stadium_unlocked_mask |= (1 << kind);
+        ap_save->stadium_unlocked_mask |= (1 << kind);
         Gm_StadiumSetUnlockedDirect(kind);
         Gm_StadiumSetNewLabelDirect(kind);
         return 1;
@@ -234,6 +231,18 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id == AP_ITEM_METEOR_TRAP)
         return SpawnEnemy_MeteorTrap();
 
+    // Bomb trap — spawn a Bomb-ability projectile from each human player
+    if (ap_item_id == AP_ITEM_BOMB_TRAP)
+        return SpawnProjectile_BombTrap();
+
+    // Gordo trap — spawn a Gordo projectile (Phan Phan throw) from each human
+    if (ap_item_id == AP_ITEM_GORDO_TRAP)
+        return SpawnProjectile_GordoTrap();
+
+    // Sensor bomb trap — spawn a Sensor Bomb projectile from each human
+    if (ap_item_id == AP_ITEM_SENSORBOMB_TRAP)
+        return SpawnProjectile_SensorBombTrap();
+
     // Legendary machine assembly — give assembled Dragoon/Hydra via cinematic
     if (ap_item_id == AP_ITEM_GIVE_DRAGOON)
         return GateMachines_GiveLegendaryMachine(0);
@@ -281,15 +290,15 @@ void APItems_PerFrame(GOBJ *g)
     int item_received = APItems_CheckMailbox();
 
     // Scan unprocessed items for one we can handle
-    for (uint i = 0; i < save_data->unprocessed_count; i++)
+    for (uint i = 0; i < ap_save->unprocessed_count; i++)
     {
-        uint item_id = save_data->unprocessed_items[i];
+        uint item_id = ap_save->unprocessed_items[i];
         if (APItems_HandleItem(item_id))
         {
             OSReport("AP item ID %d applied.\n", item_id);
             // Remove by swapping with last element
-            save_data->unprocessed_count--;
-            save_data->unprocessed_items[i] = save_data->unprocessed_items[save_data->unprocessed_count];
+            ap_save->unprocessed_count--;
+            ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
             break;
         }
     }

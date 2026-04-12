@@ -18,7 +18,7 @@ void StadiumLock_DecideStadium()
 {
     GameData *gd = Gm_GetGameData();
     gmDataAll *gda = *stc_gmdataall;
-    u32 mask = save_data->stadium_unlocked_mask;
+    u32 mask = ap_save->stadium_unlocked_mask;
     u8 menu_selection = gd->city.menu_stadium_selection;
 
     // Count unlocked stadiums to dynamically size the history buffer.
@@ -125,9 +125,9 @@ static u32 stl_last_logged_mask = 0xDEADBEEF;
 
 static int StadiumLock_IsUnlocked(StadiumKind kind)
 {
-    if (!save_data || kind < 0 || kind >= STKIND_NUM)
+    if (!ap_save || kind < 0 || kind >= STKIND_NUM)
         return 0;
-    u32 mask = save_data->stadium_unlocked_mask;
+    u32 mask = ap_save->stadium_unlocked_mask;
     if (mask != stl_last_logged_mask)
     {
         OSReport("[Stadium] IsUnlocked called, mask=0x%08X (was 0x%08X)\n", mask, stl_last_logged_mask);

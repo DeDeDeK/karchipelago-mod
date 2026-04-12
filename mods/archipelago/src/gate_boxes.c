@@ -52,7 +52,7 @@ int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
 
     u8 *src = (u8 *)info->item_desc->box_spawn_chances;
     u8 chances[9];
-    u8 mask = save_data->box_unlocked_mask;
+    u8 mask = ap_save->box_unlocked_mask;
 
     // Copy chances, zeroing out locked colors and colors with no items
     for (int color = 0; color < BOXKIND_NUM; color++)
@@ -103,9 +103,9 @@ int GateBoxes_UnlockBox(BoxKind kind)
     if (kind >= BOXKIND_NUM)
         return 0;
 
-    save_data->box_unlocked_mask |= (1 << kind);
+    ap_save->box_unlocked_mask |= (1 << kind);
     OSReport("Box %d (%s) unlocked (mask = 0x%02x)\n",
-             kind, box_names[kind], save_data->box_unlocked_mask);
+             kind, box_names[kind], ap_save->box_unlocked_mask);
     TextBox_Enqueue(box_names[kind]);
     return 1;
 }

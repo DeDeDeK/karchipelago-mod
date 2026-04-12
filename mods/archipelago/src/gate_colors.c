@@ -22,7 +22,7 @@ int GateColors_IsColorUnlocked(int color_idx)
 {
     if (color_idx < 0 || color_idx >= KIRBYCOLOR_NUM)
         return 0;
-    return (save_data->color_unlocked_mask & (1 << color_idx)) != 0;
+    return (ap_save->color_unlocked_mask & (1 << color_idx)) != 0;
 }
 
 // Find the first unlocked color, or 0 as absolute fallback.
@@ -30,7 +30,7 @@ static int first_unlocked_color()
 {
     for (int i = 0; i < KIRBYCOLOR_NUM; i++)
     {
-        if (save_data->color_unlocked_mask & (1 << i))
+        if (ap_save->color_unlocked_mask & (1 << i))
             return i;
     }
     return 0;
@@ -95,7 +95,7 @@ int GateColors_GetRandomUnlockedColor(int unused)
 
     for (int i = 0; i < KIRBYCOLOR_NUM; i++)
     {
-        if (save_data->color_unlocked_mask & (1 << i))
+        if (ap_save->color_unlocked_mask & (1 << i))
             unlocked[count++] = i;
     }
 
@@ -104,7 +104,7 @@ int GateColors_GetRandomUnlockedColor(int unused)
 
     int result = unlocked[HSD_Randi(count)];
     OSReport("GetRandomUnlockedColor: mask=0x%04x count=%d result=%d\n",
-             save_data->color_unlocked_mask, count, result);
+             ap_save->color_unlocked_mask, count, result);
     return result;
 }
 
@@ -259,9 +259,9 @@ int GateColors_UnlockColor(int color_idx)
     if (color_idx < 0 || color_idx >= KIRBYCOLOR_NUM)
         return 0;
 
-    save_data->color_unlocked_mask |= (1 << color_idx);
+    ap_save->color_unlocked_mask |= (1 << color_idx);
     OSReport("Color %d (%s) unlocked (mask = 0x%02x)\n",
-             color_idx, color_names[color_idx], save_data->color_unlocked_mask);
+             color_idx, color_names[color_idx], ap_save->color_unlocked_mask);
     TextBox_Enqueue(color_names[color_idx]);
     return 1;
 }
@@ -277,7 +277,7 @@ void GateColors_ForceDefaultColors()
     int fallback = first_unlocked_color();
 
     OSReport("ForceDefaultColors: mask=0x%04x fallback=%d\n",
-             save_data->color_unlocked_mask, fallback);
+             ap_save->color_unlocked_mask, fallback);
 
     u8 *ar_colors = gd->airride_select_ply.color;
     u8 *ar_icons = gd->airride_select_ply.icon;

@@ -87,7 +87,7 @@ static void FilterItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_num)
 {
     u8 num = *pool_num;
     u8 write = 0;
-    u32 mask = save_data->item_unlocked_mask;
+    u32 mask = ap_save->item_unlocked_mask;
 
     for (u8 read = 0; read < num; read++)
     {
@@ -137,7 +137,7 @@ void GateItems_FilterEventDropTables()
     if (!info || !info->item_desc)
         return;
 
-    u32 mask = save_data->item_unlocked_mask;
+    u32 mask = ap_save->item_unlocked_mask;
 
     for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
     {
@@ -162,7 +162,7 @@ void GateItems_FilterLegendaryPieces()
     if (!lpd)
         return;
 
-    u32 mask = save_data->item_unlocked_mask;
+    u32 mask = ap_save->item_unlocked_mask;
 
     u32 dragoon_bits = (1 << ITUNLOCK_DRAGOON1) | (1 << ITUNLOCK_DRAGOON2) | (1 << ITUNLOCK_DRAGOON3);
     if (!(mask & dragoon_bits))
@@ -201,9 +201,9 @@ int GateItems_UnlockItem(ItemUnlockKind kind)
     if (kind >= ITUNLOCK_NUM)
         return 0;
 
-    save_data->item_unlocked_mask |= (1 << kind);
+    ap_save->item_unlocked_mask |= (1 << kind);
     OSReport("Item %d (%s) unlocked (mask = 0x%08x)\n",
-             kind, item_names[kind], save_data->item_unlocked_mask);
+             kind, item_names[kind], ap_save->item_unlocked_mask);
     TextBox_Enqueue(item_names[kind]);
     return 1;
 }

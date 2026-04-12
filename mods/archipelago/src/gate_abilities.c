@@ -26,7 +26,7 @@ static int IsAbilityUnlocked(CopyKind kind)
 {
     if (kind < 0 || kind >= COPYKIND_NUM)
         return 1;
-    return (save_data->ability_unlocked_mask & (1 << kind)) != 0;
+    return (ap_save->ability_unlocked_mask & (1 << kind)) != 0;
 }
 
 // Map ITKIND_COPY* to CopyKind. Returns COPYKIND_NONE for non-copy items.
@@ -529,9 +529,9 @@ int GateAbilities_UnlockAbility(CopyKind kind)
     if (kind >= COPYKIND_NUM)
         return 0;
 
-    save_data->ability_unlocked_mask |= (1 << kind);
+    ap_save->ability_unlocked_mask |= (1 << kind);
     OSReport("Ability %d (%s) unlocked (mask = 0x%04x)\n",
-             kind, ability_names[kind], save_data->ability_unlocked_mask);
+             kind, ability_names[kind], ap_save->ability_unlocked_mask);
     TextBox_Enqueue(ability_names[kind]);
     return 1;
 }

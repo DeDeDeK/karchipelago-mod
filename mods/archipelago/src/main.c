@@ -1,5 +1,6 @@
 #include "os.h"
 #include "game.h"
+#include "scene.h"
 #include "inline.h"
 #include "code_patch/code_patch.h"
 #include "hoshi/settings.h"
@@ -18,30 +19,62 @@
 #include "spawn_item.h"
 #include "patch_item.h"
 #include "checklist_rewards.h"
+#include "check_detection.h"
 #include "stadium_lock.h"
 #include "patch_cap.h"
 #include "gate_events.h"
 #include "gate_abilities.h"
 #include "gate_boxes.h"
-#include "gate_patches.h"
 #include "gate_items.h"
 #include "gate_machines.h"
 #include "gate_airride_stages.h"
 #include "gate_topride_stages.h"
 #include "gate_topride_items.h"
 #include "gate_colors.h"
-#include "weather_control.h"
 #include "spawn_enemy.h"
+#include "item_spawn_filter.h"
 #include "custom_events_api.h"
-#include "airride_speed.h"
 #include "energylink_spend.h"
 #include "debug_menu.h"
 
 // Define global variables
-ArchipelagoData *archipelago_data;
-APMenuSettings hoshi_menu_settings;
-KARSave *save_data;
+APData *ap_data;
+APMenuSettings ap_menu_settings;
+APSave *ap_save;
 CustomEventsAPI *custom_events;
+
+// Submenu: controls whether accumulated permanent stat patches are re-applied
+// at the start of each round/race. Receiving AP permanent-patch items still
+// increments save counters unconditionally — the toggles only gate round-start
+// application. Default: both On, matching the historical behavior before the
+// toggles existed.
+static MenuDesc permanent_patches_menu = {
+    .option_num = 2,
+    .options = {
+        &(OptionDesc){
+            .name = "City Trial",
+            .description = "Apply accumulated permanent patches at the start of each City Trial round",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.ct_permanent_patches_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+        },
+        &(OptionDesc){
+            .name = "Air Ride",
+            .description = "Apply accumulated permanent patches at the start of each Air Ride race",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.ar_permanent_patches_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+        },
+    },
+};
 
 // Creates a menu that appears in the in-game Settings menu.
 // Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
@@ -56,7 +89,7 @@ OptionDesc ModSettings = {
                 .name = "Death Link",
                 .description = "Enable or Disable Death Link",
                 .kind = OPTKIND_VALUE,
-                .val = &hoshi_menu_settings.deathlink_enabled,
+                .val = &ap_menu_settings.deathlink_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -74,7 +107,7 @@ OptionDesc ModSettings = {
                             .name = "Enabled",
                             .description = "Enable or Disable Energy Link",
                             .kind = OPTKIND_VALUE,
-                            .val = &hoshi_menu_settings.energylink_enabled,
+                            .val = &ap_menu_settings.energylink_enabled,
                             .value_num = 2,
                             .value_names = (char *[]){
                                 "Off",
@@ -85,7 +118,7 @@ OptionDesc ModSettings = {
                             .name = "Auto-Charge",
                             .description = "Automatically spend energy to fill machine charge meter",
                             .kind = OPTKIND_VALUE,
-                            .val = &hoshi_menu_settings.energylink_autocharge,
+                            .val = &ap_menu_settings.energylink_autocharge,
                             .value_num = 2,
                             .value_names = (char *[]){
                                 "Off",
@@ -105,7 +138,7 @@ OptionDesc ModSettings = {
                 .name = "Trap Link",
                 .description = "Enable or Disable Trap Link",
                 .kind = OPTKIND_VALUE,
-                .val = &hoshi_menu_settings.traplink_enabled,
+                .val = &ap_menu_settings.traplink_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -116,7 +149,7 @@ OptionDesc ModSettings = {
                 .name = "AP Message Textbox",
                 .description = "Enable or Disable the in-game textbox for Archipelago Messages",
                 .kind = OPTKIND_VALUE,
-                .val = &hoshi_menu_settings.textbox_enabled,
+                .val = &ap_menu_settings.textbox_enabled,
                 .value_num = 2,
                 .value_names = (char *[]){
                     "Off",
@@ -124,31 +157,10 @@ OptionDesc ModSettings = {
                 },
             },
             &(OptionDesc){
-                .name = "City Trial Weather",
-                .description = "Choose the sky/lighting preset for City Trial",
-                .kind = OPTKIND_VALUE,
-                .val = &hoshi_menu_settings.weather_control,
-                .value_num = 18,
-                .value_names = (char *[]){
-                    "Shuffle",
-                    "Day",
-                    "Midnight",
-                    "Light Fog",
-                    "Dusk 2",
-                    "Dusky Clouds",
-                    "Dark Vignette",
-                    "Day 2",
-                    "Blue Sky",
-                    "Pink Sky",
-                    "Dense Fog",
-                    "Foggy",
-                    "Dusk",
-                    "Night",
-                    "Gray Sky",
-                    "Dark Purple",
-                    "Red Vignette",
-                    "Dark Low Vis",
-                },
+                .name = "Permanent Patches",
+                .description = "Control whether permanent patches are re-applied at round start",
+                .kind = OPTKIND_MENU,
+                .menu_ptr = &permanent_patches_menu,
             },
             &(OptionDesc){
                 .name = "Debug",
@@ -165,7 +177,7 @@ ModDesc mod_desc = {
     .author = "DeDeDK",                         // Creator of the mod.
     .version.major = 1,                         // Version of the mod.
     .version.minor = 0,
-    .save_size = sizeof(struct KARSave),        // Size of the save data your mod uses.
+    .save_size = sizeof(struct APSave),         // Size of the save data your mod uses.
     .save_ptr = 0,                              // Updated by hoshi at runtime. read-only!
     .option_desc = &ModSettings,                // Link to the settings menu
     .OnBoot = OnBoot,
@@ -181,47 +193,9 @@ ModDesc mod_desc = {
     .OnSceneChange = OnSceneChange,
     .OnFrameStart = OnFrameStart,
     .OnFrameEnd = OnFrameEnd,
+    .OnTopRideLoad = OnTopRideLoad,
 };
 
-// Central spawn table filter — called from hooks after the game populates
-// item spawn tables (CityItemSpawn_InitItemFallChances, CityEvent_ModifyItemFallDesc).
-// Each gate file filters its own item categories from both box pools and event drop pools.
-void FilterAllSpawnTables()
-{
-    OSReport("[SpawnFilter] FilterAllSpawnTables called (GrKind=%d, StageKind=%d)\n",
-             Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
-
-    // Box spawn pools (grBoxGeneObj)
-    GateAbilities_FilterSpawnTables();
-    GatePatches_FilterSpawnTables();
-    GateItems_FilterSpawnTables();
-
-    // Event drop pools (grBoxGeneInfo — Tac, meteor, pillar, chamber, UFO, misc)
-    GateAbilities_FilterEventDropTables();
-    GatePatches_FilterEventDropTables();
-    GateItems_FilterEventDropTables();
-
-    // Update which box types still have valid items after filtering
-    GateBoxes_UpdateItemAvailability();
-}
-
-// Hook at end of CityItemSpawn_InitItemFallChances (0x800eb558).
-// Clobbered instruction: lwz r0, 0x34(r1)
-CODEPATCH_HOOKCREATE(0x800eb558,
-    "",
-    FilterAllSpawnTables,
-    "",
-    0
-)
-
-// Hook at end of CityEvent_ModifyItemFallDesc (0x800ed7f0).
-// Clobbered instruction: lwz r0, 0x14(r1)
-CODEPATCH_HOOKCREATE(0x800ed7f0,
-    "",
-    FilterAllSpawnTables,
-    "",
-    0
-)
 
 // Runs immediately after the mod file is loaded.
 // Calls to HSD_MemAlloc in THIS function specifically will persist throughout the entire runtime of the game.
@@ -230,19 +204,29 @@ void OnBoot()
 {
     OSReport("Running OnBoot for %s\n", mod_desc.name);
 
-    // Persistent allocation of archipelago_data
-    archipelago_data = HSD_MemAlloc(sizeof(ArchipelagoData));
-    memset(archipelago_data, 0, sizeof(ArchipelagoData));
-    OSReport("ArchipelagoData allocated at 0x%08x (%d bytes)\n",
-             (uint)archipelago_data, sizeof(ArchipelagoData));
+    // Default menu toggle values for first-boot (no hoshi save entry yet).
+    // Hoshi's Mod_CopyFromSave overwrites these if it finds a saved hash.
+    // Defaults match pre-toggle behavior so existing installs keep working.
+    ap_menu_settings.ct_permanent_patches_enabled = 1;
+    ap_menu_settings.ar_permanent_patches_enabled = 1;
+
+    // Persistent allocation of ap_data
+    ap_data = HSD_MemAlloc(sizeof(APData));
+    memset(ap_data, 0, sizeof(APData));
+    OSReport("APData allocated at 0x%08x (%d bytes)\n",
+             (uint)ap_data, sizeof(APData));
 
     // Place pointer to this allocation at a static address so the Python client can find it
-    ArchipelagoData **static_ptr = (ArchipelagoData **)0x805d52d4;
-    (*static_ptr) = archipelago_data;
-    OSReport("Static pointer at 0x805d52d4 set to 0x%08x\n", (uint)archipelago_data);
+    APData **static_ptr = (APData **)0x805d52d4;
+    (*static_ptr) = ap_data;
+    OSReport("Static pointer at 0x805d52d4 set to 0x%08x\n", (uint)ap_data);
 
     // Replace ClearChecker_CheckUnlocked with AP bitfield hook
     ChecklistRewards_OnBoot();
+
+    // Replace ClearChecker_SetNewUnlock with the check-detection wrapper.
+    // Must run after ChecklistRewards_OnBoot since they touch related code.
+    CheckDetection_OnBoot();
 
     // Patches for stadium unlocks
     StadiumLock_OnBoot();
@@ -283,41 +267,31 @@ void OnBoot()
     // Patches for Kirby color gating
     GateColors_OnBoot();
 
-    // Hook for City Trial weather/sky control
-    WeatherControl_OnBoot();
-
     // Null-safe patches for standalone enemy spawning
     SpawnEnemy_OnBoot();
 
     // Traplink send hooks
     TrapLink_OnBoot();
 
-    // Spawn table filtering hooks (covers all gate categories)
-    CODEPATCH_HOOKAPPLY(0x800eb558);
-    CODEPATCH_HOOKAPPLY(0x800ed7f0);
+    // Item spawn table filtering hooks (covers all gate categories)
+    ItemSpawnFilter_OnBoot();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
 // Initialize default save file values here.
 void OnSaveInit()
 {
-    save_data = (KARSave *)mod_desc.save_ptr;
+    ap_save = (APSave *)mod_desc.save_ptr;
     OSReport("save data for %s created!\n", mod_desc.name);
-    memset(save_data, 0, sizeof(*save_data));
-
-    ChecklistRewards_OnSaveInit();
+    memset(ap_save, 0, sizeof(*ap_save));
 }
-
-// Debug: unlock exactly 1 random item per gate category for standalone testing.
-// Called from OnSaveLoaded when no AP client options have been received.
-static void DebugSimulateLocationData(void); // forward declaration
 
 // Runs on startup after any save data is loaded into memory.
 // This callback is executed regardless of if a memory card is inserted or contained existing save data.
 void OnSaveLoaded()
 {
-    save_data = (KARSave *)mod_desc.save_ptr;
-    save_data->boot_num++;
+    ap_save = (APSave *)mod_desc.save_ptr;
+    ap_save->boot_num++;
 
     // Import custom events API (deferred from OnBoot — all mods are loaded by now)
     if (!custom_events)
@@ -335,14 +309,14 @@ void OnSaveLoaded()
             OSReport("Custom events mod not found, custom events disabled\n");
         }
     }
-    OSReport("%s present for [%d] boot cycles\n", mod_desc.name, save_data->boot_num);
-    OSReport("items received: [%d]\n", save_data->item_received_count);
+    OSReport("%s present for [%d] boot cycles\n", mod_desc.name, ap_save->boot_num);
+    OSReport("items received: [%d]\n", ap_save->item_received_count);
 
-    // Sync received count to archipelago_data so the AP client can read it
-    archipelago_data->item_received_index = save_data->item_received_count;
-    OSReport("Synced item_received_index = %d\n", save_data->item_received_count);
+    // Sync received count to ap_data so the AP client can read it
+    ap_data->item_received_index = ap_save->item_received_count;
+    OSReport("Synced item_received_index = %d\n", ap_save->item_received_count);
     OSReport("AP slot options %s in save data\n",
-             save_data->options_received ? "found" : "not yet received");
+             ap_save->options_received ? "found" : "not yet received");
 
     // Apply hoshi-saved debug menu toggle states to save data masks.
     // Must happen before anything that reads gate masks (e.g. StadiumLock).
@@ -351,61 +325,62 @@ void OnSaveLoaded()
     // Restore reward tables and received checklist rewards from save
     ChecklistRewards_OnSaveLoaded();
 
+    // Mirror sent_checks/goal_complete into shared memory and run initial
+    // goal evaluation.
+    CheckDetection_OnSaveLoaded();
+
     OSReport("Debug gate masks applied:\n");
     OSReport("  machines=0x%08x abilities=0x%04x events=0x%08x\n",
-             save_data->machine_unlocked_mask, save_data->ability_unlocked_mask,
-             save_data->event_unlocked_mask);
+             ap_save->machine_unlocked_mask, ap_save->ability_unlocked_mask,
+             ap_save->event_unlocked_mask);
     OSReport("  patches=0x%04x items=0x%08x boxes=0x%02x\n",
-             save_data->patch_unlocked_mask, save_data->item_unlocked_mask,
-             save_data->box_unlocked_mask);
+             ap_save->patch_unlocked_mask, ap_save->item_unlocked_mask,
+             ap_save->box_unlocked_mask);
     OSReport("  ar_stages=0x%04x tr_stages=0x%04x tr_items=0x%08x\n",
-             save_data->airride_stage_unlocked_mask, save_data->topride_stage_unlocked_mask,
-             save_data->topride_item_unlocked_mask);
+             ap_save->airride_stage_unlocked_mask, ap_save->topride_stage_unlocked_mask,
+             ap_save->topride_item_unlocked_mask);
     OSReport("  colors=0x%02x stadiums=0x%08x\n",
-             save_data->color_unlocked_mask, save_data->stadium_unlocked_mask);
-
-    // Debug: reveal all checklists and simulate location data for testing
-    RevealAllChecklists();
-    DebugSimulateLocationData();
-    ChecklistRewards_ApplyLocations();  // Apply immediately (normally happens on next frame)
+             ap_save->color_unlocked_mask, ap_save->stadium_unlocked_mask);
 
     // Signal to the AP client that the mod is fully initialized
-    archipelago_data->game_ready = 1;
+    ap_data->game_ready = 1;
     OSReport("game_ready set — waiting for AP client connection\n");
 }
 
-// Check if the AP client has written slot options to ArchipelagoData.
+// Check if the AP client has written slot options to APData.
 // On first detection, copy them to save data (one-time transfer).
 // Options are immutable per AP slot, so this only runs once per save file.
 static void APOptions_TransferToSave()
 {
     // Already received options for this slot
-    if (save_data->options_received)
+    if (ap_save->options_received)
         return;
     // Client hasn't written options yet
-    if (!archipelago_data->options_valid)
+    if (!ap_data->options_valid)
         return;
 
     // One-time transfer: copy options to save data
     OSReport("AP client connected — transferring slot options to save data\n");
-    memcpy(&save_data->options, &archipelago_data->options, sizeof(APSlotOptions));
-    save_data->options_received = 1;
+    memcpy(&ap_save->options, &ap_data->options, sizeof(APSlotOptions));
+    ap_save->options_received = 1;
 
     // Set initial menu toggle values from AP slot options
-    hoshi_menu_settings.deathlink_enabled = save_data->options.death_link;
-    hoshi_menu_settings.energylink_enabled = save_data->options.energy_link;
-    hoshi_menu_settings.traplink_enabled = save_data->options.traplink;
+    ap_menu_settings.deathlink_enabled = ap_save->options.death_link_enabled;
+    ap_menu_settings.energylink_enabled = ap_save->options.energy_link_enabled;
+    ap_menu_settings.traplink_enabled = ap_save->options.trap_link_enabled;
     OSReport("Menu toggles set — DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
-             save_data->options.death_link, save_data->options.energy_link, save_data->options.traplink);
-    OSReport("Goals — CityTrial: %d, AirRide: %d, TopRide: %d\n",
-             save_data->options.city_trial_goal, save_data->options.air_ride_goal, save_data->options.top_ride_goal);
+             ap_save->options.death_link_enabled, ap_save->options.energy_link_enabled, ap_save->options.trap_link_enabled);
+    OSReport("Goals — AirRide: %d, TopRide: %d, CityTrial: %d\n",
+             ap_save->options.goal[GMMODE_AIRRIDE],
+             ap_save->options.goal[GMMODE_TOPRIDE],
+             ap_save->options.goal[GMMODE_CITYTRIAL]);
     OSReport("CityTrial — ProgressivePatchCaps: %d (start: %d), ProgressiveStadiums: %d\n",
-             save_data->options.city_trial_progressive_patch_caps,
-             save_data->options.city_trial_patch_cap_amount,
-             save_data->options.city_trial_progressive_stadiums);
-    OSReport("RevealChecklists: %d\n", save_data->options.reveal_checklists);
+             ap_save->options.city_trial_progressive_patch_caps,
+             ap_save->options.city_trial_patch_cap_amount,
+             ap_save->options.city_trial_progressive_stadiums);
+    OSReport("RevealChecklists: %d\n", ap_save->options.reveal_checklists);
 
-    if (save_data->options.reveal_checklists)
+    if (ap_save->options.reveal_checklists)
         RevealAllChecklists();
 
     Hoshi_WriteSave();
@@ -416,14 +391,6 @@ static void APOptions_TransferToSave()
 void OnMainMenuLoad()
 {
     OSReport("Entering the main menu.\n");
-
-    // Check for AP slot options (one-time transfer to save)
-    APOptions_TransferToSave();
-
-    // Pre-fix all color fields so they're correct before any select
-    // screen initializes. This mirrors what CT's OnPlayerSelectLoad
-    // does, ensuring AR icon/color data is valid from the start.
-    GateColors_ForceDefaultColors();
 }
 
 // Runs when entering the player select menu (Air Ride or City Trial).
@@ -431,12 +398,14 @@ void OnPlayerSelectLoad()
 {
     OSReport("Entering player select (minor %d).\n", Scene_GetCurrentMinor());
 
-    // Filter locked machines from the City Trial select screen
+    // City Trial select: filter locked machines and validate colors.
+    // CT colors persist from prior sessions (no init block to hook like AR/TR),
+    // so we validate here on every CSS load.
     if (Scene_GetCurrentMinor() == MNRKIND_CITYPLYSELECT)
+    {
         GateMachines_FilterSelectList();
-
-    // Force any locked Kirby colors to default
-    GateColors_ForceDefaultColors();
+        GateColors_ForceDefaultColors();
+    }
 }
 
 // Runs before the game is initialized.
@@ -469,27 +438,46 @@ void On3DLoadEnd()
     if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
         GateEvents_LogEnabledEvents();
 
+    // Enemy spawn filtering for ability gating
     GateAbilities_On3DLoadEnd();
 
-    // For stadium/Air Ride modes, the CityItemSpawn init path doesn't run,
-    // so the hooks at 0x800eb558/0x800ed7f0 never fire. Filter here instead.
-    if (!Gm_IsInCity() && *stc_grBoxGeneObj)
+    // Item spawn table filtering for non-CT modes (stadium, Air Ride)
+    ItemSpawnFilter_On3DLoadEnd();
+
+    // Round-start permanent patch re-application, per-mode menu toggle.
+    // City Trial stadium also counts as "in city" for Gm_IsInCity.
+    if (Gm_IsInCity())
     {
-        OSReport("[SpawnFilter] Filtering spawn tables for non-CT mode (GrKind=%d)\n",
-                 Gm_GetCurrentGrKind());
-        FilterAllSpawnTables();
+        if (ap_menu_settings.ct_permanent_patches_enabled)
+            PermanentPatch_On3DLoadEnd();
+    }
+    else
+    {
+        if (ap_menu_settings.ar_permanent_patches_enabled)
+            PermanentPatch_On3DLoadEnd();
     }
 
-    PermanentPatch_On3DLoadEnd();
-    AirRideSpeed_On3DLoadEnd();
-    if (hoshi_menu_settings.deathlink_enabled)
+    if (ap_menu_settings.deathlink_enabled)
         DeathLink_On3DLoadEnd();
 
-    if (hoshi_menu_settings.energylink_enabled)
+    if (ap_menu_settings.energylink_enabled)
         EnergyLink_On3DLoadEnd();
 
-    if (hoshi_menu_settings.traplink_enabled)
+    if (ap_menu_settings.traplink_enabled)
         TrapLink_On3DLoadEnd();
+}
+
+// Runs after Top Ride gameplay is fully initialized.
+// Top Ride uses minor 19 (not 18), so On3DLoadEnd does not fire.
+void OnTopRideLoad()
+{
+    OSReport("Top Ride gameplay loaded.\n");
+
+    if (ap_menu_settings.energylink_enabled)
+        EnergyLink_OnTopRideLoad();
+
+    if (ap_menu_settings.traplink_enabled)
+        TrapLink_OnTopRideLoad();
 }
 
 // Runs when pausing the match. The index of the pausing player is passed in as an argument.
@@ -524,146 +512,14 @@ void OnSceneChange()
     APItems_OnSceneChange();
 }
 
-// Simulate the AP client sending location data by filling the ArchipelagoData
-// location arrays with a random shuffle. Rewards are distributed:
-//   ~33% same-mode (reward stays in its own mode's checklist)
-//   ~33% cross-mode (reward placed in a different mode's checklist)
-//   ~33% remote (sent to another world, no local checkbox)
-// The existing OnFrameStart logic detects location_data_valid and calls
-// ChecklistRewards_ApplyLocations() on the next frame.
-static void DebugSimulateLocationData()
-{
-    static const int counts[GMMODE_NUM] = {
-        [GMMODE_AIRRIDE]   = REWARD_COUNT_AIRRIDE,
-        [GMMODE_TOPRIDE]   = REWARD_COUNT_TOPRIDE,
-        [GMMODE_CITYTRIAL] = REWARD_COUNT_CITYTRIAL,
-    };
-    u16 *loc_arrays[GMMODE_NUM] = {
-        archipelago_data->location_airride,
-        archipelago_data->location_topride,
-        archipelago_data->location_citytrial,
-    };
-
-    // Build per-mode shuffled pools of clear_kinds (0-119)
-    u8 pools[GMMODE_NUM][120];
-    int pool_idxs[GMMODE_NUM] = {0, 0, 0};
-    for (int m = 0; m < GMMODE_NUM; m++)
-    {
-        for (int i = 0; i < 120; i++)
-            pools[m][i] = (u8)i;
-        for (int i = 119; i > 0; i--)
-        {
-            int j = HSD_Randi(i + 1);
-            u8 tmp = pools[m][i];
-            pools[m][i] = pools[m][j];
-            pools[m][j] = tmp;
-        }
-    }
-
-    for (int mode = 0; mode < GMMODE_NUM; mode++)
-    {
-        int count = counts[mode];
-        int local_count = 0, cross_count = 0;
-
-        for (int i = 0; i < count; i++)
-        {
-            int roll = HSD_Randi(3);
-            if (roll == 0 && pool_idxs[mode] < 120)
-            {
-                // Same-mode: reward stays in its own checklist
-                u8 ck = pools[mode][pool_idxs[mode]++];
-                loc_arrays[mode][i] = ((u16)mode << 8) | ck;
-                local_count++;
-            }
-            else if (roll == 1)
-            {
-                // Cross-mode: reward placed in a different mode's checklist
-                int target = (mode + 1 + HSD_Randi(2)) % GMMODE_NUM;
-                if (pool_idxs[target] < 120)
-                {
-                    u8 ck = pools[target][pool_idxs[target]++];
-                    loc_arrays[mode][i] = ((u16)target << 8) | ck;
-                    cross_count++;
-                }
-                else
-                {
-                    loc_arrays[mode][i] = 0xFFFF;
-                }
-            }
-            else
-            {
-                // Remote
-                loc_arrays[mode][i] = 0xFFFF;
-            }
-        }
-        OSReport("  Mode %d: %d same, %d cross, %d remote\n",
-                 mode, local_count, cross_count,
-                 count - local_count - cross_count);
-    }
-
-    archipelago_data->location_data_valid = 1;
-    OSReport("Debug: location data written, will apply next frame\n");
-}
-
-// Debug: visualize spline paths as colored lines in 3D.
-#define HOTDOG_CITY_RADIUS (350.0f * 350.0f) // used by spline vis
-static GOBJ *spline_vis_gobj;
-
-static void SplineVis_GXCallback(GOBJ *gobj, int pass)
-{
-    int spline_count = Spline_GetCount();
-    GXColor green = {0, 255, 0, 255};
-    GXColor red = {255, 0, 0, 255};
-
-    for (int seg = 0; seg < spline_count; seg++)
-    {
-        void *spline = Spline_GetForward(seg);
-        if (!spline)
-            continue;
-
-        // Check if midpoint is within city radius
-        Vec3 mid;
-        splGetSplinePoint(&mid, spline, 0.5f);
-        float dx = mid.X - 15.0f;
-        float dz = mid.Z - (-267.4f);
-        int in_city = (dx * dx + dz * dz < HOTDOG_CITY_RADIUS);
-
-        // Draw line strip: 5 segments per spline
-        for (int step = 0; step < 5; step++)
-        {
-            Vec3 a, b;
-            float t0 = (float)step / 5.0f;
-            float t1 = (float)(step + 1) / 5.0f;
-            splGetSplinePoint(&a, spline, t0);
-            splGetSplinePoint(&b, spline, t1);
-            GX_DrawLine(&a, &b, 10, in_city ? &green : &red);
-        }
-    }
-}
-
-static void Debug_ToggleSplineVis(void)
-{
-    if (spline_vis_gobj)
-    {
-        GObj_Destroy(spline_vis_gobj);
-        spline_vis_gobj = NULL;
-        OSReport("[SplineVis] Off\n");
-        return;
-    }
-
-    if (!Gm_IsInCity())
-    {
-        OSReport("[SplineVis] Not in City Trial\n");
-        return;
-    }
-
-    spline_vis_gobj = GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0,
-                                      0, 0, SplineVis_GXCallback, 8, 0);
-    OSReport("[SplineVis] On (%d splines)\n", Spline_GetCount());
-}
-
 void OnFrameStart()
 {
+    // Poll for AP client connection (one-time options transfer)
+    APOptions_TransferToSave();
+
+    // Process client backfill writes and poll meta auto-unlocks.
+    CheckDetection_OnFrameStart();
+
     GameData *gd = Gm_GetGameData();
 
     if (gd->update.pause_kind & (1 << PAUSEKIND_SYS) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_SYS)))
@@ -672,7 +528,7 @@ void OnFrameStart()
     if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
         OSReport("Game is paused via in-game!\n");
 
-    // Debug: dpad-left = spawn random patch, dpad-right = meteor trap
+    // debug pad handlers
     HSD_Pad *pad = &stc_engine_pads[0];
     if (pad->down & PAD_BUTTON_DPAD_LEFT)
     {
@@ -693,9 +549,9 @@ void OnFrameStart()
                      kind, spawn_pos.X, spawn_pos.Y, spawn_pos.Z);
         }
     }
-    if ((pad->down & PAD_BUTTON_DPAD_RIGHT) && archipelago_data->incoming_item_id == 0)
+    if ((pad->down & PAD_BUTTON_DPAD_RIGHT) && ap_data->incoming_item_id == 0)
     {
-        archipelago_data->incoming_item_id = AP_ITEM_METEOR_TRAP;
+        ap_data->incoming_item_id = AP_ITEM_METEOR_TRAP;
         OSReport("Debug: wrote AP_ITEM_METEOR_TRAP to mailbox\n");
     }
     if (pad->down & PAD_BUTTON_DPAD_DOWN)
@@ -705,7 +561,7 @@ void OnFrameStart()
     }
     if (pad->down & PAD_BUTTON_DPAD_UP)
     {
-        Debug_ToggleSplineVis();
+
     }
 
 }

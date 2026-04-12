@@ -49,10 +49,10 @@ int Patch_AllUp_GiveItem(int num)
 // Called from APItems_HandleItem after scene + intro gate.
 int PermanentPatch_GiveItem(PatchKind kind)
 {
-    if (save_data->permanent_patches[kind] < PATCH_STAT_MAX)
-        save_data->permanent_patches[kind]++;
+    if (ap_save->permanent_patches[kind] < PATCH_STAT_MAX)
+        ap_save->permanent_patches[kind]++;
 
-    OSReport("Permanent patch %d received (total: %d).\n", kind, save_data->permanent_patches[kind]);
+    OSReport("Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
     return Patch_GiveItem(kind, 1);
 }
 
@@ -62,8 +62,8 @@ int PermanentPatch_GiveAllUp()
 {
     for (int i = 0; i < PATCHKIND_NUM; i++)
     {
-        if (save_data->permanent_patches[i] < PATCH_STAT_MAX)
-            save_data->permanent_patches[i]++;
+        if (ap_save->permanent_patches[i] < PATCH_STAT_MAX)
+            ap_save->permanent_patches[i]++;
     }
 
     OSReport("Permanent all-up received.\n");
@@ -78,16 +78,16 @@ static int permanent_patches_applied;
 static void PermanentPatch_DoApply()
 {
     // Find the minimum across all stats — this is how many all-ups we can apply
-    u8 min_patches = save_data->permanent_patches[0];
+    u8 min_patches = ap_save->permanent_patches[0];
     for (int i = 1; i < PATCHKIND_NUM; i++)
     {
-        if (save_data->permanent_patches[i] < min_patches)
-            min_patches = save_data->permanent_patches[i];
+        if (ap_save->permanent_patches[i] < min_patches)
+            min_patches = ap_save->permanent_patches[i];
     }
 
     int total = 0;
     for (int i = 0; i < PATCHKIND_NUM; i++)
-        total += save_data->permanent_patches[i];
+        total += ap_save->permanent_patches[i];
 
     OSReport("Applying permanent patches (all-up: %d, total: %d)...\n", min_patches, total);
 
@@ -107,7 +107,7 @@ static void PermanentPatch_DoApply()
         // Apply individual remainders
         for (int i = 0; i < PATCHKIND_NUM; i++)
         {
-            int remainder = save_data->permanent_patches[i] - min_patches;
+            int remainder = ap_save->permanent_patches[i] - min_patches;
             if (remainder > 0)
                 Machine_GivePatch(md, i, remainder);
         }
@@ -127,15 +127,15 @@ static void PermanentPatch_PerFrame(GOBJ *g)
 }
 
 // Called from On3DLoadEnd to set up the per-frame GObj for round-start application.
+// Caller is responsible for gating by mode + menu toggle — this just applies
+// whatever is in ap_save->permanent_patches[] to all human MachineData, so it
+// works for any 3D mode that has Rider/Machine objects (City Trial and Air Ride).
 void PermanentPatch_On3DLoadEnd()
 {
-    if (!Gm_IsInCity())
-        return;
-
     // Check if there are any patches to apply
     int total = 0;
     for (int i = 0; i < PATCHKIND_NUM; i++)
-        total += save_data->permanent_patches[i];
+        total += ap_save->permanent_patches[i];
     if (total == 0)
         return;
 

@@ -61,10 +61,10 @@ void GateTopRideItems_ApplyMask()
     u32 before = mgr->enabled_mask;
 
     // Gate non-ability items by TR item unlock mask
-    mgr->enabled_mask &= save_data->topride_item_unlocked_mask | ABILITY_ITEM_BITS;
+    mgr->enabled_mask &= ap_save->topride_item_unlocked_mask | ABILITY_ITEM_BITS;
 
     // Gate ability-themed items by ability unlock mask only
-    u16 ability_mask = save_data->ability_unlocked_mask;
+    u16 ability_mask = ap_save->ability_unlocked_mask;
     for (int i = 0; i < (int)(sizeof(ability_items) / sizeof(ability_items[0])); i++)
     {
         if (!(ability_mask & (1 << ability_items[i].ability)))
@@ -72,7 +72,7 @@ void GateTopRideItems_ApplyMask()
     }
 
     OSReport("TopRide items: enabled mask 0x%08x -> 0x%08x (item mask 0x%08x, ability mask 0x%04x)\n",
-             before, mgr->enabled_mask, save_data->topride_item_unlocked_mask, ability_mask);
+             before, mgr->enabled_mask, ap_save->topride_item_unlocked_mask, ability_mask);
 }
 
 // Hook at 0x802db05c — right after TopRideItem_MgrInit (0x8034b5f4) returns
@@ -96,9 +96,9 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind)
     if (kind >= TRITEM_NUM)
         return 0;
 
-    save_data->topride_item_unlocked_mask |= (1 << kind);
+    ap_save->topride_item_unlocked_mask |= (1 << kind);
     OSReport("Top Ride item %d (%s) unlocked (mask = 0x%08x)\n",
-             kind, topride_item_names[kind], save_data->topride_item_unlocked_mask);
+             kind, topride_item_names[kind], ap_save->topride_item_unlocked_mask);
     TextBox_Enqueue(topride_item_names[kind]);
     return 1;
 }

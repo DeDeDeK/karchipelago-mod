@@ -15,6 +15,8 @@
 #include "gate_items.h"
 #include "gate_topride_items.h"
 #include "gate_colors.h"
+#include "check_detection.h"
+#include "checklist_rewards.h"
 
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
@@ -37,9 +39,9 @@ static int stadium_state[STKIND_NUM];
         type m = 0; \
         for (int i = 0; i < (count); i++) \
             if (arr[i]) m |= ((type)1 << i); \
-        if (save_data->field != m) \
+        if (ap_save->field != m) \
             OSReport("[Debug] " #field " = 0x%X\n", (u32)m); \
-        save_data->field = m; \
+        ap_save->field = m; \
     }
 
 DEF_SYNC(SyncMachines,  u32, machine_unlocked_mask,       machine_state,  VCKIND_NUM)
@@ -73,15 +75,15 @@ void DebugMenu_ApplyToSave(void)
 #define DEF_ALL(prefix, type, field, arr, count, label) \
     static int prefix##UnlockAll(void) { \
         for (int i = 0; i < (count); i++) { \
-            save_data->field |= ((type)1 << i); \
+            ap_save->field |= ((type)1 << i); \
             arr[i] = 1; \
         } \
-        OSReport("[Debug] Unlock all " label ": " #field " = 0x%X\n", (u32)save_data->field); \
+        OSReport("[Debug] Unlock all " label ": " #field " = 0x%X\n", (u32)ap_save->field); \
         TextBox_Enqueue("All " label " unlocked"); \
         return 1; \
     } \
     static int prefix##LockAll(void) { \
-        save_data->field = 0; \
+        ap_save->field = 0; \
         for (int i = 0; i < (count); i++) arr[i] = 0; \
         OSReport("[Debug] Lock all " label ": " #field " = 0x0\n"); \
         TextBox_Enqueue("All " label " locked"); \
@@ -102,12 +104,12 @@ DEF_ALL(Std, u32, stadium_unlocked_mask,        stadium_state,  STKIND_NUM,     
 
 #define GIVE_FN(name, id) \
     static int name(void) { \
-        if (save_data->unprocessed_count >= MAX_RECEIVED_ITEMS) { \
+        if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS) { \
             OSReport("[Debug] Give item " #id " (%d) failed: queue full\n", id); \
             return 1; \
         } \
-        save_data->unprocessed_items[save_data->unprocessed_count++] = id; \
-        OSReport("[Debug] Give item " #id " (%d), queue count = %d\n", id, save_data->unprocessed_count); \
+        ap_save->unprocessed_items[ap_save->unprocessed_count++] = id; \
+        OSReport("[Debug] Give item " #id " (%d), queue count = %d\n", id, ap_save->unprocessed_count); \
         return 1; \
     }
 
@@ -187,7 +189,6 @@ GIVE_FN(GiveHydra,       AP_ITEM_GIVE_HYDRA)
 
 // Upgrades
 GIVE_FN(GivePatchCap,   AP_ITEM_PATCH_CAP_INCREASE)
-GIVE_FN(GiveARSpeed,    AP_ITEM_AIRRIDE_SPEED_BOOST)
 GIVE_FN(GiveFillerAR,   AP_ITEM_CHECKBOX_FILLER_AIRRIDE)
 GIVE_FN(GiveFillerTR,   AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
 GIVE_FN(GiveFillerCT,   AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
@@ -211,6 +212,49 @@ GIVE_FN(GiveFillerCT,   AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
         .kind = OPTKIND_ACTION, \
         .on_action = fn, \
     }
+
+// Check detection debug actions
+static int CheckDbgClearAll(void)
+{
+    CheckDetection_DebugClearAll();
+    TextBox_Enqueue("Cleared all sent_checks");
+    return 1;
+}
+
+static int CheckDbgForceMarkAll(void)
+{
+    CheckDetection_DebugForceMarkAll();
+    TextBox_Enqueue("Force-marked all sent_checks");
+    return 1;
+}
+
+static int CheckDbgTriggerGoal(void)
+{
+    CheckDetection_DebugTriggerGoal();
+    TextBox_Enqueue("Goal triggered");
+    return 1;
+}
+
+static int CheckDbgRevealAll(void)
+{
+    RevealAllChecklists();
+    TextBox_Enqueue("All checklists revealed");
+    return 1;
+}
+
+static int CheckDbgSimulateLocationData(void)
+{
+    ChecklistRewards_DebugSimulateLocationData();
+    TextBox_Enqueue("Simulated location data applied");
+    return 1;
+}
+
+static int CheckDbgClearAllChecklistData(void)
+{
+    ChecklistRewards_DebugClearAll();
+    TextBox_Enqueue("Cleared all checklist data");
+    return 1;
+}
 
 // Submenu option
 #define S(label, desc, menu_ref) \
@@ -575,10 +619,9 @@ static MenuDesc give_traps_menu = {
 };
 
 static MenuDesc give_upgrades_menu = {
-    .option_num = 5,
+    .option_num = 4,
     .options = {
         A("Patch Cap Increase",  "Increase patch cap",       GivePatchCap),
-        A("AR Speed Boost",      "Air Ride speed boost",     GiveARSpeed),
         A("AR Checkbox Filler",  "Fill AR checklist square", GiveFillerAR),
         A("TR Checkbox Filler",  "Fill TR checklist square", GiveFillerTR),
         A("CT Checkbox Filler",  "Fill CT checklist square", GiveFillerCT),
@@ -599,8 +642,20 @@ static MenuDesc give_items_menu = {
     },
 };
 
+static MenuDesc checks_menu = {
+    .option_num = 6,
+    .options = {
+        A("Clear All sent_checks",   "Wipe sent_checks bitmask and goal_complete", CheckDbgClearAll),
+        A("Force-Mark All",          "Set every sent_checks bit and goal_complete", CheckDbgForceMarkAll),
+        A("Trigger goal_complete",   "Set only goal_complete (sent_checks unchanged)", CheckDbgTriggerGoal),
+        A("Reveal All Checklists",   "Make every checkbox visible (visual only)",   CheckDbgRevealAll),
+        A("Simulate Location Data",  "Fill location arrays with a random shuffle",  CheckDbgSimulateLocationData),
+        A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, and location shuffle", CheckDbgClearAllChecklistData),
+    },
+};
+
 MenuDesc debug_menu = {
-    .option_num = 12,
+    .option_num = 13,
     .options = {
         S("Machines",        "Toggle machine unlock gates",     machines_menu),
         S("Copy Abilities",  "Toggle ability unlock gates",     abilities_menu),
@@ -614,5 +669,6 @@ MenuDesc debug_menu = {
         S("Colors",          "Toggle Kirby color gates",        colors_menu),
         S("Stadiums",        "Toggle stadium unlock gates",     stadiums_menu),
         S("Give Items",      "Give items directly (free)",      give_items_menu),
+        S("Checks",          "Check detection and goal debug",  checks_menu),
     },
 };

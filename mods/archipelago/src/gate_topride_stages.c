@@ -25,8 +25,8 @@ static int GateTopRideStages_CheckCourseUnlocked(int course)
     if (course < 0)
         return 0;
     if (course >= TOPRIDE_NUM)
-        return save_data->topride_stage_unlocked_mask != 0 ? 1 : 0;
-    return (save_data->topride_stage_unlocked_mask & (1 << course)) ? 1 : 0;
+        return ap_save->topride_stage_unlocked_mask != 0 ? 1 : 0;
+    return (ap_save->topride_stage_unlocked_mask & (1 << course)) ? 1 : 0;
 }
 
 // Adjusts the cursor at GameData[0xf8] to skip locked courses.
@@ -36,7 +36,7 @@ static void AdjustCursorToUnlocked(void)
 {
     u8 *cursor_ptr = &((u8 *)Gm_GetGameData())[0xf8];
     int pos = *cursor_ptr;
-    int any_unlocked = save_data->topride_stage_unlocked_mask != 0;
+    int any_unlocked = ap_save->topride_stage_unlocked_mask != 0;
 
     // Random button is valid only if at least one course is unlocked
     if (pos >= TOPRIDE_NUM && any_unlocked)
@@ -77,7 +77,7 @@ int GateTopRideStages_CourseSelectCanLaunch(void)
 {
     int cursor_pos = ((u8 *)Gm_GetGameData())[0xf8];
     if (cursor_pos >= TOPRIDE_NUM)
-        return save_data->topride_stage_unlocked_mask != 0 ? 0 : 1;
+        return ap_save->topride_stage_unlocked_mask != 0 ? 0 : 1;
     return GateTopRideStages_CheckCourseUnlocked(cursor_pos) ? 0 : 1;
 }
 
@@ -122,7 +122,7 @@ static int GateTopRideStages_RandomPick(int unused)
     GameData *gd = Gm_GetGameData();
     u16 *used_ptr = (u16 *)((u8 *)gd + 0xFE);
     u16 used = *used_ptr;
-    u16 unlock = save_data->topride_stage_unlocked_mask & 0x7F;
+    u16 unlock = ap_save->topride_stage_unlocked_mask & 0x7F;
 
     // Build candidates: unlocked AND not recently used
     int candidates[TOPRIDE_NUM];
@@ -180,9 +180,9 @@ int GateTopRideStages_UnlockStage(int course)
     if (course < 0 || course >= TOPRIDE_NUM)
         return 0;
 
-    save_data->topride_stage_unlocked_mask |= (1 << course);
+    ap_save->topride_stage_unlocked_mask |= (1 << course);
     OSReport("Top Ride course %d (%s) unlocked (mask = 0x%04x)\n",
-             course, topride_stage_names[course], save_data->topride_stage_unlocked_mask);
+             course, topride_stage_names[course], ap_save->topride_stage_unlocked_mask);
     TextBox_Enqueue(topride_stage_names[course]);
     return 1;
 }

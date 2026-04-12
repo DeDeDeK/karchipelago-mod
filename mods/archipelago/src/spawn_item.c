@@ -1,6 +1,7 @@
 #include "game.h"
 #include "event.h"
 #include "code_patch/code_patch.h"
+#include "os.h"
 
 // Spawn an item at the given player's location.
 // The item is collided with before the next frame begins.

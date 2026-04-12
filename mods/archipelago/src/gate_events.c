@@ -35,7 +35,7 @@ static const char *event_names[EVKIND_NUM] = {
 // ev_chk: pointer to EventCheckData (r26).
 void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
 {
-    u32 mask = save_data->event_unlocked_mask;
+    u32 mask = ap_save->event_unlocked_mask;
     int enabled_count = 0;
 
     for (int i = 0; i < EVKIND_NUM; i++)
@@ -79,7 +79,7 @@ CODEPATCH_HOOKCREATE(0x800ede24,
 
 void GateEvents_LogEnabledEvents(void)
 {
-    u32 mask = save_data->event_unlocked_mask;
+    u32 mask = ap_save->event_unlocked_mask;
     OSReport("[Events] Enabled events (mask=0x%05X):\n", mask);
     for (int i = 0; i < EVKIND_NUM; i++)
     {
@@ -101,7 +101,7 @@ void GateEvents_LogEnabledEvents(void)
 static int APEventWeightFilter(int event_index, int default_weight)
 {
     int bit = EVKIND_NUM + event_index;
-    if (!(save_data->event_unlocked_mask & (1 << bit)))
+    if (!(ap_save->event_unlocked_mask & (1 << bit)))
         return 0;
     return default_weight;
 }
@@ -128,9 +128,9 @@ int GateEvents_UnlockEvent(int kind)
     else
         return 0;
 
-    save_data->event_unlocked_mask |= (1 << kind);
+    ap_save->event_unlocked_mask |= (1 << kind);
     OSReport("Event %d (%s) unlocked (mask = 0x%05x)\n",
-             kind, name, save_data->event_unlocked_mask);
+             kind, name, ap_save->event_unlocked_mask);
     TextBox_Enqueue(name);
     return 1;
 }

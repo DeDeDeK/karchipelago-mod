@@ -148,7 +148,7 @@ void TextBox_PerFrame(GOBJ *g)
 // Enqueue a message to the textbox queue by creating a Text object
 int TextBox_Enqueue(const char *format, ...)
 {
-    if (!hoshi_menu_settings.textbox_enabled)
+    if (!ap_menu_settings.textbox_enabled)
         return 0;
 
     // Auto-dequeue oldest message if queue is full to make room for new message

@@ -29,8 +29,8 @@ int GateAirRideStages_CheckCourseUnlocked(s8 stage_kind)
     if (stage_kind < 0)
         return 0;
     if (stage_kind >= AIRRIDE_NUM)
-        return save_data->airride_stage_unlocked_mask != 0 ? 1 : 0;
-    return (save_data->airride_stage_unlocked_mask & (1 << stage_kind)) ? 1 : 0;
+        return ap_save->airride_stage_unlocked_mask != 0 ? 1 : 0;
+    return (ap_save->airride_stage_unlocked_mask & (1 << stage_kind)) ? 1 : 0;
 }
 
 void GateAirRideStages_OnBoot()
@@ -78,9 +78,9 @@ int GateAirRideStages_UnlockStage(int stage_kind)
     if (stage_kind < 0 || stage_kind >= AIRRIDE_NUM)
         return 0;
 
-    save_data->airride_stage_unlocked_mask |= (1 << stage_kind);
+    ap_save->airride_stage_unlocked_mask |= (1 << stage_kind);
     OSReport("Air Ride stage %d (%s) unlocked (mask = 0x%04x)\n",
-             stage_kind, airride_stage_names[stage_kind], save_data->airride_stage_unlocked_mask);
+             stage_kind, airride_stage_names[stage_kind], ap_save->airride_stage_unlocked_mask);
     TextBox_Enqueue(airride_stage_names[stage_kind]);
     return 1;
 }

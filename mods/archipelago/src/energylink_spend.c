@@ -97,12 +97,11 @@ static SpendEntry checkbox_fillers[] = {
 
 static SpendEntry upgrades[] = {
     {AP_ITEM_PATCH_CAP_INCREASE, 75, "Patch Cap Increase"},
-    {AP_ITEM_AIRRIDE_SPEED_BOOST, 75, "Air Ride Speed Boost"},
 };
 
 static int TryPurchase(SpendEntry *entry)
 {
-    float balance = archipelago_data->energy_balance;
+    float balance = ap_data->energy_balance;
     if (balance < entry->cost)
     {
         TextBox_Enqueue("Not enough energy! Need %.0f, have %.0f", entry->cost, balance);
@@ -118,7 +117,7 @@ static int TryPurchase(SpendEntry *entry)
     }
 
     // Deduct from local balance and queue withdrawal through accumulator
-    archipelago_data->energy_balance -= entry->cost;
+    ap_data->energy_balance -= entry->cost;
     EnergyLink_Withdraw(entry->cost);
 
     TextBox_Enqueue("Bought %s for %.0f energy", entry->name, entry->cost);
@@ -203,7 +202,6 @@ BUY_FUNC(Buy_Filler_2, checkbox_fillers, 2)
 
 // Upgrades
 BUY_FUNC(Buy_Upgrade_0, upgrades, 0)
-BUY_FUNC(Buy_Upgrade_1, upgrades, 1)
 
 #define ACTION_OPT(entry_name, cost_str, buy_fn) \
     &(OptionDesc){                                \
@@ -313,10 +311,9 @@ static MenuDesc checkbox_fillers_menu = {
 };
 
 static MenuDesc upgrades_menu = {
-    .option_num = 2,
+    .option_num = 1,
     .options = {
         ACTION_OPT("Patch Cap Increase",  "75", Buy_Upgrade_0),
-        ACTION_OPT("Air Ride Speed Boost", "75", Buy_Upgrade_1),
     },
 };
 

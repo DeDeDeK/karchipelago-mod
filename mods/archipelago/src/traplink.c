@@ -1,6 +1,10 @@
 #include "game.h"
+#include "scene.h"
 #include "inline.h"
+#include "item.h"
 #include "machine.h"
+#include "rider.h"
+#include "topride.h"
 #include "code_patch/code_patch.h"
 
 #include "main.h"
@@ -11,11 +15,11 @@
 // Send a traplink if enabled.
 void TrapLink_Send(void)
 {
-    if (!hoshi_menu_settings.traplink_enabled)
+    if (!ap_menu_settings.traplink_enabled)
         return;
 
     OSReport("Traplink send triggered\n");
-    archipelago_data->traplink_send = 1;
+    ap_data->traplink_send = 1;
 }
 
 // Trap items that can be randomly selected when traplink is triggered
@@ -32,6 +36,9 @@ static uint trap_items[] = {
     AP_ITKIND_CHARGEDOWN,
     AP_ITKIND_WEIGHTDOWN,
     AP_ITEM_METEOR_TRAP,
+    AP_ITEM_BOMB_TRAP,
+    AP_ITEM_GORDO_TRAP,
+    AP_ITEM_SENSORBOMB_TRAP,
     AP_EVENT_METEOR,
     AP_EVENT_RAILFIRE,
     AP_EVENT_BOUNCE,
@@ -49,48 +56,150 @@ static int IsTrapItemLocked(uint item_id)
     if (item_id >= AP_EVENT_BASE && item_id < AP_EVENT_BASE + EVKIND_NUM)
     {
         EventKind kind = item_id - AP_EVENT_BASE;
-        return !(save_data->event_unlocked_mask & (1 << kind));
+        return !(ap_save->event_unlocked_mask & (1 << kind));
     }
     return 0;
 }
 
-// Read from the traplink_receive location and trigger a random trap
+// City Trial receive: pick a random trap from the full item list.
+// Returns 1 if a trap was successfully applied, 0 otherwise.
+static int ApplyCityTrialTrap(void)
+{
+    // Build filtered list excluding locked events
+    uint candidates[TRAP_ITEM_COUNT];
+    int count = 0;
+    for (int i = 0; i < TRAP_ITEM_COUNT; i++)
+    {
+        if (!IsTrapItemLocked(trap_items[i]))
+            candidates[count++] = trap_items[i];
+    }
+
+    if (count == 0)
+    {
+        OSReport("TrapLink: no eligible trap items, discarding\n");
+        return 1; // treat as handled so we clear the flag
+    }
+
+    uint trap_id = candidates[HSD_Randi(count)];
+    OSReport("Applying trap item (AP ID %d)...\n", trap_id);
+    return APItems_HandleItem(trap_id);
+}
+
+// Air Ride receive: give sleep copy ability to every human rider.
+// Most City Trial trap items are CT-only (ITKIND / EVENT dispatch requires
+// Gm_IsInCity), so we bypass APItems_HandleItem and call Rider_GiveAbility
+// directly. Uses the raw rider API (not Rider_CheckAndGiveAbility) so the
+// ability gate and sleep-send hook in gate_abilities.c do not re-trigger.
+static int ApplyAirRideTrap(void)
+{
+    int applied = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) != PKIND_HMN)
+            continue;
+        GOBJ *rg = Ply_GetRiderGObj(i);
+        if (!rg)
+            continue;
+        RiderData *rd = rg->userdata;
+        if (!rd || rd->kind != RDKIND_KIRBY)
+            continue;
+        OSReport("TrapLink: giving sleep ability to ply %d\n", i);
+        Rider_GiveAbility(rd, COPYKIND_SLEEP);
+        applied = 1;
+    }
+    return applied;
+}
+
+// Top Ride bad items that can be spawned on a human player when traplink is
+// received. Only Speed Down directly penalizes the picker-up on contact;
+// the other TR items are either beneficial or are attacks that harm other
+// players. TRITEM_SPEEDDOWN (3) is the only reliable self-bad TR item.
+static const TopRideItemKind tr_trap_items[] = {
+    TRITEM_SPEEDDOWN,
+};
+#define TR_TRAP_ITEM_COUNT (sizeof(tr_trap_items) / sizeof(tr_trap_items[0]))
+
+// Top Ride receive: spawn a bad item on every human Kirby's head so they
+// collide with it immediately. Uses TopRideItem_SpawnAtPosition (0x8034bf50),
+// the same entry point that per-item widget handlers call when placing items
+// on the track. Arg pattern (flag1=0, flag2=1, orientation=zero vec) is copied
+// from widget handler 0 (0x802b0b88) which is known to work.
+static int ApplyTopRideTrap(void)
+{
+    TopRideKirbyMgr *kirby_mgr = *stc_topride_kirbymgr;
+    TopRideItemMgr *item_mgr = *stc_topride_itemmgr;
+    if (!kirby_mgr || !item_mgr)
+        return 0;
+
+    Vec3 orient = { 0.0f, 0.0f, 0.0f };
+    int applied = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        TopRideKirby *kirby = kirby_mgr->kirbys[i];
+        if (!kirby || kirby->cpu_level != 0)
+            continue;
+
+        TopRideItemKind kind = tr_trap_items[HSD_Randi(TR_TRAP_ITEM_COUNT)];
+        Vec3 spawn_pos = {
+            kirby->position.X,
+            kirby->position.Y,
+            kirby->position.Z,
+        };
+        OSReport("TrapLink: spawning TR item %d at ply %d (%f, %f, %f)\n",
+                 kind, i, spawn_pos.X, spawn_pos.Y, spawn_pos.Z);
+        TopRideItem_SpawnAtPosition(item_mgr, kind, &spawn_pos, &orient, 0, 1);
+        applied = 1;
+    }
+    return applied;
+}
+
+// Read from the traplink_receive location and dispatch a mode-appropriate trap.
 void TrapLink_PerFrame(GOBJ *g)
 {
+    if (!ap_data->traplink_receive)
+        return;
+
+    // Intro state gate only applies to 3D (Air Ride / City Trial). Top Ride
+    // has no intro sequence and Gm_GetIntroState defaults to GMINTRO_END.
     if (Gm_GetIntroState() != GMINTRO_END)
         return;
 
-    if (archipelago_data->traplink_receive)
+    MajorKind major = Scene_GetCurrentMajor();
+    int handled = 0;
+    switch (major)
     {
-        // Build filtered list excluding locked events
-        uint candidates[TRAP_ITEM_COUNT];
-        int count = 0;
-        for (int i = 0; i < TRAP_ITEM_COUNT; i++)
-        {
-            if (!IsTrapItemLocked(trap_items[i]))
-                candidates[count++] = trap_items[i];
-        }
+        case MJRKIND_CITY:
+            handled = ApplyCityTrialTrap();
+            break;
+        case MJRKIND_AIR:
+            handled = ApplyAirRideTrap();
+            break;
+        case MJRKIND_TOP:
+            handled = ApplyTopRideTrap();
+            break;
+        default:
+            // Not in a gameplay mode — drop the trap so it doesn't pile up
+            handled = 1;
+            break;
+    }
 
-        if (count == 0)
-        {
-            OSReport("TrapLink: no eligible trap items, discarding\n");
-            archipelago_data->traplink_receive = 0;
-            return;
-        }
-
-        uint trap_id = candidates[HSD_Randi(count)];
-        OSReport("Applying trap item (AP ID %d)...\n", trap_id);
-        if (APItems_HandleItem(trap_id))
-        {
-            TextBox_Enqueue("Trap received!");
-            archipelago_data->traplink_receive = 0;
-        }
+    if (handled)
+    {
+        TextBox_Enqueue("Trap received!");
+        ap_data->traplink_receive = 0;
     }
 }
 
 void TrapLink_On3DLoadEnd()
 {
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
+}
+
+void TrapLink_OnTopRideLoad()
+{
+    // Top Ride has no rider GObjs, so install a standalone per-frame proc.
+    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
+    OSReport("[TrapLink] Top Ride receive proc installed\n");
 }
 
 // Hook in Machine_OnTouchItem after CityItem_IsGoodPatch returns 0 (bad patch).
@@ -110,8 +219,79 @@ CODEPATCH_HOOKCREATE(0x801DB504,
     "",
     0)
 
+// Hook inside TopRideItem_Update (0x8034c130) at the moment the collision
+// check has just succeeded and the item is about to be marked "absorbed".
+// At 0x8034c7dc:
+//   r31 = item list node (item at +8, kind byte at node+0x68)
+//   r29 = absorber (kirby's item receiver)
+//   r26 = absorber position Vec3* (loaded earlier at 0x8034c6e4 from
+//         absorber.f18 vtable[2])
+//   Clobbered instruction: lbz r4, 104(r31)
+//
+// We load the item kind and absorber position into r3/r4 for the C handler,
+// then the framework re-executes the clobbered lbz to restore r4.
+static int IsTopRideBadItem(u8 kind)
+{
+    for (int i = 0; i < (int)TR_TRAP_ITEM_COUNT; i++)
+    {
+        if (tr_trap_items[i] == kind)
+            return 1;
+    }
+    return 0;
+}
+
+static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
+{
+    if (!IsTopRideBadItem(item_kind))
+        return;
+
+    TopRideKirbyMgr *mgr = *stc_topride_kirbymgr;
+    if (!mgr || !absorber_pos)
+        return;
+
+    // The absorber's position and the TopRideKirby's charge-component
+    // position should coincide while the kirby is in pickup range of an
+    // item. Find the kirby whose charge position is closest to the
+    // absorber position that just absorbed — that's the one that picked up.
+    int closest = -1;
+    float closest_dist = 1.0e30f;
+    for (int i = 0; i < 4; i++)
+    {
+        TopRideKirby *k = mgr->kirbys[i];
+        if (!k)
+            continue;
+        float dx = k->charge.position.X - absorber_pos->X;
+        float dy = k->charge.position.Y - absorber_pos->Y;
+        float dz = k->charge.position.Z - absorber_pos->Z;
+        float dist = dx * dx + dy * dy + dz * dz;
+        if (dist < closest_dist)
+        {
+            closest_dist = dist;
+            closest = i;
+        }
+    }
+
+    if (closest < 0)
+        return;
+
+    TopRideKirby *picker = mgr->kirbys[closest];
+    if (picker->cpu_level != 0)
+        return; // CPU picked it up — don't send
+
+    OSReport("TrapLink: TR ply %d picked up bad item %d\n", closest, item_kind);
+    TrapLink_Send();
+}
+
+CODEPATCH_HOOKCREATE(0x8034C7DC,
+    "lbz 3, 104(31)\n\t"
+    "mr 4, 26\n\t",
+    TrapLink_OnTopRideItemPickup,
+    "",
+    0)
+
 void TrapLink_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x801DB504);
+    CODEPATCH_HOOKAPPLY(0x8034C7DC);
     OSReport("Traplink send hooks installed\n");
 }
