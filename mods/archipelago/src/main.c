@@ -536,21 +536,36 @@ void OnFrameStart()
     HSD_Pad *pad = &stc_engine_pads[0];
     if (pad->down & PAD_BUTTON_DPAD_LEFT)
     {
-        GOBJ *mg = Ply_GetMachineGObj(0);
-        if (mg)
+        // Grant a random remote (non-local) checklist reward
+        static const int reward_counts[GMMODE_NUM] = {
+            REWARD_COUNT_AIRRIDE, REWARD_COUNT_TOPRIDE, REWARD_COUNT_CITYTRIAL
+        };
+        int total = REWARD_COUNT_AIRRIDE + REWARD_COUNT_TOPRIDE + REWARD_COUNT_CITYTRIAL;
+        int pick = HSD_Randi(total);
+        GameMode mode;
+        u8 ri;
+        if (pick < REWARD_COUNT_AIRRIDE)
         {
-            MachineData *md = mg->userdata;
-            ItemKind kind = ITKIND_ACCELFAKE + HSD_Randi(ITKIND_WEIGHTFAKE - ITKIND_ACCELFAKE + 1);
-            Vec3 spawn_pos = {
-                .X = md->pos.X + md->forward.X * 30.0f,
-                .Y = md->pos.Y + md->forward.Y * 30.0f,
-                .Z = md->pos.Z + md->forward.Z * 30.0f
-            };
-            ItemDesc desc;
-            Item_InitDesc(&desc, kind, 1.0f, 0, &spawn_pos, &md->up, &md->forward, -1, -1, 1, 3, -1, -1);
-            Item_Create(&desc);
-            OSReport("[Main] Debug: spawned patch item %d at (%.1f, %.1f, %.1f)\n",
-                     kind, spawn_pos.X, spawn_pos.Y, spawn_pos.Z);
+            mode = GMMODE_AIRRIDE;
+            ri = pick;
+        }
+        else if (pick < REWARD_COUNT_AIRRIDE + REWARD_COUNT_TOPRIDE)
+        {
+            mode = GMMODE_TOPRIDE;
+            ri = pick - REWARD_COUNT_AIRRIDE;
+        }
+        else
+        {
+            mode = GMMODE_CITYTRIAL;
+            ri = pick - REWARD_COUNT_AIRRIDE - REWARD_COUNT_TOPRIDE;
+        }
+
+        if (ap_save->has_local_location[mode] & (1ULL << ri))
+            OSReport("[Main] Debug: reward %d:%d is local, skipping\n", mode, ri);
+        else
+        {
+            ChecklistRewards_Grant(mode, ri);
+            OSReport("[Main] Debug: granted remote checklist reward mode=%d ri=%d\n", mode, ri);
         }
     }
     if ((pad->down & PAD_BUTTON_DPAD_RIGHT) && ap_data->incoming_item_id == 0)
@@ -560,12 +575,13 @@ void OnFrameStart()
     }
     if (pad->down & PAD_BUTTON_DPAD_DOWN)
     {
-        if (custom_events && custom_events->Do(CUSTOM_EVKIND_WADDLE_DEE_SWARM))
-            OSReport("[Main] Debug: triggered Waddle Dee Swarm\n");
+        ap_data->deathlink_receive = 1;
+        OSReport("[Main] Debug: triggered deathlink_receive\n");
     }
     if (pad->down & PAD_BUTTON_DPAD_UP)
     {
-
+        ap_data->traplink_receive = 1;
+        OSReport("[Main] Debug: triggered traplink_receive\n");
     }
 
 }

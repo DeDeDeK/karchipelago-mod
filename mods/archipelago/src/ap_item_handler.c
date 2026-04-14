@@ -171,10 +171,10 @@ int APItems_HandleItem(uint ap_item_id)
         return GateTopRideItems_UnlockItem(kind);
     }
 
-    // Stadium unlock items (AP_STADIUM_BASE + StadiumKind)
-    if (ap_item_id >= AP_STADIUM_BASE && ap_item_id < AP_STADIUM_BASE + STKIND_NUM)
+    // Stadium unlock items (AP_STADIUM_UNLOCK_BASE + StadiumKind)
+    if (ap_item_id >= AP_STADIUM_UNLOCK_BASE && ap_item_id < AP_STADIUM_UNLOCK_BASE + STKIND_NUM)
     {
-        StadiumKind kind = ap_item_id - AP_STADIUM_BASE;
+        StadiumKind kind = ap_item_id - AP_STADIUM_UNLOCK_BASE;
         ap_save->stadium_unlocked_mask |= (1 << kind);
         Gm_StadiumSetUnlockedDirect(kind);
         Gm_StadiumSetNewLabelDirect(kind);
@@ -260,6 +260,7 @@ int APItems_HandleItem(uint ap_item_id)
     // 1 HP trap — set each human player's HP to 1
     if (ap_item_id == AP_ITEM_1_HP_TRAP)
     {
+        int applied = 0;
         for (int i = 0; i < 5; i++)
         {
             if (Ply_GetPKind(i) != PKIND_HMN)
@@ -270,9 +271,12 @@ int APItems_HandleItem(uint ap_item_id)
             MachineData *md = mg->userdata;
             float damage = md->hp - 1.0f;
             if (damage > 0.0f)
+            {
                 Machine_GiveDamage(md, damage, mg);
+                applied = 1;
+            }
         }
-        return 1;
+        return applied;
     }
 
     OSReport("[APItems] Unknown AP item ID: %d\n", ap_item_id);

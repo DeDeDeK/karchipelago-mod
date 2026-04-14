@@ -34,10 +34,10 @@ typedef enum APItemId
     AP_ITEM_GIVE_DRAGOON,
     AP_ITEM_GIVE_HYDRA,
     AP_ITEM_EVENT_CUSTOM,
-    AP_ITEM_BOMB_TRAP,              // Spawn a Bomb projectile from each human
-    AP_ITEM_GORDO_TRAP,             // Spawn a Gordo projectile from each human
-    AP_ITEM_SENSORBOMB_TRAP,        // Spawn a Sensor Bomb projectile from each human
-    AP_ITEM_SPAWN_RATE_UP,          // Increase item spawn rate in City Trial and Top Ride
+    AP_ITEM_BOMB_TRAP,
+    AP_ITEM_GORDO_TRAP,
+    AP_ITEM_SENSORBOMB_TRAP,
+    AP_ITEM_SPAWN_RATE_UP,
 
     // Permanent +1 patch items (100-199, aligned to PatchKind)
     AP_PERM_PATCH_BASE = 100,
@@ -143,37 +143,166 @@ typedef enum APItemId
     AP_ITKIND_WEIGHTFAKE,           // ITKIND_WEIGHTFAKE
 
     // Stadium unlock items (400-423, aligned to StadiumKind)
-    AP_STADIUM_BASE = 400,
-    AP_STADIUM_DRAG1 = 400,         // STKIND_DRAG1
-    AP_STADIUM_DRAG2,               // STKIND_DRAG2
-    AP_STADIUM_DRAG3,               // STKIND_DRAG3
-    AP_STADIUM_DRAG4,               // STKIND_DRAG4
-    AP_STADIUM_AIRGLIDER,           // STKIND_AIRGLIDER
-    AP_STADIUM_TARGETFLIGHT,        // STKIND_TARGETFLIGHT
-    AP_STADIUM_HIGHJUMP,            // STKIND_HIGHJUMP
-    AP_STADIUM_MELEE1,              // STKIND_MELEE1
-    AP_STADIUM_MELEE2,              // STKIND_MELEE2
-    AP_STADIUM_DESTRUCTION1,        // STKIND_DESTRUCTION1
-    AP_STADIUM_DESTRUCTION2,        // STKIND_DESTRUCTION2
-    AP_STADIUM_DESTRUCTION3,        // STKIND_DESTRUCTION3
-    AP_STADIUM_DESTRUCTION4,        // STKIND_DESTRUCTION4
-    AP_STADIUM_DESTRUCTION5,        // STKIND_DESTRUCTION5
-    AP_STADIUM_SINGLERACE1,         // STKIND_SINGLERACE1
-    AP_STADIUM_SINGLERACE2,         // STKIND_SINGLERACE2
-    AP_STADIUM_SINGLERACE3,         // STKIND_SINGLERACE3
-    AP_STADIUM_SINGLERACE4,         // STKIND_SINGLERACE4
-    AP_STADIUM_SINGLERACE5,         // STKIND_SINGLERACE5
-    AP_STADIUM_SINGLERACE6,         // STKIND_SINGLERACE6
-    AP_STADIUM_SINGLERACE7,         // STKIND_SINGLERACE7
-    AP_STADIUM_SINGLERACE8,         // STKIND_SINGLERACE8
-    AP_STADIUM_SINGLERACE9,         // STKIND_SINGLERACE9
-    AP_STADIUM_VSKINGDEDEDE,        // STKIND_VSKINGDEDEDE
+    AP_STADIUM_UNLOCK_BASE = 400,
+    AP_STADIUM_UNLOCK_DRAG1 = 400,         // STKIND_DRAG1
+    AP_STADIUM_UNLOCK_DRAG2,               // STKIND_DRAG2
+    AP_STADIUM_UNLOCK_DRAG3,               // STKIND_DRAG3
+    AP_STADIUM_UNLOCK_DRAG4,               // STKIND_DRAG4
+    AP_STADIUM_UNLOCK_AIRGLIDER,           // STKIND_AIRGLIDER
+    AP_STADIUM_UNLOCK_TARGETFLIGHT,        // STKIND_TARGETFLIGHT
+    AP_STADIUM_UNLOCK_HIGHJUMP,            // STKIND_HIGHJUMP
+    AP_STADIUM_UNLOCK_MELEE1,              // STKIND_MELEE1
+    AP_STADIUM_UNLOCK_MELEE2,              // STKIND_MELEE2
+    AP_STADIUM_UNLOCK_DESTRUCTION1,        // STKIND_DESTRUCTION1
+    AP_STADIUM_UNLOCK_DESTRUCTION2,        // STKIND_DESTRUCTION2
+    AP_STADIUM_UNLOCK_DESTRUCTION3,        // STKIND_DESTRUCTION3
+    AP_STADIUM_UNLOCK_DESTRUCTION4,        // STKIND_DESTRUCTION4
+    AP_STADIUM_UNLOCK_DESTRUCTION5,        // STKIND_DESTRUCTION5
+    AP_STADIUM_UNLOCK_SINGLERACE1,         // STKIND_SINGLERACE1
+    AP_STADIUM_UNLOCK_SINGLERACE2,         // STKIND_SINGLERACE2
+    AP_STADIUM_UNLOCK_SINGLERACE3,         // STKIND_SINGLERACE3
+    AP_STADIUM_UNLOCK_SINGLERACE4,         // STKIND_SINGLERACE4
+    AP_STADIUM_UNLOCK_SINGLERACE5,         // STKIND_SINGLERACE5
+    AP_STADIUM_UNLOCK_SINGLERACE6,         // STKIND_SINGLERACE6
+    AP_STADIUM_UNLOCK_SINGLERACE7,         // STKIND_SINGLERACE7
+    AP_STADIUM_UNLOCK_SINGLERACE8,         // STKIND_SINGLERACE8
+    AP_STADIUM_UNLOCK_SINGLERACE9,         // STKIND_SINGLERACE9
+    AP_STADIUM_UNLOCK_VSKINGDEDEDE,        // STKIND_VSKINGDEDEDE
 
     // Checklist rewards (500-649, encoded as base + mode*50 + reward_index)
-    // Air Ride:   mode 0, indices 0-45  → IDs 500-545
-    // Top Ride:   mode 1, indices 0-32  → IDs 550-582
-    // City Trial: mode 2, indices 0-43  → IDs 600-643
     AP_CHECKLIST_REWARD_BASE = 500,
+
+    // Air Ride rewards (500-545, mode 0, indices 0-45)
+    AP_CHECKLIST_REWARD_AIRRIDE_BASE = 500,
+    AP_REWARD_AR_COURSE_NEBULA_BELT = 500,             // New Course: Nebula Belt
+    AP_REWARD_AR_MUSIC_NEBULA,                         // Music: Nebula
+    AP_REWARD_AR_METAKNIGHT,                           // META KNIGHT: Available on normal courses
+    AP_REWARD_AR_BONUS_MOVIE,                          // Bonus Movie: Special machine intros
+    AP_REWARD_AR_DEDEDE,                               // KING DEDEDE: Available on normal courses
+    AP_REWARD_AR_COLOR_GREEN,                          // Green Kirby
+    AP_REWARD_AR_MACHINE_WAGON_STAR,                   // New Machine: WAGON STAR
+    AP_REWARD_AR_SOUND_MAGMA_FLOWS,                    // Sound Test: MAGMA FLOWS
+    AP_REWARD_AR_FILLER_1,                             // Check off an empty box of your choice!
+    AP_REWARD_AR_MACHINE_REX_WHEELIE,                  // New Machine: REX WHEELIE
+    AP_REWARD_AR_COLOR_PURPLE,                         // Purple Kirby
+    AP_REWARD_AR_MACHINE_SLICK_STAR,                   // New Machine: SLICK STAR
+    AP_REWARD_AR_ENDING,                               // Ending
+    AP_REWARD_AR_COLOR_WHITE,                          // White Kirby
+    AP_REWARD_AR_MACHINE_SWERVE_STAR,                  // New Machine: SWERVE STAR
+    AP_REWARD_AR_MACHINE_SHADOW_STAR,                  // New Machine: SHADOW STAR
+    AP_REWARD_AR_MACHINE_JET_STAR,                     // New Machine: JET STAR
+    AP_REWARD_AR_MUSIC_HILLSIDE,                       // Music: Hillside
+    AP_REWARD_AR_SOUND_CHECKER_KNIGHTS,                // Sound Test: CHECKER KNIGHTS
+    AP_REWARD_AR_MUSIC_MEADOWS,                        // Music: Meadows
+    AP_REWARD_AR_MACHINE_BULK_STAR,                    // New Machine: BULK STAR
+    AP_REWARD_AR_SOUND_SKY_SANDS,                      // Sound Test: SKY SANDS
+    AP_REWARD_AR_MACHINE_FORMULA_STAR,                 // New Machine: FORMULA STAR
+    AP_REWARD_AR_MUSIC_MAGMA,                          // Music: Magma
+    AP_REWARD_AR_MUSIC_BEANSTALK,                      // Music: Beanstalk
+    AP_REWARD_AR_SOUND_MACHINE_PASSAGE,                // Sound Test: MACHINE PASSAGE
+    AP_REWARD_AR_SOUND_FANTASY_MEADOWS,                // Sound Test: FANTASY MEADOWS
+    AP_REWARD_AR_SOUND_CELESTIAL_VALLEY,               // Sound Test: CELESTIAL VALLEY
+    AP_REWARD_AR_COLOR_BROWN,                          // Brown Kirby
+    AP_REWARD_AR_SOUND_FROZEN_HILLSIDE,                // Sound Test: FROZEN HILLSIDE
+    AP_REWARD_AR_SOUND_BEANSTALK_PARK,                 // Sound Test: BEANSTALK PARK
+    AP_REWARD_AR_MACHINE_ROCKET_STAR,                  // New Machine: ROCKET STAR
+    AP_REWARD_AR_SOUND_RESULTS_SCREEN,                 // Sound Test: Results Screen
+    AP_REWARD_AR_MACHINE_WHEELIE_BIKE,                 // New Machine: WHEELIE BIKE
+    AP_REWARD_AR_MACHINE_WHEELIE_SCOOTER,              // New Machine: WHEELIE SCOOTER
+    AP_REWARD_AR_MACHINE_WINGED_STAR,                  // New Machine: WINGED STAR
+    AP_REWARD_AR_FILLER_2,                             // Check off an empty box of your choice!
+    AP_REWARD_AR_MUSIC_CHECKER,                        // Music: Checker
+    AP_REWARD_AR_FILLER_3,                             // Check off an empty box of your choice!
+    AP_REWARD_AR_MUSIC_SKY_SANDS,                      // Music: Sky Sands
+    AP_REWARD_AR_MUSIC_MACHINE,                        // Music: Machine
+    AP_REWARD_AR_MACHINE_TURBO_STAR,                   // New Machine: TURBO STAR
+    AP_REWARD_AR_FILLER_4,                             // Check off an empty box of your choice!
+    AP_REWARD_AR_MUSIC_CELESTIAL,                      // Music: Celestial
+    AP_REWARD_AR_FILLER_5,                             // Check off an empty box of your choice!
+    AP_REWARD_AR_SOUND_NEBULA_BELT,                    // Sound Test: NEBULA BELT
+
+    // Top Ride rewards (550-582, mode 1, indices 0-32)
+    AP_CHECKLIST_REWARD_TOPRIDE_BASE = 550,
+    AP_REWARD_TR_COLOR_GREEN = 550,                    // Green Kirby
+    AP_REWARD_TR_COLOR_PURPLE,                         // Purple Kirby
+    AP_REWARD_TR_RULE_DIAGONAL_CAMERA,                 // Extra Rule: Diagonal Camera Angle
+    AP_REWARD_TR_RULE_MYSTERY_ITEM_SET,                // Extra Rule: Mystery Item Set
+    AP_REWARD_TR_ITEM_LANTERN,                         // New Item: Lantern
+    AP_REWARD_TR_ITEM_WHO_PAINT,                       // New Item: Who? Paint
+    AP_REWARD_TR_FILLER_1,                             // Check off an empty box of your choice!
+    AP_REWARD_TR_ITEM_CHICKIE,                         // New Item: Chickie
+    AP_REWARD_TR_SOUND_GRASS,                          // Sound Test: GRASS
+    AP_REWARD_TR_MUSIC_GRASS,                          // Music: Grass
+    AP_REWARD_TR_SOUND_SAND,                           // Sound Test: SAND
+    AP_REWARD_TR_FILLER_2,                             // Check off an empty box of your choice!
+    AP_REWARD_TR_COLOR_BROWN,                          // Brown Kirby
+    AP_REWARD_TR_SOUND_SKY,                            // Sound Test: SKY
+    AP_REWARD_TR_SOUND_FIRE,                           // Sound Test: FIRE
+    AP_REWARD_TR_FILLER_3,                             // Check off an empty box of your choice!
+    AP_REWARD_TR_MUSIC_FIRE,                           // Music: Fire
+    AP_REWARD_TR_SOUND_WATER,                          // Sound Test: WATER
+    AP_REWARD_TR_RULE_DEVICE_QUANTITY,                 // Extra Rule: Device Quantity
+    AP_REWARD_TR_MUSIC_WATER,                          // Music: Water
+    AP_REWARD_TR_SOUND_LIGHT,                          // Sound Test: LIGHT
+    AP_REWARD_TR_FILLER_4,                             // Check off an empty box of your choice!
+    AP_REWARD_TR_MUSIC_METAL,                          // Music: Metal
+    AP_REWARD_TR_SOUND_METAL,                          // Sound Test: METAL
+    AP_REWARD_TR_COLOR_WHITE,                          // White Kirby
+    AP_REWARD_TR_FILLER_5,                             // Check off an empty box of your choice!
+    AP_REWARD_TR_MUSIC_SAND,                           // Music: Sand
+    AP_REWARD_TR_MUSIC_LIGHT,                          // Music: Light
+    AP_REWARD_TR_RULE_ATTACK_ITEM_SET,                 // Extra Rule: Attack Item Set
+    AP_REWARD_TR_SOUND_RESULTS_SCREEN,                 // Sound Test: Results Screen
+    AP_REWARD_TR_MUSIC_SKY,                            // Music: Sky
+    AP_REWARD_TR_RULE_SIDE_CAMERA,                     // Extra Rule: Side Camera Angle
+    AP_REWARD_TR_ENDING,                               // Ending
+
+    // City Trial rewards (600-643, mode 2, indices 0-43)
+    AP_CHECKLIST_REWARD_CITYTRIAL_BASE = 600,
+    AP_REWARD_CT_FILLER_1 = 600,                       // Check off an empty box of your choice!
+    AP_REWARD_CT_SOUND_ITEM_BOUNCE,                    // Sound Test: Item bounce
+    AP_REWARD_CT_BONUS_PAUSE_POWERUPS,                 // Bonus: Pause screen power-ups
+    AP_REWARD_CT_MUSIC_CITY,                           // Music: City
+    AP_REWARD_CT_SOUND_LEGENDARY_MACHINE,              // Sound Test: Legendary Air Ride Machine
+    AP_REWARD_CT_SOUND_DENSE_FOG,                      // Sound Test: dense fog today
+    AP_REWARD_CT_METAKNIGHT_FREERUN,                   // Meta Knight: Select in free run mode
+    AP_REWARD_CT_SOUND_CITY_TRIAL,                     // Sound Test: City Trial
+    AP_REWARD_CT_FILLER_2,                             // Check off an empty box of your choice!
+    AP_REWARD_CT_STADIUM_SINGLERACE_NEBULA,            // New Stadium: Single Race (Nebula Belt)
+    AP_REWARD_CT_SOUND_ROWDY_CHARGE_TANK,              // Sound Test: rowdy charge tank
+    AP_REWARD_CT_STADIUM_DRAG_RACE_4,                  // New Stadium: Drag Race 4
+    AP_REWARD_CT_SOUND_DRAG_RACE,                      // Sound Test: Drag Race
+    AP_REWARD_CT_DRAGOON_PART_A,                       // Dragoon Part A
+    AP_REWARD_CT_SOUND_TARGET_FLIGHT,                  // Sound Test: Target Flight
+    AP_REWARD_CT_DRAGOON_PART_C,                       // Dragoon Part C
+    AP_REWARD_CT_SOUND_AIR_GLIDER,                     // Sound Test: Air Glider
+    AP_REWARD_CT_STADIUM_DESTRUCTION_4,                // New Stadium: Destruction Derby 4
+    AP_REWARD_CT_FILLER_3,                             // Check off an empty box of your choice!
+    AP_REWARD_CT_HYDRA_PART_Y,                         // Hydra Part Y
+    AP_REWARD_CT_SOUND_WHATS_IN_THE_BOX,               // Sound Test: What's in the box?
+    AP_REWARD_CT_HYDRA_PART_Z,                         // Hydra Part Z
+    AP_REWARD_CT_DEDEDE_FREERUN,                       // King Dedede: Select in free run mode
+    AP_REWARD_CT_SOUND_DYNA_BLADE_INTRO,               // Sound Test: Dyna Blade Intro
+    AP_REWARD_CT_FILLER_4,                             // Check off an empty box of your choice!
+    AP_REWARD_CT_SOUND_HUGE_PILLAR,                    // Sound Test: Huge Pillar
+    AP_REWARD_CT_SOUND_TAC_CHALLENGE,                  // Sound Test: Tac Challenge
+    AP_REWARD_CT_SOUND_FLYING_METEOR,                  // Sound Test: Flying Meteor
+    AP_REWARD_CT_ENDING,                               // Ending
+    AP_REWARD_CT_DRAGOON_PART_B,                       // Dragoon Part B
+    AP_REWARD_CT_FILLER_5,                             // Check off an empty box of your choice!
+    AP_REWARD_CT_HYDRA_PART_X,                         // Hydra Part X
+    AP_REWARD_CT_COLOR_PURPLE,                         // Purple Kirby
+    AP_REWARD_CT_STADIUM_DESTRUCTION_3,                // New Stadium: Destruction Derby 3
+    AP_REWARD_CT_STADIUM_DESTRUCTION_5,                // New Stadium: Destruction Derby 5
+    AP_REWARD_CT_STADIUM_KIRBY_MELEE_2,                // New Stadium: Kirby Melee 2
+    AP_REWARD_CT_SOUND_KIRBY_MELEE,                    // Sound Test: Kirby Melee
+    AP_REWARD_CT_COLOR_GREEN,                          // Green Kirby
+    AP_REWARD_CT_COLOR_BROWN,                          // Brown Kirby
+    AP_REWARD_CT_DRAGOON_FREERUN,                      // Dragoon: Select in Free Run mode
+    AP_REWARD_CT_HYDRA_FREERUN,                        // Hydra: Select in Free Run mode
+    AP_REWARD_CT_SOUND_LIGHTHOUSE,                     // Sound Test: The Lighthouse Light Burns
+    AP_REWARD_CT_SOUND_STATION_FIRE,                   // Sound Test: Station Fire
+    AP_REWARD_CT_COLOR_WHITE,                          // White Kirby
 
     // Event unlock items (700-715, aligned to EventKind)
     AP_EVENT_UNLOCK_BASE = 700,
@@ -222,6 +351,36 @@ typedef enum APItemId
 
     // Individual item unlock items (790-819, aligned to ItemUnlockKind)
     AP_ITEM_UNLOCK_BASE = 790,
+    AP_ITEM_UNLOCK_ALLUP = 790,            // ITUNLOCK_ALLUP
+    AP_ITEM_UNLOCK_SPEEDMAX,               // ITUNLOCK_SPEEDMAX
+    AP_ITEM_UNLOCK_SPEEDMIN,               // ITUNLOCK_SPEEDMIN
+    AP_ITEM_UNLOCK_OFFENSEMAX,             // ITUNLOCK_OFFENSEMAX
+    AP_ITEM_UNLOCK_DEFENSEMAX,             // ITUNLOCK_DEFENSEMAX
+    AP_ITEM_UNLOCK_CHARGEMAX,              // ITUNLOCK_CHARGEMAX
+    AP_ITEM_UNLOCK_CHARGENONE,             // ITUNLOCK_CHARGENONE
+    AP_ITEM_UNLOCK_CANDY,                  // ITUNLOCK_CANDY
+    AP_ITEM_UNLOCK_FOODMAXIMTOMATO,        // ITUNLOCK_FOODMAXIMTOMATO
+    AP_ITEM_UNLOCK_FOODENERGYDRINK,        // ITUNLOCK_FOODENERGYDRINK
+    AP_ITEM_UNLOCK_FOODICECREAM,           // ITUNLOCK_FOODICECREAM
+    AP_ITEM_UNLOCK_FOODRICEBALL,           // ITUNLOCK_FOODRICEBALL
+    AP_ITEM_UNLOCK_FOODCHICKEN,            // ITUNLOCK_FOODCHICKEN
+    AP_ITEM_UNLOCK_FOODCURRY,              // ITUNLOCK_FOODCURRY
+    AP_ITEM_UNLOCK_FOODRAMEN,              // ITUNLOCK_FOODRAMEN
+    AP_ITEM_UNLOCK_FOODOMELET,             // ITUNLOCK_FOODOMELET
+    AP_ITEM_UNLOCK_FOODHAMBURGER,          // ITUNLOCK_FOODHAMBURGER
+    AP_ITEM_UNLOCK_FOODSUSHI,              // ITUNLOCK_FOODSUSHI
+    AP_ITEM_UNLOCK_FOODHOTDOG,             // ITUNLOCK_FOODHOTDOG
+    AP_ITEM_UNLOCK_FOODAPPLE,              // ITUNLOCK_FOODAPPLE
+    AP_ITEM_UNLOCK_FIREWORKS,              // ITUNLOCK_FIREWORKS
+    AP_ITEM_UNLOCK_PANICSPIN,              // ITUNLOCK_PANICSPIN
+    AP_ITEM_UNLOCK_TIMEBOMB,               // ITUNLOCK_TIMEBOMB
+    AP_ITEM_UNLOCK_GORDO,                  // ITUNLOCK_GORDO
+    AP_ITEM_UNLOCK_HYDRA1,                 // ITUNLOCK_HYDRA1
+    AP_ITEM_UNLOCK_HYDRA2,                 // ITUNLOCK_HYDRA2
+    AP_ITEM_UNLOCK_HYDRA3,                 // ITUNLOCK_HYDRA3
+    AP_ITEM_UNLOCK_DRAGOON1,               // ITUNLOCK_DRAGOON1
+    AP_ITEM_UNLOCK_DRAGOON2,               // ITUNLOCK_DRAGOON2
+    AP_ITEM_UNLOCK_DRAGOON3,               // ITUNLOCK_DRAGOON3
 
     // Machine unlock items (830-855, aligned to MachineKind)
     AP_MACHINE_UNLOCK_BASE = 830,
@@ -258,8 +417,17 @@ typedef enum APItemId
     AP_BOX_UNLOCK_GREEN,                   // BOXKIND_GREEN
     AP_BOX_UNLOCK_RED,                     // BOXKIND_RED
 
-    // Air Ride stage unlock items (870-878, one per course)
+    // Air Ride stage unlock items (870-878, aligned to AirRideCourse)
     AP_STAGE_UNLOCK_AIRRIDE_BASE = 870,
+    AP_STAGE_UNLOCK_FANTASY_MEADOWS = 870, // AIRRIDE_FANTASY_MEADOWS
+    AP_STAGE_UNLOCK_MAGMA_FLOWS,           // AIRRIDE_MAGMA_FLOWS
+    AP_STAGE_UNLOCK_SKY_SANDS,             // AIRRIDE_SKY_SANDS
+    AP_STAGE_UNLOCK_FROZEN_HILLSIDE,       // AIRRIDE_FROZEN_HILLSIDE
+    AP_STAGE_UNLOCK_BEANSTALK_PARK,        // AIRRIDE_BEANSTALK_PARK
+    AP_STAGE_UNLOCK_CELESTIAL_VALLEY,      // AIRRIDE_CELESTIAL_VALLEY
+    AP_STAGE_UNLOCK_MACHINE_PASSAGE,       // AIRRIDE_MACHINE_PASSAGE
+    AP_STAGE_UNLOCK_CHECKER_KNIGHTS,       // AIRRIDE_CHECKER_KNIGHTS
+    AP_STAGE_UNLOCK_NEBULA_BELT,           // AIRRIDE_NEBULA_BELT
 
     // Kirby color unlock items (880-887, aligned to KirbyColor)
     AP_COLOR_UNLOCK_BASE = 880,
@@ -272,11 +440,40 @@ typedef enum APItemId
     AP_COLOR_UNLOCK_BROWN,              // KIRBYCOLOR_BROWN
     AP_COLOR_UNLOCK_WHITE,              // KIRBYCOLOR_WHITE
 
-    // Top Ride stage unlock items (890-896, one per course)
+    // Top Ride stage unlock items (890-896, aligned to TopRideCourse)
     AP_STAGE_UNLOCK_TOPRIDE_BASE = 890,
+    AP_STAGE_UNLOCK_GRASS = 890,           // TOPRIDE_GRASS
+    AP_STAGE_UNLOCK_SAND,                  // TOPRIDE_SAND
+    AP_STAGE_UNLOCK_SKY,                   // TOPRIDE_SKY
+    AP_STAGE_UNLOCK_FIRE,                  // TOPRIDE_FIRE
+    AP_STAGE_UNLOCK_LIGHT,                 // TOPRIDE_LIGHT
+    AP_STAGE_UNLOCK_WATER,                 // TOPRIDE_WATER
+    AP_STAGE_UNLOCK_METAL,                 // TOPRIDE_METAL
 
-    // Top Ride item unlock items (900-922, aligned to TopRideItemKind)
+    // Top Ride item unlock items (900-921, aligned to TopRideItemKind)
     AP_TOPRIDE_ITEM_UNLOCK_BASE = 900,
+    AP_TOPRIDE_ITEM_UNLOCK_HAMMER = 900,   // TRITEM_HAMMER
+    AP_TOPRIDE_ITEM_UNLOCK_GROW,           // TRITEM_GROW
+    AP_TOPRIDE_ITEM_UNLOCK_SPEEDUP,        // TRITEM_SPEEDUP
+    AP_TOPRIDE_ITEM_UNLOCK_SPEEDDOWN,      // TRITEM_SPEEDDOWN
+    AP_TOPRIDE_ITEM_UNLOCK_BOOST_SAW,      // TRITEM_BOOST_SAW
+    AP_TOPRIDE_ITEM_UNLOCK_CHARGEBOOST,    // TRITEM_CHARGEBOOST
+    AP_TOPRIDE_ITEM_UNLOCK_INVINCIBLE,     // TRITEM_INVINCIBLE
+    AP_TOPRIDE_ITEM_UNLOCK_BUZZSAW,        // TRITEM_BUZZSAW
+    AP_TOPRIDE_ITEM_UNLOCK_SPEAR,          // TRITEM_SPEAR
+    AP_TOPRIDE_ITEM_UNLOCK_FREEZE,         // TRITEM_FREEZE
+    AP_TOPRIDE_ITEM_UNLOCK_MISSILE,        // TRITEM_MISSILE
+    AP_TOPRIDE_ITEM_UNLOCK_FIRE,           // TRITEM_FIRE
+    AP_TOPRIDE_ITEM_UNLOCK_NEEDLE,         // TRITEM_NEEDLE
+    AP_TOPRIDE_ITEM_UNLOCK_BOMB,           // TRITEM_BOMB
+    AP_TOPRIDE_ITEM_UNLOCK_LANDMINE,       // TRITEM_LANDMINE
+    AP_TOPRIDE_ITEM_UNLOCK_SENSORBOMB,     // TRITEM_SENSORBOMB
+    AP_TOPRIDE_ITEM_UNLOCK_MIKE,           // TRITEM_MIKE
+    AP_TOPRIDE_ITEM_UNLOCK_CRACKER,        // TRITEM_CRACKER
+    AP_TOPRIDE_ITEM_UNLOCK_METAKNIGHT,     // TRITEM_METAKNIGHT
+    AP_TOPRIDE_ITEM_UNLOCK_SMOKESCREEN,    // TRITEM_SMOKESCREEN
+    AP_TOPRIDE_ITEM_UNLOCK_DIZZY,          // TRITEM_DIZZY
+    AP_TOPRIDE_ITEM_UNLOCK_BACKWARD,       // TRITEM_BACKWARD
 
 } APItemId;
 
