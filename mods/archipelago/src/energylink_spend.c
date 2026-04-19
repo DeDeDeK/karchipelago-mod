@@ -108,13 +108,14 @@ static int TryPurchase(SpendEntry *entry)
         return 0;
     }
 
-    // Items that require being in a 3D scene may fail
-    int result = APItems_HandleItem(entry->item_id);
-    if (!result)
+    // Push onto the unprocessed queue so APItems_PerFrame applies it when
+    // the scene/intro gate allows — same path as items received from AP.
+    if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
-        TextBox_Enqueue("Can't use that item right now!");
+        TextBox_Enqueue("Queue full — try again later");
         return 0;
     }
+    ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
 
     // Deduct from local balance and queue withdrawal through accumulator
     ap_data->energy_balance -= entry->cost;

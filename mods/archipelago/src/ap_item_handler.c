@@ -171,6 +171,17 @@ int APItems_HandleItem(uint ap_item_id)
         return GateTopRideItems_UnlockItem(kind);
     }
 
+    // Top Ride item give items (AP_TOPRIDE_ITEM_GIVE_BASE + TopRideItemKind).
+    // Handled above the MNRKIND_3D gate below since Top Ride uses MNRKIND_19.
+    // GateTopRideItems_GiveItem returns 0 when not in Top Ride, which keeps
+    // the item in the unprocessed queue until the player enters a TR match.
+    if (ap_item_id >= AP_TOPRIDE_ITEM_GIVE_BASE &&
+        ap_item_id < AP_TOPRIDE_ITEM_GIVE_BASE + TRITEM_NUM)
+    {
+        TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_GIVE_BASE;
+        return GateTopRideItems_GiveItem(kind);
+    }
+
     // Stadium unlock items (AP_STADIUM_UNLOCK_BASE + StadiumKind)
     if (ap_item_id >= AP_STADIUM_UNLOCK_BASE && ap_item_id < AP_STADIUM_UNLOCK_BASE + STKIND_NUM)
     {
@@ -192,6 +203,14 @@ int APItems_HandleItem(uint ap_item_id)
     if (Scene_GetCurrentMinor() != MNRKIND_3D)
         return 0;
     if (Gm_GetIntroState() != GMINTRO_END)
+        return 0;
+    // CT Free Run and stadiums don't load item data tables. Any handler
+    // below that touches the item spawn pipeline would crash
+    // Item_GetItDataPtr; the remaining non-spawn handlers (HP damage,
+    // projectile/enemy traps) aren't interesting there either. Queue for
+    // a real game mode.
+    if (major == MJRKIND_CITY &&
+        (Gm_GetCityMode() == CITYMODE_FREERUN || Gm_IsStadiumMode()))
         return 0;
 
     // Permanent +1 patches (AP_PERM_PATCH_BASE + PatchKind)
@@ -221,14 +240,22 @@ int APItems_HandleItem(uint ap_item_id)
     }
 
     // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
-    // City Trial only — item data tables aren't loaded in Air Ride / Top Ride.
+    // City Trial spawns a real item so the pickup visual plays. Outside City
+    // Trial the item data tables aren't loaded, so SpawnItem would crash —
+    // but ITKIND_COPY* items can still be applied by handing the corresponding
+    // copy ability directly to every human Kirby rider (Air Ride path).
     if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
-        if (!Gm_IsInCity())
-            return 0;
         ItemKind it_kind = ap_item_id - AP_ITKIND_BASE;
-        SpawnItemHumans(it_kind);
-        return 1;
+        if (Gm_IsInCity())
+        {
+            SpawnItemHumans(it_kind);
+            return 1;
+        }
+        CopyKind copy_kind = Ability_ItKindToCopyKind(it_kind);
+        if (copy_kind != COPYKIND_NONE)
+            return Ability_GiveItem(copy_kind);
+        return 0;
     }
 
     // Meteor trap — spawn a meteor directly above each human player
@@ -246,6 +273,16 @@ int APItems_HandleItem(uint ap_item_id)
     // Sensor bomb trap — spawn a Sensor Bomb projectile from each human
     if (ap_item_id == AP_ITEM_SENSORBOMB_TRAP)
         return SpawnProjectile_SensorBombTrap();
+
+    // Drop-patches trap — eject each human rider's stats as physical patches.
+    // City Trial only (Free Run is already blocked by the major+city_mode
+    // gate above).
+    if (ap_item_id == AP_ITEM_DROP_PATCHES_TRAP)
+    {
+        if (!Gm_IsInCity())
+            return 0;
+        return Patch_DropTrap();
+    }
 
     // Legendary machine assembly — give assembled Dragoon/Hydra via cinematic
     if (ap_item_id == AP_ITEM_GIVE_DRAGOON)

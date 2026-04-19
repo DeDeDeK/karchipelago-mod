@@ -11,6 +11,7 @@
 #include "textbox.h"
 #include "traplink.h"
 #include "ap_item_handler.h"
+#include "gate_topride_items.h"
 
 // Send a traplink if enabled.
 void TrapLink_Send(void)
@@ -45,6 +46,13 @@ static uint trap_items[] = {
     AP_EVENT_FAKEPOWERUPS,
     AP_EVENT_RUNAMOK,
     AP_ITEM_1_HP_TRAP,
+    AP_ITKIND_ACCELFAKE,
+    AP_ITKIND_TOPSPEEDFAKE,
+    AP_ITKIND_OFFENSEFAKE,
+    AP_ITKIND_DEFENSEFAKE,
+    AP_ITKIND_TURNFAKE,
+    AP_ITKIND_GLIDEFAKE,
+    AP_ITKIND_CHARGEFAKE,
     AP_ITKIND_WEIGHTFAKE,
 };
 #define TRAP_ITEM_COUNT (sizeof(trap_items) / sizeof(trap_items[0]))
@@ -119,38 +127,13 @@ static const TopRideItemKind tr_trap_items[] = {
 };
 #define TR_TRAP_ITEM_COUNT (sizeof(tr_trap_items) / sizeof(tr_trap_items[0]))
 
-// Top Ride receive: spawn a bad item on every human Kirby's head so they
-// collide with it immediately. Uses TopRideItem_SpawnAtPosition (0x8034bf50),
-// the same entry point that per-item widget handlers call when placing items
-// on the track. Arg pattern (flag1=0, flag2=1, orientation=zero vec) is copied
-// from widget handler 0 (0x802b0b88) which is known to work.
+// Top Ride receive: pick a random bad item and drop it on every human Kirby
+// via the shared spawner so they collide with it immediately.
 static int ApplyTopRideTrap(void)
 {
-    TopRideKirbyMgr *kirby_mgr = *stc_topride_kirbymgr;
-    TopRideItemMgr *item_mgr = *stc_topride_itemmgr;
-    if (!kirby_mgr || !item_mgr)
-        return 0;
-
-    Vec3 orient = { 0.0f, 0.0f, 0.0f };
-    int applied = 0;
-    for (int i = 0; i < 4; i++)
-    {
-        TopRideKirby *kirby = kirby_mgr->kirbys[i];
-        if (!kirby || kirby->cpu_level != 0)
-            continue;
-
-        TopRideItemKind kind = tr_trap_items[HSD_Randi(TR_TRAP_ITEM_COUNT)];
-        Vec3 spawn_pos = {
-            kirby->position.X,
-            kirby->position.Y,
-            kirby->position.Z,
-        };
-        OSReport("[TrapLink] spawning TR item %d at ply %d (%f, %f, %f)\n",
-                 kind, i, spawn_pos.X, spawn_pos.Y, spawn_pos.Z);
-        TopRideItem_SpawnAtPosition(item_mgr, kind, &spawn_pos, &orient, 0, 1);
-        applied = 1;
-    }
-    return applied;
+    TopRideItemKind kind = tr_trap_items[HSD_Randi(TR_TRAP_ITEM_COUNT)];
+    OSReport("[TrapLink] applying TR trap item %d\n", kind);
+    return GateTopRideItems_GiveItem(kind);
 }
 
 // Read from the traplink_receive location and dispatch a mode-appropriate trap.
@@ -169,7 +152,22 @@ void TrapLink_PerFrame(GOBJ *g)
     switch (major)
     {
         case MJRKIND_CITY:
-            handled = ApplyCityTrialTrap();
+            // Free Run and stadiums don't load item data; most CT traps
+            // would crash inside SpawnItem / enemy / fake-patch spawn.
+            // Drop Free Run; fall back to the AR sleep trap for stadiums
+            // since stadiums still have rider GOBJs to apply it to.
+            if (Gm_GetCityMode() == CITYMODE_FREERUN)
+            {
+                OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded).\n");
+                handled = 1;
+            }
+            else if (Gm_IsStadiumMode())
+            {
+                OSReport("[TrapLink] Stadium — falling back to sleep ability trap.\n");
+                handled = ApplyAirRideTrap();
+            }
+            else
+                handled = ApplyCityTrialTrap();
             break;
         case MJRKIND_AIR:
             handled = ApplyAirRideTrap();

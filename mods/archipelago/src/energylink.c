@@ -22,6 +22,10 @@ static int needs_baseline[5];
 // Shared accumulator — contributions from all players pool into one value
 static float energy_send_accumulator;
 
+// Highest 10-unit bucket we've already logged for the current accumulator run.
+// Lets us print progress when the client isn't around to drain the mailbox.
+static int logged_threshold_tens;
+
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units
 #define CHARGE_ENERGY_SCALE 5.0f
 
@@ -33,6 +37,15 @@ static void FlushEnergy(void)
         ap_data->energy_send = energy_send_accumulator;
         OSReport("[EnergyLink] flushed %f energy to energy_send\n", energy_send_accumulator);
         energy_send_accumulator = 0;
+        logged_threshold_tens = 0;
+        return;
+    }
+
+    int current_tens = (int)(energy_send_accumulator / 10.0f);
+    if (current_tens > logged_threshold_tens)
+    {
+        logged_threshold_tens = current_tens;
+        OSReport("[EnergyLink] accumulator at %.1f (waiting for client)\n", energy_send_accumulator);
     }
 }
 
@@ -168,6 +181,7 @@ static void ResetTracking(void)
             prev_stats[i][j] = 0.0f;
     }
     energy_send_accumulator = 0;
+    logged_threshold_tens = 0;
 }
 
 void EnergyLink_On3DLoadEnd()

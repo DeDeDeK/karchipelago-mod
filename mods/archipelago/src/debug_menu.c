@@ -189,6 +189,7 @@ GIVE_FN(GiveHydra,          AP_ITEM_GIVE_HYDRA)
 GIVE_FN(GiveBombTrap,       AP_ITEM_BOMB_TRAP)
 GIVE_FN(GiveGordoTrap,      AP_ITEM_GORDO_TRAP)
 GIVE_FN(GiveSensorBombTrap, AP_ITEM_SENSORBOMB_TRAP)
+GIVE_FN(GiveDropPatchesTrap,AP_ITEM_DROP_PATCHES_TRAP)
 
 // Upgrades
 GIVE_FN(GivePatchCap,    AP_ITEM_PATCH_CAP_INCREASE)
@@ -196,6 +197,30 @@ GIVE_FN(GiveSpawnRateUp, AP_ITEM_SPAWN_RATE_UP)
 GIVE_FN(GiveFillerAR,    AP_ITEM_CHECKBOX_FILLER_AIRRIDE)
 GIVE_FN(GiveFillerTR,    AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
 GIVE_FN(GiveFillerCT,    AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
+
+// Top Ride items (spawn at each human Kirby's position for pickup)
+GIVE_FN(GiveTRHammer,      AP_TOPRIDE_ITEM_GIVE_HAMMER)
+GIVE_FN(GiveTRGrow,        AP_TOPRIDE_ITEM_GIVE_GROW)
+GIVE_FN(GiveTRSpeedUp,     AP_TOPRIDE_ITEM_GIVE_SPEEDUP)
+GIVE_FN(GiveTRSpeedDown,   AP_TOPRIDE_ITEM_GIVE_SPEEDDOWN)
+GIVE_FN(GiveTRBoostSaw,    AP_TOPRIDE_ITEM_GIVE_BOOST_SAW)
+GIVE_FN(GiveTRChargeBoost, AP_TOPRIDE_ITEM_GIVE_CHARGEBOOST)
+GIVE_FN(GiveTRInvincible,  AP_TOPRIDE_ITEM_GIVE_INVINCIBLE)
+GIVE_FN(GiveTRBuzzSaw,     AP_TOPRIDE_ITEM_GIVE_BUZZSAW)
+GIVE_FN(GiveTRSpear,       AP_TOPRIDE_ITEM_GIVE_SPEAR)
+GIVE_FN(GiveTRFreeze,      AP_TOPRIDE_ITEM_GIVE_FREEZE)
+GIVE_FN(GiveTRMissile,     AP_TOPRIDE_ITEM_GIVE_MISSILE)
+GIVE_FN(GiveTRFire,        AP_TOPRIDE_ITEM_GIVE_FIRE)
+GIVE_FN(GiveTRNeedle,      AP_TOPRIDE_ITEM_GIVE_NEEDLE)
+GIVE_FN(GiveTRBomb,        AP_TOPRIDE_ITEM_GIVE_BOMB)
+GIVE_FN(GiveTRLandmine,    AP_TOPRIDE_ITEM_GIVE_LANDMINE)
+GIVE_FN(GiveTRSensorBomb,  AP_TOPRIDE_ITEM_GIVE_SENSORBOMB)
+GIVE_FN(GiveTRMike,        AP_TOPRIDE_ITEM_GIVE_MIKE)
+GIVE_FN(GiveTRCracker,     AP_TOPRIDE_ITEM_GIVE_CRACKER)
+GIVE_FN(GiveTRMetaKnight,  AP_TOPRIDE_ITEM_GIVE_METAKNIGHT)
+GIVE_FN(GiveTRSmokeScreen, AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN)
+GIVE_FN(GiveTRDizzy,       AP_TOPRIDE_ITEM_GIVE_DIZZY)
+GIVE_FN(GiveTRBackward,    AP_TOPRIDE_ITEM_GIVE_BACKWARD)
 
 // Energy Link debug
 static int GiveEnergy1000(void)
@@ -474,7 +499,7 @@ static MenuDesc tr_items_menu = {
         G("Land Mine",      tr_item_state, TRITEM_LANDMINE,     SyncTRItems),
         G("Sensor Bomb",    tr_item_state, TRITEM_SENSORBOMB,   SyncTRItems),
         G("Cracker",        tr_item_state, TRITEM_CRACKER,      SyncTRItems),
-        G("Meta Knight",    tr_item_state, TRITEM_METAKNIGHT,   SyncTRItems),
+        G("Meta",           tr_item_state, TRITEM_METAKNIGHT,   SyncTRItems),
         G("Smoke Screen",   tr_item_state, TRITEM_SMOKESCREEN,  SyncTRItems),
         G("Dizzy",          tr_item_state, TRITEM_DIZZY,        SyncTRItems),
         G("Backward",       tr_item_state, TRITEM_BACKWARD,     SyncTRItems),
@@ -622,7 +647,7 @@ static MenuDesc give_legendary_menu = {
 };
 
 static MenuDesc give_traps_menu = {
-    .option_num = 7,
+    .option_num = 8,
     .options = {
         A("Meteor Trap",      "Spawn meteor trap",           GiveMeteorTrap),
         A("1 HP Trap",        "Set HP to 1",                 Give1HPTrap),
@@ -630,6 +655,7 @@ static MenuDesc give_traps_menu = {
         A("Bomb Trap",        "Spawn bomb projectile",       GiveBombTrap),
         A("Gordo Trap",       "Spawn gordo projectile",      GiveGordoTrap),
         A("Sensor Bomb Trap", "Spawn sensor bomb",           GiveSensorBombTrap),
+        A("Drop Patches Trap","Eject rider patches (CT)",    GiveDropPatchesTrap),
         A("Custom Event",     "Trigger custom event",        GiveCustomEvt),
     },
 };
@@ -646,8 +672,36 @@ static MenuDesc give_upgrades_menu = {
     },
 };
 
+static MenuDesc give_topride_items_menu = {
+    .option_num = 22,
+    .options = {
+        A("Hammer",         "Give TR Hammer",           GiveTRHammer),
+        A("Grow",           "Give TR Grow",             GiveTRGrow),
+        A("Speed Up",       "Give TR Speed Up",         GiveTRSpeedUp),
+        A("Speed Down",     "Give TR Speed Down",       GiveTRSpeedDown),
+        A("Boost Saw",      "Give TR Boost Saw",        GiveTRBoostSaw),
+        A("Charge Boost",   "Give TR Charge Boost",     GiveTRChargeBoost),
+        A("Invincible",     "Give TR Invincible Candy", GiveTRInvincible),
+        A("Buzz Saw",       "Give TR Buzz Saw",         GiveTRBuzzSaw),
+        A("Spear",          "Give TR Spear",            GiveTRSpear),
+        A("Freeze",         "Give TR Freeze",           GiveTRFreeze),
+        A("Missile",        "Give TR Missile",          GiveTRMissile),
+        A("Fire",           "Give TR Fire",             GiveTRFire),
+        A("Needle",         "Give TR Needle",           GiveTRNeedle),
+        A("Bomb",           "Give TR Bomb",             GiveTRBomb),
+        A("Landmine",       "Give TR Landmine",         GiveTRLandmine),
+        A("Sensor Bomb",    "Give TR Sensor Bomb",      GiveTRSensorBomb),
+        A("Mike",           "Give TR Mike",             GiveTRMike),
+        A("Cracker",        "Give TR Cracker",          GiveTRCracker),
+        A("Meta",           "Give TR Meta item",        GiveTRMetaKnight),
+        A("Smoke Screen",   "Give TR Smoke Screen",     GiveTRSmokeScreen),
+        A("Dizzy",          "Give TR Dizzy",            GiveTRDizzy),
+        A("Backward",       "Give TR Backward",         GiveTRBackward),
+    },
+};
+
 static MenuDesc give_items_menu = {
-    .option_num = 8,
+    .option_num = 9,
     .options = {
         S("Stat Patches",      "Temporary stat patches",          give_stat_patches_menu),
         S("Permanent Patches", "Permanent stat boosts",           give_perm_patches_menu),
@@ -655,6 +709,7 @@ static MenuDesc give_items_menu = {
         S("Food",              "Healing items",                   give_food_menu),
         S("Special Items",     "Powerful one-use items",          give_special_menu),
         S("Legendary Pieces",  "Dragoon and Hydra parts",        give_legendary_menu),
+        S("Top Ride Items",    "Spawn a Top Ride item for pickup", give_topride_items_menu),
         S("Traps & Events",    "Traps and event triggers",       give_traps_menu),
         S("Upgrades",          "Progression upgrades and fillers", give_upgrades_menu),
     },

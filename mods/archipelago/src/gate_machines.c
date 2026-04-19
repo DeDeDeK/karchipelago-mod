@@ -1,6 +1,7 @@
 #include "game.h"
 #include "menu.h"
 #include "os.h"
+#include "scene.h"
 #include "code_patch/code_patch.h"
 
 #include "main.h"
@@ -487,10 +488,12 @@ int GateMachines_UnlockMachine(MachineKind kind)
 
 // Give a player the assembled legendary machine via the cinematic.
 // machine_index: 0 = Dragoon, 1 = Hydra.
-// Returns 1 if started, 0 if not in City Trial or no machine to swap from.
+// Returns 1 if started, 0 if in an unsupported mode or no machine to swap from.
+// Top Ride has no MachineData / Rider pipeline, so the assembly cinematic cannot run there.
 int GateMachines_GiveLegendaryMachine(int machine_index)
 {
-    if (!Gm_IsInCity())
+    MajorKind major = Scene_GetCurrentMajor();
+    if (major != MJRKIND_CITY && major != MJRKIND_AIR)
         return 0;
 
     int given = 0;

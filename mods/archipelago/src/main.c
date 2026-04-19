@@ -47,12 +47,25 @@ CustomEventsAPI *custom_events;
 // Menu toggle callbacks
 static const char *stc_off_on[] = {"Off", "On"};
 
-static void OnToggleDeathLink(int val)      { OSReport("[Main] DeathLink toggled %s\n", stc_off_on[val]); }
-static void OnToggleEnergyLink(int val)     { OSReport("[Main] EnergyLink toggled %s\n", stc_off_on[val]); }
+// Publishes the current death/energy/trap link menu state into APData so the
+// Python client can forward enable/disable to the AP server when the player
+// toggles mid-session. Safe to call any time after OnBoot allocates ap_data.
+static void SyncLinkMenuStateToAPData(void)
+{
+    if (!ap_data)
+        return;
+    ap_data->deathlink_menu_enabled = ap_menu_settings.deathlink_enabled;
+    ap_data->energylink_menu_enabled = ap_menu_settings.energylink_enabled;
+    ap_data->traplink_menu_enabled = ap_menu_settings.traplink_enabled;
+}
+
+static void OnToggleDeathLink(int val)      { OSReport("[Main] DeathLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
+static void OnToggleEnergyLink(int val)     { OSReport("[Main] EnergyLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
 static void OnToggleAutoCharge(int val)     { OSReport("[Main] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
-static void OnToggleTrapLink(int val)       { OSReport("[Main] TrapLink toggled %s\n", stc_off_on[val]); }
+static void OnToggleTrapLink(int val)       { OSReport("[Main] TrapLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
 static void OnToggleTextBox(int val)        { OSReport("[Main] AP Message Textbox toggled %s\n", stc_off_on[val]); }
 static void OnToggleCTPermanent(int val)    { OSReport("[Main] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
+static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleARPermanent(int val)    { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
 
 // Submenu: controls whether accumulated permanent stat patches are re-applied
@@ -61,7 +74,7 @@ static void OnToggleARPermanent(int val)    { OSReport("[Main] AR Permanent Patc
 // application. Default: both On, matching the historical behavior before the
 // toggles existed.
 static MenuDesc permanent_patches_menu = {
-    .option_num = 2,
+    .option_num = 3,
     .options = {
         &(OptionDesc){
             .name = "City Trial",
@@ -74,6 +87,18 @@ static MenuDesc permanent_patches_menu = {
                 "On",
             },
             .on_change = OnToggleCTPermanent,
+        },
+        &(OptionDesc){
+            .name = "CT Stadium",
+            .description = "Apply accumulated permanent patches when entering a City Trial stadium",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.ct_stadium_permanent_patches_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleCTStadiumPermanent,
         },
         &(OptionDesc){
             .name = "Air Ride",
@@ -227,6 +252,7 @@ void OnBoot()
     // Hoshi's Mod_CopyFromSave overwrites these if it finds a saved hash.
     // Defaults match pre-toggle behavior so existing installs keep working.
     ap_menu_settings.ct_permanent_patches_enabled = 1;
+    ap_menu_settings.ct_stadium_permanent_patches_enabled = 1;
     ap_menu_settings.ar_permanent_patches_enabled = 1;
 
     // Persistent allocation of ap_data
@@ -347,6 +373,10 @@ void OnSaveLoaded()
     // goal evaluation.
     CheckDetection_OnSaveLoaded();
 
+    // Publish restored link-toggle state. Hoshi's Mod_CopyFromSave has run
+    // by now, so ap_menu_settings reflects the player's persisted choices.
+    SyncLinkMenuStateToAPData();
+
     // Signal to the AP client that the mod is fully initialized
     ap_data->game_ready = 1;
     OSReport("[Main] game_ready set — waiting for AP client connection\n");
@@ -373,6 +403,7 @@ static void APOptions_TransferToSave()
     ap_menu_settings.deathlink_enabled = ap_save->options.death_link_enabled;
     ap_menu_settings.energylink_enabled = ap_save->options.energy_link_enabled;
     ap_menu_settings.traplink_enabled = ap_save->options.trap_link_enabled;
+    SyncLinkMenuStateToAPData();
     OSReport("[Main] Menu toggles set — DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
              ap_save->options.death_link_enabled, ap_save->options.energy_link_enabled, ap_save->options.trap_link_enabled);
     OSReport("[Main] Goals — AirRide: %d, TopRide: %d, CityTrial: %d\n",
@@ -424,10 +455,10 @@ void On3DLoadStart()
 void On3DLoadEnd()
 {
     char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
-    OSReport("[Main] Starting %s: Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d\n",
+    OSReport("[Main] Starting %s: Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
              mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
              Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
-             Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled());
+             Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
 
     for (int i = 0; i < 5; i++)
     {
@@ -451,17 +482,29 @@ void On3DLoadEnd()
     ItemSpawnFilter_On3DLoadEnd();
 
     // Round-start permanent patch re-application, per-mode menu toggle.
-    // City Trial stadium also counts as "in city" for Gm_IsInCity.
+    // City Trial stadium also counts as "in city" for Gm_IsInCity, so split
+    // it out via Gm_IsStadiumMode to honor the separate stadium toggle.
+    // Free Run never loads item data tables, so inflated stats from perm
+    // patches would crash Item_GetItDataPtr on damage-driven patch ejection.
+    int apply_patches;
     if (Gm_IsInCity())
     {
-        if (ap_menu_settings.ct_permanent_patches_enabled)
-            PermanentPatch_On3DLoadEnd();
+        if (Gm_GetCityMode() == CITYMODE_FREERUN)
+        {
+            apply_patches = 0;
+            OSReport("[Main] Skipping permanent patches in Free Run (item data not loaded).\n");
+        }
+        else if (Gm_IsStadiumMode())
+            apply_patches = ap_menu_settings.ct_stadium_permanent_patches_enabled;
+        else
+            apply_patches = ap_menu_settings.ct_permanent_patches_enabled;
     }
     else
     {
-        if (ap_menu_settings.ar_permanent_patches_enabled)
-            PermanentPatch_On3DLoadEnd();
+        apply_patches = ap_menu_settings.ar_permanent_patches_enabled;
     }
+    if (apply_patches)
+        PermanentPatch_On3DLoadEnd();
 
     if (ap_menu_settings.deathlink_enabled)
         DeathLink_On3DLoadEnd();

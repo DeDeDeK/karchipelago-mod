@@ -11,4 +11,6 @@ int PermanentPatch_GiveItem(PatchKind kind);
 int PermanentPatch_GiveAllUp();
 void PermanentPatch_On3DLoadEnd();
 
+int Patch_DropTrap();
+
 #endif

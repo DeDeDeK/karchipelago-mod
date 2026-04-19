@@ -38,6 +38,7 @@ typedef enum APItemId
     AP_ITEM_GORDO_TRAP,
     AP_ITEM_SENSORBOMB_TRAP,
     AP_ITEM_SPAWN_RATE_UP,
+    AP_ITEM_DROP_PATCHES_TRAP,
 
     // Permanent +1 patch items (100-199, aligned to PatchKind)
     AP_PERM_PATCH_BASE = 100,
@@ -475,6 +476,33 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_DIZZY,          // TRITEM_DIZZY
     AP_TOPRIDE_ITEM_UNLOCK_BACKWARD,       // TRITEM_BACKWARD
 
+    // Top Ride item give items (950-971, aligned to TopRideItemKind).
+    // Spawns the matching TR item at each human Kirby's position so it's
+    // collected on the next frame. Only effective in a Top Ride scene.
+    AP_TOPRIDE_ITEM_GIVE_BASE = 950,
+    AP_TOPRIDE_ITEM_GIVE_HAMMER = 950,     // TRITEM_HAMMER
+    AP_TOPRIDE_ITEM_GIVE_GROW,             // TRITEM_GROW
+    AP_TOPRIDE_ITEM_GIVE_SPEEDUP,          // TRITEM_SPEEDUP
+    AP_TOPRIDE_ITEM_GIVE_SPEEDDOWN,        // TRITEM_SPEEDDOWN
+    AP_TOPRIDE_ITEM_GIVE_BOOST_SAW,        // TRITEM_BOOST_SAW
+    AP_TOPRIDE_ITEM_GIVE_CHARGEBOOST,      // TRITEM_CHARGEBOOST
+    AP_TOPRIDE_ITEM_GIVE_INVINCIBLE,       // TRITEM_INVINCIBLE
+    AP_TOPRIDE_ITEM_GIVE_BUZZSAW,          // TRITEM_BUZZSAW
+    AP_TOPRIDE_ITEM_GIVE_SPEAR,            // TRITEM_SPEAR
+    AP_TOPRIDE_ITEM_GIVE_FREEZE,           // TRITEM_FREEZE
+    AP_TOPRIDE_ITEM_GIVE_MISSILE,          // TRITEM_MISSILE
+    AP_TOPRIDE_ITEM_GIVE_FIRE,             // TRITEM_FIRE
+    AP_TOPRIDE_ITEM_GIVE_NEEDLE,           // TRITEM_NEEDLE
+    AP_TOPRIDE_ITEM_GIVE_BOMB,             // TRITEM_BOMB
+    AP_TOPRIDE_ITEM_GIVE_LANDMINE,         // TRITEM_LANDMINE
+    AP_TOPRIDE_ITEM_GIVE_SENSORBOMB,       // TRITEM_SENSORBOMB
+    AP_TOPRIDE_ITEM_GIVE_MIKE,             // TRITEM_MIKE
+    AP_TOPRIDE_ITEM_GIVE_CRACKER,          // TRITEM_CRACKER
+    AP_TOPRIDE_ITEM_GIVE_METAKNIGHT,       // TRITEM_METAKNIGHT
+    AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN,      // TRITEM_SMOKESCREEN
+    AP_TOPRIDE_ITEM_GIVE_DIZZY,            // TRITEM_DIZZY
+    AP_TOPRIDE_ITEM_GIVE_BACKWARD,         // TRITEM_BACKWARD
+
 } APItemId;
 
 // AP Slot Options
@@ -592,6 +620,15 @@ typedef struct APData
     // Goal completion: mod sets to 1 when the player satisfies the active
     // goal. Sticky and persisted to save. Client reads and forwards victory.
     u8 goal_complete;
+
+    // Live mirrors of the Settings menu toggles. Written by the game on boot,
+    // on first-connect option transfer, and on every menu change. Client polls
+    // to forward deathlink/traplink/energylink enable/disable to the AP server
+    // whenever the player changes them mid-session. Game-owned: client reads
+    // only, never writes.
+    u32 deathlink_menu_enabled;
+    u32 energylink_menu_enabled;
+    u32 traplink_menu_enabled;
 } APData;
 
 // In-game menu toggle state. Bound to the Settings menu via OptionDesc.
@@ -605,6 +642,7 @@ typedef struct APMenuSettings
     int traplink_enabled;
     int textbox_enabled;
     int ct_permanent_patches_enabled;
+    int ct_stadium_permanent_patches_enabled;
     int ar_permanent_patches_enabled;
 } APMenuSettings;
 

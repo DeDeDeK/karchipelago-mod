@@ -62,6 +62,7 @@ static void RecordCheck(u8 mode, u8 clear_kind)
     OSReport("[Check] mode=%d clear_kind=0x%02x recorded\n", mode, clear_kind);
 
     CheckDetection_EvaluateGoal();
+    Hoshi_WriteSave();
 }
 
 // Replacement for ClearChecker_SetNewUnlock at 0x8004A054.

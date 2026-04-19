@@ -54,14 +54,24 @@ CODEPATCH_HOOKCREATE(0x801e6540,
     "addi 1, 1, 16\n\t",
     0)
 
-// Kill a player via HP death (City Trial) or fall death (Air Ride / Top Ride).
+// Kill a player via HP death (City Trial + Destruction Derby + VS King
+// Dedede) or fall death (Air Ride / Top Ride / other stadiums). The HP-death
+// stadiums run outside Gm_IsInCity but use CT-style HP-based death; fall
+// death there either no-ops or misbehaves since there's no out-of-bounds
+// spline to respawn to.
 static void KillPlayer(RiderData *rd, MachineData *md)
 {
     OSReport("[DeathLink] Deathlink received! Killing player %d\n", rd->ply);
 
-    if (Gm_IsInCity())
+    StadiumKind stadium = Gm_GetCurrentStadiumKind();
+    int hp_death = Gm_IsInCity()
+                || Gm_IsDestructionDerby()
+                || stadium == STKIND_VSKINGDEDEDE
+                || stadium == STKIND_MELEE1
+                || stadium == STKIND_MELEE2;
+    if (hp_death)
     {
-        // City Trial: zero HP to trigger normal death flow
+        // Zero HP to trigger normal death flow
         DmgLog dl = md->dmg_log;
         dl.attacker_ply = 0;
         Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);

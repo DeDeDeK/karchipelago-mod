@@ -15,6 +15,12 @@
 // Position is offset forward by `distance` so the projectile visually spawns
 // in front of the machine rather than clipping through it. The projectile's
 // initial velocity inherits md->velocity so it carries the machine's motion.
+//
+// Bomb/sensor-bomb/gordo kinds come out of Projectile_Create in state 0
+// (HELD) — the post-init callback puts them in the rider's hand and the
+// detonation logic never runs until a separate throw transition. We don't
+// have a rider to hold them, so we immediately advance to state 1 (THROWN)
+// exactly like the vanilla throw path does.
 static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float distance)
 {
     GOBJ *mg = Ply_GetMachineGObj(ply_idx);
@@ -58,7 +64,26 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
     desc.type_flag = 1;
     desc.charge = 1.0f;           // vanilla uses md->projectile_charge_scale
 
-    Projectile_Create(&desc);
+    void *handle = Projectile_Create(&desc);
+    if (!handle)
+        return 0;
+
+    // Projectile_Create stored desc.velocity at proj->spawn_velocity (the
+    // read-only snapshot slot) but per-frame physics reads proj->velocity —
+    // the vanilla throw function writes those explicitly before the state
+    // transition.
+    ProjectileData *proj = Projectile_GetData(handle);
+    if (proj)
+    {
+        proj->velocity = desc.velocity;
+
+        // State index 1 = "thrown / armed-flying" for BOMB, SENSORBOMB, and
+        // GORDO (see their respective state enums — each defines index 1
+        // as the physics-driven flying state, though with different
+        // state_ids). flags=1 matches vanilla throw: skip the rider-
+        // attached cleanup path that post-init ran for state 0.
+        Projectile_SetState(proj, 1, 1.0f, 1.0f, 1);
+    }
     return 1;
 }
 
