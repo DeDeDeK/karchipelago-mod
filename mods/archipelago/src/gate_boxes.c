@@ -5,7 +5,7 @@
 
 #include "main.h"
 #include "gate_boxes.h"
-#include "mask_fmt.h"
+#include "inline.h"
 #include "textbox.h"
 
 // Tracks whether each box type has at least one item with chance > 0

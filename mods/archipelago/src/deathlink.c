@@ -1,10 +1,11 @@
 #include "game.h"
 #include "machine.h"
+#include "inline.h"
 #include "code_patch/code_patch.h"
 
 #include "main.h"
+#include "settings_menu.h"
 #include "deathlink.h"
-#include "text.h"
 #include "textbox.h"
 
 // Reentrancy guard — prevents send hooks from echoing when we call

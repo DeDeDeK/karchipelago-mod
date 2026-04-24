@@ -5,7 +5,7 @@
 #include "main.h"
 #include "gate_airride_stages.h"
 #include "textbox.h"
-#include "mask_fmt.h"
+#include "inline.h"
 
 static const char *airride_stage_names[AIRRIDE_NUM] = {
     [AIRRIDE_FANTASY_MEADOWS]  = "Fantasy Meadows",

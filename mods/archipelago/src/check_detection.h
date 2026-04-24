@@ -4,16 +4,6 @@
 #include "structs.h"
 #include "game.h"
 
-// Bit accessors for sent_checks[mode][2] u64 packing.
-// Mode m, clear_kind k in [0..CLEAR_KIND_NUM-1]:
-//   word index = k / 64
-//   bit index  = k % 64
-#define SENT_CHECK_BIT(m, k)  ((ap_save->sent_checks[(m)][(k) >> 6] >> ((k) & 63)) & 1ULL)
-#define SET_SENT_CHECK(m, k)  (ap_save->sent_checks[(m)][(k) >> 6] |= (1ULL << ((k) & 63)))
-
-// Beat King Dedede goal: CT clear_kind 0x2F
-#define KD_CLEAR_KIND 0x2F
-
 // Install hooks and patches. Call from OnBoot.
 void CheckDetection_OnBoot(void);
 
@@ -25,9 +15,14 @@ void CheckDetection_OnSaveLoaded(void);
 // Call from OnFrameStart.
 void CheckDetection_OnFrameStart(void);
 
-// Re-evaluate the goal condition and set goal_complete if satisfied.
-// Idempotent: sticky once set. Saves on first transition.
+// Re-run goal evaluation. Idempotent and sticky — once goal_complete is set,
+// further calls are no-ops. Used by external state changes (e.g. max-stats CT
+// detection) that flip a goal-relevant save bit outside the sent_checks flow.
 void CheckDetection_EvaluateGoal(void);
+
+// Reset all sent_checks + goal_complete in both save and shared-memory mirror.
+// Does NOT persist or re-evaluate goal — caller owns those.
+void CheckDetection_ResetAll(void);
 
 // Debug menu helpers.
 void CheckDetection_DebugClearAll(void);

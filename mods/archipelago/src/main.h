@@ -3,7 +3,6 @@
 
 #include "structs.h"
 #include "event.h"
-#include "custom_events_api.h"
 
 #define MAX_RECEIVED_ITEMS 512
 
@@ -468,12 +467,12 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_NEEDLE,         // TRITEM_NEEDLE
     AP_TOPRIDE_ITEM_UNLOCK_BOMB,           // TRITEM_BOMB
     AP_TOPRIDE_ITEM_UNLOCK_LANDMINE,       // TRITEM_LANDMINE
-    AP_TOPRIDE_ITEM_UNLOCK_SENSORBOMB,     // TRITEM_SENSORBOMB
+    AP_TOPRIDE_ITEM_UNLOCK_LANTERN,        // TRITEM_LANTERN
     AP_TOPRIDE_ITEM_UNLOCK_MIKE,           // TRITEM_MIKE
     AP_TOPRIDE_ITEM_UNLOCK_CRACKER,        // TRITEM_CRACKER
-    AP_TOPRIDE_ITEM_UNLOCK_METAKNIGHT,     // TRITEM_METAKNIGHT
+    AP_TOPRIDE_ITEM_UNLOCK_WHO_PAINT,       // TRITEM_WHO_PAINT
     AP_TOPRIDE_ITEM_UNLOCK_SMOKESCREEN,    // TRITEM_SMOKESCREEN
-    AP_TOPRIDE_ITEM_UNLOCK_DIZZY,          // TRITEM_DIZZY
+    AP_TOPRIDE_ITEM_UNLOCK_CHICKIE,        // TRITEM_CHICKIE
     AP_TOPRIDE_ITEM_UNLOCK_BACKWARD,       // TRITEM_BACKWARD
 
     // Top Ride item give items (950-971, aligned to TopRideItemKind).
@@ -495,12 +494,12 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_NEEDLE,           // TRITEM_NEEDLE
     AP_TOPRIDE_ITEM_GIVE_BOMB,             // TRITEM_BOMB
     AP_TOPRIDE_ITEM_GIVE_LANDMINE,         // TRITEM_LANDMINE
-    AP_TOPRIDE_ITEM_GIVE_SENSORBOMB,       // TRITEM_SENSORBOMB
+    AP_TOPRIDE_ITEM_GIVE_LANTERN,          // TRITEM_LANTERN
     AP_TOPRIDE_ITEM_GIVE_MIKE,             // TRITEM_MIKE
     AP_TOPRIDE_ITEM_GIVE_CRACKER,          // TRITEM_CRACKER
-    AP_TOPRIDE_ITEM_GIVE_METAKNIGHT,       // TRITEM_METAKNIGHT
+    AP_TOPRIDE_ITEM_GIVE_WHO_PAINT,        // TRITEM_WHO_PAINT
     AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN,      // TRITEM_SMOKESCREEN
-    AP_TOPRIDE_ITEM_GIVE_DIZZY,            // TRITEM_DIZZY
+    AP_TOPRIDE_ITEM_GIVE_CHICKIE,          // TRITEM_CHICKIE
     AP_TOPRIDE_ITEM_GIVE_BACKWARD,         // TRITEM_BACKWARD
 
 } APItemId;
@@ -517,6 +516,7 @@ typedef enum APGoalKind
     GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
     GOAL_NONE,                  // No goal for this mode
     GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
+    GOAL_MAX_STATS_CT,          // City Trial only: reach PATCH_STAT_MAX on every stat in one CT run
 } APGoalKind;
 
 typedef struct APSlotOptions
@@ -563,14 +563,14 @@ typedef struct APSave
     u8 spawn_rate_level;                                // Number of Spawn Rate Up items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-18)
     u8 options_received;                                // Nonzero if AP slot options have been saved
-    u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX];     // Saved location assignment per mode: (target_mode << 8) | clear_kind
+    u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX];     // Saved location assignment per mode: (target_mode << 8) | clear_kind, 0xFFFF = remote
     u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received for that mode
-    u64 has_local_location[3];                          // [GMMODE_NUM] bit N = reward_index N is assigned to a local checkpoint
     // Authoritative record of which checkboxes the player has completed (in
     // gameplay or via filler placement). Indexed [mode][word], 2 u64s per mode
     // covers the 0..119 clear_kind range (bit (k%64) of word (k/64)).
     u64 sent_checks[3][2];
     u8 goal_complete;                                   // Sticky once set; persisted across boots
+    u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit PATCH_STAT_MAX on all 9 stats during a CT trial round
     APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     // Large arrays last
     uint received_items[MAX_RECEIVED_ITEMS];            // Ordered list of all received AP item IDs
@@ -631,25 +631,8 @@ typedef struct APData
     u32 traplink_menu_enabled;
 } APData;
 
-// In-game menu toggle state. Bound to the Settings menu via OptionDesc.
-// Initial values are set from APSlotOptions on first connect; the player
-// can override them at any time via the Settings menu.
-typedef struct APMenuSettings
-{
-    int deathlink_enabled;
-    int energylink_enabled;
-    int energylink_autocharge;
-    int traplink_enabled;
-    int textbox_enabled;
-    int ct_permanent_patches_enabled;
-    int ct_stadium_permanent_patches_enabled;
-    int ar_permanent_patches_enabled;
-} APMenuSettings;
-
 extern APData *ap_data;
-extern APMenuSettings ap_menu_settings;
 extern APSave *ap_save;
-extern CustomEventsAPI *custom_events;
 
 void OnBoot();
 void OnSaveInit();

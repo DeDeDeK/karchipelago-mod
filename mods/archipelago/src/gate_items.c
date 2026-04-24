@@ -5,7 +5,7 @@
 #include "main.h"
 #include "gate_items.h"
 #include "textbox.h"
-#include "mask_fmt.h"
+#include "inline.h"
 
 #define LEGENDARY_DRAGOON_ENABLE_OFFSET 0x38
 #define LEGENDARY_HYDRA_ENABLE_OFFSET   0x70

@@ -1,10 +1,7 @@
 #include "game.h"
-#include "inline.h"
 
 #include "main.h"
 #include "city_trial_event.h"
-#include "textbox.h"
-#include "ap_item_handler.h"
 
 // Trigger a specific event. Similar to the game's CityEvent_ForceStart (0x800ee778),
 // but adds the event to prev_kind[] history (prevents natural re-occurrence stacking)

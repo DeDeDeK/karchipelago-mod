@@ -6,7 +6,35 @@
 
 #include "main.h"
 #include "stadium_lock.h"
-#include "mask_fmt.h"
+#include "textbox.h"
+#include "inline.h"
+
+static const char *stadium_names[STKIND_NUM] = {
+    [STKIND_DRAG1]         = "Drag Race 1",
+    [STKIND_DRAG2]         = "Drag Race 2",
+    [STKIND_DRAG3]         = "Drag Race 3",
+    [STKIND_DRAG4]         = "Drag Race 4",
+    [STKIND_AIRGLIDER]     = "Air Glider",
+    [STKIND_TARGETFLIGHT]  = "Target Flight",
+    [STKIND_HIGHJUMP]      = "High Jump",
+    [STKIND_MELEE1]        = "Kirby Melee 1",
+    [STKIND_MELEE2]        = "Kirby Melee 2",
+    [STKIND_DESTRUCTION1]  = "Destruction Derby 1",
+    [STKIND_DESTRUCTION2]  = "Destruction Derby 2",
+    [STKIND_DESTRUCTION3]  = "Destruction Derby 3",
+    [STKIND_DESTRUCTION4]  = "Destruction Derby 4",
+    [STKIND_DESTRUCTION5]  = "Destruction Derby 5",
+    [STKIND_SINGLERACE1]   = "Single Race 1",
+    [STKIND_SINGLERACE2]   = "Single Race 2",
+    [STKIND_SINGLERACE3]   = "Single Race 3",
+    [STKIND_SINGLERACE4]   = "Single Race 4",
+    [STKIND_SINGLERACE5]   = "Single Race 5",
+    [STKIND_SINGLERACE6]   = "Single Race 6",
+    [STKIND_SINGLERACE7]   = "Single Race 7",
+    [STKIND_SINGLERACE8]   = "Single Race 8",
+    [STKIND_SINGLERACE9]   = "Single Race: Nebula Belt",
+    [STKIND_VSKINGDEDEDE]  = "Vs. King Dedede",
+};
 
 // Vanilla uses 4 of the 5 prev_stadium_kind entries for history exclusion
 #define STADIUM_HISTORY_SIZE 4
@@ -172,5 +200,19 @@ void StadiumLock_OnBoot()
     //    Original: beq 0x80046f44 (if locked -> checklist fallback)
     //    Replace:  beq 0x80046fc4 (if locked -> next iteration)
     CODEPATCH_REPLACEINSTRUCTION(0x80046ef8, 0x418200CC); // beq 0x80046fc4
+}
+
+int GateStadium_UnlockStadium(StadiumKind kind)
+{
+    if (kind < 0 || kind >= STKIND_NUM)
+        return 0;
+
+    ap_save->stadium_unlocked_mask |= (1 << kind);
+    Gm_StadiumSetUnlockedDirect(kind);
+    Gm_StadiumSetNewLabelDirect(kind);
+    OSReport("[Stadium] Stadium %d (%s) unlocked (mask = %s)\n",
+             kind, stadium_names[kind], MaskBits(ap_save->stadium_unlocked_mask, STKIND_NUM));
+    TextBox_Enqueue(stadium_names[kind]);
+    return 1;
 }
 

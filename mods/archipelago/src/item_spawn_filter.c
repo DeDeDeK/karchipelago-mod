@@ -1,6 +1,5 @@
 #include "os.h"
 #include "game.h"
-#include "scene.h"
 #include "code_patch/code_patch.h"
 
 #include "item_spawn_filter.h"

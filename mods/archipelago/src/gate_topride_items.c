@@ -8,7 +8,7 @@
 #include "gate_topride_items.h"
 #include "gate_abilities.h"
 #include "textbox.h"
-#include "mask_fmt.h"
+#include "inline.h"
 
 // Top Ride items that correspond to copy abilities.
 // These are additionally gated by ability_unlocked_mask.
@@ -37,12 +37,12 @@ static const char *topride_item_names[TRITEM_NUM] = {
     [TRITEM_NEEDLE]       = "TR Needle",
     [TRITEM_BOMB]         = "TR Bomb",
     [TRITEM_LANDMINE]     = "TR Land Mine",
-    [TRITEM_SENSORBOMB]   = "TR Sensor Bomb",
+    [TRITEM_LANTERN]      = "TR Lantern",
     [TRITEM_MIKE]         = "TR Mike",
     [TRITEM_CRACKER]      = "TR Cracker",
-    [TRITEM_METAKNIGHT]   = "TR Meta Knight",
+    [TRITEM_WHO_PAINT]    = "TR Who? Paint",
     [TRITEM_SMOKESCREEN]  = "TR Smoke Screen",
-    [TRITEM_DIZZY]        = "TR Dizzy",
+    [TRITEM_CHICKIE]      = "TR Chickie",
     [TRITEM_BACKWARD]     = "TR Backward",
 };
 

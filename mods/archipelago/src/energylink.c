@@ -4,6 +4,7 @@
 #include "scene.h"
 
 #include "main.h"
+#include "settings_menu.h"
 #include "textbox.h"
 
 // Per-player tracking state. Indexed by player index (0-4).

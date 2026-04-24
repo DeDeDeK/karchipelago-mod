@@ -1,25 +1,15 @@
 #ifndef ARCHIPELAGO_CHECKLIST_REWARDS_H
 #define ARCHIPELAGO_CHECKLIST_REWARDS_H
 
-#include "structs.h"
 #include "game.h"
-
-// Cross-mode reward mapping: for each (target_mode, clear_kind), stores which
-// reward from another mode is placed there. source_mode == 0xFF means none.
-typedef struct CrossModeSlot
-{
-    u8 source_mode;
-    u8 source_reward_index;
-} CrossModeSlot;
-
-// Per-mode cross-mode slot table. Populated by ApplyLocations, rebuilt on save load.
-extern CrossModeSlot cross_mode_slots[GMMODE_NUM][120];
-
-// Per-mode reward table sizes (REWARD_COUNT_AIRRIDE / TOPRIDE / CITYTRIAL).
-extern const int reward_counts[GMMODE_NUM];
+#include "main.h"  // CLEAR_KIND_NUM, GMMODE_NUM, ap_save
 
 // Allocate reward tables and install all checklist hooks. Call from OnBoot.
 void ChecklistRewards_OnBoot(void);
+
+// Initialize checklist-owned save fields on fresh save creation.
+// Call from OnSaveInit, after the top-level memset of ap_save.
+void ChecklistRewards_OnSaveInit(void);
 
 // Restore reward tables and received rewards from save data. Call from OnSaveLoaded.
 void ChecklistRewards_OnSaveLoaded(void);
@@ -29,9 +19,6 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index);
 
 // Apply the AP location assignment from APData.
 void ChecklistRewards_ApplyLocations(void);
-
-// Reset all cross-mode slot entries to empty (source_mode = 0xFF).
-void ChecklistRewards_ClearCrossModeSlots(void);
 
 // Reveal and unlock all checklist squares across all modes (debug/option).
 void RevealAllChecklists(void);
@@ -46,5 +33,29 @@ void ChecklistRewards_DebugSimulateLocationData(void);
 // location/shuffle assignment in both save and shared memory, and resets
 // the mod's reward tables and cross-mode slots to the empty state.
 void ChecklistRewards_DebugClearAll(void);
+
+// Debug helper: returns the currently-hovered cell in the checklist menu
+// (captured by the UpdateCellInfo hook whenever the cursor moves). Returns 1
+// on success with `*out_mode` and `*out_clear_kind` populated, 0 if no cell
+// has been hovered yet this scene.
+int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind);
+
+// Debug helper: log what reward (if any) is placed at (mode, clear_kind) —
+// same-mode local, cross-mode local from another of our modes, or none.
+void ChecklistRewards_LogPlacement(u8 mode, u8 clear_kind);
+
+// Resolve which reward is placed at (mode, clear_kind). On hit, writes the
+// source mode and reward_index (same-mode: source_mode == mode; cross-mode:
+// source_mode != mode). Returns 0 if the cell has no local placement.
+int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
+                                 u8 *out_source_mode, u8 *out_source_reward_index);
+
+// Returns 1 if a reward is placed at (mode, clear_kind) AND that reward has
+// already been received from AP. Fast path for "should this cell show the
+// received reward badge?" — used by the backfill path in check_detection.
+int ChecklistRewards_CellHasReceivedReward(u8 mode, u8 clear_kind);
+
+// Returns a human-readable name for a RewardType enum value, or "?".
+const char *ChecklistRewards_RewardTypeName(u8 rtype);
 
 #endif // ARCHIPELAGO_CHECKLIST_REWARDS_H

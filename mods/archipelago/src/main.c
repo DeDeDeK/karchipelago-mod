@@ -1,9 +1,8 @@
+#include <string.h>
+
 #include "os.h"
 #include "game.h"
 #include "scene.h"
-#include "inline.h"
-#include "code_patch/code_patch.h"
-#include "hoshi/settings.h"
 #include "hoshi/mod.h"
 #include "hoshi/func.h"
 #include "stage.h"
@@ -34,187 +33,14 @@
 #include "spawn_enemy.h"
 #include "spawn_rate.h"
 #include "item_spawn_filter.h"
-#include "custom_events_api.h"
-#include "energylink_spend.h"
+#include "settings_menu.h"
+#include "main_menu.h"
 #include "debug_menu.h"
+#include "goal_max_stats_ct.h"
 
-// Define global variables
+// Define global variables.
 APData *ap_data;
-APMenuSettings ap_menu_settings;
 APSave *ap_save;
-CustomEventsAPI *custom_events;
-
-// Menu toggle callbacks
-static const char *stc_off_on[] = {"Off", "On"};
-
-// Publishes the current death/energy/trap link menu state into APData so the
-// Python client can forward enable/disable to the AP server when the player
-// toggles mid-session. Safe to call any time after OnBoot allocates ap_data.
-static void SyncLinkMenuStateToAPData(void)
-{
-    if (!ap_data)
-        return;
-    ap_data->deathlink_menu_enabled = ap_menu_settings.deathlink_enabled;
-    ap_data->energylink_menu_enabled = ap_menu_settings.energylink_enabled;
-    ap_data->traplink_menu_enabled = ap_menu_settings.traplink_enabled;
-}
-
-static void OnToggleDeathLink(int val)      { OSReport("[Main] DeathLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
-static void OnToggleEnergyLink(int val)     { OSReport("[Main] EnergyLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
-static void OnToggleAutoCharge(int val)     { OSReport("[Main] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
-static void OnToggleTrapLink(int val)       { OSReport("[Main] TrapLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
-static void OnToggleTextBox(int val)        { OSReport("[Main] AP Message Textbox toggled %s\n", stc_off_on[val]); }
-static void OnToggleCTPermanent(int val)    { OSReport("[Main] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
-static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
-static void OnToggleARPermanent(int val)    { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
-
-// Submenu: controls whether accumulated permanent stat patches are re-applied
-// at the start of each round/race. Receiving AP permanent-patch items still
-// increments save counters unconditionally — the toggles only gate round-start
-// application. Default: both On, matching the historical behavior before the
-// toggles existed.
-static MenuDesc permanent_patches_menu = {
-    .option_num = 3,
-    .options = {
-        &(OptionDesc){
-            .name = "City Trial",
-            .description = "Apply accumulated permanent patches at the start of each City Trial round",
-            .kind = OPTKIND_VALUE,
-            .val = &ap_menu_settings.ct_permanent_patches_enabled,
-            .value_num = 2,
-            .value_names = (char *[]){
-                "Off",
-                "On",
-            },
-            .on_change = OnToggleCTPermanent,
-        },
-        &(OptionDesc){
-            .name = "CT Stadium",
-            .description = "Apply accumulated permanent patches when entering a City Trial stadium",
-            .kind = OPTKIND_VALUE,
-            .val = &ap_menu_settings.ct_stadium_permanent_patches_enabled,
-            .value_num = 2,
-            .value_names = (char *[]){
-                "Off",
-                "On",
-            },
-            .on_change = OnToggleCTStadiumPermanent,
-        },
-        &(OptionDesc){
-            .name = "Air Ride",
-            .description = "Apply accumulated permanent patches at the start of each Air Ride race",
-            .kind = OPTKIND_VALUE,
-            .val = &ap_menu_settings.ar_permanent_patches_enabled,
-            .value_num = 2,
-            .value_names = (char *[]){
-                "Off",
-                "On",
-            },
-            .on_change = OnToggleARPermanent,
-        },
-    },
-};
-
-// Creates a menu that appears in the in-game Settings menu.
-// Menus may be nested by setting the OptionDesc::kind to OPTKIND_MENU
-OptionDesc ModSettings = {
-    .name = "Archipelago Settings",
-    .description = "Interface with mod settings here.",
-    .kind = OPTKIND_MENU,
-    .menu_ptr = &(MenuDesc){
-        .option_num = 6,
-        .options = {
-            &(OptionDesc){
-                .name = "Death Link",
-                .description = "Enable or Disable Death Link",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.deathlink_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleDeathLink,
-            },
-            &(OptionDesc){
-                .name = "Energy Link",
-                .description = "Energy Link settings and item shop.",
-                .kind = OPTKIND_MENU,
-                .menu_ptr = &(MenuDesc){
-                    .option_num = 3,
-                    .options = {
-                        &(OptionDesc){
-                            .name = "Enabled",
-                            .description = "Enable or Disable Energy Link",
-                            .kind = OPTKIND_VALUE,
-                            .val = &ap_menu_settings.energylink_enabled,
-                            .value_num = 2,
-                            .value_names = (char *[]){
-                                "Off",
-                                "On",
-                            },
-                            .on_change = OnToggleEnergyLink,
-                        },
-                        &(OptionDesc){
-                            .name = "Auto-Charge",
-                            .description = "Automatically spend energy to fill machine charge meter",
-                            .kind = OPTKIND_VALUE,
-                            .val = &ap_menu_settings.energylink_autocharge,
-                            .value_num = 2,
-                            .value_names = (char *[]){
-                                "Off",
-                                "On",
-                            },
-                            .on_change = OnToggleAutoCharge,
-                        },
-                        &(OptionDesc){
-                            .name = "Spend",
-                            .description = "Purchase items with pooled energy.",
-                            .kind = OPTKIND_MENU,
-                            .menu_ptr = &energylink_spend_menu,
-                        },
-                    },
-                },
-            },
-            &(OptionDesc){
-                .name = "Trap Link",
-                .description = "Enable or Disable Trap Link",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.traplink_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleTrapLink,
-            },
-            &(OptionDesc){
-                .name = "AP Message Textbox",
-                .description = "Enable or Disable the in-game textbox for Archipelago Messages",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.textbox_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleTextBox,
-            },
-            &(OptionDesc){
-                .name = "Permanent Patches",
-                .description = "Control whether permanent patches are re-applied at round start",
-                .kind = OPTKIND_MENU,
-                .menu_ptr = &permanent_patches_menu,
-            },
-            &(OptionDesc){
-                .name = "Debug",
-                .description = "Debug menu for toggling gates and giving items.",
-                .kind = OPTKIND_MENU,
-                .menu_ptr = &debug_menu,
-            },
-        },
-    },
-};
 
 ModDesc mod_desc = {
     .name = "KARchipelago",                     // Name of the mod.
@@ -247,13 +73,6 @@ ModDesc mod_desc = {
 void OnBoot()
 {
     OSReport("[Main] Running OnBoot for %s\n", mod_desc.name);
-
-    // Default menu toggle values for first-boot (no hoshi save entry yet).
-    // Hoshi's Mod_CopyFromSave overwrites these if it finds a saved hash.
-    // Defaults match pre-toggle behavior so existing installs keep working.
-    ap_menu_settings.ct_permanent_patches_enabled = 1;
-    ap_menu_settings.ct_stadium_permanent_patches_enabled = 1;
-    ap_menu_settings.ar_permanent_patches_enabled = 1;
 
     // Persistent allocation of ap_data
     ap_data = HSD_MemAlloc(sizeof(APData));
@@ -321,6 +140,9 @@ void OnBoot()
 
     // Item spawn table filtering hooks (covers all gate categories)
     ItemSpawnFilter_OnBoot();
+
+    // Replace main-menu demo rider/machine (Kirby on Warp Star -> Dedede on Wheelie)
+    MainMenu_OnBoot();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
@@ -330,6 +152,8 @@ void OnSaveInit()
     ap_save = (APSave *)mod_desc.save_ptr;
     OSReport("[Main] save data for %s created!\n", mod_desc.name);
     memset(ap_save, 0, sizeof(*ap_save));
+
+    ChecklistRewards_OnSaveInit();
 }
 
 // Runs on startup after any save data is loaded into memory.
@@ -339,22 +163,6 @@ void OnSaveLoaded()
     ap_save = (APSave *)mod_desc.save_ptr;
     ap_save->boot_num++;
 
-    // Import custom events API (deferred from OnBoot — all mods are loaded by now)
-    if (!custom_events)
-    {
-        custom_events = Hoshi_ImportMod("custom_events",
-                                        CUSTOM_EVENTS_API_MAJOR,
-                                        CUSTOM_EVENTS_API_MINOR);
-        if (custom_events)
-        {
-            custom_events->SetWeightFilter(GateEvents_GetWeightFilter());
-            OSReport("[Main] Custom events API imported, weight filter installed\n");
-        }
-        else
-        {
-            OSReport("[Main] Custom events mod not found, custom events disabled\n");
-        }
-    }
     OSReport("[Main] Boot #%d, %d items received, options %s\n",
              ap_save->boot_num, ap_save->item_received_count,
              ap_save->options_received ? "loaded" : "pending");
@@ -373,13 +181,19 @@ void OnSaveLoaded()
     // goal evaluation.
     CheckDetection_OnSaveLoaded();
 
+    // Pull masks back into debug menu toggle state so the display reflects
+    // everything just re-granted by ChecklistRewards_OnSaveLoaded (AP-received
+    // rewards re-apply their gate unlocks but don't update color_state[] and
+    // friends). Without this, the debug menu would show granted items as locked.
+    DebugMenu_RefreshStateFromMasks();
+
     // Publish restored link-toggle state. Hoshi's Mod_CopyFromSave has run
     // by now, so ap_menu_settings reflects the player's persisted choices.
     SyncLinkMenuStateToAPData();
 
     // Signal to the AP client that the mod is fully initialized
     ap_data->game_ready = 1;
-    OSReport("[Main] game_ready set — waiting for AP client connection\n");
+    OSReport("[Main] game_ready set - waiting for AP client connection\n");
 }
 
 // Check if the AP client has written slot options to APData.
@@ -472,8 +286,7 @@ void On3DLoadEnd()
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
-    if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
-        GateEvents_LogEnabledEvents();
+    GateEvents_On3DLoadEnd();
 
     // Enemy spawn filtering for ability gating
     GateAbilities_On3DLoadEnd();
@@ -481,30 +294,7 @@ void On3DLoadEnd()
     // Item spawn table filtering for non-CT modes (stadium, Air Ride)
     ItemSpawnFilter_On3DLoadEnd();
 
-    // Round-start permanent patch re-application, per-mode menu toggle.
-    // City Trial stadium also counts as "in city" for Gm_IsInCity, so split
-    // it out via Gm_IsStadiumMode to honor the separate stadium toggle.
-    // Free Run never loads item data tables, so inflated stats from perm
-    // patches would crash Item_GetItDataPtr on damage-driven patch ejection.
-    int apply_patches;
-    if (Gm_IsInCity())
-    {
-        if (Gm_GetCityMode() == CITYMODE_FREERUN)
-        {
-            apply_patches = 0;
-            OSReport("[Main] Skipping permanent patches in Free Run (item data not loaded).\n");
-        }
-        else if (Gm_IsStadiumMode())
-            apply_patches = ap_menu_settings.ct_stadium_permanent_patches_enabled;
-        else
-            apply_patches = ap_menu_settings.ct_permanent_patches_enabled;
-    }
-    else
-    {
-        apply_patches = ap_menu_settings.ar_permanent_patches_enabled;
-    }
-    if (apply_patches)
-        PermanentPatch_On3DLoadEnd();
+    PermanentPatch_On3DLoadEnd();
 
     if (ap_menu_settings.deathlink_enabled)
         DeathLink_On3DLoadEnd();
@@ -514,6 +304,8 @@ void On3DLoadEnd()
 
     if (ap_menu_settings.traplink_enabled)
         TrapLink_On3DLoadEnd();
+
+    GoalMaxStatsCT_On3DLoadEnd();
 }
 
 // Runs after Top Ride gameplay is fully initialized.
@@ -532,11 +324,13 @@ void OnTopRideLoad()
 // Runs when pausing the match. The index of the pausing player is passed in as an argument.
 void On3DPause(int pause_ply)
 {
+    OSReport("[Main] Pausing 3D (player %d).\n", pause_ply);
 }
 
 // Runs when unpausing the match.
 void On3DUnpause(int pause_ply)
 {
+    OSReport("[Main] Unpausing 3D (player %d).\n", pause_ply);
 }
 
 // Runs when exiting a match.
@@ -567,22 +361,11 @@ void OnFrameStart()
     // Process client backfill writes and poll meta auto-unlocks.
     CheckDetection_OnFrameStart();
 
-    GameData *gd = Gm_GetGameData();
-
-    if (gd->update.pause_kind & (1 << PAUSEKIND_SYS) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_SYS)))
-        OSReport("[Main] Game is paused via debug mode!\n");
-
-    if (gd->update.pause_kind & (1 << PAUSEKIND_GAME) && !(gd->update.pause_kind_prev & (1 << PAUSEKIND_GAME)))
-        OSReport("[Main] Game is paused via in-game!\n");
-
     // debug pad handlers
     HSD_Pad *pad = &stc_engine_pads[0];
     if (pad->down & PAD_BUTTON_DPAD_LEFT)
     {
         // Grant a random remote (non-local) checklist reward
-        static const int reward_counts[GMMODE_NUM] = {
-            REWARD_COUNT_AIRRIDE, REWARD_COUNT_TOPRIDE, REWARD_COUNT_CITYTRIAL
-        };
         int total = REWARD_COUNT_AIRRIDE + REWARD_COUNT_TOPRIDE + REWARD_COUNT_CITYTRIAL;
         int pick = HSD_Randi(total);
         GameMode mode;
@@ -603,7 +386,7 @@ void OnFrameStart()
             ri = pick - REWARD_COUNT_AIRRIDE - REWARD_COUNT_TOPRIDE;
         }
 
-        if (ap_save->has_local_location[mode] & (1ULL << ri))
+        if (ap_save->shuffled_rewards[mode][ri] != 0xFFFF)
             OSReport("[Main] Debug: reward %d:%d is local, skipping\n", mode, ri);
         else
         {
@@ -625,6 +408,52 @@ void OnFrameStart()
     {
         ap_data->traplink_receive = 1;
         OSReport("[Main] Debug: triggered traplink_receive\n");
+    }
+    if (pad->down & PAD_TRIGGER_Z)
+    {
+        // In a checklist menu, Z unlocks the currently hovered cell as if
+        // the objective had been completed in-game. Z is unused by vanilla
+        // checklist navigation (A/X/Y/L/R all cycle screens or place fillers).
+        // ClearChecker_SetNewUnlock is REPLACEFUNC'd by check_detection, so
+        // the AP check fires and goal evaluation runs. The hovered
+        // (mode, clear_kind) is captured by the UpdateCellInfo hook in
+        // checklist_rewards.c.
+        u8 mode, k;
+        if (ChecklistRewards_GetHoveredCell(&mode, &k))
+        {
+            GameClearData *cd = gmGetClearcheckerTypeP(mode);
+            OSReport("[Main] Debug: Z unlock mode=%d clear_kind=%d\n", mode, k);
+            ChecklistRewards_LogPlacement(mode, k);
+            ClearChecker_SetNewUnlock(mode, k);
+            // SetNewUnlock bails when Checklist_IsCacheValid (always true in
+            // menus), so RecordCheck ran but no clear[] bits got written. Set
+            // the end-state bits directly — the reveal animation only plays
+            // on post-mode summary screens anyway, so there's nothing to
+            // preserve.
+            cd->clear[k].is_new = 1;
+            cd->clear[k].is_unlocked = 1;
+            cd->clear[k].is_visible = 1;
+
+            // When the "Auto-Grant on Z Unlock" debug toggle is on, also
+            // simulate AP item receipt by granting whatever reward is placed
+            // at this cell. Remote placements have no local reward to grant
+            // (ResolveCell returns 0), so toggle-on is a no-op for them.
+            if (DebugMenu_ShouldAutoGrantOnUnlock())
+            {
+                u8 src_mode, src_ri;
+                if (ChecklistRewards_ResolveCell(mode, k, &src_mode, &src_ri))
+                {
+                    OSReport("[Main] Debug: auto-granting reward mode=%d ri=%d\n",
+                             src_mode, src_ri);
+                    ChecklistRewards_Grant(src_mode, src_ri);
+                    Hoshi_WriteSave();
+                }
+            }
+        }
+        else
+        {
+            OSReport("[Main] Debug: Z pressed but no cell hovered yet (move cursor first)\n");
+        }
     }
 
 }

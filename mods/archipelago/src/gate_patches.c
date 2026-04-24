@@ -3,7 +3,7 @@
 
 #include "main.h"
 #include "gate_patches.h"
-#include "mask_fmt.h"
+#include "inline.h"
 #include "textbox.h"
 
 // Note: this file has no OnBoot. GatePatches_FilterSpawnTables and

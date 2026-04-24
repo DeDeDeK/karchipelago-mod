@@ -23,7 +23,7 @@ static char *toggle_values[] = {"Disabled", "Enabled"};
 
 static int machine_state[VCKIND_NUM];
 static int ability_state[COPYKIND_NUM];
-static int event_state[CUSTOM_EVKIND_NUM];
+static int event_state[EVKIND_NUM];
 static int patch_state[PATCHKIND_NUM];
 static int item_state[ITUNLOCK_NUM];
 static int box_state[BOXKIND_NUM];
@@ -46,7 +46,7 @@ static int stadium_state[STKIND_NUM];
 
 DEF_SYNC(SyncMachines,  u32, machine_unlocked_mask,       machine_state,  VCKIND_NUM)
 DEF_SYNC(SyncAbilities, u16, ability_unlocked_mask,        ability_state,  COPYKIND_NUM)
-DEF_SYNC(SyncEvents,    u32, event_unlocked_mask,          event_state,    CUSTOM_EVKIND_NUM)
+DEF_SYNC(SyncEvents,    u32, event_unlocked_mask,          event_state,    EVKIND_NUM)
 DEF_SYNC(SyncPatches,   u16, patch_unlocked_mask,          patch_state,    PATCHKIND_NUM)
 DEF_SYNC(SyncItems,     u32, item_unlocked_mask,           item_state,     ITUNLOCK_NUM)
 DEF_SYNC(SyncBoxes,     u8,  box_unlocked_mask,            box_state,      BOXKIND_NUM)
@@ -55,6 +55,39 @@ DEF_SYNC(SyncTRStages,  u16, topride_stage_unlocked_mask,  tr_stage_state, TOPRI
 DEF_SYNC(SyncTRItems,   u32, topride_item_unlocked_mask,   tr_item_state,  TRITEM_NUM)
 DEF_SYNC(SyncColors,    u8,  color_unlocked_mask,          color_state,    KIRBYCOLOR_NUM)
 DEF_SYNC(SyncStadiums,  u32, stadium_unlocked_mask,        stadium_state,  STKIND_NUM)
+
+#define DEF_REFRESH(name, type, field, arr, count) \
+    static void name(void) { \
+        for (int i = 0; i < (count); i++) \
+            arr[i] = (ap_save->field & ((type)1 << i)) ? 1 : 0; \
+    }
+
+DEF_REFRESH(RefreshMachines,  u32, machine_unlocked_mask,       machine_state,  VCKIND_NUM)
+DEF_REFRESH(RefreshAbilities, u16, ability_unlocked_mask,        ability_state,  COPYKIND_NUM)
+DEF_REFRESH(RefreshEvents,    u32, event_unlocked_mask,          event_state,    EVKIND_NUM)
+DEF_REFRESH(RefreshPatches,   u16, patch_unlocked_mask,          patch_state,    PATCHKIND_NUM)
+DEF_REFRESH(RefreshItems,     u32, item_unlocked_mask,           item_state,     ITUNLOCK_NUM)
+DEF_REFRESH(RefreshBoxes,     u8,  box_unlocked_mask,            box_state,      BOXKIND_NUM)
+DEF_REFRESH(RefreshARStages,  u16, airride_stage_unlocked_mask,  ar_stage_state, AIRRIDE_NUM)
+DEF_REFRESH(RefreshTRStages,  u16, topride_stage_unlocked_mask,  tr_stage_state, TOPRIDE_NUM)
+DEF_REFRESH(RefreshTRItems,   u32, topride_item_unlocked_mask,   tr_item_state,  TRITEM_NUM)
+DEF_REFRESH(RefreshColors,    u8,  color_unlocked_mask,          color_state,    KIRBYCOLOR_NUM)
+DEF_REFRESH(RefreshStadiums,  u32, stadium_unlocked_mask,        stadium_state,  STKIND_NUM)
+
+void DebugMenu_RefreshStateFromMasks(void)
+{
+    RefreshMachines();
+    RefreshAbilities();
+    RefreshEvents();
+    RefreshPatches();
+    RefreshItems();
+    RefreshBoxes();
+    RefreshARStages();
+    RefreshTRStages();
+    RefreshTRItems();
+    RefreshColors();
+    RefreshStadiums();
+}
 
 void DebugMenu_ApplyToSave(void)
 {
@@ -92,7 +125,7 @@ void DebugMenu_ApplyToSave(void)
 
 DEF_ALL(Mch, u32, machine_unlocked_mask,       machine_state,  VCKIND_NUM,       "machines")
 DEF_ALL(Abl, u16, ability_unlocked_mask,        ability_state,  COPYKIND_NUM,     "abilities")
-DEF_ALL(Evt, u32, event_unlocked_mask,          event_state,    CUSTOM_EVKIND_NUM, "events")
+DEF_ALL(Evt, u32, event_unlocked_mask,          event_state,    EVKIND_NUM,       "events")
 DEF_ALL(Pch, u16, patch_unlocked_mask,          patch_state,    PATCHKIND_NUM,    "patch types")
 DEF_ALL(Itm, u32, item_unlocked_mask,           item_state,     ITUNLOCK_NUM,     "items")
 DEF_ALL(Box, u8,  box_unlocked_mask,            box_state,      BOXKIND_NUM,      "boxes")
@@ -214,12 +247,12 @@ GIVE_FN(GiveTRFire,        AP_TOPRIDE_ITEM_GIVE_FIRE)
 GIVE_FN(GiveTRNeedle,      AP_TOPRIDE_ITEM_GIVE_NEEDLE)
 GIVE_FN(GiveTRBomb,        AP_TOPRIDE_ITEM_GIVE_BOMB)
 GIVE_FN(GiveTRLandmine,    AP_TOPRIDE_ITEM_GIVE_LANDMINE)
-GIVE_FN(GiveTRSensorBomb,  AP_TOPRIDE_ITEM_GIVE_SENSORBOMB)
+GIVE_FN(GiveTRLantern,     AP_TOPRIDE_ITEM_GIVE_LANTERN)
 GIVE_FN(GiveTRMike,        AP_TOPRIDE_ITEM_GIVE_MIKE)
 GIVE_FN(GiveTRCracker,     AP_TOPRIDE_ITEM_GIVE_CRACKER)
-GIVE_FN(GiveTRMetaKnight,  AP_TOPRIDE_ITEM_GIVE_METAKNIGHT)
+GIVE_FN(GiveTRWhoPaint,    AP_TOPRIDE_ITEM_GIVE_WHO_PAINT)
 GIVE_FN(GiveTRSmokeScreen, AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN)
-GIVE_FN(GiveTRDizzy,       AP_TOPRIDE_ITEM_GIVE_DIZZY)
+GIVE_FN(GiveTRChickie,     AP_TOPRIDE_ITEM_GIVE_CHICKIE)
 GIVE_FN(GiveTRBackward,    AP_TOPRIDE_ITEM_GIVE_BACKWARD)
 
 // Energy Link debug
@@ -294,6 +327,24 @@ static int CheckDbgClearAllChecklistData(void)
     return 1;
 }
 
+// When enabled (default), the Z-button debug checklist unlock also calls
+// ChecklistRewards_Grant() on the reward placed at the unlocked cell, closely
+// simulating AP item receipt for standalone testing. When disabled, only the
+// check is sent — the connected AP client delivers the item as normal.
+static int auto_grant_on_debug_unlock = 1;
+
+int DebugMenu_ShouldAutoGrantOnUnlock(void)
+{
+    return auto_grant_on_debug_unlock;
+}
+
+static void OnAutoGrantChange(int v)
+{
+    (void)v;
+    OSReport("[Debug] Auto-grant on Z unlock: %s\n",
+             auto_grant_on_debug_unlock ? "Enabled" : "Disabled");
+}
+
 // Submenu option
 #define S(label, desc, menu_ref) \
     &(OptionDesc){ \
@@ -357,7 +408,7 @@ static MenuDesc abilities_menu = {
 };
 
 static MenuDesc events_menu = {
-    .option_num = 21,
+    .option_num = 18,
     .options = {
         A("Unlock All", "Unlock all events", EvtUnlockAll),
         A("Lock All",   "Lock all events",   EvtLockAll),
@@ -377,9 +428,6 @@ static MenuDesc events_menu = {
         G("Bounce",             event_state, EVKIND_BOUNCE,           SyncEvents),
         G("Fog",                event_state, EVKIND_FOG,              SyncEvents),
         G("Fake Powerups",      event_state, EVKIND_FAKEPOWERUPS,     SyncEvents),
-        G("Waddle Dee Swarm",   event_state, CUSTOM_EVKIND_WADDLE_DEE_SWARM, SyncEvents),
-        G("Gravity Change",     event_state, CUSTOM_EVKIND_GRAVITY_CHANGE, SyncEvents),
-        G("Scale Change",       event_state, CUSTOM_EVKIND_SCALE_CHANGE,   SyncEvents),
     },
 };
 
@@ -497,11 +545,11 @@ static MenuDesc tr_items_menu = {
         G("Spear",          tr_item_state, TRITEM_SPEAR,        SyncTRItems),
         G("Missile",        tr_item_state, TRITEM_MISSILE,      SyncTRItems),
         G("Land Mine",      tr_item_state, TRITEM_LANDMINE,     SyncTRItems),
-        G("Sensor Bomb",    tr_item_state, TRITEM_SENSORBOMB,   SyncTRItems),
+        G("Lantern",        tr_item_state, TRITEM_LANTERN,      SyncTRItems),
         G("Cracker",        tr_item_state, TRITEM_CRACKER,      SyncTRItems),
-        G("Meta",           tr_item_state, TRITEM_METAKNIGHT,   SyncTRItems),
+        G("Who? Paint",     tr_item_state, TRITEM_WHO_PAINT,    SyncTRItems),
         G("Smoke Screen",   tr_item_state, TRITEM_SMOKESCREEN,  SyncTRItems),
-        G("Dizzy",          tr_item_state, TRITEM_DIZZY,        SyncTRItems),
+        G("Chickie",        tr_item_state, TRITEM_CHICKIE,      SyncTRItems),
         G("Backward",       tr_item_state, TRITEM_BACKWARD,     SyncTRItems),
     },
 };
@@ -690,12 +738,12 @@ static MenuDesc give_topride_items_menu = {
         A("Needle",         "Give TR Needle",           GiveTRNeedle),
         A("Bomb",           "Give TR Bomb",             GiveTRBomb),
         A("Landmine",       "Give TR Landmine",         GiveTRLandmine),
-        A("Sensor Bomb",    "Give TR Sensor Bomb",      GiveTRSensorBomb),
+        A("Lantern",        "Give TR Lantern",          GiveTRLantern),
         A("Mike",           "Give TR Mike",             GiveTRMike),
         A("Cracker",        "Give TR Cracker",          GiveTRCracker),
-        A("Meta",           "Give TR Meta item",        GiveTRMetaKnight),
+        A("Who? Paint",     "Give TR Who? Paint",       GiveTRWhoPaint),
         A("Smoke Screen",   "Give TR Smoke Screen",     GiveTRSmokeScreen),
-        A("Dizzy",          "Give TR Dizzy",            GiveTRDizzy),
+        A("Chickie",        "Give TR Chickie",          GiveTRChickie),
         A("Backward",       "Give TR Backward",         GiveTRBackward),
     },
 };
@@ -716,8 +764,17 @@ static MenuDesc give_items_menu = {
 };
 
 static MenuDesc checks_menu = {
-    .option_num = 6,
+    .option_num = 7,
     .options = {
+        &(OptionDesc){
+            .name = "Auto-Grant on Z Unlock",
+            .description = "On: Z-unlock also grants the cell's reward (simulate AP). Off: only send the check; let AP client deliver.",
+            .kind = OPTKIND_VALUE,
+            .val = &auto_grant_on_debug_unlock,
+            .value_num = 2,
+            .value_names = toggle_values,
+            .on_change = OnAutoGrantChange,
+        },
         A("Clear All sent_checks",   "Wipe sent_checks bitmask and goal_complete", CheckDbgClearAll),
         A("Force-Mark All",          "Set every sent_checks bit and goal_complete", CheckDbgForceMarkAll),
         A("Trigger goal_complete",   "Set only goal_complete (sent_checks unchanged)", CheckDbgTriggerGoal),

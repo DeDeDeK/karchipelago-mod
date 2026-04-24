@@ -5,7 +5,7 @@
 #include "main.h"
 #include "gate_topride_stages.h"
 #include "textbox.h"
-#include "mask_fmt.h"
+#include "inline.h"
 
 static const char *topride_stage_names[TOPRIDE_NUM] = {
     [TOPRIDE_GRASS]  = "Grass",

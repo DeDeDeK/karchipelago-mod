@@ -1,8 +1,8 @@
+#include <string.h>
+
 #include "os.h"
 #include "game.h"
-#include "inline.h"
 #include "enemy.h"
-#include "event.h"
 #include "code_patch/code_patch.h"
 
 #include "spawn_enemy.h"

@@ -2,7 +2,6 @@
 
 #include "os.h"
 #include "game.h"
-#include "rider.h"
 #include "projectile.h"
 
 #include "spawn_projectile.h"
@@ -21,7 +20,7 @@
 // detonation logic never runs until a separate throw transition. We don't
 // have a rider to hold them, so we immediately advance to state 1 (THROWN)
 // exactly like the vanilla throw path does.
-static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float distance)
+static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, int throw_state, float distance)
 {
     GOBJ *mg = Ply_GetMachineGObj(ply_idx);
     if (!mg)
@@ -77,24 +76,21 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
     {
         proj->velocity = desc.velocity;
 
-        // State index 1 = "thrown / armed-flying" for BOMB, SENSORBOMB, and
-        // GORDO (see their respective state enums — each defines index 1
-        // as the physics-driven flying state, though with different
-        // state_ids). flags=1 matches vanilla throw: skip the rider-
-        // attached cleanup path that post-init ran for state 0.
-        Projectile_SetState(proj, 1, 1.0f, 1.0f, 1);
+        // flags=1 matches vanilla throw: skip the rider-attached cleanup
+        // path that post-init ran for state 0.
+        Projectile_SetState(proj, throw_state, 1.0f, 1.0f, 1);
     }
     return 1;
 }
 
-static int SpawnForAllHumans(ProjectileKind kind, float distance, const char *label)
+static int SpawnForAllHumans(ProjectileKind kind, int throw_state, float distance, const char *label)
 {
     int spawned = 0;
     for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
-        if (SpawnProjectileForPlayer(i, kind, distance))
+        if (SpawnProjectileForPlayer(i, kind, throw_state, distance))
         {
             OSReport("[SpawnProjectile] %s: spawned on ply %d\n", label, i);
             spawned++;
@@ -105,16 +101,16 @@ static int SpawnForAllHumans(ProjectileKind kind, float distance, const char *la
 
 int SpawnProjectile_BombTrap(void)
 {
-    return SpawnForAllHumans(PROJKIND_BOMB, 60.0f, "BombTrap");
+    return SpawnForAllHumans(PROJKIND_BOMB, BOMB_STATE_THROWN, 60.0f, "BombTrap");
 }
 
 int SpawnProjectile_GordoTrap(void)
 {
-    return SpawnForAllHumans(PROJKIND_GORDO, 60.0f, "GordoTrap");
+    return SpawnForAllHumans(PROJKIND_GORDO, GORDO_STATE_THROWN_ASCENDING, 60.0f, "GordoTrap");
 }
 
 int SpawnProjectile_SensorBombTrap(void)
 {
-    return SpawnForAllHumans(PROJKIND_SENSORBOMB, 60.0f, "SensorBombTrap");
+    return SpawnForAllHumans(PROJKIND_SENSORBOMB, SENSOR_BOMB_STATE_ARMED_FLYING, 60.0f, "SensorBombTrap");
 }
 

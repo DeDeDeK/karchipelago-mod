@@ -7,7 +7,7 @@
 #include "main.h"
 #include "gate_machines.h"
 #include "textbox.h"
-#include "mask_fmt.h"
+#include "inline.h"
 
 static int IsCKindUnlocked(CharacterKind ckind);
 CharacterKind GateMachines_GetDefaultCKind();

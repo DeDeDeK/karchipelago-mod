@@ -7,7 +7,7 @@
 #include "gate_abilities.h"
 #include "textbox.h"
 #include "traplink.h"
-#include "mask_fmt.h"
+#include "inline.h"
 
 static const char *ability_names[COPYKIND_NUM] = {
     [COPYKIND_FIRE]    = "Fire",

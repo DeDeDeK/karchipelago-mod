@@ -1,6 +1,5 @@
 #include "ability_item.h"
 #include "main.h"
-#include "textbox.h"
 
 // Give copy ability to every human Kirby rider via the raw rider API.
 // Used in Air Ride (and as a CT fallback when item data tables are unavailable);

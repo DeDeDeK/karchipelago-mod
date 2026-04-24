@@ -21,9 +21,11 @@
 #include "gate_topride_stages.h"
 #include "gate_topride_items.h"
 #include "gate_colors.h"
+#include "stadium_lock.h"
 #include "spawn_enemy.h"
 #include "spawn_projectile.h"
 #include "spawn_rate.h"
+#include "debug_menu.h"
 #include "main.h"
 
 // Check the mailbox for an incoming item from the AP client.
@@ -186,10 +188,7 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id >= AP_STADIUM_UNLOCK_BASE && ap_item_id < AP_STADIUM_UNLOCK_BASE + STKIND_NUM)
     {
         StadiumKind kind = ap_item_id - AP_STADIUM_UNLOCK_BASE;
-        ap_save->stadium_unlocked_mask |= (1 << kind);
-        Gm_StadiumSetUnlockedDirect(kind);
-        Gm_StadiumSetNewLabelDirect(kind);
-        return 1;
+        return GateStadium_UnlockStadium(kind);
     }
 
     // All remaining items require being in an actual 3D game scene
@@ -231,13 +230,10 @@ int APItems_HandleItem(uint ap_item_id)
         return Event_GiveItem(kind);
     }
 
-    // Custom City Trial event
+    // Custom City Trial event — TODO: re-enable once the custom events
+    // mod is brought back. Acknowledge so the AP queue doesn't retry forever.
     if (ap_item_id == AP_ITEM_EVENT_CUSTOM)
-    {
-        if (custom_events && Gm_GetCurrentGrKind() == GRKIND_CITY1)
-            return custom_events->Do(CUSTOM_EVKIND_GRAVITY_CHANGE);
-        return 0;
-    }
+        return 1;
 
     // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
     // City Trial spawns a real item so the pickup visual plays. Outside City
@@ -344,6 +340,9 @@ void APItems_PerFrame(GOBJ *g)
             // Remove by swapping with last element
             ap_save->unprocessed_count--;
             ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
+            // Mirror any mask changes the grant made back into the debug menu
+            // toggle arrays so the menu display stays in sync.
+            DebugMenu_RefreshStateFromMasks();
             break;
         }
     }

@@ -8,6 +8,7 @@
 #include "code_patch/code_patch.h"
 
 #include "main.h"
+#include "settings_menu.h"
 #include "textbox.h"
 #include "traplink.h"
 #include "ap_item_handler.h"

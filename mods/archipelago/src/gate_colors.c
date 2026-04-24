@@ -4,7 +4,7 @@
 
 #include "main.h"
 #include "gate_colors.h"
-#include "mask_fmt.h"
+#include "inline.h"
 #include "textbox.h"
 
 static const char *color_names[KIRBYCOLOR_NUM] = {

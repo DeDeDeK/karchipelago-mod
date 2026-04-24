@@ -2,6 +2,7 @@
 #include <string.h>
 #include "text.h"
 #include "main.h"
+#include "settings_menu.h"
 #include "text_joint/text_joint.h"
 #include "hoshi/screen_cam.h"
 

@@ -5,7 +5,7 @@
 #include "main.h"
 #include "gate_events.h"
 #include "textbox.h"
-#include "mask_fmt.h"
+#include "inline.h"
 
 static const char *event_names[EVKIND_NUM] = {
     [EVKIND_DYNABLADE]        = "Dyna Blade",
@@ -81,35 +81,12 @@ CODEPATCH_HOOKCREATE(0x800ede24,
 void GateEvents_LogEnabledEvents(void)
 {
     u32 mask = ap_save->event_unlocked_mask;
-    OSReport("[Events] Enabled events (mask=%s):\n", MaskBits(mask, 20));
+    OSReport("[Events] Enabled events (mask=%s):\n", MaskBits(mask, EVKIND_NUM));
     for (int i = 0; i < EVKIND_NUM; i++)
     {
         if (mask & (1 << i))
             OSReport("  [%2d] %s\n", i, event_names[i]);
     }
-    if (custom_events)
-    {
-        for (int i = 0; i < custom_events->event_count; i++)
-        {
-            int bit = EVKIND_NUM + i;
-            OSReport("  [%2d] %s: %s\n", bit, custom_events->params[i].label,
-                     (mask & (1 << bit)) ? "enabled" : "disabled");
-        }
-    }
-}
-
-// Weight filter: gates custom events by AP unlock mask
-static int APEventWeightFilter(int event_index, int default_weight)
-{
-    int bit = EVKIND_NUM + event_index;
-    if (!(ap_save->event_unlocked_mask & (1 << bit)))
-        return 0;
-    return default_weight;
-}
-
-CustomEventWeightFilter GateEvents_GetWeightFilter(void)
-{
-    return APEventWeightFilter;
 }
 
 void GateEvents_OnBoot()
@@ -118,20 +95,21 @@ void GateEvents_OnBoot()
     OSReport("[Events] Event gating hook installed at CityEvent_Decide\n");
 }
 
+void GateEvents_On3DLoadEnd(void)
+{
+    if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
+        GateEvents_LogEnabledEvents();
+}
+
 int GateEvents_UnlockEvent(int kind)
 {
-    const char *name;
-
-    if (kind < EVKIND_NUM)
-        name = event_names[kind];
-    else if (custom_events && kind < CUSTOM_EVKIND_NUM)
-        name = custom_events->params[kind - EVKIND_NUM].label;
-    else
+    if (kind < 0 || kind >= EVKIND_NUM)
         return 0;
 
+    const char *name = event_names[kind];
     ap_save->event_unlocked_mask |= (1 << kind);
     OSReport("[Events] Event %d (%s) unlocked (mask = %s)\n",
-             kind, name, MaskBits(ap_save->event_unlocked_mask, 20));
+             kind, name, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
     TextBox_Enqueue(name);
     return 1;
 }

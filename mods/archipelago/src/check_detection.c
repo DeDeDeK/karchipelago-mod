@@ -1,12 +1,13 @@
 #include "game.h"
 #include "audio.h"
 #include "os.h"
+#include "inline.h"
 #include "code_patch/code_patch.h"
 #include "hoshi/func.h"
 
 #include "main.h"
 #include "check_detection.h"
-#include "checklist_rewards.h"  // for cross_mode_slots, reward_counts
+#include "checklist_rewards.h"
 
 // SFX cue played by the vanilla ClearChecker_SetNewUnlock on a first-this-frame
 // transition. Guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
@@ -23,21 +24,42 @@
 // `stb` of a register holding 1 — after `bl` clobbers the volatile reg we
 // restore it in the epilogue so the trampoline's auto-re-execute writes 1.
 
-// Mirror a sent_checks bit into APData (for the client to read).
-static inline void MirrorSentCheckBit(u8 mode, u8 clear_kind)
+// Bit accessor for sent_checks[mode][2] u64 packing. Mode m, clear_kind k in
+// [0..CLEAR_KIND_NUM-1]: word index = k / 64, bit index = k % 64.
+#define SENT_CHECK_BIT(m, k)  ((ap_save->sent_checks[(m)][(k) >> 6] >> ((k) & 63)) & 1ULL)
+
+// Beat King Dedede goal: CT clear_kind 0x2F
+#define KD_CLEAR_KIND 0x2F
+
+// Forward declaration: defined mid-file, called from earlier helpers.
+static void EvaluateGoal(void);
+
+void CheckDetection_EvaluateGoal(void)
 {
-    ap_data->sent_checks[mode][clear_kind >> 6] |=
-        (1ULL << (clear_kind & 63));
+    EvaluateGoal();
 }
 
-// SWAR popcount for u64. Hand-rolled because the freestanding PPC build has
-// no libgcc helper (__popcountdi2 is undefined at link time).
-static inline int Popcount64(u64 x)
+// Set the sent_checks bit in both save and the shared-memory mirror. No-op if
+// already set. Returns 1 if newly set, 0 if already set (for callers that
+// want to detect transitions).
+static inline int SetSentCheck(u8 mode, u8 clear_kind)
 {
-    x = x - ((x >> 1) & 0x5555555555555555ULL);
-    x = (x & 0x3333333333333333ULL) + ((x >> 2) & 0x3333333333333333ULL);
-    x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
-    return (int)((x * 0x0101010101010101ULL) >> 56);
+    u64 bit = 1ULL << (clear_kind & 63);
+    int word = clear_kind >> 6;
+    if (ap_save->sent_checks[mode][word] & bit)
+        return 0;
+    ap_save->sent_checks[mode][word] |= bit;
+    ap_data->sent_checks[mode][word] |= bit;
+    return 1;
+}
+
+// Clear sent_checks for a single mode in both save and mirror.
+static inline void ClearSentChecksForMode(u8 mode)
+{
+    ap_save->sent_checks[mode][0] = 0;
+    ap_save->sent_checks[mode][1] = 0;
+    ap_data->sent_checks[mode][0] = 0;
+    ap_data->sent_checks[mode][1] = 0;
 }
 
 // popcount the two u64 words covering the 0..CLEAR_KIND_NUM-1 range.
@@ -53,15 +75,24 @@ static void RecordCheck(u8 mode, u8 clear_kind)
 {
     if (mode >= GMMODE_NUM || clear_kind >= CLEAR_KIND_NUM)
         return;
-    if (SENT_CHECK_BIT(mode, clear_kind))
+    if (!SetSentCheck(mode, clear_kind))
         return;
 
-    SET_SENT_CHECK(mode, clear_kind);
-    MirrorSentCheckBit(mode, clear_kind);
+    u8 src_mode, src_ri;
+    if (ChecklistRewards_ResolveCell(mode, clear_kind, &src_mode, &src_ri))
+    {
+        u8 rtype = stc_reward_table_ptrs[src_mode][src_ri].reward_type;
+        OSReport("[Check] mode=%d clear_kind=%d type=%s (0x%02x) recorded\n",
+                 mode, clear_kind,
+                 ChecklistRewards_RewardTypeName(rtype), rtype);
+    }
+    else
+    {
+        OSReport("[Check] mode=%d clear_kind=%d recorded (no local reward placement)\n",
+                 mode, clear_kind);
+    }
 
-    OSReport("[Check] mode=%d clear_kind=0x%02x recorded\n", mode, clear_kind);
-
-    CheckDetection_EvaluateGoal();
+    EvaluateGoal();
     Hoshi_WriteSave();
 }
 
@@ -72,40 +103,30 @@ static void RecordCheck(u8 mode, u8 clear_kind)
 // continues to work normally (including the SFX cue with one-frame cooldown).
 static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
 {
-    // Vanilla short-circuit: when the unlock cache is valid, the function is
-    // a no-op. We still want to record the check regardless of cache state,
-    // so the transition detection runs before the early return.
-    GameClearData *cd = NULL;
-    if ((unsigned)mode < GMMODE_NUM && (unsigned)clear_kind < CLEAR_KIND_NUM)
-    {
-        cd = gmGetClearcheckerTypeP(mode);
-        if (cd && (cd->clear[clear_kind].is_new == 0)
-               && (cd->clear[clear_kind].is_unlocked == 0))
-        {
-            RecordCheck((u8)mode, (u8)clear_kind);
-        }
-    }
-
-    // Vanilla logic: bail if cache valid.
-    if (Checklist_IsCacheValid() != 0)
+    if ((unsigned)mode >= GMMODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
         return;
-
-    // Vanilla OOB handling: the original function prints an assert for
-    // clear_kind >= 120 but still proceeds to index clear[] — we safely
-    // bail here instead.
-    if ((unsigned)clear_kind >= CLEAR_KIND_NUM || (unsigned)mode >= GMMODE_NUM)
-        return;
+    GameClearData *cd = gmGetClearcheckerTypeP(mode);
     if (!cd)
         return;
 
+    int fresh = !cd->clear[clear_kind].is_new && !cd->clear[clear_kind].is_unlocked;
+
+    // Transition detection runs regardless of cache state so AP never misses a check.
+    if (fresh)
+        RecordCheck((u8)mode, (u8)clear_kind);
+
+    // Vanilla short-circuit: when the unlock cache is valid the rest is a no-op.
+    if (Checklist_IsCacheValid() != 0)
+        return;
+
     // Play the unlock SFX at most once per frame (matches vanilla behavior).
-    if ((cd->clear[clear_kind].is_new == 0) && (cd->clear[clear_kind].is_unlocked == 0))
+    if (fresh)
     {
         int frame = ClearChecker_GetFrameIndex();
         if (*stc_clearchecker_sfx_last_frame != frame)
         {
             SFX_PlayFullVolume(CHECKLIST_UNLOCK_SFX);
-            *stc_clearchecker_sfx_last_frame = ClearChecker_GetFrameIndex();
+            *stc_clearchecker_sfx_last_frame = frame;
         }
     }
 
@@ -136,11 +157,15 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
         return ((ap_save->sent_checks[mode][0] & gc[0]) == gc[0])
             && ((ap_save->sent_checks[mode][1] & gc[1]) == gc[1]);
     }
+    case GOAL_MAX_STATS_CT:
+        // Set by goal_max_stats_ct.c when a human player's CT stats all hit
+        // PATCH_STAT_MAX in one trial round. Mode-independent.
+        return ap_save->max_stats_ct_achieved;
     }
     return 0;
 }
 
-void CheckDetection_EvaluateGoal(void)
+static void EvaluateGoal(void)
 {
     if (ap_save->goal_complete)
         return;  // sticky once set
@@ -165,44 +190,6 @@ void CheckDetection_EvaluateGoal(void)
         ap_data->goal_complete = 1;
         OSReport("[Check] GOAL COMPLETE\n");
         Hoshi_WriteSave();
-    }
-}
-
-// Set has_reward on clear[mode][clear_kind] if a received reward is actually
-// placed at this checkbox (either same-mode or cross-mode). Mirrors the logic
-// in ChecklistRewards_Grant but keyed by checkbox instead of reward index.
-static void ApplyBackfillHasReward(GameClearData *cd, u8 mode, u8 clear_kind)
-{
-    // Cross-mode: a reward from another mode is placed here.
-    CrossModeSlot *slot = &cross_mode_slots[mode][clear_kind];
-    if (slot->source_mode != 0xFF)
-    {
-        if (ap_save->received_checklist_rewards[slot->source_mode]
-            & (1ULL << slot->source_reward_index))
-        {
-            cd->clear[clear_kind].has_reward = 1;
-        }
-        return;
-    }
-
-    // Same-mode: scan this mode's save location array for an entry encoding
-    // (mode << 8) | clear_kind. Comparing against the full u16 encoding
-    // avoids the clear_kind=0 sentinel aliasing that a RewardEntry.clear_kind
-    // scan would suffer.
-    u16 *save_arr = ap_save->shuffled_rewards[mode];
-    if (!save_arr)
-        return;
-    u16 target = ((u16)mode << 8) | clear_kind;
-    int count = reward_counts[mode];
-    for (int ri = 0; ri < count; ri++)
-    {
-        if (save_arr[ri] != target)
-            continue;
-        if (ap_save->received_checklist_rewards[mode] & (1ULL << ri))
-        {
-            cd->clear[clear_kind].has_reward = 1;
-        }
-        return;
     }
 }
 
@@ -243,17 +230,18 @@ static void ProcessBackfill(void)
                 if (clear_kind >= CLEAR_KIND_NUM)
                     continue;
 
-                // Set the sent_checks bit (save + mirror).
-                SET_SENT_CHECK(m, clear_kind);
-                MirrorSentCheckBit((u8)m, clear_kind);
+                SetSentCheck((u8)m, clear_kind);
 
-                // Set is_unlocked on the local checklist for visual consistency,
-                // and set has_reward if a local placement exists and its source
-                // item has been received.
+                // Set is_unlocked + is_visible on the local checklist for
+                // visual consistency (is_visible is what the grid actually
+                // renders as revealed), and set has_reward if a local
+                // placement exists and its source item has been received.
                 if (cd)
                 {
                     cd->clear[clear_kind].is_unlocked = 1;
-                    ApplyBackfillHasReward(cd, (u8)m, clear_kind);
+                    cd->clear[clear_kind].is_visible = 1;
+                    if (ChecklistRewards_CellHasReceivedReward((u8)m, clear_kind))
+                        cd->clear[clear_kind].has_reward = 1;
                 }
 
                 processed_any = 1;
@@ -271,7 +259,7 @@ static void ProcessBackfill(void)
     if (processed_any)
     {
         OSReport("[Check] Backfill processed\n");
-        CheckDetection_EvaluateGoal();
+        EvaluateGoal();
         Hoshi_WriteSave();
     }
 }
@@ -290,36 +278,19 @@ static void ProcessBackfill(void)
 //            already drove the cell to a completed state through SetNewUnlock,
 //            and letting the store run would wipe the is_filler indicator
 //            (and any other bits) that no other code path will re-set.
-static int MetaUnlock_AirRide100(void)
-{
-    RecordCheck(GMMODE_AIRRIDE, 0x18);
-    GameClearData *cd = gmGetClearcheckerTypeP(GMMODE_AIRRIDE);
-    return (cd && cd->clear[0x18].is_filler) ? 1 : 0;
-}
-static int MetaUnlock_TopRide100(void)
-{
-    RecordCheck(GMMODE_TOPRIDE, 0x77);
-    GameClearData *cd = gmGetClearcheckerTypeP(GMMODE_TOPRIDE);
-    return (cd && cd->clear[0x77].is_filler) ? 1 : 0;
-}
-static int MetaUnlock_CityTrial100(void)
-{
-    RecordCheck(GMMODE_CITYTRIAL, 0x37);
-    GameClearData *cd = gmGetClearcheckerTypeP(GMMODE_CITYTRIAL);
-    return (cd && cd->clear[0x37].is_filler) ? 1 : 0;
-}
-static int MetaUnlock_CityTrialDragoon(void)
-{
-    RecordCheck(GMMODE_CITYTRIAL, 0x6D);
-    GameClearData *cd = gmGetClearcheckerTypeP(GMMODE_CITYTRIAL);
-    return (cd && cd->clear[0x6D].is_filler) ? 1 : 0;
-}
-static int MetaUnlock_CityTrialHydra(void)
-{
-    RecordCheck(GMMODE_CITYTRIAL, 0x6E);
-    GameClearData *cd = gmGetClearcheckerTypeP(GMMODE_CITYTRIAL);
-    return (cd && cd->clear[0x6E].is_filler) ? 1 : 0;
-}
+#define META_UNLOCK_HANDLER(name, mode, kind)                            \
+    static int name(void)                                                \
+    {                                                                    \
+        RecordCheck((mode), (kind));                                     \
+        GameClearData *cd = gmGetClearcheckerTypeP((mode));              \
+        return (cd && cd->clear[(kind)].is_filler) ? 1 : 0;              \
+    }
+
+META_UNLOCK_HANDLER(MetaUnlock_AirRide100,       GMMODE_AIRRIDE,   0x18)
+META_UNLOCK_HANDLER(MetaUnlock_TopRide100,       GMMODE_TOPRIDE,   0x77)
+META_UNLOCK_HANDLER(MetaUnlock_CityTrial100,     GMMODE_CITYTRIAL, 0x37)
+META_UNLOCK_HANDLER(MetaUnlock_CityTrialDragoon, GMMODE_CITYTRIAL, 0x6D)
+META_UNLOCK_HANDLER(MetaUnlock_CityTrialHydra,   GMMODE_CITYTRIAL, 0x6E)
 
 // Hook sites. Each clobbered instruction is a one-byte store of 1 via a
 // volatile register (r4 for the 100-checklist stores, r0 for the legendary
@@ -379,23 +350,22 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
     if (mode >= GMMODE_NUM)
         return 0;
 
-    APGoalKind goal = (APGoalKind)ap_save->options.goal[mode];
+    GameClearData *cd = gmGetClearcheckerTypeP((GameMode)mode);
+    if (!cd)
+        return 0;
 
-    u8 goal_kinds[CLEAR_KIND_NUM];
-    int goal_count = 0;
+    APGoalKind goal = (APGoalKind)ap_save->options.goal[mode];
     switch (goal)
     {
     case GOAL_HYDRA_AND_DRAGOON:
-        if (mode == GMMODE_CITYTRIAL)
-        {
-            goal_kinds[goal_count++] = 0x6D;  // Dragoon assembly
-            goal_kinds[goal_count++] = 0x6E;  // Hydra assembly
-        }
-        break;
+        if (mode != GMMODE_CITYTRIAL)
+            return 0;
+        return cd->grid_mapping[0x6D] == phys_slot   // Dragoon assembly
+            || cd->grid_mapping[0x6E] == phys_slot;  // Hydra assembly
     case GOAL_BEAT_KING_DEDEDE:
-        if (mode == GMMODE_CITYTRIAL)
-            goal_kinds[goal_count++] = KD_CLEAR_KIND;
-        break;
+        if (mode != GMMODE_CITYTRIAL)
+            return 0;
+        return cd->grid_mapping[KD_CLEAR_KIND] == phys_slot;
     case GOAL_CHECKLIST_LIST:
     {
         // Protect every clear_kind whose bit is set in goal_checks[mode].
@@ -407,24 +377,15 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
             {
                 int bit = __builtin_ctzll(bits);
                 bits &= bits - 1;
-                goal_kinds[goal_count++] = (u8)(w * 64 + bit);
+                if (cd->grid_mapping[(u8)(w * 64 + bit)] == phys_slot)
+                    return 1;
             }
         }
-        break;
+        return 0;
     }
     default:
         return 0;  // count-based or NONE: no specific cell to protect
     }
-
-    GameClearData *cd = gmGetClearcheckerTypeP((GameMode)mode);
-    if (!cd)
-        return 0;
-    for (int i = 0; i < goal_count; i++)
-    {
-        if (cd->grid_mapping[goal_kinds[i]] == phys_slot)
-            return 1;
-    }
-    return 0;
 }
 
 // Hook site: 0x80180A64 (`lbz r3, 20(r31)` — vanilla's mode load at the top
@@ -481,7 +442,7 @@ void CheckDetection_OnSaveLoaded(void)
 
     // Initial goal evaluation in case options changed since last boot or
     // saved checks already satisfy the active goal.
-    CheckDetection_EvaluateGoal();
+    EvaluateGoal();
 
     OSReport("[Check] Loaded sent_checks AR=%d TR=%d CT=%d goal=%d\n",
              PopcountMode(GMMODE_AIRRIDE),
@@ -507,17 +468,18 @@ void CheckDetection_OnBoot(void)
     OSReport("[Check] Hooks installed\n");
 }
 
-void CheckDetection_DebugClearAll(void)
+void CheckDetection_ResetAll(void)
 {
     for (int m = 0; m < GMMODE_NUM; m++)
-    {
-        ap_save->sent_checks[m][0] = 0;
-        ap_save->sent_checks[m][1] = 0;
-        ap_data->sent_checks[m][0] = 0;
-        ap_data->sent_checks[m][1] = 0;
-    }
+        ClearSentChecksForMode((u8)m);
     ap_save->goal_complete = 0;
     ap_data->goal_complete = 0;
+    ap_save->max_stats_ct_achieved = 0;
+}
+
+void CheckDetection_DebugClearAll(void)
+{
+    CheckDetection_ResetAll();
     Hoshi_WriteSave();
     OSReport("[Check] Debug: cleared all sent_checks and goal_complete\n");
 }
@@ -540,6 +502,7 @@ void CheckDetection_DebugForceMarkAll(void)
     }
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;
+    ap_save->max_stats_ct_achieved = 1;
     Hoshi_WriteSave();
     OSReport("[Check] Debug: force-marked all sent_checks and goal_complete\n");
 }
@@ -551,3 +514,4 @@ void CheckDetection_DebugTriggerGoal(void)
     Hoshi_WriteSave();
     OSReport("[Check] Debug: goal_complete forced\n");
 }
+

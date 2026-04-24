@@ -2,6 +2,7 @@
 #include "inline.h"
 #include "patch_item.h"
 #include "main.h"
+#include "settings_menu.h"
 #include "textbox.h"
 #include "item.h"
 #include "machine.h"
@@ -196,12 +197,36 @@ static void PermanentPatch_PerFrame(GOBJ *g)
     PermanentPatch_DoApply();
 }
 
-// Called from On3DLoadEnd to set up the per-frame GObj for round-start application.
-// Caller is responsible for gating by mode + menu toggle — this just applies
-// whatever is in ap_save->permanent_patches[] to all human MachineData, so it
-// works for any 3D mode that has Rider/Machine objects (City Trial and Air Ride).
+// Round-start permanent patch re-application, per-mode menu toggle.
+// City Trial stadium also counts as "in city" for Gm_IsInCity, so split it
+// out via Gm_IsStadiumMode to honor the separate stadium toggle. Free Run
+// never loads item data tables, so inflated stats from perm patches would
+// crash Item_GetItDataPtr on damage-driven patch ejection.
+static int PermanentPatch_ShouldApply(void)
+{
+    if (Gm_IsInCity())
+    {
+        if (Gm_GetCityMode() == CITYMODE_FREERUN)
+        {
+            OSReport("[PermanentPatch] Skipping in Free Run (item data not loaded).\n");
+            return 0;
+        }
+        if (Gm_IsStadiumMode())
+            return ap_menu_settings.ct_stadium_permanent_patches_enabled;
+        return ap_menu_settings.ct_permanent_patches_enabled;
+    }
+    return ap_menu_settings.ar_permanent_patches_enabled;
+}
+
+// Called from On3DLoadEnd to set up the per-frame GObj for round-start
+// application. Applies whatever is in ap_save->permanent_patches[] to all
+// human MachineData, gated by mode + menu toggle. Works for any 3D mode that
+// has Rider/Machine objects (City Trial and Air Ride).
 void PermanentPatch_On3DLoadEnd()
 {
+    if (!PermanentPatch_ShouldApply())
+        return;
+
     // Check if there are any patches to apply
     int total = 0;
     for (int i = 0; i < PATCHKIND_NUM; i++)
