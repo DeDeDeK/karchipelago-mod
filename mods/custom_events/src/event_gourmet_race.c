@@ -19,7 +19,6 @@
 #include "hsd.h"
 
 #include "event_gourmet_race.h"
-#include "spawn_item.h"
 
 // --- Configuration ---
 #define GOURMET_MAX_FOOD            60

@@ -1,10 +1,10 @@
 #include "game.h"
 #include "topride.h"
 #include "inline.h"
-#include "scene.h"
 
 #include "main.h"
 #include "settings_menu.h"
+#include "energylink.h"
 #include "textbox.h"
 
 // Per-player tracking state. Indexed by player index (0-4).
@@ -14,18 +14,33 @@ static int prev_obj_destroyed[5];
 static float prev_stats[5][PATCHKIND_NUM];
 static float prev_charge_value[5];
 
-// Per-player flag: when set, the next EnergyLink_PerFrame call snapshots
-// current stats as the baseline without counting any delta as energy.
-// This prevents permanent patches applied at round start from being
-// counted as generated energy.
+// Per-player flag: when set, the next per-frame call snapshots current stats
+// as the baseline without counting any delta as energy. Prevents permanent
+// patches applied at round start from being counted as generated energy.
 static int needs_baseline[5];
 
-// Shared accumulator — contributions from all players pool into one value
+// Shared accumulator — contributions from all players pool into one value.
+// Buys subtract; the net signed value is flushed to ap_data->energy_send.
 static float energy_send_accumulator;
 
-// Highest 10-unit bucket we've already logged for the current accumulator run.
-// Lets us print progress when the client isn't around to drain the mailbox.
-static int logged_threshold_tens;
+// Last observed value of ap_data->energy_balance. Used to detect AP-side
+// receives (other players' generated energy arriving from the server).
+// Mod-side withdrawals also change the balance; those show up as negative
+// deltas which we silently absorb.
+static float prev_energy_balance;
+
+// Detect a positive delta in ap_data->energy_balance since the last call and
+// announce it once. Idempotent: safe to invoke multiple times per frame from
+// the per-rider procs in CT/AR — only the first call in a frame will see the
+// rise (prev == curr after that).
+static void TrackEnergyReceive(void)
+{
+    float curr = ap_data->energy_balance;
+    float delta = curr - prev_energy_balance;
+    prev_energy_balance = curr;
+    if (delta > 0)
+        TextBox_Enqueue("Received %.0f energy", delta);
+}
 
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units
 #define CHARGE_ENERGY_SCALE 5.0f
@@ -38,24 +53,19 @@ static void FlushEnergy(void)
         ap_data->energy_send = energy_send_accumulator;
         OSReport("[EnergyLink] flushed %f energy to energy_send\n", energy_send_accumulator);
         energy_send_accumulator = 0;
-        logged_threshold_tens = 0;
-        return;
-    }
-
-    int current_tens = (int)(energy_send_accumulator / 10.0f);
-    if (current_tens > logged_threshold_tens)
-    {
-        logged_threshold_tens = current_tens;
-        OSReport("[EnergyLink] accumulator at %.1f (waiting for client)\n", energy_send_accumulator);
     }
 }
 
 // Per-frame proc attached to each human rider GOBJ in Air Ride / City Trial.
 // Tracks objects destroyed, patches collected, and machine charge.
-void EnergyLink_PerFrame(GOBJ *rg)
+static void EnergyLink_PerFrame(GOBJ *rg)
 {
+    TrackEnergyReceive();
+
     RiderData *rd = rg->userdata;
     int ply = rd->ply;
+    GOBJ *mg = rd->machine_gobj;
+    MachineData *md = mg ? mg->userdata : 0;
 
     // On the first frame after intro, snapshot current stats as the baseline
     // so that permanent patches applied at round start aren't counted as energy.
@@ -65,25 +75,17 @@ void EnergyLink_PerFrame(GOBJ *rg)
             return;
         needs_baseline[ply] = 0;
         prev_obj_destroyed[ply] = stc_playerdata[ply].objects_destroyed_num;
-        prev_charge_value[ply] = 0.0f;
         for (int i = 0; i < PATCHKIND_NUM; i++)
             prev_stats[ply][i] = rd->stats.values[i];
-        GOBJ *mg = rd->machine_gobj;
-        if (mg)
-        {
-            MachineData *md = mg->userdata;
-            prev_charge_value[ply] = md->charge_value;
-        }
+        prev_charge_value[ply] = md ? md->charge_value : 0.0f;
         return;
     }
 
-    // Objects destroyed
+    // Objects destroyed (City Trial only — always 0 in Air Ride)
     int diff = stc_playerdata[ply].objects_destroyed_num - prev_obj_destroyed[ply];
     prev_obj_destroyed[ply] = stc_playerdata[ply].objects_destroyed_num;
     if (diff > 0)
-    {
         energy_send_accumulator += diff;
-    }
 
     // Patches collected
     int sum = 0;
@@ -95,50 +97,33 @@ void EnergyLink_PerFrame(GOBJ *rg)
         prev_stats[ply][i] = rd->stats.values[i];
     }
     if (sum > 0)
-    {
         energy_send_accumulator += sum;
-    }
 
-    // Charge gained from holding A — snapshot BEFORE applying received energy
-    GOBJ *mg = rd->machine_gobj;
-    if (mg)
+    // Charge gained from holding A
+    if (md)
     {
-        MachineData *md = mg->userdata;
         float charge_diff = md->charge_value - prev_charge_value[ply];
         if (charge_diff > 0)
-        {
-            float charge_energy = charge_diff * CHARGE_ENERGY_SCALE;
-            energy_send_accumulator += charge_energy;
-        }
+            energy_send_accumulator += charge_diff * CHARGE_ENERGY_SCALE;
         prev_charge_value[ply] = md->charge_value;
     }
 
     FlushEnergy();
 
-    // Auto-charge: spend energy from pool to fill machine charge meter
-    if (ap_menu_settings.energylink_autocharge && mg)
+    // Auto-charge: spend energy from pool to fill machine charge meter.
+    // Computing charge_gain directly avoids the round-trip through SCALE.
+    if (ap_menu_settings.energylink_autocharge && md)
     {
-        MachineData *md = mg->userdata;
         float deficit = 1.0f - md->charge_value;
-        float balance = ap_data->energy_balance;
-        if (deficit > 0 && balance > 0)
+        float max_gain = ap_data->energy_balance / CHARGE_ENERGY_SCALE;
+        float charge_gain = (deficit < max_gain) ? deficit : max_gain;
+        if (charge_gain > 0)
         {
-            // Convert charge units to energy cost
-            float energy_needed = deficit * CHARGE_ENERGY_SCALE;
-            if (energy_needed > balance)
-                energy_needed = balance;
-
-            float charge_gain = energy_needed / CHARGE_ENERGY_SCALE;
             md->charge_value += charge_gain;
-            if (md->charge_value > 1.0f)
-                md->charge_value = 1.0f;
-
-            // Update prev so the injected charge is not re-counted as generated energy
+            // Inject is invisible to next frame's send delta
             prev_charge_value[ply] = md->charge_value;
 
-            // Deduct from balance and queue withdrawal through accumulator
-            ap_data->energy_balance -= energy_needed;
-            energy_send_accumulator -= energy_needed;
+            EnergyLink_Withdraw(charge_gain * CHARGE_ENERGY_SCALE);
         }
     }
 }
@@ -148,6 +133,8 @@ void EnergyLink_PerFrame(GOBJ *rg)
 // Charge value is at TopRideKirby.charge.charge_value (see docs/topride-system.md).
 static void EnergyLink_TopRidePerFrame(GOBJ *g)
 {
+    TrackEnergyReceive();
+
     TopRideKirbyMgr *mgr = *stc_topride_kirbymgr;
     if (!mgr)
         return;
@@ -161,34 +148,33 @@ static void EnergyLink_TopRidePerFrame(GOBJ *g)
         float charge = kirby->charge.charge_value;
         float charge_diff = charge - prev_charge_value[i];
         if (charge_diff > 0)
-        {
-            float charge_energy = charge_diff * CHARGE_ENERGY_SCALE;
-            energy_send_accumulator += charge_energy;
-        }
+            energy_send_accumulator += charge_diff * CHARGE_ENERGY_SCALE;
         prev_charge_value[i] = charge;
     }
 
     FlushEnergy();
 }
 
-static void ResetTracking(void)
+static void ResetTracking(int needs_baseline_value)
 {
     for (int i = 0; i < 5; i++)
     {
         prev_obj_destroyed[i] = 0;
         prev_charge_value[i] = 0.0f;
-        needs_baseline[i] = 1;
+        needs_baseline[i] = needs_baseline_value;
         for (int j = 0; j < PATCHKIND_NUM; j++)
             prev_stats[i][j] = 0.0f;
     }
     energy_send_accumulator = 0;
-    logged_threshold_tens = 0;
+    // Seed at the current balance so the first per-frame call doesn't
+    // treat the carried-over balance as a fresh receive.
+    prev_energy_balance = ap_data->energy_balance;
 }
 
 void EnergyLink_On3DLoadEnd()
 {
     OSReport("[EnergyLink] Active\n");
-    ResetTracking();
+    ResetTracking(1);
 
     // Add the energylink check to all human players in Air Ride / City Trial.
     for (int i = 0; i < 5; i++)
@@ -207,18 +193,31 @@ void EnergyLink_On3DLoadEnd()
 
 void EnergyLink_OnTopRideLoad()
 {
-    ResetTracking();
-
-    // Top Ride has no rider GOBJs, so create a standalone GOBJ for charge tracking.
-    // Baseline is not needed — Top Ride has no patches or intro sequence to skip.
-    for (int i = 0; i < 4; i++)
-        needs_baseline[i] = 0;
-
+    // Top Ride has no patches or intro sequence — no baseline needed.
+    ResetTracking(0);
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, EnergyLink_TopRidePerFrame, 0, 0, 0, 0);
     OSReport("[EnergyLink] Active (Top Ride)\n");
 }
 
 void EnergyLink_Withdraw(float amount)
 {
+    ap_data->energy_balance -= amount;
     energy_send_accumulator -= amount;
+}
+
+void EnergyLink_Deposit(float amount)
+{
+    ap_data->energy_balance += amount;
+}
+
+void EnergyLink_RebaseStats(int ply)
+{
+    if (ply < 0 || ply >= 5)
+        return;
+    GOBJ *r = Ply_GetRiderGObj(ply);
+    if (!r)
+        return;
+    RiderData *rd = r->userdata;
+    for (int i = 0; i < PATCHKIND_NUM; i++)
+        prev_stats[ply][i] = rd->stats.values[i];
 }

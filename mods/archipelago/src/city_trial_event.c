@@ -47,13 +47,11 @@ int Event_GiveItem(EventKind kind)
 {
     if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
     {
-        OSReport("[CTEvent] Attempting to trigger event kind: %d\n", kind);
         if (Event_Do(kind))
         {
-            OSReport("[CTEvent] Event triggered successfully!\n");
+            OSReport("[CTEvent] Event kind %d triggered\n", kind);
             return 1;
         }
-        OSReport("[CTEvent] Failed to trigger event\n");
     }
     return 0;
 }

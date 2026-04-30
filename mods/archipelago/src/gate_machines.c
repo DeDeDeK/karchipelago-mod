@@ -9,47 +9,79 @@
 #include "textbox.h"
 #include "inline.h"
 
-static int IsCKindUnlocked(CharacterKind ckind);
-CharacterKind GateMachines_GetDefaultCKind();
+// Machines that don't naturally spawn in CT: Top Ride stars, transformation
+// forms, and debug wheelie kinds. Force these to 0 chance regardless of mask.
+#define CT_SPAWN_EXCLUDED_MASK \
+    ((1u << VCKIND_FREE)        | \
+     (1u << VCKIND_STEER)       | \
+     (1u << VCKIND_WINGKIRBY)   | \
+     (1u << VCKIND_WHEELNORMAL) | \
+     (1u << VCKIND_WHEELKIRBY)  | \
+     (1u << VCKIND_WHEELDEDEDE) | \
+     (1u << VCKIND_WHEELVSDEDEDE))
 
-static const char *machine_names[VCKIND_NUM] = {
-    [VCKIND_WARP]           = "Warp Star",
-    [VCKIND_COMPACT]        = "Compact Star",
-    [VCKIND_WINGED]         = "Winged Star",
-    [VCKIND_SHADOW]         = "Shadow Star",
-    [VCKIND_HYDRA]          = "Hydra",
-    [VCKIND_BULK]           = "Bulk Star",
-    [VCKIND_SLICK]          = "Slick Star",
-    [VCKIND_FORMULA]        = "Formula Star",
-    [VCKIND_DRAGOON]        = "Dragoon",
-    [VCKIND_WAGON]          = "Wagon Star",
-    [VCKIND_ROCKET]         = "Rocket Star",
-    [VCKIND_SWERVE]         = "Swerve Star",
-    [VCKIND_TURBO]          = "Turbo Star",
-    [VCKIND_JET]            = "Jet Star",
-    [VCKIND_FLIGHT]         = "Flight Warp Star",
-    [VCKIND_FREE]           = "Free Star",
-    [VCKIND_STEER]          = "Steer Star",
-    [VCKIND_WINGKIRBY]      = "Wing Kirby",
-    [VCKIND_WINGMETAKNIGHT] = "Wing Meta Knight",
-    [VCKIND_WHEELNORMAL]    = "Wheel",
-    [VCKIND_WHEELKIRBY]     = "Wheel Kirby",
-    [VCKIND_WHEELIEBIKE]    = "Wheelie Bike",
-    [VCKIND_REXWHEELIE]     = "Rex Wheelie",
-    [VCKIND_WHEELIESCOOTER] = "Wheelie Scooter",
-    [VCKIND_WHEELDEDEDE]    = "Dedede Wheelie",
-    [VCKIND_WHEELVSDEDEDE]  = "VS Dedede Wheelie",
-};
-
-// Convert CharacterDesc fields to the actual MachineKind (VCKIND).
-// For non-bikes, machine_kind IS the VCKIND directly.
-// For bikes, machine_kind is a bike-relative index; the actual VCKIND
-// is VCKIND_WHEELNORMAL + machine_kind.
-static MachineKind CharacterDesc_GetMachineKind(CharacterDesc *desc)
+static int IsCKindUnlocked(CharacterKind ckind)
 {
-    if (desc->is_bike)
-        return VCKIND_WHEELNORMAL + desc->machine_kind;
-    return desc->machine_kind;
+    CharacterDesc *desc = Character_GetDesc(ckind);
+    if (!desc)
+        return 0;
+    MachineKind vckind = CharacterDesc_GetMachineKind(desc);
+    return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
+}
+
+// Get the first unlocked MachineKind, or VCKIND_COMPACT as absolute fallback.
+static MachineKind GetFirstUnlockedMachine()
+{
+    u32 mask = ap_save->machine_unlocked_mask;
+    for (int i = 0; i < VCKIND_NUM; i++)
+    {
+        if (mask & (1 << i))
+            return i;
+    }
+    return VCKIND_COMPACT;
+}
+
+// Default CharacterKind for the City Trial mode-0 CSS init. Prefers Compact
+// Star (vanilla default); when Compact is locked, picks one of the unlocked
+// Kirby-rider CharacterKinds at random.
+//
+// Excludes CKIND_DEDEDE and CKIND_METAKNIGHT: their riders rely on
+// rider-specific HUD assets (`ScInfSpeedd*`, `ScInfHpd*`, etc.) that vanilla's
+// 3D HUD loader explicitly skips in Base CT (`zz_8011878c_` and friends short-
+// circuit when major==CITY && cityMode==TRIAL). Picking those riders here
+// would NULL-deref `3DHud_CreateSpeedometerInner` during scene init. Vanilla
+// only uses Dedede/Meta Knight in stadium contexts where the conversion
+// happens stadium-side, so excluding them from CT-mode-0 selection matches
+// vanilla's own assumption. Compact is always a safe fallback.
+CharacterKind GateMachines_GetDefaultCKind()
+{
+    if (IsCKindUnlocked(CKIND_COMPACT))
+        return CKIND_COMPACT;
+
+    int unlocked_count = 0;
+    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
+    {
+        if (ckind == CKIND_DEDEDE || ckind == CKIND_METAKNIGHT)
+            continue;
+        if (IsCKindUnlocked(ckind))
+            unlocked_count++;
+    }
+
+    if (unlocked_count == 0)
+    {
+        OSReport("[GateMachines] GetDefaultCKind: no Kirby-rider machines unlocked, fallback to Compact\n");
+        return CKIND_COMPACT;
+    }
+
+    int pick = HSD_Randi(unlocked_count);
+    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
+    {
+        if (ckind == CKIND_DEDEDE || ckind == CKIND_METAKNIGHT)
+            continue;
+        if (IsCKindUnlocked(ckind) && pick-- == 0)
+            return ckind;
+    }
+    return CKIND_COMPACT;
 }
 
 // Replace the vanilla spawn selection logic entirely.
@@ -62,37 +94,26 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
     u32 unlocked_mask = ap_save->machine_unlocked_mask;
     vcDataCommon *vc_data_common = (*stc_vcDataCommon);
 
-    // Find spawn table entry for current match progress
     int spawn_table_idx = 0;
     while (match_progress > vc_data_common->spawn_data->spawn_desc[spawn_table_idx].match_progress)
         spawn_table_idx++;
 
-    // Make local copy of spawn chances
     float spawn_chances[VCKIND_NUM];
     for (int i = 0; i < VCKIND_NUM; i++)
         spawn_chances[i] = vc_data_common->spawn_data->spawn_desc[spawn_table_idx].chance[i];
 
-    // Zero locked machines, give unlocked-but-zero-weight machines a base chance
+    // Zero locked machines, give unlocked-but-zero-weight machines a base
+    // chance, then force-zero machines that don't naturally spawn in CT.
     for (int i = 0; i < VCKIND_NUM; i++)
     {
-        if (!(unlocked_mask & (1 << i)))
-            spawn_chances[i] = 0;          // locked: zero out
+        if (CT_SPAWN_EXCLUDED_MASK & (1u << i))
+            spawn_chances[i] = 0;
+        else if (!(unlocked_mask & (1u << i)))
+            spawn_chances[i] = 0;
         else if (spawn_chances[i] == 0)
-            spawn_chances[i] = 10;         // unlocked but zero weight: give base chance
+            spawn_chances[i] = 10;
     }
 
-    // Exclude machines that don't naturally spawn in CT (Top Ride stars,
-    // wing transformations, debug wheelie kinds). Must be after the unlock
-    // loop to override the base chance fallback.
-    spawn_chances[VCKIND_FREE] = 0;
-    spawn_chances[VCKIND_STEER] = 0;
-    spawn_chances[VCKIND_WINGKIRBY] = 0;
-    spawn_chances[VCKIND_WHEELNORMAL] = 0;
-    spawn_chances[VCKIND_WHEELKIRBY] = 0;
-    spawn_chances[VCKIND_WHEELDEDEDE] = 0;
-    spawn_chances[VCKIND_WHEELVSDEDEDE] = 0;
-
-    // Count spawnable machines (nonzero chance after exclusions)
     int spawnable_count = 0;
     for (int i = 0; i < VCKIND_NUM; i++)
     {
@@ -100,15 +121,12 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
             spawnable_count++;
     }
 
-    // No spawnable machines — return Compact Star as a safe fallback
     if (spawnable_count == 0)
-        return VCKIND_COMPACT;
+        return GetFirstUnlockedMachine();
 
-    // Reduce history size when few machines are available to prevent
-    // the only unlocked machine from being excluded by its own history
+    // Reduce history size when few machines are spawnable to prevent
+    // the only candidate from being excluded by its own history.
     int history_size = (spawnable_count <= 4) ? (spawnable_count - 1) : 4;
-
-    // Remove recently spawned machines from candidates
     for (int i = 0; i < VCKIND_NUM; i++)
     {
         for (int j = 0; j < history_size; j++)
@@ -118,7 +136,6 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
         }
     }
 
-    // Weighted random selection
     int machine_kind = VCKIND_COMPACT;
     float chance_total = 0;
     for (int i = 0; i < VCKIND_NUM; i++)
@@ -139,59 +156,6 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
     // History writes are handled by the vanilla code after our skip target
     // (0x801df220 / 0x801df630), which writes r31 to the history buffer.
     return machine_kind;
-}
-
-// Filter the City Trial select screen machine list to only include
-// unlocked machines. Call this after the machine list is populated.
-void GateMachines_FilterSelectList()
-{
-    GameData *gd = Gm_GetGameData();
-    if (!gd)
-        return;
-
-    u8 *arr = gd->city_select_ply.machine_select.c_kind_arr;
-    u8 num = gd->city_select_ply.machine_select.num;
-    u32 mask = ap_save->machine_unlocked_mask;
-    u8 write = 0;
-
-    for (u8 read = 0; read < num; read++)
-    {
-        CharacterDesc *desc = Character_GetDesc(arr[read]);
-        if (!desc)
-            continue;
-
-        MachineKind vckind = CharacterDesc_GetMachineKind(desc);
-        if (!(mask & (1 << vckind)))
-            continue;
-
-        if (write != read)
-            arr[write] = arr[read];
-        write++;
-    }
-
-    // Ensure at least one machine is selectable
-    if (write == 0 && num > 0)
-    {
-        arr[0] = arr[0]; // keep first entry as fallback
-        write = 1;
-    }
-
-    gd->city_select_ply.machine_select.num = write;
-
-    // City Trial mode 0: fix the initial ply_icon_ckind for all players.
-    // CitySelect_LoadCityTrial hardcodes it to CKIND_COMPACT (0); override
-    // with the correct default so the CSS icon matches the starting machine.
-    // Note: Gm_GetCityMode() reads GameData[0x399] which isn't set during CSS;
-    // use city_select_ply.x1d0 (GameData[0x1D0]) which is set by the CSS loader.
-    if (gd->city_select_ply.x1d0 == CITYMODE_TRIAL)
-    {
-        CharacterKind default_ckind = GateMachines_GetDefaultCKind();
-        for (int i = 0; i < 4; i++)
-        {
-            if (!IsCKindUnlocked(gd->city_select_ply.ply_icon_ckind[i]))
-                gd->city_select_ply.ply_icon_ckind[i] = default_ckind;
-        }
-    }
 }
 
 // Replace the spawn selection in CityMachineSpawn_DecideAndSpawn (0x801defac).
@@ -216,20 +180,9 @@ CODEPATCH_HOOKCREATE(0x801df44c,
     0x801df630
 )
 
-// Check if a CharacterKind's machine is unlocked.
-static int IsCKindUnlocked(CharacterKind ckind)
-{
-    CharacterDesc *desc = Character_GetDesc(ckind);
-    if (!desc)
-        return 0;
-    MachineKind vckind = CharacterDesc_GetMachineKind(desc);
-    return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
-}
-
 // Count unlocked characters for City Trial select screens.
 // Replaces the mode 1 (Stadium) and mode 2 (Free Run) counting passes
 // in CitySelect_CreateMachineIcons.
-// Iterates all 20 CharacterKinds and counts those whose machines are unlocked.
 int GateMachines_CountCTSelectAvailable()
 {
     int count = 0;
@@ -283,13 +236,17 @@ CODEPATCH_HOOKCREATE(0x8002e4d0,
 // Hook at 0x8002e67c: mode 1 (Stadium) array-building pass.
 // At entry: r29 = local_41 (char array), r28 = local_48 (row counts).
 // r26 and r31 are set from r29/r28 inside the loop, but we skip the loop entirely.
-// Exit to 0x8002e820: into the reordering code that reads from the stack arrays.
+// Exit to 0x8002f0b8: past the vanilla reorder/balance block. The reorder is
+// designed around vanilla's grid iteration (special chars at fixed col 0/9
+// positions) — our packed arrays violate that assumption and trigger a
+// duplicate-icon bug when only DEDEDE/METAKNIGHT are unlocked. The flat-copy
+// at 0x8002f0b8 reads our row_counts + char_arr directly, no reorder needed.
 CODEPATCH_HOOKCREATE(0x8002e67c,
     "mr 3, 29\n\t"
     "mr 4, 28\n\t",
     GateMachines_BuildCTSelectArray,
     "",
-    0x8002e820
+    0x8002f0b8
 )
 
 // Hook at 0x8002e5c0: mode 2 (Free Run) counting pass in CitySelect_CreateMachineIcons.
@@ -310,54 +267,14 @@ CODEPATCH_HOOKCREATE(0x8002e5c0,
 // We replace the entire array-building loop with our filtered version.
 // Clobbered: or r26, r29, r29 (mr r26, r29 — harmless for the reordering code
 // which reads from stack, not r26).
-// Exit to 0x8002e820: into the reordering code that reads from the stack arrays.
+// Exit to 0x8002f0b8: see the mode-1 hook above for the reorder-bypass rationale.
 CODEPATCH_HOOKCREATE(0x8002e738,
     "mr 3, 29\n\t"
     "mr 4, 28\n\t",
     GateMachines_BuildCTSelectArray,
     "",
-    0x8002e820
+    0x8002f0b8
 )
-
-// Get the first unlocked MachineKind, or VCKIND_COMPACT as absolute fallback.
-static MachineKind GetFirstUnlockedMachine()
-{
-    u32 mask = ap_save->machine_unlocked_mask;
-    for (int i = 0; i < VCKIND_NUM; i++)
-    {
-        if (mask & (1 << i))
-            return i;
-    }
-    return VCKIND_COMPACT;
-}
-
-// Get the default CharacterKind for City Trial mode 0.
-// Prefers Compact Star (vanilla default); falls back to a random unlocked machine.
-CharacterKind GateMachines_GetDefaultCKind()
-{
-    if (IsCKindUnlocked(CKIND_COMPACT))
-        return CKIND_COMPACT;
-
-    // Build list of unlocked CKinds and pick one at random
-    CharacterKind unlocked[CKIND_NUM];
-    int count = 0;
-    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
-    {
-        if (IsCKindUnlocked(ckind))
-            unlocked[count++] = ckind;
-    }
-
-    if (count > 0)
-    {
-        CharacterKind chosen = unlocked[HSD_Randi(count)];
-        OSReport("[GateMachines] GateMachines_GetDefaultCKind: Compact locked, chose ckind %d from %d unlocked (mask=%s)\n",
-                 chosen, count, MaskBits(ap_save->machine_unlocked_mask, 32));
-        return chosen;
-    }
-
-    OSReport("[GateMachines] GateMachines_GetDefaultCKind: no machines unlocked, fallback to Compact\n");
-    return CKIND_COMPACT;
-}
 
 // Replace the respawn machine assignment in Rider_ResetStartingMachine.
 // Vanilla hardcodes VCKIND_COMPACT; we use the rider's starting_machine_idx
@@ -384,8 +301,9 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
 
 // Hook at 0x8002de80 in CitySelect_InitPlayerMachines.
 // Vanilla hardcodes ply_icon_ckind = 0 (CKIND_COMPACT) for City Trial mode 0.
-// We replace it with the first unlocked CharacterKind so players start on an
-// unlocked machine. r28 = city_select_ply + player_offset (callee-saved).
+// We replace it with GateMachines_GetDefaultCKind() (Compact if unlocked, else
+// random unlocked) so players start on an unlocked machine. r28 = city_select_ply
+// + player_offset (callee-saved).
 // Skipped instructions: stb r0,97(r28) and b 0x8002dea0 — we handle both.
 CODEPATCH_HOOKCREATE(0x8002de80,
     "",
@@ -397,6 +315,9 @@ CODEPATCH_HOOKCREATE(0x8002de80,
 // Hook at 0x801952c8 in Rider_ResetStartingMachine.
 // At entry: r31 = RiderData*. Replaces the two Ply_Set calls (is_bike=0,
 // machine_kind=COMPACT) with our validated selection.
+// Vanilla signature is Rider_ResetStartingMachine(RiderData *rd, int unk_arg2);
+// our replacement only consumes rd — the prologue gating (which uses arg2)
+// runs unmodified before this hook point, so we don't need it.
 // Skip to 0x801952e0: the function epilogue.
 CODEPATCH_HOOKCREATE(0x801952c8,
     "mr 3, 31\n\t",
@@ -471,7 +392,7 @@ void GateMachines_OnBoot()
     // Respawn machine validation: use starting machine instead of hardcoded Compact
     CODEPATCH_HOOKAPPLY(0x801952c8);
 
-    OSReport("[GateMachines] Machine gating hooks installed (CT spawn + CT mode 0 default + CT Stadium + CT Free Run + AR select + respawn)\n");
+    OSReport("[GateMachines] Hooks installed\n");
 }
 
 int GateMachines_UnlockMachine(MachineKind kind)
@@ -481,19 +402,21 @@ int GateMachines_UnlockMachine(MachineKind kind)
 
     ap_save->machine_unlocked_mask |= (1 << kind);
     OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n",
-             kind, machine_names[kind], MaskBits(ap_save->machine_unlocked_mask, 32));
-    TextBox_Enqueue(machine_names[kind]);
+             kind, MachineKind_Names[kind], MaskBits(ap_save->machine_unlocked_mask, 32));
+    TextBox_Enqueue(MachineKind_Names[kind]);
     return 1;
 }
 
 // Give a player the assembled legendary machine via the cinematic.
 // machine_index: 0 = Dragoon, 1 = Hydra.
 // Returns 1 if started, 0 if in an unsupported mode or no machine to swap from.
-// Top Ride has no MachineData / Rider pipeline, so the assembly cinematic cannot run there.
+// City Trial only: Top Ride has no MachineData / Rider pipeline, and the
+// assembly cinematic crashes on Air Ride courses (legendary machines have no
+// AR course support — see docs/gate-machines.md).
 int GateMachines_GiveLegendaryMachine(int machine_index)
 {
     MajorKind major = Scene_GetCurrentMajor();
-    if (major != MJRKIND_CITY && major != MJRKIND_AIR)
+    if (major != MJRKIND_CITY)
         return 0;
 
     int given = 0;

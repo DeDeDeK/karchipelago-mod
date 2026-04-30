@@ -7,7 +7,7 @@
 #include "item.h"
 #include "machine.h"
 #include "os.h"
-#include "spawn_item.h"
+#include "energylink.h"
 
 // Map PatchKind to the matching "+1" ITKIND. Same ordering as PatchKind.
 static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
@@ -47,6 +47,12 @@ int Patch_GiveItem(PatchKind kind, int num)
         {
             MachineData *md = mg->userdata;
             Machine_GivePatch(md, kind, num);
+            // Stats just changed; mask from EnergyLink so the receive doesn't
+            // refund energy back into the pool. The CT spawn-pickup branch
+            // also applies same-frame (SpawnItemPlayer drives
+            // Machine_OnTouchItem for non-fake kinds) but doesn't rebase yet
+            // — see docs/energylink.md.
+            EnergyLink_RebaseStats(i);
         }
         OSReport("[PatchItem] Giving %d patches of kind %d to player %d (%s)...\n",
                  num, kind, i, use_item_spawn ? "item" : "direct");
@@ -76,6 +82,7 @@ int Patch_AllUp_GiveItem(int num)
         {
             MachineData *md = mg->userdata;
             Machine_GiveAllUp(md, num);
+            EnergyLink_RebaseStats(i);
         }
         OSReport("[PatchItem] Giving %d all ups to player %d (%s)...\n",
                  num, i, use_item_spawn ? "item" : "direct");
@@ -98,8 +105,9 @@ int Patch_DropTrap()
         if (!rg)
             continue;
         RiderData *rd = rg->userdata;
-        Rider_DropPatches(rd, rd->stats.values, 1);
-        OSReport("[PatchItem] Drop-patches trap applied to player %d\n", i);
+        int drop_mode = HSD_Randi(3);
+        Rider_DropPatches(rd, rd->stats.values, drop_mode);
+        OSReport("[PatchItem] Drop-patches trap applied to player %d (mode %d)\n", i, drop_mode);
         dropped = 1;
     }
     return dropped;
@@ -113,6 +121,8 @@ int PermanentPatch_GiveItem(PatchKind kind)
         ap_save->permanent_patches[kind]++;
 
     OSReport("[PatchItem] Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
+    if (kind < PATCHKIND_NUM)
+        TextBox_Enqueue("Permanent +1 %s", PatchKind_Names[kind]);
     return Patch_GiveItem(kind, 1);
 }
 
@@ -127,6 +137,7 @@ int PermanentPatch_GiveAllUp()
     }
 
     OSReport("[PatchItem] Permanent all-up received.\n");
+    TextBox_Enqueue("Permanent +1 All Up");
     return Patch_AllUp_GiveItem(1);
 }
 

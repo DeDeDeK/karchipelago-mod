@@ -46,7 +46,9 @@ MODS_ROOT_DIR = mods
 
 # --- Derived Variables ---
 # INCLUDES: Transforms include paths into compiler -I flags
-INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) -I$(MODS_ROOT_DIR)/custom_events/include
+INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) \
+           -I$(MODS_ROOT_DIR)/custom_events/include \
+           -I$(MODS_ROOT_DIR)/archipelago/include
 
 # --- Source File Discovery ---
 
@@ -54,8 +56,19 @@ INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) -I$(MODS_ROOT_DIR)/custom_events/inclu
 LIB_SOURCES := $(shell find $(LIB_ROOT_DIR) -name "*.c")
 
 # 2. Mods: Find all mods in the mod folder
-MOD_NAMES ?= $(notdir $(wildcard $(MODS_ROOT_DIR)/*))
+# EXCLUDE_MODS lists mod folders to drop from the build (comma- or
+# space-separated). Override on the command line: `make package EXCLUDE_MODS=`
+# to include everything, or `EXCLUDE_MODS=foo,bar` to drop additional mods.
+# custom_events is excluded by default while it remains WIP and not wired up to
+# the archipelago mod.
+EXCLUDE_MODS ?= custom_events
+MOD_NAMES ?= $(filter-out $(subst $(comma),$(space),$(EXCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
 #MOD_NAMES = city_settings credits
+
+# Helpers for the EXCLUDE_MODS comma-to-space substitution above.
+comma := ,
+empty :=
+space := $(empty) $(empty)
 
 # 3. Mods Source: For each mod, find its specific source files within its 'src' subdirectory.
 MOD_C_SOURCES := $(foreach mod,$(MOD_NAMES),\

@@ -20,32 +20,6 @@ static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] 
     { TRITEM_MIKE,   COPYKIND_MIC },
 };
 
-
-static const char *topride_item_names[TRITEM_NUM] = {
-    [TRITEM_HAMMER]       = "TR Hammer",
-    [TRITEM_GROW]         = "TR Grow",
-    [TRITEM_SPEEDUP]      = "TR Speed Up",
-    [TRITEM_SPEEDDOWN]    = "TR Speed Down",
-    [TRITEM_BOOST_SAW]    = "TR Boost Saw",
-    [TRITEM_CHARGEBOOST]  = "TR Charge Boost",
-    [TRITEM_INVINCIBLE]   = "TR Invincible Candy",
-    [TRITEM_BUZZSAW]      = "TR Buzz Saw",
-    [TRITEM_SPEAR]        = "TR Spear",
-    [TRITEM_FREEZE]       = "TR Freeze",
-    [TRITEM_MISSILE]      = "TR Missile",
-    [TRITEM_FIRE]         = "TR Fire",
-    [TRITEM_NEEDLE]       = "TR Needle",
-    [TRITEM_BOMB]         = "TR Bomb",
-    [TRITEM_LANDMINE]     = "TR Land Mine",
-    [TRITEM_LANTERN]      = "TR Lantern",
-    [TRITEM_MIKE]         = "TR Mike",
-    [TRITEM_CRACKER]      = "TR Cracker",
-    [TRITEM_WHO_PAINT]    = "TR Who? Paint",
-    [TRITEM_SMOKESCREEN]  = "TR Smoke Screen",
-    [TRITEM_CHICKIE]      = "TR Chickie",
-    [TRITEM_BACKWARD]     = "TR Backward",
-};
-
 // Bitmask of ability-themed TR items — these are not gated by topride_item_unlocked_mask.
 #define ABILITY_ITEM_BITS ( \
     (1 << TRITEM_FREEZE) | (1 << TRITEM_FIRE) | (1 << TRITEM_NEEDLE) | \
@@ -114,7 +88,7 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
     if (mgr->enabled_mask & (1 << item_kind))
         return 0;
     OSReport("[TopRideItems] Blocked spawn of locked kind %d (%s)\n",
-             item_kind, topride_item_names[item_kind]);
+             item_kind, TopRideItemKind_Names[item_kind]);
     return 1;
 }
 
@@ -166,8 +140,8 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind)
 
     ap_save->topride_item_unlocked_mask |= (1 << kind);
     OSReport("[TopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
-             kind, topride_item_names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
-    TextBox_Enqueue(topride_item_names[kind]);
+             kind, TopRideItemKind_Names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
+    TextBox_Enqueue("TR %s", TopRideItemKind_Names[kind]);
     return 1;
 }
 
@@ -198,7 +172,7 @@ int GateTopRideItems_GiveItem(TopRideItemKind kind)
         TopRideItem_SpawnAtPosition(item_mgr, kind, &pos, &orient, 0, 1);
         spawned = 1;
         OSReport("[TopRideItems] Spawned TR item %d (%s) at player %d\n",
-                 kind, topride_item_names[kind], i);
+                 kind, TopRideItemKind_Names[kind], i);
     }
     topride_spawn_bypass = 0;
     return spawned;

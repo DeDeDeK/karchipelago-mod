@@ -10,18 +10,6 @@
 // GatePatches_FilterEventDropTables are invoked externally by item_spawn_filter.c
 // alongside the other gate filter functions (abilities, items).
 
-static const char *patch_names[PATCHKIND_NUM] = {
-    [PATCHKIND_WEIGHT]   = "Weight Patch",
-    [PATCHKIND_ACCEL]    = "Boost Patch",
-    [PATCHKIND_TOPSPEED] = "Top Speed Patch",
-    [PATCHKIND_TURN]     = "Turn Patch",
-    [PATCHKIND_CHARGE]   = "Charge Patch",
-    [PATCHKIND_GLIDE]    = "Glide Patch",
-    [PATCHKIND_OFFENSE]  = "Offense Patch",
-    [PATCHKIND_DEFENSE]  = "Defense Patch",
-    [PATCHKIND_HP]       = "HP Patch",
-};
-
 // Map ITKIND stat patch items (up, down, fake) to their PatchKind.
 // Returns -1 for non-patch items.
 static int ItemKindToPatchKind(u8 it_kind)
@@ -102,10 +90,10 @@ void GatePatches_FilterEventDropTables()
         int pk = ItemKindToPatchKind(info->item_desc->event_source_drop[i].it_kind);
         if (pk >= 0 && !(mask & (1 << pk)))
         {
-            info->item_desc->event_source_drop[i].chance_misc = 0;
+            info->item_desc->event_source_drop[i].chance_dyna = 0;
             info->item_desc->event_source_drop[i].chance_tac = 0;
             info->item_desc->event_source_drop[i].chance_meteor = 0;
-            info->item_desc->event_source_drop[i].chance_pilar = 0;
+            info->item_desc->event_source_drop[i].chance_destructible = 0;
             info->item_desc->event_source_drop[i].chance_chamber = 0;
             info->item_desc->event_source_drop[i].chance_ufo = 0;
         }
@@ -114,12 +102,9 @@ void GatePatches_FilterEventDropTables()
 
 int GatePatches_UnlockPatch(PatchKind kind)
 {
-    if (kind >= PATCHKIND_NUM)
-        return 0;
-
     ap_save->patch_unlocked_mask |= (1 << kind);
     OSReport("[GatePatches] Patch %d (%s) unlocked (mask = %s)\n",
-             kind, patch_names[kind], MaskBits(ap_save->patch_unlocked_mask, 16));
-    TextBox_Enqueue(patch_names[kind]);
+             kind, PatchKind_Names[kind], MaskBits(ap_save->patch_unlocked_mask, 16));
+    TextBox_Enqueue("%s Patch", PatchKind_Names[kind]);
     return 1;
 }

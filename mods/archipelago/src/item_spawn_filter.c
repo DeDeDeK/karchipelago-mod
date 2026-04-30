@@ -6,7 +6,6 @@
 #include "gate_abilities.h"
 #include "gate_patches.h"
 #include "gate_items.h"
-#include "gate_boxes.h"
 
 // Central spawn table filter — called from hooks after the game populates
 // item spawn tables (CityItemSpawn_InitItemFallChances, CityEvent_ModifyItemFallDesc).
@@ -25,9 +24,6 @@ static void FilterAllSpawnTables()
     GateAbilities_FilterEventDropTables();
     GatePatches_FilterEventDropTables();
     GateItems_FilterEventDropTables();
-
-    // Update which box types still have valid items after filtering
-    GateBoxes_UpdateItemAvailability();
 }
 
 // Hook at end of CityItemSpawn_InitItemFallChances (0x800eb558).

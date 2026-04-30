@@ -7,25 +7,6 @@
 #include "textbox.h"
 #include "inline.h"
 
-static const char *event_names[EVKIND_NUM] = {
-    [EVKIND_DYNABLADE]        = "Dyna Blade",
-    [EVKIND_TAC]              = "Tac",
-    [EVKIND_METEOR]           = "Meteor",
-    [EVKIND_PILLAR]           = "Pillar",
-    [EVKIND_RUNAMOK]          = "Run Amok",
-    [EVKIND_RESTORATIONAREA]  = "Restoration Area",
-    [EVKIND_RAILFIRE]         = "Rail Fire",
-    [EVKIND_SAMEITEM]         = "All Same Item",
-    [EVKIND_LIGHTHOUSE]       = "Lighthouse",
-    [EVKIND_SECRETCHAMBER]    = "Secret Chamber",
-    [EVKIND_PREDICTION]       = "Prediction",
-    [EVKIND_MACHINEFORMATION] = "Machine Formation",
-    [EVKIND_UFO]              = "UFO",
-    [EVKIND_BOUNCE]           = "Bounce",
-    [EVKIND_FOG]              = "Fog",
-    [EVKIND_FAKEPOWERUPS]     = "Fake Powerups",
-};
-
 // Called from the hook at 0x800ede24 in CityEvent_Decide.
 // At this point, the local chance array on the stack has been populated from the
 // weights table but history adjustments have not yet been applied.
@@ -57,11 +38,11 @@ void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
         ev_chk->prev_kind_num = max_history;
 
     OSReport("[Events] CityEvent_Decide called: mask=%s, enabled=%d, history=%d->%d\n",
-             MaskBits(mask, 20), enabled_count, old_history, ev_chk->prev_kind_num);
+             MaskBits(mask, EVKIND_NUM), enabled_count, old_history, ev_chk->prev_kind_num);
     for (int i = 0; i < EVKIND_NUM; i++)
     {
         if (chance_arr[i] > 0)
-            OSReport("  [%2d] %s: weight=%d\n", i, event_names[i], chance_arr[i]);
+            OSReport("  [%2d] %s: weight=%d\n", i, EventKind_Names[i], chance_arr[i]);
     }
 }
 
@@ -78,27 +59,10 @@ CODEPATCH_HOOKCREATE(0x800ede24,
     0
 )
 
-void GateEvents_LogEnabledEvents(void)
-{
-    u32 mask = ap_save->event_unlocked_mask;
-    OSReport("[Events] Enabled events (mask=%s):\n", MaskBits(mask, EVKIND_NUM));
-    for (int i = 0; i < EVKIND_NUM; i++)
-    {
-        if (mask & (1 << i))
-            OSReport("  [%2d] %s\n", i, event_names[i]);
-    }
-}
-
 void GateEvents_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800ede24);
     OSReport("[Events] Event gating hook installed at CityEvent_Decide\n");
-}
-
-void GateEvents_On3DLoadEnd(void)
-{
-    if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
-        GateEvents_LogEnabledEvents();
 }
 
 int GateEvents_UnlockEvent(int kind)
@@ -106,7 +70,7 @@ int GateEvents_UnlockEvent(int kind)
     if (kind < 0 || kind >= EVKIND_NUM)
         return 0;
 
-    const char *name = event_names[kind];
+    const char *name = EventKind_Names[kind];
     ap_save->event_unlocked_mask |= (1 << kind);
     OSReport("[Events] Event %d (%s) unlocked (mask = %s)\n",
              kind, name, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));

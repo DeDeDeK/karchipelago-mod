@@ -7,60 +7,38 @@
 #include "textbox.h"
 #include "inline.h"
 
-static const char *topride_stage_names[TOPRIDE_NUM] = {
-    [TOPRIDE_GRASS]  = "Grass",
-    [TOPRIDE_SAND]   = "Sand",
-    [TOPRIDE_SKY]    = "Sky",
-    [TOPRIDE_FIRE]   = "Fire",
-    [TOPRIDE_LIGHT]  = "Light",
-    [TOPRIDE_WATER]  = "Water",
-    [TOPRIDE_METAL]  = "Metal",
-};
-
-// Returns 1 if unlocked, 0 if locked.
-// Courses >= TOPRIDE_NUM (e.g., random button at position 7) are only
-// available if at least one course is unlocked, to prevent selecting
-// random with no valid candidates.
+// Returns 1 if the course at index `course` is unlocked, 0 otherwise.
+// Callers must pre-check the random-button case (course >= TOPRIDE_NUM).
 static int GateTopRideStages_CheckCourseUnlocked(int course)
 {
-    if (course < 0)
-        return 0;
-    if (course >= TOPRIDE_NUM)
-        return ap_save->topride_stage_unlocked_mask != 0 ? 1 : 0;
     return (ap_save->topride_stage_unlocked_mask & (1 << course)) ? 1 : 0;
 }
 
-// Adjusts the cursor at GameData[0xf8] to skip locked courses.
-// Scans forward (wrapping 0-7) until an unlocked course or the random
-// button (position 7, only if any courses are unlocked) is found.
+// True if the given grid position is currently selectable: an unlocked course,
+// or the random button when at least one course is unlocked.
+static int IsGridPosSelectable(int pos)
+{
+    if (pos >= TOPRIDE_NUM)
+        return ap_save->topride_stage_unlocked_mask != 0;
+    return GateTopRideStages_CheckCourseUnlocked(pos);
+}
+
+// Adjusts the cursor on the Top Ride CSS to skip locked courses.
+// Scans forward (wrapping 0-7) until a selectable position is found.
 static void AdjustCursorToUnlocked(void)
 {
-    u8 *cursor_ptr = &((u8 *)Gm_GetGameData())[0xf8];
+    if (!ap_save)
+        return;
+    u8 *cursor_ptr = &Gm_GetGameData()->topride_course_select.cursor;
     int pos = *cursor_ptr;
-    int any_unlocked = ap_save->topride_stage_unlocked_mask != 0;
 
-    // Random button is valid only if at least one course is unlocked
-    if (pos >= TOPRIDE_NUM && any_unlocked)
+    if (IsGridPosSelectable(pos))
         return;
 
-    // Already on an unlocked course
-    if (pos < TOPRIDE_NUM && GateTopRideStages_CheckCourseUnlocked(pos))
-        return;
-
-    // Scan forward, wrapping through all 8 positions
     for (int i = 1; i <= 8; i++)
     {
         int next = (pos + i) % 8;
-        if (next >= TOPRIDE_NUM)
-        {
-            if (any_unlocked)
-            {
-                *cursor_ptr = (u8)next;
-                return;
-            }
-            continue;
-        }
-        if (GateTopRideStages_CheckCourseUnlocked(next))
+        if (IsGridPosSelectable(next))
         {
             *cursor_ptr = (u8)next;
             return;
@@ -68,18 +46,17 @@ static void AdjustCursorToUnlocked(void)
     }
 }
 
-// --- Course Select Screen (minor scene 7, zz_8003c8bc_) ---
+// Course Select Screen (minor scene 7, TopRide_CourseSelectThink @ 0x8003c8bc)
 // Grid has 8 positions: 0-6 = courses, 7 = random button.
 // Grid-to-course table at 0x805d51a8: identity for 0-6, position 7 = value 8.
 
 // Hook 1: A-button launch (0x8003ca78: andi. r0, r7, 0x1160).
 // Returns 0 = allow (unlocked or random with candidates), 1 = block (locked).
-int GateTopRideStages_CourseSelectCanLaunch(void)
+static int GateTopRideStages_CourseSelectCanLaunch(void)
 {
-    int cursor_pos = ((u8 *)Gm_GetGameData())[0xf8];
-    if (cursor_pos >= TOPRIDE_NUM)
-        return ap_save->topride_stage_unlocked_mask != 0 ? 0 : 1;
-    return GateTopRideStages_CheckCourseUnlocked(cursor_pos) ? 0 : 1;
+    if (!ap_save)
+        return 1;
+    return IsGridPosSelectable(Gm_GetGameData()->topride_course_select.cursor) ? 0 : 1;
 }
 
 CODEPATCH_HOOKCONDITIONALCREATE(
@@ -94,10 +71,10 @@ CODEPATCH_HOOKCONDITIONALCREATE(
 );
 
 // Hook 2: Cursor movement convergence (0x8003cd18: lbz r0, 0x2(r31)).
-// All D-pad movement paths write to GameData[0xf8] then converge here.
-// We adjust the cursor before the game reads it, so locked positions are
-// skipped and the visual update highlights the corrected position.
-void GateTopRideStages_SkipLockedCursor(void)
+// All D-pad movement paths write to topride_course_select.cursor then
+// converge here. We adjust the cursor before the game reads it, so locked
+// positions are skipped and the visual update highlights the corrected position.
+static void GateTopRideStages_SkipLockedCursor(void)
 {
     AdjustCursorToUnlocked();
 }
@@ -112,7 +89,7 @@ CODEPATCH_HOOKCREATE(
 
 // Replaces the HSD_Randi(7) call at 0x8003c798 in TopRide_CourseSelectRandomInit.
 // The vanilla random loop picks from all 7 courses and only checks a "used" history
-// bitmask (GameData+0xFE), with no unlock check. Our replacement picks only from
+// bitmask (topride_course_select.used_history_mask), with no unlock check. Our replacement picks only from
 // courses that are both unlocked AND not in the used history. If all unlocked courses
 // are used, it resets the used bits for unlocked courses so the cycle can restart.
 // The vanilla loop at 0x8003c7a0 re-checks the used mask after we return — since we
@@ -120,8 +97,9 @@ CODEPATCH_HOOKCREATE(
 static int GateTopRideStages_RandomPick(int unused)
 {
     (void)unused;
-    GameData *gd = Gm_GetGameData();
-    u16 *used_ptr = (u16 *)((u8 *)gd + 0xFE);
+    if (!ap_save)
+        return 0;
+    u16 *used_ptr = &Gm_GetGameData()->topride_course_select.used_history_mask;
     u16 used = *used_ptr;
     u16 unlock = ap_save->topride_stage_unlocked_mask & 0x7F;
 
@@ -138,7 +116,6 @@ static int GateTopRideStages_RandomPick(int unused)
     if (count == 0)
     {
         *used_ptr = used & ~unlock;
-        count = 0;
         for (int i = 0; i < TOPRIDE_NUM; i++)
         {
             if (unlock & (1 << i))
@@ -183,7 +160,7 @@ int GateTopRideStages_UnlockStage(int course)
 
     ap_save->topride_stage_unlocked_mask |= (1 << course);
     OSReport("[TopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
-             course, topride_stage_names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
-    TextBox_Enqueue(topride_stage_names[course]);
+             course, TopRideCourse_Names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
+    TextBox_Enqueue(TopRideCourse_Names[course]);
     return 1;
 }

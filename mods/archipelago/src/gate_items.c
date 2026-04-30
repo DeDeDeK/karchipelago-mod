@@ -7,42 +7,45 @@
 #include "textbox.h"
 #include "inline.h"
 
-#define LEGENDARY_DRAGOON_ENABLE_OFFSET 0x38
-#define LEGENDARY_HYDRA_ENABLE_OFFSET   0x70
-#define LEGENDARY_ENABLE_BIT            0x40
-
-static const char *item_names[ITUNLOCK_NUM] = {
-    [ITUNLOCK_ALLUP]            = "All Up",
-    [ITUNLOCK_SPEEDMAX]         = "Speed Max",
-    [ITUNLOCK_SPEEDMIN]         = "Speed Min",
-    [ITUNLOCK_OFFENSEMAX]       = "Offense Max",
-    [ITUNLOCK_DEFENSEMAX]       = "Defense Max",
-    [ITUNLOCK_CHARGEMAX]        = "Charge Max",
-    [ITUNLOCK_CHARGENONE]       = "No Charge",
-    [ITUNLOCK_CANDY]            = "Candy",
-    [ITUNLOCK_FOODMAXIMTOMATO]  = "Maxim Tomato",
-    [ITUNLOCK_FOODENERGYDRINK]  = "Energy Drink",
-    [ITUNLOCK_FOODICECREAM]     = "Ice Cream",
-    [ITUNLOCK_FOODRICEBALL]     = "Rice Ball",
-    [ITUNLOCK_FOODCHICKEN]      = "Chicken",
-    [ITUNLOCK_FOODCURRY]        = "Curry",
-    [ITUNLOCK_FOODRAMEN]        = "Ramen",
-    [ITUNLOCK_FOODOMELET]       = "Omelet",
-    [ITUNLOCK_FOODHAMBURGER]    = "Hamburger",
-    [ITUNLOCK_FOODSUSHI]        = "Sushi",
-    [ITUNLOCK_FOODHOTDOG]       = "Hot Dog",
-    [ITUNLOCK_FOODAPPLE]        = "Apple",
-    [ITUNLOCK_FIREWORKS]        = "Fireworks",
-    [ITUNLOCK_PANICSPIN]        = "Panic Spin",
-    [ITUNLOCK_TIMEBOMB]         = "Time Bomb",
-    [ITUNLOCK_GORDO]            = "Gordo",
-    [ITUNLOCK_HYDRA1]           = "Hydra Piece 1",
-    [ITUNLOCK_HYDRA2]           = "Hydra Piece 2",
-    [ITUNLOCK_HYDRA3]           = "Hydra Piece 3",
-    [ITUNLOCK_DRAGOON1]         = "Dragoon Piece 1",
-    [ITUNLOCK_DRAGOON2]         = "Dragoon Piece 2",
-    [ITUNLOCK_DRAGOON3]         = "Dragoon Piece 3",
+// 1-to-1 inverse of ItemKindToUnlockBit. Lets us reuse hoshi's ItemKind_Names
+// for display rather than maintaining a parallel name table here.
+static const ItemKind itunlock_to_itkind[ITUNLOCK_NUM] = {
+    [ITUNLOCK_ALLUP]            = ITKIND_ALLUP,
+    [ITUNLOCK_SPEEDMAX]         = ITKIND_SPEEDMAX,
+    [ITUNLOCK_SPEEDMIN]         = ITKIND_SPEEDMIN,
+    [ITUNLOCK_OFFENSEMAX]       = ITKIND_OFFENSEMAX,
+    [ITUNLOCK_DEFENSEMAX]       = ITKIND_DEFENSEMAX,
+    [ITUNLOCK_CHARGEMAX]        = ITKIND_CHARGEMAX,
+    [ITUNLOCK_CHARGENONE]       = ITKIND_CHARGENONE,
+    [ITUNLOCK_CANDY]            = ITKIND_CANDY,
+    [ITUNLOCK_FOODMAXIMTOMATO]  = ITKIND_FOODMAXIMTOMATO,
+    [ITUNLOCK_FOODENERGYDRINK]  = ITKIND_FOODENERGYDRINK,
+    [ITUNLOCK_FOODICECREAM]     = ITKIND_FOODICECREAM,
+    [ITUNLOCK_FOODRICEBALL]     = ITKIND_FOODRICEBALL,
+    [ITUNLOCK_FOODCHICKEN]      = ITKIND_FOODCHICKEN,
+    [ITUNLOCK_FOODCURRY]        = ITKIND_FOODCURRY,
+    [ITUNLOCK_FOODRAMEN]        = ITKIND_FOODRAMEN,
+    [ITUNLOCK_FOODOMELET]       = ITKIND_FOODOMELET,
+    [ITUNLOCK_FOODHAMBURGER]    = ITKIND_FOODHAMBURGER,
+    [ITUNLOCK_FOODSUSHI]        = ITKIND_FOODSUSHI,
+    [ITUNLOCK_FOODHOTDOG]       = ITKIND_FOODHOTDOG,
+    [ITUNLOCK_FOODAPPLE]        = ITKIND_FOODAPPLE,
+    [ITUNLOCK_FIREWORKS]        = ITKIND_FIREWORKS,
+    [ITUNLOCK_PANICSPIN]        = ITKIND_PANICSPIN,
+    [ITUNLOCK_TIMEBOMB]         = ITKIND_TIMEBOMB,
+    [ITUNLOCK_GORDO]            = ITKIND_GORDO,
+    [ITUNLOCK_HYDRA1]           = ITKIND_HYDRA1,
+    [ITUNLOCK_HYDRA2]           = ITKIND_HYDRA2,
+    [ITUNLOCK_HYDRA3]           = ITKIND_HYDRA3,
+    [ITUNLOCK_DRAGOON1]         = ITKIND_DRAGOON1,
+    [ITUNLOCK_DRAGOON2]         = ITKIND_DRAGOON2,
+    [ITUNLOCK_DRAGOON3]         = ITKIND_DRAGOON3,
 };
+
+static const char *ItemUnlockName(ItemUnlockKind kind)
+{
+    return ItemKind_Names[itunlock_to_itkind[kind]];
+}
 
 // Map non-patch, non-copy ItemKinds to their individual unlock bit.
 // Returns -1 for items not gated by this system.
@@ -145,10 +148,10 @@ void GateItems_FilterEventDropTables()
         int bit = ItemKindToUnlockBit(info->item_desc->event_source_drop[i].it_kind);
         if (bit >= 0 && !(mask & (1 << bit)))
         {
-            info->item_desc->event_source_drop[i].chance_misc = 0;
+            info->item_desc->event_source_drop[i].chance_dyna = 0;
             info->item_desc->event_source_drop[i].chance_tac = 0;
             info->item_desc->event_source_drop[i].chance_meteor = 0;
-            info->item_desc->event_source_drop[i].chance_pilar = 0;
+            info->item_desc->event_source_drop[i].chance_destructible = 0;
             info->item_desc->event_source_drop[i].chance_chamber = 0;
             info->item_desc->event_source_drop[i].chance_ufo = 0;
         }
@@ -157,7 +160,7 @@ void GateItems_FilterEventDropTables()
 
 // Disable legendary piece spawns when all pieces of a type are locked.
 // Called via hook after LegendaryPieces_Init sets up spawn data.
-void GateItems_FilterLegendaryPieces()
+static void GateItems_FilterLegendaryPieces()
 {
     LegendaryPieceData *lpd = *stc_legendary_piece_data;
     if (!lpd)
@@ -168,16 +171,14 @@ void GateItems_FilterLegendaryPieces()
     u32 dragoon_bits = (1 << ITUNLOCK_DRAGOON1) | (1 << ITUNLOCK_DRAGOON2) | (1 << ITUNLOCK_DRAGOON3);
     if (!(mask & dragoon_bits))
     {
-        u8 *status = (u8 *)lpd + LEGENDARY_DRAGOON_ENABLE_OFFSET;
-        *status &= ~LEGENDARY_ENABLE_BIT;
+        lpd->machine[0].is_enabled = 0;
         OSReport("[GateItems] Legendary Dragoon disabled (no pieces unlocked)\n");
     }
 
     u32 hydra_bits = (1 << ITUNLOCK_HYDRA1) | (1 << ITUNLOCK_HYDRA2) | (1 << ITUNLOCK_HYDRA3);
     if (!(mask & hydra_bits))
     {
-        u8 *status = (u8 *)lpd + LEGENDARY_HYDRA_ENABLE_OFFSET;
-        *status &= ~LEGENDARY_ENABLE_BIT;
+        lpd->machine[1].is_enabled = 0;
         OSReport("[GateItems] Legendary Hydra disabled (no pieces unlocked)\n");
     }
 }
@@ -191,10 +192,31 @@ CODEPATCH_HOOKCREATE(0x800ec284,
     0
 )
 
+// Wrapper for LegendaryPiece_MarkAsSpawned. Patched in via REPLACECALL at the
+// two `bl` sites inside CityItemSpawn_SpawnLegendaryPiece (Dragoon at
+// 0x800ed41c, Hydra at 0x800ed49c). If the piece's ITKIND is locked, we skip
+// the call and the spawner box keeps its default forced_item (-1 = random
+// pool roll). The legendary spawn slot is "consumed" (next_piece_index still
+// advances in the caller), so the player won't be able to collect that piece
+// until the AP unlock arrives in a later round.
+static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
+{
+    int bit = ItemKindToUnlockBit(item_kind);
+    if (bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit)))
+    {
+        OSReport("[GateItems] Legendary piece %d (%s) locked — skipping spawn\n",
+                 item_kind, ItemUnlockName(bit));
+        return;
+    }
+    LegendaryPiece_MarkAsSpawned(spawner, item_kind);
+}
+
 void GateItems_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800ec284);
-    OSReport("[GateItems] Legendary piece gating hook installed\n");
+    CODEPATCH_REPLACECALL(0x800ed41c, GateItems_MarkAsSpawnedGated); // Dragoon piece bl
+    CODEPATCH_REPLACECALL(0x800ed49c, GateItems_MarkAsSpawnedGated); // Hydra piece bl
+    OSReport("[GateItems] Legendary piece gating hooks installed\n");
 }
 
 int GateItems_UnlockItem(ItemUnlockKind kind)
@@ -204,7 +226,7 @@ int GateItems_UnlockItem(ItemUnlockKind kind)
 
     ap_save->item_unlocked_mask |= (1 << kind);
     OSReport("[GateItems] Item %d (%s) unlocked (mask = %s)\n",
-             kind, item_names[kind], MaskBits(ap_save->item_unlocked_mask, 32));
-    TextBox_Enqueue(item_names[kind]);
+             kind, ItemUnlockName(kind), MaskBits(ap_save->item_unlocked_mask, 32));
+    TextBox_Enqueue(ItemUnlockName(kind));
     return 1;
 }

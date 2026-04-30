@@ -1,5 +1,6 @@
 #include "ability_item.h"
 #include "main.h"
+#include "textbox.h"
 
 // Give copy ability to every human Kirby rider via the raw rider API.
 // Used in Air Ride (and as a CT fallback when item data tables are unavailable);
@@ -7,6 +8,7 @@
 // the pickup visual plays. Skips non-Kirby riders and players with no rider GObj.
 int Ability_GiveItem(CopyKind copy_kind)
 {
+    int applied = 0;
     for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
@@ -17,9 +19,16 @@ int Ability_GiveItem(CopyKind copy_kind)
         RiderData *rd = rg->userdata;
         if (!rd || rd->kind != RDKIND_KIRBY)
             continue;
+        // Off-vehicle riders crash inside the new ability's anim callbacks,
+        // which deref rd->machine_gobj (e.g. sleep -> Rider_CopyInputToMachine).
+        if (!Rider_IsOnMachine(rd))
+            continue;
         OSReport("[AbilityItem] Giving ability %d to player %d...\n", copy_kind, rd->ply);
         Rider_GiveAbility(rd, copy_kind);
+        applied = 1;
     }
+    if (applied && copy_kind < COPYKIND_NUM && CopyKind_Names[copy_kind])
+        TextBox_Enqueue("Got %s ability!", CopyKind_Names[copy_kind]);
     return 1;
 }
 

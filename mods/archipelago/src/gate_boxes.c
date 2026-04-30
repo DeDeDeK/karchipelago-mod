@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "game.h"
 #include "hsd.h"
 #include "os.h"
@@ -8,36 +10,17 @@
 #include "inline.h"
 #include "textbox.h"
 
-// Tracks whether each box type has at least one item with chance > 0
-// after all spawn table filtering. Updated by GateBoxes_UpdateItemAvailability().
-static u8 stc_box_has_items[BOXKIND_NUM];
-
-static const char *box_names[BOXKIND_NUM] = {
-    [BOXKIND_BLUE]  = "Blue Box",
-    [BOXKIND_GREEN] = "Green Box",
-    [BOXKIND_RED]   = "Red Box",
-};
-
-// Check each box type's spawn pool after all item filtering.
-// A box type is disabled if it has no items with chance > 0.
-void GateBoxes_UpdateItemAvailability()
+// True if the post-filter pool for `box` still has at least one item with chance > 0.
+// Other gating systems (abilities/patches/items) zero entries in this pool, so a
+// box color may end up empty even when its bit in box_unlocked_mask is set.
+static int BoxHasItems(grBoxGeneObj *obj, int box)
 {
-    grBoxGeneObj *obj = *stc_grBoxGeneObj;
-    if (!obj)
-        return;
-
-    for (int box = 0; box < BOXKIND_NUM; box++)
+    for (int i = 0; i < obj->item_group_spawn[box].num; i++)
     {
-        stc_box_has_items[box] = 0;
-        for (int i = 0; i < obj->item_group_spawn[box].num; i++)
-        {
-            if (obj->item_group_spawn[box].chance[i] > 0)
-            {
-                stc_box_has_items[box] = 1;
-                break;
-            }
-        }
+        if (obj->item_group_spawn[box].chance[i] > 0)
+            return 1;
     }
+    return 0;
 }
 
 // Replacement for GrBoxGeneratorDetermine (0x800ebc04).
@@ -48,25 +31,23 @@ void GateBoxes_UpdateItemAvailability()
 int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (!info || !info->item_desc || !info->item_desc->box_spawn_chances)
+    grBoxGeneObj *obj = *stc_grBoxGeneObj;
+    if (!info || !info->item_desc || !info->item_desc->box_spawn_chances || !obj)
         return -1;
 
-    u8 *src = (u8 *)info->item_desc->box_spawn_chances;
     u8 chances[9];
-    u8 mask = ap_save->box_unlocked_mask;
+    memcpy(chances, info->item_desc->box_spawn_chances, 9);
 
-    // Copy chances, zeroing out locked colors and colors with no items
+    u8 mask = ap_save->box_unlocked_mask;
     for (int color = 0; color < BOXKIND_NUM; color++)
     {
-        int enabled = (mask & (1 << color)) && stc_box_has_items[color];
-        for (int size = 0; size < 3; size++)
-        {
-            int idx = color * 3 + size;
-            chances[idx] = enabled ? src[idx] : 0;
-        }
+        if ((mask & (1 << color)) && BoxHasItems(obj, color))
+            continue;
+        chances[color * 3 + 0] = 0;
+        chances[color * 3 + 1] = 0;
+        chances[color * 3 + 2] = 0;
     }
 
-    // Sum all chances
     int total = 0;
     for (int i = 0; i < 9; i++)
         total += chances[i];
@@ -74,7 +55,6 @@ int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
     if (total == 0)
         return -1;
 
-    // Weighted random selection
     int roll = HSD_Randi(total);
     int cumulative = 0;
     int selected = 0;
@@ -106,7 +86,7 @@ int GateBoxes_UnlockBox(BoxKind kind)
 
     ap_save->box_unlocked_mask |= (1 << kind);
     OSReport("[GateBoxes] Box %d (%s) unlocked (mask = %s)\n",
-             kind, box_names[kind], MaskBits(ap_save->box_unlocked_mask, 8));
-    TextBox_Enqueue(box_names[kind]);
+             kind, BoxKind_Names[kind], MaskBits(ap_save->box_unlocked_mask, 8));
+    TextBox_Enqueue(BoxKind_Names[kind]);
     return 1;
 }

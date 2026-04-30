@@ -4,7 +4,6 @@
 #include "item.h"
 
 void GateBoxes_OnBoot();
-void GateBoxes_UpdateItemAvailability();
 int GateBoxes_UnlockBox(BoxKind kind);
 
 #endif

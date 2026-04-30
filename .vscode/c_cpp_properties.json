@@ -8,7 +8,9 @@
                 "${workspaceFolder}/externals/devkitpro/devkitPPC/include/**", 
                 "${workspaceFolder}/externals/hoshi/include/**", 
                 "${workspaceFolder}/externals/hoshi/Lib/**",
-                "${workspaceFolder}/mods/custom_events/include"
+                "${workspaceFolder}/mods/custom_events/include",
+                "${workspaceFolder}/mods/archipelago/include",
+                "${workspaceFolder}/mods/**/src"
             ],
             "defines": ["HW_DOL", "_DEBUG", "_UNICODE", "WIN32", "ARM7", "ARM9"],
             "compilerPath": "${workspaceFolder}/externals/devkitpro/devkitPPC/bin/powerpc-eabi-gcc",

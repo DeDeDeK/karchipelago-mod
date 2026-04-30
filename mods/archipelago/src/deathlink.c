@@ -28,11 +28,11 @@ static void SendDeathLink(int ply)
 
 // Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0 — fires when Machine_IsDead returns
 // true (HP death). Does NOT fire for fall deaths (different bit in md->x0C35).
-void Rider_OnDeath(RiderData *rd)
+static void DeathLink_OnHpDeath(RiderData *rd)
 {
     SendDeathLink(rd->ply);
 }
-CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", Rider_OnDeath, "", 0)
+CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", DeathLink_OnHpDeath, "", 0)
 
 // Hook inside Machine_SetFallDead (0x801e6540) — fires when a machine falls out of
 // bounds. At this point r31 = MachineData* and rider_gobj is known non-null.
@@ -92,7 +92,7 @@ static void KillPlayer(RiderData *rd, MachineData *md)
 }
 
 // Check for deathlink receive and kill all human players
-void DeathLink_PerFrame(GOBJ *g)
+static void DeathLink_PerFrame(GOBJ *g)
 {
     if (Gm_GetIntroState() != GMINTRO_END)
         return;

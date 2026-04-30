@@ -5,49 +5,22 @@
 
 #include "main.h"
 #include "gate_abilities.h"
+#include "ability_item.h"
 #include "textbox.h"
 #include "traplink.h"
 #include "inline.h"
 
-static const char *ability_names[COPYKIND_NUM] = {
-    [COPYKIND_FIRE]    = "Fire",
-    [COPYKIND_WHEEL]   = "Wheel",
-    [COPYKIND_SLEEP]   = "Sleep",
-    [COPYKIND_SWORD]   = "Sword",
-    [COPYKIND_BOMB]    = "Bomb",
-    [COPYKIND_PLASMA]  = "Plasma",
-    [COPYKIND_NEEDLE]  = "Needle",
-    [COPYKIND_MIC]     = "Mic",
-    [COPYKIND_ICE]     = "Ice",
-    [COPYKIND_TORNADO] = "Tornado",
-    [COPYKIND_BIRD]    = "Wing",
-};
-
+// Caller-side bounds checks ensure kind is in [0, COPYKIND_NUM).
 static int IsAbilityUnlocked(CopyKind kind)
 {
-    if (kind < 0 || kind >= COPYKIND_NUM)
-        return 1;
     return (ap_save->ability_unlocked_mask & (1 << kind)) != 0;
 }
 
-// Map ITKIND_COPY* to CopyKind. Returns COPYKIND_NONE for non-copy items.
-static CopyKind ItemKindToCopyKind(u8 it_kind)
+// Returns 1 if the item kind maps to a locked copy ability.
+static int IsCopyItemLocked(u8 it_kind)
 {
-    switch (it_kind)
-    {
-        case ITKIND_COPYFIRE:    return COPYKIND_FIRE;
-        case ITKIND_COPYTIRE:    return COPYKIND_WHEEL;
-        case ITKIND_COPYSLEEP:   return COPYKIND_SLEEP;
-        case ITKIND_COPYSWORD:   return COPYKIND_SWORD;
-        case ITKIND_COPYBOMB:    return COPYKIND_BOMB;
-        case ITKIND_COPYPLASMA:  return COPYKIND_PLASMA;
-        case ITKIND_COPYSPIKE:   return COPYKIND_NEEDLE;
-        case ITKIND_COPYMIC:     return COPYKIND_MIC;
-        case ITKIND_COPYICE:     return COPYKIND_ICE;
-        case ITKIND_COPYTORNADO: return COPYKIND_TORNADO;
-        case ITKIND_COPYBIRD:    return COPYKIND_BIRD;
-        default:                 return COPYKIND_NONE;
-    }
+    CopyKind ck = Ability_ItKindToCopyKind(it_kind);
+    return ck != COPYKIND_NONE && !IsAbilityUnlocked(ck);
 }
 
 // Remove locked copy items from a spawn pool in-place.
@@ -58,8 +31,7 @@ static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_n
 
     for (u8 read = 0; read < num; read++)
     {
-        CopyKind ck = ItemKindToCopyKind(pool_kinds[read]);
-        if (ck != COPYKIND_NONE && !IsAbilityUnlocked(ck))
+        if (IsCopyItemLocked(pool_kinds[read]))
             continue;
 
         if (write != read)
@@ -75,7 +47,7 @@ static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_n
 
 // Removes locked copy abilities from the event-source drop table.
 // Zeroes all drop chances (misc/tac/meteor/pilar/chamber/ufo) for any entry
-// whose item kind maps to a locked ability. Called by item_spawn_filter.c.
+// whose item kind maps to a locked ability. Sole caller: item_spawn_filter.c.
 void GateAbilities_FilterEventDropTables()
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
@@ -84,13 +56,12 @@ void GateAbilities_FilterEventDropTables()
 
     for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
     {
-        CopyKind ck = ItemKindToCopyKind(info->item_desc->event_source_drop[i].it_kind);
-        if (ck != COPYKIND_NONE && !IsAbilityUnlocked(ck))
+        if (IsCopyItemLocked(info->item_desc->event_source_drop[i].it_kind))
         {
-            info->item_desc->event_source_drop[i].chance_misc = 0;
+            info->item_desc->event_source_drop[i].chance_dyna = 0;
             info->item_desc->event_source_drop[i].chance_tac = 0;
             info->item_desc->event_source_drop[i].chance_meteor = 0;
-            info->item_desc->event_source_drop[i].chance_pilar = 0;
+            info->item_desc->event_source_drop[i].chance_destructible = 0;
             info->item_desc->event_source_drop[i].chance_chamber = 0;
             info->item_desc->event_source_drop[i].chance_ufo = 0;
         }
@@ -98,6 +69,7 @@ void GateAbilities_FilterEventDropTables()
 }
 
 // Removes locked copy abilities from all box spawn pools.
+// Sole caller: item_spawn_filter.c.
 void GateAbilities_FilterSpawnTables()
 {
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
@@ -135,11 +107,15 @@ int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
     if (kind >= 0 && kind < COPYKIND_NUM && !IsAbilityUnlocked(kind))
         return 0;
 
-    // Traplink send: getting sleep from an enemy/item is a natural trap
-    if (kind == COPYKIND_SLEEP && !Ply_CheckIfCPU(rd->ply))
+    int result = Rider_GiveAbility(rd, kind);
+
+    // Traplink send: getting sleep from an enemy/item is a natural trap.
+    // Only send on a successful grant — Rider_GiveAbility can return 0 if the
+    // rider is in an unable state, and we don't want to send phantom traps.
+    if (result && kind == COPYKIND_SLEEP && !Ply_CheckIfCPU(rd->ply))
         TrapLink_Send();
 
-    return Rider_GiveAbility(rd, kind);
+    return result;
 }
 
 // Pick a random unlocked ability. Returns -1 if none are unlocked.
@@ -150,7 +126,7 @@ static int RandomUnlockedAbility()
 
     for (int i = 0; i < COPYKIND_NUM; i++)
     {
-        if (IsAbilityUnlocked(i) && stc_ability_init_table[i] != NULL)
+        if (IsAbilityUnlocked(i))
             unlocked[count++] = i;
     }
 
@@ -169,13 +145,13 @@ static int RandomUnlockedAbility()
 // kind so the obtained-abilities bitmask tracks correctly.
 int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 {
-    if (kind == -1)
+    if (kind < 0 || kind >= COPYKIND_NUM)
         return 0;
 
-    if (kind >= 0 && kind < COPYKIND_NUM && !IsAbilityUnlocked(kind))
+    if (!IsAbilityUnlocked(kind))
         kind = RandomUnlockedAbility();
 
-    if (kind == -1 || stc_ability_init_table[kind] == NULL)
+    if (kind == -1)
         return 0;
 
     Rider_AbilityRemoveModel(rd);
@@ -186,133 +162,55 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
     return 1;
 }
 
-
-// Enemy data table at 0x804b22b4. Each entry is {int data_index, int flags}.
-// data_index identifies the enemy type (archive to load).
-// flags selects the tier variant (0=base, 1=enhanced, 2/3/4=special).
-// Maps enemy_id → ability theme (CopyKind). Used to filter ability-themed enemies
-// from spawn tables when their ability is locked. The copy chance wheel is random
-// for all enemies — this table is about visual theming, not actual granted abilities.
-//
-// Enemy ID table layout (0x804b22b4):
-//   IDs 0-23:  Tier 0 (flags=0) — base enemies
-//   IDs 24-47: Tier 1 (flags=1) — enhanced variants
-//   IDs 48-71: Tier 2 (flags=1) — enhanced variants
-//   IDs 72-78: Special enemies
-// Each tier has 24 slots mapping to data_indices: 0,0,1,1,2,3,4,4,5,6,7,8,9,10,11,12,13,13,14,14,15,16,17,18
-//
-// Tier 1/2 enemies share the same archive as tier 0 but load different model/stat
-// data via the flags field. Some tier 1/2 COPYKIND_NONE enemies become ability-themed
-// variants (e.g., tier 1 Phan Phan = Heat PhanPhan, fire-themed).
-#define T0(slot) (slot)
-#define T1(slot) (24 + (slot))
-#define T2(slot) (48 + (slot))
-static const s8 enemy_id_to_copykind[ACTORID_NUM] = {
-    // Tier 0 (IDs 0-23, base enemies)
-    [T0(0)]  = COPYKIND_NONE,    // Broom Hatter
-    [T0(1)]  = COPYKIND_NONE,    // Broom Hatter (dup)
-    [T0(2)]  = COPYKIND_NONE,    // Bronto Burt
-    [T0(3)]  = COPYKIND_NONE,    // Bronto Burt (dup)
-    [T0(4)]  = COPYKIND_NONE,    // Scarfy
-    [T0(5)]  = COPYKIND_SWORD,   // Sword Knight
-    [T0(6)]  = COPYKIND_NONE,    // Cappy
-    [T0(7)]  = COPYKIND_NONE,    // Cappy (flags=4)
-    [T0(8)]  = COPYKIND_WHEEL,   // Wheelie
-    [T0(9)]  = COPYKIND_FIRE,    // Phan Phan (same Fire ability as T1 Heat Phan-Phan; shares data_index 6)
-    [T0(10)] = COPYKIND_SLEEP,   // Noddy
-    [T0(11)] = COPYKIND_ICE,     // Chilly
-    [T0(12)] = COPYKIND_BIRD,    // Flappy
-    [T0(13)] = COPYKIND_PLASMA,  // Plasma Wisp
-    [T0(14)] = COPYKIND_NONE,    // Gordo
-    [T0(15)] = COPYKIND_BOMB,    // Bomber
-    [T0(16)] = COPYKIND_NEEDLE,  // Pichikuri
-    [T0(17)] = COPYKIND_NEEDLE,  // Pichikuri (dup)
-    [T0(18)] = COPYKIND_FIRE,    // Dayl (fire enemy)
-    [T0(19)] = COPYKIND_FIRE,    // Dayl (flags=4)
-    [T0(20)] = COPYKIND_TORNADO, // Caller (internal: Shaturn)
-    [T0(21)] = COPYKIND_MIC,     // Walky
-    [T0(22)] = COPYKIND_NONE,    // Waddle Dee Truck
-    [T0(23)] = COPYKIND_NONE,    // Waddle Dee
-
-    // Tier 1 (IDs 24-47, enhanced variants)
-    [T1(0)]  = COPYKIND_NONE,    // Broom Hatter
-    [T1(1)]  = COPYKIND_NONE,    // Broom Hatter (dup)
-    [T1(2)]  = COPYKIND_NONE,    // Bronto Burt
-    [T1(3)]  = COPYKIND_NONE,    // Bronto Burt (dup)
-    [T1(4)]  = COPYKIND_NONE,    // Scarfy
-    [T1(5)]  = COPYKIND_SWORD,   // Sword Knight
-    [T1(6)]  = COPYKIND_NONE,    // Cappy
-    [T1(7)]  = COPYKIND_NONE,    // Cappy (flags=4)
-    [T1(8)]  = COPYKIND_WHEEL,   // Wheelie
-    [T1(9)]  = COPYKIND_FIRE,    // Heat PhanPhan (tier 1 Phan Phan)
-    [T1(10)] = COPYKIND_SLEEP,   // Noddy
-    [T1(11)] = COPYKIND_ICE,     // Chilly
-    [T1(12)] = COPYKIND_BIRD,    // Flappy
-    [T1(13)] = COPYKIND_PLASMA,  // Plasma Wisp
-    [T1(14)] = COPYKIND_NONE,    // Gordo
-    [T1(15)] = COPYKIND_BOMB,    // Bomber
-    [T1(16)] = COPYKIND_NEEDLE,  // Pichikuri
-    [T1(17)] = COPYKIND_NEEDLE,  // Pichikuri (dup)
-    [T1(18)] = COPYKIND_FIRE,    // Dayl
-    [T1(19)] = COPYKIND_FIRE,    // Dayl (flags=4)
-    [T1(20)] = COPYKIND_TORNADO, // Caller
-    [T1(21)] = COPYKIND_MIC,     // Walky
-    [T1(22)] = COPYKIND_NONE,    // Waddle Dee Truck
-    [T1(23)] = COPYKIND_NONE,    // Waddle Dee
-
-    // Tier 2 (IDs 48-71, enhanced variants)
-    [T2(0)]  = COPYKIND_NONE,    // Broom Hatter
-    [T2(1)]  = COPYKIND_NONE,    // Broom Hatter (dup)
-    [T2(2)]  = COPYKIND_NONE,    // Bronto Burt
-    [T2(3)]  = COPYKIND_NONE,    // Bronto Burt (dup)
-    [T2(4)]  = COPYKIND_NONE,    // Scarfy
-    [T2(5)]  = COPYKIND_SWORD,   // Sword Knight
-    [T2(6)]  = COPYKIND_NONE,    // Cappy
-    [T2(7)]  = COPYKIND_NONE,    // Cappy (flags=4)
-    [T2(8)]  = COPYKIND_WHEEL,   // Wheelie
-    [T2(9)]  = COPYKIND_FIRE,    // Heat PhanPhan (tier 2 Phan Phan)
-    [T2(10)] = COPYKIND_SLEEP,   // Noddy
-    [T2(11)] = COPYKIND_ICE,     // Chilly
-    [T2(12)] = COPYKIND_BIRD,    // Flappy
-    [T2(13)] = COPYKIND_PLASMA,  // Plasma Wisp
-    [T2(14)] = COPYKIND_NONE,    // Gordo
-    [T2(15)] = COPYKIND_BOMB,    // Bomber
-    [T2(16)] = COPYKIND_NEEDLE,  // Pichikuri
-    [T2(17)] = COPYKIND_NEEDLE,  // Pichikuri (dup)
-    [T2(18)] = COPYKIND_FIRE,    // Dayl
-    [T2(19)] = COPYKIND_FIRE,    // Dayl (flags=4)
-    [T2(20)] = COPYKIND_TORNADO, // Caller
-    [T2(21)] = COPYKIND_MIC,     // Walky
-    [T2(22)] = COPYKIND_NONE,    // Waddle Dee Truck
-    [T2(23)] = COPYKIND_NONE,    // Waddle Dee
-
-    // Special enemies (IDs 72-78)
-    [72] = COPYKIND_NONE,    // Broom Hatter (flags=2)
-    [73] = COPYKIND_SWORD,   // Sword Knight (flags=2)
-    [74] = COPYKIND_NONE,    // Waddle Dee Truck (flags=2)
-    [75] = COPYKIND_NONE,    // Gordo (flags=3)
-    [76] = COPYKIND_NONE,    // TAC
-    [77] = COPYKIND_NONE,    // Dyna Blade
-    [78] = COPYKIND_NONE,    // Meteor
+// Per-slot copy ability theme. T0/T1/T2 share the same 24-slot mapping because
+// the copy ability is tied to the archive (data_index), not the tier flags —
+// e.g., T1 Heat Phan-Phan is visually distinct but shares Phan-Phan's Fire
+// archive. Used to zero spawn weights for ability-themed enemies when their
+// ability is locked. The copy chance wheel is random regardless; this table is
+// about visual theming.
+static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
+    COPYKIND_NONE,    // 0  Broom Hatter
+    COPYKIND_NONE,    // 1  Broom Hatter (dup)
+    COPYKIND_NONE,    // 2  Bronto Burt
+    COPYKIND_NONE,    // 3  Bronto Burt (dup)
+    COPYKIND_NONE,    // 4  Scarfy
+    COPYKIND_SWORD,   // 5  Sword Knight
+    COPYKIND_NONE,    // 6  Cappy
+    COPYKIND_NONE,    // 7  Cappy (flags=4)
+    COPYKIND_WHEEL,   // 8  Wheelie
+    COPYKIND_FIRE,    // 9  Phan Phan / Heat Phan-Phan
+    COPYKIND_SLEEP,   // 10 Noddy
+    COPYKIND_ICE,     // 11 Chilly
+    COPYKIND_BIRD,    // 12 Flappy
+    COPYKIND_PLASMA,  // 13 Plasma Wisp
+    COPYKIND_NONE,    // 14 Gordo
+    COPYKIND_BOMB,    // 15 Bomber
+    COPYKIND_NEEDLE,  // 16 Pichikuri
+    COPYKIND_NEEDLE,  // 17 Pichikuri (dup)
+    COPYKIND_FIRE,    // 18 Dayl
+    COPYKIND_FIRE,    // 19 Dayl (flags=4)
+    COPYKIND_TORNADO, // 20 Caller (internal: Shaturn)
+    COPYKIND_MIC,     // 21 Walky
+    COPYKIND_NONE,    // 22 Waddle Dee Truck
+    COPYKIND_NONE,    // 23 Waddle Dee
 };
 
-// Spawn data structure populated by Enemy_InitPositionData from stage .dat archive.
-// Pointer stored at 0x805dd710.
-//   +0x00: short spawn_count
-//   +0x04: int*  spawn_entries (stride 0x38 per entry)
-//   +0x0C: int*  secondary_tables (meta-enemy sub-tables)
-//   +0x10: int*  config (mode short at config+0x28)
-// Per-entry layout varies by mode:
-//   Mode 1 (Air Ride):  ids at +0x1e short[4], weights at +0x26 short[4]
-//   Mode 3 (Stadium):   ids at +0x06 short[5], weights at +0x10 short[5]
+// Map an enemy_id to its CopyKind theme. T0/T1/T2 fold to the same slot;
+// specials are all NONE except SP Sword Knight (0x49).
+static CopyKind EnemyIDToCopyKind(int enemy_id)
+{
+    if (enemy_id >= ACTORID_TIER0_START && enemy_id < ACTORID_SPECIAL_START)
+        return enemy_slot_copykind[(enemy_id - ACTORID_TIER0_START) % ACTORID_ENEMIES_PER_TIER];
+    if (enemy_id == ACTORID_SP_SWORD_KNIGHT)
+        return COPYKIND_SWORD;
+    return COPYKIND_NONE;
+}
 
 // Check if enemy_id is themed around a locked ability. Returns 1 if locked, 0 if allowed.
 static int IsEnemyAbilityLocked(int enemy_id)
 {
-    if (enemy_id < 0 || enemy_id >= ACTORID_NUM)
-        return 0;
-    CopyKind ck = (CopyKind)enemy_id_to_copykind[enemy_id];
-    return (ck != COPYKIND_NONE && !IsAbilityUnlocked(ck));
+    CopyKind ck = EnemyIDToCopyKind(enemy_id);
+    return ck != COPYKIND_NONE && !IsAbilityUnlocked(ck);
 }
 
 // Filter a secondary sub-table: zero weights for locked-ability enemies.
@@ -330,26 +228,22 @@ static int FilterSecondarySubTable(short *sub_table)
     return has_valid;
 }
 
-// Mode 1 (Air Ride) / Mode 3 (Stadium variant):
+// Mode 1 (Air Ride courses) / Mode 3 (STKIND_MELEE2):
 // Per-entry has ids[max_slots] and weights[max_slots] at known offsets.
 // Zero weights for locked-ability enemies, filter meta-enemy sub-tables.
-static void FilterMode1Or3(char *spawn_data, int ids_offset, int weights_offset, int max_slots)
+static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_offset, int max_slots)
 {
-    short spawn_count = *(short *)spawn_data;
-    char *entries = (char *)(*(int *)(spawn_data + 4));
-    if (!entries || spawn_count <= 0)
+    if (!data->spawn_entries || data->spawn_count <= 0)
         return;
-
-    char *secondary = (char *)(*(int *)(spawn_data + 0x0C));
 
     // Per-meta-enemy filter results: 1 = has valid enemies, 0 = all zeroed, -1 = not yet processed
     s8 meta_valid[15];
     for (int m = 0; m < 15; m++)
         meta_valid[m] = -1;
 
-    for (int i = 0; i < spawn_count; i++)
+    for (int i = 0; i < data->spawn_count; i++)
     {
-        char *entry = entries + i * 0x38;
+        char *entry = data->spawn_entries + i * 0x38;
         short *ids = (short *)(entry + ids_offset);
         short *weights = (short *)(entry + weights_offset);
 
@@ -369,15 +263,10 @@ static void FilterMode1Or3(char *spawn_data, int ids_offset, int weights_offset,
                 int meta = enemy_id - 0x50;
                 if (meta_valid[meta] == -1)
                 {
-                    if (secondary)
-                    {
-                        short *sub_table = (short *)(*(int *)(secondary + meta * 4));
-                        meta_valid[meta] = (sub_table) ? FilterSecondarySubTable(sub_table) : 0;
-                    }
-                    else
-                    {
-                        meta_valid[meta] = 0;
-                    }
+                    short *sub_table = data->secondary_table
+                                       ? (short *)data->secondary_table[meta]
+                                       : NULL;
+                    meta_valid[meta] = sub_table ? FilterSecondarySubTable(sub_table) : 0;
                 }
                 if (!meta_valid[meta])
                     weights[slot] = 0;
@@ -391,24 +280,18 @@ static void FilterMode1Or3(char *spawn_data, int ids_offset, int weights_offset,
     }
 }
 
-// Mode 2 (Stadium — Kirby Melee, etc.):
-// Two-stage selection: first picks a meta-enemy category from secondary[0],
+// Mode 2 (STKIND_MELEE1):
+// Two-stage selection: first picks a meta-enemy category from secondary_table[0],
 // then picks an individual enemy from that category's weight column in the entries.
 // Per-entry: enemy_id at +0x06, weight columns at +0x08 (one per category).
 // Zero all weight columns for entries whose enemy has a locked ability.
-// Also filter secondary[0] sub-table to remove categories where all enemies are locked.
-static void FilterMode2(char *spawn_data)
+// Also filter secondary_table[0] to remove categories where all enemies are locked.
+static void FilterMode2(EnemySpawnData *data)
 {
-    short spawn_count = *(short *)spawn_data;
-    char *entries = (char *)(*(int *)(spawn_data + 4));
-    if (!entries || spawn_count <= 0)
+    if (!data->spawn_entries || data->spawn_count <= 0 || !data->secondary_table)
         return;
 
-    char *secondary_base = (char *)(*(int *)(spawn_data + 0x0C));
-    if (!secondary_base)
-        return;
-
-    short *sub_table = (short *)(*(int *)secondary_base);
+    short *sub_table = (short *)data->secondary_table[0];
     if (!sub_table)
         return;
 
@@ -422,9 +305,9 @@ static void FilterMode2(char *spawn_data)
 
     // Zero all weight columns for entries with locked-ability enemies
     int zeroed_entries = 0;
-    for (int i = 0; i < spawn_count; i++)
+    for (int i = 0; i < data->spawn_count; i++)
     {
-        char *entry = entries + i * 0x38;
+        char *entry = data->spawn_entries + i * 0x38;
         int enemy_id = *(short *)(entry + 0x06);
 
         if (enemy_id < 0)
@@ -445,9 +328,9 @@ static void FilterMode2(char *spawn_data)
     for (int cat = 0; cat < num_categories; cat++)
     {
         int has_valid = 0;
-        for (int i = 0; i < spawn_count; i++)
+        for (int i = 0; i < data->spawn_count; i++)
         {
-            short *weights = (short *)(entries + i * 0x38 + 0x08);
+            short *weights = (short *)(data->spawn_entries + i * 0x38 + 0x08);
             if (weights[cat] > 0)
             {
                 has_valid = 1;
@@ -461,55 +344,32 @@ static void FilterMode2(char *spawn_data)
         }
     }
     OSReport("[GateAbilities] Mode2: zeroed %d/%d entries, %d/%d categories\n",
-             zeroed_entries, spawn_count, zeroed_categories, num_categories);
+             zeroed_entries, data->spawn_count, zeroed_categories, num_categories);
 }
 
 // Zero spawn weights for enemies whose copy ability is locked.
 // Modifies the .dat data in-place; it is reloaded from disc each stage load.
-static void FilterEnemySpawnWeights()
+// Early-exits when spawn_data is NULL (CT Free Run, Top Ride, any mode where
+// the per-stage "enemies enabled" flag is off).
+void GateAbilities_On3DLoadEnd()
 {
-    char *spawn_data = *stc_enemy_spawn_data;
-    if (!spawn_data)
+    EnemySpawnData *data = *stc_enemy_spawn_data;
+    if (!data || !data->config)
         return;
 
-    int *config = *(int **)(spawn_data + 0x10);
-    if (!config)
-        return;
-    short mode = *(short *)((char *)config + 0x28);
-
-    static const char *mode_names[] = {
-        [1] = "AirRide", [2] = "Stadium", [3] = "StadiumAlt"
-    };
-    const char *mode_name = (mode >= 1 && mode <= 3) ? mode_names[mode] : "Unknown";
+    short mode = data->config->mode;
+    OSReport("[GateAbilities] Filtering enemy spawns (mode=%d, entries=%d, ability_mask=%s)\n",
+             mode, data->spawn_count, MaskBits(ap_save->ability_unlocked_mask, 16));
 
     switch (mode)
     {
-        case 1:
-            FilterMode1Or3(spawn_data, 0x1e, 0x26, 4);
-            break;
-        case 2:
-            FilterMode2(spawn_data);
-            break;
-        case 3:
-            FilterMode1Or3(spawn_data, 0x06, 0x10, 5);
+        case 1: FilterMode1Or3(data, 0x1e, 0x26, 4); break;
+        case 2: FilterMode2(data); break;
+        case 3: FilterMode1Or3(data, 0x06, 0x10, 5); break;
+        default:
+            OSReport("[GateAbilities] Unknown spawn mode %d — skipping\n", mode);
             break;
     }
-    OSReport("[GateAbilities] Filtered %s enemy table (%d entries)\n",
-             mode_name, *(short *)spawn_data);
-}
-
-void GateAbilities_On3DLoadEnd()
-{
-    // City Trial free roam has its own spawn filtering via FilterAllSpawnTables hooks.
-    // Stadiums are part of City Trial but need enemy spawn weight filtering.
-    int in_city = Gm_IsInCity();
-    int in_stadium = CityTrial_IsInStadium();
-    if (in_city && !in_stadium)
-        return;
-
-    OSReport("[GateAbilities] Filtering enemy spawns (stadium=%d, ability_mask=%s)\n",
-             in_stadium, MaskBits(ap_save->ability_unlocked_mask, 16));
-    FilterEnemySpawnWeights();
 }
 
 void GateAbilities_OnBoot()
@@ -531,7 +391,7 @@ int GateAbilities_UnlockAbility(CopyKind kind)
 
     ap_save->ability_unlocked_mask |= (1 << kind);
     OSReport("[GateAbilities] Ability %d (%s) unlocked (mask = %s)\n",
-             kind, ability_names[kind], MaskBits(ap_save->ability_unlocked_mask, 16));
-    TextBox_Enqueue(ability_names[kind]);
+             kind, CopyKind_Names[kind], MaskBits(ap_save->ability_unlocked_mask, 16));
+    TextBox_Enqueue(CopyKind_Names[kind]);
     return 1;
 }

@@ -40,10 +40,6 @@ void ChecklistRewards_DebugClearAll(void);
 // has been hovered yet this scene.
 int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind);
 
-// Debug helper: log what reward (if any) is placed at (mode, clear_kind) —
-// same-mode local, cross-mode local from another of our modes, or none.
-void ChecklistRewards_LogPlacement(u8 mode, u8 clear_kind);
-
 // Resolve which reward is placed at (mode, clear_kind). On hit, writes the
 // source mode and reward_index (same-mode: source_mode == mode; cross-mode:
 // source_mode != mode). Returns 0 if the cell has no local placement.
@@ -55,7 +51,12 @@ int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
 // received reward badge?" — used by the backfill path in check_detection.
 int ChecklistRewards_CellHasReceivedReward(u8 mode, u8 clear_kind);
 
-// Returns a human-readable name for a RewardType enum value, or "?".
-const char *ChecklistRewards_RewardTypeName(u8 rtype);
+// Number of reward rows for the given mode. Out-of-range modes return 0.
+int ChecklistRewards_GetRewardCount(GameMode mode);
+
+// Encoded `shuffled_rewards[mode][index]` for a given (mode, reward_index).
+// Encoding: high byte = target mode, low byte = target clear_kind, 0xFFFF =
+// remote (no local placement). Out-of-range inputs return 0xFFFF.
+u16 ChecklistRewards_GetShuffledReward(GameMode mode, u8 reward_index);
 
 #endif // ARCHIPELAGO_CHECKLIST_REWARDS_H

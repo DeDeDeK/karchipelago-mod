@@ -4,7 +4,6 @@
 
 #include "main.h"
 #include "settings_menu.h"
-#include "debug_menu.h"
 #include "energylink_spend.h"
 
 // Defaults match pre-toggle behavior so existing installs keep working on
@@ -89,7 +88,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here.",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 6,
+        .option_num = 5,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -172,12 +171,6 @@ OptionDesc ModSettings = {
                 .description = "Control whether permanent patches are re-applied at round start",
                 .kind = OPTKIND_MENU,
                 .menu_ptr = &permanent_patches_menu,
-            },
-            &(OptionDesc){
-                .name = "Debug",
-                .description = "Debug menu for toggling gates and giving items.",
-                .kind = OPTKIND_MENU,
-                .menu_ptr = &debug_menu,
             },
         },
     },

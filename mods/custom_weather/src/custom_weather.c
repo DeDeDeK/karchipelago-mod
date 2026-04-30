@@ -253,10 +253,6 @@ static int weather_enabled[WEATHER_TOTAL] = {
 
 static char *toggle_names[] = {"Disabled", "Enabled"};
 
-// ---------------------------------------------------------------
-// Preset array extension
-// ---------------------------------------------------------------
-
 // Copy vanilla presets into our static buffer, append custom presets,
 // and repoint the game's sub-header to use the extended array.
 // Safe to call each stage load (idempotent).
@@ -354,18 +350,14 @@ static void CustomWeather_OverrideSky(GrObj *grobj)
     Sky_SetPresetIndex(grobj, preset);
 }
 
-// ---------------------------------------------------------------
-// Hooks into Sky_Init
-// ---------------------------------------------------------------
-
-// Hook at 0x8010f1a4: City Trial (stage kind 9) random selection block.
+// Hook at 0x8010f1a4 (inside Sky_Init): City Trial (stage kind 9) random selection block.
 // r30 = grobj (the extended stage object). Exits past vanilla setSkyIndex.
 CODEPATCH_HOOKCREATE(0x8010f1a4,
     "mr 3, 30\n\t",
     CustomWeather_OverrideSky,
     "", 0x8010f1d0);
 
-// Hook at 0x8010f224: City Trial Free Run (stage kind 52) sky init.
+// Hook at 0x8010f224 (inside Sky_Init): City Trial Free Run (stage kind 52) sky init.
 // Vanilla hardcodes preset 0. Same r30 = grobj.
 CODEPATCH_HOOKCREATE(0x8010f224,
     "mr 3, 30\n\t",
@@ -376,30 +368,24 @@ void CustomWeather_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x8010f1a4);
     CODEPATCH_HOOKAPPLY(0x8010f224);
-    OSReport("[CustomWeather] Hooks installed (Sky_Init Trial + Free Run)\n");
+    OSReport("[CustomWeather] Hooks installed (City Trial + City Trial Free Run)\n");
 }
 
-// ---------------------------------------------------------------
-// Menu: Enable All / Disable All actions
-// ---------------------------------------------------------------
-
-static int EnableAllWeather(void)
+static int EnableAllWeather(OptionDesc *self)
 {
+    (void)self;
     for (int i = 0; i < WEATHER_TOTAL; i++)
         weather_enabled[i] = 1;
     return 1;
 }
 
-static int DisableAllWeather(void)
+static int DisableAllWeather(OptionDesc *self)
 {
+    (void)self;
     for (int i = 0; i < WEATHER_TOTAL; i++)
         weather_enabled[i] = 0;
     return 1;
 }
-
-// ---------------------------------------------------------------
-// Menu definition: per-preset toggles + bulk actions
-// ---------------------------------------------------------------
 
 #define WEATHER_TOGGLE(idx, label) \
     &(OptionDesc){ \

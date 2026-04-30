@@ -4,7 +4,6 @@
 #include "machine.h"
 
 void GateMachines_OnBoot();
-void GateMachines_FilterSelectList();
 int GateMachines_UnlockMachine(MachineKind kind);
 int GateMachines_GiveLegendaryMachine(int machine_index);
 

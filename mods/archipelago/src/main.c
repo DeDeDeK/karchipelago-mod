@@ -15,11 +15,11 @@
 #include "ap_item_handler.h"
 #include "energylink.h"
 #include "traplink.h"
-#include "spawn_item.h"
+#include "fake_patches.h"
 #include "patch_item.h"
 #include "checklist_rewards.h"
 #include "check_detection.h"
-#include "stadium_lock.h"
+#include "gate_stadiums.h"
 #include "patch_cap.h"
 #include "gate_events.h"
 #include "gate_abilities.h"
@@ -30,12 +30,10 @@
 #include "gate_topride_stages.h"
 #include "gate_topride_items.h"
 #include "gate_colors.h"
-#include "spawn_enemy.h"
 #include "spawn_rate.h"
 #include "item_spawn_filter.h"
 #include "settings_menu.h"
 #include "main_menu.h"
-#include "debug_menu.h"
 #include "goal_max_stats_ct.h"
 
 // Define global variables.
@@ -77,7 +75,7 @@ void OnBoot()
     // Persistent allocation of ap_data
     ap_data = HSD_MemAlloc(sizeof(APData));
     memset(ap_data, 0, sizeof(APData));
-    OSReport("[Main] APData at 0x%08x (%d bytes)\n", (uint)ap_data, sizeof(APData));
+    OSReport("[Main] APData at %u (%d bytes)\n", (uint)ap_data, sizeof(APData));
 
     // Place pointer to this allocation at a static address so the Python client can find it
     APData **static_ptr = (APData **)0x805d52d4;
@@ -91,7 +89,7 @@ void OnBoot()
     CheckDetection_OnBoot();
 
     // Patches for stadium unlocks
-    StadiumLock_OnBoot();
+    GateStadiums_OnBoot();
 
     // Patches for patch cap
     PatchCap_OnBoot();
@@ -124,13 +122,10 @@ void OnBoot()
     GateTopRideItems_OnBoot();
 
     // Patches for fake item effects outside fake items event
-    SpawnItem_OnBoot();
+    FakePatches_OnBoot();
 
     // Patches for Kirby color gating
     GateColors_OnBoot();
-
-    // Null-safe patches for standalone enemy spawning
-    SpawnEnemy_OnBoot();
 
     // Traplink send hooks
     TrapLink_OnBoot();
@@ -143,6 +138,9 @@ void OnBoot()
 
     // Replace main-menu demo rider/machine (Kirby on Warp Star -> Dedede on Wheelie)
     MainMenu_OnBoot();
+
+    // Publish the public API so external mods can import it.
+    ArchipelagoAPI_Export();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
@@ -170,22 +168,12 @@ void OnSaveLoaded()
     // Sync received count to ap_data so the AP client can read it
     ap_data->item_received_index = ap_save->item_received_count;
 
-    // Apply hoshi-saved debug menu toggle states to save data masks.
-    // Must happen before anything that reads gate masks (e.g. StadiumLock).
-    DebugMenu_ApplyToSave();
-
     // Restore reward tables and received checklist rewards from save
     ChecklistRewards_OnSaveLoaded();
 
     // Mirror sent_checks/goal_complete into shared memory and run initial
     // goal evaluation.
     CheckDetection_OnSaveLoaded();
-
-    // Pull masks back into debug menu toggle state so the display reflects
-    // everything just re-granted by ChecklistRewards_OnSaveLoaded (AP-received
-    // rewards re-apply their gate unlocks but don't update color_state[] and
-    // friends). Without this, the debug menu would show granted items as locked.
-    DebugMenu_RefreshStateFromMasks();
 
     // Publish restored link-toggle state. Hoshi's Mod_CopyFromSave has run
     // by now, so ap_menu_settings reflects the player's persisted choices.
@@ -248,14 +236,12 @@ void OnPlayerSelectLoad()
 {
     OSReport("[Main] Entering player select (minor %d).\n", Scene_GetCurrentMinor());
 
-    // City Trial select: filter locked machines and validate colors.
-    // CT colors persist from prior sessions (no init block to hook like AR/TR),
-    // so we validate here on every CSS load.
+    // City Trial colors persist from prior sessions (no init block to hook
+    // like AR/TR), so we validate here on every CSS load. Machine filtering
+    // is handled inside CitySelect_CreateMachineIcons / CitySelect_InitPlayerMachines
+    // via the gate_machines hooks — no extra pass needed here.
     if (Scene_GetCurrentMinor() == MNRKIND_CITYPLYSELECT)
-    {
-        GateMachines_FilterSelectList();
-        GateColors_ForceDefaultColors();
-    }
+        GateColors_ValidateCityTrialColors();
 }
 
 // Runs before the game is initialized.
@@ -285,8 +271,6 @@ void On3DLoadEnd()
         OSReport("[Main] Player %d using rider [%d] color [%d] riding machine [%d].\n",
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
-
-    GateEvents_On3DLoadEnd();
 
     // Enemy spawn filtering for ability gating
     GateAbilities_On3DLoadEnd();
@@ -360,102 +344,6 @@ void OnFrameStart()
 
     // Process client backfill writes and poll meta auto-unlocks.
     CheckDetection_OnFrameStart();
-
-    // debug pad handlers
-    HSD_Pad *pad = &stc_engine_pads[0];
-    if (pad->down & PAD_BUTTON_DPAD_LEFT)
-    {
-        // Grant a random remote (non-local) checklist reward
-        int total = REWARD_COUNT_AIRRIDE + REWARD_COUNT_TOPRIDE + REWARD_COUNT_CITYTRIAL;
-        int pick = HSD_Randi(total);
-        GameMode mode;
-        u8 ri;
-        if (pick < REWARD_COUNT_AIRRIDE)
-        {
-            mode = GMMODE_AIRRIDE;
-            ri = pick;
-        }
-        else if (pick < REWARD_COUNT_AIRRIDE + REWARD_COUNT_TOPRIDE)
-        {
-            mode = GMMODE_TOPRIDE;
-            ri = pick - REWARD_COUNT_AIRRIDE;
-        }
-        else
-        {
-            mode = GMMODE_CITYTRIAL;
-            ri = pick - REWARD_COUNT_AIRRIDE - REWARD_COUNT_TOPRIDE;
-        }
-
-        if (ap_save->shuffled_rewards[mode][ri] != 0xFFFF)
-            OSReport("[Main] Debug: reward %d:%d is local, skipping\n", mode, ri);
-        else
-        {
-            ChecklistRewards_Grant(mode, ri);
-            OSReport("[Main] Debug: granted remote checklist reward mode=%d ri=%d\n", mode, ri);
-        }
-    }
-    if ((pad->down & PAD_BUTTON_DPAD_RIGHT) && ap_data->incoming_item_id == 0)
-    {
-        ap_data->incoming_item_id = AP_ITEM_METEOR_TRAP;
-        OSReport("[Main] Debug: wrote AP_ITEM_METEOR_TRAP to mailbox\n");
-    }
-    if (pad->down & PAD_BUTTON_DPAD_DOWN)
-    {
-        ap_data->deathlink_receive = 1;
-        OSReport("[Main] Debug: triggered deathlink_receive\n");
-    }
-    if (pad->down & PAD_BUTTON_DPAD_UP)
-    {
-        ap_data->traplink_receive = 1;
-        OSReport("[Main] Debug: triggered traplink_receive\n");
-    }
-    if (pad->down & PAD_TRIGGER_Z)
-    {
-        // In a checklist menu, Z unlocks the currently hovered cell as if
-        // the objective had been completed in-game. Z is unused by vanilla
-        // checklist navigation (A/X/Y/L/R all cycle screens or place fillers).
-        // ClearChecker_SetNewUnlock is REPLACEFUNC'd by check_detection, so
-        // the AP check fires and goal evaluation runs. The hovered
-        // (mode, clear_kind) is captured by the UpdateCellInfo hook in
-        // checklist_rewards.c.
-        u8 mode, k;
-        if (ChecklistRewards_GetHoveredCell(&mode, &k))
-        {
-            GameClearData *cd = gmGetClearcheckerTypeP(mode);
-            OSReport("[Main] Debug: Z unlock mode=%d clear_kind=%d\n", mode, k);
-            ChecklistRewards_LogPlacement(mode, k);
-            ClearChecker_SetNewUnlock(mode, k);
-            // SetNewUnlock bails when Checklist_IsCacheValid (always true in
-            // menus), so RecordCheck ran but no clear[] bits got written. Set
-            // the end-state bits directly — the reveal animation only plays
-            // on post-mode summary screens anyway, so there's nothing to
-            // preserve.
-            cd->clear[k].is_new = 1;
-            cd->clear[k].is_unlocked = 1;
-            cd->clear[k].is_visible = 1;
-
-            // When the "Auto-Grant on Z Unlock" debug toggle is on, also
-            // simulate AP item receipt by granting whatever reward is placed
-            // at this cell. Remote placements have no local reward to grant
-            // (ResolveCell returns 0), so toggle-on is a no-op for them.
-            if (DebugMenu_ShouldAutoGrantOnUnlock())
-            {
-                u8 src_mode, src_ri;
-                if (ChecklistRewards_ResolveCell(mode, k, &src_mode, &src_ri))
-                {
-                    OSReport("[Main] Debug: auto-granting reward mode=%d ri=%d\n",
-                             src_mode, src_ri);
-                    ChecklistRewards_Grant(src_mode, src_ri);
-                    Hoshi_WriteSave();
-                }
-            }
-        }
-        else
-        {
-            OSReport("[Main] Debug: Z pressed but no cell hovered yet (move cursor first)\n");
-        }
-    }
-
 }
 
 // Runs every game tick after the frame has been processed.

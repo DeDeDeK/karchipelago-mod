@@ -1,9 +1,6 @@
 #ifndef ARCHIPELAGO_CHECK_DETECTION_H
 #define ARCHIPELAGO_CHECK_DETECTION_H
 
-#include "structs.h"
-#include "game.h"
-
 // Install hooks and patches. Call from OnBoot.
 void CheckDetection_OnBoot(void);
 

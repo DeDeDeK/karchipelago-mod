@@ -1,9 +1,6 @@
 #ifndef TRAPLINK_H
 #define TRAPLINK_H
 
-#include "structs.h"
-
-void TrapLink_PerFrame(GOBJ *g);
 void TrapLink_On3DLoadEnd();
 void TrapLink_OnTopRideLoad();
 void TrapLink_OnBoot();

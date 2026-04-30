@@ -37,16 +37,13 @@ static uint trap_items[] = {
     AP_ITKIND_GLIDEDOWN,
     AP_ITKIND_CHARGEDOWN,
     AP_ITKIND_WEIGHTDOWN,
-    AP_ITEM_METEOR_TRAP,
-    AP_ITEM_BOMB_TRAP,
-    AP_ITEM_GORDO_TRAP,
-    AP_ITEM_SENSORBOMB_TRAP,
     AP_EVENT_METEOR,
     AP_EVENT_RAILFIRE,
     AP_EVENT_BOUNCE,
     AP_EVENT_FAKEPOWERUPS,
     AP_EVENT_RUNAMOK,
     AP_ITEM_1_HP_TRAP,
+    AP_ITEM_DROP_PATCHES_TRAP,
     AP_ITKIND_ACCELFAKE,
     AP_ITKIND_TOPSPEEDFAKE,
     AP_ITKIND_OFFENSEFAKE,
@@ -112,6 +109,10 @@ static int ApplyAirRideTrap(void)
         RiderData *rd = rg->userdata;
         if (!rd || rd->kind != RDKIND_KIRBY)
             continue;
+        // Off-vehicle riders crash in the sleep anim's MObj callback, which
+        // calls Rider_CopyInputToMachine and derefs a null machine_gobj.
+        if (!Rider_IsOnMachine(rd))
+            continue;
         OSReport("[TrapLink] giving sleep ability to ply %d\n", i);
         Rider_GiveAbility(rd, COPYKIND_SLEEP);
         applied = 1;
@@ -138,7 +139,9 @@ static int ApplyTopRideTrap(void)
 }
 
 // Read from the traplink_receive location and dispatch a mode-appropriate trap.
-void TrapLink_PerFrame(GOBJ *g)
+// The GObj is only installed in 3D / Top Ride scenes, so the major is always
+// CITY/AIR/TOP here.
+static void TrapLink_PerFrame(GOBJ *g)
 {
     if (!ap_data->traplink_receive)
         return;
@@ -175,10 +178,6 @@ void TrapLink_PerFrame(GOBJ *g)
             break;
         case MJRKIND_TOP:
             handled = ApplyTopRideTrap();
-            break;
-        default:
-            // Not in a gameplay mode — drop the trap so it doesn't pile up
-            handled = 1;
             break;
     }
 

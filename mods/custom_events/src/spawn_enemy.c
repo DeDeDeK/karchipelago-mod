@@ -53,7 +53,9 @@ static struct
     float zone_angle;           // +0x20: 0.0 = straight down
 } s_fake_event_data;
 
-#define METEOR_FALL_SPEED     5.0f
+#define METEOR_FALL_SPEED     8.0f
+#define METEOR_DROP_HEIGHT    400.0f
+#define METEOR_SCALE          2.0f
 #define METEOR_LANDING_FRAMES 210 // 3.5 seconds for impact effects to play out
 
 void SpawnEnemy_OnBoot(void)
@@ -158,17 +160,18 @@ static GOBJ *SpawnMeteorOnPlayer(int ply_idx)
 
     Enemy_CheckAndLoad(ACTORID_METEOR);
 
-    // Lead the target: offset spawn by ~80 frames of current velocity so the
-    // meteor lands on a moving player (400 / METEOR_FALL_SPEED=5.0 = 80 frames).
+    // Lead the target: offset spawn by frames-to-land of current velocity so the
+    // meteor lands on a moving player.
+    float lead_frames = METEOR_DROP_HEIGHT / METEOR_FALL_SPEED;
     EventActorDesc desc;
     memset(&desc, 0, sizeof(desc));
     desc.actor_id = ACTORID_METEOR;
-    desc.position.X = rd->pos.X + rd->self_vel.X * 80.0f;
-    desc.position.Y = rd->pos.Y + 400.0f;
-    desc.position.Z = rd->pos.Z + rd->self_vel.Z * 80.0f;
+    desc.position.X = rd->pos.X + rd->self_vel.X * lead_frames;
+    desc.position.Y = rd->pos.Y + METEOR_DROP_HEIGHT;
+    desc.position.Z = rd->pos.Z + rd->self_vel.Z * lead_frames;
     desc.forward.Z = 1.0f;
     desc.up.Y = 1.0f;
-    desc.scale = 1.0f;
+    desc.scale = METEOR_SCALE;
     desc.spawn_index = -1;
     desc.spawn_slot = -1;
     desc.bounds_flag = -1.0f;

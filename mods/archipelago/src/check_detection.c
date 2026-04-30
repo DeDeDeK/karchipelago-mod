@@ -8,6 +8,7 @@
 #include "main.h"
 #include "check_detection.h"
 #include "checklist_rewards.h"
+#include "textbox.h"
 
 // SFX cue played by the vanilla ClearChecker_SetNewUnlock on a first-this-frame
 // transition. Guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
@@ -32,12 +33,7 @@
 #define KD_CLEAR_KIND 0x2F
 
 // Forward declaration: defined mid-file, called from earlier helpers.
-static void EvaluateGoal(void);
-
-void CheckDetection_EvaluateGoal(void)
-{
-    EvaluateGoal();
-}
+void CheckDetection_EvaluateGoal(void);
 
 // Set the sent_checks bit in both save and the shared-memory mirror. No-op if
 // already set. Returns 1 if newly set, 0 if already set (for callers that
@@ -82,17 +78,18 @@ static void RecordCheck(u8 mode, u8 clear_kind)
     if (ChecklistRewards_ResolveCell(mode, clear_kind, &src_mode, &src_ri))
     {
         u8 rtype = stc_reward_table_ptrs[src_mode][src_ri].reward_type;
-        OSReport("[Check] mode=%d clear_kind=%d type=%s (0x%02x) recorded\n",
+        OSReport("[Check] mode=%d clear_kind=%d type=%s (%d) recorded\n",
                  mode, clear_kind,
-                 ChecklistRewards_RewardTypeName(rtype), rtype);
+                 Reward_TypeName(rtype), rtype);
     }
     else
     {
         OSReport("[Check] mode=%d clear_kind=%d recorded (no local reward placement)\n",
                  mode, clear_kind);
     }
+    TextBox_Enqueue("Check sent");
 
-    EvaluateGoal();
+    CheckDetection_EvaluateGoal();
     Hoshi_WriteSave();
 }
 
@@ -165,7 +162,7 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
     return 0;
 }
 
-static void EvaluateGoal(void)
+void CheckDetection_EvaluateGoal(void)
 {
     if (ap_save->goal_complete)
         return;  // sticky once set
@@ -189,6 +186,7 @@ static void EvaluateGoal(void)
         ap_save->goal_complete = 1;
         ap_data->goal_complete = 1;
         OSReport("[Check] GOAL COMPLETE\n");
+        TextBox_Enqueue("Goal complete!");
         Hoshi_WriteSave();
     }
 }
@@ -259,7 +257,7 @@ static void ProcessBackfill(void)
     if (processed_any)
     {
         OSReport("[Check] Backfill processed\n");
-        EvaluateGoal();
+        CheckDetection_EvaluateGoal();
         Hoshi_WriteSave();
     }
 }
@@ -442,7 +440,7 @@ void CheckDetection_OnSaveLoaded(void)
 
     // Initial goal evaluation in case options changed since last boot or
     // saved checks already satisfy the active goal.
-    EvaluateGoal();
+    CheckDetection_EvaluateGoal();
 
     OSReport("[Check] Loaded sent_checks AR=%d TR=%d CT=%d goal=%d\n",
              PopcountMode(GMMODE_AIRRIDE),
