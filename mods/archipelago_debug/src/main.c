@@ -65,6 +65,16 @@ static void OnFrameStart(void)
         }
     }
 
+    if (pad->down & PAD_BUTTON_DPAD_RIGHT)
+    {
+        int range = AP_ITKIND_WEIGHTFAKE - AP_ITKIND_BASE + 1;
+        int picked = AP_ITKIND_BASE + HSD_Randi(range);
+        if (ap_api->QueueItem(picked))
+            OSReport("[ApDebug] queued random CT item id=%d\n", picked);
+        else
+            OSReport("[ApDebug] queue full, could not give CT item id=%d\n", picked);
+    }
+
     if (pad->down & PAD_BUTTON_DPAD_DOWN)
     {
         ap_api->DebugTriggerDeathlinkReceive();

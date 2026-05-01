@@ -29,7 +29,7 @@ int Ability_GiveItem(CopyKind copy_kind)
     }
     if (applied && copy_kind < COPYKIND_NUM && CopyKind_Names[copy_kind])
         TextBox_Enqueue("Got %s ability!", CopyKind_Names[copy_kind]);
-    return 1;
+    return applied;
 }
 
 CopyKind Ability_ItKindToCopyKind(ItemKind it_kind)

@@ -20,11 +20,11 @@ typedef enum APItemId
     AP_ITEM_CHECKBOX_FILLER_CITYTRIAL,
     AP_ITEM_PATCH_CAP_INCREASE,
     AP_ITEM_1_HP_TRAP,
+    AP_ITEM_ALL_UP,
     AP_ITEM_PERM_PATCH_ALL_UP,
     AP_ITEM_ALL_DOWN,
     AP_ITEM_GIVE_DRAGOON,
     AP_ITEM_GIVE_HYDRA,
-    AP_ITEM_EVENT_CUSTOM,
     AP_ITEM_SPAWN_RATE_UP,
     AP_ITEM_DROP_PATCHES_TRAP,
 
@@ -371,7 +371,10 @@ typedef enum APItemId
     AP_ITEM_UNLOCK_DRAGOON2,               // ITUNLOCK_DRAGOON2
     AP_ITEM_UNLOCK_DRAGOON3,               // ITUNLOCK_DRAGOON3
 
-    // Machine unlock items (830-855, aligned to MachineKind)
+    // Machine unlock items (830-854, aligned to MachineKind).
+    // VCKIND_WHEELVSDEDEDE (would be 855) is intentionally NOT exposed: it is
+    // the Vs. King Dedede stadium's CPU-only machine, no character can ride it
+    // in player-controlled contexts, and no game code reads its unlock bit.
     AP_MACHINE_UNLOCK_BASE = 830,
     AP_MACHINE_UNLOCK_WARP = 830,          // VCKIND_WARP
     AP_MACHINE_UNLOCK_COMPACT,             // VCKIND_COMPACT
@@ -398,7 +401,6 @@ typedef enum APItemId
     AP_MACHINE_UNLOCK_REXWHEELIE,          // VCKIND_REXWHEELIE
     AP_MACHINE_UNLOCK_WHEELIESCOOTER,      // VCKIND_WHEELIESCOOTER
     AP_MACHINE_UNLOCK_WHEELDEDEDE,         // VCKIND_WHEELDEDEDE — player-facing Dedede (Free Run / Stadium CSS)
-    AP_MACHINE_UNLOCK_WHEELVSDEDEDE,       // VCKIND_WHEELVSDEDEDE — Vs. King Dedede stadium CPU-only; AP world skips this ID
 
     // Box type unlock items (860-862, aligned to BoxKind)
     AP_BOX_UNLOCK_BASE = 860,
@@ -496,7 +498,6 @@ typedef enum APItemId
 // Archipelago-defined unlock kinds whose bit indices live in the masks below
 // but are not part of any vanilla game enum. Public so the debug mod (and
 // future API consumers) can index into the matching unlock category.
-
 typedef enum ItemUnlockKind
 {
     ITUNLOCK_ALLUP,

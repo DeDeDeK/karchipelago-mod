@@ -251,9 +251,9 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
         // Character rewards resolve through CharacterDesc_GetMachineKind in
         // GateMachines_CheckAirRideCharacterAvailable, so unlocking the
         // character's machine also unlocks selecting the character.
-        // VCKIND_WHEELDEDEDE (24) is the player-facing Dedede machine.
-        // VCKIND_WHEELVSDEDEDE (25) is the Vs. King Dedede stadium CPU-only
-        // machine; no game code reads its unlock bit, so we don't set it.
+        // VCKIND_WHEELDEDEDE (24) is the player-facing Dedede machine — the
+        // canonical Dedede unlock. (VCKIND_WHEELVSDEDEDE is stadium CPU-only
+        // and has no AP unlock at all.)
         case REWARD_KING_DEDEDE:
             GateMachines_UnlockMachine(VCKIND_WHEELDEDEDE);
             break;

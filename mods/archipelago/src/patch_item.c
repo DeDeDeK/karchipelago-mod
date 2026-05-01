@@ -62,9 +62,13 @@ int Patch_GiveItem(PatchKind kind, int num)
 
 // Give num of AllUp to every human rider on a machine.
 // Same City Trial / Air Ride split as Patch_GiveItem.
+// Returns 1 if at least one player got the apply, 0 otherwise — Top Ride has
+// no MachineData so every iter skips, and AP_ITEM_ALL_DOWN (the only negative
+// caller) is a one-shot trap that must defer instead of being consumed.
 int Patch_AllUp_GiveItem(int num)
 {
     int use_item_spawn = (num > 0) && Gm_IsInCity();
+    int applied = 0;
     for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
@@ -86,8 +90,9 @@ int Patch_AllUp_GiveItem(int num)
         }
         OSReport("[PatchItem] Giving %d all ups to player %d (%s)...\n",
                  num, i, use_item_spawn ? "item" : "direct");
+        applied = 1;
     }
-    return 1;
+    return applied;
 }
 
 // Drop-patches trap: eject each human rider's current stats as physical
@@ -113,8 +118,10 @@ int Patch_DropTrap()
     return dropped;
 }
 
-// Record a permanent +1 patch in save data and apply to all human players.
-// Called from APItems_HandleItem after scene + intro gate.
+// Record a permanent +1 patch in save data. The actual stat application
+// happens at the next round start via PermanentPatch_On3DLoadEnd — applying
+// here too would double up against the carry-over of stats into stadium loads
+// (and against the round-start re-apply on subsequent rounds).
 int PermanentPatch_GiveItem(PatchKind kind)
 {
     if (ap_save->permanent_patches[kind] < PATCH_STAT_MAX)
@@ -123,11 +130,11 @@ int PermanentPatch_GiveItem(PatchKind kind)
     OSReport("[PatchItem] Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
     if (kind < PATCHKIND_NUM)
         TextBox_Enqueue("Permanent +1 %s", PatchKind_Names[kind]);
-    return Patch_GiveItem(kind, 1);
+    return 1;
 }
 
-// Record a permanent +1 all-up in save data and apply to all human players.
-// Called from APItems_HandleItem after scene + intro gate.
+// Record a permanent +1 all-up in save data. As with PermanentPatch_GiveItem,
+// stat application is deferred to the next round start.
 int PermanentPatch_GiveAllUp()
 {
     for (int i = 0; i < PATCHKIND_NUM; i++)
@@ -138,7 +145,7 @@ int PermanentPatch_GiveAllUp()
 
     OSReport("[PatchItem] Permanent all-up received.\n");
     TextBox_Enqueue("Permanent +1 All Up");
-    return Patch_AllUp_GiveItem(1);
+    return 1;
 }
 
 // Flag to track whether round-start patches have been applied this scene

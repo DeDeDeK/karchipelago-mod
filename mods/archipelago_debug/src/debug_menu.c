@@ -214,7 +214,6 @@ GIVE_FN(GiveEvtFakePowerups,     AP_EVENT_FAKEPOWERUPS)
 // Traps & events
 GIVE_FN(Give1HPTrap,        AP_ITEM_1_HP_TRAP)
 GIVE_FN(GiveAllDown,        AP_ITEM_ALL_DOWN)
-GIVE_FN(GiveCustomEvt,      AP_ITEM_EVENT_CUSTOM)
 GIVE_FN(GiveDragoon,        AP_ITEM_GIVE_DRAGOON)
 GIVE_FN(GiveHydra,          AP_ITEM_GIVE_HYDRA)
 GIVE_FN(GiveDropPatchesTrap,AP_ITEM_DROP_PATCHES_TRAP)
@@ -723,12 +722,11 @@ static MenuDesc give_events_menu = {
 };
 
 static MenuDesc give_traps_menu = {
-    .option_num = 4,
+    .option_num = 3,
     .options = {
         A("1 HP Trap",        "Set HP to 1",                 Give1HPTrap),
         A("All Down",         "All stats down",              GiveAllDown),
         A("Drop Patches Trap","Eject rider patches (CT)",    GiveDropPatchesTrap),
-        A("Custom Event",     "Trigger custom event",        GiveCustomEvt),
     },
 };
 
