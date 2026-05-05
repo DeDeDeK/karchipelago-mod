@@ -1,5 +1,6 @@
 #include "game.h"
 #include "machine.h"
+#include "topride.h"
 #include "inline.h"
 #include "code_patch/code_patch.h"
 
@@ -131,6 +132,73 @@ void DeathLink_On3DLoadEnd()
 {
     OSReport("[DeathLink] Active\n");
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_PerFrame, 0, 0, 0, 0);
+}
+
+// Top Ride deathlink. TR has no rider/machine/HP/fall-death system, so the
+// AR/CT receive path can't apply. Pick a damage-class state wrapper from the
+// pool and apply it to each human kirby. Same state for every human keeps
+// the visual coherent. SpeedDown is reserved for traplink. Burn, Spin,
+// Crush, Strike, Explode, Elec excluded — see docs/topride-kirby-states.md
+// "Caveats & Open Items" for per-state reasoning.
+typedef void (*KirbyStateFn)(TopRideKirby *);
+static const KirbyStateFn deathlink_states[] = {
+    TopRide_KirbyPress,
+    TopRide_KirbyFreeze,
+    TopRide_KirbyNumb,
+    TopRide_KirbyConfuse,
+};
+static const char *const deathlink_state_names[] = {
+    "Press",
+    "Freeze",
+    "Numb",
+    "Confuse",
+};
+#define DEATHLINK_STATE_COUNT (sizeof(deathlink_states) / sizeof(deathlink_states[0]))
+
+static void DeathLink_TopRidePerFrame(GOBJ *g)
+{
+    if (ap_data->deathlink_receive != 1)
+        return;
+
+    TopRideKirbyMgr *mgr = *stc_topride_kirbymgr;
+    if (!mgr || mgr->round_state != 2)
+        return;
+
+    int idx = HSD_Randi(DEATHLINK_STATE_COUNT);
+    KirbyStateFn apply = deathlink_states[idx];
+    int hits = 0;
+
+    for (int i = 0; i < 4; i++)
+    {
+        TopRideKirby *kirby = mgr->kirbys[i];
+        if (!kirby)
+            continue;
+        if (TopRide_GetPlayerKind(kirby->player_slot) != TR_PKIND_HMN)
+            continue;
+
+        // Zero ChargeComponent.velocity (kirby+0xA0) before AND after apply()
+        // to neutralize the AC_TOBASARE per-frame rescale callback. Pre-zero
+        // pre-empts setters that read kirby+0xA0 and scale it (Strike/Explode);
+        // post-zero overrides Crush, whose setter ignores kirby+0xA0 and
+        // PSVECNormalizes its Vec3 arg (we pass &zero) into NaN which it
+        // writes to kirby+0xA0. See docs/topride-kirby-states.md.
+        Vec3 *vel = (Vec3 *)((char *)kirby + 0xA0);
+        vel->X = vel->Y = vel->Z = 0.0f;
+        apply(kirby);
+        vel->X = vel->Y = vel->Z = 0.0f;
+        hits++;
+    }
+
+    OSReport("[DeathLink] Received (TR) - applied %s to %d humans\n",
+             deathlink_state_names[idx], hits);
+    TextBox_Enqueue("Deathlink received!");
+    ap_data->deathlink_receive = 0;
+}
+
+void DeathLink_OnTopRideLoad()
+{
+    OSReport("[DeathLink] Active (Top Ride)\n");
+    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_TopRidePerFrame, 0, 0, 0, 0);
 }
 
 // Apply patches needed for deathlink

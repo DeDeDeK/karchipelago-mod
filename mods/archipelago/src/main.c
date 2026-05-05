@@ -75,7 +75,7 @@ void OnBoot()
     // Persistent allocation of ap_data
     ap_data = HSD_MemAlloc(sizeof(APData));
     memset(ap_data, 0, sizeof(APData));
-    OSReport("[Main] APData at %u (%d bytes)\n", (uint)ap_data, sizeof(APData));
+    OSReport("[Main] APData at 0x%08x (%d bytes)\n", (uint)ap_data, sizeof(APData));
 
     // Place pointer to this allocation at a static address so the Python client can find it
     APData **static_ptr = (APData **)0x805d52d4;
@@ -303,6 +303,9 @@ void OnTopRideLoad()
 
     if (ap_menu_settings.traplink_enabled)
         TrapLink_OnTopRideLoad();
+
+    if (ap_menu_settings.deathlink_enabled)
+        DeathLink_OnTopRideLoad();
 }
 
 // Runs when pausing the match. The index of the pausing player is passed in as an argument.

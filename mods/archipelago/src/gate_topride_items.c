@@ -61,15 +61,6 @@ CODEPATCH_HOOKCREATE(0x802db05c,
     0
 )
 
-// Bypass flag so our own callers (GateTopRideItems_GiveItem, traplink) can
-// spawn any kind regardless of the mask. Most vanilla spawn paths go through
-// TopRideItem_SpawnAtPosition; the cracker burst also ends up there, but it
-// picks its kind with a weighted random across all 22 items that ignores
-// enabled_mask entirely — so post-filtering here just drops spawns without
-// preventing the locked pick. See GateTopRideItems_GetDataGated below for
-// the picker-side fix that zero-weights locked items.
-static volatile int topride_spawn_bypass;
-
 // Hook at entry of TopRideItem_SpawnAtPosition (0x8034bf50). Returns 1 to
 // block the spawn (locked item, mask bit clear), 0 to let it through.
 // The hook trampoline saves LR around the bl to our C function so the
@@ -79,8 +70,6 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
                                  Vec3 *pos, Vec3 *orient,
                                  unsigned int flag1, unsigned int flag2)
 {
-    if (topride_spawn_bypass)
-        return 0;
     if (!mgr)
         return 0;
     if (item_kind < 0 || item_kind >= TRITEM_NUM)
@@ -92,17 +81,46 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
     return 1;
 }
 
-// Mini stack frame around the bl so LR is preserved. If filter returns 1,
-// the framework branches to 0x8034c12c (the function's final blr) which
-// then returns to the caller using the LR we just restored.
+// Save r3-r8 (the original args to TopRideItem_SpawnAtPosition) across the
+// bl into our C filter, since the filter's return value clobbers r3 and the
+// function's first instructions deref r3 (lwz r3, 4(r3) at 0x8034bf68 — DSI
+// crash if r3 is left at 0 from a "proceed" return).
+//
+// Proceed path: restore args + LR + frame, then `b 0x1c` to skip past the
+// block-path tail (4 instr) plus the macro's cmpwi+bne (8 bytes), landing
+// directly on the clobbered instruction. Bypassing the macro's cmpwi is
+// necessary because we need r3 = mgr (non-zero) here, not the filter result.
+//
+// Block path: restore LR + frame, set r3 = 1 so the macro's cmpwi/bne sends
+// us to the alt addr 0x8034c12c (the function's blr) using our saved LR.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
-    "stwu 1, -16(1)\n\t"
+    "stwu 1, -48(1)\n\t"
     "mflr 0\n\t"
-    "stw 0, 0x8(1)\n\t",
+    "stw 0, 0x8(1)\n\t"
+    "stw 3, 0x10(1)\n\t"
+    "stw 4, 0x14(1)\n\t"
+    "stw 5, 0x18(1)\n\t"
+    "stw 6, 0x1c(1)\n\t"
+    "stw 7, 0x20(1)\n\t"
+    "stw 8, 0x24(1)\n\t",
     GateTopRideItems_FilterSpawn,
+    "cmpwi 3, 0\n\t"
+    "bne 1f\n\t"
+    "lwz 3, 0x10(1)\n\t"
+    "lwz 4, 0x14(1)\n\t"
+    "lwz 5, 0x18(1)\n\t"
+    "lwz 6, 0x1c(1)\n\t"
+    "lwz 7, 0x20(1)\n\t"
+    "lwz 8, 0x24(1)\n\t"
     "lwz 0, 0x8(1)\n\t"
     "mtlr 0\n\t"
-    "addi 1, 1, 16\n\t",
+    "addi 1, 1, 48\n\t"
+    "b 0x1c\n\t"
+    "1:\n\t"
+    "lwz 0, 0x8(1)\n\t"
+    "mtlr 0\n\t"
+    "addi 1, 1, 48\n\t"
+    "li 3, 1\n\t",
     0,
     0x8034c12c)
 
@@ -135,7 +153,7 @@ void GateTopRideItems_OnBoot()
 
 int GateTopRideItems_UnlockItem(TopRideItemKind kind)
 {
-    if (kind >= TRITEM_NUM)
+    if ((unsigned)kind >= TRITEM_NUM)
         return 0;
 
     ap_save->topride_item_unlocked_mask |= (1 << kind);
@@ -147,33 +165,32 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind)
 
 int GateTopRideItems_GiveItem(TopRideItemKind kind)
 {
-    if (kind >= TRITEM_NUM)
+    if ((unsigned)kind >= TRITEM_NUM)
         return 0;
 
-    TopRideItemMgr *item_mgr = *stc_topride_itemmgr;
     TopRideKirbyMgr *kirby_mgr = *stc_topride_kirbymgr;
-    if (!item_mgr || !kirby_mgr)
+    if (!kirby_mgr)
         return 0;
 
-    int spawned = 0;
-    // Debug/traplink give should spawn any kind, locked or not — bypass the
-    // mask filter hook while we call into the spawner.
-    topride_spawn_bypass = 1;
+    // TopRide_KirbyApplyItem dereferences kirby+0x7c (held item GObj) which
+    // is only populated once the race is active. round_state == 2 doubles as
+    // the "kirby is fully wired up" gate.
+    if (kirby_mgr->round_state != 2)
+        return 0;
+
+    int applied = 0;
     for (int i = 0; i < 4; i++)
     {
         TopRideKirby *k = kirby_mgr->kirbys[i];
-        if (!k || !k->is_active || k->cpu_level != 0)
+        if (!k || !k->is_active)
+            continue;
+        if (TopRide_GetPlayerKind(k->player_slot) != TR_PKIND_HMN)
             continue;
 
-        // charge.position is the in-world kirby position; TopRideKirby.position
-        // (0x4C) is the spawn/default and would put the item at course start.
-        Vec3 pos = k->charge.position;
-        Vec3 orient = k->charge.facing_dir;
-        TopRideItem_SpawnAtPosition(item_mgr, kind, &pos, &orient, 0, 1);
-        spawned = 1;
-        OSReport("[TopRideItems] Spawned TR item %d (%s) at player %d\n",
+        TopRide_KirbyApplyItem(k, kind);
+        applied = 1;
+        OSReport("[TopRideItems] Applied TR item %d (%s) to player %d\n",
                  kind, TopRideItemKind_Names[kind], i);
     }
-    topride_spawn_bypass = 0;
-    return spawned;
+    return applied;
 }

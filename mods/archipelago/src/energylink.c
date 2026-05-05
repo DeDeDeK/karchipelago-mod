@@ -142,7 +142,9 @@ static void EnergyLink_TopRidePerFrame(GOBJ *g)
     for (int i = 0; i < 4; i++)
     {
         TopRideKirby *kirby = mgr->kirbys[i];
-        if (!kirby || kirby->cpu_level != 0)
+        if (!kirby)
+            continue;
+        if (TopRide_GetPlayerKind(kirby->player_slot) != TR_PKIND_HMN)
             continue;
 
         float charge = kirby->charge.charge_value;

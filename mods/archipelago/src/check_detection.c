@@ -386,6 +386,34 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
     }
 }
 
+// Filler-apply hook (Checklist_Think, 0x80180dc4)
+// Vanilla's filler-apply path (0x80180dbc: `ori r0, r0, 2; stb r0, 124(r3)`)
+// sets clear[k].is_filler=1 directly and does not call ClearChecker_SetNewUnlock,
+// so the SetNewUnlock REPLACEFUNC never sees it. Without a separate hook the
+// check would never be sent when the player spends a filler. This hook is the
+// AP-side completion notifier for the filler path. RecordCheck is idempotent,
+// so even repeated firings are harmless. At this point r31 = UI state struct
+// (mode at +0x14) and r18 = clear_kind (both non-volatile, held across the
+// preceding `bl` to the filler SFX at 0x80180db0).
+static void CheckDetection_OnFillerApplied(int mode, int clear_kind)
+{
+    if ((unsigned)mode >= GMMODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
+        return;
+    RecordCheck((u8)mode, (u8)clear_kind);
+}
+
+// Hook site: 0x80180dc4. Clobbered instruction is `lbz r3, 2(r29)` (start of
+// the checkbox_filler_num decrement); auto re-execution after the helper
+// returns reloads r3 from r29 (non-volatile), so no epilogue is needed.
+CODEPATCH_HOOKCREATE(
+    0x80180dc4,
+    "lbz 3, 20(31)\n\t"   // r3 = mode
+    "mr 4, 18\n\t",        // r4 = clear_kind
+    CheckDetection_OnFillerApplied,
+    "",
+    0
+)
+
 // Hook site: 0x80180A64 (`lbz r3, 20(r31)` — vanilla's mode load at the top
 // of the filler-eligibility block). We chose this site specifically because
 // the clobbered instruction naturally restores r3 = mode on the accept path,
@@ -463,6 +491,9 @@ void CheckDetection_OnBoot(void)
     // Filler gate: replace vanilla's 3 hardcoded immediate rejects with a
     // goal-aware check.
     CODEPATCH_HOOKAPPLY(0x80180a64);
+
+    // Filler-apply: record the check when the player spends a filler.
+    CODEPATCH_HOOKAPPLY(0x80180dc4);
     OSReport("[Check] Hooks installed\n");
 }
 

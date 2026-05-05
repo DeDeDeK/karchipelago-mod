@@ -120,21 +120,32 @@ static int ApplyAirRideTrap(void)
     return applied;
 }
 
-// Top Ride bad items that can be spawned on a human player when traplink is
-// received. Only Speed Down directly penalizes the picker-up on contact;
-// the other TR items are either beneficial or are attacks that harm other
-// players. TRITEM_SPEEDDOWN (3) is the only reliable self-bad TR item.
+// Top Ride bad items that penalize the picker-up via TopRide_KirbyApplyItem
+// (which installs a self-affecting state on the kirby that "used" the item).
+// Most TR items either buff the user or arm them with an attack against
+// other players; only items whose dispatcher installs a self-debuff state
+// belong here.
+//
+//   TRITEM_SPEEDDOWN — installs KirbySpeedDown (state ID 18, AC_RUN_LOOP
+//                      with reduced speed_factor). Reliable trap.
+//
+// TRITEM_BACKWARD was tried but its 0x802d9188 dispatcher only resets to
+// KirbyNormal and swaps in the KirbyUshiroyurerun vtable; the velocity-flip
+// portion of the vanilla effect is set up by the absorber-pickup path that
+// TopRide_KirbyApplyItem skips, so applied via this path it produces only
+// the smoke-trail visual without slowing the picker. Excluded.
 static const TopRideItemKind tr_trap_items[] = {
     TRITEM_SPEEDDOWN,
 };
 #define TR_TRAP_ITEM_COUNT (sizeof(tr_trap_items) / sizeof(tr_trap_items[0]))
 
-// Top Ride receive: pick a random bad item and drop it on every human Kirby
-// via the shared spawner so they collide with it immediately.
+// Top Ride receive: pick a random bad item and apply it to every human Kirby
+// via the shared item-give path (TopRide_KirbyApplyItem under the hood).
 static int ApplyTopRideTrap(void)
 {
     TopRideItemKind kind = tr_trap_items[HSD_Randi(TR_TRAP_ITEM_COUNT)];
-    OSReport("[TrapLink] applying TR trap item %d\n", kind);
+    OSReport("[TrapLink] applying TR trap item %d (%s)\n",
+             kind, TopRideItemKind_Names[kind]);
     return GateTopRideItems_GiveItem(kind);
 }
 
@@ -274,7 +285,7 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
         return;
 
     TopRideKirby *picker = mgr->kirbys[closest];
-    if (picker->cpu_level != 0)
+    if (TopRide_GetPlayerKind(picker->player_slot) != TR_PKIND_HMN)
         return; // CPU picked it up — don't send
 
     OSReport("[TrapLink] TR ply %d picked up bad item %d\n", closest, item_kind);
