@@ -48,6 +48,7 @@ MODS_ROOT_DIR = mods
 # INCLUDES: Transforms include paths into compiler -I flags
 INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) \
            -I$(MODS_ROOT_DIR)/custom_events/include \
+           -I$(MODS_ROOT_DIR)/textbox/include \
            -I$(MODS_ROOT_DIR)/archipelago/include
 
 # --- Source File Discovery ---

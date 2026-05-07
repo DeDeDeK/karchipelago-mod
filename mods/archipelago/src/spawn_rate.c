@@ -5,8 +5,7 @@
 #include "main.h"
 #include "spawn_rate.h"
 #include "os.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // Returns the effective spawn rate scale factor.
 //
@@ -125,7 +124,7 @@ void SpawnRate_Increment()
     float pct = SpawnRate_GetScale() * 100.0f;
     OSReport("[SpawnRate] Level %d, effective rate %.0f%%.\n",
              ap_save->spawn_rate_level, pct);
-    TextBox_EnqueueColoredNounFmt(NULL, "Spawn rate", TextBox_ItemColor, " up! (%.0f%%)", pct);
+    tb_api->EnqueueColoredNounFmt(NULL, "Spawn rate", tb_api->ItemColor, " up! (%.0f%%)", pct);
 }
 
 void SpawnRate_OnBoot()

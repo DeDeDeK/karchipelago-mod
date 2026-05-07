@@ -1,7 +1,6 @@
 #include "ability_item.h"
 #include "main.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // Give copy ability to every human Kirby rider via the raw rider API.
 // Used in Air Ride (and as a CT fallback when item data tables are unavailable);
@@ -29,8 +28,8 @@ int Ability_GiveItem(CopyKind copy_kind)
         applied = 1;
     }
     if (applied && copy_kind < COPYKIND_NUM && CopyKind_Names[copy_kind])
-        TextBox_EnqueueColoredNoun("Got ", CopyKind_Names[copy_kind],
-                                   TextBox_AbilityColors[copy_kind], " ability!");
+        tb_api->EnqueueColoredNoun("Got ", CopyKind_Names[copy_kind],
+                                   tb_api->AbilityColors[copy_kind], " ability!");
     return applied;
 }
 

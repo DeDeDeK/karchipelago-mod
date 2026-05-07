@@ -9,7 +9,7 @@
 #include "checklist_rewards.h"
 #include "check_detection.h"
 #include "energylink.h"
-#include "textbox.h"
+#include "textbox_api.h"
 
 static u32 ApiGetUnlockMask(APUnlockCategory cat)
 {
@@ -61,7 +61,7 @@ static void ApiAddEnergy(float amount)
 
 static void ApiGrantReward(GameMode mode, u8 reward_index)
 {
-    ChecklistRewards_Grant(mode, reward_index);
+    ChecklistRewards_Grant(mode, reward_index, /*announce=*/1);
 }
 
 static int ApiGetHoveredCell(u8 *out_mode, u8 *out_clear_kind)
@@ -86,7 +86,7 @@ static u16 ApiGetShuffledReward(GameMode mode, u8 reward_index)
 
 static void ApiTextbox(const char *msg)
 {
-    TextBox_Enqueue("%s", msg);
+    tb_api->Enqueue("%s", msg);
 }
 
 static void ApiDebugRevealAllChecklists(void)

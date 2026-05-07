@@ -5,7 +5,7 @@
 
 #include "ap_item_handler.h"
 #include "checklist_rewards.h"
-#include "textbox.h"
+#include "textbox_api.h"
 #include "city_trial_event.h"
 #include "ability_item.h"
 #include "patch_item.h"
@@ -92,7 +92,7 @@ int APItems_HandleItem(uint ap_item_id)
         u32 offset = ap_item_id - AP_CHECKLIST_REWARD_BASE;
         GameMode mode = offset / 50;
         u8 reward_index = offset % 50;
-        ChecklistRewards_Grant(mode, reward_index);
+        ChecklistRewards_Grant(mode, reward_index, /*announce=*/1);
         return 1;
     }
 

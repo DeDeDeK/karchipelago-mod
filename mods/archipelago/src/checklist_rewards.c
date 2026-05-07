@@ -15,8 +15,7 @@
 #include "gate_airride_stages.h"
 #include "gate_topride_items.h"
 #include "gate_stadiums.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // Per-mode reward table sizes (REWARD_COUNT_AIRRIDE / TOPRIDE / CITYTRIAL).
 static const int reward_counts[GMMODE_NUM] = {
@@ -299,16 +298,17 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
 // Checklist_BuildUnlockBitfields the next time it runs, and that function
 // calls our REPLACEFUNC'd ClearChecker_CheckUnlocked — so it picks up the
 // new bit automatically without an explicit cache write here.
-void ChecklistRewards_Grant(GameMode mode, u8 reward_index)
+void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
 {
     ap_save->received_checklist_rewards[mode] |= (1ULL << reward_index);
 
     // reward_type survives all cross-mode / shuffle remapping (only clear_kind
     // is overwritten), so this lookup is always valid.
     u8 reward_type = stc_reward_table_ptrs[mode][reward_index].reward_type;
-    OSReport("[Checklist] Granted mode=%d ri=%d type=%s (%d)\n",
-             mode, reward_index, Reward_TypeName(reward_type), reward_type);
-    TextBox_EnqueueColoredNoun("Received: ", Reward_TypeName(reward_type), TextBox_RewardColor, NULL);
+    OSReport("[Checklist] Granted mode=%d ri=%d type=%s (%d) announce=%d\n",
+             mode, reward_index, Reward_TypeName(reward_type), reward_type, announce);
+    if (announce)
+        tb_api->EnqueueColoredNoun("Received: ", Reward_TypeName(reward_type), tb_api->RewardColor, NULL);
     ApplyVanillaRewardUnlock(mode, reward_index, reward_type);
 
     // The shuffled u16 encodes the placement cell directly: high byte = target
@@ -650,7 +650,7 @@ static void RegrantAllReceivedRewards(void)
         while (received)
         {
             int idx = __builtin_ctzll(received);
-            ChecklistRewards_Grant(mode, (u8)idx);
+            ChecklistRewards_Grant(mode, (u8)idx, /*announce=*/0);
             received &= received - 1;
         }
     }

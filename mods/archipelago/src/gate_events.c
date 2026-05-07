@@ -4,8 +4,7 @@
 
 #include "main.h"
 #include "gate_events.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 #include "inline.h"
 
 // Called from the hook at 0x800ede24 in CityEvent_Decide.
@@ -75,6 +74,6 @@ int GateEvents_UnlockEvent(int kind)
     ap_save->event_unlocked_mask |= (1 << kind);
     OSReport("[Events] Event %d (%s) unlocked (mask = %s)\n",
              kind, name, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
-    TextBox_EnqueueColoredNoun(NULL, name, TextBox_EventColor, NULL);
+    tb_api->EnqueueColoredNoun(NULL, name, tb_api->EventColor, NULL);
     return 1;
 }

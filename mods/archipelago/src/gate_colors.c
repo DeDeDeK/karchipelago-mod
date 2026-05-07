@@ -5,8 +5,7 @@
 #include "main.h"
 #include "gate_colors.h"
 #include "inline.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // Check if a color is unlocked via the AP bitmask.
 static int GateColors_IsColorUnlocked(int color_idx)
@@ -249,8 +248,8 @@ int GateColors_UnlockColor(int color_idx)
     ap_save->color_unlocked_mask |= (1 << color_idx);
     OSReport("[GateColors] Color %d (%s) unlocked (mask = %s)\n",
              color_idx, KirbyColor_Names[color_idx], MaskBits(ap_save->color_unlocked_mask, 8));
-    TextBox_EnqueueColoredNoun(NULL, KirbyColor_Names[color_idx],
-                               TextBox_KirbyColors[color_idx], " Kirby");
+    tb_api->EnqueueColoredNoun(NULL, KirbyColor_Names[color_idx],
+                               tb_api->KirbyColors[color_idx], " Kirby");
     return 1;
 }
 

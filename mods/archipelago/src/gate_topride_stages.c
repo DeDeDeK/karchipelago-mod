@@ -4,8 +4,7 @@
 
 #include "main.h"
 #include "gate_topride_stages.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 #include "inline.h"
 
 // Returns 1 if the course at index `course` is unlocked, 0 otherwise.
@@ -162,6 +161,6 @@ int GateTopRideStages_UnlockStage(int course)
     ap_save->topride_stage_unlocked_mask |= (1 << course);
     OSReport("[TopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
              course, TopRideCourse_Names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
-    TextBox_EnqueueColoredNoun(NULL, TopRideCourse_Names[course], TextBox_StageColor, NULL);
+    tb_api->EnqueueColoredNoun(NULL, TopRideCourse_Names[course], tb_api->StageColor, NULL);
     return 1;
 }

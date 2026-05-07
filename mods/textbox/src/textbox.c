@@ -1,13 +1,95 @@
 #include <stdarg.h>
 #include <string.h>
 #include "text.h"
-#include "main.h"
-#include "settings_menu.h"
 #include "text_joint/text_joint.h"
 #include "hoshi/screen_cam.h"
 
 #include "textbox.h"
 #include "textbox_colors.h"
+
+// Mod-owned settings backing storage. Defaults preserve previous behavior:
+// medium font, colored names, no extra spacing, solid bg, 6 messages, medium
+// display time, medium typewriter speed.
+TextBoxSettings textbox_settings = {
+    .enabled            = 1,
+    .typewriter_enabled = 1,
+    .typewriter_speed   = 1, // Med (4 frames/glyph)
+    .font_size          = 1, // Med (0.4)
+    .colored_names      = 1, // On
+    .message_spacing    = 1, // Normal
+    .background_opacity = 2, // Solid
+    .max_visible        = 2, // 6
+    .display_time       = 1, // Med (300 frames)
+    .corner             = TEXTBOX_CORNER_TOP_LEFT,
+};
+
+// Canvas extents and edge padding for corner anchoring. The screen canvas is
+// ortho 640x480 (see hoshi/src/screen_cam.c). MARGIN keeps the textbox stack
+// off the screen edges.
+#define TEXTBOX_CANVAS_W 640.0f
+#define TEXTBOX_CANVAS_H 480.0f
+#define TEXTBOX_MARGIN   10.0f
+
+// Preset tables. Indexed by the matching settings field.
+static const float font_size_scales[] = { 0.30f, 0.40f, 0.55f };
+static const u8    typewriter_dwells[] = { 8, 4, 2 };
+static const float spacing_multipliers[] = { 0.75f, 1.0f, 1.5f };
+static const u8    bg_alpha_targets[] = { 0, 100, 200 };
+static const u8    max_visible_caps[] = { 3, 4, 6, 8 };
+static const u16   display_wait_frames[] = { 180, 300, 480 };
+
+#define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
+
+// Bounds-checked accessors so an out-of-range setting can't index past the
+// preset array. Defaults match the Med/Normal preset for each.
+static float Settings_FontScale(void)
+{
+    int i = textbox_settings.font_size;
+    if (i < 0 || i >= (int)ARRAY_COUNT(font_size_scales)) i = 1;
+    return font_size_scales[i];
+}
+
+static u8 Settings_TypewriterDwell(void)
+{
+    int i = textbox_settings.typewriter_speed;
+    if (i < 0 || i >= (int)ARRAY_COUNT(typewriter_dwells)) i = 1;
+    return typewriter_dwells[i];
+}
+
+static float Settings_SpacingMultiplier(void)
+{
+    int i = textbox_settings.message_spacing;
+    if (i < 0 || i >= (int)ARRAY_COUNT(spacing_multipliers)) i = 1;
+    return spacing_multipliers[i];
+}
+
+static u8 Settings_BgAlphaTarget(void)
+{
+    int i = textbox_settings.background_opacity;
+    if (i < 0 || i >= (int)ARRAY_COUNT(bg_alpha_targets)) i = 2;
+    return bg_alpha_targets[i];
+}
+
+static u8 Settings_MaxVisible(void)
+{
+    int i = textbox_settings.max_visible;
+    if (i < 0 || i >= (int)ARRAY_COUNT(max_visible_caps)) i = 2;
+    return max_visible_caps[i];
+}
+
+static u16 Settings_DisplayWait(void)
+{
+    int i = textbox_settings.display_time;
+    if (i < 0 || i >= (int)ARRAY_COUNT(display_wait_frames)) i = 1;
+    return display_wait_frames[i];
+}
+
+static int Settings_Corner(void)
+{
+    int i = textbox_settings.corner;
+    if (i < 0 || i >= TEXTBOX_CORNER_NUM) i = TEXTBOX_CORNER_TOP_LEFT;
+    return i;
+}
 
 // Text* pointers inside each entry are invalidated on scene change and recreated
 // by CreateTextBox_OnSceneChange.
@@ -20,9 +102,6 @@ typedef struct
 } TextBoxState;
 
 static TextBoxState textbox_state;
-
-// Frames between glyph reveals when typewriter is on. ~15 glyphs/sec at 60 fps.
-#define TEXTBOX_TYPEWRITER_DWELL 4
 
 // Walk an SIS opcode stream from `start` to `end` and return the byte just past
 // the Nth visible glyph (char codes >= 0x20 or 0x1a SPACE). If n exceeds the
@@ -160,7 +239,7 @@ static void TextBox_InjectTypewriterTerm(TextBoxMessage *msg)
 // Build a multi-segment Text GObj. Each segment becomes one subtext at the
 // computed x cursor position, with its own COLOR opcode (Text_AddSubtext
 // captures t->color at emit time).
-Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec3 pos, Vec2 scale, uint lifetime)
+Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec3 pos, Vec2 scale, uint lifetime, u8 bg_alpha)
 {
     if (seg_count <= 0 || seg_count > TEXTBOX_MAX_SEGMENTS)
         return NULL;
@@ -173,7 +252,9 @@ Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec3 pos, V
     t->use_aspect = 1;
     t->trans = pos;
     t->viewport_scale = scale;
-    t->viewport_color = (GXColor){0, 0, 0, lifetime};
+    // Background quad alpha is independent of text alpha — clamped against the
+    // text fade in TextBox_SetAlpha so the bg can't outlast the text.
+    t->viewport_color = (GXColor){0, 0, 0, (bg_alpha < lifetime) ? bg_alpha : (u8)lifetime};
 
     char sanitize_buf[TEXTBOX_SEGMENT_TEXT_SIZE * 2];
     float x_cursor = 0.0f;
@@ -228,7 +309,7 @@ void CreateTextBox_OnSceneChange()
                 segs[s].text = msg->segments[s].text;
                 segs[s].color = msg->segments[s].color;
             }
-            msg->text = CreateTextBoxSegmented(segs, msg->segment_count, msg->pos, msg->scale, msg->lifetime);
+            msg->text = CreateTextBoxSegmented(segs, msg->segment_count, msg->pos, msg->scale, msg->lifetime, msg->bg_alpha_target);
             if (!msg->text)
             {
                 OSReport("[TextBox] Failed to recreate textbox on scene change\n");
@@ -261,35 +342,68 @@ void CreateTextBox_OnSceneChange()
 // applied to every glyph in every subtext (see docs/sis-text-system.md
 // "Color Rendering Pipeline"). So fading the whole textbox = touching .a only.
 // We must NOT overwrite RGB, or per-segment noun colors would all collapse to white.
-void TextBox_SetAlpha(Text *text, u8 alpha)
+//
+// Background opacity is set independently from text alpha: bg.a sits at
+// `bg_target` until the text fade brings text_alpha below the target, at which
+// point bg fades together with the text so it can't outlast the glyphs.
+void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target)
 {
     if (!text)
         return;
-    text->color.a = alpha;
-    text->viewport_color.a = alpha;
+    text->color.a          = text_alpha;
+    text->viewport_color.a = (text_alpha < bg_target) ? text_alpha : bg_target;
 }
 
-// Repositions all messages in the queue by moving older messages down
+// Repositions all messages in the queue based on the selected corner. Top
+// corners stack newest at top, older flowing down; bottom corners stack
+// newest at bottom, older flowing up. Right corners right-align each
+// message individually against the right edge (per-message width since
+// each TextBox can have a different width).
+//
+// The line advance ((aspect.Y / 2) * spacing) is preserved from the
+// original top-left layout — aspect.Y is the glyph cell height in
+// text-pixel units; halving it gives the empirical canvas-pixel line
+// height at default viewport_scale.
 void TextBoxQueue_RepositionAll()
 {
     int count = TextBoxQueue_Count();
     if (count == 0)
         return;
 
-    // Start at the top position for the newest message
-    float y_offset = 10.0f;
+    int corner    = Settings_Corner();
+    int is_right  = (corner == TEXTBOX_CORNER_TOP_RIGHT  || corner == TEXTBOX_CORNER_BOTTOM_RIGHT);
+    int is_bottom = (corner == TEXTBOX_CORNER_BOTTOM_LEFT || corner == TEXTBOX_CORNER_BOTTOM_RIGHT);
 
-    // Iterate from newest (index count-1) to oldest (index 0).
-    // Newest message stays at top, older messages stack below.
+    float spacing = Settings_SpacingMultiplier();
+
+    // edge_y is the canvas y of the next anchor edge — top edge for top
+    // corners, bottom edge for bottom corners.
+    float edge_y = is_bottom ? (TEXTBOX_CANVAS_H - TEXTBOX_MARGIN) : TEXTBOX_MARGIN;
+
     for (int i = count - 1; i >= 0; i--)
     {
         TextBoxMessage *t = TextBoxQueue_GetAt(i);
-        if (t && t->text)
-        {
-            t->pos.Y = y_offset;
-            t->text->trans.Y = t->pos.Y;
-            y_offset += t->text->aspect.Y / 2;
-        }
+        if (!t || !t->text)
+            continue;
+
+        float w_px   = t->text->aspect.X * t->text->viewport_scale.X;
+        float line_h = (t->text->aspect.Y / 2.0f) * spacing;
+
+        // trans is the top-left of the message bounding box. For bottom
+        // corners we shift up by line_h so the message's bottom edge sits
+        // at edge_y.
+        float trans_x = is_right  ? (TEXTBOX_CANVAS_W - TEXTBOX_MARGIN - w_px) : TEXTBOX_MARGIN;
+        float trans_y = is_bottom ? (edge_y - line_h) : edge_y;
+
+        t->pos.X = trans_x;
+        t->pos.Y = trans_y;
+        t->text->trans.X = trans_x;
+        t->text->trans.Y = trans_y;
+
+        if (is_bottom)
+            edge_y -= line_h;
+        else
+            edge_y += line_h;
     }
 }
 
@@ -309,7 +423,7 @@ void TextBox_PerFrame(GOBJ *g)
             continue;
         if (msg->chars_revealed >= msg->chars_total)
             continue;
-        if (++msg->typewriter_counter < TEXTBOX_TYPEWRITER_DWELL)
+        if (++msg->typewriter_counter < msg->typewriter_dwell)
             continue;
         msg->typewriter_counter = 0;
         msg->chars_revealed++;
@@ -326,14 +440,15 @@ void TextBox_PerFrame(GOBJ *g)
     if (oldest->typewriter_active && oldest->chars_revealed < oldest->chars_total)
         return;
 
-    // After 5 seconds since the last removed message, subtract from the alpha
-    // value of the oldest message until it reaches 0. When it hits 0, dequeue it.
-    if (++textbox_state.framecounter > 300)
+    // After the player-configured display window since the last removed message,
+    // subtract from the alpha value of the oldest message until it reaches 0.
+    // When it hits 0, dequeue it.
+    if (++textbox_state.framecounter > Settings_DisplayWait())
     {
         if (oldest->lifetime > 0)
         {
             oldest->lifetime--;
-            TextBox_SetAlpha(oldest->text, oldest->lifetime);
+            TextBox_SetAlpha(oldest->text, oldest->lifetime, oldest->bg_alpha_target);
         }
         else
         {
@@ -347,39 +462,63 @@ void TextBox_PerFrame(GOBJ *g)
 // Common queue/dequeue/creation logic shared by all enqueue entry points.
 static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
 {
-    if (!ap_menu_settings.textbox_enabled)
+    if (!textbox_settings.enabled)
         return 0;
     if (seg_count <= 0 || seg_count > TEXTBOX_MAX_SEGMENTS)
         return 0;
+    // Hoshi creates the screen canvas in Hook_SceneChange, so callers that
+    // fire pre-first-scene (e.g. ChecklistRewards regrant from OnSaveLoaded)
+    // would walk an empty canvas list inside Text_CreateText and dereference
+    // NULL+0xA. Drop the message instead.
+    if (!*stc_textcanvas_first)
+    {
+        OSReport("[TextBox] Dropping enqueue — no canvas yet (pre-first-scene)\n");
+        return 0;
+    }
 
-    // Auto-dequeue oldest message if queue is full to make room for new message
-    if (TextBoxQueue_IsFull())
+    // Honor the runtime "Max On Screen" cap. The static array can hold up to
+    // TEXTBOX_QUEUE_SIZE; the cap is whatever the player picked. Drop oldest
+    // until count < cap so the new message fits.
+    u8 max_visible = Settings_MaxVisible();
+    while (TextBoxQueue_Count() >= max_visible)
     {
         TextBoxMessage removed_text;
         TextBox_Dequeue(&removed_text);
-        // Reset framecounter so the next oldest message gets a fresh 5-second timer
         textbox_state.framecounter = 0;
-        OSReport("[TextBox] Queue full, auto-dequeued oldest message.\n");
+        OSReport("[TextBox] Visible cap reached, auto-dequeued oldest message.\n");
     }
 
     // Reset framecounter if adding to an empty queue
     if (TextBoxQueue_IsEmpty())
         textbox_state.framecounter = 0;
 
+    // Build a local segment array so we can apply the Colored Names policy
+    // without mutating the caller's buffer. When colors are off, every
+    // segment renders in DefaultColor.
+    int colored = textbox_settings.colored_names ? 1 : 0;
+    TextSegment local_segs[TEXTBOX_MAX_SEGMENTS];
+    for (int i = 0; i < seg_count; i++)
+    {
+        local_segs[i].text  = segs[i].text;
+        local_segs[i].color = colored ? segs[i].color : TextBox_DefaultColor;
+    }
+
     TextBoxMessage entry;
     entry.lifetime = 200;
     entry.pos = (Vec3){10, 10, 0};
-    entry.scale = (Vec2){0.4, 0.4};
+    float font_scale = Settings_FontScale();
+    entry.scale = (Vec2){font_scale, font_scale};
+    entry.bg_alpha_target = Settings_BgAlphaTarget();
     entry.segment_count = (u8)seg_count;
     for (int i = 0; i < seg_count; i++)
     {
-        const char *src = segs[i].text ? segs[i].text : "";
+        const char *src = local_segs[i].text ? local_segs[i].text : "";
         strncpy(entry.segments[i].text, src, TEXTBOX_SEGMENT_TEXT_SIZE - 1);
         entry.segments[i].text[TEXTBOX_SEGMENT_TEXT_SIZE - 1] = '\0';
-        entry.segments[i].color = segs[i].color;
+        entry.segments[i].color = local_segs[i].color;
     }
 
-    entry.text = CreateTextBoxSegmented(segs, seg_count, entry.pos, entry.scale, entry.lifetime);
+    entry.text = CreateTextBoxSegmented(local_segs, seg_count, entry.pos, entry.scale, entry.lifetime, entry.bg_alpha_target);
     if (!entry.text)
     {
         OSReport("[TextBox] Failed to create Text object!\n");
@@ -388,7 +527,8 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
 
     // Sample the typewriter setting at enqueue time so per-message behavior
     // stays stable even if the player toggles mid-reveal.
-    entry.typewriter_active    = ap_menu_settings.textbox_typewriter_enabled ? 1 : 0;
+    entry.typewriter_active    = textbox_settings.typewriter_enabled ? 1 : 0;
+    entry.typewriter_dwell     = Settings_TypewriterDwell();
     entry.typewriter_counter   = 0;
     entry.chars_revealed       = 0;
     entry.typewriter_term_pos  = NULL;
@@ -463,7 +603,7 @@ int TextBox_EnqueueColoredNounFmt(const char *prefix, const char *noun, GXColor 
 
 int TextBox_Enqueue(const char *format, ...)
 {
-    if (!ap_menu_settings.textbox_enabled)
+    if (!textbox_settings.enabled)
         return 0;
 
     char buffer[TEXTBOX_SEGMENT_TEXT_SIZE];

@@ -3,8 +3,7 @@
 #include "patch_item.h"
 #include "main.h"
 #include "settings_menu.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 #include "item.h"
 #include "machine.h"
 #include "os.h"
@@ -130,7 +129,7 @@ int PermanentPatch_GiveItem(PatchKind kind)
 
     OSReport("[PatchItem] Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
     if (kind < PATCHKIND_NUM)
-        TextBox_EnqueueColoredNoun("Permanent +1 ", PatchKind_Names[kind], TextBox_PatchColor, NULL);
+        tb_api->EnqueueColoredNoun("Permanent +1 ", PatchKind_Names[kind], tb_api->PatchColor, NULL);
     return 1;
 }
 
@@ -145,7 +144,7 @@ int PermanentPatch_GiveAllUp()
     }
 
     OSReport("[PatchItem] Permanent all-up received.\n");
-    TextBox_EnqueueColoredNoun("Permanent +1 ", "All Up", TextBox_PatchColor, NULL);
+    tb_api->EnqueueColoredNoun("Permanent +1 ", "All Up", tb_api->PatchColor, NULL);
     return 1;
 }
 

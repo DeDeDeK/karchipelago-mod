@@ -7,8 +7,7 @@
 #include "main.h"
 #include "gate_topride_items.h"
 #include "gate_abilities.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 #include "inline.h"
 
 // Top Ride items that correspond to copy abilities.
@@ -160,7 +159,7 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind)
     ap_save->topride_item_unlocked_mask |= (1 << kind);
     OSReport("[TopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
              kind, TopRideItemKind_Names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
-    TextBox_EnqueueColoredNoun("TR ", TopRideItemKind_Names[kind], TextBox_TopRideItemColor, NULL);
+    tb_api->EnqueueColoredNoun("TR ", TopRideItemKind_Names[kind], tb_api->TopRideItemColor, NULL);
     return 1;
 }
 

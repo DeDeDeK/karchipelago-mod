@@ -4,8 +4,7 @@
 
 #include "main.h"
 #include "gate_airride_stages.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 #include "inline.h"
 
 // Replacement for AirRide_CheckCourseUnlocked (0x8000c0e0).
@@ -71,6 +70,6 @@ int GateAirRideStages_UnlockStage(int stage_kind)
     ap_save->airride_stage_unlocked_mask |= (1 << stage_kind);
     OSReport("[AirRideStages] Air Ride stage %d (%s) unlocked (mask = %s)\n",
              stage_kind, AirRideCourse_Names[stage_kind], MaskBits(ap_save->airride_stage_unlocked_mask, 16));
-    TextBox_EnqueueColoredNoun(NULL, AirRideCourse_Names[stage_kind], TextBox_StageColor, NULL);
+    tb_api->EnqueueColoredNoun(NULL, AirRideCourse_Names[stage_kind], tb_api->StageColor, NULL);
     return 1;
 }

@@ -14,8 +14,10 @@ void ChecklistRewards_OnSaveInit(void);
 // Restore reward tables and received rewards from save data. Call from OnSaveLoaded.
 void ChecklistRewards_OnSaveLoaded(void);
 
-// Grant a checklist reward received from the AP server.
-void ChecklistRewards_Grant(GameMode mode, u8 reward_index);
+// Grant a checklist reward received from the AP server. `announce=1` shows the
+// "Received: …" textbox; pass 0 from re-grant paths (save-load restoration,
+// post-shuffle re-apply) where the player isn't actually receiving anything new.
+void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce);
 
 // Apply the AP location assignment from APData.
 void ChecklistRewards_ApplyLocations(void);

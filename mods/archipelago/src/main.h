@@ -7,6 +7,12 @@
 // Public API (APItemId enum lives here so external mods can use it too).
 #include "archipelago_api.h"
 
+// Imported textbox API. Resolved in OnSaveLoaded via Hoshi_ImportMod (deferred
+// past OnBoot since mods boot alphabetically and textbox boots after us);
+// callers dereference directly (e.g. tb_api->Enqueue("..."), tb_api->EventColor).
+#include "textbox_api.h"
+extern const TextBoxAPI *tb_api;
+
 #define MAX_RECEIVED_ITEMS 512
 
 #define REWARD_COUNT_AIRRIDE   46

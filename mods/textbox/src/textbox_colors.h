@@ -6,8 +6,9 @@
 #include "rider.h"
 #include "item.h"
 
-// Per-noun text colors used by the AP textbox. RGB only — alpha is set
-// per-frame by the textbox lifetime/fade machinery (see TextBox_SetAlpha).
+// Per-noun text colors. RGB only — alpha is set per-frame by the textbox
+// lifetime/fade machinery. These are the canonical palette; the cross-mod
+// API (textbox_api.h) re-exports them by value through TextBoxAPI fields.
 
 extern const GXColor TextBox_DefaultColor;     // white, used for prefix/suffix
 extern const GXColor TextBox_AbilityColors[COPYKIND_NUM];

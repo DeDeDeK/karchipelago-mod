@@ -9,6 +9,7 @@
                 "${workspaceFolder}/externals/hoshi/include/**", 
                 "${workspaceFolder}/externals/hoshi/Lib/**",
                 "${workspaceFolder}/mods/custom_events/include",
+                "${workspaceFolder}/mods/textbox/include",
                 "${workspaceFolder}/mods/archipelago/include",
                 "${workspaceFolder}/mods/**/src"
             ],

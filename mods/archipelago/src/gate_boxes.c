@@ -8,8 +8,7 @@
 #include "main.h"
 #include "gate_boxes.h"
 #include "inline.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // True if the post-filter pool for `box` still has at least one item with chance > 0.
 // Other gating systems (abilities/patches/items) zero entries in this pool, so a
@@ -88,6 +87,6 @@ int GateBoxes_UnlockBox(BoxKind kind)
     ap_save->box_unlocked_mask |= (1 << kind);
     OSReport("[GateBoxes] Box %d (%s) unlocked (mask = %s)\n",
              kind, BoxKind_Names[kind], MaskBits(ap_save->box_unlocked_mask, 8));
-    TextBox_EnqueueColoredNoun(NULL, BoxKind_Names[kind], TextBox_BoxColor, NULL);
+    tb_api->EnqueueColoredNoun(NULL, BoxKind_Names[kind], tb_api->BoxColor, NULL);
     return 1;
 }

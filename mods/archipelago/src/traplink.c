@@ -9,8 +9,7 @@
 
 #include "main.h"
 #include "settings_menu.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 #include "traplink.h"
 #include "ap_item_handler.h"
 #include "gate_topride_items.h"
@@ -213,7 +212,7 @@ static void TrapLink_PerFrame(GOBJ *g)
 
     if (handled)
     {
-        TextBox_EnqueueColoredNoun(NULL, "Trap", TextBox_TrapColor, " received!");
+        tb_api->EnqueueColoredNoun(NULL, "Trap", tb_api->TrapColor, " received!");
         ap_data->traplink_receive = 0;
     }
 }

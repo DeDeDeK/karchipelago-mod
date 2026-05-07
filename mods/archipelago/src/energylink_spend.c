@@ -3,8 +3,7 @@
 #include "hoshi/settings.h"
 
 #include "main.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 #include "ap_item_handler.h"
 #include "energylink.h"
 #include "energylink_spend.h"
@@ -23,7 +22,7 @@ static int Buy(OptionDesc *self)
     {
         OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: need %.0f, have %.0f\n",
                  self->name, entry->item_id, entry->cost, ap_data->energy_balance);
-        TextBox_EnqueueColoredNounFmt("Not enough ", "energy", TextBox_EnergyColor,
+        tb_api->EnqueueColoredNounFmt("Not enough ", "energy", tb_api->EnergyColor,
                                       "! Need %.0f, have %.0f", entry->cost, ap_data->energy_balance);
         return 0;
     }
@@ -34,7 +33,7 @@ static int Buy(OptionDesc *self)
     {
         OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: queue full\n",
                  self->name, entry->item_id);
-        TextBox_Enqueue("Queue full - try again later");
+        tb_api->Enqueue("Queue full - try again later");
         return 0;
     }
     ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
@@ -43,7 +42,7 @@ static int Buy(OptionDesc *self)
 
     OSReport("[EnergyLink] Bought '%s' (id=%d) for %.0f, balance %.0f\n",
              self->name, entry->item_id, entry->cost, ap_data->energy_balance);
-    TextBox_EnqueueColoredNounFmt("Bought ", self->name, TextBox_ShopColor,
+    tb_api->EnqueueColoredNounFmt("Bought ", self->name, tb_api->ShopColor,
                                   " for %.0f energy", entry->cost);
     return 1;
 }

@@ -6,8 +6,7 @@
 #include "main.h"
 #include "patch_cap.h"
 #include "os.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // Returns the current patch cap value.
 // When progressive patch caps are off, returns PATCH_STAT_MAX (vanilla behavior).
@@ -91,7 +90,7 @@ void PatchCap_Increment()
     ap_save->patch_cap_count++;
     int cap = PatchCap_GetCap();
     OSReport("[PatchCap] Patch cap increased to %d.\n", cap);
-    TextBox_EnqueueColoredNounFmt(NULL, "Patch cap", TextBox_PatchColor,
+    tb_api->EnqueueColoredNounFmt(NULL, "Patch cap", tb_api->PatchColor,
                                   " increased! (%d/%d)", cap, PATCH_STAT_MAX);
 }
 

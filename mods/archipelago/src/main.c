@@ -9,7 +9,6 @@
 #include "stadium.h"
 
 #include "main.h"
-#include "textbox.h"
 #include "deathlink.h"
 #include "city_trial_event.h"
 #include "ap_item_handler.h"
@@ -39,6 +38,7 @@
 // Define global variables.
 APData *ap_data;
 APSave *ap_save;
+const TextBoxAPI *tb_api = 0;
 
 ModDesc mod_desc = {
     .name = "KARchipelago",                     // Name of the mod.
@@ -158,6 +158,18 @@ void OnSaveInit()
 // This callback is executed regardless of if a memory card is inserted or contained existing save data.
 void OnSaveLoaded()
 {
+    // Resolve the textbox API (separate mod). Deferred to OnSaveLoaded because
+    // mods are booted in alphabetical order; "archipelago" boots before
+    // "textbox", so Hoshi_ImportMod would return NULL during our own OnBoot.
+    // By OnSaveLoaded all mods have exported their APIs.
+    if (!tb_api)
+    {
+        tb_api = (const TextBoxAPI *)Hoshi_ImportMod(
+            (char *)TEXTBOX_MOD_NAME, TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR);
+        if (!tb_api)
+            OSReport("[Main] failed to import textbox API\n");
+    }
+
     ap_save = (APSave *)mod_desc.save_ptr;
     ap_save->boot_num++;
 
@@ -367,8 +379,6 @@ void OnSceneChange()
 {
     OSReport("[Main] We are now entering major %d / minor %d\n",
              Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
-
-    CreateTextBox_OnSceneChange();
 
     APItems_OnSceneChange();
 }

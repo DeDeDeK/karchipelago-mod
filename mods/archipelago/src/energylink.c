@@ -5,8 +5,7 @@
 #include "main.h"
 #include "settings_menu.h"
 #include "energylink.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // Per-player tracking state. Indexed by player index (0-4).
 // Kept separate so multiple human players in city trial each track their own
@@ -40,7 +39,7 @@ static void TrackEnergyReceive(void)
     float delta = curr - prev_energy_balance;
     prev_energy_balance = curr;
     if (delta > 0)
-        TextBox_EnqueueColoredNounFmt("Received ", "energy", TextBox_EnergyColor, " (+%.0f)", delta);
+        tb_api->EnqueueColoredNounFmt("Received ", "energy", tb_api->EnergyColor, " (+%.0f)", delta);
 }
 
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units

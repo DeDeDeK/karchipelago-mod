@@ -7,8 +7,7 @@
 #include "main.h"
 #include "settings_menu.h"
 #include "deathlink.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // Reentrancy guard — prevents send hooks from echoing when we call
 // Machine_SetFallDead or Ply_SetHP from the receive path.
@@ -125,7 +124,7 @@ static void DeathLink_PerFrame(GOBJ *g)
         applying_deathlink = 0;
     }
 
-    TextBox_EnqueueColoredNoun(NULL, "Deathlink", TextBox_DeathColor, " received!");
+    tb_api->EnqueueColoredNoun(NULL, "Deathlink", tb_api->DeathColor, " received!");
     ap_data->deathlink_receive = 0;
 }
 
@@ -192,7 +191,7 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
 
     OSReport("[DeathLink] Received (TR) - applied %s to %d humans\n",
              deathlink_state_names[idx], hits);
-    TextBox_EnqueueColoredNoun(NULL, "Deathlink", TextBox_DeathColor, " received!");
+    tb_api->EnqueueColoredNoun(NULL, "Deathlink", tb_api->DeathColor, " received!");
     ap_data->deathlink_receive = 0;
 }
 

@@ -8,8 +8,7 @@
 #include "main.h"
 #include "check_detection.h"
 #include "checklist_rewards.h"
-#include "textbox.h"
-#include "textbox_colors.h"
+#include "textbox_api.h"
 
 // SFX cue played by the vanilla ClearChecker_SetNewUnlock on a first-this-frame
 // transition. Guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
@@ -88,7 +87,7 @@ static void RecordCheck(u8 mode, u8 clear_kind)
         OSReport("[Check] mode=%d clear_kind=%d recorded (no local reward placement)\n",
                  mode, clear_kind);
     }
-    TextBox_EnqueueColoredNoun(NULL, "Check", TextBox_CheckColor, " sent");
+    tb_api->EnqueueColoredNoun(NULL, "Check", tb_api->CheckColor, " sent");
 
     CheckDetection_EvaluateGoal();
     Hoshi_WriteSave();
@@ -187,7 +186,7 @@ void CheckDetection_EvaluateGoal(void)
         ap_save->goal_complete = 1;
         ap_data->goal_complete = 1;
         OSReport("[Check] GOAL COMPLETE\n");
-        TextBox_EnqueueColoredNoun(NULL, "Goal", TextBox_GoalColor, " complete!");
+        tb_api->EnqueueColoredNoun(NULL, "Goal", tb_api->GoalColor, " complete!");
         Hoshi_WriteSave();
     }
 }
