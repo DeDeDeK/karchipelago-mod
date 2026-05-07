@@ -7,6 +7,7 @@
 #include "gate_abilities.h"
 #include "ability_item.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 #include "traplink.h"
 #include "inline.h"
 
@@ -392,6 +393,6 @@ int GateAbilities_UnlockAbility(CopyKind kind)
     ap_save->ability_unlocked_mask |= (1 << kind);
     OSReport("[GateAbilities] Ability %d (%s) unlocked (mask = %s)\n",
              kind, CopyKind_Names[kind], MaskBits(ap_save->ability_unlocked_mask, 16));
-    TextBox_Enqueue(CopyKind_Names[kind]);
+    TextBox_EnqueueColoredNoun(NULL, CopyKind_Names[kind], TextBox_AbilityColors[kind], NULL);
     return 1;
 }

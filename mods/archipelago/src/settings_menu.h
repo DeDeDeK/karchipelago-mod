@@ -13,6 +13,7 @@ typedef struct APMenuSettings
     int energylink_autocharge;
     int traplink_enabled;
     int textbox_enabled;
+    int textbox_typewriter_enabled;
     int ct_permanent_patches_enabled;
     int ct_stadium_permanent_patches_enabled;
     int ar_permanent_patches_enabled;

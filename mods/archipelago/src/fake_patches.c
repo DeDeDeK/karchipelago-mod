@@ -1,5 +1,6 @@
 #include "event.h"
 #include "item.h"
+#include "stage.h"
 #include "code_patch/code_patch.h"
 
 #include "fake_patches.h"
@@ -10,22 +11,24 @@
 // (stc_city_item_mgr->fake_event_data != NULL), in which case the surrounding
 // caller (Machine_OnTouchItem at 0x801db8c0) skips the bl Machine_ApplyHurt
 // and the fake patch silently does nothing. AP traps spawn ITKIND_*FAKE
-// items outside the event, so we look up the same fake-data table directly
-// from the event registry, which is loaded for the whole match.
+// items outside the event, so we look up the fake-data table from the loaded
+// event archive directly.
 //
-// Note: stc_city_item_mgr->fake_event_data and the event-table lookup return
-// the same pointer (CityItem_InitFakeEvent copies it from the event into
-// the manager). Reading the event table works in both cases.
+// We read it from GrData.event_config rather than *stc_eventcheck_gobj because
+// the event GOBJ is never created when CT events are disabled in the menu —
+// CityEvent_Init bails when Gm_CheckEnemyEnabled returns 0 — but the archive
+// is loaded unconditionally by fn_grSetupCityEventData on every City Trial
+// load, so the bgm_sky table is always available.
 static int ProcessFakeItem(GOBJ *item_gobj, void *hurt_params)
 {
-    GOBJ *ev_gobj = *stc_eventcheck_gobj;
-    if (!ev_gobj)
+    GrObj *gr = stc_grobj ? *stc_grobj : 0;
+    if (!gr || !gr->gr_data)
         return 0;
-    EventCheckData *ev = ev_gobj->userdata;
-    if (!ev || !ev->data || !ev->data->bgm_sky)
+    EventConfigData *cfg = gr->gr_data->event_config;
+    if (!cfg || !cfg->bgm_sky)
         return 0;
 
-    void *fake_data = ev->data->bgm_sky[EVKIND_FAKEPOWERUPS].event_data;
+    void *fake_data = cfg->bgm_sky[EVKIND_FAKEPOWERUPS].event_data;
     if (!fake_data)
         return 0;
 

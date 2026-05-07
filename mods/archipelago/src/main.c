@@ -254,11 +254,41 @@ void On3DLoadStart()
 // Players, riders, their machines, and the map have all been instantiated.
 void On3DLoadEnd()
 {
-    char *mode_name = Gm_IsInCity() ? "City Trial" : "Air Ride";
-    OSReport("[Main] Starting %s: Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-             mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
-             Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
-             Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
+    static const char *const ar_mode_names[] = { "Race", "Time Attack", "Free Run" };
+    static const char *const city_mode_names[] = { "Trial", "Stadium", "Free Run" };
+    // Gm_IsInCity() only returns true on the CT main map (stage_kind 9/52);
+    // stadiums load their own stages and would be misreported as Air Ride.
+    // The CT major (MJRKIND_CITY) covers Trial, Free Run, and all stadiums.
+    if (Scene_GetCurrentMajor() == MJRKIND_CITY)
+    {
+        CityMode cm = Gm_GetCityMode();
+        if (cm == CITYMODE_STADIUM)
+        {
+            StadiumKind sk = Gm_GetCurrentStadiumKind();
+            const char *sk_name = ((unsigned)sk < STKIND_NUM) ? StadiumKind_Names[sk] : "?";
+            OSReport("[Main] Starting City Trial: Stadium (%s) Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
+                     sk_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                     Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
+                     Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
+        }
+        else
+        {
+            const char *cm_name = ((unsigned)cm < 3) ? city_mode_names[cm] : "?";
+            OSReport("[Main] Starting City Trial: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
+                     cm_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                     Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
+                     Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
+        }
+    }
+    else
+    {
+        AirRideMode ar_mode = Gm_GetAirRideMode();
+        const char *ar_mode_name = ((unsigned)ar_mode < 3) ? ar_mode_names[ar_mode] : "?";
+        OSReport("[Main] Starting Air Ride: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
+                 ar_mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                 Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
+                 Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
+    }
 
     for (int i = 0; i < 5; i++)
     {
@@ -296,7 +326,10 @@ void On3DLoadEnd()
 // Top Ride uses minor 19 (not 18), so On3DLoadEnd does not fire.
 void OnTopRideLoad()
 {
-    OSReport("[Main] Top Ride gameplay loaded.\n");
+    static const char *const tr_mode_names[] = { "Race", "Time Attack", "Free Run" };
+    TopRideMode tr_mode = TopRide_GetMode();
+    const char *tr_mode_name = ((unsigned)tr_mode < 3) ? tr_mode_names[tr_mode] : "?";
+    OSReport("[Main] Top Ride gameplay loaded (mode: %s).\n", tr_mode_name);
 
     if (ap_menu_settings.energylink_enabled)
         EnergyLink_OnTopRideLoad();

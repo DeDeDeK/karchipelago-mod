@@ -6,6 +6,7 @@
 #include "settings_menu.h"
 #include "energylink.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 
 // Per-player tracking state. Indexed by player index (0-4).
 // Kept separate so multiple human players in city trial each track their own
@@ -39,7 +40,7 @@ static void TrackEnergyReceive(void)
     float delta = curr - prev_energy_balance;
     prev_energy_balance = curr;
     if (delta > 0)
-        TextBox_Enqueue("Received %.0f energy", delta);
+        TextBox_EnqueueColoredNounFmt("Received ", "energy", TextBox_EnergyColor, " (+%.0f)", delta);
 }
 
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units
@@ -152,6 +153,26 @@ static void EnergyLink_TopRidePerFrame(GOBJ *g)
         if (charge_diff > 0)
             energy_send_accumulator += charge_diff * CHARGE_ENERGY_SCALE;
         prev_charge_value[i] = charge;
+
+        // Auto-charge: spend energy from pool to fill the kirby's charge meter.
+        // Gated on charge_ready so we don't overwrite charge_value during the
+        // post-release depletion phase — that depletion drives the boost
+        // mechanic (boost_speed is computed from charge_at_release at the
+        // moment A is released; see docs/topride-system.md).
+        if (ap_menu_settings.energylink_autocharge && kirby->charge.charge_ready)
+        {
+            float deficit = 1.0f - kirby->charge.charge_value;
+            float max_gain = ap_data->energy_balance / CHARGE_ENERGY_SCALE;
+            float charge_gain = (deficit < max_gain) ? deficit : max_gain;
+            if (charge_gain > 0)
+            {
+                kirby->charge.charge_value += charge_gain;
+                // Inject is invisible to next frame's send delta
+                prev_charge_value[i] = kirby->charge.charge_value;
+
+                EnergyLink_Withdraw(charge_gain * CHARGE_ENERGY_SCALE);
+            }
+        }
     }
 
     FlushEnergy();

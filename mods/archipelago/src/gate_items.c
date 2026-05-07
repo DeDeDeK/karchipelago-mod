@@ -5,6 +5,7 @@
 #include "main.h"
 #include "gate_items.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 #include "inline.h"
 
 // 1-to-1 inverse of ItemKindToUnlockBit. Lets us reuse hoshi's ItemKind_Names
@@ -227,6 +228,6 @@ int GateItems_UnlockItem(ItemUnlockKind kind)
     ap_save->item_unlocked_mask |= (1 << kind);
     OSReport("[GateItems] Item %d (%s) unlocked (mask = %s)\n",
              kind, ItemUnlockName(kind), MaskBits(ap_save->item_unlocked_mask, 32));
-    TextBox_Enqueue(ItemUnlockName(kind));
+    TextBox_EnqueueColoredNoun(NULL, ItemUnlockName(kind), TextBox_ItemColor, NULL);
     return 1;
 }

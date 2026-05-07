@@ -5,6 +5,7 @@
 #include "gate_patches.h"
 #include "inline.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 
 // Note: this file has no OnBoot. GatePatches_FilterSpawnTables and
 // GatePatches_FilterEventDropTables are invoked externally by item_spawn_filter.c
@@ -105,6 +106,6 @@ int GatePatches_UnlockPatch(PatchKind kind)
     ap_save->patch_unlocked_mask |= (1 << kind);
     OSReport("[GatePatches] Patch %d (%s) unlocked (mask = %s)\n",
              kind, PatchKind_Names[kind], MaskBits(ap_save->patch_unlocked_mask, 16));
-    TextBox_Enqueue("%s Patch", PatchKind_Names[kind]);
+    TextBox_EnqueueColoredNoun(NULL, PatchKind_Names[kind], TextBox_PatchColor, " Patch");
     return 1;
 }

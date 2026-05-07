@@ -4,6 +4,7 @@
 #include "main.h"
 #include "settings_menu.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 #include "item.h"
 #include "machine.h"
 #include "os.h"
@@ -129,7 +130,7 @@ int PermanentPatch_GiveItem(PatchKind kind)
 
     OSReport("[PatchItem] Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
     if (kind < PATCHKIND_NUM)
-        TextBox_Enqueue("Permanent +1 %s", PatchKind_Names[kind]);
+        TextBox_EnqueueColoredNoun("Permanent +1 ", PatchKind_Names[kind], TextBox_PatchColor, NULL);
     return 1;
 }
 
@@ -144,7 +145,7 @@ int PermanentPatch_GiveAllUp()
     }
 
     OSReport("[PatchItem] Permanent all-up received.\n");
-    TextBox_Enqueue("Permanent +1 All Up");
+    TextBox_EnqueueColoredNoun("Permanent +1 ", "All Up", TextBox_PatchColor, NULL);
     return 1;
 }
 
@@ -216,20 +217,21 @@ static void PermanentPatch_PerFrame(GOBJ *g)
 }
 
 // Round-start permanent patch re-application, per-mode menu toggle.
-// City Trial stadium also counts as "in city" for Gm_IsInCity, so split it
-// out via Gm_IsStadiumMode to honor the separate stadium toggle. Free Run
-// never loads item data tables, so inflated stats from perm patches would
-// crash Item_GetItDataPtr on damage-driven patch ejection.
+// Gm_IsInCity() is stage-based (only true on the CT main map, stage_kind 9/52)
+// and excludes stadiums, so we dispatch off the CT major + city_mode instead.
+// Free Run never loads item data tables, so inflated stats from perm patches
+// would crash Item_GetItDataPtr on damage-driven patch ejection.
 static int PermanentPatch_ShouldApply(void)
 {
-    if (Gm_IsInCity())
+    if (Scene_GetCurrentMajor() == MJRKIND_CITY)
     {
-        if (Gm_GetCityMode() == CITYMODE_FREERUN)
+        CityMode cm = Gm_GetCityMode();
+        if (cm == CITYMODE_FREERUN)
         {
             OSReport("[PermanentPatch] Skipping in Free Run (item data not loaded).\n");
             return 0;
         }
-        if (Gm_IsStadiumMode())
+        if (cm == CITYMODE_STADIUM)
             return ap_menu_settings.ct_stadium_permanent_patches_enabled;
         return ap_menu_settings.ct_permanent_patches_enabled;
     }

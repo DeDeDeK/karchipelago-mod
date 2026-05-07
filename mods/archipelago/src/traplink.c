@@ -10,6 +10,7 @@
 #include "main.h"
 #include "settings_menu.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 #include "traplink.h"
 #include "ap_item_handler.h"
 #include "gate_topride_items.h"
@@ -67,8 +68,13 @@ static int IsTrapItemLocked(uint item_id)
     return 0;
 }
 
-// City Trial receive: pick a random trap from the full item list.
-// Returns 1 if a trap was successfully applied, 0 otherwise.
+// City Trial receive: try every eligible trap in shuffled order until one
+// applies. APItems_HandleItem returns 0 for items that can't apply in the
+// current scene/mode (e.g. ITKIND spawns outside actual City Trial, AP_EVENTs
+// in stadium-style city modes), so iterating in one tick avoids the per-frame
+// dispatcher loop where a single random pick fails and the receive flag stays
+// set until many frames later when chance lands on an applicable item.
+// Returns 1 if any trap applied, 0 otherwise.
 static int ApplyCityTrialTrap(void)
 {
     // Build filtered list excluding locked events
@@ -86,9 +92,24 @@ static int ApplyCityTrialTrap(void)
         return 1; // treat as handled so we clear the flag
     }
 
-    uint trap_id = candidates[HSD_Randi(count)];
-    OSReport("[TrapLink] Applying trap item (AP ID %d)...\n", trap_id);
-    return APItems_HandleItem(trap_id);
+    // Fisher–Yates shuffle so the attempt order is randomized across frames.
+    for (int i = count - 1; i > 0; i--)
+    {
+        int j = HSD_Randi(i + 1);
+        uint tmp = candidates[i];
+        candidates[i] = candidates[j];
+        candidates[j] = tmp;
+    }
+
+    for (int i = 0; i < count; i++)
+    {
+        if (APItems_HandleItem(candidates[i]))
+        {
+            OSReport("[TrapLink] Applied trap item (AP ID %d)\n", candidates[i]);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 // Air Ride receive: give sleep copy ability to every human rider.
@@ -144,8 +165,6 @@ static const TopRideItemKind tr_trap_items[] = {
 static int ApplyTopRideTrap(void)
 {
     TopRideItemKind kind = tr_trap_items[HSD_Randi(TR_TRAP_ITEM_COUNT)];
-    OSReport("[TrapLink] applying TR trap item %d (%s)\n",
-             kind, TopRideItemKind_Names[kind]);
     return GateTopRideItems_GiveItem(kind);
 }
 
@@ -194,7 +213,7 @@ static void TrapLink_PerFrame(GOBJ *g)
 
     if (handled)
     {
-        TextBox_Enqueue("Trap received!");
+        TextBox_EnqueueColoredNoun(NULL, "Trap", TextBox_TrapColor, " received!");
         ap_data->traplink_receive = 0;
     }
 }

@@ -31,6 +31,7 @@ static void OnToggleEnergyLink(int val)         { OSReport("[Main] EnergyLink to
 static void OnToggleAutoCharge(int val)         { OSReport("[Main] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
 static void OnToggleTrapLink(int val)           { OSReport("[Main] TrapLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
 static void OnToggleTextBox(int val)            { OSReport("[Main] AP Message Textbox toggled %s\n", stc_off_on[val]); }
+static void OnToggleTextBoxTypewriter(int val)  { OSReport("[Main] AP Message Textbox Typewriter toggled %s\n", stc_off_on[val]); }
 static void OnToggleCTPermanent(int val)        { OSReport("[Main] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleARPermanent(int val)        { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
@@ -88,7 +89,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here.",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 5,
+        .option_num = 6,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -165,6 +166,18 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleTextBox,
+            },
+            &(OptionDesc){
+                .name = "Textbox Typewriter",
+                .description = "Reveal textbox messages one glyph at a time instead of all at once",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.textbox_typewriter_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleTextBoxTypewriter,
             },
             &(OptionDesc){
                 .name = "Permanent Patches",

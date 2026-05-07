@@ -16,6 +16,7 @@
 #include "gate_topride_items.h"
 #include "gate_stadiums.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 
 // Per-mode reward table sizes (REWARD_COUNT_AIRRIDE / TOPRIDE / CITYTRIAL).
 static const int reward_counts[GMMODE_NUM] = {
@@ -307,7 +308,7 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index)
     u8 reward_type = stc_reward_table_ptrs[mode][reward_index].reward_type;
     OSReport("[Checklist] Granted mode=%d ri=%d type=%s (%d)\n",
              mode, reward_index, Reward_TypeName(reward_type), reward_type);
-    TextBox_Enqueue("Received: %s", Reward_TypeName(reward_type));
+    TextBox_EnqueueColoredNoun("Received: ", Reward_TypeName(reward_type), TextBox_RewardColor, NULL);
     ApplyVanillaRewardUnlock(mode, reward_index, reward_type);
 
     // The shuffled u16 encodes the placement cell directly: high byte = target
@@ -520,7 +521,7 @@ CODEPATCH_HOOKCREATE(
 // Vanilla code:
 //   8018201c: lwz r3, 12(r29)       -- text object
 //   80182020: addi r4, r27, 0x7D    -- text_index = reward_index + 125
-//   80182024: bl Text_FinalizeSisText
+//   80182024: bl Text_InitPremadeText
 // We replace this entire sequence to handle cross-mode sis_id switching.
 // r27 = reward_index (set by our lookup hook or vanilla loop)
 // r29 = UI data struct (text object at +0x0C)
@@ -532,7 +533,7 @@ static void ChecklistRewards_DisplayRewardText(Text *text, int reward_index, u8 
     // glyph/font data for rendering (all checklist SIS files share the same font).
     u8 source_slot = mode_to_sis_slot[hover.source_mode];
     text->sis_id = source_slot;
-    Text_FinalizeSisText(text, reward_index + 0x7D);
+    Text_InitPremadeText(text, reward_index + 0x7D);
     text->sis_id = 0;
 }
 
@@ -553,7 +554,7 @@ CODEPATCH_HOOKCREATE(
 static void ChecklistRewards_SetBlankTextSisId(Text *text, u8 current_mode)
 {
     text->sis_id = 0; // Slot 0 is always the current mode
-    Text_FinalizeSisText(text, 0x7C);
+    Text_InitPremadeText(text, 0x7C);
 }
 
 CODEPATCH_HOOKCREATE(

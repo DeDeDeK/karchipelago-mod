@@ -7,6 +7,7 @@
 #include "main.h"
 #include "gate_machines.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 #include "inline.h"
 
 // Machines that don't naturally spawn in CT: Top Ride stars, transformation
@@ -403,7 +404,7 @@ int GateMachines_UnlockMachine(MachineKind kind)
     ap_save->machine_unlocked_mask |= (1 << kind);
     OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n",
              kind, MachineKind_Names[kind], MaskBits(ap_save->machine_unlocked_mask, 32));
-    TextBox_Enqueue(MachineKind_Names[kind]);
+    TextBox_EnqueueColoredNoun(NULL, MachineKind_Names[kind], TextBox_MachineColor, NULL);
     return 1;
 }
 

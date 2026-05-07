@@ -7,6 +7,7 @@
 #include "main.h"
 #include "gate_stadiums.h"
 #include "textbox.h"
+#include "textbox_colors.h"
 #include "inline.h"
 
 // gd->city.prev_stadium_kind[] is sized 5, but vanilla only uses 4 entries
@@ -184,6 +185,6 @@ int GateStadiums_UnlockStadium(StadiumKind kind)
     Gm_StadiumSetNewLabelDirect(kind);
     OSReport("[GateStadiums] Stadium %d (%s) unlocked (mask = %s)\n",
              kind, StadiumKind_Names[kind], MaskBits(ap_save->stadium_unlocked_mask, STKIND_NUM));
-    TextBox_Enqueue(StadiumKind_Names[kind]);
+    TextBox_EnqueueColoredNoun(NULL, StadiumKind_Names[kind], TextBox_StadiumColor, NULL);
     return 1;
 }
