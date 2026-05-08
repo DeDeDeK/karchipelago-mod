@@ -9,236 +9,202 @@
 
 #include "custom_weather.h"
 
-// Pack separate R, G, B, A bytes into a u32 color value.
-#define RGBA(r, g, b, a) ((u32)(r) << 24 | (u32)(g) << 16 | (u32)(b) << 8 | (u32)(a))
+// CustomPresetDef + WeatherAnimKind live in custom_weather.h. SkyPresetEntry
+// and AreaLightData live in hoshi (stage.h, obj.h). RGBA() is in gx.h. See
+// docs/sky-lighting-system.md for the rendering model and the vanilla CT
+// preset table used as base values below.
 
-// Sky preset entry: 0x48 bytes, matching the game's stage-file format.
-// Loaded from stage data (e.g. GrCity1.dat) and interpolated per-frame by
-// Sky_Update. Fields confirmed via disasm of Sky_LoadPreset, Sky_Update,
-// AreaLight_Lerp (lbarealight.c), and the lbfade system (lbfade.c).
-typedef struct AreaLightData
-{
-    u32 header;             // 0x00  metadata for Sky_SetupLights, not interpolated
-    u8 unk_04;              // 0x04  not interpolated
-    u8 flags;               // 0x05  bit 0+1: validity (asserted), bit 2: intensity lerp
-    u16 unk_06;             // 0x06  not interpolated
-    u32 light_color;        // 0x08  RGBA diffuse light color (interpolated)
-    u32 light_hw_color;     // 0x0C  RGBA specular/hardware light color (interpolated)
-    float light_dir_x;      // 0x10  light direction X (interpolated)
-    float light_dir_y;      // 0x14  light direction Y (interpolated)
-    float light_dir_z;      // 0x18  light direction Z (interpolated)
-    u8 unk_1C[3];           // 0x1C  raw-copied (likely attenuation type/flags)
-    u8 light_intensity;     // 0x1F  interpolated (byte x ratio) if flags bit 2
-    u32 attn_param_0;       // 0x20  raw-copied (HSD light attn/spot params)
-    u32 attn_param_1;       // 0x24  raw-copied
-    u32 attn_param_2;       // 0x28  raw-copied
-} AreaLightData;
-
-typedef struct SkyPresetEntry
-{
-    s32 transition_frames;      // 0x00  blend duration in frames
-    u32 fog_color;              // 0x04  RGBA fog/background color (interpolated)
-    float fog_start;            // 0x08  fog near distance (interpolated)
-    float fog_end;              // 0x0C  fog far distance (interpolated)
-    u32 fade_color;             // 0x10  RGBA screen tint overlay via lbfade (interpolated)
-    u32 sky_ambient_color;      // 0x14  RGBA ambient sky color (interpolated)
-    AreaLightData area_light;   // 0x18  area light params (0x2C bytes)
-    u8 light_vis_flag;          // 0x44  bit 0 -> light #3 render node visibility
-    u8 pad[3];                  // 0x45
-} SkyPresetEntry;
-
-_Static_assert(sizeof(SkyPresetEntry) == 0x48, "SkyPresetEntry must be 0x48 bytes");
-
-// Custom preset spec: clone a vanilla base preset then override colors/fog/fade/light.
-//
-// fog_color:         RGBA fog/background color. Only RGB matters; alpha is ignored by GX.
-// sky_ambient_color: RGBA skybox tint. Alpha controls opacity: 0=skybox texture visible,
-//                    255=solid flat color. Most vanilla presets use 128-200.
-// fade_color:        RGBA full-screen tint overlay via lbfade. Only applied during
-//                    Sky_BeginTransition (event-driven mid-game changes), NOT on initial
-//                    load via Sky_LoadPreset. Dead for initial sky selection.
-// fog_start/end:     Fog near/far distances. Objects closer than start are unfogged,
-//                    objects beyond end are fully fogged. Vanilla range: 1-1300.
-// light_color:       RGBA diffuse light. How objects/terrain are lit. Vanilla uses muted
-//                    pastels tinted to match the preset mood. Alpha always FF.
-// light_hw_color:    RGBA specular/hardware light. Usually brighter than light_color.
-// light_dir:         Light direction vector (x, y, z). Two vanilla modes:
-//                      "sun":     (-0.40, 0.80, 0.50) — upper-left, most day presets.
-//                      "ambient": ( 0.00, 1.00, 0.00) — straight up, dark/night presets.
-//                    Dusk (11) uses (-0.40, 0.30, 0.50) for a low sun angle.
-// light_vis:         Third light source visibility. 1=visible (day/lit), 0=hidden (dark).
-typedef struct CustomPresetDef
-{
-    int base_index;
-    u32 fog_color;
-    u32 sky_ambient_color;
-    u32 fade_color;
-    float fog_start;
-    float fog_end;
-    u32 light_color;
-    u32 light_hw_color;
-    float light_dir_x;
-    float light_dir_y;
-    float light_dir_z;
-    u8 light_vis;
-} CustomPresetDef;
-
-// Vanilla preset reference (from GrCity1.dat runtime dump):
-//                       fog          start  end   fade       sky        light      hw_light   dir                vis
-//  [ 0] Day             9FCFFFFF      210   665   00000000   00000000   D7D7FFFF   FFFFFFFF   (-0.40,0.80,0.50)   1
-//  [ 1] Midnight        1E0005FF      140   560   00000080   1E0005C8   D2CDD2FF   A096A0FF   ( 0.00,-1.0,0.00)   0
-//  [ 2] Light Fog       969696FF      140  1000   00000000   A0A0A0AA   BEBEE6FF   D2D2F0FF   (-0.40,0.80,0.50)   1
-//  [ 3] Dusk 2          C8461EFF      240   900   3200006E   7832198C   E6DCD2FF   B4AAAAFF   ( 0.00,1.00,0.00)   0
-//  [ 4] Dusky Clouds    C8B4E6FF        1  1000   00000000   C8B4E600   D2D2E6FF   DCD2FAFF   (-0.40,0.80,0.50)   1
-//  [ 5] Dark Vignette   000000FF      140   500   0000003C   00143CB2   A0A0AAFF   9696AAFF   (-0.40,0.80,0.50)   0
-//  [ 6] Day 2           32A0C8FF      240  1000   00000000   32A0C800   DCE6FAFF   C8F0FFFF   (-0.40,0.80,0.50)   1
-//  [ 7] Blue Sky        82AAFFFF      300  1000   00000000   1450DC80   DCDCFFFF   FAFAFFFF   (-0.40,0.80,0.50)   1
-//  [ 8] Pink Sky        FFA0D9FF      180   900   00000000   FFA0D964   F0E6F0FF   FFEBF5FF   (-0.40,0.80,0.50)   1
-//  [ 9] Dense Fog       E6E6E6FF       20    90   00000000   E6E6E6FF   D2D2F0FF   DCDCFAFF   ( 0.00,1.00,0.00)   0
-// [10] Foggy            E6E6E6FF      130   800   80808050   E6E6D2C8   D2D2E6FF   AAAABEFF   (-0.40,0.80,0.50)   1
-// [11] Dusk             DC783CFF      300   900   785A3C00   F0965080   DCC8BEFF   FFAA6EFF   (-0.40,0.30,0.50)   1
-// [12] Night            00143CFF      140   665   00001080   00143CC6   B4B4D2FF   AAB4BEFF   ( 0.00,1.00,0.00)   0
-// [13] Gray Sky         785A32FF      500  1300   00000000   785A32AA   E6DCC8FF   FADCB4FF   (-0.40,0.80,0.50)   1
-// [14] Dark Purple      000000FF      500  1300   0000005A   3C0000A0   DCC8C8FF   F0DCFFFF   (-0.40,0.80,0.50)   0
-// [15] Red Vignette     C8461EFF      100   500   32000000   783219B4   DCC8BEFF   FAD2AAFF   ( 0.00,1.00,0.00)   1
-// [16] Dark Low Vis     000000FF       90   360   2800006E   1E0005C8   F0DCC8FF   DCA078FF   ( 0.00,-1.0,0.00)   1
-static const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
+const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
     // Deep Blue — based on Night (12)
     // Deep ocean feel: dark blue fog, cool blue light from above
-    { .base_index = WEATHER_NIGHT,
+    { .base_preset = WEATHER_NIGHT,
       .fog_color = RGBA(8, 20, 40, 255),
-      .sky_ambient_color = RGBA(12, 30, 60, 190),
-      .fade_color = RGBA(6, 16, 32, 64),
-      .fog_start = 120.0f, 
+      .fog_start = 120.0f,
       .fog_end = 600.0f,
-      .light_color = RGBA(140, 150, 200, 255), 
-      .light_hw_color = RGBA(100, 120, 180, 255),
-      .light_dir_x = 0.00f, 
-      .light_dir_y = 1.00f, 
-      .light_dir_z = 0.00f, 
-      .light_vis = 0 
+      .sky_color = RGBA(12, 30, 60, 190),
+      .char_diffuse = RGBA(140, 150, 200, 255),
+      .char_specular = RGBA(100, 120, 180, 255),
+      .char_dir = { 0.00f, 1.00f, 0.00f },
+      .char_dir_lit = 0,
     },
     // Golden Hour — based on Dusk (11)
     // Warm sunset: orange fog, deep warm light, low sun
-    { .base_index = WEATHER_DUSK,
+    { .base_preset = WEATHER_DUSK,
       .fog_color = RGBA(200, 128, 48, 255),
-      .sky_ambient_color = RGBA(224, 152, 56, 150),
-      .fade_color = RGBA(64, 40, 0, 48),
-      .fog_start = 280.0f, 
+      .fog_start = 280.0f,
       .fog_end = 850.0f,
-      .light_color = RGBA(240, 200, 140, 255), 
-      .light_hw_color = RGBA(255, 180, 90, 255),
-      .light_dir_x = -0.40f, 
-      .light_dir_y = 0.20f, 
-      .light_dir_z = 0.50f, 
-      .light_vis = 1 
+      .sky_color = RGBA(224, 152, 56, 150),
+      .char_diffuse = RGBA(240, 200, 140, 255),
+      .char_specular = RGBA(255, 180, 90, 255),
+      .char_dir = { -0.40f, 0.20f, 0.50f },
+      .char_dir_lit = 1,
     },
     // Blood Red — based on Red Vignette (15)
     // Hellscape: intense red fog, sickly red light from above
-    { .base_index = WEATHER_RED_VIGNETTE,
+    { .base_preset = WEATHER_RED_VIGNETTE,
       .fog_color = RGBA(96, 8, 8, 255),
-      .sky_ambient_color = RGBA(128, 16, 16, 190),
-      .fade_color = RGBA(80, 8, 0, 80),
-      .fog_start = 80.0f, 
+      .fog_start = 80.0f,
       .fog_end = 450.0f,
-      .light_color = RGBA(200, 120, 100, 255), 
-      .light_hw_color = RGBA(220, 100, 80, 255),
-      .light_dir_x = 0.00f, 
-      .light_dir_y = 1.00f, 
-      .light_dir_z = 0.00f, 
-      .light_vis = 1 
+      .sky_color = RGBA(128, 16, 16, 190),
+      .char_diffuse = RGBA(200, 120, 100, 255),
+      .char_specular = RGBA(220, 100, 80, 255),
+      .char_dir = { 0.00f, 1.00f, 0.00f },
+      .char_dir_lit = 1,
     },
     // Whiteout — based on Dense Fog (9)
     // Blizzard: white fog, flat diffuse light, no directional source
-    { .base_index = WEATHER_DENSE_FOG,
+    { .base_preset = WEATHER_DENSE_FOG,
       .fog_color = RGBA(224, 224, 232, 255),
-      .sky_ambient_color = RGBA(208, 208, 224, 255),
-      .fade_color = RGBA(192, 192, 208, 32),
-      .fog_start = 15.0f, 
+      .fog_start = 15.0f,
       .fog_end = 80.0f,
-      .light_color = RGBA(220, 220, 240, 255), 
-      .light_hw_color = RGBA(230, 230, 250, 255),
-      .light_dir_x = 0.00f, 
-      .light_dir_y = 1.00f, 
-      .light_dir_z = 0.00f, 
-      .light_vis = 0 
+      .sky_color = RGBA(208, 208, 224, 255),
+      .char_diffuse = RGBA(220, 220, 240, 255),
+      .char_specular = RGBA(230, 230, 250, 255),
+      .char_dir = { 0.00f, 1.00f, 0.00f },
+      .char_dir_lit = 0,
     },
     // Toxic Green — based on Dark Vignette (5)
     // Poisonous: dark green fog, eerie green-tinted light
-    { .base_index = WEATHER_DARK_VIGNETTE,
+    { .base_preset = WEATHER_DARK_VIGNETTE,
       .fog_color = RGBA(16, 48, 16, 255),
-      .sky_ambient_color = RGBA(24, 72, 24, 170),
-      .fade_color = RGBA(8, 32, 8, 64),
-      .fog_start = 120.0f, 
+      .fog_start = 120.0f,
       .fog_end = 500.0f,
-      .light_color = RGBA(140, 180, 130, 255), 
-      .light_hw_color = RGBA(120, 170, 110, 255),
-      .light_dir_x = -0.40f, 
-      .light_dir_y = 0.80f, 
-      .light_dir_z = 0.50f, 
-      .light_vis = 0 
+      .sky_color = RGBA(24, 72, 24, 170),
+      .char_diffuse = RGBA(140, 180, 130, 255),
+      .char_specular = RGBA(120, 170, 110, 255),
+      .char_dir = { -0.40f, 0.80f, 0.50f },
+      .char_dir_lit = 0,
     },
     // Neon — based on Dark Purple (14)
     // Cyberpunk: magenta fog, vivid purple-pink light
-    { .base_index = WEATHER_DARK_PURPLE,
+    { .base_preset = WEATHER_DARK_PURPLE,
       .fog_color = RGBA(128, 32, 192, 255),
-      .sky_ambient_color = RGBA(32, 8, 64, 150),
-      .fade_color = RGBA(48, 16, 64, 72),
-      .fog_start = 450.0f, 
+      .fog_start = 450.0f,
       .fog_end = 1200.0f,
-      .light_color = RGBA(200, 160, 220, 255), 
-      .light_hw_color = RGBA(240, 180, 255, 255),
-      .light_dir_x = -0.40f, 
-      .light_dir_y = 0.80f, 
-      .light_dir_z = 0.50f, 
-      .light_vis = 0 
+      .sky_color = RGBA(32, 8, 64, 150),
+      .char_diffuse = RGBA(200, 160, 220, 255),
+      .char_specular = RGBA(240, 180, 255, 255),
+      .char_dir = { -0.40f, 0.80f, 0.50f },
+      .char_dir_lit = 0,
     },
     // Cotton Candy — based on Pink Sky (8)
     // Pink sky with contrasting teal fog, warm pink light
-    { .base_index = WEATHER_PINK_SKY,
+    { .base_preset = WEATHER_PINK_SKY,
       .fog_color = RGBA(0, 160, 160, 255),
-      .sky_ambient_color = RGBA(255, 140, 200, 120),
-      .fade_color = RGBA(0, 0, 0, 0),
-      .fog_start = 200.0f, 
+      .fog_start = 200.0f,
       .fog_end = 900.0f,
-      .light_color = RGBA(240, 210, 230, 255), 
-      .light_hw_color = RGBA(255, 200, 240, 255),
-      .light_dir_x = -0.40f, 
-      .light_dir_y = 0.80f, 
-      .light_dir_z = 0.50f, 
-      .light_vis = 1 
+      .sky_color = RGBA(255, 140, 200, 120),
+      .char_diffuse = RGBA(240, 210, 230, 255),
+      .char_specular = RGBA(255, 200, 240, 255),
+      .char_dir = { -0.40f, 0.80f, 0.50f },
+      .char_dir_lit = 1,
     },
     // Frozen Dawn — based on Blue Sky (7)
     // Yellow sky with cool blue fog, cold blue-white light
-    { .base_index = WEATHER_BLUE_SKY,
+    { .base_preset = WEATHER_BLUE_SKY,
       .fog_color = RGBA(40, 60, 140, 255),
-      .sky_ambient_color = RGBA(220, 200, 80, 140),
-      .fade_color = RGBA(0, 0, 0, 0),
-      .fog_start = 250.0f, 
+      .fog_start = 250.0f,
       .fog_end = 900.0f,
-      .light_color = RGBA(190, 200, 240, 255), 
-      .light_hw_color = RGBA(210, 220, 255, 255),
-      .light_dir_x = -0.40f, 
-      .light_dir_y = 0.80f, 
-      .light_dir_z = 0.50f, 
-      .light_vis = 1 
+      .sky_color = RGBA(220, 200, 80, 140),
+      .char_diffuse = RGBA(190, 200, 240, 255),
+      .char_specular = RGBA(210, 220, 255, 255),
+      .char_dir = { -0.40f, 0.80f, 0.50f },
+      .char_dir_lit = 1,
     },
     // Void — based on Night (12)
     // Black sky with white fog creeping in, very dim light from below
-    { .base_index = WEATHER_NIGHT,
+    { .base_preset = WEATHER_NIGHT,
       .fog_color = RGBA(200, 200, 210, 255),
-      .sky_ambient_color = RGBA(0, 0, 0, 200),
-      .fade_color = RGBA(0, 0, 0, 0),
-      .fog_start = 150.0f, 
+      .fog_start = 150.0f,
       .fog_end = 700.0f,
-      .light_color = RGBA(100, 100, 110, 255), 
-      .light_hw_color = RGBA(80, 80, 90, 255),
-      .light_dir_x = 0.00f, 
-      .light_dir_y = -1.00f, 
-      .light_dir_z = 0.00f, 
-      .light_vis = 0 
+      .sky_color = RGBA(0, 0, 0, 200),
+      .char_diffuse = RGBA(100, 100, 110, 255),
+      .char_specular = RGBA(80, 80, 90, 255),
+      .char_dir = { 0.00f, -1.00f, 0.00f },
+      .char_dir_lit = 0,
+    },
+    // ---- Animated prototype presets ----
+    // Storm — base Dark Vignette. Heavy near-fog so terrain visibly hazes
+    // (KAR stage geometry doesn't read HSD light colors — fog + screen_tint
+    // are the only levers that darken terrain). Lightning is a per-frame
+    // fog/EFB-clear override punched in by ANIM_LIGHTNING.
+    { .base_preset = WEATHER_DARK_VIGNETTE,
+      .fog_color = RGBA(14, 18, 28, 255),
+      .fog_start = 10.0f,
+      .fog_end = 220.0f,
+      .sky_color = RGBA(20, 24, 36, 220),
+      .terrain_diffuse = RGBA(55, 65, 85, 255),       // cold dim directional
+      .terrain_specular = RGBA(45, 55, 75, 255),
+      .char_diffuse = RGBA(80, 90, 110, 255),
+      .char_specular = RGBA(60, 70, 95, 255),
+      .char_dir = { 0.00f, 1.00f, 0.00f },
+      .char_dir_lit = 0,
+      .char_ambient = RGBA(35, 40, 60, 255),
+      .char_ambient_specular = RGBA(30, 35, 50, 255),
+      .screen_tint = RGBA(0, 0, 8, 110),              // dark-blue lbfade overlay
+      .anim_kind = ANIM_LIGHTNING,
+      .anim_param = RGBA(255, 250, 240, 255),         // flash color
+    },
+    // Aurora — base Night. Slowly cycling green/cyan/violet directional light
+    // overhead. Faint blue terrain tint. Exercises ANIM_AURORA + extra LOBJ +
+    // terrain re-tint.
+    { .base_preset = WEATHER_NIGHT,
+      .fog_color = RGBA(8, 12, 28, 255),
+      .fog_start = 180.0f,
+      .fog_end = 800.0f,
+      .sky_color = RGBA(0, 4, 12, 220),
+      .terrain_diffuse = RGBA(80, 110, 140, 255),     // chilly blue terrain
+      .terrain_specular = RGBA(120, 160, 200, 255),
+      .char_diffuse = RGBA(120, 200, 200, 255),
+      .char_specular = RGBA(100, 220, 220, 255),
+      .char_dir = { 0.00f, 1.00f, 0.00f },
+      .char_dir_lit = 1,
+      .anim_kind = ANIM_AURORA,
+      .anim_param = 0,
+    },
+    // Inferno — base Red Vignette. Hot orange terrain tint, sinusoidal fog
+    // pulse so the heat haze visibly breathes. Exercises ANIM_PULSE_FOG +
+    // terrain re-tint.
+    { .base_preset = WEATHER_RED_VIGNETTE,
+      .fog_color = RGBA(180, 60, 20, 255),
+      .fog_start = 220.0f,
+      .fog_end = 600.0f,
+      .sky_color = RGBA(140, 32, 8, 200),
+      .terrain_diffuse = RGBA(255, 200, 130, 255),    // hot warm terrain
+      .terrain_specular = RGBA(255, 180, 90, 255),
+      .char_diffuse = RGBA(255, 200, 140, 255),
+      .char_specular = RGBA(255, 180, 100, 255),
+      .char_dir = { -0.40f, 0.60f, 0.50f },
+      .char_dir_lit = 1,
+      .screen_tint = RGBA(90, 20, 0, 90),             // burnt orange-red overlay
+      .anim_kind = ANIM_PULSE_FOG,
+      .anim_param = 80,                               // ±80 distance amplitude
     },
 };
+
+const CustomPresetDef *CustomWeather_GetPresetDef(int weather_kind)
+{
+    if (weather_kind < WEATHER_VANILLA_NUM || weather_kind >= WEATHER_TOTAL)
+        return 0;
+    return &custom_defs[weather_kind - WEATHER_VANILLA_NUM];
+}
+
+static const char *preset_names[WEATHER_TOTAL] = {
+    "Day", "Midnight", "Light Fog", "Dusk 2", "Dusky Clouds",
+    "Dark Vignette", "Day 2", "Blue Sky", "Pink Sky", "Dense Fog",
+    "Foggy", "Dusk", "Night", "Gray Sky", "Dark Purple",
+    "Red Vignette", "Dark Low Vis",
+    "Deep Blue", "Golden Hour", "Blood Red", "Whiteout",
+    "Toxic Green", "Neon", "Cotton Candy", "Frozen Dawn", "Void",
+    "Storm", "Aurora", "Inferno",
+};
+
+const char *CustomWeather_GetPresetName(int weather_kind)
+{
+    if (weather_kind < 0 || weather_kind >= WEATHER_TOTAL)
+        return "Unknown";
+    return preset_names[weather_kind];
+}
 
 // Extended preset buffer: vanilla entries copied from stage file + custom appended.
 static SkyPresetEntry extended_presets[WEATHER_TOTAL];
@@ -248,8 +214,10 @@ static SkyPresetEntry extended_presets[WEATHER_TOTAL];
 static int weather_enabled[WEATHER_TOTAL] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
 };
+_Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_TOTAL,
+               "weather_enabled init must match WEATHER_TOTAL");
 
 static char *toggle_names[] = {"Disabled", "Enabled"};
 
@@ -277,19 +245,17 @@ static void ExtendPresetArray(GrObj *grobj)
         SkyPresetEntry *entry = &extended_presets[WEATHER_VANILLA_NUM + i];
 
         // Clone base (inherits non-overridden area light params: flags, attn, header)
-        *entry = extended_presets[def->base_index];
+        *entry = extended_presets[def->base_preset];
 
         entry->fog_color = def->fog_color;
-        entry->sky_ambient_color = def->sky_ambient_color;
-        entry->fade_color = def->fade_color;
         entry->fog_start = def->fog_start;
         entry->fog_end = def->fog_end;
-        entry->area_light.light_color = def->light_color;
-        entry->area_light.light_hw_color = def->light_hw_color;
-        entry->area_light.light_dir_x = def->light_dir_x;
-        entry->area_light.light_dir_y = def->light_dir_y;
-        entry->area_light.light_dir_z = def->light_dir_z;
-        entry->light_vis_flag = def->light_vis;
+        entry->sky_ambient_color = def->sky_color;
+        entry->fade_color = 0;          // we drive screen tint ourselves via screen_tint + Sky_BeginFade
+        entry->area_light.color = def->char_diffuse;
+        entry->area_light.hw_color = def->char_specular;
+        entry->area_light.direction = def->char_dir;
+        entry->light_vis_flag = (u8)def->char_dir_lit;
         entry->transition_frames = 1;
     }
 
@@ -297,19 +263,6 @@ static void ExtendPresetArray(GrObj *grobj)
     sub_header[0] = (void *)extended_presets;
     sub_header[1] = (void *)WEATHER_TOTAL;
 }
-
-// ---------------------------------------------------------------
-// Sky override (called from hooks in Sky_Init)
-// ---------------------------------------------------------------
-
-static const char *preset_names[WEATHER_TOTAL] = {
-    "Day", "Midnight", "Light Fog", "Dusk 2", "Dusky Clouds",
-    "Dark Vignette", "Day 2", "Blue Sky", "Pink Sky", "Dense Fog",
-    "Foggy", "Dusk", "Night", "Gray Sky", "Dark Purple",
-    "Red Vignette", "Dark Low Vis",
-    "Deep Blue", "Golden Hour", "Blood Red", "Whiteout",
-    "Toxic Green", "Neon", "Cotton Candy", "Frozen Dawn", "Void",
-};
 
 // Replaces vanilla random/fixed sky selection.
 // Extends the preset array, then picks uniformly from enabled presets.
@@ -345,7 +298,7 @@ static void CustomWeather_OverrideSky(GrObj *grobj)
     }
 
     OSReport("[CustomWeather] Selected preset %d: %s (%d/%d enabled)\n",
-             preset, preset_names[preset], enabled_count, WEATHER_TOTAL);
+             preset, CustomWeather_GetPresetName(preset), enabled_count, WEATHER_TOTAL);
 
     Sky_SetPresetIndex(grobj, preset);
 }
@@ -439,5 +392,9 @@ MenuDesc weather_menu = {
         WEATHER_TOGGLE(WEATHER_COTTON_CANDY,   "Cotton Candy"),
         WEATHER_TOGGLE(WEATHER_FROZEN_DAWN,    "Frozen Dawn"),
         WEATHER_TOGGLE(WEATHER_VOID,           "Void"),
+        // Animated prototypes
+        WEATHER_TOGGLE(WEATHER_STORM,          "Storm"),
+        WEATHER_TOGGLE(WEATHER_AURORA,         "Aurora"),
+        WEATHER_TOGGLE(WEATHER_INFERNO,        "Inferno"),
     },
 };

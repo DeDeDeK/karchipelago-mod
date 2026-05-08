@@ -12,21 +12,17 @@ PYTHON = uv run --with pyelftools --with pyisotools python
 BUILD_DIR 		= build
 SCRIPT_DIR 		?= scripts
 HOSHI_DIR		= externals/hoshi
-LIB_ROOT_DIR 		= $(HOSHI_DIR)/Lib
+LIB_ROOT_DIR 	= $(HOSHI_DIR)/Lib
 INC_DIR 		?= $(HOSHI_DIR)/include
-PACKTOOL_DIR 		?= $(HOSHI_DIR)/packtool
-HOSHI_BIN_DIR		= $(HOSHI_DIR)/out/release
+PACKTOOL_DIR 	?= $(HOSHI_DIR)/packtool
 ORIG_DOL		= $(HOSHI_DIR)/dol/kar.dol
-ROOT_DIR 		= root
-ISO_DIR		 	?= iso
 OUT_DIR 		= out
-MODS_OUT_DIR 		= $(ROOT_DIR)/files/mods
-ISO_OUT_DIR 		= 
-INSTALL_DIR 		?= install
+MODS_OUT_DIR 	= $(OUT_DIR)/files/mods
+MODS_ROOT_DIR = mods
+DOLPHIN_RIIVOLUTION_DIR ?= $(HOME)/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution
 
 # --- File Paths ---
 ISO_PATH		?= kar.iso
-HOSHI_BIN		= $(HOSHI_BIN_DIR)/hoshi.bin
 MOD_NAME		?= KARchipelago
 
 # --- Script Paths ---
@@ -41,8 +37,10 @@ CFLAGS = -O1 -mcpu=750 -meabi -msdata=none -mhard-float -ffreestanding \
 
 LDFLAGS  ?= -r -T$(PACKTOOL_DIR)/link.ld
 
-# Define MODS_ROOT_DIR
-MODS_ROOT_DIR = mods
+# Helpers for the EXCLUDE_MODS comma-to-space substitution below.
+comma := ,
+empty :=
+space := $(empty) $(empty)
 
 # --- Derived Variables ---
 # INCLUDES: Transforms include paths into compiler -I flags
@@ -64,12 +62,6 @@ LIB_SOURCES := $(shell find $(LIB_ROOT_DIR) -name "*.c")
 # the archipelago mod.
 EXCLUDE_MODS ?= custom_events
 MOD_NAMES ?= $(filter-out $(subst $(comma),$(space),$(EXCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
-#MOD_NAMES = city_settings credits
-
-# Helpers for the EXCLUDE_MODS comma-to-space substitution above.
-comma := ,
-empty :=
-space := $(empty) $(empty)
 
 # 3. Mods Source: For each mod, find its specific source files within its 'src' subdirectory.
 MOD_C_SOURCES := $(foreach mod,$(MOD_NAMES),\
@@ -97,11 +89,6 @@ DEPS := $(ALL_INDIVIDUAL_OBJECTS_TO_COMPILE:.o=.d)
 # Get a list of all unique build directories that need to be created for ALL objects.
 OBJ_DIRS := $(sort $(dir $(ALL_INDIVIDUAL_OBJECTS_TO_COMPILE)))
 
-# --- Mod Specific Linked Objects & Binaries ---
-
-# MOD_LINKED_OBJECTS: The output of the linking step for each mod (e.g. build/credits.o)
-MOD_LINKED_FILES := $(addsuffix .modlink, $(addprefix $(BUILD_DIR)/, $(MOD_NAMES)))
-
 # MOD_BIN_FILES: The final .bin files for each mod (e.g. out/credits.bin)
 MOD_BIN_FILES := $(addsuffix .bin, $(addprefix $(MODS_OUT_DIR)/, $(MOD_NAMES)))
 
@@ -110,40 +97,16 @@ MOD_ASSET_DIRS := $(foreach mod,$(MOD_NAMES),\
                                $(if $(wildcard $(MODS_ROOT_DIR)/$(mod)/assets), \
                                     $(MODS_ROOT_DIR)/$(mod)/assets))
 
-# --- Debug Outputs ---
-# $(warning DEBUG: MOD_ASSET_DIRS = $(MOD_ASSET_DIRS))
-#$(warning DEBUG: LIB_SOURCES = $(LIB_SOURCES))
-#$(warning DEBUG: LIB_OBJECTS = $(LIB_OBJECTS))
-#$(warning DEBUG: MOD_NAMES = $(MOD_NAMES))
-#$(warning DEBUG: MOD_ALL_SOURCES = $(MOD_ALL_SOURCES))
-#$(warning DEBUG: MOD_OBJECTS = $(MOD_OBJECTS))
-#$(warning DEBUG: ALL_INDIVIDUAL_OBJECTS_TO_COMPILE = $(ALL_INDIVIDUAL_OBJECTS_TO_COMPILE))
-#$(warning DEBUG: MOD_LINKED_FILES = $(MOD_LINKED_FILES))
-#$(warning DEBUG: DEPS = $(DEPS))
-
 # --- Main Targets ---
 
-.PHONY: all clean install assets riivolution patch
+.PHONY: all package clean assets riivolution deploy patch
 
 # The 'all' target builds all final .bin files.
 all: 		$(MOD_BIN_FILES) hoshi assets
 package: 	all riivolution
 
 # --- Directory Creation Rules ---
-# Rule to create the top-level build directory
-$(BUILD_DIR):
-	@mkdir -p $@
-
-# Rule to create the mods output directory
-$(OUT_DIR):
-	@mkdir -p $@
-
-# Rule to create the mods output directory
-$(MODS_OUT_DIR):
-	@mkdir -p $@
-
-# Rule to create all necessary subdirectories within the build folder for objects
-$(OBJ_DIRS):
+$(BUILD_DIR) $(OUT_DIR) $(MODS_OUT_DIR) $(OBJ_DIRS):
 	@mkdir -p $@
 
 # Rule to extract the original dol from the iso
@@ -154,17 +117,15 @@ $(ORIG_DOL):
 hoshi: $(ORIG_DOL)
 	$(MAKE) -C $(HOSHI_DIR) MOD_NAME="$(MOD_NAME)" PYTHON="$(PYTHON)"
 
-# --- Generic Compilation Rule for C Source Files ---
-# This single pattern rule handles compiling ANY .c file into its corresponding .o file in BUILD_DIR.
-# It uses an order-only prerequisite to ensure the output directory exists before compilation.
+# --- Generic Compilation Rules ---
+# Pattern rules for .c and .s sources. The | $(OBJ_DIRS) order-only prereq
+# ensures the output subdirectory exists before compilation.
 $(BUILD_DIR)/%.o: %.c | $(OBJ_DIRS)
 	@echo "Compiling $<..."
-	@mkdir -p $(dir $@) 
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.s | $(OBJ_DIRS)
 	@echo "Compiling $<..."
-	@mkdir -p $(dir $@) 
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 # --- Linking Rules for Individual Mod Files ---
@@ -178,11 +139,7 @@ endef
 # This template will be used for each mod.
 define LINK_MOD_RULE_TEMPLATE
 $(BUILD_DIR)/$(1).modlink: $(LIB_OBJECTS) $(call GET_MOD_LINK_OBJECTS,$(1))
-	@echo ""
-	@echo "--- Linking '$(1)' Mod Object Files ---"
-	@echo "DEBUG (Linking Rule): All prerequisites ($$^): $$^" # See what $$^ contains
-	@echo "DEBUG (Linking Rule): Filtered prerequisites for linker: $(filter %.o,$$^)" # See what is passed to linker
-	@echo ""
+	@echo "Linking $(1)..."
 	$(LD) $(LDFLAGS) $$^ -o $$@
 endef
 
@@ -195,60 +152,53 @@ $(foreach mod,$(MOD_NAMES),\
 # This template will be used for each mod.
 define PACK_MOD_RULE_TEMPLATE
 $(MODS_OUT_DIR)/$(1).bin: $(BUILD_DIR)/$(1).modlink | $(MODS_OUT_DIR)
-	@echo ""
-	@echo "--- Creating '$(1)' bin file ---"
-	@echo ""
+	@echo "Packing $(1)..."
 	$(PYTHON) $(PACKTOOL_DIR)/main.py $$< -m gbFunction -o $$@
 
 endef
 
-# Generate a specific linking rule for each mod using the template.
+# Generate a specific packing rule for each mod using the template.
 $(foreach mod,$(MOD_NAMES),\
   $(eval $(call PACK_MOD_RULE_TEMPLATE,$(mod))))
 
 # --- Include generated dependency files (.d files) ---
 -include $(DEPS)
 
-# Rule to copy all assets to the root directory
-assets: hoshi
+# Rule to copy all assets into the staging files/ overlay
+assets: hoshi | $(MODS_OUT_DIR)
 	@for dir in $(MOD_ASSET_DIRS); do \
 		if [ -d "$$dir" ]; then \
-			cp -a "$$dir"/* "$(ROOT_DIR)/files/"; \
+			cp -a "$$dir"/* "$(OUT_DIR)/files/"; \
 		fi; \
 	done
-	cp -a -r "$(ISO_DIR)"/* "$(strip $(ROOT_DIR))/"
-	cp -a -r "$(HOSHI_DIR)/dol/out/main.dol" "$(strip $(ROOT_DIR)/sys)/"
-	cp -a -r "$(HOSHI_DIR)/out/release"/* "$(strip $(ROOT_DIR)/files)/"
+	cp -a -r "$(HOSHI_DIR)/out/release"/* "$(OUT_DIR)/files/"
 
-# --- Install Target ---
-# Copies the files from $(ROOT_DIR) to $(INSTALL_DIR)
-install: $(MOD_BIN_FILES) hoshi assets 
-	@echo ""
-	$(MAKE) -C $(HOSHI_DIR) install INSTALL_DIR="$(INSTALL_DIR)" PYTHON="$(PYTHON)"
-	@echo "--- Installing files to "$(INSTALL_DIR)" ---"
-	cp -a -r "$(ROOT_DIR)"/* "$(strip $(INSTALL_DIR))/"
-	@echo ""
-	@echo "Installation complete."
-
-patch: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets
+patch: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets | $(BUILD_DIR)
 	@echo ""
 	@echo "--- Creating ISO Patch... ---"
-	$(PYTHON) $(ISOPATCH_SCRIPT) $(ISO_PATH) $(ROOT_DIR) $(OUT_DIR)/patch.xdelta
+	rm -rf $(BUILD_DIR)/iso_overlay
+	mkdir -p $(BUILD_DIR)/iso_overlay
+	ln -s "$(CURDIR)/$(OUT_DIR)/files" "$(BUILD_DIR)/iso_overlay/files"
+	$(PYTHON) $(ISOPATCH_SCRIPT) $(ISO_PATH) $(BUILD_DIR)/iso_overlay $(OUT_DIR)/patch.xdelta
 
 riivolution: $(OUT_DIR) $(MOD_BIN_FILES) hoshi assets
 	@echo ""
 	@echo "--- Creating Riivolution Mod... ---"
+	rm -rf $(OUT_DIR)/Riivolution
 	cp -a -r "$(HOSHI_DIR)/dol/out/Riivolution" "$(OUT_DIR)"
-	cp -a -r "$(ROOT_DIR)"/files/* "$(OUT_DIR)/Riivolution/$(MOD_NAME)"
-	@echo "--- Copying Riivolution files into dolphin dir... ---"
-	cp -a -r "$(OUT_DIR)/Riivolution/"* "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/"
+	cp -a -r "$(OUT_DIR)"/files/* "$(OUT_DIR)/Riivolution/$(MOD_NAME)"
+
+deploy: package
+	@echo ""
+	@echo "--- Copying Riivolution files into Dolphin dir... ---"
+	cp -a -r "$(OUT_DIR)/Riivolution/"* "$(DOLPHIN_RIIVOLUTION_DIR)/"
 
 # --- Clean Target ---
 clean:
 	@echo "Cleaning build and output directories..."
 	$(MAKE) -C $(HOSHI_DIR) clean PYTHON="$(PYTHON)"
-	rm -rf $(ORIG_DOL) $(ROOT_DIR) $(OUT_DIR) $(BUILD_DIR)
+	rm -rf $(ORIG_DOL) $(OUT_DIR) $(BUILD_DIR)
 	@echo "Cleaning Dolphin Riivolution dir..."
-	trash-put -f "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution/"*
+	trash-put -f "$(DOLPHIN_RIIVOLUTION_DIR)/"*
 	@echo "Cleaning Dolphin KAR memory cards..."
 	trash-put -f "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC/USA/Card A/01-GKYE-"*

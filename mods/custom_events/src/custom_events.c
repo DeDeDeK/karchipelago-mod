@@ -171,7 +171,7 @@ void CustomEvents_InitSis(void)
         extended_sis_ptrs[sis_idx] = custom_sis_text[i];
     }
 
-    // Replace SIS data pointer so Text_FinalizeSisText can find our entries
+    // Replace SIS data pointer so Text_InitPremadeText can find our entries
     stc_sis_data[0] = (SISData *)extended_sis_ptrs;
 
     // Write custom SIS IDs into the event name lookup table at 0x804a7b98.

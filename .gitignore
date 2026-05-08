@@ -1,8 +1,6 @@
 /build/
-/root/
 /out/
 /.temp/
-/install/
 /externals/devkitpro/
 /docs/
 /.claude/
@@ -10,5 +8,5 @@ mem1.raw
 notes.txt
 kar.iso
 out.iso
-/iso/root/
+/iso/
 patch.xdelta

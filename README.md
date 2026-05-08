@@ -44,11 +44,8 @@ This will:
 
 * Compile all mod's source files.
 * Pack each mod into a hoshi compatible `.bin` file using the Python script.
-* Output a Riivolution folder for the mod.
-* Output an XDelta patch that can be used to create an .iso for the mod.
+* Output a Riivolution mod under `out/Riivolution/`.
 
-To automatically install the files to your iso filesystem after building the project, run:
-```bash
-make all install INSTALL_DIR="Path\To\Root\Folder"
-```
-where `"Path\To\Root\Folder"` points to your extracted ISO filesystem containing the `files` and `sys` folder.
+To copy `out/Riivolution/*` into Dolphin's `Load/Riivolution/` directory, run `make deploy`. Override the destination with `DOLPHIN_RIIVOLUTION_DIR=...` if Dolphin lives elsewhere on your system.
+
+To produce an XDelta patch against `kar.iso` for a one-off ISO build, run `make patch` instead.

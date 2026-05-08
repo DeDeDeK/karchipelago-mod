@@ -13,12 +13,23 @@
 // Machine_SetFallDead or Ply_SetHP from the receive path.
 static int applying_deathlink = 0;
 
-// Shared helper — sends deathlink for a human player.
-static void SendDeathLink(int ply)
+// Common send gate. Returns 1 if the caller should proceed to set
+// deathlink_send. Both 3D and TR send paths use this; the human-vs-CPU check
+// is mode-specific and stays at the call site (3D uses Ply_CheckIfCPU,
+// TR uses TopRide_GetPlayerKind).
+static int DeathLinkSendAllowed(void)
 {
     if (applying_deathlink)
-        return;
+        return 0;
     if (!ap_menu_settings.deathlink_enabled)
+        return 0;
+    return 1;
+}
+
+// 3D-mode helper — gates on Ply_CheckIfCPU then sends.
+static void SendDeathLink(int ply)
+{
+    if (!DeathLinkSendAllowed())
         return;
     if (Ply_CheckIfCPU(ply))
         return;
@@ -134,10 +145,52 @@ void DeathLink_On3DLoadEnd()
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_PerFrame, 0, 0, 0, 0);
 }
 
-// Top Ride deathlink. TR has no rider/machine/HP/fall-death system, so the
-// AR/CT receive path can't apply. Pick a damage-class state wrapper from the
-// pool and apply it to each human kirby. Same state for every human keeps
-// the visual coherent. SpeedDown is reserved for traplink. Burn, Spin,
+// Top Ride send hook for the sand-pit enemy on the SAND course. The pit
+// has an enemy at its center that swallows kirby and spits them back out;
+// the spit-out animation goes through `KirbyDoodlebugOut` (vtable wrapper
+// at +0xD0 — the same one used when a Doodlebug item ejects its rider,
+// hence the name). Two call sites for vt[+0xD0] exist: 0x802e2804 (the
+// Doodlebug item) and 0x80331a94 (this enemy, in a per-frame function
+// that loops over all 4 kirby slots). Hooking 0x80331a94 catches only
+// the sand-pit interaction, not generic Doodlebug-item ejection.
+//
+// At the hook site:
+//   r31 = kirby           (set at 0x80331a7c via mr r3, r31 above)
+//   r4  = stack+0x90      (kirby_pos arg)
+//   r5  = stack+0x84      (src_pos arg — center of the pit)
+//   r6  = 30, r7 = 60     (immediate u16 args)
+//   r12 = kirby->vtable   (loaded at 0x80331a84)
+// Clobbered: `lwz r12, 0xd0(r12)`. r1 untouched by our prologue (no stack
+// frame allocated), so the stack-relative arg pointers stay valid.
+static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
+{
+    if (!DeathLinkSendAllowed())
+        return;
+    if (TopRide_GetPlayerKind(kirby->player_slot) != TR_PKIND_HMN)
+        return;
+    TopRideKirbyMgr *mgr = *stc_topride_kirbymgr;
+    if (!mgr || mgr->round_state != 2)
+        return;
+
+    OSReport("[DeathLink] TR sand pit (slot %d). Sending deathlink...\n",
+             kirby->player_slot);
+    ap_data->deathlink_send = 1;
+}
+CODEPATCH_HOOKCREATE(0x80331a94,
+    "mr 3, 31\n\t",
+    DeathLink_OnTopRideSandPit,
+    "mr 3, 31\n\t"
+    "addi 4, 1, 0x90\n\t"
+    "addi 5, 1, 0x84\n\t"
+    "li 6, 30\n\t"
+    "li 7, 60\n\t"
+    "lwz 12, 0(31)\n\t",
+    0)
+
+// Top Ride deathlink receive. TR has no rider/machine/HP/fall-death system,
+// so the AR/CT receive path can't apply. Pick a damage-class state wrapper
+// from the pool and apply it to each human kirby. Same state for every human
+// keeps the visual coherent. SpeedDown is reserved for traplink. Burn, Spin,
 // Crush, Strike, Explode, Elec excluded — see docs/topride-kirby-states.md
 // "Caveats & Open Items" for per-state reasoning.
 typedef void (*KirbyStateFn)(TopRideKirby *);
@@ -204,9 +257,11 @@ void DeathLink_OnTopRideLoad()
 // Apply patches needed for deathlink
 void DeathLink_OnBoot()
 {
-    OSReport("[DeathLink] Applying deathlink patches...\n");
     // HP death: hook in Rider_CheckToDieOnMachine
     CODEPATCH_HOOKAPPLY(0x801a06d0);
     // Fall death: hook in Machine_SetFallDead
     CODEPATCH_HOOKAPPLY(0x801e6540);
+    // TR scenery: sand-pit enemy on the SAND course (DoodlebugOut wrapper)
+    CODEPATCH_HOOKAPPLY(0x80331a94);
+    OSReport("[DeathLink] Hooks installed\n");
 }

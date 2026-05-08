@@ -314,8 +314,8 @@ static void CrossLoadCT(void)
         return;
     }
     OSReport("[CannonEvent] load: grDataMachine2 = %p\n", grdata);
-    OSReport("[CannonEvent] load:   flags=0x%x  stage_node=%p  lights=%p  motion=%p  spline=%p  pos_data=%p  yakumono=%p\n",
-             grdata->flags, grdata->stage_node, grdata->lights, grdata->motion,
+    OSReport("[CannonEvent] load:   flags=0x%x  stage_node=%p  model_section=%p  motion=%p  spline=%p  pos_data=%p  yakumono=%p\n",
+             grdata->flags, grdata->stage_node, grdata->model_section, grdata->motion,
              grdata->spline, grdata->pos_data, grdata->yakumono);
 
     if (!grdata->yakumono)

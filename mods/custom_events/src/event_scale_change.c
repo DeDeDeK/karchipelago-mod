@@ -40,8 +40,7 @@ static JOBJ *GetCollisionJObj(void)
     GrObj *grobj = *stc_grobj;
     if (!grobj)
         return NULL;
-    // Collision JOBJ is at extended GrObj offset 0xF4
-    return *(JOBJ **)((char *)grobj + 0xF4);
+    return grobj->backdrop_jobj;
 }
 
 static float *GetOOBBounds(void)
