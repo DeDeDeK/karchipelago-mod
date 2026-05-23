@@ -226,28 +226,28 @@ GIVE_FN(GiveFillerTR,    AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
 GIVE_FN(GiveFillerCT,    AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
 
 // Top Ride items (spawn at each human Kirby's position for pickup)
-GIVE_FN(GiveTRHammer,      AP_TOPRIDE_ITEM_GIVE_HAMMER)
-GIVE_FN(GiveTRGrow,        AP_TOPRIDE_ITEM_GIVE_GROW)
-GIVE_FN(GiveTRSpeedUp,     AP_TOPRIDE_ITEM_GIVE_SPEEDUP)
-GIVE_FN(GiveTRSpeedDown,   AP_TOPRIDE_ITEM_GIVE_SPEEDDOWN)
-GIVE_FN(GiveTRBoostSaw,    AP_TOPRIDE_ITEM_GIVE_BOOST_SAW)
-GIVE_FN(GiveTRChargeBoost, AP_TOPRIDE_ITEM_GIVE_CHARGEBOOST)
-GIVE_FN(GiveTRInvincible,  AP_TOPRIDE_ITEM_GIVE_INVINCIBLE)
-GIVE_FN(GiveTRBuzzSaw,     AP_TOPRIDE_ITEM_GIVE_BUZZSAW)
-GIVE_FN(GiveTRSpear,       AP_TOPRIDE_ITEM_GIVE_SPEAR)
-GIVE_FN(GiveTRFreeze,      AP_TOPRIDE_ITEM_GIVE_FREEZE)
-GIVE_FN(GiveTRMissile,     AP_TOPRIDE_ITEM_GIVE_MISSILE)
-GIVE_FN(GiveTRFire,        AP_TOPRIDE_ITEM_GIVE_FIRE)
-GIVE_FN(GiveTRNeedle,      AP_TOPRIDE_ITEM_GIVE_NEEDLE)
-GIVE_FN(GiveTRBomb,        AP_TOPRIDE_ITEM_GIVE_BOMB)
-GIVE_FN(GiveTRLandmine,    AP_TOPRIDE_ITEM_GIVE_LANDMINE)
-GIVE_FN(GiveTRLantern,     AP_TOPRIDE_ITEM_GIVE_LANTERN)
-GIVE_FN(GiveTRMike,        AP_TOPRIDE_ITEM_GIVE_MIKE)
-GIVE_FN(GiveTRCracker,     AP_TOPRIDE_ITEM_GIVE_CRACKER)
-GIVE_FN(GiveTRWhoPaint,    AP_TOPRIDE_ITEM_GIVE_WHO_PAINT)
-GIVE_FN(GiveTRSmokeScreen, AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN)
-GIVE_FN(GiveTRChickie,     AP_TOPRIDE_ITEM_GIVE_CHICKIE)
-GIVE_FN(GiveTRBackward,    AP_TOPRIDE_ITEM_GIVE_BACKWARD)
+GIVE_FN(GiveTRHammer,          AP_TOPRIDE_ITEM_GIVE_HAMMER)
+GIVE_FN(GiveTRBigCake,         AP_TOPRIDE_ITEM_GIVE_BIG_CAKE)
+GIVE_FN(GiveTRSpeedUp,         AP_TOPRIDE_ITEM_GIVE_SPEED_UP)
+GIVE_FN(GiveTRSpeedDown,       AP_TOPRIDE_ITEM_GIVE_SPEED_DOWN)
+GIVE_FN(GiveTRSpinner,         AP_TOPRIDE_ITEM_GIVE_SPINNER)
+GIVE_FN(GiveTRChargeTank,      AP_TOPRIDE_ITEM_GIVE_CHARGE_TANK)
+GIVE_FN(GiveTRInvincibleCandy, AP_TOPRIDE_ITEM_GIVE_INVINCIBLE_CANDY)
+GIVE_FN(GiveTRBuzzSaw,         AP_TOPRIDE_ITEM_GIVE_BUZZ_SAW)
+GIVE_FN(GiveTRDrill,           AP_TOPRIDE_ITEM_GIVE_DRILL)
+GIVE_FN(GiveTRFreezeFan,       AP_TOPRIDE_ITEM_GIVE_FREEZE_FAN)
+GIVE_FN(GiveTRMissile,         AP_TOPRIDE_ITEM_GIVE_MISSILE)
+GIVE_FN(GiveTRFire,            AP_TOPRIDE_ITEM_GIVE_FIRE)
+GIVE_FN(GiveTRPartyBallAlt,    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT)
+GIVE_FN(GiveTRBomb,            AP_TOPRIDE_ITEM_GIVE_BOMB)
+GIVE_FN(GiveTRStepBoom,        AP_TOPRIDE_ITEM_GIVE_STEP_BOOM)
+GIVE_FN(GiveTRLantern,         AP_TOPRIDE_ITEM_GIVE_LANTERN)
+GIVE_FN(GiveTRWalky,           AP_TOPRIDE_ITEM_GIVE_WALKY)
+GIVE_FN(GiveTRKracko,          AP_TOPRIDE_ITEM_GIVE_KRACKO)
+GIVE_FN(GiveTRWhoPaint,        AP_TOPRIDE_ITEM_GIVE_WHO_PAINT)
+GIVE_FN(GiveTRSmokescreen,     AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN)
+GIVE_FN(GiveTRChickie,         AP_TOPRIDE_ITEM_GIVE_CHICKIE)
+GIVE_FN(GiveTRPartyBall,       AP_TOPRIDE_ITEM_GIVE_PARTY_BALL)
 
 // Energy Link debug
 static int GiveEnergy1000(OptionDesc *self)
@@ -480,7 +480,7 @@ static MenuDesc items_menu = {
         G("Apple",          item_state, ITUNLOCK_FOODAPPLE,       SyncItems),
         G("Fireworks",      item_state, ITUNLOCK_FIREWORKS,       SyncItems),
         G("Panic Spin",     item_state, ITUNLOCK_PANICSPIN,       SyncItems),
-        G("Time Bomb",      item_state, ITUNLOCK_TIMEBOMB,        SyncItems),
+        G("Sensor Bomb",    item_state, ITUNLOCK_SENSORBOMB,      SyncItems),
         G("Gordo",          item_state, ITUNLOCK_GORDO,           SyncItems),
         G("Hydra Piece 1",  item_state, ITUNLOCK_HYDRA1,          SyncItems),
         G("Hydra Piece 2",  item_state, ITUNLOCK_HYDRA2,          SyncItems),
@@ -539,23 +539,23 @@ static MenuDesc tr_items_menu = {
     .options = {
         A("Unlock All", "Unlock all TR items", TriUnlockAll),
         A("Lock All",   "Lock all TR items",   TriLockAll),
-        G("Hammer",         tr_item_state, TRITEM_HAMMER,       SyncTRItems),
-        G("Grow",           tr_item_state, TRITEM_GROW,         SyncTRItems),
-        G("Speed Up",       tr_item_state, TRITEM_SPEEDUP,      SyncTRItems),
-        G("Speed Down",     tr_item_state, TRITEM_SPEEDDOWN,    SyncTRItems),
-        G("Boost Saw",      tr_item_state, TRITEM_BOOST_SAW,    SyncTRItems),
-        G("Charge Boost",   tr_item_state, TRITEM_CHARGEBOOST,  SyncTRItems),
-        G("Invincible",     tr_item_state, TRITEM_INVINCIBLE,   SyncTRItems),
-        G("Buzz Saw",       tr_item_state, TRITEM_BUZZSAW,      SyncTRItems),
-        G("Spear",          tr_item_state, TRITEM_SPEAR,        SyncTRItems),
-        G("Missile",        tr_item_state, TRITEM_MISSILE,      SyncTRItems),
-        G("Land Mine",      tr_item_state, TRITEM_LANDMINE,     SyncTRItems),
-        G("Lantern",        tr_item_state, TRITEM_LANTERN,      SyncTRItems),
-        G("Cracker",        tr_item_state, TRITEM_CRACKER,      SyncTRItems),
-        G("Who? Paint",     tr_item_state, TRITEM_WHO_PAINT,    SyncTRItems),
-        G("Smoke Screen",   tr_item_state, TRITEM_SMOKESCREEN,  SyncTRItems),
-        G("Chickie",        tr_item_state, TRITEM_CHICKIE,      SyncTRItems),
-        G("Backward",       tr_item_state, TRITEM_BACKWARD,     SyncTRItems),
+        G("Hammer",            tr_item_state, TRITEM_HAMMER,           SyncTRItems),
+        G("Big Cake",          tr_item_state, TRITEM_BIG_CAKE,         SyncTRItems),
+        G("Speed Up",          tr_item_state, TRITEM_SPEED_UP,         SyncTRItems),
+        G("Speed Down",        tr_item_state, TRITEM_SPEED_DOWN,       SyncTRItems),
+        G("Spinner",           tr_item_state, TRITEM_SPINNER,          SyncTRItems),
+        G("Charge Tank",       tr_item_state, TRITEM_CHARGE_TANK,      SyncTRItems),
+        G("Invincible Candy",  tr_item_state, TRITEM_INVINCIBLE_CANDY, SyncTRItems),
+        G("Buzz Saw",          tr_item_state, TRITEM_BUZZ_SAW,         SyncTRItems),
+        G("Drill",             tr_item_state, TRITEM_DRILL,            SyncTRItems),
+        G("Missile",           tr_item_state, TRITEM_MISSILE,          SyncTRItems),
+        G("Step-boom",         tr_item_state, TRITEM_STEP_BOOM,        SyncTRItems),
+        G("Lantern",           tr_item_state, TRITEM_LANTERN,          SyncTRItems),
+        G("Kracko",            tr_item_state, TRITEM_KRACKO,           SyncTRItems),
+        G("Who? Paint",        tr_item_state, TRITEM_WHO_PAINT,        SyncTRItems),
+        G("Smokescreen",       tr_item_state, TRITEM_SMOKESCREEN,      SyncTRItems),
+        G("Chickie",           tr_item_state, TRITEM_CHICKIE,          SyncTRItems),
+        G("Party Ball",        tr_item_state, TRITEM_PARTY_BALL,       SyncTRItems),
     },
 };
 
@@ -745,28 +745,28 @@ static MenuDesc give_upgrades_menu = {
 static MenuDesc give_topride_items_menu = {
     .option_num = 22,
     .options = {
-        A("Hammer",         "Give TR Hammer",           GiveTRHammer),
-        A("Grow",           "Give TR Grow",             GiveTRGrow),
-        A("Speed Up",       "Give TR Speed Up",         GiveTRSpeedUp),
-        A("Speed Down",     "Give TR Speed Down",       GiveTRSpeedDown),
-        A("Boost Saw",      "Give TR Boost Saw",        GiveTRBoostSaw),
-        A("Charge Boost",   "Give TR Charge Boost",     GiveTRChargeBoost),
-        A("Invincible",     "Give TR Invincible Candy", GiveTRInvincible),
-        A("Buzz Saw",       "Give TR Buzz Saw",         GiveTRBuzzSaw),
-        A("Spear",          "Give TR Spear",            GiveTRSpear),
-        A("Freeze",         "Give TR Freeze",           GiveTRFreeze),
-        A("Missile",        "Give TR Missile",          GiveTRMissile),
-        A("Fire",           "Give TR Fire",             GiveTRFire),
-        A("Needle",         "Give TR Needle",           GiveTRNeedle),
-        A("Bomb",           "Give TR Bomb",             GiveTRBomb),
-        A("Landmine",       "Give TR Landmine",         GiveTRLandmine),
-        A("Lantern",        "Give TR Lantern",          GiveTRLantern),
-        A("Mike",           "Give TR Mike",             GiveTRMike),
-        A("Cracker",        "Give TR Cracker",          GiveTRCracker),
-        A("Who? Paint",     "Give TR Who? Paint",       GiveTRWhoPaint),
-        A("Smoke Screen",   "Give TR Smoke Screen",     GiveTRSmokeScreen),
-        A("Chickie",        "Give TR Chickie",          GiveTRChickie),
-        A("Backward",       "Give TR Backward",         GiveTRBackward),
+        A("Hammer",            "Give TR Hammer",           GiveTRHammer),
+        A("Big Cake",          "Give TR Big Cake",         GiveTRBigCake),
+        A("Speed Up",          "Give TR Speed Up",         GiveTRSpeedUp),
+        A("Speed Down",        "Give TR Speed Down",       GiveTRSpeedDown),
+        A("Spinner",           "Give TR Spinner",          GiveTRSpinner),
+        A("Charge Tank",       "Give TR Charge Tank",      GiveTRChargeTank),
+        A("Invincible Candy",  "Give TR Invincible Candy", GiveTRInvincibleCandy),
+        A("Buzz Saw",          "Give TR Buzz Saw",         GiveTRBuzzSaw),
+        A("Drill",             "Give TR Drill",            GiveTRDrill),
+        A("Freeze Fan",        "Give TR Freeze Fan",       GiveTRFreezeFan),
+        A("Missile",           "Give TR Missile",          GiveTRMissile),
+        A("Fire",              "Give TR Fire",             GiveTRFire),
+        A("Party Ball (alt)",  "Give TR Party Ball (alt)", GiveTRPartyBallAlt),
+        A("Bomb",              "Give TR Bomb",             GiveTRBomb),
+        A("Step-boom",         "Give TR Step-boom",        GiveTRStepBoom),
+        A("Lantern",           "Give TR Lantern",          GiveTRLantern),
+        A("Walky",             "Give TR Walky",            GiveTRWalky),
+        A("Kracko",            "Give TR Kracko",           GiveTRKracko),
+        A("Who? Paint",        "Give TR Who? Paint",       GiveTRWhoPaint),
+        A("Smokescreen",       "Give TR Smokescreen",      GiveTRSmokescreen),
+        A("Chickie",           "Give TR Chickie",          GiveTRChickie),
+        A("Party Ball",        "Give TR Party Ball",       GiveTRPartyBall),
     },
 };
 

@@ -11,7 +11,7 @@
 #include "energylink.h"
 #include "textbox_api.h"
 
-static u32 ApiGetUnlockMask(APUnlockCategory cat)
+u32 Unlock_GetMask(APUnlockCategory cat)
 {
     switch (cat)
     {
@@ -30,7 +30,7 @@ static u32 ApiGetUnlockMask(APUnlockCategory cat)
     }
 }
 
-static void ApiSetUnlockMask(APUnlockCategory cat, u32 mask)
+void Unlock_SetMask(APUnlockCategory cat, u32 mask)
 {
     switch (cat)
     {
@@ -135,8 +135,8 @@ static void ApiDebugTriggerTraplinkReceive(void)
 }
 
 static const ArchipelagoAPI api = {
-    .GetUnlockMask                = ApiGetUnlockMask,
-    .SetUnlockMask                = ApiSetUnlockMask,
+    .GetUnlockMask                = Unlock_GetMask,
+    .SetUnlockMask                = Unlock_SetMask,
     .QueueItem                    = ApiQueueItem,
     .AddEnergy                    = ApiAddEnergy,
     .GrantReward                  = ApiGrantReward,

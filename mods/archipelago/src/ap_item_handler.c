@@ -25,7 +25,7 @@
 #include "main.h"
 
 // Check the mailbox for an incoming item from the AP client.
-// Store it in the persistent received list, add to unprocessed list,
+// Bump the received counter, add to unprocessed list,
 // and immediately acknowledge receipt.
 // Returns 1 if an item was received, 0 otherwise.
 int APItems_CheckMailbox()
@@ -35,15 +35,13 @@ int APItems_CheckMailbox()
         return 0;
 
     uint idx = ap_save->item_received_count;
-    if (idx >= MAX_RECEIVED_ITEMS)
+    if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
-        OSReport("[APItems] APItems_CheckMailbox: received list is full!\n");
+        OSReport("[APItems] APItems_CheckMailbox: unprocessed queue is full!\n");
         ap_data->incoming_item_id = 0;
         return 0;
     }
 
-    // Store in persistent received list
-    ap_save->received_items[idx] = incoming;
     ap_save->item_received_count++;
 
     // Add to unprocessed list

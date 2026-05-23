@@ -1,9 +1,21 @@
 #include "os.h"
 #include "hoshi/mod.h"
 #include "hoshi/settings.h"
+#include "code_patch/code_patch.h"
 
 #include "textbox.h"
 #include "textbox_colors.h"
+
+// Hook installed at 0x80009084 — the instruction right after the `bl
+// TopRide_CustomRenderer` inside TopRide_PostRenderCallback. TR's post-render
+// kicks off a second HSD_StartRender pass that overdraws the EFB after the
+// standard frame render, wiping anything the screen canvas drew. Re-issuing
+// the canvas's render after that pass returns puts the textbox back on top.
+static void Hook_TopRidePostRender(void)
+{
+    TextBox_TopRideReRender();
+}
+CODEPATCH_HOOKCREATE(0x80009084, "", Hook_TopRidePostRender, "", 0)
 
 // Populated at boot from textbox_colors.c. The struct fields can't be
 // initialized statically from extern const GXColor symbols (not constants
@@ -37,7 +49,11 @@ static void OnBoot(void)
     api.KirbyColors      = TextBox_KirbyColors;
 
     Hoshi_ExportMod((void *)&api);
-    OSReport("[TextBox] API exported (v%d.%d)\n", TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR);
+
+    CODEPATCH_HOOKAPPLY(0x80009084);
+
+    OSReport("[TextBox] API exported (v%d.%d), TR post-render hook installed\n",
+             TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR);
 }
 
 static const char *stc_off_on[] = {"Off", "On"};

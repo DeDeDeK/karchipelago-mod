@@ -6,6 +6,7 @@
 void GateItems_OnBoot();
 void GateItems_FilterSpawnTables();
 void GateItems_FilterEventDropTables();
+void GateItems_EnsureAllUpInSpawnPools();
 int GateItems_UnlockItem(ItemUnlockKind kind);
 
 #endif

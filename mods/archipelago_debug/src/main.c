@@ -67,12 +67,46 @@ static void OnFrameStart(void)
 
     if (pad->down & PAD_BUTTON_DPAD_RIGHT)
     {
-        int range = AP_ITKIND_WEIGHTFAKE - AP_ITKIND_BASE + 1;
-        int picked = AP_ITKIND_BASE + HSD_Randi(range);
+        // Pick uniformly across every AP unlock pool. Useful for exercising
+        // the receive path on unlocks specifically, including idempotence
+        // (the same unlock landing twice should be a no-op).
+        static const struct
+        {
+            int base;
+            int count;
+        } unlock_pools[] = {
+            { AP_STADIUM_UNLOCK_BASE,       STKIND_NUM     },
+            { AP_EVENT_UNLOCK_BASE,         EVKIND_NUM     },
+            { AP_ABILITY_UNLOCK_BASE,       COPYKIND_NUM   },
+            { AP_PATCH_UNLOCK_BASE,         PATCHKIND_NUM  },
+            { AP_ITEM_UNLOCK_BASE,          ITUNLOCK_NUM   },
+            // VCKIND_WHEELVSDEDEDE is the last enum value but is intentionally
+            // not exposed as an AP unlock (see archipelago_api.h).
+            { AP_MACHINE_UNLOCK_BASE,       VCKIND_NUM - 1 },
+            { AP_BOX_UNLOCK_BASE,           BOXKIND_NUM    },
+            { AP_STAGE_UNLOCK_AIRRIDE_BASE, AIRRIDE_NUM    },
+            { AP_COLOR_UNLOCK_BASE,         KIRBYCOLOR_NUM },
+            { AP_STAGE_UNLOCK_TOPRIDE_BASE, TOPRIDE_NUM    },
+            { AP_TOPRIDE_ITEM_UNLOCK_BASE,  TRITEM_NUM     },
+        };
+        int total = 0;
+        for (int i = 0; i < (int)(sizeof(unlock_pools) / sizeof(unlock_pools[0])); i++)
+            total += unlock_pools[i].count;
+        int pick = HSD_Randi(total);
+        int picked = -1;
+        for (int i = 0; i < (int)(sizeof(unlock_pools) / sizeof(unlock_pools[0])); i++)
+        {
+            if (pick < unlock_pools[i].count)
+            {
+                picked = unlock_pools[i].base + pick;
+                break;
+            }
+            pick -= unlock_pools[i].count;
+        }
         if (ap_api->QueueItem(picked))
-            OSReport("[ApDebug] queued random CT item id=%d\n", picked);
+            OSReport("[ApDebug] queued random unlock id=%d\n", picked);
         else
-            OSReport("[ApDebug] queue full, could not give CT item id=%d\n", picked);
+            OSReport("[ApDebug] queue full, could not give unlock id=%d\n", picked);
     }
 
     if (pad->down & PAD_BUTTON_DPAD_DOWN)
@@ -83,8 +117,55 @@ static void OnFrameStart(void)
 
     if (pad->down & PAD_BUTTON_DPAD_UP)
     {
-        ap_api->DebugTriggerTraplinkReceive();
-        OSReport("[ApDebug] triggered traplink_receive\n");
+        if (pad->held & PAD_TRIGGER_L)
+        {
+            // L+Up: queue a random in-game item from the pool that applies to
+            // the current major mode. Complements the unlocks pool on D-Pad
+            // Right — these are the items you'd actually pick up in-game.
+            MajorKind major = Scene_GetCurrentMajor();
+            int picked = -1;
+            const char *mode_name = 0;
+            if (major == MJRKIND_CITY)
+            {
+                // Full ITKIND range — boxes, copies, food, patches, fakes, etc.
+                int range = AP_ITKIND_WEIGHTFAKE - AP_ITKIND_BASE + 1;
+                picked = AP_ITKIND_BASE + HSD_Randi(range);
+                mode_name = "CT";
+            }
+            else if (major == MJRKIND_AIR)
+            {
+                // Only copy abilities are honored outside CT — every other
+                // ITKIND falls through to the Gm_IsInCity gate in
+                // ap_item_handler and no-ops.
+                int range = AP_ITKIND_COPYMIC - AP_ITKIND_COPYBOMB + 1;
+                picked = AP_ITKIND_COPYBOMB + HSD_Randi(range);
+                mode_name = "AR";
+            }
+            else if (major == MJRKIND_TOP)
+            {
+                // TR-specific GIVE pool spawns the matching TR item at each
+                // human Kirby's position.
+                int range = AP_TOPRIDE_ITEM_GIVE_PARTY_BALL - AP_TOPRIDE_ITEM_GIVE_BASE + 1;
+                picked = AP_TOPRIDE_ITEM_GIVE_BASE + HSD_Randi(range);
+                mode_name = "TR";
+            }
+            if (mode_name)
+            {
+                if (ap_api->QueueItem(picked))
+                    OSReport("[ApDebug] queued random %s item id=%d\n", mode_name, picked);
+                else
+                    OSReport("[ApDebug] queue full, could not give %s item id=%d\n", mode_name, picked);
+            }
+            else
+            {
+                OSReport("[ApDebug] L+Up: not in a recognized 3D game scene, no items to give\n");
+            }
+        }
+        else
+        {
+            ap_api->DebugTriggerTraplinkReceive();
+            OSReport("[ApDebug] triggered traplink_receive\n");
+        }
     }
 
     if (pad->down & PAD_TRIGGER_Z)

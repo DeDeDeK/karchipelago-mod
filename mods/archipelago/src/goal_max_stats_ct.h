@@ -8,4 +8,9 @@
 // Call from On3DLoadEnd.
 void GoalMaxStatsCT_On3DLoadEnd(void);
 
+// Apply +1 patch / All-Up drop-weight bias to all spawn pools when the active
+// City Trial goal is GOAL_MAX_STATS_CT. Invoked from item_spawn_filter.c after
+// the gate filters have run.
+void GoalMaxStatsCT_ApplyDropBias(void);
+
 #endif // ARCHIPELAGO_GOAL_MAX_STATS_CT_H

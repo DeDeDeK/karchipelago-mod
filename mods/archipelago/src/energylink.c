@@ -21,13 +21,16 @@ static int needs_baseline[5];
 
 // Shared accumulator — contributions from all players pool into one value.
 // Buys subtract; the net signed value is flushed to ap_data->energy_send.
+// Stays float so per-frame fractional charge gains accumulate exactly. Only
+// the integer-truncated portion is committed to ap_data->energy_send each
+// flush; the fractional remainder rolls into the next flush.
 static float energy_send_accumulator;
 
 // Last observed value of ap_data->energy_balance. Used to detect AP-side
 // receives (other players' generated energy arriving from the server).
 // Mod-side withdrawals also change the balance; those show up as negative
 // deltas which we silently absorb.
-static float prev_energy_balance;
+static s64 prev_energy_balance;
 
 // Detect a positive delta in ap_data->energy_balance since the last call and
 // announce it once. Idempotent: safe to invoke multiple times per frame from
@@ -35,25 +38,34 @@ static float prev_energy_balance;
 // rise (prev == curr after that).
 static void TrackEnergyReceive(void)
 {
-    float curr = ap_data->energy_balance;
-    float delta = curr - prev_energy_balance;
+    s64 curr = ap_data->energy_balance;
+    s64 delta = curr - prev_energy_balance;
     prev_energy_balance = curr;
     if (delta > 0)
-        tb_api->EnqueueColoredNounFmt("Received ", "energy", tb_api->EnergyColor, " (+%.0f)", delta);
+        tb_api->EnqueueColoredNounFmt("Received ", "energy", tb_api->EnergyColor, " (+%lld)", delta);
 }
 
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units
 #define CHARGE_ENERGY_SCALE 5.0f
 
 // Flush accumulated energy to the shared field when client has cleared it.
+// Only the integer portion of the float accumulator is sent; the fractional
+// remainder stays behind for the next flush.
+//
+// The cast goes through s32 deliberately — PowerPC has hardware float→s32
+// (fctiwz) but no float→s64 instruction, and we don't link against the
+// libgcc soft routines (__fixsfdi). The accumulator only ever holds small
+// per-frame deltas (well under s32 range), so the intermediate s32 is safe.
 static void FlushEnergy(void)
 {
-    if (energy_send_accumulator != 0 && ap_data->energy_send == 0)
-    {
-        ap_data->energy_send = energy_send_accumulator;
-        OSReport("[EnergyLink] flushed %f energy to energy_send\n", energy_send_accumulator);
-        energy_send_accumulator = 0;
-    }
+    if (ap_data->energy_send != 0)
+        return;
+    s32 whole = (s32)energy_send_accumulator;  // truncate toward zero
+    if (whole == 0)
+        return;
+    ap_data->energy_send = (s64)whole;
+    energy_send_accumulator -= (float)whole;
+    OSReport("[EnergyLink] flushed %d energy to energy_send\n", whole);
 }
 
 // Per-frame proc attached to each human rider GOBJ in Air Ride / City Trial.
@@ -115,8 +127,24 @@ static void EnergyLink_PerFrame(GOBJ *rg)
     if (ap_menu_settings.energylink_autocharge && md)
     {
         float deficit = 1.0f - md->charge_value;
-        float max_gain = ap_data->energy_balance / CHARGE_ENERGY_SCALE;
-        float charge_gain = (deficit < max_gain) ? deficit : max_gain;
+        // deficit is in [0,1] and SCALE = 5, so any balance ≥ 5 raw units
+        // can pay for the entire deficit. Split on that threshold so the
+        // common case (plenty of energy) skips the s64→float cast entirely.
+        float charge_gain;
+        if (ap_data->energy_balance >= (s64)CHARGE_ENERGY_SCALE)
+        {
+            charge_gain = deficit;
+        }
+        else if (ap_data->energy_balance > 0)
+        {
+            // Balance < 5 raw units, so it fits safely in s32 for the cast.
+            float max_gain = (float)(s32)ap_data->energy_balance / CHARGE_ENERGY_SCALE;
+            charge_gain = (deficit < max_gain) ? deficit : max_gain;
+        }
+        else
+        {
+            charge_gain = 0;
+        }
         if (charge_gain > 0)
         {
             md->charge_value += charge_gain;
@@ -161,8 +189,20 @@ static void EnergyLink_TopRidePerFrame(GOBJ *g)
         if (ap_menu_settings.energylink_autocharge && kirby->charge.charge_ready)
         {
             float deficit = 1.0f - kirby->charge.charge_value;
-            float max_gain = ap_data->energy_balance / CHARGE_ENERGY_SCALE;
-            float charge_gain = (deficit < max_gain) ? deficit : max_gain;
+            float charge_gain;
+            if (ap_data->energy_balance >= (s64)CHARGE_ENERGY_SCALE)
+            {
+                charge_gain = deficit;
+            }
+            else if (ap_data->energy_balance > 0)
+            {
+                float max_gain = (float)(s32)ap_data->energy_balance / CHARGE_ENERGY_SCALE;
+                charge_gain = (deficit < max_gain) ? deficit : max_gain;
+            }
+            else
+            {
+                charge_gain = 0;
+            }
             if (charge_gain > 0)
             {
                 kirby->charge.charge_value += charge_gain;
@@ -221,15 +261,27 @@ void EnergyLink_OnTopRideLoad()
     OSReport("[EnergyLink] Active (Top Ride)\n");
 }
 
+// Queues a withdrawal on the send accumulator. Does NOT update
+// ap_data->energy_balance — that's authoritative state owned by the client.
+// Callers that want immediate balance UI feedback for an integer purchase
+// should decrement ap_data->energy_balance themselves (the next client
+// SetReply push will overwrite anyway, but the local subtract avoids a
+// brief stale display).
 void EnergyLink_Withdraw(float amount)
 {
-    ap_data->energy_balance -= amount;
     energy_send_accumulator -= amount;
 }
 
+// Local debug-only deposit: bumps the displayed balance without queuing a
+// send. The server still owns the true pool value, so the next client push
+// will overwrite this. Useful for testing UI/purchase paths without burning
+// real pool energy.
+//
+// Float→s32 cast uses hardware fctiwz; debug deposits are always small
+// integer amounts so the s32 intermediate is safe.
 void EnergyLink_Deposit(float amount)
 {
-    ap_data->energy_balance += amount;
+    ap_data->energy_balance += (s64)(s32)amount;
 }
 
 void EnergyLink_RebaseStats(int ply)

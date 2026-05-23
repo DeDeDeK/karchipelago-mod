@@ -13,17 +13,16 @@
 // Top Ride items that correspond to copy abilities.
 // These are additionally gated by ability_unlocked_mask.
 static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
-    { TRITEM_FREEZE, COPYKIND_ICE },
-    { TRITEM_FIRE,   COPYKIND_FIRE },
-    { TRITEM_NEEDLE, COPYKIND_NEEDLE },
-    { TRITEM_BOMB,   COPYKIND_BOMB },
-    { TRITEM_MIKE,   COPYKIND_MIC },
+    { TRITEM_FREEZE_FAN, COPYKIND_ICE },
+    { TRITEM_FIRE,       COPYKIND_FIRE },
+    { TRITEM_BOMB,       COPYKIND_BOMB },
+    { TRITEM_WALKY,      COPYKIND_MIC },
 };
 
 // Bitmask of ability-themed TR items — these are not gated by topride_item_unlocked_mask.
 #define ABILITY_ITEM_BITS ( \
-    (1 << TRITEM_FREEZE) | (1 << TRITEM_FIRE) | (1 << TRITEM_NEEDLE) | \
-    (1 << TRITEM_BOMB) | (1 << TRITEM_MIKE))
+    (1 << TRITEM_FREEZE_FAN) | (1 << TRITEM_FIRE) | \
+    (1 << TRITEM_BOMB) | (1 << TRITEM_WALKY))
 
 // Apply the unlock mask to the ItemMgr's enabled bitmask.
 // Ability-themed items bypass the TR item mask and are gated only by ability_unlocked_mask.
@@ -38,6 +37,16 @@ void GateTopRideItems_ApplyMask()
 
     // Gate non-ability items by TR item unlock mask
     mgr->enabled_mask &= ap_save->topride_item_unlocked_mask | ABILITY_ITEM_BITS;
+
+    // Slot 12 (TRITEM_PARTY_BALL_ALT, KirbyKusdama) is the engine's twin
+    // Party Ball variant. AP exposes only one Party Ball (slot 21,
+    // TRITEM_PARTY_BALL, KirbyUshiroyurerun), so mirror bit 21's state
+    // onto bit 12 here. Without this, the kusdama variant never spawns
+    // under the AP mod.
+    if (mgr->enabled_mask & (1 << TRITEM_PARTY_BALL))
+        mgr->enabled_mask |= (1 << TRITEM_PARTY_BALL_ALT);
+    else
+        mgr->enabled_mask &= ~(1 << TRITEM_PARTY_BALL_ALT);
 
     // Gate ability-themed items by ability unlock mask only
     u16 ability_mask = ap_save->ability_unlocked_mask;
@@ -72,8 +81,16 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
 {
     if (!mgr)
         return 0;
+    // TopRideItem_PartyBallUpdate (frame 0xFF: Party Ball open) sums per-item
+    // weights then picks via weighted random. When every TR item is locked,
+    // sum == 0 and the pick loop falls out with its loop counter at
+    // TRITEM_NUM. Letting that through makes TopRideItem_Create read past the
+    // descriptor table at 0x804ea2fc and crash on a garbage model-name pointer.
     if (item_kind < 0 || item_kind >= TRITEM_NUM)
-        return 0;
+    {
+        OSReport("[TopRideItems] Blocked spawn of out-of-range kind %d\n", item_kind);
+        return 1;
+    }
     if (mgr->enabled_mask & (1 << item_kind))
         return 0;
     OSReport("[TopRideItems] Blocked spawn of locked kind %d (%s)\n",
@@ -124,11 +141,12 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     0,
     0x8034c12c)
 
-// Cracker burst (zz_80356dac_) runs a weighted-random picker across all 22
-// items with no enabled_mask check. Both loops read the per-item weight
-// through `bl TopRideItem_GetDataByIndex` then `lfs f0, 16(r3)`. Redirecting
-// those two bl's to this wrapper yields a stub with weight=0 for locked
-// kinds, so the total excludes them and the picker can never land on one.
+// Party Ball burst (TopRideItem_PartyBallUpdate, 0x80356dac, at frame 0xFF)
+// runs a weighted-random picker across all 22 items with no enabled_mask
+// check. Both loops read the per-item weight through
+// `bl TopRideItem_GetDataByIndex` then `lfs f0, 16(r3)`. Redirecting those
+// two bl's to this wrapper yields a stub with weight=0 for locked kinds, so
+// the total excludes them and the picker can never land on one.
 static const float locked_item_stub[8] = {0}; // offset +0x10 (index 4) = 0.0
 
 const void *GateTopRideItems_GetDataGated(int kind)
@@ -144,8 +162,8 @@ void GateTopRideItems_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x802db05c);
     CODEPATCH_HOOKAPPLY(0x8034bf50);
-    // Redirect the cracker burst's two weight-lookup bl's inside zz_80356dac_
-    // to the gated wrapper. Sum loop + pick loop, in that order.
+    // Redirect the Party Ball burst's two weight-lookup bl's inside
+    // TopRideItem_PartyBallUpdate to the gated wrapper. Sum loop + pick loop.
     CODEPATCH_REPLACECALL(0x803574a4, GateTopRideItems_GetDataGated);
     CODEPATCH_REPLACECALL(0x803574d0, GateTopRideItems_GetDataGated);
     OSReport("[TopRideItems] Top Ride item gating hooks installed\n");

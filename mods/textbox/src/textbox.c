@@ -2,21 +2,20 @@
 #include <string.h>
 #include "text.h"
 #include "text_joint/text_joint.h"
+#include "obj.h"
 #include "hoshi/screen_cam.h"
 
 #include "textbox.h"
 #include "textbox_colors.h"
 
-// Mod-owned settings backing storage. Defaults preserve previous behavior:
-// medium font, colored names, no extra spacing, solid bg, 6 messages, medium
-// display time, medium typewriter speed.
+// Mod-owned settings backing storage.
 TextBoxSettings textbox_settings = {
     .enabled            = 1,
     .typewriter_enabled = 1,
     .typewriter_speed   = 1, // Med (4 frames/glyph)
     .font_size          = 1, // Med (0.4)
     .colored_names      = 1, // On
-    .message_spacing    = 1, // Normal
+    .message_spacing    = 0, // Tight (touching)
     .background_opacity = 2, // Solid
     .max_visible        = 2, // 6
     .display_time       = 1, // Med (300 frames)
@@ -33,7 +32,9 @@ TextBoxSettings textbox_settings = {
 // Preset tables. Indexed by the matching settings field.
 static const float font_size_scales[] = { 0.30f, 0.40f, 0.55f };
 static const u8    typewriter_dwells[] = { 8, 4, 2 };
-static const float spacing_multipliers[] = { 0.75f, 1.0f, 1.5f };
+// Extra vertical gap between stacked messages, expressed as a fraction of the
+// rendered text height. Tight=touching, Med/Wide add progressively more space.
+static const float spacing_extras[] = { 0.0f, 0.25f, 0.5f };
 static const u8    bg_alpha_targets[] = { 0, 100, 200 };
 static const u8    max_visible_caps[] = { 3, 4, 6, 8 };
 static const u16   display_wait_frames[] = { 180, 300, 480 };
@@ -56,11 +57,11 @@ static u8 Settings_TypewriterDwell(void)
     return typewriter_dwells[i];
 }
 
-static float Settings_SpacingMultiplier(void)
+static float Settings_SpacingExtra(void)
 {
     int i = textbox_settings.message_spacing;
-    if (i < 0 || i >= (int)ARRAY_COUNT(spacing_multipliers)) i = 1;
-    return spacing_multipliers[i];
+    if (i < 0 || i >= (int)ARRAY_COUNT(spacing_extras)) i = 0;
+    return spacing_extras[i];
 }
 
 static u8 Settings_BgAlphaTarget(void)
@@ -360,10 +361,10 @@ void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target)
 // message individually against the right edge (per-message width since
 // each TextBox can have a different width).
 //
-// The line advance ((aspect.Y / 2) * spacing) is preserved from the
-// original top-left layout — aspect.Y is the glyph cell height in
-// text-pixel units; halving it gives the empirical canvas-pixel line
-// height at default viewport_scale.
+// Line advance is the rendered text height (aspect.Y * viewport_scale.Y)
+// plus an optional fractional gap from the Spacing setting, so Tight always
+// lays messages flush regardless of font size and Med/Wide scale their gap
+// with the font.
 void TextBoxQueue_RepositionAll()
 {
     int count = TextBoxQueue_Count();
@@ -374,7 +375,7 @@ void TextBoxQueue_RepositionAll()
     int is_right  = (corner == TEXTBOX_CORNER_TOP_RIGHT  || corner == TEXTBOX_CORNER_BOTTOM_RIGHT);
     int is_bottom = (corner == TEXTBOX_CORNER_BOTTOM_LEFT || corner == TEXTBOX_CORNER_BOTTOM_RIGHT);
 
-    float spacing = Settings_SpacingMultiplier();
+    float spacing_extra = Settings_SpacingExtra();
 
     // edge_y is the canvas y of the next anchor edge — top edge for top
     // corners, bottom edge for bottom corners.
@@ -387,7 +388,8 @@ void TextBoxQueue_RepositionAll()
             continue;
 
         float w_px   = t->text->aspect.X * t->text->viewport_scale.X;
-        float line_h = (t->text->aspect.Y / 2.0f) * spacing;
+        float text_h = t->text->aspect.Y * t->text->viewport_scale.Y;
+        float line_h = text_h * (1.0f + spacing_extra);
 
         // trans is the top-left of the message bounding box. For bottom
         // corners we shift up by line_h so the message's bottom edge sits
@@ -656,4 +658,21 @@ TextBoxMessage *TextBoxQueue_GetAt(int index)
         return NULL;
     int actual_index = (textbox_state.head + index) % TEXTBOX_QUEUE_SIZE;
     return &textbox_state.queue[actual_index];
+}
+
+// Top Ride's `cb_ThinkPostRender` (TopRide_PostRenderCallback @ 0x80009074)
+// runs TopRide_CustomRenderer, which kicks off an entirely new HSD_StartRender
+// pass for the 2D engine. That pass overwrites the EFB after the standard
+// frame render — wiping the textbox drawn by the hoshi screen canvas's
+// camera. Re-issuing CObjThink_Common on each canvas's cam_gobj after TR's
+// post-render returns redraws the text on top of the second pass.
+void TextBox_TopRideReRender(void)
+{
+    TextCanvas *canvas = *stc_textcanvas_first;
+    while (canvas != NULL)
+    {
+        if (canvas->cam_gobj != NULL)
+            CObjThink_Common(canvas->cam_gobj);
+        canvas = canvas->next;
+    }
 }

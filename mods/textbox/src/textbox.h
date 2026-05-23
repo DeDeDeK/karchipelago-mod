@@ -99,6 +99,11 @@ void CreateTextBox_OnSceneChange();
 void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target);
 void TextBox_PerFrame(GOBJ *g);
 
+// Re-issues the screen canvas's render pass. Called from a hook installed
+// after TopRide_CustomRenderer so the textbox isn't wiped by TR's post-render
+// HSD_StartRender second pass — see textbox.c for details.
+void TextBox_TopRideReRender(void);
+
 // Concrete implementations exported through TextBoxAPI.
 int TextBox_Enqueue(const char *format, ...);
 int TextBox_EnqueueSegments(const TextSegment *segs, int seg_count);

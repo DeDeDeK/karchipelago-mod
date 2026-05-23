@@ -156,7 +156,7 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
     }
     case GOAL_MAX_STATS_CT:
         // Set by goal_max_stats_ct.c when a human player's CT stats all hit
-        // PATCH_STAT_MAX in one trial round. Mode-independent.
+        // the per-slot patch-cap target in one trial round. Mode-independent.
         return ap_save->max_stats_ct_achieved;
     }
     return 0;

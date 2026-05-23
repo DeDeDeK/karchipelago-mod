@@ -14,14 +14,39 @@
 #include "ap_item_handler.h"
 #include "gate_topride_items.h"
 
-// Send a traplink if enabled.
-void TrapLink_Send(void)
+// Reentrancy guard. The TrapLink protocol requires that received traps do not
+// bounce back as outgoing traps ("permanent recursion of Traps"). Our CT and
+// TR receive paths re-fire the same hooks that ordinarily detect organic trap
+// pickups (bad-patch in CT, SpeedDown in TR), so without a guard we'd ping-pong
+// the same trap kind back and forth at the rate of one debounced send per
+// round-trip. AR is bypassed by design (ApplyAirRideTrap calls Rider_GiveAbility
+// directly, skipping the GateAbilities replacement that owns the send hook).
+//
+// After TrapLink_PerFrame applies a receive, we set this to a generous window
+// (120f = 2s at 60Hz) covering the worst-case latency between the apply call
+// and the resulting natural-pickup hook firing. While positive, TrapLink_Send
+// no-ops. The counter ticks down in TrapLink_PerFrame itself and is reset on
+// scene-load so it can't carry stale state across sessions.
+#define TRAPLINK_RECV_GUARD_FRAMES 120
+static int recv_suppress_frames = 0;
+
+// Send a traplink if enabled. `kind` is the TrapLinkKind value; the client
+// reads ap_data->traplink_send as a kind enum (0 = none, >0 = pending) and
+// maps it to a trap_name string in the outgoing Bounce.
+void TrapLink_Send(TrapLinkKind kind)
 {
     if (!ap_menu_settings.traplink_enabled)
         return;
+    if (kind == TRAPLINK_KIND_NONE)
+        return;
+    if (recv_suppress_frames > 0)
+    {
+        OSReport("[TrapLink] Suppressing send (kind %d) — within receive guard window\n", kind);
+        return;
+    }
 
-    OSReport("[TrapLink] Traplink send triggered\n");
-    ap_data->traplink_send = 1;
+    OSReport("[TrapLink] Traplink send triggered (kind %d)\n", kind);
+    ap_data->traplink_send = (uint)kind;
 }
 
 // Trap items that can be randomly selected when traplink is triggered
@@ -146,16 +171,16 @@ static int ApplyAirRideTrap(void)
 // other players; only items whose dispatcher installs a self-debuff state
 // belong here.
 //
-//   TRITEM_SPEEDDOWN — installs KirbySpeedDown (state ID 18, AC_RUN_LOOP
-//                      with reduced speed_factor). Reliable trap.
+//   TRITEM_SPEED_DOWN — installs KirbySpeedDown (state ID 18, AC_RUN_LOOP
+//                       with reduced speed_factor). Reliable trap.
 //
-// TRITEM_BACKWARD was tried but its 0x802d9188 dispatcher only resets to
+// TRITEM_PARTY_BALL was tried but its 0x802d9188 dispatcher only resets to
 // KirbyNormal and swaps in the KirbyUshiroyurerun vtable; the velocity-flip
 // portion of the vanilla effect is set up by the absorber-pickup path that
 // TopRide_KirbyApplyItem skips, so applied via this path it produces only
 // the smoke-trail visual without slowing the picker. Excluded.
 static const TopRideItemKind tr_trap_items[] = {
-    TRITEM_SPEEDDOWN,
+    TRITEM_SPEED_DOWN,
 };
 #define TR_TRAP_ITEM_COUNT (sizeof(tr_trap_items) / sizeof(tr_trap_items[0]))
 
@@ -172,6 +197,12 @@ static int ApplyTopRideTrap(void)
 // CITY/AIR/TOP here.
 static void TrapLink_PerFrame(GOBJ *g)
 {
+    // Tick the recv→send recursion guard down every frame the GObj is alive.
+    // Decrement happens before the receive check so even idle frames advance
+    // the timer; otherwise the guard could overstay if no receive is pending.
+    if (recv_suppress_frames > 0)
+        recv_suppress_frames--;
+
     if (!ap_data->traplink_receive)
         return;
 
@@ -214,18 +245,24 @@ static void TrapLink_PerFrame(GOBJ *g)
     {
         tb_api->EnqueueColoredNoun(NULL, "Trap", tb_api->TrapColor, " received!");
         ap_data->traplink_receive = 0;
+        // Arm the recursion guard: the apply path is about to spawn an item /
+        // grant an ability that will trigger our send hooks on the next frame
+        // or two. Suppress outgoing sends until well past that window.
+        recv_suppress_frames = TRAPLINK_RECV_GUARD_FRAMES;
     }
 }
 
 void TrapLink_On3DLoadEnd()
 {
     OSReport("[TrapLink] Active\n");
+    recv_suppress_frames = 0;
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
 }
 
 void TrapLink_OnTopRideLoad()
 {
     OSReport("[TrapLink] Active (Top Ride)\n");
+    recv_suppress_frames = 0;
     // Top Ride has no rider GObjs, so install a standalone per-frame proc.
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
 }
@@ -239,7 +276,7 @@ static void TrapLink_OnBadPatch(MachineData *md)
     int ply = Machine_GetRiderPly(md);
     if (Ply_CheckIfCPU(ply))
         return;
-    TrapLink_Send();
+    TrapLink_Send(TRAPLINK_KIND_BAD_PATCH);
 }
 CODEPATCH_HOOKCREATE(0x801DB504,
     "mr 3, 20\n\t",
@@ -307,7 +344,7 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
         return; // CPU picked it up — don't send
 
     OSReport("[TrapLink] TR ply %d picked up bad item %d\n", closest, item_kind);
-    TrapLink_Send();
+    TrapLink_Send(TRAPLINK_KIND_SPEED_DOWN);
 }
 
 CODEPATCH_HOOKCREATE(0x8034C7DC,

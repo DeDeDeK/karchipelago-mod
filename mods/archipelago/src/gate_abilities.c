@@ -113,7 +113,7 @@ int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
     // Only send on a successful grant — Rider_GiveAbility can return 0 if the
     // rider is in an unable state, and we don't want to send phantom traps.
     if (result && kind == COPYKIND_SLEEP && !Ply_CheckIfCPU(rd->ply))
-        TrapLink_Send();
+        TrapLink_Send(TRAPLINK_KIND_SLEEP);
 
     return result;
 }

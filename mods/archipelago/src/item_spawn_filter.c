@@ -6,6 +6,7 @@
 #include "gate_abilities.h"
 #include "gate_patches.h"
 #include "gate_items.h"
+#include "goal_max_stats_ct.h"
 
 // Central spawn table filter — called from hooks after the game populates
 // item spawn tables (CityItemSpawn_InitItemFallChances, CityEvent_ModifyItemFallDesc).
@@ -14,6 +15,11 @@ static void FilterAllSpawnTables()
 {
     OSReport("[SpawnFilter] FilterAllSpawnTables called (GrKind=%d, StageKind=%d)\n",
              Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
+
+    // Inject All-Up into the box/sky and destructible/dyna pools first. Only
+    // active when the Max Stats Insanity CT goal is on — see the function for
+    // why we don't broadcast All-Up everywhere in normal runs.
+    GateItems_EnsureAllUpInSpawnPools();
 
     // Box spawn pools (grBoxGeneObj)
     GateAbilities_FilterSpawnTables();
@@ -24,6 +30,11 @@ static void FilterAllSpawnTables()
     GateAbilities_FilterEventDropTables();
     GatePatches_FilterEventDropTables();
     GateItems_FilterEventDropTables();
+
+    // Bias +1 patch / All-Up weights when the Max Stats Insanity goal is on.
+    // Runs after gate filters so we don't waste the multiplier on entries that
+    // are about to be removed/zeroed.
+    GoalMaxStatsCT_ApplyDropBias();
 }
 
 // Hook at end of CityItemSpawn_InitItemFallChances (0x800eb558).

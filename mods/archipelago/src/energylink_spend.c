@@ -11,7 +11,7 @@
 typedef struct SpendEntry
 {
     APItemId item_id;
-    float cost;
+    s64 cost;
 } SpendEntry;
 
 static int Buy(OptionDesc *self)
@@ -20,10 +20,10 @@ static int Buy(OptionDesc *self)
 
     if (ap_data->energy_balance < entry->cost)
     {
-        OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: need %.0f, have %.0f\n",
+        OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: need %lld, have %lld\n",
                  self->name, entry->item_id, entry->cost, ap_data->energy_balance);
         tb_api->EnqueueColoredNounFmt("Not enough ", "energy", tb_api->EnergyColor,
-                                      "! Need %.0f, have %.0f", entry->cost, ap_data->energy_balance);
+                                      "! Need %lld, have %lld", entry->cost, ap_data->energy_balance);
         return 0;
     }
 
@@ -38,12 +38,17 @@ static int Buy(OptionDesc *self)
     }
     ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
 
-    EnergyLink_Withdraw(entry->cost);
+    // Local UI feedback: decrement balance immediately. The next client
+    // SetReply push will overwrite with the authoritative server view.
+    ap_data->energy_balance -= entry->cost;
+    // Cast through s32 to avoid the s64→float libgcc call (__floatdisf).
+    // Costs are small literals (≤ 600) so this is exact.
+    EnergyLink_Withdraw((float)(s32)entry->cost);
 
-    OSReport("[EnergyLink] Bought '%s' (id=%d) for %.0f, balance %.0f\n",
+    OSReport("[EnergyLink] Bought '%s' (id=%d) for %lld, balance %lld\n",
              self->name, entry->item_id, entry->cost, ap_data->energy_balance);
     tb_api->EnqueueColoredNounFmt("Bought ", self->name, tb_api->ShopColor,
-                                  " for %.0f energy", entry->cost);
+                                  " for %lld energy", entry->cost);
     return 1;
 }
 
@@ -163,7 +168,7 @@ static MenuDesc ct_items_menu = {
         BUY(AP_ITKIND_BOXGREEN,  50, "Green Box"),
         BUY(AP_ITKIND_BOXRED,    80, "Red Box"),
         BUY(AP_ITKIND_FIREWORKS, 20, "Fireworks"),
-        BUY(AP_ITKIND_TIMEBOMB,  30, "Time Bomb"),
+        BUY(AP_ITKIND_SENSORBOMB, 30, "Sensor Bomb"),
         BUY(AP_ITKIND_GORDO,     40, "Gordo"),
         BUY(AP_ITKIND_PANICSPIN, 30, "Panic Spin"),
     },
@@ -194,28 +199,28 @@ static MenuDesc ct_events_menu = {
 static MenuDesc topride_items_menu = {
     .option_num = 22,
     .options = {
-        BUY(AP_TOPRIDE_ITEM_GIVE_HAMMER,      15, "Hammer"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_GROW,        15, "Grow"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_SPEEDUP,     15, "Speed Up"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_BOOST_SAW,   15, "Boost Saw"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_CHARGEBOOST, 15, "Charge Boost"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_INVINCIBLE,  20, "Invincible"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_BUZZSAW,     15, "Buzzsaw"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_SPEAR,       15, "Spear"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_FREEZE,      15, "Freeze"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_MISSILE,     15, "Missile"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_FIRE,        15, "Fire"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_NEEDLE,      15, "Needle"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_BOMB,        15, "Bomb"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_LANDMINE,    15, "Landmine"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_LANTERN,     15, "Lantern"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_MIKE,        15, "Mike"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_CRACKER,     15, "Cracker"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_WHO_PAINT,   15, "Who? Paint"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN, 15, "Smokescreen"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_CHICKIE,     15, "Chickie"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_SPEEDDOWN,   10, "Speed Down"),
-        BUY(AP_TOPRIDE_ITEM_GIVE_BACKWARD,    10, "Backward"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_HAMMER,           15, "Hammer"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_BIG_CAKE,         15, "Big Cake"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_SPEED_UP,         15, "Speed Up"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_SPINNER,          15, "Spinner"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_CHARGE_TANK,      15, "Charge Tank"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_INVINCIBLE_CANDY, 20, "Invincible Candy"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_BUZZ_SAW,         15, "Buzz Saw"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_DRILL,            15, "Drill"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_FREEZE_FAN,       15, "Freeze Fan"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_MISSILE,          15, "Missile"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_FIRE,             15, "Fire"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT,   15, "Party Ball (alt)"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_BOMB,             15, "Bomb"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_STEP_BOOM,        15, "Step-boom"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_LANTERN,          15, "Lantern"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_WALKY,            15, "Walky"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_KRACKO,           15, "Kracko"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_WHO_PAINT,        15, "Who? Paint"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN,      15, "Smokescreen"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_CHICKIE,          15, "Chickie"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_SPEED_DOWN,       10, "Speed Down"),
+        BUY(AP_TOPRIDE_ITEM_GIVE_PARTY_BALL,       10, "Party Ball"),
     },
 };
 

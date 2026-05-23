@@ -32,7 +32,7 @@ static const ItemKind itunlock_to_itkind[ITUNLOCK_NUM] = {
     [ITUNLOCK_FOODAPPLE]        = ITKIND_FOODAPPLE,
     [ITUNLOCK_FIREWORKS]        = ITKIND_FIREWORKS,
     [ITUNLOCK_PANICSPIN]        = ITKIND_PANICSPIN,
-    [ITUNLOCK_TIMEBOMB]         = ITKIND_TIMEBOMB,
+    [ITUNLOCK_SENSORBOMB]       = ITKIND_SENSORBOMB,
     [ITUNLOCK_GORDO]            = ITKIND_GORDO,
     [ITUNLOCK_HYDRA1]           = ITKIND_HYDRA1,
     [ITUNLOCK_HYDRA2]           = ITKIND_HYDRA2,
@@ -75,7 +75,7 @@ static int ItemKindToUnlockBit(u8 it_kind)
         case ITKIND_FOODAPPLE:        return ITUNLOCK_FOODAPPLE;
         case ITKIND_FIREWORKS:        return ITUNLOCK_FIREWORKS;
         case ITKIND_PANICSPIN:        return ITUNLOCK_PANICSPIN;
-        case ITKIND_TIMEBOMB:         return ITUNLOCK_TIMEBOMB;
+        case ITKIND_SENSORBOMB:       return ITUNLOCK_SENSORBOMB;
         case ITKIND_GORDO:            return ITUNLOCK_GORDO;
         case ITKIND_HYDRA1:           return ITUNLOCK_HYDRA1;
         case ITKIND_HYDRA2:           return ITUNLOCK_HYDRA2;
@@ -84,6 +84,88 @@ static int ItemKindToUnlockBit(u8 it_kind)
         case ITKIND_DRAGOON2:         return ITUNLOCK_DRAGOON2;
         case ITKIND_DRAGOON3:         return ITUNLOCK_DRAGOON3;
         default:                      return -1;
+    }
+}
+
+// Per-source weights for the All-Up entry injected into spawn pools when
+// All-Up is unlocked. Tuned so All-Up appears alongside existing +1 patches in
+// each pool (rather than dominating them) — Max Stats Insanity's weight bias
+// runs on top of this and amplifies further. These values were chosen to match
+// the mid-range of vanilla +1 patch weights in each pool family.
+#define ALLUP_BOX_POOL_CHANCE      8
+#define ALLUP_CHANCE_DESTRUCTIBLE  16
+#define ALLUP_CHANCE_DYNA          4
+
+// Ensure pool[] contains it_kind. If absent, append with `weight` (if there's
+// room). If already present, leave it alone — vanilla weight is preserved.
+static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
+                             u8 it_kind, u8 weight)
+{
+    for (u8 i = 0; i < *num; i++)
+    {
+        if (kinds[i] == it_kind)
+            return;
+    }
+    if (*num >= max_entries)
+        return;
+    kinds[*num] = it_kind;
+    chances[*num] = weight;
+    *num += 1;
+}
+
+// Make sure All-Up is reachable from every patch spawn source when the Max
+// Stats Insanity goal is active and All-Up is unlocked: the three box pools
+// (also used for sky and ground drops), the "Same Item" event pool, the
+// blue-box subsequent pool, the chance_destructible column (star pole, event
+// pillar, volcano walls), and Dyna Blade. Vanilla already places All-Up in
+// the UFO / Tac / Meteor / Chamber columns; we leave those alone.
+//
+// Restricted to the Max Stats goal because in other modes, broadcasting All-Up
+// across every source would make individual-patch unlocks pointless and skew
+// the drop economy. Max Stats genuinely needs the saturation: 127 on every
+// stat in ~7 minutes is only feasible if All-Up is plentiful.
+//
+// Called from FilterAllSpawnTables before the gate filters run.
+void GateItems_EnsureAllUpInSpawnPools()
+{
+    if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
+        return;
+    if (!(ap_save->item_unlocked_mask & (1U << ITUNLOCK_ALLUP)))
+        return;
+
+    grBoxGeneObj *obj = *stc_grBoxGeneObj;
+    if (obj)
+    {
+        for (int box = 0; box < BOXKIND_NUM; box++)
+        {
+            EnsureItemInPool(
+                obj->item_group_spawn[box].it_kind,
+                obj->item_group_spawn[box].chance,
+                &obj->item_group_spawn[box].num,
+                ITKIND_NUM - 1,
+                ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
+        }
+        EnsureItemInPool(obj->sameitem_it_kind, obj->sameitem_chance,
+                         &obj->sameitem_num, ITKIND_NUM - 1,
+                         ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
+        EnsureItemInPool(obj->subsequent_it_kind, obj->subsequent_chance,
+                         &obj->subsequent_num, 40,
+                         ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
+    }
+
+    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
+    if (info && info->item_desc)
+    {
+        for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
+        {
+            if (info->item_desc->event_source_drop[i].it_kind != ITKIND_ALLUP)
+                continue;
+            if (info->item_desc->event_source_drop[i].chance_destructible == 0)
+                info->item_desc->event_source_drop[i].chance_destructible = ALLUP_CHANCE_DESTRUCTIBLE;
+            if (info->item_desc->event_source_drop[i].chance_dyna == 0)
+                info->item_desc->event_source_drop[i].chance_dyna = ALLUP_CHANCE_DYNA;
+            break;
+        }
     }
 }
 

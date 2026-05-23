@@ -196,6 +196,35 @@ void OnSaveLoaded()
     OSReport("[Main] game_ready set - waiting for AP client connection\n");
 }
 
+// For any category whose slot option marks gating as disabled, pre-fill the
+// corresponding unlock mask with all-1s. The AP world ships no unlock items
+// for ungated categories, so the mod has to deliver "everything unlocked"
+// itself. Per-bit reads in gate_*.c are unchanged. Skips the textbox/log
+// path in GateX_UnlockY to avoid a connect-time popup flood.
+static void APOptions_ApplyUngatedCategories(void)
+{
+    const APSlotOptions *opts = &ap_save->options;
+    if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       (1u << VCKIND_NUM) - 1);
+    if (!opts->ability_gating_enabled)       Unlock_SetMask(AP_UNLOCK_ABILITY,       (1u << COPYKIND_NUM) - 1);
+    if (!opts->event_gating_enabled)         Unlock_SetMask(AP_UNLOCK_EVENT,         (1u << EVKIND_NUM) - 1);
+    if (!opts->patch_gating_enabled)         Unlock_SetMask(AP_UNLOCK_PATCH,         (1u << PATCHKIND_NUM) - 1);
+    if (!opts->item_gating_enabled)          Unlock_SetMask(AP_UNLOCK_ITEM,          (1u << ITUNLOCK_NUM) - 1);
+    if (!opts->box_gating_enabled)           Unlock_SetMask(AP_UNLOCK_BOX,           (1u << BOXKIND_NUM) - 1);
+    if (!opts->airride_stage_gating_enabled) Unlock_SetMask(AP_UNLOCK_AIRRIDE_STAGE, (1u << AIRRIDE_NUM) - 1);
+    if (!opts->topride_stage_gating_enabled) Unlock_SetMask(AP_UNLOCK_TOPRIDE_STAGE, (1u << TOPRIDE_NUM) - 1);
+    if (!opts->topride_item_gating_enabled)  Unlock_SetMask(AP_UNLOCK_TOPRIDE_ITEM,  (1u << TRITEM_NUM) - 1);
+    if (!opts->color_gating_enabled)         Unlock_SetMask(AP_UNLOCK_COLOR,         (1u << KIRBYCOLOR_NUM) - 1);
+    if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       (1u << STKIND_NUM) - 1);
+
+    OSReport("[Main] Gating — machines:%d abilities:%d events:%d patches:%d items:%d boxes:%d AR-stages:%d TR-stages:%d TR-items:%d colors:%d stadiums:%d\n",
+             opts->machine_gating_enabled, opts->ability_gating_enabled,
+             opts->event_gating_enabled, opts->patch_gating_enabled,
+             opts->item_gating_enabled, opts->box_gating_enabled,
+             opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
+             opts->topride_item_gating_enabled, opts->color_gating_enabled,
+             opts->stadium_gating_enabled);
+}
+
 // Check if the AP client has written slot options to APData.
 // On first detection, copy them to save data (one-time transfer).
 // Options are immutable per AP slot, so this only runs once per save file.
@@ -224,14 +253,15 @@ static void APOptions_TransferToSave()
              ap_save->options.goal[GMMODE_AIRRIDE],
              ap_save->options.goal[GMMODE_TOPRIDE],
              ap_save->options.goal[GMMODE_CITYTRIAL]);
-    OSReport("[Main] CityTrial — ProgressivePatchCaps: %d (start: %d), ProgressiveStadiums: %d\n",
+    OSReport("[Main] CityTrial — ProgressivePatchCaps: %d (target: %d)\n",
              ap_save->options.city_trial_progressive_patch_caps,
-             ap_save->options.city_trial_patch_cap_amount,
-             ap_save->options.city_trial_progressive_stadiums);
+             ap_save->options.city_trial_patch_cap_amount);
     OSReport("[Main] RevealChecklists: %d\n", ap_save->options.reveal_checklists);
 
     if (ap_save->options.reveal_checklists)
         RevealAllChecklists();
+
+    APOptions_ApplyUngatedCategories();
 
     Hoshi_WriteSave();
     OSReport("[Main] AP slot options saved to memory card\n");
