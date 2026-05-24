@@ -49,3 +49,20 @@ This will:
 To copy `out/Riivolution/*` into Dolphin's `Load/Riivolution/` directory, run `make deploy`. Override the destination with `DOLPHIN_RIIVOLUTION_DIR=...` if Dolphin lives elsewhere on your system.
 
 To produce an XDelta patch against `kar.iso` for a one-off ISO build, run `make patch` instead.
+
+---
+
+## License
+
+KARchipelago is distributed under the **GNU General Public License v3** —
+see [`LICENSE`](LICENSE).
+
+The mod links against [hoshi](https://github.com/UnclePunch/hoshi) (also
+GPLv3, vendored as a submodule under `externals/hoshi/`), which is why
+the project as a whole is GPLv3.
+
+Several Python helpers under `scripts/hsd/` are ports of code from
+[HSDLib](https://github.com/Ploaj/HSDLib) (MIT, © 2021 Ploaj). HSDLib's
+MIT license text is preserved verbatim in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), and each ported file
+carries an attribution header.
