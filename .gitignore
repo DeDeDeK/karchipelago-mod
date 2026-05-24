@@ -10,3 +10,4 @@ kar.iso
 out.iso
 /iso/
 patch.xdelta
+__pycache__/

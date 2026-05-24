@@ -4,7 +4,7 @@
 // distant skyline subtree at GrObj+0xF4) with a backdrop carved out
 // of a different stage's archive. Pool of 21 carved donor backdrops
 // plus a "Vanilla" no-op option lives in `mods/custom_weather/assets/`,
-// extracted by `scripts/carve_all_backdrops.py`.
+// extracted by `scripts/hsd/carve_all_backdrops.py`.
 //
 // Mechanism:
 //   stage init pipeline is grLoadStage -> grLoadStageArchive ->

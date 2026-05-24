@@ -1,39 +1,33 @@
 #!/usr/bin/env python3
-"""Dump LObjDescs from the LightGroup** chains in a stage .dat file.
+"""Dump LObjDesc / LightGroup chains from a stage .dat file.
 
-HSD .dat layout: 0x20-byte header, then data section. On-disk pointers
-in the data section are 32-bit big-endian file-offset values relative to
-the *start of data section* (i.e., real file offset = stored_value + 0x20).
-A stored value of 0 with no reloc entry means NULL.
+The chain head offsets are stage-specific (this script defaults to
+City Trial's `GrCity1.dat` layout — see `docs/sky-lighting-system.md`).
+Pointers in the file are u32 file-offset values (`stored_value + 0x20
+= real file offset`). NULL is `0` with no reloc entry, but this
+dumper just chases the raw values and reports them.
+
+Usage:
+    uv run python scripts/hsd/dump_lights.py [<file.dat>]
 """
-
+import os
 import struct
 import sys
-from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-HEADER_SIZE = 0x20
-
-
-def u32(buf, off):
-    return struct.unpack(">I", buf[off : off + 4])[0]
-
-
-def u16(buf, off):
-    return struct.unpack(">H", buf[off : off + 2])[0]
+from hsd.archive import Archive, HSD_HEADER, u16, u32
 
 
 def f32(buf, off):
-    return struct.unpack(">f", buf[off : off + 4])[0]
+    return struct.unpack(">f", buf[off:off+4])[0]
 
 
 def ptr(buf, off):
     """Read a stored pointer at file offset `off` and return the file
     offset it points to, or None for NULL."""
     v = u32(buf, off)
-    if v == 0:
-        return None
-    return v + HEADER_SIZE
+    return None if v == 0 else v + HSD_HEADER
 
 
 def vec3(buf, off):
@@ -41,10 +35,9 @@ def vec3(buf, off):
 
 
 def dump_wobj_desc(buf, off, label):
-    """WObjDesc layout (verified by reading 0xC1718 in GrCity1.dat):
+    """WObjDesc:
         +0x00 char *class_name
         +0x04 Vec3 position (X, Y, Z)
-        +0x10 (next field — observed 0)
     """
     cn = ptr(buf, off + 0x00)
     print(f"      {label} @ 0x{off:X}: class={f'0x{cn:X}' if cn else 'NULL'} pos={vec3(buf, off + 0x04)}")
@@ -72,16 +65,12 @@ def dump_lobj_desc(buf, off, idx):
         dump_wobj_desc(buf, int_p, "int")
     print(f"    u (light) = {f'0x{u_p:X}' if u_p else 'NULL'}")
     if u_p:
-        # Dump 24 bytes of union content. LightSpot / LightPoint are
-        # 0x11 bytes; LightAttn is 0x18 bytes (6 floats).
-        # u.spot computed: 3 words. u.attn raw: 6 floats.
-        print(f"      raw 24B: " + " ".join(f"{b:02X}" for b in buf[u_p : u_p + 24]))
+        print(f"      raw 24B: " + " ".join(f"{b:02X}" for b in buf[u_p:u_p + 24]))
         if attnflags & 1:
             # LOBJ_RAW_PARAM: 6-float attn block
             a0, a1, a2, k0, k1, k2 = (f32(buf, u_p + 4 * i) for i in range(6))
             print(f"      attn raw: a=({a0},{a1},{a2}) k=({k0},{k1},{k2})")
         else:
-            # Computed spot/point: cutoff, ref_br, ref_dist (best effort)
             cutoff = f32(buf, u_p + 0x00)
             func = buf[u_p + 0x04]
             ref_br = f32(buf, u_p + 0x05)
@@ -110,19 +99,21 @@ def dump_chain(buf, chain_off, name):
         i += 1
 
 
-def main():
-    dat_path = Path(sys.argv[1] if len(sys.argv) > 1 else "iso/files/GrCity1.dat")
-    buf = dat_path.read_bytes()
-    print(f"File: {dat_path} ({len(buf)} bytes)")
+# Chain head file offsets — verified for GrCity1.dat. Sourced from
+# stage_resource[+0x14]: {primary, tertiary, secondary} LightGroup**.
+GRCITY1_CHAINS = [
+    (0xC1790, "PRIMARY"),
+    (0xC1870, "TERTIARY"),
+    (0xC1910, "SECONDARY"),
+]
 
-    # From sky-lighting-system.md "Concrete CT chain contents":
-    #   light_chains (small struct at stage_resource[+0x14]):
-    #     +0x00 → LightGroup** primary    @ file 0xC1790
-    #     +0x04 → LightGroup** tertiary   @ file 0xC1870
-    #     +0x08 → LightGroup** secondary  @ file 0xC1910
-    dump_chain(buf, 0xC1790, "PRIMARY")
-    dump_chain(buf, 0xC1870, "TERTIARY")
-    dump_chain(buf, 0xC1910, "SECONDARY")
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else "iso/files/GrCity1.dat"
+    arc = Archive(path)  # sanity-checks the header, raises NotAnHSDArchive otherwise
+    print(f"File: {path} ({len(arc.blob)} bytes)")
+    for off, name in GRCITY1_CHAINS:
+        dump_chain(arc.blob, off, name)
 
 
 if __name__ == "__main__":

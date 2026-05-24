@@ -58,9 +58,9 @@ LIB_SOURCES := $(shell find $(LIB_ROOT_DIR) -name "*.c")
 # EXCLUDE_MODS lists mod folders to drop from the build (comma- or
 # space-separated). Override on the command line: `make package EXCLUDE_MODS=`
 # to include everything, or `EXCLUDE_MODS=foo,bar` to drop additional mods.
-# custom_events is excluded by default while it remains WIP and not wired up to
-# the archipelago mod.
-EXCLUDE_MODS ?= custom_events
+# custom_events and custom_weather are excluded by default while they remain
+# WIP and not wired up to the archipelago mod.
+EXCLUDE_MODS ?= custom_events,custom_weather
 MOD_NAMES ?= $(filter-out $(subst $(comma),$(space),$(EXCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
 
 # 3. Mods Source: For each mod, find its specific source files within its 'src' subdirectory.
