@@ -5,7 +5,7 @@
 
 void GateTopRideItems_OnBoot();
 void GateTopRideItems_ApplyMask();
-int GateTopRideItems_UnlockItem(TopRideItemKind kind);
+int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce);
 
 // Spawn a Top Ride item at each human Kirby's position so it is collected on
 // the next collision tick. Only valid in a Top Ride scene with the item

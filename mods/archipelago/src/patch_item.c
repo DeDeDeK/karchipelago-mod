@@ -129,7 +129,7 @@ int PermanentPatch_GiveItem(PatchKind kind)
 
     OSReport("[PatchItem] Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
     if (kind < PATCHKIND_NUM)
-        tb_api->EnqueueColoredNoun("Permanent +1 ", PatchKind_Names[kind], tb_api->PatchColor, NULL);
+        tb_api->EnqueueColoredNoun("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
     return 1;
 }
 
@@ -144,7 +144,7 @@ int PermanentPatch_GiveAllUp()
     }
 
     OSReport("[PatchItem] Permanent all-up received.\n");
-    tb_api->EnqueueColoredNoun("Permanent +1 ", "All Up", tb_api->PatchColor, NULL);
+    tb_api->EnqueueColoredNoun("Received: permanent +1 ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
     return 1;
 }
 

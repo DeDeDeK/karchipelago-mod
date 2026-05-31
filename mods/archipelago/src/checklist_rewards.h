@@ -19,6 +19,10 @@ void ChecklistRewards_OnSaveLoaded(void);
 // post-shuffle re-apply) where the player isn't actually receiving anything new.
 void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce);
 
+// Announce a checkbox filler grant on the TextBox: "Received: Checkbox Filler
+// (<Mode>)". Does not mutate filler state — call Checklist_GrantFiller for that.
+void Checklist_AnnounceFiller(GameMode mode);
+
 // Apply the AP location assignment from APData.
 void ChecklistRewards_ApplyLocations(void);
 

@@ -30,9 +30,7 @@ static TextBoxAPI api = {
 static void OnBoot(void)
 {
     api.DefaultColor     = TextBox_DefaultColor;
-    api.PatchColor       = TextBox_PatchColor;
     api.MachineColor     = TextBox_MachineColor;
-    api.BoxColor         = TextBox_BoxColor;
     api.EventColor       = TextBox_EventColor;
     api.StadiumColor     = TextBox_StadiumColor;
     api.StageColor       = TextBox_StageColor;
@@ -45,8 +43,12 @@ static void OnBoot(void)
     api.GoalColor        = TextBox_GoalColor;
     api.RewardColor      = TextBox_RewardColor;
     api.ShopColor        = TextBox_ShopColor;
+    api.FillerColor      = TextBox_FillerColor;
     api.AbilityColors    = TextBox_AbilityColors;
     api.KirbyColors      = TextBox_KirbyColors;
+    api.ModeColors       = TextBox_ModeColors;
+    api.PatchColors      = TextBox_PatchColors;
+    api.BoxColors        = TextBox_BoxColors;
 
     Hoshi_ExportMod((void *)&api);
 

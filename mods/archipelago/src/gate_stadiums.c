@@ -173,7 +173,7 @@ void GateStadiums_OnBoot()
     OSReport("[GateStadiums] Hooks installed\n");
 }
 
-int GateStadiums_UnlockStadium(StadiumKind kind)
+int GateStadiums_UnlockStadium(StadiumKind kind, int announce)
 {
     if (kind < 0 || kind >= STKIND_NUM)
         return 0;
@@ -184,6 +184,7 @@ int GateStadiums_UnlockStadium(StadiumKind kind)
     Gm_StadiumSetNewLabelDirect(kind);
     OSReport("[GateStadiums] Stadium %d (%s) unlocked (mask = %s)\n",
              kind, StadiumKind_Names[kind], MaskBits(ap_save->stadium_unlocked_mask, STKIND_NUM));
-    tb_api->EnqueueColoredNoun(NULL, StadiumKind_Names[kind], tb_api->StadiumColor, NULL);
+    if (announce)
+        tb_api->EnqueueColoredNoun("Unlocked Stadium: ", StadiumKind_Names[kind], tb_api->StadiumColor, NULL);
     return 1;
 }

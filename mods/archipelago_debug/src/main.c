@@ -67,14 +67,16 @@ static void OnFrameStart(void)
 
     if (pad->down & PAD_BUTTON_DPAD_RIGHT)
     {
-        // Pick uniformly across every AP unlock pool. Useful for exercising
-        // the receive path on unlocks specifically, including idempotence
-        // (the same unlock landing twice should be a no-op).
+        // Pick uniformly across every AP unlock pool plus the persistent
+        // progression items (patch-cap, spawn-rate, permanent patches). Useful
+        // for exercising the receive path, including idempotence (the same
+        // unlock landing twice should be a no-op). Each entry is a contiguous
+        // { base, count } block; singletons use count == 1.
         static const struct
         {
             int base;
             int count;
-        } unlock_pools[] = {
+        } give_pools[] = {
             { AP_STADIUM_UNLOCK_BASE,       STKIND_NUM     },
             { AP_EVENT_UNLOCK_BASE,         EVKIND_NUM     },
             { AP_ABILITY_UNLOCK_BASE,       COPYKIND_NUM   },
@@ -88,25 +90,33 @@ static void OnFrameStart(void)
             { AP_COLOR_UNLOCK_BASE,         KIRBYCOLOR_NUM },
             { AP_STAGE_UNLOCK_TOPRIDE_BASE, TOPRIDE_NUM    },
             { AP_TOPRIDE_ITEM_UNLOCK_BASE,  TRITEM_NUM     },
+            // Persistent progression items (not unlocks): the permanent-patch
+            // range, permanent All Up, and the two save-only upgrades. These
+            // apply globally / at next round start rather than spawning a
+            // pickup, so they live here rather than in the L+Up in-match pool.
+            { AP_PERM_PATCH_BASE,           PATCHKIND_NUM  },
+            { AP_ITEM_PERM_PATCH_ALL_UP,    1              },
+            { AP_ITEM_PATCH_CAP_INCREASE,   1              },
+            { AP_ITEM_SPAWN_RATE_UP,        1              },
         };
         int total = 0;
-        for (int i = 0; i < (int)(sizeof(unlock_pools) / sizeof(unlock_pools[0])); i++)
-            total += unlock_pools[i].count;
+        for (int i = 0; i < (int)(sizeof(give_pools) / sizeof(give_pools[0])); i++)
+            total += give_pools[i].count;
         int pick = HSD_Randi(total);
         int picked = -1;
-        for (int i = 0; i < (int)(sizeof(unlock_pools) / sizeof(unlock_pools[0])); i++)
+        for (int i = 0; i < (int)(sizeof(give_pools) / sizeof(give_pools[0])); i++)
         {
-            if (pick < unlock_pools[i].count)
+            if (pick < give_pools[i].count)
             {
-                picked = unlock_pools[i].base + pick;
+                picked = give_pools[i].base + pick;
                 break;
             }
-            pick -= unlock_pools[i].count;
+            pick -= give_pools[i].count;
         }
         if (ap_api->QueueItem(picked))
-            OSReport("[ApDebug] queued random unlock id=%d\n", picked);
+            OSReport("[ApDebug] queued random unlock/progression id=%d\n", picked);
         else
-            OSReport("[ApDebug] queue full, could not give unlock id=%d\n", picked);
+            OSReport("[ApDebug] queue full, could not give id=%d\n", picked);
     }
 
     if (pad->down & PAD_BUTTON_DPAD_DOWN)
@@ -127,9 +137,36 @@ static void OnFrameStart(void)
             const char *mode_name = 0;
             if (major == MJRKIND_CITY)
             {
-                // Full ITKIND range — boxes, copies, food, patches, fakes, etc.
-                int range = AP_ITKIND_WEIGHTFAKE - AP_ITKIND_BASE + 1;
-                picked = AP_ITKIND_BASE + HSD_Randi(range);
+                // Full CT give pool, in three contiguous segments:
+                //   1. the event range (AP_EVENT_BASE + EventKind),
+                //   2. the full ITKIND range — boxes, copies, food, patches,
+                //      fakes, etc. (AP_ITKIND_BASE + ItemKind),
+                //   3. the standalone CT gives that live in the 1-99 block:
+                //      bulk stat gives, legendary-machine assembly, and the CT
+                //      traps. (The other 1-99 standalones — checkbox filler,
+                //      patch-cap, spawn-rate, permanent patches — are global or
+                //      save-only progression, not in-match pickups, so they're
+                //      left out.)
+                // All three are serviced by ap_item_handler as CT gives, so
+                // they share one uniform random pool.
+                static const u16 ct_singletons[] = {
+                    AP_ITEM_ALL_UP,
+                    AP_ITEM_ALL_DOWN,
+                    AP_ITEM_GIVE_DRAGOON,
+                    AP_ITEM_GIVE_HYDRA,
+                    AP_ITEM_1_HP_TRAP,
+                    AP_ITEM_DROP_PATCHES_TRAP,
+                };
+                int n_evt = EVKIND_NUM;
+                int n_it = AP_ITKIND_WEIGHTFAKE - AP_ITKIND_BASE + 1;
+                int n_one = (int)(sizeof(ct_singletons) / sizeof(ct_singletons[0]));
+                int r = HSD_Randi(n_evt + n_it + n_one);
+                if (r < n_evt)
+                    picked = AP_EVENT_BASE + r;
+                else if (r < n_evt + n_it)
+                    picked = AP_ITKIND_BASE + (r - n_evt);
+                else
+                    picked = ct_singletons[r - n_evt - n_it];
                 mode_name = "CT";
             }
             else if (major == MJRKIND_AIR)

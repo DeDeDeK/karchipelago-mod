@@ -362,11 +362,13 @@ static void OnAutoGrantChange(int v)
         .menu_ptr = &menu_ref, \
     }
 
-// 20 player-rideable machines. The 6 omitted VCKINDs (FREE, STEER, WINGKIRBY,
-// WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE) are Top Ride placeholders,
-// transformation forms, or stadium CPU-only machines.
+// 22 player-rideable machines. Free / Steer Star are the two Top Ride lobby
+// "Control Type" choices and are gated by the TR machine-select hooks in
+// gate_machines.c. The 4 omitted VCKINDs (WINGKIRBY, WHEELNORMAL, WHEELKIRBY,
+// WHEELVSDEDEDE) are transformation forms or stadium CPU-only machines and
+// have no player-facing unlock surface.
 static MenuDesc machines_menu = {
-    .option_num = 22,
+    .option_num = 24,
     .options = {
         A("Unlock All", "Unlock all machines", MchUnlockAll),
         A("Lock All",   "Lock all machines",   MchLockAll),
@@ -385,6 +387,8 @@ static MenuDesc machines_menu = {
         G("Turbo Star",        machine_state, VCKIND_TURBO,          SyncMachines),
         G("Jet Star",          machine_state, VCKIND_JET,            SyncMachines),
         G("Flight Warp Star",  machine_state, VCKIND_FLIGHT,         SyncMachines),
+        G("Free Star",         machine_state, VCKIND_FREE,           SyncMachines),
+        G("Steer Star",        machine_state, VCKIND_STEER,          SyncMachines),
         G("Wing Meta Knight",  machine_state, VCKIND_WINGMETAKNIGHT, SyncMachines),
         G("Wheelie Bike",      machine_state, VCKIND_WHEELIEBIKE,    SyncMachines),
         G("Rex Wheelie",       machine_state, VCKIND_REXWHEELIE,     SyncMachines),
@@ -406,7 +410,7 @@ static MenuDesc abilities_menu = {
         G("Plasma",  ability_state, COPYKIND_PLASMA,  SyncAbilities),
         G("Needle",  ability_state, COPYKIND_NEEDLE,  SyncAbilities),
         G("Mic",     ability_state, COPYKIND_MIC,     SyncAbilities),
-        G("Ice",     ability_state, COPYKIND_ICE,     SyncAbilities),
+        G("Freeze",  ability_state, COPYKIND_FREEZE,  SyncAbilities),
         G("Tornado", ability_state, COPYKIND_TORNADO, SyncAbilities),
         G("Wing",    ability_state, COPYKIND_BIRD,    SyncAbilities),
     },

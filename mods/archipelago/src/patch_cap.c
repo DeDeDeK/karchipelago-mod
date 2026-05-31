@@ -112,7 +112,7 @@ void PatchCap_Increment()
     int cap = PatchCap_GetCap();
     int target = PatchCap_GetTarget();
     OSReport("[PatchCap] Patch cap increased to %d (target %d).\n", cap, target);
-    tb_api->EnqueueColoredNounFmt(NULL, "Patch cap", tb_api->PatchColor,
+    tb_api->EnqueueColoredNounFmt(NULL, "Patch cap", tb_api->PatchColors[PATCHKIND_CHARGE],
                                   " increased! (%d/%d)", cap, target);
 }
 

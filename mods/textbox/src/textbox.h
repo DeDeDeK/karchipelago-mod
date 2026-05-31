@@ -24,34 +24,27 @@ typedef struct TextBoxMessage
 {
     TextBoxSegmentEntry segments[TEXTBOX_MAX_SEGMENTS];
     u8 segment_count;
+    // Dual-purpose: seeds the peak text alpha at creation (messages top out at
+    // 200/255, not fully opaque) and then counts down to 0 as the fade-out
+    // timer — so peak opacity and fade length are both tied to the initial 200.
     uint lifetime;
-    Vec3 pos;
     Vec2 scale;
     Text *text;
 
-    // Typewriter state. typewriter_active is sampled from the mod's settings at
-    // enqueue time so per-message behavior stays stable even if the player
-    // toggles mid-reveal.
+    // Typewriter state. The actual reveal is done by the engine's built-in
+    // typewriter (we seed text->temp.char_delay — see docs/sis-text-system.md). We
+    // sample the setting at enqueue time so per-message behavior stays stable if
+    // the player toggles mid-reveal, and keep chars_total to gate the fade-out:
+    // the fade is held until the renderer's temp.reveal_count reaches it.
     //
-    // Mechanism: text->text_end is unreliable for AddSubtext-built buffers (the
-    // renderer resets it each frame and only consults it for typewriter dwell).
-    // Instead we mutate the opcode stream directly — save the byte at the next
-    // "after-Nth-glyph" position into typewriter_saved_byte, then write 0x00
-    // (TERMINATE) there. The parser halts on TERMINATE, hiding everything past
-    // it. Each tick we restore the saved byte and inject a new TERMINATE one
-    // glyph further along. The lifetime/fade timer for the oldest message is
-    // paused until its reveal completes.
+    // chars_revealed mirrors the engine's temp.reveal_count every frame so the
+    // reveal progress survives the Text being destroyed and rebuilt on a scene
+    // change. Without it, CreateTextBox_OnSceneChange would restart every message's
+    // typewriter from zero. Fresh messages set it to 0 at enqueue.
     u8 typewriter_active;
-    u16 chars_revealed;
     u16 chars_total;
-    u16 typewriter_counter;
-    u8 *buf_full_end;
-    u8 *typewriter_term_pos; // where the injected 0x00 currently lives, NULL if none
-    u8 typewriter_saved_byte; // original byte at that position
-
-    // Sampled from settings at enqueue time so per-message behavior is stable
-    // even if the player changes settings mid-life.
-    u8 typewriter_dwell;     // frames per glyph reveal
+    u16 chars_revealed;
+    u8 typewriter_dwell;     // frames per glyph reveal (fed to temp.char_delay)
     u8 bg_alpha_target;      // background quad alpha when fully visible
 } TextBoxMessage;
 
@@ -85,19 +78,7 @@ typedef struct TextBoxSettings
 
 extern TextBoxSettings textbox_settings;
 
-// Build a Text GObj from N coloured segments. Each segment renders inline,
-// positioned right after the previous one on the same line. `bg_alpha` is the
-// background quad alpha at full visibility (independent of the text fade).
-Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec3 pos, Vec2 scale, uint lifetime, u8 bg_alpha);
-
 void CreateTextBox_OnSceneChange();
-
-// Sets text alpha on `text`, and clamps the background quad alpha to
-// min(text_alpha, bg_target). This keeps the bg at the player-chosen opacity
-// during the steady-state phase, then fades it together with the text once
-// the text alpha drops below the target.
-void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target);
-void TextBox_PerFrame(GOBJ *g);
 
 // Re-issues the screen canvas's render pass. Called from a hook installed
 // after TopRide_CustomRenderer so the textbox isn't wiped by TR's post-render
@@ -111,11 +92,8 @@ int TextBox_EnqueueColoredNoun(const char *prefix, const char *noun, GXColor nou
 int TextBox_EnqueueColoredNounFmt(const char *prefix, const char *noun, GXColor noun_color,
                                   const char *suffix_format, ...);
 
-int TextBox_Dequeue(TextBoxMessage *text_out);
-int TextBoxQueue_IsEmpty();
-int TextBoxQueue_IsFull();
-int TextBoxQueue_Count();
-TextBoxMessage *TextBoxQueue_GetAt(int index);
+// Reflows the on-screen stack for the current corner/spacing settings. Called
+// from the settings on_change callbacks in main.c as well as internally.
 void TextBoxQueue_RepositionAll();
 
 #endif // TEXTBOX_H

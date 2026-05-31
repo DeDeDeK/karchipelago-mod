@@ -42,7 +42,7 @@ static void TrackEnergyReceive(void)
     s64 delta = curr - prev_energy_balance;
     prev_energy_balance = curr;
     if (delta > 0)
-        tb_api->EnqueueColoredNounFmt("Received ", "energy", tb_api->EnergyColor, " (+%lld)", delta);
+        tb_api->EnqueueColoredNounFmt("Received: ", "energy", tb_api->EnergyColor, " (+%lld)", delta);
 }
 
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units

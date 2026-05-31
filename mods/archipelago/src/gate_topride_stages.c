@@ -1,5 +1,6 @@
 #include "game.h"
 #include "os.h"
+#include "audio.h"
 #include "code_patch/code_patch.h"
 
 #include "main.h"
@@ -51,20 +52,62 @@ static void AdjustCursorToUnlocked(void)
 // Grid-to-course table at 0x805d51a8: identity for 0-6, position 7 = value 8.
 
 // Hook 1: A-button launch (0x8003ca78: andi. r0, r7, 0x1160).
-// Returns 0 = allow (unlocked or random with candidates), 1 = block (locked).
-static int GateTopRideStages_CourseSelectCanLaunch(void)
+// Returns 0 = allow (run the vanilla launch test), 1 = block (locked + pressed).
+//
+// IMPORTANT: this hook sits on the per-frame input-dispatch instruction, so it
+// runs EVERY frame — not only when A is pressed. The cursor can only ever rest
+// on a locked course when ALL courses are locked (the skip-cursor in Hook 2 has
+// nowhere selectable to move to, so it leaves the cursor put). In that state we
+// still want the player to be able to hover the locked course; pressing A just
+// shouldn't launch — and should explain why.
+//
+// `launch_buttons` (passed in from r7 by the prologue) is the combined launch
+// button word; 0x1160 is the same A/Start rising-edge mask the clobbered
+// `andi. r0, r7, 0x1160` tests. Gating on it is essential: it both ties the
+// feedback to an actual press (the buzzer/textbox would otherwise retrigger
+// every frame the cursor sits on a locked course, never producing a clean
+// notification) and lets every non-launch frame fall through to the vanilla
+// andi → D-pad handler unchanged.
+//   no launch press        -> return 0 (re-run andi; falls to D-pad)
+//   press, course unlocked  -> return 0 (re-run andi; vanilla launch)
+//   press, course locked    -> buzzer + textbox, return 1 (skip launch)
+static int GateTopRideStages_CourseSelectCanLaunch(u32 launch_buttons)
 {
     if (!ap_save)
         return 1;
-    return IsGridPosSelectable(Gm_GetGameData()->topride_course_select.cursor) ? 0 : 1;
+
+    if (!(launch_buttons & 0x1160))
+        return 0;
+
+    int cursor = Gm_GetGameData()->topride_course_select.cursor;
+    if (IsGridPosSelectable(cursor))
+        return 0;
+
+    playSoundFX_errorNoise();
+    if (cursor < TOPRIDE_NUM)
+        tb_api->EnqueueColoredNoun("Unlock the ", TopRideCourse_Names[cursor], tb_api->StageColor, " course to play!");
+    else
+        tb_api->EnqueueColoredNoun("Unlock a ", "Top Ride course", tb_api->StageColor, " to play!");
+    return 1;
 }
 
+// Register preservation: the block path (r3 != 0) branches to 0x8003cc18, the
+// D-pad movement handler, which reads `r5 & 0x3000C` at 0x8003cc24 — r5 holds
+// the combined controller direction bits and is caller-saved. The allow path
+// re-executes the clobbered `andi. r0, r7, 0x1160`, so r7 must survive too.
+// The hoshi codepatch trampoline saves no registers around its `bl`, so both
+// volatiles are stashed on a scratch frame here. The final `mr 3, 7` forwards
+// r7 to the C function as `launch_buttons` (r3 = first arg) without disturbing
+// the saved copy.
 CODEPATCH_HOOKCONDITIONALCREATE(
     0x8003ca78,                         // dol_addr: andi. r0, r7, 0x1160 (A-button test)
     "stwu 1, -16(1)\n\t"               // prologue: create mini stack frame
-    "stw 7, 0x8(1)\n\t",               //           save r7 (combined pad data)
+    "stw 7, 0x8(1)\n\t"                //           save r7 (combined pad data, for clobbered andi.)
+    "stw 5, 0xc(1)\n\t"                //           save r5 (direction bits, for block-path d-pad handler)
+    "mr 3, 7\n\t",                     //           pass r7 (launch buttons) as the C arg
     GateTopRideStages_CourseSelectCanLaunch,
     "lwz 7, 0x8(1)\n\t"                // epilogue: restore r7 for clobbered andi.
+    "lwz 5, 0xc(1)\n\t"                //           restore r5 for 0x8003cc18
     "addi 1, 1, 16\n\t",               //           pop mini stack frame
     0,                                  // exit_addr: normal exit (run clobbered andi.)
     0x8003cc18                          // exit_addr_alt: skip to cursor movement (locked)
@@ -161,6 +204,6 @@ int GateTopRideStages_UnlockStage(int course)
     ap_save->topride_stage_unlocked_mask |= (1 << course);
     OSReport("[TopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
              course, TopRideCourse_Names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
-    tb_api->EnqueueColoredNoun(NULL, TopRideCourse_Names[course], tb_api->StageColor, NULL);
+    tb_api->EnqueueColoredNoun("Unlocked Course: ", TopRideCourse_Names[course], tb_api->StageColor, NULL);
     return 1;
 }

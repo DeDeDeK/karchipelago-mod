@@ -87,6 +87,6 @@ int GateBoxes_UnlockBox(BoxKind kind)
     ap_save->box_unlocked_mask |= (1 << kind);
     OSReport("[GateBoxes] Box %d (%s) unlocked (mask = %s)\n",
              kind, BoxKind_Names[kind], MaskBits(ap_save->box_unlocked_mask, 8));
-    tb_api->EnqueueColoredNoun(NULL, BoxKind_Names[kind], tb_api->BoxColor, NULL);
+    tb_api->EnqueueColoredNoun("Unlocked Box: ", BoxKind_Names[kind], tb_api->BoxColors[kind], NULL);
     return 1;
 }

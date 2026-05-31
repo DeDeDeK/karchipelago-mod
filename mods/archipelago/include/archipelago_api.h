@@ -10,7 +10,7 @@
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
 
-// AP Item IDs — must match the IDs defined in the APWorld Python code.
+// AP Item IDs - must match the IDs defined in the APWorld Python code.
 // ID 0 is reserved as the "empty" sentinel for the mailbox.
 typedef enum APItemId
 {
@@ -322,7 +322,7 @@ typedef enum APItemId
     AP_ABILITY_UNLOCK_PLASMA,              // COPYKIND_PLASMA
     AP_ABILITY_UNLOCK_NEEDLE,              // COPYKIND_NEEDLE
     AP_ABILITY_UNLOCK_MIC,                 // COPYKIND_MIC
-    AP_ABILITY_UNLOCK_ICE,                 // COPYKIND_ICE
+    AP_ABILITY_UNLOCK_FREEZE,              // COPYKIND_FREEZE
     AP_ABILITY_UNLOCK_TORNADO,             // COPYKIND_TORNADO
     AP_ABILITY_UNLOCK_BIRD,                // COPYKIND_BIRD
 
@@ -400,7 +400,7 @@ typedef enum APItemId
     AP_MACHINE_UNLOCK_WHEELIEBIKE,         // VCKIND_WHEELIEBIKE
     AP_MACHINE_UNLOCK_REXWHEELIE,          // VCKIND_REXWHEELIE
     AP_MACHINE_UNLOCK_WHEELIESCOOTER,      // VCKIND_WHEELIESCOOTER
-    AP_MACHINE_UNLOCK_WHEELDEDEDE,         // VCKIND_WHEELDEDEDE — player-facing Dedede (Free Run / Stadium CSS)
+    AP_MACHINE_UNLOCK_WHEELDEDEDE,         // VCKIND_WHEELDEDEDE - player-facing Dedede (Free Run / Stadium CSS)
 
     // Box type unlock items (860-862, aligned to BoxKind)
     AP_BOX_UNLOCK_BASE = 860,
@@ -459,7 +459,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_FREEZE_FAN,          // TRITEM_FREEZE_FAN
     AP_TOPRIDE_ITEM_UNLOCK_MISSILE,             // TRITEM_MISSILE
     AP_TOPRIDE_ITEM_UNLOCK_FIRE,                // TRITEM_FIRE
-    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL_ALT,      // TRITEM_PARTY_BALL_ALT — kusdama variant; unused by AP, see header comment above
+    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL_ALT,      // TRITEM_PARTY_BALL_ALT - kusdama variant; unused by AP, see header comment above
     AP_TOPRIDE_ITEM_UNLOCK_BOMB,                // TRITEM_BOMB
     AP_TOPRIDE_ITEM_UNLOCK_STEP_BOOM,           // TRITEM_STEP_BOOM
     AP_TOPRIDE_ITEM_UNLOCK_LANTERN,             // TRITEM_LANTERN
@@ -468,7 +468,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_WHO_PAINT,           // TRITEM_WHO_PAINT
     AP_TOPRIDE_ITEM_UNLOCK_SMOKESCREEN,         // TRITEM_SMOKESCREEN
     AP_TOPRIDE_ITEM_UNLOCK_CHICKIE,             // TRITEM_CHICKIE
-    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL,          // TRITEM_PARTY_BALL — ushiroyurerun variant; canonical Party Ball AP unlock
+    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL,          // TRITEM_PARTY_BALL - ushiroyurerun variant; canonical Party Ball AP unlock
 
     // Top Ride item give items (950-971, aligned to TopRideItemKind).
     // Spawns the matching TR item at each human Kirby's position so it's
@@ -486,7 +486,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_FREEZE_FAN,            // TRITEM_FREEZE_FAN
     AP_TOPRIDE_ITEM_GIVE_MISSILE,               // TRITEM_MISSILE
     AP_TOPRIDE_ITEM_GIVE_FIRE,                  // TRITEM_FIRE
-    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT,        // TRITEM_PARTY_BALL_ALT — kusdama variant; unused by AP, see header comment above
+    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT,        // TRITEM_PARTY_BALL_ALT - kusdama variant; unused by AP, see header comment above
     AP_TOPRIDE_ITEM_GIVE_BOMB,                  // TRITEM_BOMB
     AP_TOPRIDE_ITEM_GIVE_STEP_BOOM,             // TRITEM_STEP_BOOM
     AP_TOPRIDE_ITEM_GIVE_LANTERN,               // TRITEM_LANTERN
@@ -495,7 +495,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_WHO_PAINT,             // TRITEM_WHO_PAINT
     AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN,           // TRITEM_SMOKESCREEN
     AP_TOPRIDE_ITEM_GIVE_CHICKIE,               // TRITEM_CHICKIE
-    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL,            // TRITEM_PARTY_BALL — ushiroyurerun variant; canonical Party Ball AP give
+    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL,            // TRITEM_PARTY_BALL - ushiroyurerun variant; canonical Party Ball AP give
 
 } APItemId;
 
@@ -543,17 +543,17 @@ typedef enum ItemUnlockKind
 // zero-extended; SetUnlockMask truncates back to the underlying width.
 typedef enum APUnlockCategory
 {
-    AP_UNLOCK_MACHINE,         // u32 — VCKIND_*
-    AP_UNLOCK_ABILITY,         // u16 — COPYKIND_*
-    AP_UNLOCK_EVENT,           // u32 — EVKIND_*
-    AP_UNLOCK_PATCH,           // u16 — PATCHKIND_*
-    AP_UNLOCK_ITEM,            // u32 — ITUNLOCK_*
-    AP_UNLOCK_BOX,             // u8  — BOXKIND_*
-    AP_UNLOCK_AIRRIDE_STAGE,   // u16 — AIRRIDE_*
-    AP_UNLOCK_TOPRIDE_STAGE,   // u16 — TOPRIDE_*
-    AP_UNLOCK_TOPRIDE_ITEM,    // u32 — TRITEM_*
-    AP_UNLOCK_COLOR,           // u8  — KIRBYCOLOR_*
-    AP_UNLOCK_STADIUM,         // u32 — STKIND_*
+    AP_UNLOCK_MACHINE,         // u32 - VCKIND_*
+    AP_UNLOCK_ABILITY,         // u16 - COPYKIND_*
+    AP_UNLOCK_EVENT,           // u32 - EVKIND_*
+    AP_UNLOCK_PATCH,           // u16 - PATCHKIND_*
+    AP_UNLOCK_ITEM,            // u32 - ITUNLOCK_*
+    AP_UNLOCK_BOX,             // u8  - BOXKIND_*
+    AP_UNLOCK_AIRRIDE_STAGE,   // u16 - AIRRIDE_*
+    AP_UNLOCK_TOPRIDE_STAGE,   // u16 - TOPRIDE_*
+    AP_UNLOCK_TOPRIDE_ITEM,    // u32 - TRITEM_*
+    AP_UNLOCK_COLOR,           // u8  - KIRBYCOLOR_*
+    AP_UNLOCK_STADIUM,         // u32 - STKIND_*
     AP_UNLOCK_NUM,
 } APUnlockCategory;
 

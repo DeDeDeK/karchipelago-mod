@@ -58,6 +58,51 @@ int APItems_CheckMailbox()
     return 1;
 }
 
+// Pick the TextBox color for a directly-received ITKIND item, by category.
+// Detrimental kinds (stat-downs, min/none, fakes) read as traps; stat-ups and
+// maxes take their per-stat patch color (All Up falls back to a gold-ish one);
+// legendary pieces machine-blue; boxes take their per-box color; the rest
+// (food, candy, weapons) general-item green.
+static GXColor ItemReceiveColor(ItemKind k)
+{
+    switch (k)
+    {
+        case ITKIND_ACCELDOWN:   case ITKIND_TOPSPEEDDOWN: case ITKIND_OFFENSEDOWN:
+        case ITKIND_DEFENSEDOWN: case ITKIND_TURNDOWN:     case ITKIND_GLIDEDOWN:
+        case ITKIND_CHARGEDOWN:  case ITKIND_WEIGHTDOWN:
+        case ITKIND_SPEEDMIN:    case ITKIND_CHARGENONE:
+        case ITKIND_ACCELFAKE:   case ITKIND_TOPSPEEDFAKE: case ITKIND_OFFENSEFAKE:
+        case ITKIND_DEFENSEFAKE: case ITKIND_TURNFAKE:     case ITKIND_GLIDEFAKE:
+        case ITKIND_CHARGEFAKE:  case ITKIND_WEIGHTFAKE:
+            return tb_api->TrapColor;
+        case ITKIND_WEIGHT:                            return tb_api->PatchColors[PATCHKIND_WEIGHT];
+        case ITKIND_ACCEL:                             return tb_api->PatchColors[PATCHKIND_ACCEL];
+        case ITKIND_TOPSPEED:   case ITKIND_SPEEDMAX:  return tb_api->PatchColors[PATCHKIND_TOPSPEED];
+        case ITKIND_TURN:                              return tb_api->PatchColors[PATCHKIND_TURN];
+        case ITKIND_CHARGE:     case ITKIND_CHARGEMAX: return tb_api->PatchColors[PATCHKIND_CHARGE];
+        case ITKIND_GLIDE:                             return tb_api->PatchColors[PATCHKIND_GLIDE];
+        case ITKIND_OFFENSE:    case ITKIND_OFFENSEMAX:return tb_api->PatchColors[PATCHKIND_OFFENSE];
+        case ITKIND_DEFENSE:    case ITKIND_DEFENSEMAX:return tb_api->PatchColors[PATCHKIND_DEFENSE];
+        case ITKIND_HP:                                return tb_api->PatchColors[PATCHKIND_HP];
+        case ITKIND_ALLUP:                             return tb_api->PatchColors[PATCHKIND_CHARGE]; // affects all stats — gold-ish representative
+        case ITKIND_HYDRA1:   case ITKIND_HYDRA2:   case ITKIND_HYDRA3:
+        case ITKIND_DRAGOON1: case ITKIND_DRAGOON2: case ITKIND_DRAGOON3:
+            return tb_api->MachineColor;
+        case ITKIND_BOXBLUE:  return tb_api->BoxColors[BOXKIND_BLUE];
+        case ITKIND_BOXGREEN: return tb_api->BoxColors[BOXKIND_GREEN];
+        case ITKIND_BOXRED:   return tb_api->BoxColors[BOXKIND_RED];
+        default:
+            return tb_api->ItemColor;
+    }
+}
+
+// Announce a directly-received ITKIND item ("Received: <name>").
+static void NotifyItemReceived(ItemKind k)
+{
+    if ((unsigned)k < ITKIND_NUM && ItemKind_Names[k])
+        tb_api->EnqueueColoredNoun("Received: ", ItemKind_Names[k], ItemReceiveColor(k), NULL);
+}
+
 // Handle an AP item by its raw ID. Maps the ID directly to game behavior.
 // Returns 1 if the item was successfully applied, 0 if it can't be applied yet
 // (e.g., player is not in the right scene, or an event is already active).
@@ -68,12 +113,15 @@ int APItems_HandleItem(uint ap_item_id)
     {
         case AP_ITEM_CHECKBOX_FILLER_AIRRIDE:
             Checklist_GrantFiller(GMMODE_AIRRIDE);
+            Checklist_AnnounceFiller(GMMODE_AIRRIDE);
             return 1;
         case AP_ITEM_CHECKBOX_FILLER_TOPRIDE:
             Checklist_GrantFiller(GMMODE_TOPRIDE);
+            Checklist_AnnounceFiller(GMMODE_TOPRIDE);
             return 1;
         case AP_ITEM_CHECKBOX_FILLER_CITYTRIAL:
             Checklist_GrantFiller(GMMODE_CITYTRIAL);
+            Checklist_AnnounceFiller(GMMODE_CITYTRIAL);
             return 1;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
@@ -135,7 +183,7 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
     {
         MachineKind kind = ap_item_id - AP_MACHINE_UNLOCK_BASE;
-        return GateMachines_UnlockMachine(kind);
+        return GateMachines_UnlockMachine(kind, /*announce=*/1);
     }
 
     // Box type unlock items (AP_BOX_UNLOCK_BASE + BoxKind)
@@ -150,14 +198,14 @@ int APItems_HandleItem(uint ap_item_id)
         ap_item_id < AP_STAGE_UNLOCK_AIRRIDE_BASE + AIRRIDE_NUM)
     {
         int stage_kind = ap_item_id - AP_STAGE_UNLOCK_AIRRIDE_BASE;
-        return GateAirRideStages_UnlockStage(stage_kind);
+        return GateAirRideStages_UnlockStage(stage_kind, /*announce=*/1);
     }
 
     // Kirby color unlock items (AP_COLOR_UNLOCK_BASE + KirbyColor)
     if (ap_item_id >= AP_COLOR_UNLOCK_BASE && ap_item_id < AP_COLOR_UNLOCK_BASE + KIRBYCOLOR_NUM)
     {
         int color = ap_item_id - AP_COLOR_UNLOCK_BASE;
-        return GateColors_UnlockColor(color);
+        return GateColors_UnlockColor(color, /*announce=*/1);
     }
 
     // Top Ride stage unlock items (AP_STAGE_UNLOCK_TOPRIDE_BASE + course)
@@ -173,7 +221,7 @@ int APItems_HandleItem(uint ap_item_id)
         ap_item_id < AP_TOPRIDE_ITEM_UNLOCK_BASE + TRITEM_NUM)
     {
         TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_UNLOCK_BASE;
-        return GateTopRideItems_UnlockItem(kind);
+        return GateTopRideItems_UnlockItem(kind, /*announce=*/1);
     }
 
     // Top Ride item give items (AP_TOPRIDE_ITEM_GIVE_BASE + TopRideItemKind).
@@ -184,14 +232,20 @@ int APItems_HandleItem(uint ap_item_id)
         ap_item_id < AP_TOPRIDE_ITEM_GIVE_BASE + TRITEM_NUM)
     {
         TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_GIVE_BASE;
-        return GateTopRideItems_GiveItem(kind);
+        // Notify here (not inside GateTopRideItems_GiveItem) — TrapLink also
+        // calls that handler and shows its own "Trap received!" message.
+        int ok = GateTopRideItems_GiveItem(kind);
+        if (ok && (unsigned)kind < TRITEM_NUM && TopRideItemKind_Names[kind])
+            tb_api->EnqueueColoredNoun("Received: TR ", TopRideItemKind_Names[kind],
+                                       tb_api->TopRideItemColor, NULL);
+        return ok;
     }
 
     // Stadium unlock items (AP_STADIUM_UNLOCK_BASE + StadiumKind)
     if (ap_item_id >= AP_STADIUM_UNLOCK_BASE && ap_item_id < AP_STADIUM_UNLOCK_BASE + STKIND_NUM)
     {
         StadiumKind kind = ap_item_id - AP_STADIUM_UNLOCK_BASE;
-        return GateStadiums_UnlockStadium(kind);
+        return GateStadiums_UnlockStadium(kind, /*announce=*/1);
     }
 
     // Permanent +1 patches (AP_PERM_PATCH_BASE + PatchKind). Save-only — the
@@ -232,7 +286,10 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id >= AP_EVENT_BASE && ap_item_id < AP_EVENT_BASE + EVKIND_NUM)
     {
         EventKind kind = ap_item_id - AP_EVENT_BASE;
-        return Event_GiveItem(kind);
+        int ok = Event_GiveItem(kind);
+        if (ok && kind < EVKIND_NUM && EventKind_Names[kind])
+            tb_api->EnqueueColoredNoun("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
+        return ok;
     }
 
     // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
@@ -250,6 +307,7 @@ int APItems_HandleItem(uint ap_item_id)
         if (Gm_IsInCity())
         {
             SpawnItemHumans(it_kind);
+            NotifyItemReceived(it_kind);
             return 1;
         }
         return 0;
@@ -262,22 +320,45 @@ int APItems_HandleItem(uint ap_item_id)
     {
         if (!Gm_IsInCity())
             return 0;
-        return Patch_DropTrap();
+        int ok = Patch_DropTrap();
+        if (ok)
+            tb_api->EnqueueColoredNoun("Received: ", "Drop Patches", tb_api->TrapColor, NULL);
+        return ok;
     }
 
     // Legendary machine assembly — give assembled Dragoon/Hydra via cinematic
     if (ap_item_id == AP_ITEM_GIVE_DRAGOON)
-        return GateMachines_GiveLegendaryMachine(0);
+    {
+        int ok = GateMachines_GiveLegendaryMachine(0);
+        if (ok)
+            tb_api->EnqueueColoredNoun("Received: ", "Dragoon", tb_api->MachineColor, NULL);
+        return ok;
+    }
     if (ap_item_id == AP_ITEM_GIVE_HYDRA)
-        return GateMachines_GiveLegendaryMachine(1);
+    {
+        int ok = GateMachines_GiveLegendaryMachine(1);
+        if (ok)
+            tb_api->EnqueueColoredNoun("Received: ", "Hydra", tb_api->MachineColor, NULL);
+        return ok;
+    }
 
     // All Down — lower all stats by 1 for each human player
     if (ap_item_id == AP_ITEM_ALL_DOWN)
-        return Patch_AllUp_GiveItem(-1);
+    {
+        int ok = Patch_AllUp_GiveItem(-1);
+        if (ok)
+            tb_api->EnqueueColoredNoun("Received: ", "All Down", tb_api->TrapColor, NULL);
+        return ok;
+    }
 
     // All Up — raise all stats by 1 for each human player
     if (ap_item_id == AP_ITEM_ALL_UP)
-        return Patch_AllUp_GiveItem(1);
+    {
+        int ok = Patch_AllUp_GiveItem(1);
+        if (ok)
+            tb_api->EnqueueColoredNoun("Received: ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
+        return ok;
+    }
 
     // 1 HP trap — set each human player's HP to 1
     if (ap_item_id == AP_ITEM_1_HP_TRAP)
@@ -298,6 +379,8 @@ int APItems_HandleItem(uint ap_item_id)
                 applied = 1;
             }
         }
+        if (applied)
+            tb_api->EnqueueColoredNoun("Received: ", "1 HP", tb_api->TrapColor, NULL);
         return applied;
     }
 

@@ -309,6 +309,6 @@ int GateItems_UnlockItem(ItemUnlockKind kind)
     ap_save->item_unlocked_mask |= (1 << kind);
     OSReport("[GateItems] Item %d (%s) unlocked (mask = %s)\n",
              kind, ItemUnlockName(kind), MaskBits(ap_save->item_unlocked_mask, 32));
-    tb_api->EnqueueColoredNoun(NULL, ItemUnlockName(kind), tb_api->ItemColor, NULL);
+    tb_api->EnqueueColoredNoun("Unlocked Item: ", ItemUnlockName(kind), tb_api->ItemColor, NULL);
     return 1;
 }

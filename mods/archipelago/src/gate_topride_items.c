@@ -13,7 +13,7 @@
 // Top Ride items that correspond to copy abilities.
 // These are additionally gated by ability_unlocked_mask.
 static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
-    { TRITEM_FREEZE_FAN, COPYKIND_ICE },
+    { TRITEM_FREEZE_FAN, COPYKIND_FREEZE },
     { TRITEM_FIRE,       COPYKIND_FIRE },
     { TRITEM_BOMB,       COPYKIND_BOMB },
     { TRITEM_WALKY,      COPYKIND_MIC },
@@ -169,7 +169,7 @@ void GateTopRideItems_OnBoot()
     OSReport("[TopRideItems] Top Ride item gating hooks installed\n");
 }
 
-int GateTopRideItems_UnlockItem(TopRideItemKind kind)
+int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce)
 {
     if ((unsigned)kind >= TRITEM_NUM)
         return 0;
@@ -177,7 +177,17 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind)
     ap_save->topride_item_unlocked_mask |= (1 << kind);
     OSReport("[TopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
              kind, TopRideItemKind_Names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
-    tb_api->EnqueueColoredNoun("TR ", TopRideItemKind_Names[kind], tb_api->TopRideItemColor, NULL);
+    if (announce)
+    {
+        TextSegment segs[5] = {
+            {"Unlocked Item: ",           tb_api->DefaultColor},
+            {TopRideItemKind_Names[kind], tb_api->TopRideItemColor},
+            {" (",                        tb_api->DefaultColor},
+            {"Top Ride",                  tb_api->ModeColors[GMMODE_TOPRIDE]},
+            {")",                         tb_api->DefaultColor},
+        };
+        tb_api->EnqueueSegments(segs, 5);
+    }
     return 1;
 }
 

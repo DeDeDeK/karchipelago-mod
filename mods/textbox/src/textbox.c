@@ -104,143 +104,109 @@ typedef struct
 
 static TextBoxState textbox_state;
 
-// Walk an SIS opcode stream from `start` to `end` and return the byte just past
-// the Nth visible glyph (char codes >= 0x20 or 0x1a SPACE). If n exceeds the
-// number of glyphs in the buffer, returns `end`. Stopping after a glyph is safe:
-// every prior opcode is fully parsed and the renderer's hard text_end check
-// halts before reading any further header bytes. Sizes mirror text.h's
-// TextCmdOpcode comments.
-static u8 *Sis_AdvancePastGlyphs(u8 *start, u8 *end, int n)
-{
-    if (!start || !end || end <= start)
-        return start;
-    if (n <= 0)
-        return start;
+// Internal helpers defined lower in the file but referenced before their
+// definition (the per-frame callback and the queue accessors). Everything else
+// is either declared in textbox.h (public) or defined before first use.
+static void            TextBox_PerFrame(GOBJ *g);
+static int             TextBox_Dequeue(TextBoxMessage *text_out);
+static int             TextBoxQueue_IsEmpty(void);
+static int             TextBoxQueue_Count(void);
+static TextBoxMessage *TextBoxQueue_GetAt(int index);
 
-    u8 *p         = start;
-    int remaining = n;
-    while (p < end)
+// Byte width of the opcode at a stream position. Char codes (>= 0x20) are
+// 2-byte glyphs; the rest are SIS control opcodes whose sizes mirror text.h's
+// TextCmdOpcode comments. This is the single source of truth shared by the
+// three walkers below, so a newly-learned opcode width only changes one place.
+static int Sis_OpWidth(u8 op)
+{
+    if (op >= 0x20)
+        return 2;
+    switch (op)
     {
-        u8 op = *p;
-        if (op >= 0x20)
-        {
-            // 2-byte glyph code
-            p += 2;
-            if (--remaining == 0)
-                return p;
-            continue;
-        }
-        switch (op)
-        {
-            case 0x05: p += 3; break;                    // DELAY
-            case 0x07:                                    // POS
-            case 0x08:                                    // JUMP
-            case 0x09:                                    // CALL
-            case 0x0a:                                    // POSPUSH
-            case 0x0e:                                    // SCALE
-            case 0x06: p += 5; break;                    // TIMING
-            case 0x0c: p += 4; break;                    // COLOR
-            case 0x1a:                                    // SPACE — counts as one glyph
-                p += 1;
-                if (--remaining == 0)
-                    return p;
-                break;
-            default: p += 1; break;                       // 1-byte ops + no-ops
-        }
+        case 0x06: // TIMING
+        case 0x07: // POS
+        case 0x08: // JUMP
+        case 0x09: // CALL
+        case 0x0a: // POSPUSH
+        case 0x0e: return 5; // SCALE
+        case 0x0c: return 4; // COLOR
+        case 0x05: return 3; // DELAY
+        default:   return 1; // 0x00 TERMINATE, 0x1a SPACE, 1-byte ops + no-ops
     }
-    return end;
 }
 
-// Text_AddSubtext / Text_SetText do not update text->text_end — the vanilla
-// renderer stops on the inline TERMINATE (0x00) opcode at the buffer tail. So
-// for AddSubtext-built buffers we have to derive the end by scanning. Returns
-// a pointer to the TERMINATE byte (one past the last meaningful opcode), or
-// NULL if start is NULL. A safety cap prevents runaway scans on malformed data.
-static u8 *Sis_FindBufferEnd(u8 *start)
+// A visible glyph is either a 2-byte char code (>= 0x20) or the 1-byte SPACE
+// opcode (0x1a); both advance the typewriter by one.
+static int Sis_IsGlyph(u8 op)
+{
+    return op >= 0x20 || op == 0x1a;
+}
+
+// Count visible glyphs (2-byte char codes >= 0x20 and the 1-byte SPACE) in a SIS
+// opcode stream, walking from `start` to the inline 0x00 TERMINATE at the buffer
+// tail. Text_AddSubtext / Text_SetText don't update text->text_end, so we derive
+// the count by scanning the stream ourselves. This matches the engine's final
+// temp.reveal_count (glyphs and SPACE each advance the reveal frontier) and so
+// bounds the typewriter fade-pause. A safety cap guards against runaway scans on
+// malformed data.
+static int Sis_CountGlyphs(u8 *start)
 {
     if (!start)
-        return NULL;
-    u8 *p     = start;
-    u8 *limit = start + 4096;
-    while (p < limit)
-    {
-        u8 op = *p;
-        if (op >= 0x20) { p += 2; continue; }
-        switch (op)
-        {
-            case 0x00: return p; // TERMINATE
-            case 0x06:
-            case 0x07:
-            case 0x08:
-            case 0x09:
-            case 0x0a:
-            case 0x0e: p += 5; break;
-            case 0x05: p += 3; break;
-            case 0x0c: p += 4; break;
-            default:   p += 1; break;
-        }
-    }
-    return p;
-}
-
-static int Sis_CountGlyphs(u8 *start, u8 *end)
-{
-    if (!start || !end || end <= start)
         return 0;
     int count = 0;
     u8 *p     = start;
-    while (p < end)
+    u8 *limit = start + 4096;
+    while (p < limit && *p != 0x00) // 0x00 = TERMINATE
     {
-        u8 op = *p;
-        if (op >= 0x20) { p += 2; count++; continue; }
-        switch (op)
-        {
-            case 0x05: p += 3; break;
-            case 0x06:
-            case 0x07:
-            case 0x08:
-            case 0x09:
-            case 0x0a:
-            case 0x0e: p += 5; break;
-            case 0x0c: p += 4; break;
-            case 0x1a: p += 1; count++; break;
-            default:   p += 1; break;
-        }
+        if (Sis_IsGlyph(*p))
+            count++;
+        p += Sis_OpWidth(*p);
     }
     return count;
 }
 
-// Restore any pending injected 0x00 in the message's buffer. Safe to call
-// whether or not a TERMINATE is currently injected.
-static void TextBox_RestoreTypewriterByte(TextBoxMessage *msg)
+// Enable (or clear) the engine's built-in typewriter on a message's Text. The
+// renderer reveals one glyph every char_delay frames on its own (paced via
+// temp.wait_countdown / text_end), so there's no per-frame work on our side —
+// see docs/sis-text-system.md "Typewriter reveal". 0 = reveal instantly.
+static void TextBox_ApplyTypewriter(TextBoxMessage *msg)
 {
-    if (!msg || !msg->typewriter_term_pos)
+    if (!msg || !msg->text)
         return;
-    *msg->typewriter_term_pos = msg->typewriter_saved_byte;
-    msg->typewriter_term_pos  = NULL;
-}
+    u16 delay = msg->typewriter_active ? msg->typewriter_dwell : 0;
 
-// Inject a 0x00 (TERMINATE) at the position-after-N-glyphs into the buffer,
-// hiding everything past it. Caller must restore any prior injection first.
-// If chars_revealed >= chars_total the buffer is left fully revealed.
-static void TextBox_InjectTypewriterTerm(TextBoxMessage *msg)
-{
-    if (!msg || !msg->text || !msg->buf_full_end)
-        return;
-    if (msg->chars_revealed >= msg->chars_total)
-        return;
-    u8 *stop = Sis_AdvancePastGlyphs(msg->text->text_start, msg->buf_full_end, msg->chars_revealed);
-    if (!stop || stop >= msg->buf_full_end)
-        return;
-    msg->typewriter_saved_byte = *stop;
-    msg->typewriter_term_pos   = stop;
-    *stop                      = 0x00;
+    // char_delay_init/space_delay_init (0x44/0x46) are the *designed* seeds, but
+    // the renderer only copies them into the live temp.char_delay/space_delay on a
+    // 0x01/0x02 SUBTEXT opcode (the sole write to temp.char_delay is Text_GXLink
+    // 0x80451cec, inside that handler). Text_AddSubtext buffers are delimited by
+    // 0x07 POS and contain NO 0x01/0x02, so that copy never fires — leaving
+    // temp.char_delay at 0, wait_countdown at 0, and every glyph revealed on frame
+    // one. So we seed the live temp fields directly; the renderer reloads them into
+    // its working registers at the top of each render (0x80451c34) and never clears
+    // them, so a single write at enqueue persists across all frames.
+    msg->text->char_delay_init  = delay;
+    msg->text->space_delay_init = delay;
+    msg->text->temp.char_delay  = delay;
+    msg->text->temp.space_delay = delay;
+
+    // Resume the reveal from where it left off. chars_revealed is mirrored from the
+    // engine's temp.reveal_count every frame (TextBox_PerFrame), so on a scene-change
+    // rebuild a finished message stays fully shown and a mid-reveal one picks up
+    // where it was — instead of re-typing from scratch. Fresh messages set
+    // chars_revealed = 0 at enqueue. text_end is left at 0: the engine re-derives the
+    // reveal frontier on the first render from reveal_count (drawing that many glyphs
+    // as already-revealed before pausing at the next one).
+    u16 revealed = msg->chars_revealed;
+    if (revealed > msg->chars_total)
+        revealed = msg->chars_total;
+    msg->text->temp.reveal_count = revealed;
+    msg->text->text_end          = NULL;
 }
 
 // Build a multi-segment Text GObj. Each segment becomes one subtext at the
 // computed x cursor position, with its own COLOR opcode (Text_AddSubtext
 // captures t->color at emit time).
-Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec3 pos, Vec2 scale, uint lifetime, u8 bg_alpha)
+static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2 scale, uint lifetime, u8 bg_alpha)
 {
     if (seg_count <= 0 || seg_count > TEXTBOX_MAX_SEGMENTS)
         return NULL;
@@ -251,7 +217,9 @@ Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec3 pos, V
 
     t->kerning = 1;
     t->use_aspect = 1;
-    t->trans = pos;
+    // trans is a placeholder — TextBoxQueue_RepositionAll runs before the next
+    // render and is the single source of truth for on-screen position.
+    t->trans = (Vec3){0, 0, 0};
     t->viewport_scale = scale;
     // Background quad alpha is independent of text alpha — clamped against the
     // text fade in TextBox_SetAlpha so the bg can't outlast the text.
@@ -310,25 +278,20 @@ void CreateTextBox_OnSceneChange()
                 segs[s].text = msg->segments[s].text;
                 segs[s].color = msg->segments[s].color;
             }
-            msg->text = CreateTextBoxSegmented(segs, msg->segment_count, msg->pos, msg->scale, msg->lifetime, msg->bg_alpha_target);
+            msg->text = CreateTextBoxSegmented(segs, msg->segment_count, msg->scale, msg->lifetime, msg->bg_alpha_target);
             if (!msg->text)
             {
                 OSReport("[TextBox] Failed to recreate textbox on scene change\n");
                 continue;
             }
 
-            // Re-snapshot the buffer end and glyph count for the new Text. Reveal
-            // progress is preserved across scene changes — clamp to the new total
-            // in case the rebuilt buffer measures slightly differently. The old
-            // buffer is gone, so any prior typewriter_term_pos pointer is stale.
-            msg->typewriter_term_pos   = NULL;
-            msg->typewriter_saved_byte = 0;
-            msg->buf_full_end = Sis_FindBufferEnd(msg->text->text_start);
-            msg->chars_total  = (u16)Sis_CountGlyphs(msg->text->text_start, msg->buf_full_end);
-            if (msg->chars_revealed > msg->chars_total)
-                msg->chars_revealed = msg->chars_total;
-            if (msg->typewriter_active && msg->chars_revealed < msg->chars_total)
-                TextBox_InjectTypewriterTerm(msg);
+            // Re-snapshot the glyph count and re-arm the built-in typewriter on the
+            // rebuilt Text. The engine's reveal_count lived in the old (destroyed)
+            // Text, but chars_revealed mirrored it every frame (TextBox_PerFrame), so
+            // TextBox_ApplyTypewriter resumes the reveal from there — a finished
+            // message stays fully shown instead of re-typing from scratch.
+            msg->chars_total = (u16)Sis_CountGlyphs(msg->text->text_start);
+            TextBox_ApplyTypewriter(msg);
         }
         // Reposition all recreated messages
         TextBoxQueue_RepositionAll();
@@ -347,7 +310,7 @@ void CreateTextBox_OnSceneChange()
 // Background opacity is set independently from text alpha: bg.a sits at
 // `bg_target` until the text fade brings text_alpha below the target, at which
 // point bg fades together with the text so it can't outlast the glyphs.
-void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target)
+static void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target)
 {
     if (!text)
         return;
@@ -397,8 +360,6 @@ void TextBoxQueue_RepositionAll()
         float trans_x = is_right  ? (TEXTBOX_CANVAS_W - TEXTBOX_MARGIN - w_px) : TEXTBOX_MARGIN;
         float trans_y = is_bottom ? (edge_y - line_h) : edge_y;
 
-        t->pos.X = trans_x;
-        t->pos.Y = trans_y;
         t->text->trans.X = trans_x;
         t->text->trans.Y = trans_y;
 
@@ -409,37 +370,27 @@ void TextBoxQueue_RepositionAll()
     }
 }
 
-void TextBox_PerFrame(GOBJ *g)
+static void TextBox_PerFrame(GOBJ *g)
 {
     if (TextBoxQueue_IsEmpty())
         return;
 
-    // Advance the typewriter on every queued message independently. Each holds
-    // an injected 0x00 (TERMINATE) at the position-after-Nth-glyph; on each tick
-    // we restore the saved byte, advance N, and inject again one glyph further.
+    // Mirror each visible message's engine-side reveal progress into the message,
+    // so it survives the Text being destroyed and recreated on a scene change.
+    // Every message reveals independently (the engine paces each Text on its own),
+    // so we snapshot the whole queue, not just the oldest.
     int count = TextBoxQueue_Count();
     for (int i = 0; i < count; i++)
     {
-        TextBoxMessage *msg = TextBoxQueue_GetAt(i);
-        if (!msg || !msg->text || !msg->typewriter_active)
-            continue;
-        if (msg->chars_revealed >= msg->chars_total)
-            continue;
-        if (++msg->typewriter_counter < msg->typewriter_dwell)
-            continue;
-        msg->typewriter_counter = 0;
-        msg->chars_revealed++;
-        TextBox_RestoreTypewriterByte(msg);
-        if (msg->chars_revealed < msg->chars_total)
-            TextBox_InjectTypewriterTerm(msg);
+        TextBoxMessage *m = TextBoxQueue_GetAt(i);
+        if (m && m->text)
+            m->chars_revealed = (u16)m->text->temp.reveal_count;
     }
 
-    // Fade timer is paused while the oldest message is still revealing — we
-    // don't want a slow typewriter to overlap with the fade-out countdown.
     TextBoxMessage *oldest = TextBoxQueue_GetAt(0);
     if (!oldest || !oldest->text)
         return;
-    if (oldest->typewriter_active && oldest->chars_revealed < oldest->chars_total)
+    if (oldest->typewriter_active && oldest->text->temp.reveal_count < oldest->chars_total)
         return;
 
     // After the player-configured display window since the last removed message,
@@ -507,7 +458,6 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
 
     TextBoxMessage entry;
     entry.lifetime = 200;
-    entry.pos = (Vec3){10, 10, 0};
     float font_scale = Settings_FontScale();
     entry.scale = (Vec2){font_scale, font_scale};
     entry.bg_alpha_target = Settings_BgAlphaTarget();
@@ -520,7 +470,7 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
         entry.segments[i].color = local_segs[i].color;
     }
 
-    entry.text = CreateTextBoxSegmented(local_segs, seg_count, entry.pos, entry.scale, entry.lifetime, entry.bg_alpha_target);
+    entry.text = CreateTextBoxSegmented(local_segs, seg_count, entry.scale, entry.lifetime, entry.bg_alpha_target);
     if (!entry.text)
     {
         OSReport("[TextBox] Failed to create Text object!\n");
@@ -528,23 +478,17 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
     }
 
     // Sample the typewriter setting at enqueue time so per-message behavior
-    // stays stable even if the player toggles mid-reveal.
-    entry.typewriter_active    = textbox_settings.typewriter_enabled ? 1 : 0;
-    entry.typewriter_dwell     = Settings_TypewriterDwell();
-    entry.typewriter_counter   = 0;
-    entry.chars_revealed       = 0;
-    entry.typewriter_term_pos  = NULL;
-    entry.typewriter_saved_byte = 0;
-    entry.buf_full_end         = Sis_FindBufferEnd(entry.text->text_start);
-    entry.chars_total          = (u16)Sis_CountGlyphs(entry.text->text_start, entry.buf_full_end);
+    // stays stable even if the player toggles mid-reveal. chars_total bounds the
+    // fade-pause (we hold the fade until temp.reveal_count reaches it).
+    entry.typewriter_active = textbox_settings.typewriter_enabled ? 1 : 0;
+    entry.typewriter_dwell  = Settings_TypewriterDwell();
+    entry.chars_total       = (u16)Sis_CountGlyphs(entry.text->text_start);
+    entry.chars_revealed    = 0; // fresh message — reveal starts from the first glyph
 
-    // queue[] stores by value, so write the entry first then operate on the
-    // stored copy — the injected pointer must reference the queued entry, not
-    // this stack frame.
+    // Hand the message's reveal to the engine's built-in typewriter.
+    TextBox_ApplyTypewriter(&entry);
+
     textbox_state.queue[textbox_state.tail] = entry;
-    TextBoxMessage *queued = &textbox_state.queue[textbox_state.tail];
-    if (queued->typewriter_active && queued->chars_total > 0)
-        TextBox_InjectTypewriterTerm(queued);
     textbox_state.tail = (textbox_state.tail + 1) % TEXTBOX_QUEUE_SIZE;
 
     TextBoxQueue_RepositionAll();
@@ -619,7 +563,7 @@ int TextBox_Enqueue(const char *format, ...)
 }
 
 // Dequeue a TextBoxMessage object from the textbox queue
-int TextBox_Dequeue(TextBoxMessage *text_out)
+static int TextBox_Dequeue(TextBoxMessage *text_out)
 {
     if (TextBoxQueue_IsEmpty())
         return 0;
@@ -633,26 +577,20 @@ int TextBox_Dequeue(TextBoxMessage *text_out)
     return 1;
 }
 
-int TextBoxQueue_IsEmpty()
+static int TextBoxQueue_IsEmpty(void)
 {
     return textbox_state.head == textbox_state.tail;
 }
 
-int TextBoxQueue_IsFull()
-{
-    uint next_tail = (textbox_state.tail + 1) % TEXTBOX_QUEUE_SIZE;
-    return next_tail == textbox_state.head;
-}
-
 // Derive count from head and tail indices
-int TextBoxQueue_Count()
+static int TextBoxQueue_Count(void)
 {
     return (textbox_state.tail - textbox_state.head + TEXTBOX_QUEUE_SIZE) % TEXTBOX_QUEUE_SIZE;
 }
 
 // Get a TextBoxMessage at a specific index in the queue (for iteration).
 // Index 0 is the head (oldest), count-1 is the newest.
-TextBoxMessage *TextBoxQueue_GetAt(int index)
+static TextBoxMessage *TextBoxQueue_GetAt(int index)
 {
     if (index < 0 || index >= TextBoxQueue_Count())
         return NULL;

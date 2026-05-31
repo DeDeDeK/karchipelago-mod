@@ -4,6 +4,6 @@
 #include "stadium.h"
 
 void GateStadiums_OnBoot();
-int GateStadiums_UnlockStadium(StadiumKind kind);
+int GateStadiums_UnlockStadium(StadiumKind kind, int announce);
 
 #endif

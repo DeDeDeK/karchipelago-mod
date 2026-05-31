@@ -62,7 +62,7 @@ void GateAirRideStages_OnBoot()
     OSReport("[AirRideStages] Air Ride stage gating installed\n");
 }
 
-int GateAirRideStages_UnlockStage(int stage_kind)
+int GateAirRideStages_UnlockStage(int stage_kind, int announce)
 {
     if (stage_kind < 0 || stage_kind >= AIRRIDE_NUM)
         return 0;
@@ -70,6 +70,7 @@ int GateAirRideStages_UnlockStage(int stage_kind)
     ap_save->airride_stage_unlocked_mask |= (1 << stage_kind);
     OSReport("[AirRideStages] Air Ride stage %d (%s) unlocked (mask = %s)\n",
              stage_kind, AirRideCourse_Names[stage_kind], MaskBits(ap_save->airride_stage_unlocked_mask, 16));
-    tb_api->EnqueueColoredNoun(NULL, AirRideCourse_Names[stage_kind], tb_api->StageColor, NULL);
+    if (announce)
+        tb_api->EnqueueColoredNoun("Unlocked Course: ", AirRideCourse_Names[stage_kind], tb_api->StageColor, NULL);
     return 1;
 }

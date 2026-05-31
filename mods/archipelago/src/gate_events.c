@@ -74,6 +74,6 @@ int GateEvents_UnlockEvent(int kind)
     ap_save->event_unlocked_mask |= (1 << kind);
     OSReport("[Events] Event %d (%s) unlocked (mask = %s)\n",
              kind, name, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
-    tb_api->EnqueueColoredNoun(NULL, name, tb_api->EventColor, NULL);
+    tb_api->EnqueueColoredNoun("Unlocked Event: ", name, tb_api->EventColor, NULL);
     return 1;
 }

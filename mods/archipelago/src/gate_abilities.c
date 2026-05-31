@@ -180,7 +180,7 @@ static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
     COPYKIND_WHEEL,   // 8  Wheelie
     COPYKIND_FIRE,    // 9  Phan Phan / Heat Phan-Phan
     COPYKIND_SLEEP,   // 10 Noddy
-    COPYKIND_ICE,     // 11 Chilly
+    COPYKIND_FREEZE,  // 11 Chilly
     COPYKIND_BIRD,    // 12 Flappy
     COPYKIND_PLASMA,  // 13 Plasma Wisp
     COPYKIND_NONE,    // 14 Gordo
@@ -392,6 +392,6 @@ int GateAbilities_UnlockAbility(CopyKind kind)
     ap_save->ability_unlocked_mask |= (1 << kind);
     OSReport("[GateAbilities] Ability %d (%s) unlocked (mask = %s)\n",
              kind, CopyKind_Names[kind], MaskBits(ap_save->ability_unlocked_mask, 16));
-    tb_api->EnqueueColoredNoun(NULL, CopyKind_Names[kind], tb_api->AbilityColors[kind], NULL);
+    tb_api->EnqueueColoredNoun("Unlocked Ability: ", CopyKind_Names[kind], tb_api->AbilityColors[kind], NULL);
     return 1;
 }

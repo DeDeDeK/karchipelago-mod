@@ -105,6 +105,6 @@ int GatePatches_UnlockPatch(PatchKind kind)
     ap_save->patch_unlocked_mask |= (1 << kind);
     OSReport("[GatePatches] Patch %d (%s) unlocked (mask = %s)\n",
              kind, PatchKind_Names[kind], MaskBits(ap_save->patch_unlocked_mask, 16));
-    tb_api->EnqueueColoredNoun(NULL, PatchKind_Names[kind], tb_api->PatchColor, " Patch");
+    tb_api->EnqueueColoredNoun("Unlocked Patch: ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
     return 1;
 }

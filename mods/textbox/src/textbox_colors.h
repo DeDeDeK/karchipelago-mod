@@ -5,29 +5,32 @@
 #include "structs.h"
 #include "rider.h"
 #include "item.h"
+#include "game.h"
 
 // Per-noun text colors. RGB only — alpha is set per-frame by the textbox
 // lifetime/fade machinery. These are the canonical palette; the cross-mod
 // API (textbox_api.h) re-exports them by value through TextBoxAPI fields.
 
-extern const GXColor TextBox_DefaultColor;     // white, used for prefix/suffix
+extern const GXColor TextBox_DefaultColor;
 extern const GXColor TextBox_AbilityColors[COPYKIND_NUM];
 extern const GXColor TextBox_KirbyColors[KIRBYCOLOR_NUM];
+extern const GXColor TextBox_ModeColors[GMMODE_NUM];
+extern const GXColor TextBox_PatchColors[PATCHKIND_NUM];
+extern const GXColor TextBox_BoxColors[BOXKIND_NUM];
 
-extern const GXColor TextBox_PatchColor;       // gold (patches/stat-ups)
-extern const GXColor TextBox_MachineColor;     // sky blue (machines)
-extern const GXColor TextBox_BoxColor;         // wood-brown (item boxes)
-extern const GXColor TextBox_EventColor;       // violet (City Trial events)
-extern const GXColor TextBox_StadiumColor;     // orange (stadium)
-extern const GXColor TextBox_StageColor;       // cyan (Air Ride / Top Ride courses)
-extern const GXColor TextBox_TopRideItemColor; // mustard (TR ability items)
-extern const GXColor TextBox_ItemColor;        // light green (general items)
-extern const GXColor TextBox_TrapColor;        // dark red (traps)
-extern const GXColor TextBox_DeathColor;       // red (deathlink)
-extern const GXColor TextBox_EnergyColor;      // cyan (energylink)
-extern const GXColor TextBox_CheckColor;       // green (check sent)
-extern const GXColor TextBox_GoalColor;        // gold (goal complete)
-extern const GXColor TextBox_RewardColor;      // pale yellow (checklist reward)
-extern const GXColor TextBox_ShopColor;        // teal (energylink shop purchase)
+extern const GXColor TextBox_MachineColor;
+extern const GXColor TextBox_EventColor;
+extern const GXColor TextBox_StadiumColor;     
+extern const GXColor TextBox_StageColor;       
+extern const GXColor TextBox_TopRideItemColor; 
+extern const GXColor TextBox_ItemColor;        
+extern const GXColor TextBox_TrapColor;        
+extern const GXColor TextBox_DeathColor;       
+extern const GXColor TextBox_EnergyColor;      
+extern const GXColor TextBox_CheckColor;       
+extern const GXColor TextBox_GoalColor;        
+extern const GXColor TextBox_RewardColor;
+extern const GXColor TextBox_ShopColor;
+extern const GXColor TextBox_FillerColor;
 
 #endif // TEXTBOX_COLORS_H

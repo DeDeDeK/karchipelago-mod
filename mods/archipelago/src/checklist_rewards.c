@@ -222,7 +222,7 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
     switch (reward_type)
     {
         case REWARD_COURSE: // Nebula Belt (Air Ride)
-            GateAirRideStages_UnlockStage(AIRRIDE_NEBULA_BELT);
+            GateAirRideStages_UnlockStage(AIRRIDE_NEBULA_BELT, /*announce=*/0);
             break;
 
         case REWARD_STADIUM:
@@ -230,23 +230,23 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
             {
                 int st = CtRewardIndexToStadium(reward_index);
                 if (st >= 0)
-                    GateStadiums_UnlockStadium((StadiumKind)st);
+                    GateStadiums_UnlockStadium((StadiumKind)st, /*announce=*/0);
             }
             break;
 
-        case REWARD_MACHINE_WINGED_STAR:     GateMachines_UnlockMachine(VCKIND_WINGED);         break;
-        case REWARD_MACHINE_WAGON_STAR:      GateMachines_UnlockMachine(VCKIND_WAGON);          break;
-        case REWARD_MACHINE_SWERVE_STAR:     GateMachines_UnlockMachine(VCKIND_SWERVE);         break;
-        case REWARD_MACHINE_BULK_STAR:       GateMachines_UnlockMachine(VCKIND_BULK);           break;
-        case REWARD_MACHINE_WHEELIE_BIKE:    GateMachines_UnlockMachine(VCKIND_WHEELIEBIKE);    break;
-        case REWARD_MACHINE_SLICK_STAR:      GateMachines_UnlockMachine(VCKIND_SLICK);          break;
-        case REWARD_MACHINE_FORMULA_STAR:    GateMachines_UnlockMachine(VCKIND_FORMULA);        break;
-        case REWARD_MACHINE_SHADOW_STAR:     GateMachines_UnlockMachine(VCKIND_SHADOW);         break;
-        case REWARD_MACHINE_WHEELIE_SCOOTER: GateMachines_UnlockMachine(VCKIND_WHEELIESCOOTER); break;
-        case REWARD_MACHINE_ROCKET_STAR:     GateMachines_UnlockMachine(VCKIND_ROCKET);         break;
-        case REWARD_MACHINE_TURBO_STAR:      GateMachines_UnlockMachine(VCKIND_TURBO);          break;
-        case REWARD_MACHINE_JET_STAR:        GateMachines_UnlockMachine(VCKIND_JET);            break;
-        case REWARD_MACHINE_REX_WHEELIE:     GateMachines_UnlockMachine(VCKIND_REXWHEELIE);     break;
+        case REWARD_MACHINE_WINGED_STAR:     GateMachines_UnlockMachine(VCKIND_WINGED, 0);         break;
+        case REWARD_MACHINE_WAGON_STAR:      GateMachines_UnlockMachine(VCKIND_WAGON, 0);          break;
+        case REWARD_MACHINE_SWERVE_STAR:     GateMachines_UnlockMachine(VCKIND_SWERVE, 0);         break;
+        case REWARD_MACHINE_BULK_STAR:       GateMachines_UnlockMachine(VCKIND_BULK, 0);           break;
+        case REWARD_MACHINE_WHEELIE_BIKE:    GateMachines_UnlockMachine(VCKIND_WHEELIEBIKE, 0);    break;
+        case REWARD_MACHINE_SLICK_STAR:      GateMachines_UnlockMachine(VCKIND_SLICK, 0);          break;
+        case REWARD_MACHINE_FORMULA_STAR:    GateMachines_UnlockMachine(VCKIND_FORMULA, 0);        break;
+        case REWARD_MACHINE_SHADOW_STAR:     GateMachines_UnlockMachine(VCKIND_SHADOW, 0);         break;
+        case REWARD_MACHINE_WHEELIE_SCOOTER: GateMachines_UnlockMachine(VCKIND_WHEELIESCOOTER, 0); break;
+        case REWARD_MACHINE_ROCKET_STAR:     GateMachines_UnlockMachine(VCKIND_ROCKET, 0);         break;
+        case REWARD_MACHINE_TURBO_STAR:      GateMachines_UnlockMachine(VCKIND_TURBO, 0);          break;
+        case REWARD_MACHINE_JET_STAR:        GateMachines_UnlockMachine(VCKIND_JET, 0);            break;
+        case REWARD_MACHINE_REX_WHEELIE:     GateMachines_UnlockMachine(VCKIND_REXWHEELIE, 0);     break;
 
         // Character rewards resolve through CharacterDesc_GetMachineKind in
         // GateMachines_CheckAirRideCharacterAvailable, so unlocking the
@@ -255,19 +255,19 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
         // canonical Dedede unlock. (VCKIND_WHEELVSDEDEDE is stadium CPU-only
         // and has no AP unlock at all.)
         case REWARD_KING_DEDEDE:
-            GateMachines_UnlockMachine(VCKIND_WHEELDEDEDE);
+            GateMachines_UnlockMachine(VCKIND_WHEELDEDEDE, 0);
             break;
         case REWARD_META_KNIGHT:
-            GateMachines_UnlockMachine(VCKIND_WINGMETAKNIGHT);
+            GateMachines_UnlockMachine(VCKIND_WINGMETAKNIGHT, 0);
             break;
 
-        case REWARD_DRAGOON: GateMachines_UnlockMachine(VCKIND_DRAGOON); break;
-        case REWARD_HYDRA:   GateMachines_UnlockMachine(VCKIND_HYDRA);   break;
+        case REWARD_DRAGOON: GateMachines_UnlockMachine(VCKIND_DRAGOON, 0); break;
+        case REWARD_HYDRA:   GateMachines_UnlockMachine(VCKIND_HYDRA, 0);   break;
 
-        case REWARD_COLOR_GREEN:  GateColors_UnlockColor(KIRBYCOLOR_GREEN);  break;
-        case REWARD_COLOR_PURPLE: GateColors_UnlockColor(KIRBYCOLOR_PURPLE); break;
-        case REWARD_COLOR_BROWN:  GateColors_UnlockColor(KIRBYCOLOR_BROWN);  break;
-        case REWARD_COLOR_WHITE:  GateColors_UnlockColor(KIRBYCOLOR_WHITE);  break;
+        case REWARD_COLOR_GREEN:  GateColors_UnlockColor(KIRBYCOLOR_GREEN, 0);  break;
+        case REWARD_COLOR_PURPLE: GateColors_UnlockColor(KIRBYCOLOR_PURPLE, 0); break;
+        case REWARD_COLOR_BROWN:  GateColors_UnlockColor(KIRBYCOLOR_BROWN, 0);  break;
+        case REWARD_COLOR_WHITE:  GateColors_UnlockColor(KIRBYCOLOR_WHITE, 0);  break;
 
         // TR "New Item" rewards. Vanilla TopRide_OnCourseSelect (0x8002cc30)
         // reads the checklist has_reward bit for reward indices 8/9/10
@@ -276,9 +276,9 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
         // Those propagate into TopRideItem_MgrInit's config (+0x4a/+0x4b/+0x4c),
         // which conditionally clears bits 20/18/15 of ItemMgr.enabled_mask.
         // Result: Chickie→bit 20 (piyo), Who? Paint→bit 18 (meta), Lantern→bit 15 (lanthanum).
-        case REWARD_ITEM_CHICKIE:   GateTopRideItems_UnlockItem(TRITEM_CHICKIE);   break;
-        case REWARD_ITEM_WHO_PAINT: GateTopRideItems_UnlockItem(TRITEM_WHO_PAINT); break;
-        case REWARD_ITEM_LANTERN:   GateTopRideItems_UnlockItem(TRITEM_LANTERN);   break;
+        case REWARD_ITEM_CHICKIE:   GateTopRideItems_UnlockItem(TRITEM_CHICKIE, 0);   break;
+        case REWARD_ITEM_WHO_PAINT: GateTopRideItems_UnlockItem(TRITEM_WHO_PAINT, 0); break;
+        case REWARD_ITEM_LANTERN:   GateTopRideItems_UnlockItem(TRITEM_LANTERN, 0);   break;
 
         default:
             // Not gated, left to vanilla: REWARD_FILLER, REWARD_BONUS_MOVIE,
@@ -290,6 +290,194 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
             // the assembled checkbox once all 3 of a set are marked).
             break;
     }
+}
+
+// Announce a checkbox filler grant: "Received: Checkbox Filler (<Mode>)", with
+// the "Checkbox Filler" noun in FillerColor (purple) and the mode name in
+// that mode's ModeColor (the parentheses stay neutral). Shared by the direct AP
+// filler-item path (ap_item_handler) and the checklist-reward filler path below,
+// so the wording and coloring stay identical however a filler arrives.
+void Checklist_AnnounceFiller(GameMode mode)
+{
+    const char *mode_name;
+    GXColor mode_color;
+    switch (mode)
+    {
+        case GMMODE_AIRRIDE:   mode_name = "Air Ride";   mode_color = tb_api->ModeColors[GMMODE_AIRRIDE];   break;
+        case GMMODE_TOPRIDE:   mode_name = "Top Ride";   mode_color = tb_api->ModeColors[GMMODE_TOPRIDE];   break;
+        case GMMODE_CITYTRIAL: mode_name = "City Trial"; mode_color = tb_api->ModeColors[GMMODE_CITYTRIAL]; break;
+        default:               mode_name = "Checklist";  mode_color = tb_api->DefaultColor;                 break;
+    }
+
+    TextSegment segs[5] = {
+        {"Received: ",      tb_api->DefaultColor},
+        {"Checkbox Filler", tb_api->FillerColor},
+        {" (",              tb_api->DefaultColor},
+        {mode_name,         mode_color},
+        {")",               tb_api->DefaultColor},
+    };
+    tb_api->EnqueueSegments(segs, 5);
+}
+
+// Per-(mode, reward_index) display names for every checkbox reward, joined from
+// the vanilla reward tables and docs/checklist-mappings.csv. This is the single
+// source of truth for the textbox noun shown when a checklist reward is granted
+// — including the gated categories (machines/colors/stadiums/etc.), whose own
+// gate-handler "Unlocked: X" lines are suppressed for checklist grants (the
+// handlers take an announce flag) so each reward is announced exactly once here.
+// reward_index slots that are fillers are NULL: AnnounceChecklistReward handles
+// REWARD_FILLER before the lookup, so they are never read.
+static const char *const stc_checklist_reward_names[GMMODE_NUM][REWARD_COUNT_MAX] = {
+    [GMMODE_AIRRIDE] = {
+        // 0-4 Fillers (handled specially)
+        NULL, NULL, NULL, NULL, NULL,
+        // 5-14 Sound Test
+        "Fantasy Meadows", "Magma Flows", "Sky Sands", "Frozen Hillside", "Beanstalk Park",
+        "Celestial Valley", "Machine Passage", "Checker Knights", "Nebula Belt", "Results Screen",
+        // 15-18 Color
+        "Green Kirby", "Purple Kirby", "Brown Kirby", "White Kirby",
+        // 19-31 Machine
+        "Winged Star", "Wagon Star", "Swerve Star", "Bulk Star", "Wheelie Bike",
+        "Slick Star", "Formula Star", "Shadow Star", "Wheelie Scooter", "Rocket Star",
+        "Turbo Star", "Jet Star", "Rex Wheelie",
+        // 32-33 Character
+        "King Dedede", "Meta Knight",
+        // 34 Course
+        "Nebula Belt",
+        // 35 Bonus Movie, 36 Ending
+        "Bonus Movie", "Ending",
+        // 37-45 Music
+        "Meadows", "Magma", "Sky Sands", "Hillside", "Beanstalk",
+        "Celestial", "Machine", "Checker", "Nebula",
+    },
+    [GMMODE_TOPRIDE] = {
+        // 0-4 Fillers
+        NULL, NULL, NULL, NULL, NULL,
+        // 5-7 Extra Rule
+        "Diagonal Camera Angle", "Side Camera Angle", "Device Quantity",
+        // 8-10 TR Item
+        "Chickie", "Who? Paint", "Lantern",
+        // 11-12 Extra Rule
+        "Mystery Item Set", "Attack Item Set",
+        // 13-20 Sound Test
+        "Grass", "Sand", "Sky", "Fire", "Light", "Water", "Metal", "Results Screen",
+        // 21-24 Color
+        "Green Kirby", "Purple Kirby", "Brown Kirby", "White Kirby",
+        // 25 Ending
+        "Ending",
+        // 26-32 Music
+        "Grass", "Sky", "Fire", "Water", "Metal", "Sand", "Light",
+    },
+    [GMMODE_CITYTRIAL] = {
+        // 0-4 Fillers
+        NULL, NULL, NULL, NULL, NULL,
+        // 5-20 Sound Test
+        "City Trial", "Legendary Air Ride Machine", "Dyna Blade Intro", "Tac Challenge",
+        "Flying Meteor", "Huge Pillar", "Station Fire", "What's in the Box?",
+        "The Lighthouse Light Burns", "Rowdy Charge Tank", "Item Bounce", "Dense Fog Today",
+        "Drag Race", "Air Glider", "Target Flight", "Kirby Melee",
+        // 21-24 Color
+        "Green Kirby", "Purple Kirby", "Brown Kirby", "White Kirby",
+        // 25 Music, 26 Ending
+        "City", "Ending",
+        // 27-29 Dragoon Parts, 30 Dragoon
+        "Dragoon Part A", "Dragoon Part B", "Dragoon Part C", "Dragoon",
+        // 31-33 Hydra Parts, 34 Hydra
+        "Hydra Part X", "Hydra Part Y", "Hydra Part Z", "Hydra",
+        // 35-36 Character
+        "King Dedede", "Meta Knight",
+        // 37-42 Stadium
+        "Drag Race 4", "Kirby Melee 2", "Destruction Derby 3", "Destruction Derby 4",
+        "Destruction Derby 5", "Single Race: Nebula Belt",
+        // 43 Pause Power-ups
+        "Pause Power-ups",
+    },
+};
+
+static const char *ChecklistRewardName(GameMode mode, u8 reward_index)
+{
+    if ((unsigned)mode >= GMMODE_NUM || reward_index >= reward_counts[mode])
+        return NULL;
+    return stc_checklist_reward_names[mode][reward_index];
+}
+
+// Textbox prefix + noun color for a checklist reward, keyed by reward type.
+// "Unlocked <category>: <name>" is reserved for gate-unlock categories (Stadium,
+// Course, Machine, Character, Color, TR Item) — these reuse the noun colors their
+// direct-unlock gate handlers print, so a reward looks the same whichever way it
+// arrives. Everything that isn't a gated unlock is something the player simply
+// receives: non-gated checkbox extras (Sound Test, Music, Extra Rule, Bonus
+// Movie, Ending, Pause Power-ups) and the collectible legendary parts all read
+// "Received…". The extras keep their category ("Received Sound Test: <name>");
+// single-instance features (Bonus Movie, Ending, Pause Power-ups) carry no
+// category — their name already says it all — so they read "Received: <name>".
+static void ChecklistRewardStyle(u8 reward_type, const char **out_prefix, GXColor *out_color)
+{
+    *out_prefix = "Received: ";
+    *out_color  = tb_api->RewardColor;
+
+    if (reward_type == REWARD_SOUND_TEST)
+        *out_prefix = "Received Sound Test: ";
+    else if (reward_type == REWARD_MUSIC)
+        *out_prefix = "Received Music: ";
+    else if (reward_type == REWARD_EXTRA_RULE)
+        *out_prefix = "Received Extra Rule: ";
+    else if (reward_type == REWARD_STADIUM)
+    {
+        *out_prefix = "Unlocked Stadium: ";
+        *out_color  = tb_api->StadiumColor;
+    }
+    else if (reward_type == REWARD_COURSE)
+    {
+        *out_prefix = "Unlocked Course: ";
+        *out_color  = tb_api->StageColor;
+    }
+    else if ((reward_type >= REWARD_MACHINE_WINGED_STAR && reward_type <= REWARD_MACHINE_REX_WHEELIE) ||
+             reward_type == REWARD_DRAGOON || reward_type == REWARD_HYDRA)
+    {
+        *out_prefix = "Unlocked Machine: ";
+        *out_color  = tb_api->MachineColor;
+    }
+    else if (reward_type == REWARD_KING_DEDEDE || reward_type == REWARD_META_KNIGHT)
+    {
+        *out_prefix = "Unlocked Character: ";
+        *out_color  = tb_api->MachineColor;
+    }
+    else if (reward_type >= REWARD_COLOR_GREEN && reward_type <= REWARD_COLOR_WHITE)
+    {
+        *out_prefix = "Unlocked Color: ";
+        *out_color  = tb_api->KirbyColors[KIRBYCOLOR_GREEN + (reward_type - REWARD_COLOR_GREEN)];
+    }
+    else if (reward_type >= REWARD_ITEM_CHICKIE && reward_type <= REWARD_ITEM_LANTERN)
+    {
+        *out_prefix = "Unlocked TR Item: ";
+        *out_color  = tb_api->TopRideItemColor;
+    }
+    // DRAGOON_PART_*/HYDRA_PART_*, BONUS_MOVIE, ENDING, and PAUSE_POWERUPS all
+    // fall through to the "Received: " + RewardColor default.
+}
+
+// Announce a checklist reward on the TextBox. Every reward (gated and non-gated)
+// is named here via stc_checklist_reward_names — the gate handlers invoked by
+// ApplyVanillaRewardUnlock are passed announce=0 for checklist grants so they
+// only flip their mask, leaving this the single place a checklist reward is
+// announced. Fillers keep their own wording (they name the checklist they fill).
+static void AnnounceChecklistReward(GameMode mode, u8 reward_index, u8 reward_type)
+{
+    if (reward_type == REWARD_FILLER)
+    {
+        Checklist_AnnounceFiller(mode);
+        return;
+    }
+
+    const char *name = ChecklistRewardName(mode, reward_index);
+    if (!name)
+        return; // No display name (unexpected for a non-filler) — stay silent.
+
+    const char *prefix;
+    GXColor color;
+    ChecklistRewardStyle(reward_type, &prefix, &color);
+    tb_api->EnqueueColoredNoun(prefix, name, color, NULL);
 }
 
 // Grant a checklist reward received from the AP server.
@@ -308,7 +496,7 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
     OSReport("[Checklist] Granted mode=%d ri=%d type=%s (%d) announce=%d\n",
              mode, reward_index, Reward_TypeName(reward_type), reward_type, announce);
     if (announce)
-        tb_api->EnqueueColoredNoun("Received: ", Reward_TypeName(reward_type), tb_api->RewardColor, NULL);
+        AnnounceChecklistReward(mode, reward_index, reward_type);
     ApplyVanillaRewardUnlock(mode, reward_index, reward_type);
 
     // The shuffled u16 encodes the placement cell directly: high byte = target

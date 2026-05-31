@@ -240,7 +240,7 @@ void GateColors_OnBoot()
     OSReport("[GateColors] Color gating hooks installed\n");
 }
 
-int GateColors_UnlockColor(int color_idx)
+int GateColors_UnlockColor(int color_idx, int announce)
 {
     if (color_idx < 0 || color_idx >= KIRBYCOLOR_NUM)
         return 0;
@@ -248,8 +248,9 @@ int GateColors_UnlockColor(int color_idx)
     ap_save->color_unlocked_mask |= (1 << color_idx);
     OSReport("[GateColors] Color %d (%s) unlocked (mask = %s)\n",
              color_idx, KirbyColor_Names[color_idx], MaskBits(ap_save->color_unlocked_mask, 8));
-    tb_api->EnqueueColoredNoun(NULL, KirbyColor_Names[color_idx],
-                               tb_api->KirbyColors[color_idx], " Kirby");
+    if (announce)
+        tb_api->EnqueueColoredNoun("Unlocked Color: ", KirbyColor_Names[color_idx],
+                                   tb_api->KirbyColors[color_idx], " Kirby");
     return 1;
 }
 

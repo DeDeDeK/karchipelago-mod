@@ -28,8 +28,8 @@ int Ability_GiveItem(CopyKind copy_kind)
         applied = 1;
     }
     if (applied && copy_kind < COPYKIND_NUM && CopyKind_Names[copy_kind])
-        tb_api->EnqueueColoredNoun("Got ", CopyKind_Names[copy_kind],
-                                   tb_api->AbilityColors[copy_kind], " ability!");
+        tb_api->EnqueueColoredNoun("Received: ", CopyKind_Names[copy_kind],
+                                   tb_api->AbilityColors[copy_kind], " ability");
     return applied;
 }
 
@@ -45,7 +45,7 @@ CopyKind Ability_ItKindToCopyKind(ItemKind it_kind)
         case ITKIND_COPYPLASMA:  return COPYKIND_PLASMA;
         case ITKIND_COPYSPIKE:   return COPYKIND_NEEDLE;
         case ITKIND_COPYMIC:     return COPYKIND_MIC;
-        case ITKIND_COPYICE:     return COPYKIND_ICE;
+        case ITKIND_COPYICE:     return COPYKIND_FREEZE;
         case ITKIND_COPYTORNADO: return COPYKIND_TORNADO;
         case ITKIND_COPYBIRD:    return COPYKIND_BIRD;
         default:                 return COPYKIND_NONE;

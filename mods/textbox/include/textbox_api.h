@@ -15,13 +15,13 @@
 
 // Maximum colored runs per message. Each segment becomes one subtext (with its
 // own COLOR opcode) inside the underlying Text GObj.
-#define TEXTBOX_MAX_SEGMENTS 4
+#define TEXTBOX_MAX_SEGMENTS 5
 
 // One coloured run of text.
 typedef struct TextSegment
 {
     const char *text;
-    GXColor color; // RGB; alpha is overwritten per-frame from textbox lifetime.
+    GXColor color;
 } TextSegment;
 
 // Function-pointer table exported by the textbox mod via Hoshi_ExportMod.
@@ -29,7 +29,7 @@ typedef struct TextSegment
 // `Hoshi_ImportMod(TEXTBOX_MOD_NAME, TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR)`.
 typedef struct TextBoxAPI
 {
-    // Plain message — single segment in TextBox_DefaultColor. printf-style.
+    // Plain message - single segment in TextBox_DefaultColor. printf-style.
     int (*Enqueue)(const char *format, ...);
 
     // N-segment message with per-segment colors.
@@ -45,12 +45,10 @@ typedef struct TextBoxAPI
     int (*EnqueueColoredNounFmt)(const char *prefix, const char *noun, GXColor noun_color,
                                  const char *suffix_format, ...);
 
-    // Named color palette. RGB only — alpha is set per-frame by the lifetime/
+    // Named color palette. RGB only - alpha is set per-frame by the lifetime/
     // fade machinery, so the alpha byte here is ignored.
     GXColor DefaultColor;       // white, used for prefix/suffix
-    GXColor PatchColor;         // gold (patches/stat-ups)
     GXColor MachineColor;       // sky blue (machines)
-    GXColor BoxColor;           // wood-brown (item boxes)
     GXColor EventColor;         // violet (City Trial events)
     GXColor StadiumColor;       // orange (stadium)
     GXColor StageColor;         // cyan (Air Ride / Top Ride courses)
@@ -63,10 +61,14 @@ typedef struct TextBoxAPI
     GXColor GoalColor;          // gold (goal complete)
     GXColor RewardColor;        // pale yellow (checklist reward)
     GXColor ShopColor;          // teal (energylink shop purchase)
+    GXColor FillerColor;        // purple (checkbox fillers)
 
-    // Indexed palettes. Pointer to a fixed-size array in the textbox mod.
+    // Indexed palettes.
     const GXColor *AbilityColors; // [COPYKIND_NUM]
     const GXColor *KirbyColors;   // [KIRBYCOLOR_NUM]
+    const GXColor *ModeColors;    // [GMMODE_NUM] — mode name (AR/TR/CT)
+    const GXColor *PatchColors;   // [PATCHKIND_NUM] — per-stat patch color
+    const GXColor *BoxColors;     // [BOXKIND_NUM] — per-box color
 } TextBoxAPI;
 
 #endif // TEXTBOX_API_H
