@@ -80,6 +80,12 @@ typedef struct APSlotOptions
     u32 topride_item_gating_enabled;
     u32 color_gating_enabled;
     u32 stadium_gating_enabled;
+
+    // Non-progression checklist rewards (music, sound test, extra rules, endings, filler boxes, …).
+    // 1 = gated (default: each reward is an AP item the player finds). 0 = ungated (the mod marks
+    // every such reward received at connect via received_checklist_rewards; the AP world ships none).
+    // The 6 Dragoon/Hydra part markers are progression and are NOT affected by this flag.
+    u32 checklist_rewards_gating_enabled;
 } APSlotOptions;
 
 typedef struct APSave

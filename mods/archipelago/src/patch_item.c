@@ -22,6 +22,17 @@ static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
     [PATCHKIND_HP]       = ITKIND_HP,
 };
 
+// Inverse of stc_patch_itkinds: map a "+1" stat-patch ItemKind back to its PatchKind.
+// Returns PATCHKIND_NUM for any ItemKind that is not one of the nine stat "+1" patches
+// (down/max/fake variants, All Up, food, boxes, copy abilities, etc.).
+PatchKind Patch_ItKindToPatchKind(ItemKind it_kind)
+{
+    for (int k = 0; k < PATCHKIND_NUM; k++)
+        if (stc_patch_itkinds[k] == it_kind)
+            return (PatchKind)k;
+    return PATCHKIND_NUM;
+}
+
 // Give PatchKind to every human rider on a machine.
 // In City Trial, positive deltas go through the item pickup pipeline so the
 // player sees the normal "+1 stat" visual. Air Ride has no item data tables

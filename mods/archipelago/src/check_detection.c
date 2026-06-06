@@ -32,6 +32,11 @@
 // Beat King Dedede goal: CT clear_kind 0x2F
 #define KD_CLEAR_KIND 0x2F
 
+// Hydra & Dragoon goal: CT clear_kind 0x77 — the single "In one match, complete both Dragoon and
+// Hydra!" gameplay checkbox. This is NOT the two "Unlock <machine> Parts on the Checklist!" cells
+// (0x6D/0x6E), which auto-complete from receiving the part rewards and are unrelated to this goal.
+#define HYDRA_DRAGOON_CLEAR_KIND 0x77
+
 // Forward declaration: defined mid-file, called from earlier helpers.
 void CheckDetection_EvaluateGoal(void);
 
@@ -130,6 +135,22 @@ static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
     cd->clear[clear_kind].is_new = 1;
 }
 
+// Per-mode clear_kind of the "Fill in over 100 Checklist blocks!" cell. This is a
+// real vanilla checklist checkbox the game auto-completes once the player fills over
+// 100 of that mode's boxes (see the MetaUnlock_*100 hooks below). GOAL_100_CHECKLIST
+// keys off this specific cell, distinct from the synthetic popcount GOAL_N_CHECKLIST.
+// Returns 0xFF for an unknown mode (callers must range-check before indexing).
+static u8 Fill100ClearKind(u8 mode)
+{
+    switch (mode)
+    {
+    case GMMODE_AIRRIDE:   return AR_CLEAR_FILL_100_BLOCKS;
+    case GMMODE_TOPRIDE:   return TR_CLEAR_FILL_100_BLOCKS;
+    case GMMODE_CITYTRIAL: return CT_CLEAR_FILL_100_BLOCKS;
+    default:               return 0xFF;
+    }
+}
+
 // Evaluate a single mode's goal condition. Returns 1 if satisfied (or NONE).
 // `mode` is the GameMode index, `count` is the popcount, `n` is the threshold
 // for GOAL_N_CHECKLIST.
@@ -140,12 +161,18 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
     case GOAL_NONE:
         return 1;  // vacuously satisfied
     case GOAL_100_CHECKLIST:
-        return count >= 100;
+    {
+        // The actual "Fill in over 100 Checklist blocks!" cell, NOT a popcount of
+        // arbitrary boxes. The game auto-checks this cell once over 100 boxes are
+        // filled; we bind to it the same way the HYDRA/KD goals bind to their cells.
+        // (count is unused here; GOAL_N_CHECKLIST below is the synthetic count goal.)
+        u8 k = Fill100ClearKind(mode);
+        return (k < CLEAR_KIND_NUM) && SENT_CHECK_BIT(mode, k);
+    }
     case GOAL_N_CHECKLIST:
         return count >= n;
     case GOAL_HYDRA_AND_DRAGOON:
-        return SENT_CHECK_BIT(GMMODE_CITYTRIAL, 0x6D)
-            && SENT_CHECK_BIT(GMMODE_CITYTRIAL, 0x6E);
+        return SENT_CHECK_BIT(GMMODE_CITYTRIAL, HYDRA_DRAGOON_CLEAR_KIND);
     case GOAL_BEAT_KING_DEDEDE:
         return SENT_CHECK_BIT(GMMODE_CITYTRIAL, KD_CLEAR_KIND);
     case GOAL_CHECKLIST_LIST:
@@ -185,8 +212,8 @@ void CheckDetection_EvaluateGoal(void)
     {
         ap_save->goal_complete = 1;
         ap_data->goal_complete = 1;
-        OSReport("[Check] GOAL COMPLETE\n");
-        tb_api->EnqueueColoredNoun(NULL, "Goal", tb_api->GoalColor, " complete!");
+        OSReport("[Check] GOALS COMPLETE\n");
+        tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
         Hoshi_WriteSave();
     }
 }
@@ -311,10 +338,12 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8017eff8, "", MetaUnlock_TopRide100,       "li
 // 0x8017f030: stb r4, 179(r30)   — CT: Complete 100 checkboxes (clear_kind 0x37)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f030, "", MetaUnlock_CityTrial100,     "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017f0ac: stb r0, 233(r30)   — CT: Dragoon assembly (clear_kind 0x6D)
+// 0x8017f0ac: stb r0, 233(r30)   — CT: Unlock Dragoon Parts on the Checklist (clear_kind 0x6D),
+// auto-completes once all three Dragoon part rewards are received. Not the goal cell (0x77).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f0ac, "", MetaUnlock_CityTrialDragoon, "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017f120: stb r0, 234(r30)   — CT: Hydra assembly (clear_kind 0x6E)
+// 0x8017f120: stb r0, 234(r30)   — CT: Unlock Hydra Parts on the Checklist (clear_kind 0x6E),
+// auto-completes once all three Hydra part rewards are received. Not the goal cell (0x77).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f120, "", MetaUnlock_CityTrialHydra,   "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
 // Filler gate (Checklist_Think case 8)
@@ -332,12 +361,13 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8017f120, "", MetaUnlock_CityTrialHydra,   "li
 // satisfy the active mode's APGoalKind without the player actually doing the
 // underlying objective.
 //
-// GOAL_100_CHECKLIST / GOAL_N_CHECKLIST are count thresholds with no single
-// "goal cell" — filler'ing any cell (including a meta cell) still costs a
-// filler token, so there's no cheese to prevent. GOAL_NONE likewise.
-// GOAL_HYDRA_AND_DRAGOON and GOAL_BEAT_KING_DEDEDE protect specific CT
-// clear_kinds. GOAL_CHECKLIST_LIST protects every clear_kind whose bit is
-// set in goal_checks[mode].
+// GOAL_N_CHECKLIST is a count threshold with no single "goal cell" — filler'ing
+// any cell still costs a filler token, so there's no cheese to prevent. GOAL_NONE
+// likewise. GOAL_100_CHECKLIST binds to the per-mode "Fill in over 100 Checklist
+// blocks!" cell, and GOAL_HYDRA_AND_DRAGOON / GOAL_BEAT_KING_DEDEDE to their
+// specific CT clear_kinds, so all three reject a filler on that one goal cell (it
+// would otherwise be a free win). GOAL_CHECKLIST_LIST protects every clear_kind
+// whose bit is set in goal_checks[mode].
 
 // Returns 1 to reject (caller branches to the errorNoise path), 0 to accept.
 // phys_slot is the cursor's physical grid position (row + col*12, column-major
@@ -355,11 +385,17 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
     APGoalKind goal = (APGoalKind)ap_save->options.goal[mode];
     switch (goal)
     {
+    case GOAL_100_CHECKLIST:
+    {
+        // Protect this mode's "Fill in over 100 Checklist blocks!" cell — it is the
+        // goal cell, so a filler on it would satisfy the goal without filling 100 boxes.
+        u8 k = Fill100ClearKind(mode);
+        return (k < CLEAR_KIND_NUM) && cd->grid_mapping[k] == phys_slot;
+    }
     case GOAL_HYDRA_AND_DRAGOON:
         if (mode != GMMODE_CITYTRIAL)
             return 0;
-        return cd->grid_mapping[0x6D] == phys_slot   // Dragoon assembly
-            || cd->grid_mapping[0x6E] == phys_slot;  // Hydra assembly
+        return cd->grid_mapping[HYDRA_DRAGOON_CLEAR_KIND] == phys_slot;
     case GOAL_BEAT_KING_DEDEDE:
         if (mode != GMMODE_CITYTRIAL)
             return 0;

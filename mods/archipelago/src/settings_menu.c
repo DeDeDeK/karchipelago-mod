@@ -13,9 +13,11 @@ APMenuSettings ap_menu_settings = {
     .ct_permanent_patches_enabled         = 1,
     .ct_stadium_permanent_patches_enabled = 1,
     .ar_permanent_patches_enabled         = 1,
+    .energylink_autocharge_rate           = 1, // Medium by default (~1.5s to fill)
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
+static const char *stc_slow_med_fast[] = {"Slow", "Medium", "Fast"};
 
 void SyncLinkMenuStateToAPData(void)
 {
@@ -29,6 +31,7 @@ void SyncLinkMenuStateToAPData(void)
 static void OnToggleDeathLink(int val)          { OSReport("[Main] DeathLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
 static void OnToggleEnergyLink(int val)         { OSReport("[Main] EnergyLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
 static void OnToggleAutoCharge(int val)         { OSReport("[Main] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
+static void OnChangeAutoChargeRate(int val)     { OSReport("[Main] EnergyLink AutoCharge rate set to %s\n", stc_slow_med_fast[val]); }
 static void OnToggleTrapLink(int val)           { OSReport("[Main] TrapLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
 static void OnToggleCTPermanent(int val)        { OSReport("[Main] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
@@ -106,7 +109,7 @@ OptionDesc ModSettings = {
                 .description = "Energy Link settings and item shop.",
                 .kind = OPTKIND_MENU,
                 .menu_ptr = &(MenuDesc){
-                    .option_num = 3,
+                    .option_num = 4,
                     .options = {
                         &(OptionDesc){
                             .name = "Enabled",
@@ -131,6 +134,19 @@ OptionDesc ModSettings = {
                                 "On",
                             },
                             .on_change = OnToggleAutoCharge,
+                        },
+                        &(OptionDesc){
+                            .name = "Auto-Charge Rate",
+                            .description = "How fast Auto-Charge fills the meter (slower = energy lasts longer)",
+                            .kind = OPTKIND_VALUE,
+                            .val = &ap_menu_settings.energylink_autocharge_rate,
+                            .value_num = 3,
+                            .value_names = (char *[]){
+                                "Slow",
+                                "Medium",
+                                "Fast",
+                            },
+                            .on_change = OnChangeAutoChargeRate,
                         },
                         &(OptionDesc){
                             .name = "Spend",

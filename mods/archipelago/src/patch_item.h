@@ -5,6 +5,7 @@
 #include "obj.h"
 
 int Patch_GiveItem(PatchKind kind, int num);
+PatchKind Patch_ItKindToPatchKind(ItemKind it_kind);
 int Patch_AllUp_GiveItem(int num);
 
 int PermanentPatch_GiveItem(PatchKind kind);

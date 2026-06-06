@@ -213,8 +213,6 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
     }
 
     // Despawn on contact: start fade-out
-    // TODO: Add custom damage/knockback — needs investigation into machine hit
-    // reaction pipeline. See docs/hurtdata-system.md for the full system overview.
     if (ed->target_player_idx >= 0)
     {
         float dist = EnemyActor_DistToPlayer(ed->target_player_idx, &ed->pos.X);

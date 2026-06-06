@@ -30,18 +30,31 @@
 // Returns 1 if an item was received, 0 otherwise.
 int APItems_CheckMailbox()
 {
+    static int warned_full = 0;
+
     uint incoming = ap_data->incoming_item_id;
     if (incoming == 0)
         return 0;
 
-    uint idx = ap_save->item_received_count;
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
-        OSReport("[APItems] APItems_CheckMailbox: unprocessed queue is full!\n");
-        ap_data->incoming_item_id = 0;
+        // Queue full: leave the item in the mailbox (do NOT clear it). The client
+        // gates its next write on incoming_item_id == 0 and only advances its send
+        // cursor after a successful write, so holding the value here applies natural
+        // backpressure and the item is retried each frame as the list drains.
+        // Clearing it would lose the item permanently: the client already advanced
+        // past it, and item_received_count was never incremented for it.
+        if (!warned_full)
+        {
+            OSReport("[APItems] unprocessed queue full (%d); holding item %d in mailbox\n",
+                     MAX_RECEIVED_ITEMS, incoming);
+            warned_full = 1;
+        }
         return 0;
     }
+    warned_full = 0;
 
+    uint idx = ap_save->item_received_count;
     ap_save->item_received_count++;
 
     // Add to unprocessed list
@@ -104,8 +117,10 @@ static void NotifyItemReceived(ItemKind k)
 }
 
 // Handle an AP item by its raw ID. Maps the ID directly to game behavior.
-// Returns 1 if the item was successfully applied, 0 if it can't be applied yet
-// (e.g., player is not in the right scene, or an event is already active).
+// Returns an APItemResult: AP_ITEM_APPLIED on success, AP_ITEM_RETRY if it
+// can't be applied yet (wrong scene / event already active — keep and retry),
+// or AP_ITEM_DROP if the ID is unrecognized or out of range (remove without
+// applying, so a malformed ID can't wedge the queue and re-log every frame).
 int APItems_HandleItem(uint ap_item_id)
 {
     // Items that apply immediately with no scene requirement
@@ -138,8 +153,17 @@ int APItems_HandleItem(uint ap_item_id)
         u32 offset = ap_item_id - AP_CHECKLIST_REWARD_BASE;
         GameMode mode = offset / 50;
         u8 reward_index = offset % 50;
+        // Reward bands are stride-50 but each mode uses fewer (AR 46, TR 33,
+        // CT 44). IDs in the gaps are not valid rewards — drop rather than
+        // grant an out-of-range index.
+        if (reward_index >= ChecklistRewards_GetRewardCount(mode))
+        {
+            OSReport("[APItems] Checklist reward ID %d out of range (mode %d index %d) — dropping\n",
+                     ap_item_id, mode, reward_index);
+            return AP_ITEM_DROP;
+        }
         ChecklistRewards_Grant(mode, reward_index, /*announce=*/1);
-        return 1;
+        return AP_ITEM_APPLIED;
     }
 
     // Event unlock items (AP_EVENT_UNLOCK_BASE + EventKind)
@@ -295,15 +319,33 @@ int APItems_HandleItem(uint ap_item_id)
     // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
     // ITKIND_COPY* always go through Ability_GiveItem so they bypass the
     // ability gate — an AP-granted copy item is meant to apply regardless of
-    // unlock state, matching the Air Ride path. Other ITKIND items spawn a
-    // real pickup in City Trial (so the visual plays); outside City Trial the
-    // item data tables aren't loaded and we can't service them.
+    // unlock state, matching the Air Ride path. The nine "+1" stat patches go
+    // through Patch_GiveItem, which applies in both City Trial (item pickup) and
+    // Air Ride (direct stat change). Other ITKIND items spawn a real pickup in
+    // City Trial only (so the visual plays); outside City Trial the item data
+    // tables aren't loaded and we can't service them.
     if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
         ItemKind it_kind = ap_item_id - AP_ITKIND_BASE;
         CopyKind copy_kind = Ability_ItKindToCopyKind(it_kind);
         if (copy_kind != COPYKIND_NONE)
             return Ability_GiveItem(copy_kind);
+
+        // Stat "+1" patches apply to machine stats in City Trial and Air Ride.
+        // Patch_GiveItem spawns the pickup in CT and applies directly via
+        // Machine_GivePatch in AR. Top Ride has no MachineData, so defer there
+        // (return 0 -> retry once the player reaches a patch-capable mode). The
+        // CT Free Run / stadium cases are already filtered by the scene gate above.
+        PatchKind patch_kind = Patch_ItKindToPatchKind(it_kind);
+        if (patch_kind != PATCHKIND_NUM)
+        {
+            if (major != MJRKIND_CITY && major != MJRKIND_AIR)
+                return 0;
+            Patch_GiveItem(patch_kind, 1);
+            NotifyItemReceived(it_kind);
+            return 1;
+        }
+
         if (Gm_IsInCity())
         {
             SpawnItemHumans(it_kind);
@@ -384,8 +426,8 @@ int APItems_HandleItem(uint ap_item_id)
         return applied;
     }
 
-    OSReport("[APItems] Unknown AP item ID: %d\n", ap_item_id);
-    return 0;
+    OSReport("[APItems] Unknown AP item ID: %d — dropping\n", ap_item_id);
+    return AP_ITEM_DROP;
 }
 
 // Append an AP item ID to the unprocessed queue. Returns 1 if queued,
@@ -404,26 +446,32 @@ void APItems_OnSceneChange()
     GOBJ_EZCreator(0, 0, 0, 0, HSD_Free, HSD_OBJKIND_NONE, 0, APItems_PerFrame, 0, 0, 0, 0);
 }
 
-// Scan the unprocessed list for the first item that can be applied.
-// Processes one item per frame. Items that can't apply yet (e.g., blocked events)
-// are skipped, allowing items behind them to process out of order.
+// Scan the unprocessed list for the first item we can resolve. Processes one
+// item per frame. Items that can't apply yet (e.g., blocked events) are skipped,
+// allowing items behind them to process out of order. Applied items and
+// unrecognized/out-of-range items are both removed; only RETRY items stay.
 void APItems_PerFrame(GOBJ *g)
 {
     // Pull from mailbox into persistent list
     int item_received = APItems_CheckMailbox();
 
-    // Scan unprocessed items for one we can handle
+    // Scan unprocessed items for one we can resolve this frame.
     for (uint i = 0; i < ap_save->unprocessed_count; i++)
     {
         uint item_id = ap_save->unprocessed_items[i];
-        if (APItems_HandleItem(item_id))
-        {
+        int result = APItems_HandleItem(item_id);
+        if (result == AP_ITEM_RETRY)
+            continue;
+
+        if (result == AP_ITEM_APPLIED)
             OSReport("[APItems] AP item ID %d applied.\n", item_id);
-            // Remove by swapping with last element
-            ap_save->unprocessed_count--;
-            ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
-            break;
-        }
+        else
+            OSReport("[APItems] AP item ID %d dropped.\n", item_id);
+
+        // Remove by swapping with last element.
+        ap_save->unprocessed_count--;
+        ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
+        break;
     }
 
 }

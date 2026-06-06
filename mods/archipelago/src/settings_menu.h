@@ -11,6 +11,7 @@ typedef struct APMenuSettings
     int deathlink_enabled;
     int energylink_enabled;
     int energylink_autocharge;
+    int energylink_autocharge_rate; // 0=Slow, 1=Medium, 2=Fast (index into AUTOCHARGE_RATES)
     int traplink_enabled;
     int ct_permanent_patches_enabled;
     int ct_stadium_permanent_patches_enabled;

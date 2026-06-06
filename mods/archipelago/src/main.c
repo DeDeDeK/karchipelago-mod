@@ -216,6 +216,29 @@ static void APOptions_ApplyUngatedCategories(void)
     if (!opts->color_gating_enabled)         Unlock_SetMask(AP_UNLOCK_COLOR,         (1u << KIRBYCOLOR_NUM) - 1);
     if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       (1u << STKIND_NUM) - 1);
 
+    // The three Top Ride "New Item" types (Chickie/Who? Paint/Lantern, bits
+    // 20/18/15) need a second nudge. Unlike every other category, the mask-all
+    // above can't enable them: TopRideItem_MgrInit leaves those bits clear
+    // unless the checklist has_reward bit is set for TR reward indices 8/9/10,
+    // and GateTopRideItems_ApplyMask only ANDs (it can clear bits, never set
+    // them). So when TR items are ungated, set has_reward on those three cells
+    // here — the same field ChecklistRewards_Grant writes on a real delivery —
+    // so the engine enables the types at course init. has_reward is purely the
+    // "reward received" flag; it does not touch is_unlocked, so no spurious
+    // outbound check is detected.
+    if (!opts->topride_item_gating_enabled)
+    {
+        GameClearData *tr = gmGetClearcheckerTypeP(GMMODE_TOPRIDE);
+        if (tr)
+            for (u8 ri = 8; ri <= 10; ri++)
+                tr->clear[Checklist_GetClearKindFromRewardIndex(GMMODE_TOPRIDE, ri)].has_reward = 1;
+    }
+
+    // Non-progression checklist rewards: unlock the whole cosmetic set at connect when ungated. Not a
+    // mask category — these unlock via the received_checklist_rewards bitfield (see checklist_rewards.c).
+    if (!opts->checklist_rewards_gating_enabled)
+        ChecklistRewards_GrantAllCosmetic();
+
     OSReport("[Main] Gating — machines:%d abilities:%d events:%d patches:%d items:%d boxes:%d AR-stages:%d TR-stages:%d TR-items:%d colors:%d stadiums:%d\n",
              opts->machine_gating_enabled, opts->ability_gating_enabled,
              opts->event_gating_enabled, opts->patch_gating_enabled,
@@ -417,6 +440,12 @@ void OnFrameStart()
 {
     // Poll for AP client connection (one-time options transfer)
     APOptions_TransferToSave();
+
+    // Apply the AP location assignment when the client signals new data.
+    // ChecklistRewards_ApplyLocations clears location_data_valid and persists,
+    // so this fires once per client write (every (re)connection).
+    if (ap_data->location_data_valid)
+        ChecklistRewards_ApplyLocations();
 
     // Process client backfill writes and poll meta auto-unlocks.
     CheckDetection_OnFrameStart();

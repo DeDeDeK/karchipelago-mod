@@ -68,6 +68,41 @@ static void FlushEnergy(void)
     OSReport("[EnergyLink] flushed %d energy to energy_send\n", whole);
 }
 
+// Per-frame charge-meter gain for each Auto-Charge Rate setting
+// (Slow/Medium/Fast). charge_value spans 0.0–1.0, so ~1/rate frames fill the
+// meter from empty — at 60fps that's roughly 3.0s / 1.5s / 0.75s. Auto-Charge
+// adds at most this much per frame so the meter rises steadily and stacks with
+// the player's own charging, rather than snapping straight to full.
+#define AUTOCHARGE_RATE_NUM 3
+static const float AUTOCHARGE_RATES[AUTOCHARGE_RATE_NUM] = {
+    0.00555f, // Slow   ~180 frames (~3.0s)
+    0.01111f, // Medium  ~90 frames (~1.5s)
+    0.02222f, // Fast    ~45 frames (~0.75s)
+};
+
+// Charge-meter gain to apply this frame for Auto-Charge, given the current
+// charge level. Bounded by both the per-frame rate cap (so the meter rises
+// steadily) and the remaining deficit (so it never overshoots 1.0). Returns 0
+// when no energy is available.
+//
+// The rate cap keeps the cost (gain * SCALE) well under one energy unit (max
+// ≈ 0.11), so any positive integer balance can pay for a full step. That's why
+// we only gate on balance > 0 here — none of the s64→float partial-affordability
+// math the old fill-the-whole-deficit version needed.
+static float AutoCharge_Gain(float charge_value)
+{
+    if (ap_data->energy_balance <= 0)
+        return 0.0f;
+    int ri = ap_menu_settings.energylink_autocharge_rate;
+    if (ri < 0)
+        ri = 0;
+    else if (ri >= AUTOCHARGE_RATE_NUM)
+        ri = AUTOCHARGE_RATE_NUM - 1;
+    float cap = AUTOCHARGE_RATES[ri];
+    float deficit = 1.0f - charge_value;
+    return (deficit < cap) ? deficit : cap;
+}
+
 // Per-frame proc attached to each human rider GOBJ in Air Ride / City Trial.
 // Tracks objects destroyed, patches collected, and machine charge.
 static void EnergyLink_PerFrame(GOBJ *rg)
@@ -122,29 +157,13 @@ static void EnergyLink_PerFrame(GOBJ *rg)
 
     FlushEnergy();
 
-    // Auto-charge: spend energy from pool to fill machine charge meter.
-    // Computing charge_gain directly avoids the round-trip through SCALE.
+    // Auto-charge: spend energy from the pool to top up the machine charge
+    // meter, capped per frame so it rises steadily and assists (rather than
+    // replaces) the player's own charging. Computing charge_gain directly
+    // avoids the round-trip through SCALE.
     if (ap_menu_settings.energylink_autocharge && md)
     {
-        float deficit = 1.0f - md->charge_value;
-        // deficit is in [0,1] and SCALE = 5, so any balance ≥ 5 raw units
-        // can pay for the entire deficit. Split on that threshold so the
-        // common case (plenty of energy) skips the s64→float cast entirely.
-        float charge_gain;
-        if (ap_data->energy_balance >= (s64)CHARGE_ENERGY_SCALE)
-        {
-            charge_gain = deficit;
-        }
-        else if (ap_data->energy_balance > 0)
-        {
-            // Balance < 5 raw units, so it fits safely in s32 for the cast.
-            float max_gain = (float)(s32)ap_data->energy_balance / CHARGE_ENERGY_SCALE;
-            charge_gain = (deficit < max_gain) ? deficit : max_gain;
-        }
-        else
-        {
-            charge_gain = 0;
-        }
+        float charge_gain = AutoCharge_Gain(md->charge_value);
         if (charge_gain > 0)
         {
             md->charge_value += charge_gain;
@@ -188,21 +207,7 @@ static void EnergyLink_TopRidePerFrame(GOBJ *g)
         // moment A is released; see docs/topride-system.md).
         if (ap_menu_settings.energylink_autocharge && kirby->charge.charge_ready)
         {
-            float deficit = 1.0f - kirby->charge.charge_value;
-            float charge_gain;
-            if (ap_data->energy_balance >= (s64)CHARGE_ENERGY_SCALE)
-            {
-                charge_gain = deficit;
-            }
-            else if (ap_data->energy_balance > 0)
-            {
-                float max_gain = (float)(s32)ap_data->energy_balance / CHARGE_ENERGY_SCALE;
-                charge_gain = (deficit < max_gain) ? deficit : max_gain;
-            }
-            else
-            {
-                charge_gain = 0;
-            }
+            float charge_gain = AutoCharge_Gain(kirby->charge.charge_value);
             if (charge_gain > 0)
             {
                 kirby->charge.charge_value += charge_gain;

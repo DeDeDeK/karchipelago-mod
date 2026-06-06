@@ -116,23 +116,30 @@ static int IsSameModeLocalPlacement(u8 mode, u8 reward_index)
 }
 
 // Replacement for ClearChecker_CheckUnlocked (0x80049E24).
-// Order of checks:
-//   1. AP received bitfield — covers same-mode, cross-mode, and remote rewards
-//      that the player has already received.
-//   2. Same-mode local placement — read clear_kind directly from the saved
-//      shuffle u16 and check the cell's has_reward bit. Cross-mode source rows
-//      and remote rewards fail the same-mode test and return 0 without ever
-//      reading clear[].
+//
+// AP delivery is the SOLE authority for a checklist reward being unlocked: we
+// return true iff the reward's bit is set in received_checklist_rewards — set by
+// ChecklistRewards_Grant on AP item receipt, and by ChecklistRewards_GrantAllCosmetic
+// for ungated cosmetics at connect.
+//
+// We deliberately do NOT fall back to the placement cell's has_reward bit.
+// has_reward is also raised by in-game completion (vanilla SetRewardFlagOnUnlocks
+// flags it once a same-mode local cell unlocks), so a has_reward fallback would
+// unlock the reward the moment the player earns the checkbox — before the AP
+// server delivers the item. For gated categories (machines/colors/stadiums/
+// stages/etc.) that leak is invisible: their vanilla availability checks are
+// REPLACEFUNC'd to read mod gate masks and never call this function. But the
+// non-gated "cosmetic" categories (Sound Test, Music, Endings, Bonus Movie,
+// Pause Power-ups, Extra Rules) read this function live, so a has_reward fallback
+// let them unlock pre-delivery. Keying purely on the received bitfield closes that.
+//
+// The checklist reward ICON still appears on in-game completion — that path is
+// ChecklistRewards_FindRewardForCell, independent of this function.
+//
 // Installed via CODEPATCH_REPLACEFUNC in ChecklistRewards_OnBoot.
 int ChecklistRewards_CheckUnlocked(GameMode mode, u8 reward_index)
 {
-    if (ap_save->received_checklist_rewards[mode] & (1ULL << reward_index))
-        return 1;
-    u16 loc = ap_save->shuffled_rewards[mode][reward_index];
-    if (loc == 0xFFFF || (u8)(loc >> 8) != (u8)mode)
-        return 0;
-    GameClearData *cd = gmGetClearcheckerTypeP(mode);
-    return cd->clear[(u8)loc].has_reward;
+    return (ap_save->received_checklist_rewards[mode] & (1ULL << reward_index)) != 0;
 }
 
 // Replacement for ClearChecker_GetRewardFromClearKind (0x80049EC4).
@@ -518,6 +525,57 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
         // cross-mode local FILLERs are already covered by those two paths.
         Checklist_GrantFiller(mode);
     }
+}
+
+// Reward types that unlock content with no gate mask of their own — their unlocked state lives
+// entirely in received_checklist_rewards (see ChecklistRewards_CheckUnlocked / the no-op default in
+// ApplyVanillaRewardUnlock). These are exactly the non-progression rewards the AP world removes from
+// the pool when checklist_rewards_gated is off. Deliberately excludes:
+//   - REWARD_STADIUM / REWARD_COURSE / REWARD_MACHINE_* / characters / colors / TR items: gated
+//     categories, governed by their own *_gating_enabled flag (and already overlapping_rewards on the
+//     AP side), so granting them here would badge them "received" without flipping their gate mask;
+//   - REWARD_DRAGOON_PART_* / REWARD_HYDRA_PART_*: progression (they build the legendary machines),
+//     so they stay in the AP pool and must never be auto-granted.
+static int IsCosmeticRewardType(u8 reward_type)
+{
+    switch (reward_type)
+    {
+        case REWARD_FILLER:
+        case REWARD_BONUS_MOVIE:
+        case REWARD_EXTRA_RULE:
+        case REWARD_SOUND_TEST:
+        case REWARD_MUSIC:
+        case REWARD_ENDING:
+        case REWARD_PAUSE_POWERUPS:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+// checklist_rewards_gated off: mark every cosmetic (no-gate-mask) reward received at connect, so the
+// content is available from the start while its checklist box is freed to hold an ordinary AP item.
+// Setting the received bit is the complete unlock — ChecklistRewards_CheckUnlocked reads it, and
+// ApplyVanillaRewardUnlock is a no-op for these types. We deliberately do NOT call
+// ChecklistRewards_Grant: no per-reward textbox, and no Checklist_GrantFiller bump for REWARD_FILLER
+// (the player earns no extra remote filler from an ungated reward). reward_type survives all shuffle
+// remapping, so reading it here is valid.
+void ChecklistRewards_GrantAllCosmetic(void)
+{
+    int total = 0;
+    for (int mode = 0; mode < GMMODE_NUM; mode++)
+    {
+        int count = reward_counts[mode];
+        for (int ri = 0; ri < count; ri++)
+        {
+            if (IsCosmeticRewardType(stc_reward_table_ptrs[mode][ri].reward_type))
+            {
+                ap_save->received_checklist_rewards[mode] |= (1ULL << ri);
+                total++;
+            }
+        }
+    }
+    OSReport("[Checklist] Checklist rewards ungated — auto-granted %d cosmetic reward(s)\n", total);
 }
 
 // Filter for the reward loop in Checklist_SetRewardFlagOnUnlocks (0x8017DF5C).

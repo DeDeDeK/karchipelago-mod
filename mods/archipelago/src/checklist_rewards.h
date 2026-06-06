@@ -29,6 +29,11 @@ void ChecklistRewards_ApplyLocations(void);
 // Reveal and unlock all checklist squares across all modes (debug/option).
 void RevealAllChecklists(void);
 
+// checklist_rewards_gated off: mark every non-progression (cosmetic, no-gate-mask) checklist reward
+// as received at connect, so the content is available from the start and its box is freed for an
+// ordinary item. Progression Dragoon/Hydra part markers and gated-category rewards are left alone.
+void ChecklistRewards_GrantAllCosmetic(void);
+
 // Debug: fill APData location arrays with a random shuffle
 // (~1/3 same-mode, ~1/3 cross-mode, ~1/3 remote) and apply immediately.
 // For standalone testing without an AP client connection.
