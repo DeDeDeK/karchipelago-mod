@@ -61,8 +61,8 @@ typedef enum WeatherAnimKind
 } WeatherAnimKind;
 
 // Per-custom-preset config. Fields are grouped by what they affect on screen,
-// not by the underlying engine mechanism. See docs/sky-lighting-system.md for
-// the full rendering model. Color fields are RGBA8888 packed u32 (high byte=R).
+// not by the underlying engine mechanism. Color fields are RGBA8888 packed u32
+// (high byte=R).
 typedef struct CustomPresetDef
 {
     int base_preset;             // Vanilla WeatherKind (0..16) to clone unset fields from

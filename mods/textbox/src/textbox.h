@@ -32,7 +32,7 @@ typedef struct TextBoxMessage
     Text *text;
 
     // Typewriter state. The actual reveal is done by the engine's built-in
-    // typewriter (we seed text->temp.char_delay — see docs/sis-text-system.md). We
+    // typewriter (we seed text->temp.char_delay). We
     // sample the setting at enqueue time so per-message behavior stays stable if
     // the player toggles mid-reveal, and keep chars_total to gate the fade-out:
     // the fade is held until the renderer's temp.reveal_count reaches it.

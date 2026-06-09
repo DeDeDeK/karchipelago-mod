@@ -1,41 +1,16 @@
-// Waddle Dee Swarm — custom City Trial event
+// Waddle Dee Swarm — custom City Trial event. Spawns standalone Waddle Dees
+// (ACTORID_WADDLE_DEE, 0x17) that chase the nearest human player and fade out
+// on contact. Two mechanics make standalone chase AI work:
 //
-// Waddle Dee State Machine
-// ========================
-// Actors start at state 0 (memset). The animation bytecode drives transitions
-// through common states (0x00-0x0D), eventually reaching per-type states.
-// The 0x0E→0x0F transition completes atomically within priority 1 (ProcUpdate),
-// so our priority 10 proc never observes state 0x0E.
+// Spline snap: every vanilla state transition re-runs the actor's func1, which
+// snaps its position to the nearest spline point — at priority 1, before our
+// proc runs. We undo it at priority 10 by restoring last frame's saved_pos
+// whenever ed->state changed since the previous frame.
 //
-// Per-type states (Waddle Dee, actor 0x17):
-//   0x0E  Idle. func1 calls SetVisibility, re-inits path (snaps pos to
-//         nearest spline!), then immediately transitions to 0x0F.
-//   0x0F  Walk A. Ground path walk + orientation.
-//   0x10  Walk B variant.
-//   0x11  Turn/walk left.
-//   0x12  Turn/walk right.
-//
-// Spline Snap Problem
-// ===================
-// Every vanilla state transition (0x0F→0x10→0x11→0x12→...) snaps the actor's
-// position to the nearest spline point via func1 at priority 1. This teleports
-// standalone-spawned waddle dees back to a spline path.
-//
-// The snap happens inside `EnemyStateChange` → new func1 call, all within
-// priority 1, BEFORE our priority 10 proc runs. We cannot prevent it.
-//
-// Fix: At priority 10, detect state changes by comparing ed->state to the
-// saved state from last frame. On change, restore pos from saved_pos
-// (the last known good position from end of previous frame). This undoes
-// the spline snap while preserving chase movement.
-//
-// Chase Override
-// ==============
-// We override func2/func3/func4 every frame at priority 10:
-//   func2 = WaddleDeeChaseMovement (velocity toward nearest player)
-//   func3 = WaddleDeeChaseGroundSnap (snap Y to ground)
-//   func4 = WaddleDeeChaseOrientation (face toward target)
-// func1 is left alone — vanilla walk animations continue playing.
+// Chase override: we reinstall func2/func3/func4 every frame for movement,
+// ground-snap, and facing (func1 left alone, so walk animations keep playing).
+// FindNearestPlayer's range cap is bypassed by pre-setting target_player_idx
+// with a non-zero retarget_cooldown.
 
 #include "game.h"
 #include "os.h"

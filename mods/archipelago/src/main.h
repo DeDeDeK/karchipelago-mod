@@ -112,6 +112,7 @@ typedef struct APSave
     u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received for that mode
     u64 sent_checks[3][2];                              // Authoritative completed-checkbox bitmask per mode.
     u8 goal_complete;                                   // Sticky once set; persisted across boots
+    u8 goal_announced[GMMODE_NUM];                       // Sticky per mode: 1 once that mode's goal first satisfied (drives the per-mode "X goal complete!" textbox, fired once each)
     u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit the runtime patch cap target on all 9 stats during a CT trial round
     APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
@@ -120,14 +121,14 @@ typedef struct APSave
 // Shared data struct stored at a static location in memory.
 // The Python AP client reads/writes this via dolphin-memory-engine.
 // All 32-bit fields are 4-byte aligned and atomic on PPC at this alignment.
-// 64-bit fields (energy_balance, energy_send, sent_checks, client_backfill,
+// 64-bit fields (energy_balance, energy_sent_total, sent_checks, client_backfill,
 // goal_checks) are not atomic on PPC32 — readers may observe a torn value
-// during a writer's update. The mailbox handshake for energy_send (write
-// only when 0, clear to 0 after consume) limits the race window in practice.
+// during a writer's update. For energy_sent_total this is self-correcting: it's
+// a cumulative counter the client reads-and-diffs, so a torn read only skews one
+// poll's delta and the next poll's diff compensates exactly (see the field).
 //
-// Field offsets are computed by the compiler; the protocol doc
-// (docs/client-game-protocol.md) is the canonical reference for the Python
-// client. Field order in this struct is the source of truth.
+// Field offsets are computed by the compiler; field order in this struct is
+// the source of truth for the Python client.
 typedef struct APData
 {
     // EnergyLink pool balance in raw units (1 raw unit = 1 MJ in the AP pool).
@@ -136,11 +137,16 @@ typedef struct APData
     // client write is authoritative. Widened to s64 so multiworld pools that
     // exceed u64 joules (i.e. > ~1.8e19 J) still fit at MJ scale.
     s64 energy_balance;
-    // Signed mailbox delta. Game → client. Positive = deposit into pool,
-    // negative = withdrawal. Game writes only when current value is 0; client
-    // clears to 0 after consume. Per-tick deltas are small (well below s32);
-    // s64 just matches energy_balance's width for consistent alignment.
-    s64 energy_send;
+    // Cumulative net energy emitted to the pool this session, raw MJ.
+    // Game → client, SINGLE-writer: the game only ever writes (+= deposits from
+    // generation, −= withdrawals from spends/Auto-Charge); the client only ever
+    // reads-and-diffs (delta since its last poll → forward to server) and NEVER
+    // writes it. Resets to 0 on each mod boot (this struct is memset in OnBoot);
+    // persists across scene loads within a session. Not atomic on PPC32, but
+    // self-correcting: a torn read skews one poll's delta and the next diff
+    // compensates. The client re-seeds its watermark on a fresh game_ready
+    // transition so the boot reset isn't misread as a giant withdrawal.
+    s64 energy_sent_total;
     uint deathlink_receive;
     uint deathlink_send;
     uint traplink_receive;

@@ -65,6 +65,12 @@ int ChecklistRewards_CellHasReceivedReward(u8 mode, u8 clear_kind);
 // Number of reward rows for the given mode. Out-of-range modes return 0.
 int ChecklistRewards_GetRewardCount(GameMode mode);
 
+// Translate an AP reward_index (the apworld's clear_kind-sorted numbering, as
+// encoded in a 500-649 item ID) to the mod's internal game reward-table index
+// used by Grant / shuffled_rewards / received_checklist_rewards. Out-of-range
+// inputs pass through unchanged (range-check with GetRewardCount first).
+u8 ChecklistRewards_ApToGameIndex(GameMode mode, u8 ap_reward_index);
+
 // Encoded `shuffled_rewards[mode][index]` for a given (mode, reward_index).
 // Encoding: high byte = target mode, low byte = target clear_kind, 0xFFFF =
 // remote (no local placement). Out-of-range inputs return 0xFFFF.

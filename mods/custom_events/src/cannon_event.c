@@ -18,7 +18,7 @@
 // Disabled by default. Loading GrMachine2Model.dat (1.6MB) in CT exhausts
 // heap 1 — the JObj instantiation needs ~1KB and only ~30 bytes were left
 // after the load. CT's memory budget can't accommodate the full model
-// archive. See docs/yakumono-system.md for the path forward.
+// archive.
 #ifndef CANNON_LOAD_ENABLED
 #define CANNON_LOAD_ENABLED 0
 #endif
@@ -26,7 +26,7 @@
 #define CANNON_DESC_ID 48
 
 // CT path: hijack a spare data_array slot for a zeroed-param ghost spawn.
-// CT's data_count is 33 with slots 31, 32 unused (see docs/yakumono-system.md).
+// CT's data_count is 33 with slots 31, 32 unused.
 #define CT_HIJACK_DATA_IDX 31
 
 // Machine Passage path: data_array[1] is the live cannon param block populated

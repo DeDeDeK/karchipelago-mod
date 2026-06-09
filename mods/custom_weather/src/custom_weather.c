@@ -10,9 +10,8 @@
 #include "custom_weather.h"
 
 // CustomPresetDef + WeatherAnimKind live in custom_weather.h. SkyPresetEntry
-// and AreaLightData live in hoshi (stage.h, obj.h). RGBA() is in gx.h. See
-// docs/sky-lighting-system.md for the rendering model and the vanilla CT
-// preset table used as base values below.
+// and AreaLightData live in hoshi (stage.h, obj.h). RGBA() is in gx.h. The
+// vanilla CT preset table is used as base values below.
 
 const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
     // Deep Blue — based on Night (12)

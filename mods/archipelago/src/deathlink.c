@@ -191,8 +191,7 @@ CODEPATCH_HOOKCREATE(0x80331a94,
 // so the AR/CT receive path can't apply. Pick a damage-class state wrapper
 // from the pool and apply it to each human kirby. Same state for every human
 // keeps the visual coherent. SpeedDown is reserved for traplink. Burn, Spin,
-// Crush, Strike, Explode, Elec excluded — see docs/topride-kirby-states.md
-// "Caveats & Open Items" for per-state reasoning.
+// Crush, Strike, Explode, Elec excluded.
 typedef void (*KirbyStateFn)(TopRideKirby *);
 static const KirbyStateFn deathlink_states[] = {
     TopRide_KirbyPress,
@@ -234,7 +233,7 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
         // pre-empts setters that read kirby+0xA0 and scale it (Strike/Explode);
         // post-zero overrides Crush, whose setter ignores kirby+0xA0 and
         // PSVECNormalizes its Vec3 arg (we pass &zero) into NaN which it
-        // writes to kirby+0xA0. See docs/topride-kirby-states.md.
+        // writes to kirby+0xA0.
         Vec3 *vel = (Vec3 *)((char *)kirby + 0xA0);
         vel->X = vel->Y = vel->Z = 0.0f;
         apply(kirby);

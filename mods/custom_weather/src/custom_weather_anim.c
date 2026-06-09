@@ -9,8 +9,7 @@
 //      presets don't touch it normally.
 //   2. Extra LOBJ       — spawn one INFINITE light overhead and animate its
 //      color per frame. Hits all stage geometry automatically — there is no
-//      per-material light_mask gating in CT (see docs/sky-lighting-system.md
-//      Q7).
+//      per-material light_mask gating in CT.
 //   3. Fog modulation   — write directly to HSD_Fog at (fog_gobj)->hsd_object
 //      so fog.start/end/color move independently of the sky preset's lerp.
 //
@@ -222,8 +221,7 @@ static void RunAuroraTick(void)
 
 // Sky_Update overwrites *stc_global_fog_color each frame from the active
 // preset, so writing here only needs to override for the current frame;
-// no restore needed. See docs/sky-lighting-system.md "EFB clear color
-// (per frame buffer copy)".
+// no restore needed.
 static void RunLightningTick(HSD_Fog *fog, u32 flash_color)
 {
     EnsureExtraLight();
@@ -349,10 +347,8 @@ void CustomWeatherAnim_Tick(GrObj *grobj)
         ApplyTerrainTint(s_active_def);
         ApplyAmbientTint(s_active_def);
 
-        // Drive the lbfade slot-3 overlay (the "genuinely darken everything"
-        // path used by event preset transitions). Sky_BeginFade lerps to
-        // target and holds — verified empirically by sampling the slot's
-        // RGBA over 14s of gameplay.
+        // Drive the lbfade slot-3 overlay (the global "darken everything" path):
+        // Sky_BeginFade lerps to the target tint over 30 frames and holds.
         if (grobj->fade_slot_id && s_active_def && s_active_def->screen_tint)
         {
             u32 tint = s_active_def->screen_tint;

@@ -61,8 +61,7 @@ int Patch_GiveItem(PatchKind kind, int num)
             // Stats just changed; mask from EnergyLink so the receive doesn't
             // refund energy back into the pool. The CT spawn-pickup branch
             // also applies same-frame (SpawnItemPlayer drives
-            // Machine_OnTouchItem for non-fake kinds) but doesn't rebase yet
-            // — see docs/energylink.md.
+            // Machine_OnTouchItem for non-fake kinds) but doesn't rebase yet.
             EnergyLink_RebaseStats(i);
         }
         OSReport("[PatchItem] Giving %d patches of kind %d to player %d (%s)...\n",
@@ -107,9 +106,9 @@ int Patch_AllUp_GiveItem(int num)
 }
 
 // Drop-patches trap: eject each human rider's current stats as physical
-// patches behind the machine. Caller must guarantee item data is loaded
-// (CT Trial/Stadium only — Free Run and non-CT modes would crash inside
-// Rider_DropPatches when it tries to spawn the patch items).
+// patches behind the machine. Caller must guarantee item data is loaded — the
+// open City Trial phase only; Free Run, the stadium phase, and non-CT modes
+// would crash inside Rider_DropPatches when it tries to spawn the patch items.
 int Patch_DropTrap()
 {
     int dropped = 0;
@@ -179,7 +178,7 @@ static void PermanentPatch_DoApply()
         total += ap_save->permanent_patches[i];
 
     OSReport("[PatchItem] Applying permanent patches (all-up: %d, total: %d): "
-             "Weight=%d Accel=%d TopSpd=%d Turn=%d Charge=%d Glide=%d Offense=%d Defense=%d HP=%d\n",
+             "Weight=%d Boost=%d TopSpd=%d Turn=%d Charge=%d Glide=%d Offense=%d Defense=%d HP=%d\n",
              min_patches, total,
              ap_save->permanent_patches[PATCHKIND_WEIGHT],
              ap_save->permanent_patches[PATCHKIND_ACCEL],

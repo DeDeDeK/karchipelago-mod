@@ -216,23 +216,23 @@ static void APOptions_ApplyUngatedCategories(void)
     if (!opts->color_gating_enabled)         Unlock_SetMask(AP_UNLOCK_COLOR,         (1u << KIRBYCOLOR_NUM) - 1);
     if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       (1u << STKIND_NUM) - 1);
 
-    // The three Top Ride "New Item" types (Chickie/Who? Paint/Lantern, bits
-    // 20/18/15) need a second nudge. Unlike every other category, the mask-all
-    // above can't enable them: TopRideItem_MgrInit leaves those bits clear
-    // unless the checklist has_reward bit is set for TR reward indices 8/9/10,
-    // and GateTopRideItems_ApplyMask only ANDs (it can clear bits, never set
-    // them). So when TR items are ungated, set has_reward on those three cells
-    // here — the same field ChecklistRewards_Grant writes on a real delivery —
-    // so the engine enables the types at course init. has_reward is purely the
-    // "reward received" flag; it does not touch is_unlocked, so no spurious
-    // outbound check is detected.
+    // The three Top Ride "New Item" types (Chickie/Who? Paint/Lantern, enabled-
+    // mask bits 20/18/15) need a second nudge. Unlike every other category, the
+    // mask-all above can't enable them: TopRideItem_MgrInit only enables those
+    // slots when GameData.topride_extra_unlocks is set, and that is fed by
+    // TopRide_OnCourseSelect / TopRide_PreGameThink calling ClearChecker_CheckUnlocked
+    // (mod-replaced to read received_checklist_rewards) for TR reward indices
+    // 8/9/10 — and GateTopRideItems_ApplyMask only ANDs (clears, never sets).
+    // So mark those three rewards received here, exactly as
+    // ChecklistRewards_GrantAllCosmetic does for ungated cosmetics, so
+    // CheckUnlocked returns true and the engine enables the types at course init.
+    // Setting only the received bit drives the enable without touching is_unlocked
+    // (no spurious outbound check) and without any clear[] write (the old code set
+    // has_reward via GetClearKindFromRewardIndex, which for these unplaced rewards
+    // resolves to the clear_kind=0 sentinel and wrongly badged that cell).
     if (!opts->topride_item_gating_enabled)
-    {
-        GameClearData *tr = gmGetClearcheckerTypeP(GMMODE_TOPRIDE);
-        if (tr)
-            for (u8 ri = 8; ri <= 10; ri++)
-                tr->clear[Checklist_GetClearKindFromRewardIndex(GMMODE_TOPRIDE, ri)].has_reward = 1;
-    }
+        for (u8 ri = 8; ri <= 10; ri++)
+            ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= (1ULL << ri);
 
     // Non-progression checklist rewards: unlock the whole cosmetic set at connect when ungated. Not a
     // mask category — these unlock via the received_checklist_rewards bitfield (see checklist_rewards.c).

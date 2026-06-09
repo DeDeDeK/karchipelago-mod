@@ -1,15 +1,11 @@
-// Scale Change — custom City Trial event
+// Scale Change — custom City Trial event. Scales the stage visuals and the
+// OOB death boundary for the event's duration.
 //
-// Scales the entire stage (visual model, collision model, OOB boundaries)
-// for the duration of the event.
-//
-// The stage has two JOBJs: the visual model (on the stage GOBJ) and
-// the collision model (at GrObj extended offset 0xF4). Both must be
-// scaled and have their matrices marked dirty.
-//
-// OOB death boundaries live at stage_node offsets 0xCC-0xE0 (AABB
-// min/max XYZ). These must be scaled proportionally so the kill
-// boundary matches the new stage size.
+// Two JOBJs are scaled and matrix-dirtied: the stage visual model (stage GOBJ)
+// and the backdrop/skybox JOBJ at GrObj+0xF4. Collision does NOT scale — it's
+// pre-baked spatial data, not a JOBJ (the GetCollisionJObj helper is misnamed;
+// +0xF4 is the backdrop). OOB boundaries are the 6 AABB floats at
+// stage_node+0xCC, scaled proportionally so the kill box matches.
 
 #include "game.h"
 #include "os.h"

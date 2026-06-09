@@ -135,6 +135,39 @@ static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
     cd->clear[clear_kind].is_new = 1;
 }
 
+// Replacement for ClearChecker_SetNewUnlockSilent at 0x80049FCC.
+// The Top Ride checklist evaluator (the cluster of functions at 0x802b7xxx)
+// commits every gameplay objective through this "silent" variant instead of
+// ClearChecker_SetNewUnlock: each call site plays its own unlock SFX and prints
+// "ClearChecker(<clear_kind+1>)" before calling here, which only sets the
+// is_new bit. Because the primary detection path only replaces SetNewUnlock,
+// every Top Ride check was silently dropped — never added to sent_checks, never
+// forwarded to the server, and TR GOAL_CHECKLIST_LIST goals (e.g. "Cross the
+// goal 20 or more times!" = TR clear_kind 0, "Compete in more than 10
+// multiplayer races!" = TR clear_kind 2) could never complete. We mirror the
+// SetNewUnlock replacement: detect the transition and record the check, then run
+// the vanilla silent body (no SFX — the caller already played it).
+static void CheckDetection_SetNewUnlockSilentReplacement(int mode, int clear_kind)
+{
+    if ((unsigned)mode >= GMMODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
+        return;
+    GameClearData *cd = gmGetClearcheckerTypeP(mode);
+    if (!cd)
+        return;
+
+    int fresh = !cd->clear[clear_kind].is_new && !cd->clear[clear_kind].is_unlocked;
+
+    // Transition detection runs regardless of cache state so AP never misses a check.
+    if (fresh)
+        RecordCheck((u8)mode, (u8)clear_kind);
+
+    // Vanilla short-circuit: when the unlock cache is valid the store is skipped.
+    if (Checklist_IsCacheValid() != 0)
+        return;
+
+    cd->clear[clear_kind].is_new = 1;
+}
+
 // Per-mode clear_kind of the "Fill in over 100 Checklist blocks!" cell. This is a
 // real vanilla checklist checkbox the game auto-completes once the player fills over
 // 100 of that mode's boxes (see the MetaUnlock_*100 hooks below). GOAL_100_CHECKLIST
@@ -189,6 +222,26 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
     return 0;
 }
 
+// Announce a single mode's goal completion: "<Mode> goal complete!" with the
+// mode name in its mode color and the rest in GoalColor (gold). Distinct from
+// the aggregate "All Goals complete!" — this fires per mode as each is finished.
+static void AnnounceModeGoal(u8 mode)
+{
+    static const char *const mode_names[GMMODE_NUM] = {
+        [GMMODE_AIRRIDE]   = "Air Ride",
+        [GMMODE_TOPRIDE]   = "Top Ride",
+        [GMMODE_CITYTRIAL] = "City Trial",
+    };
+    if (mode >= GMMODE_NUM)
+        return;
+    TextSegment segs[2] = {
+        { mode_names[mode],   tb_api->ModeColors[mode] },
+        { " goal complete!",  tb_api->GoalColor },
+    };
+    tb_api->EnqueueSegments(segs, 2);
+    OSReport("[Check] %s goal satisfied\n", mode_names[mode]);
+}
+
 void CheckDetection_EvaluateGoal(void)
 {
     if (ap_save->goal_complete)
@@ -200,11 +253,16 @@ void CheckDetection_EvaluateGoal(void)
     // must be satisfied. If every mode is GOAL_NONE, victory never fires.
     int any_real_goal = 0;
     int all_ok = 1;
+    int newly_satisfied[GMMODE_NUM];
     for (int m = 0; m < GMMODE_NUM; m++)
     {
-        if (opt->goal[m] != GOAL_NONE)
+        APGoalKind goal = (APGoalKind)opt->goal[m];
+        int sat = goal_satisfied(goal, (u8)m, PopcountMode((u8)m), opt->checklist_amount[m]);
+        // A real goal that just flipped to satisfied and hasn't been announced.
+        newly_satisfied[m] = (goal != GOAL_NONE) && sat && !ap_save->goal_announced[m];
+        if (goal != GOAL_NONE)
             any_real_goal = 1;
-        if (!goal_satisfied((APGoalKind)opt->goal[m], (u8)m, PopcountMode((u8)m), opt->checklist_amount[m]))
+        if (!sat)
             all_ok = 0;
     }
 
@@ -212,10 +270,30 @@ void CheckDetection_EvaluateGoal(void)
     {
         ap_save->goal_complete = 1;
         ap_data->goal_complete = 1;
+        // Mark every real goal announced so the aggregate "All Goals complete!"
+        // isn't doubled by a per-mode message for the final mode.
+        for (int m = 0; m < GMMODE_NUM; m++)
+            if (opt->goal[m] != GOAL_NONE)
+                ap_save->goal_announced[m] = 1;
         OSReport("[Check] GOALS COMPLETE\n");
         tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
         Hoshi_WriteSave();
+        return;
     }
+
+    // Overall victory not reached yet: announce each mode goal that just became
+    // satisfied (once each) so the player gets feedback as they finish modes.
+    int announced = 0;
+    for (int m = 0; m < GMMODE_NUM; m++)
+    {
+        if (!newly_satisfied[m])
+            continue;
+        ap_save->goal_announced[m] = 1;
+        AnnounceModeGoal((u8)m);
+        announced = 1;
+    }
+    if (announced)
+        Hoshi_WriteSave();
 }
 
 // Process bits the client wrote into ap_data->client_backfill.
@@ -517,6 +595,10 @@ void CheckDetection_OnBoot(void)
 {
     CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlock, CheckDetection_SetNewUnlockReplacement);
 
+    // Top Ride checklist objectives commit through the "silent" variant, which
+    // bypasses SetNewUnlock entirely — replace it too or every TR check is lost.
+    CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlockSilent, CheckDetection_SetNewUnlockSilentReplacement);
+
     // Meta auto-unlock hooks inside Checklist_ProcessUnlock.
     CODEPATCH_HOOKAPPLY(0x8017efc0);  // AR 100-checklist
     CODEPATCH_HOOKAPPLY(0x8017eff8);  // TR 100-checklist
@@ -536,7 +618,10 @@ void CheckDetection_OnBoot(void)
 void CheckDetection_ResetAll(void)
 {
     for (int m = 0; m < GMMODE_NUM; m++)
+    {
         ClearSentChecksForMode((u8)m);
+        ap_save->goal_announced[m] = 0;
+    }
     ap_save->goal_complete = 0;
     ap_data->goal_complete = 0;
     ap_save->max_stats_ct_achieved = 0;
@@ -564,6 +649,7 @@ void CheckDetection_DebugForceMarkAll(void)
         ap_save->sent_checks[m][1] = hi_mask;
         ap_data->sent_checks[m][0] = lo_mask;
         ap_data->sent_checks[m][1] = hi_mask;
+        ap_save->goal_announced[m] = 1;
     }
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;

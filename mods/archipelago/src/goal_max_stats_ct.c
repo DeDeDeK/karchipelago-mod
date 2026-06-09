@@ -59,15 +59,9 @@ void GoalMaxStatsCT_On3DLoadEnd(void)
              attached, (int)ap_save->options.city_trial_patch_cap_amount);
 }
 
-// Multiplier applied to +1 patch and All-Up chance fields when the Max Stats
-// Insanity goal is active. Tuned so patches/All-Up dominate the pools without
-// fully suppressing other drops — at 8x, vanilla weights of 4-20 become
-// 32-160, well above the typical 1-10 weights of food/copy/trap entries.
-//
-// Reaching 127 on every stat in 7 min requires ~127 All-Ups collected (one
-// All-Up bumps every stat by 1). At 60fps and a 4-frame spawn floor we cap
-// around 15 items/sec — even modest All-Up dominance puts collection well
-// within reach. Dial up if play-testing shows insufficient throughput.
+// Multiplier applied to +1 patch and All-Up spawn weights while the Max Stats
+// Insanity goal is active, so patches dominate the rolls without fully
+// suppressing other drops. Sole tuning knob — raise if throughput is too low.
 #define MAX_STATS_PATCH_BIAS 8
 
 static int IsPatchOrAllUpItemKind(u8 it_kind)

@@ -2,12 +2,11 @@
 /out/
 /.temp/
 /externals/devkitpro/
-/docs/
-/.claude/
+/iso/
+/.claude/settings.local.json
+__pycache__/
 mem1.raw
 notes.txt
 kar.iso
 out.iso
-/iso/
 patch.xdelta
-__pycache__/

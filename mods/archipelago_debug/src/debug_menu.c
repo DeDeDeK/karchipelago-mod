@@ -129,7 +129,7 @@ DEF_ALL(Std, AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM,       "stadiu
 
 // Stat patches
 GIVE_FN(GiveHP,       AP_ITKIND_HP)
-GIVE_FN(GiveAccel,    AP_ITKIND_ACCEL)
+GIVE_FN(GiveBoost,    AP_ITKIND_BOOST)
 GIVE_FN(GiveTopSpd,   AP_ITKIND_TOPSPEED)
 GIVE_FN(GiveTurn,     AP_ITKIND_TURN)
 GIVE_FN(GiveCharge,   AP_ITKIND_CHARGE)
@@ -141,7 +141,7 @@ GIVE_FN(GiveAllUp,    AP_ITKIND_ALLUP)
 
 // Permanent patches
 GIVE_FN(GivePermHP,      AP_PERM_PATCH_HP)
-GIVE_FN(GivePermAccel,   AP_PERM_PATCH_ACCEL)
+GIVE_FN(GivePermBoost,   AP_PERM_PATCH_BOOST)
 GIVE_FN(GivePermTopSpd,  AP_PERM_PATCH_TOPSPEED)
 GIVE_FN(GivePermTurn,    AP_PERM_PATCH_TURN)
 GIVE_FN(GivePermCharge,  AP_PERM_PATCH_CHARGE)
@@ -154,7 +154,7 @@ GIVE_FN(GivePermAllUp,   AP_ITEM_PERM_PATCH_ALL_UP)
 // Copy abilities
 GIVE_FN(GiveCopyBomb,    AP_ITKIND_COPYBOMB)
 GIVE_FN(GiveCopyFire,    AP_ITKIND_COPYFIRE)
-GIVE_FN(GiveCopyIce,     AP_ITKIND_COPYICE)
+GIVE_FN(GiveCopyFreeze,  AP_ITKIND_COPYFREEZE)
 GIVE_FN(GiveCopySleep,   AP_ITKIND_COPYSLEEP)
 GIVE_FN(GiveCopyWheel,   AP_ITKIND_COPYTIRE)
 GIVE_FN(GiveCopyWing,    AP_ITKIND_COPYBIRD)
@@ -335,11 +335,13 @@ static int CheckDbgClearAllChecklistData(OptionDesc *self)
     return 1;
 }
 
-// When enabled (default), the Z-button debug checklist unlock also calls
-// GrantReward on the reward placed at the unlocked cell, closely simulating
-// AP item receipt for standalone testing. When disabled, only the check is
-// sent — the connected AP client delivers the item as normal.
-static int auto_grant_on_debug_unlock = 1;
+// When enabled, the Z-button debug checklist unlock also calls GrantReward on
+// the reward placed at the unlocked cell, simulating AP item receipt for
+// standalone testing with no client connected. Disabled by default: with a
+// client connected the auto-grant duplicates the client's own delivery, so the
+// reward is granted (and announced) twice. Only enable when testing the mod
+// without an AP client to deliver items.
+static int auto_grant_on_debug_unlock = 0;
 
 int DebugMenu_ShouldAutoGrantOnUnlock(void)
 {
@@ -446,7 +448,7 @@ static MenuDesc patches_menu = {
         A("Unlock All", "Unlock all patch types", PchUnlockAll),
         A("Lock All",   "Lock all patch types",   PchLockAll),
         G("Weight",    patch_state, PATCHKIND_WEIGHT,   SyncPatches),
-        G("Accel",     patch_state, PATCHKIND_ACCEL,    SyncPatches),
+        G("Boost",     patch_state, PATCHKIND_ACCEL,    SyncPatches),
         G("Top Speed", patch_state, PATCHKIND_TOPSPEED, SyncPatches),
         G("Turn",      patch_state, PATCHKIND_TURN,     SyncPatches),
         G("Charge",    patch_state, PATCHKIND_CHARGE,   SyncPatches),
@@ -486,12 +488,12 @@ static MenuDesc items_menu = {
         G("Panic Spin",     item_state, ITUNLOCK_PANICSPIN,       SyncItems),
         G("Sensor Bomb",    item_state, ITUNLOCK_SENSORBOMB,      SyncItems),
         G("Gordo",          item_state, ITUNLOCK_GORDO,           SyncItems),
-        G("Hydra Piece 1",  item_state, ITUNLOCK_HYDRA1,          SyncItems),
-        G("Hydra Piece 2",  item_state, ITUNLOCK_HYDRA2,          SyncItems),
-        G("Hydra Piece 3",  item_state, ITUNLOCK_HYDRA3,          SyncItems),
-        G("Dragoon Piece 1", item_state, ITUNLOCK_DRAGOON1,       SyncItems),
-        G("Dragoon Piece 2", item_state, ITUNLOCK_DRAGOON2,       SyncItems),
-        G("Dragoon Piece 3", item_state, ITUNLOCK_DRAGOON3,       SyncItems),
+        G("Hydra Part X",   item_state, ITUNLOCK_HYDRA1,          SyncItems),
+        G("Hydra Part Y",   item_state, ITUNLOCK_HYDRA2,          SyncItems),
+        G("Hydra Part Z",   item_state, ITUNLOCK_HYDRA3,          SyncItems),
+        G("Dragoon Part A", item_state, ITUNLOCK_DRAGOON1,       SyncItems),
+        G("Dragoon Part B", item_state, ITUNLOCK_DRAGOON2,       SyncItems),
+        G("Dragoon Part C", item_state, ITUNLOCK_DRAGOON3,       SyncItems),
     },
 };
 
@@ -615,7 +617,7 @@ static MenuDesc give_stat_patches_menu = {
     .option_num = 10,
     .options = {
         A("HP Patch",        "Give HP patch",        GiveHP),
-        A("Accel Patch",     "Give Accel patch",     GiveAccel),
+        A("Boost Patch",     "Give Boost patch",     GiveBoost),
         A("Top Speed Patch", "Give Top Speed patch", GiveTopSpd),
         A("Turn Patch",      "Give Turn patch",      GiveTurn),
         A("Charge Patch",    "Give Charge patch",    GiveCharge),
@@ -631,7 +633,7 @@ static MenuDesc give_perm_patches_menu = {
     .option_num = 10,
     .options = {
         A("Perm HP",        "Give permanent HP patch",        GivePermHP),
-        A("Perm Accel",     "Give permanent Accel patch",     GivePermAccel),
+        A("Perm Boost",     "Give permanent Boost patch",     GivePermBoost),
         A("Perm Top Speed", "Give permanent Top Speed patch", GivePermTopSpd),
         A("Perm Turn",      "Give permanent Turn patch",      GivePermTurn),
         A("Perm Charge",    "Give permanent Charge patch",    GivePermCharge),
@@ -648,7 +650,7 @@ static MenuDesc give_abilities_menu = {
     .options = {
         A("Bomb",    "Give Bomb ability",    GiveCopyBomb),
         A("Fire",    "Give Fire ability",    GiveCopyFire),
-        A("Ice",     "Give Ice ability",     GiveCopyIce),
+        A("Freeze",  "Give Freeze ability",  GiveCopyFreeze),
         A("Sleep",   "Give Sleep ability",   GiveCopySleep),
         A("Wheel",   "Give Wheel ability",   GiveCopyWheel),
         A("Wing",    "Give Wing ability",    GiveCopyWing),

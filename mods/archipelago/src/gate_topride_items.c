@@ -191,6 +191,14 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce)
     return 1;
 }
 
+int GateTopRideItems_AbilityToItem(CopyKind ability)
+{
+    for (int i = 0; i < (int)(sizeof(ability_items) / sizeof(ability_items[0])); i++)
+        if (ability_items[i].ability == ability)
+            return ability_items[i].item;
+    return -1;
+}
+
 int GateTopRideItems_GiveItem(TopRideItemKind kind)
 {
     if ((unsigned)kind >= TRITEM_NUM)

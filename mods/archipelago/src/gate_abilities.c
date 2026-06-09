@@ -392,6 +392,6 @@ int GateAbilities_UnlockAbility(CopyKind kind)
     ap_save->ability_unlocked_mask |= (1 << kind);
     OSReport("[GateAbilities] Ability %d (%s) unlocked (mask = %s)\n",
              kind, CopyKind_Names[kind], MaskBits(ap_save->ability_unlocked_mask, 16));
-    tb_api->EnqueueColoredNoun("Unlocked Ability: ", CopyKind_Names[kind], tb_api->AbilityColors[kind], NULL);
+    tb_api->EnqueueColoredNoun("Unlock Copy Ability: ", CopyKind_Names[kind], tb_api->AbilityColors[kind], NULL);
     return 1;
 }

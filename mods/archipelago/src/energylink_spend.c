@@ -38,12 +38,15 @@ static int Buy(OptionDesc *self)
     }
     ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
 
-    // Local UI feedback: decrement balance immediately. The next client
-    // SetReply push will overwrite with the authoritative server view.
-    ap_data->energy_balance -= entry->cost;
-    // Cast through s32 to avoid the s64→float libgcc call (__floatdisf).
-    // Costs are small literals (≤ 600) so this is exact.
-    EnergyLink_Withdraw((float)(s32)entry->cost);
+    // Withdraw the cost. Subtract from both the cumulative send counter (exact
+    // integer — lands immediately, so the client diffs it on its next poll in
+    // ANY scene with no flush; this is what makes menu purchases actually reach
+    // the pool) and the local balance (instant UI feedback + keeps the gate
+    // above honest). The next client set_notify push overwrites energy_balance
+    // with the authoritative server view. Both are s64 -= s64, inline on PPC32
+    // (no float, no libgcc).
+    ap_data->energy_sent_total -= entry->cost;
+    ap_data->energy_balance    -= entry->cost;
 
     OSReport("[EnergyLink] Bought '%s' (id=%d) for %lld, balance %lld\n",
              self->name, entry->item_id, entry->cost, ap_data->energy_balance);
@@ -73,7 +76,7 @@ static MenuDesc stat_patches_menu = {
     .option_num = 10,
     .options = {
         BUY(AP_ITKIND_HP,       5,  "HP Patch"),
-        BUY(AP_ITKIND_ACCEL,    5,  "Accel Patch"),
+        BUY(AP_ITKIND_BOOST,    5,  "Boost Patch"),
         BUY(AP_ITKIND_TOPSPEED, 5,  "Top Speed Patch"),
         BUY(AP_ITKIND_TURN,     5,  "Turn Patch"),
         BUY(AP_ITKIND_CHARGE,   5,  "Charge Patch"),
@@ -89,7 +92,7 @@ static MenuDesc permanent_patches_menu = {
     .option_num = 10,
     .options = {
         BUY(AP_PERM_PATCH_HP,        75,  "Perm HP"),
-        BUY(AP_PERM_PATCH_ACCEL,     75,  "Perm Accel"),
+        BUY(AP_PERM_PATCH_BOOST,     75,  "Perm Boost"),
         BUY(AP_PERM_PATCH_TOPSPEED,  75,  "Perm Top Speed"),
         BUY(AP_PERM_PATCH_TURN,      75,  "Perm Turn"),
         BUY(AP_PERM_PATCH_CHARGE,    75,  "Perm Charge"),
@@ -106,7 +109,7 @@ static MenuDesc copy_abilities_menu = {
     .options = {
         BUY(AP_ITKIND_COPYBOMB,    10, "Bomb"),
         BUY(AP_ITKIND_COPYFIRE,    10, "Fire"),
-        BUY(AP_ITKIND_COPYICE,     10, "Ice"),
+        BUY(AP_ITKIND_COPYFREEZE,  10, "Freeze"),
         BUY(AP_ITKIND_COPYSLEEP,   10, "Sleep"),
         BUY(AP_ITKIND_COPYTIRE,    10, "Wheel"),
         BUY(AP_ITKIND_COPYBIRD,    10, "Wing"),

@@ -29,10 +29,6 @@
 //   stashed archive pointer reads back as all-zeros after returning
 //   from player select). Reloading each round is cheap relative to
 //   the full stage load and avoids a dangling-pointer footgun.
-//
-// See docs/sky-backdrop-system.md for the verified ModelSection
-// layout and the gr_kind table that confirms which stage archives
-// carry usable backdrops.
 
 #include "os.h"
 #include "game.h"
@@ -98,12 +94,9 @@ static int backdrop_enabled[BACKDROP_NUM] = {
 
 static char *toggle_names[] = {"Disabled", "Enabled"};
 
-// We don't cache the loaded archive across rounds. The heap that
-// `Archive_LoadFile` allocates into is per-scene — its memory is
-// zeroed on 3D scene exit (verified empirically: a cached pointer
-// reads back as `file_size=0, data=0, flags=0` after returning from
-// player select). So we simply reload on each CT entry and let the
-// scene-exit teardown reclaim the storage. No `Archive_Free` needed.
+// Don't cache the loaded archive across rounds: Archive_LoadFile allocates into
+// the per-scene heap, which is zeroed on 3D scene exit. Reload on each CT entry;
+// scene-exit teardown reclaims it, so no Archive_Free is needed.
 
 static int PickEnabled(void)
 {

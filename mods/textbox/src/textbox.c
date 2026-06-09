@@ -167,35 +167,26 @@ static int Sis_CountGlyphs(u8 *start)
 
 // Enable (or clear) the engine's built-in typewriter on a message's Text. The
 // renderer reveals one glyph every char_delay frames on its own (paced via
-// temp.wait_countdown / text_end), so there's no per-frame work on our side —
-// see docs/sis-text-system.md "Typewriter reveal". 0 = reveal instantly.
+// temp.wait_countdown / text_end), so there's no per-frame work on our side.
+// 0 = reveal instantly.
 static void TextBox_ApplyTypewriter(TextBoxMessage *msg)
 {
     if (!msg || !msg->text)
         return;
     u16 delay = msg->typewriter_active ? msg->typewriter_dwell : 0;
 
-    // char_delay_init/space_delay_init (0x44/0x46) are the *designed* seeds, but
-    // the renderer only copies them into the live temp.char_delay/space_delay on a
-    // 0x01/0x02 SUBTEXT opcode (the sole write to temp.char_delay is Text_GXLink
-    // 0x80451cec, inside that handler). Text_AddSubtext buffers are delimited by
-    // 0x07 POS and contain NO 0x01/0x02, so that copy never fires — leaving
-    // temp.char_delay at 0, wait_countdown at 0, and every glyph revealed on frame
-    // one. So we seed the live temp fields directly; the renderer reloads them into
-    // its working registers at the top of each render (0x80451c34) and never clears
-    // them, so a single write at enqueue persists across all frames.
+    // Seed the live temp.char_delay/space_delay directly: char_delay_init is dead
+    // for Text_AddSubtext buffers (the renderer only copies it on a 0x01/0x02 SUBTEXT
+    // opcode, which these 0x07-POS-delimited buffers never contain). The renderer
+    // reloads temp each render and never clears it, so one write at enqueue persists.
     msg->text->char_delay_init  = delay;
     msg->text->space_delay_init = delay;
     msg->text->temp.char_delay  = delay;
     msg->text->temp.space_delay = delay;
 
-    // Resume the reveal from where it left off. chars_revealed is mirrored from the
-    // engine's temp.reveal_count every frame (TextBox_PerFrame), so on a scene-change
-    // rebuild a finished message stays fully shown and a mid-reveal one picks up
-    // where it was — instead of re-typing from scratch. Fresh messages set
-    // chars_revealed = 0 at enqueue. text_end is left at 0: the engine re-derives the
-    // reveal frontier on the first render from reveal_count (drawing that many glyphs
-    // as already-revealed before pausing at the next one).
+    // Resume from chars_revealed (mirrored from temp.reveal_count each frame), so a
+    // scene-change rebuild doesn't re-type finished messages. text_end stays NULL so
+    // the engine re-derives the reveal frontier from reveal_count.
     u16 revealed = msg->chars_revealed;
     if (revealed > msg->chars_total)
         revealed = msg->chars_total;
@@ -303,8 +294,8 @@ void CreateTextBox_OnSceneChange()
 
 // The renderer uses text->color.a as a global alpha modulator — TEXTCMD_COLOR
 // only updates temp.color RGB, alpha is sourced from text->color.a at init and
-// applied to every glyph in every subtext (see docs/sis-text-system.md
-// "Color Rendering Pipeline"). So fading the whole textbox = touching .a only.
+// applied to every glyph in every subtext. So fading the whole textbox =
+// touching .a only.
 // We must NOT overwrite RGB, or per-segment noun colors would all collapse to white.
 //
 // Background opacity is set independently from text alpha: bg.a sits at

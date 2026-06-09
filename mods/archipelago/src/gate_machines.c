@@ -31,12 +31,18 @@ static int IsCKindUnlocked(CharacterKind ckind)
     return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
-// Get the first unlocked MachineKind, or VCKIND_COMPACT as absolute fallback.
-static MachineKind GetFirstUnlockedMachine()
+// Get the first unlocked City-Trial-spawnable MachineKind, or VCKIND_COMPACT as
+// absolute fallback. Skips CT_SPAWN_EXCLUDED_MASK machines (Free/Steer Star,
+// transformation forms, debug wheelie kinds) so a sparse unlock state — e.g.
+// only the Top Ride Free/Steer Star unlocked — never falls back to spawning a
+// TR-only or transform machine on the City Trial field.
+static MachineKind GetFirstUnlockedCTMachine()
 {
     u32 mask = ap_save->machine_unlocked_mask;
     for (int i = 0; i < VCKIND_NUM; i++)
     {
+        if (CT_SPAWN_EXCLUDED_MASK & (1u << i))
+            continue;
         if (mask & (1 << i))
             return i;
     }
@@ -314,18 +320,10 @@ int GateMachines_TRLobbyCanStart(void)
 //   r3 != 0 → jump to 0x8002c878 (next-slot iterator, skip start)
 //
 // Register preservation: this hook lives INSIDE the function's 4-slot scan
-// loop, and the block path (r3 != 0) returns to 0x8002c878, which loops back
-// to 0x8002c4fc and recomputes `r3 = r4 + r5*68` then `lwz r0, 8(r3)`. r4
-// (slot-array base 0x8058b634, set once before the loop) and r5 (slot index)
-// are caller-saved and live across the entire loop, but the hoshi codepatch
-// trampoline saves NO registers around its `bl` to the C function. While
-// GateMachines_TRLobbyCanStart was a pure leaf it happened to leave r4/r5
-// intact; once it calls into the SFX + textbox helpers those volatiles get
-// clobbered and the loop continuation faults on the garbage base. Stash r4/r5
-// on a scratch frame in the prologue and restore them in the epilogue so the
-// loop is register-clean regardless of what the C function touches. (The
-// allow path doesn't need them — it re-fetches GameData via gmGetGlobalP at
-// 0x8002c530 — but restoring on both paths is harmless and keeps it simple.)
+// loop, whose continuation at 0x8002c878 recomputes the slot base from r4/r5.
+// Once the gate calls the SFX/textbox helpers it's no longer a leaf and
+// clobbers those caller-saved volatiles, so the prologue stashes r4/r5 on a
+// scratch frame and the epilogue restores them, keeping the loop register-clean.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002c52c,
     "stwu 1, -16(1)\n\t"
     "stw 4, 8(1)\n\t"
@@ -391,7 +389,7 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
     }
 
     if (spawnable_count == 0)
-        return GetFirstUnlockedMachine();
+        return GetFirstUnlockedCTMachine();
 
     // Reduce history size when few machines are spawnable to prevent
     // the only candidate from being excluded by its own history.
@@ -554,7 +552,7 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     MachineKind vckind = rd->starting_machine_idx;
 
     if (!(ap_save->machine_unlocked_mask & (1 << vckind)))
-        vckind = GetFirstUnlockedMachine();
+        vckind = GetFirstUnlockedCTMachine();
 
     if (vckind >= VCKIND_WHEELNORMAL)
     {
@@ -732,7 +730,7 @@ int GateMachines_UnlockMachine(MachineKind kind, int announce)
 // Returns 1 if started, 0 if in an unsupported mode or no machine to swap from.
 // City Trial only: Top Ride has no MachineData / Rider pipeline, and the
 // assembly cinematic crashes on Air Ride courses (legendary machines have no
-// AR course support — see docs/gate-machines.md).
+// AR course support).
 int GateMachines_GiveLegendaryMachine(int machine_index)
 {
     MajorKind major = Scene_GetCurrentMajor();
