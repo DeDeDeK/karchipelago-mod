@@ -12,7 +12,7 @@ The three City modes are distinct menu selections, not phases of one session. `P
 
 **City Trial Free Run (`CITYMODE_FREERUN`) is never applied** — `PermanentPatch_ShouldApply()` returns 0 for it unconditionally, regardless of any toggle. Free Run does not load the item-data tables, so the inflated stats from permanent patches would crash `Item_GetItDataPtr` when the game tries to eject patches on damage.
 
-Top Ride is not reached at all: it loads through `OnTopRideLoad` (minor `MNRKIND_19`), so `On3DLoadEnd` never fires for it. It also has no `MachineData` (see `topride-system.md`).
+Top Ride is not reached at all: it loads through `OnTopRideLoadEnd` (minor `MNRKIND_19`), so `On3DLoadEnd` never fires for it. It also has no `MachineData` (see `topride-system.md`).
 
 **Files:** `patch_item.c` / `patch_item.h` (receive + apply), `main.h` (`APSave` save data), `settings_menu.h` / `settings_menu.c` (per-mode toggles), `ap_item_handler.c` (receive routing)
 
@@ -206,7 +206,7 @@ Permanent patches flow through the replaced `Machine_GivePatch` / `Machine_GiveA
 - **City Trial (Stadium-only mode, `CITYMODE_STADIUM`):** This is a distinct menu selection (direct stadium entry). Permanent patches apply on stadium load, gated by `ct_stadium_permanent_patches_enabled`, selected via `Gm_GetCityMode()` (not `Gm_IsStadiumMode()`).
 - **City Trial (Free Run, `CITYMODE_FREERUN`):** **Never applied.** `PermanentPatch_ShouldApply()` returns 0 unconditionally — Free Run does not load item-data tables, and inflated stats would crash `Item_GetItDataPtr` on damage-driven patch ejection. The toggles do not affect this.
 - **Air Ride:** Permanent patches apply at every race start, gated by `ar_permanent_patches_enabled` (the fall-through for any non-`MJRKIND_CITY` major). The HUD stat bar does not display in Air Ride, so the boost is only felt in gameplay.
-- **Top Ride:** Not reached. Top Ride loads via `OnTopRideLoad` (minor `MNRKIND_19`), so `On3DLoadEnd` — and therefore `PermanentPatch_On3DLoadEnd()` — never fires for it. It also has a separate 2D engine with no `MachineData` or stat system, so there is nothing for `Machine_GivePatch` to modify.
+- **Top Ride:** Not reached. Top Ride loads via `OnTopRideLoadEnd` (minor `MNRKIND_19`), so `On3DLoadEnd` — and therefore `PermanentPatch_On3DLoadEnd()` — never fires for it. It also has a separate 2D engine with no `MachineData` or stat system, so there is nothing for `Machine_GivePatch` to modify.
 
 ## Stadium Consideration
 

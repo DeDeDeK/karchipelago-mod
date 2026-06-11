@@ -14,7 +14,7 @@
 // transition. Guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
 #define CHECKLIST_UNLOCK_SFX 0x10008
 
-// Meta auto-unlock checkboxes bypass ClearChecker_SetNewUnlock entirely — the
+// Meta auto-unlock checkboxes bypass ClearChecker_SetNewUnlock entirely - the
 // vanilla game sets their clear[] bytes via direct stores inside
 // Checklist_ProcessUnlock (0x8017e490), reached from Checklist_Think case 1
 // when the checklist is entered with a qualifying condition already true.
@@ -22,7 +22,7 @@
 //
 // Layout: r30 = GameClearData* (from gmGetClearcheckerTypeP), the store's
 // immediate (e.g. 148) is (0x7C + clear_kind). Each store is a single 1-byte
-// `stb` of a register holding 1 — after `bl` clobbers the volatile reg we
+// `stb` of a register holding 1 - after `bl` clobbers the volatile reg we
 // restore it in the epilogue so the trampoline's auto-re-execute writes 1.
 
 // Bit accessor for sent_checks[mode][2] u64 packing. Mode m, clear_kind k in
@@ -32,7 +32,7 @@
 // Beat King Dedede goal: CT clear_kind 0x2F
 #define KD_CLEAR_KIND 0x2F
 
-// Hydra & Dragoon goal: CT clear_kind 0x77 — the single "In one match, complete both Dragoon and
+// Hydra & Dragoon goal: CT clear_kind 0x77 - the single "In one match, complete both Dragoon and
 // Hydra!" gameplay checkbox. This is NOT the two "Unlock <machine> Parts on the Checklist!" cells
 // (0x6D/0x6E), which auto-complete from receiving the part rewards and are unrelated to this goal.
 #define HYDRA_DRAGOON_CLEAR_KIND 0x77
@@ -141,12 +141,12 @@ static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
 // ClearChecker_SetNewUnlock: each call site plays its own unlock SFX and prints
 // "ClearChecker(<clear_kind+1>)" before calling here, which only sets the
 // is_new bit. Because the primary detection path only replaces SetNewUnlock,
-// every Top Ride check was silently dropped — never added to sent_checks, never
+// every Top Ride check was silently dropped - never added to sent_checks, never
 // forwarded to the server, and TR GOAL_CHECKLIST_LIST goals (e.g. "Cross the
 // goal 20 or more times!" = TR clear_kind 0, "Compete in more than 10
 // multiplayer races!" = TR clear_kind 2) could never complete. We mirror the
 // SetNewUnlock replacement: detect the transition and record the check, then run
-// the vanilla silent body (no SFX — the caller already played it).
+// the vanilla silent body (no SFX - the caller already played it).
 static void CheckDetection_SetNewUnlockSilentReplacement(int mode, int clear_kind)
 {
     if ((unsigned)mode >= GMMODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
@@ -224,7 +224,7 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
 
 // Announce a single mode's goal completion: "<Mode> goal complete!" with the
 // mode name in its mode color and the rest in GoalColor (gold). Distinct from
-// the aggregate "All Goals complete!" — this fires per mode as each is finished.
+// the aggregate "All Goals complete!" - this fires per mode as each is finished.
 static void AnnounceModeGoal(u8 mode)
 {
     static const char *const mode_names[GMMODE_NUM] = {
@@ -352,7 +352,7 @@ static void ProcessBackfill(void)
         }
     }
 
-    // Clear the backfill field (single-writer protocol — mod consumes, then zero).
+    // Clear the backfill field (single-writer protocol - mod consumes, then zero).
     for (int m = 0; m < GMMODE_NUM; m++)
     {
         ap_data->client_backfill[m][0] = 0;
@@ -368,9 +368,9 @@ static void ProcessBackfill(void)
 }
 
 // Meta auto-unlock hooks (Checklist_ProcessUnlock 0x8017e490)
-// Thin handlers — each hook knows its (mode, clear_kind) at compile time since
+// Thin handlers - each hook knows its (mode, clear_kind) at compile time since
 // the five hook sites live at distinct code addresses. Each handler records
-// the check (RecordCheck is idempotent — no-op if the sent_checks bit is
+// the check (RecordCheck is idempotent - no-op if the sent_checks bit is
 // already set) and then decides whether to let vanilla's `stb` run.
 //
 // Return 0 → let vanilla's auto-unlock `stb` execute normally (clear[k] = 1,
@@ -402,25 +402,25 @@ META_UNLOCK_HANDLER(MetaUnlock_CityTrialHydra,   GMMODE_CITYTRIAL, 0x6E)
 // accept/return-0 path) still lands the correct value after `bl` trashed
 // volatiles. On the reject/return-1 path the clobbered `stb` is skipped and
 // control jumps directly to the function tail at `0x8017f394`, bypassing both
-// the store and the display_state update that follows it — which is the
+// the store and the display_state update that follows it - which is the
 // correct behavior when the cell is already filler-completed, because the
 // filler path already drove both.
 #define META_SKIP_EXIT 0x8017f394
 
-// 0x8017efc0: stb r4, 148(r30)   — AR: Complete 100 checkboxes (clear_kind 0x18)
+// 0x8017efc0: stb r4, 148(r30)   - AR: Complete 100 checkboxes (clear_kind 0x18)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017efc0, "", MetaUnlock_AirRide100,       "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017eff8: stb r4, 243(r30)   — TR: Complete 100 checkboxes (clear_kind 0x77)
+// 0x8017eff8: stb r4, 243(r30)   - TR: Complete 100 checkboxes (clear_kind 0x77)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017eff8, "", MetaUnlock_TopRide100,       "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017f030: stb r4, 179(r30)   — CT: Complete 100 checkboxes (clear_kind 0x37)
+// 0x8017f030: stb r4, 179(r30)   - CT: Complete 100 checkboxes (clear_kind 0x37)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f030, "", MetaUnlock_CityTrial100,     "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017f0ac: stb r0, 233(r30)   — CT: Unlock Dragoon Parts on the Checklist (clear_kind 0x6D),
+// 0x8017f0ac: stb r0, 233(r30)   - CT: Unlock Dragoon Parts on the Checklist (clear_kind 0x6D),
 // auto-completes once all three Dragoon part rewards are received. Not the goal cell (0x77).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f0ac, "", MetaUnlock_CityTrialDragoon, "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017f120: stb r0, 234(r30)   — CT: Unlock Hydra Parts on the Checklist (clear_kind 0x6E),
+// 0x8017f120: stb r0, 234(r30)   - CT: Unlock Hydra Parts on the Checklist (clear_kind 0x6E),
 // auto-completes once all three Hydra part rewards are received. Not the goal cell (0x77).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f120, "", MetaUnlock_CityTrialHydra,   "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
@@ -432,14 +432,14 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8017f120, "", MetaUnlock_CityTrialHydra,   "li
 // block exists to stop the player from cheesing auto-unlock cells by spending
 // a filler on them.
 //
-// Under our reward shuffle, that reasoning no longer holds — any of those
+// Under our reward shuffle, that reasoning no longer holds - any of those
 // cells may now hold a legitimate shuffled reward that the player should be
 // free to filler. So we remove vanilla's gate entirely and substitute a
 // goal-aware check: only reject fillers on cells that, if completed, would
 // satisfy the active mode's APGoalKind without the player actually doing the
 // underlying objective.
 //
-// GOAL_N_CHECKLIST is a count threshold with no single "goal cell" — filler'ing
+// GOAL_N_CHECKLIST is a count threshold with no single "goal cell" - filler'ing
 // any cell still costs a filler token, so there's no cheese to prevent. GOAL_NONE
 // likewise. GOAL_100_CHECKLIST binds to the per-mode "Fill in over 100 Checklist
 // blocks!" cell, and GOAL_HYDRA_AND_DRAGOON / GOAL_BEAT_KING_DEDEDE to their
@@ -465,7 +465,7 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
     {
     case GOAL_100_CHECKLIST:
     {
-        // Protect this mode's "Fill in over 100 Checklist blocks!" cell — it is the
+        // Protect this mode's "Fill in over 100 Checklist blocks!" cell - it is the
         // goal cell, so a filler on it would satisfy the goal without filling 100 boxes.
         u8 k = Fill100ClearKind(mode);
         return (k < CLEAR_KIND_NUM) && cd->grid_mapping[k] == phys_slot;
@@ -528,14 +528,14 @@ CODEPATCH_HOOKCREATE(
     0
 )
 
-// Hook site: 0x80180A64 (`lbz r3, 20(r31)` — vanilla's mode load at the top
+// Hook site: 0x80180A64 (`lbz r3, 20(r31)` - vanilla's mode load at the top
 // of the filler-eligibility block). We chose this site specifically because
 // the clobbered instruction naturally restores r3 = mode on the accept path,
 // which the downstream `bl gmGetClearcheckerTypeP` at 0x80180A9C needs.
 //
 // Prologue replays vanilla's full phys_slot computation (col = +0x18, row =
-// +0x17, phys_slot = row + col*12), stashing phys_slot in r18 — where the
-// downstream code at 0x80180AA4 expects it — because r18 is non-volatile and
+// +0x17, phys_slot = row + col*12), stashing phys_slot in r18 - where the
+// downstream code at 0x80180AA4 expects it - because r18 is non-volatile and
 // survives the `bl` into our helper. Mode goes in r3, phys_slot in r4 for
 // the C call. The call target FillerGate_IsRejected returns 1 to reject.
 //
@@ -596,7 +596,7 @@ void CheckDetection_OnBoot(void)
     CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlock, CheckDetection_SetNewUnlockReplacement);
 
     // Top Ride checklist objectives commit through the "silent" variant, which
-    // bypasses SetNewUnlock entirely — replace it too or every TR check is lost.
+    // bypasses SetNewUnlock entirely - replace it too or every TR check is lost.
     CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlockSilent, CheckDetection_SetNewUnlockSilentReplacement);
 
     // Meta auto-unlock hooks inside Checklist_ProcessUnlock.

@@ -14,7 +14,7 @@
 // vanilla CT preset table is used as base values below.
 
 const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
-    // Deep Blue — based on Night (12)
+    // Deep Blue - based on Night (12)
     // Deep ocean feel: dark blue fog, cool blue light from above
     { .base_preset = WEATHER_NIGHT,
       .fog_color = RGBA(8, 20, 40, 255),
@@ -26,7 +26,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
     },
-    // Golden Hour — based on Dusk (11)
+    // Golden Hour - based on Dusk (11)
     // Warm sunset: orange fog, deep warm light, low sun
     { .base_preset = WEATHER_DUSK,
       .fog_color = RGBA(200, 128, 48, 255),
@@ -38,7 +38,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.20f, 0.50f },
       .char_dir_lit = 1,
     },
-    // Blood Red — based on Red Vignette (15)
+    // Blood Red - based on Red Vignette (15)
     // Hellscape: intense red fog, sickly red light from above
     { .base_preset = WEATHER_RED_VIGNETTE,
       .fog_color = RGBA(96, 8, 8, 255),
@@ -50,7 +50,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 1,
     },
-    // Whiteout — based on Dense Fog (9)
+    // Whiteout - based on Dense Fog (9)
     // Blizzard: white fog, flat diffuse light, no directional source
     { .base_preset = WEATHER_DENSE_FOG,
       .fog_color = RGBA(224, 224, 232, 255),
@@ -62,7 +62,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
     },
-    // Toxic Green — based on Dark Vignette (5)
+    // Toxic Green - based on Dark Vignette (5)
     // Poisonous: dark green fog, eerie green-tinted light
     { .base_preset = WEATHER_DARK_VIGNETTE,
       .fog_color = RGBA(16, 48, 16, 255),
@@ -74,7 +74,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 0,
     },
-    // Neon — based on Dark Purple (14)
+    // Neon - based on Dark Purple (14)
     // Cyberpunk: magenta fog, vivid purple-pink light
     { .base_preset = WEATHER_DARK_PURPLE,
       .fog_color = RGBA(128, 32, 192, 255),
@@ -86,7 +86,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 0,
     },
-    // Cotton Candy — based on Pink Sky (8)
+    // Cotton Candy - based on Pink Sky (8)
     // Pink sky with contrasting teal fog, warm pink light
     { .base_preset = WEATHER_PINK_SKY,
       .fog_color = RGBA(0, 160, 160, 255),
@@ -98,7 +98,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 1,
     },
-    // Frozen Dawn — based on Blue Sky (7)
+    // Frozen Dawn - based on Blue Sky (7)
     // Yellow sky with cool blue fog, cold blue-white light
     { .base_preset = WEATHER_BLUE_SKY,
       .fog_color = RGBA(40, 60, 140, 255),
@@ -110,7 +110,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 1,
     },
-    // Void — based on Night (12)
+    // Void - based on Night (12)
     // Black sky with white fog creeping in, very dim light from below
     { .base_preset = WEATHER_NIGHT,
       .fog_color = RGBA(200, 200, 210, 255),
@@ -123,8 +123,8 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir_lit = 0,
     },
     // ---- Animated prototype presets ----
-    // Storm — base Dark Vignette. Heavy near-fog so terrain visibly hazes
-    // (KAR stage geometry doesn't read HSD light colors — fog + screen_tint
+    // Storm - base Dark Vignette. Heavy near-fog so terrain visibly hazes
+    // (KAR stage geometry doesn't read HSD light colors - fog + screen_tint
     // are the only levers that darken terrain). Lightning is a per-frame
     // fog/EFB-clear override punched in by ANIM_LIGHTNING.
     { .base_preset = WEATHER_DARK_VIGNETTE,
@@ -144,7 +144,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .anim_kind = ANIM_LIGHTNING,
       .anim_param = RGBA(255, 250, 240, 255),         // flash color
     },
-    // Aurora — base Night. Slowly cycling green/cyan/violet directional light
+    // Aurora - base Night. Slowly cycling green/cyan/violet directional light
     // overhead. Faint blue terrain tint. Exercises ANIM_AURORA + extra LOBJ +
     // terrain re-tint.
     { .base_preset = WEATHER_NIGHT,
@@ -161,7 +161,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .anim_kind = ANIM_AURORA,
       .anim_param = 0,
     },
-    // Inferno — base Red Vignette. Hot orange terrain tint, sinusoidal fog
+    // Inferno - base Red Vignette. Hot orange terrain tint, sinusoidal fog
     // pulse so the heat haze visibly breathes. Exercises ANIM_PULSE_FOG +
     // terrain re-tint.
     { .base_preset = WEATHER_RED_VIGNETTE,

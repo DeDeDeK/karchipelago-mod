@@ -92,24 +92,31 @@ A static tree of `SpendEntry { APItemId item_id; s64 cost }` (cost in integer ra
 
 | Category | Items | Cost (raw MJ) |
 |----------|-------|---------------|
-| Stat Patches | 10 | 5 each (All Up 60) |
-| Permanent Patches | 10 | 75 each (Perm All Up 600) |
-| Copy Abilities | 11 | 10 each |
-| Food | 12 | 4–20 |
-| Special Items | 5 | 20–50 |
-| Legendary Pieces | 8 | 100 each (full Dragoon/Hydra 350) |
-| City Trial Items | 7 | 20–80 |
-| City Trial Events | 16 | 60 each |
-| Top Ride Items | 22 | 10–20 |
-| Checkbox Fillers | 3 | 500 each |
-| Upgrades | 2 | 75 each (Patch Cap Increase / Spawn Rate Up) |
+| Stat Patches | 10 | 250 each (All Up 2000) |
+| Permanent Patches | 10 | 3500 each (Perm All Up 25000) |
+| Copy Abilities | 11 | 600 each |
+| Food | 12 | 200–1000 |
+| Special Items | 5 | 1000–2500 |
+| Legendary Pieces | 8 | 5000 each (full Dragoon/Hydra 17500) |
+| City Trial Items | 7 | 800–3200 |
+| City Trial Events | 16 | 2500 each |
+| Top Ride Items | 22 | 400–800 |
+| Checkbox Fillers | 3 | 50000 each |
+| Cosmetic | 2 | 500 each (Big / Small Kirby) |
+
+Prices are deliberately high: EnergyLink mints fast in City Trial (a full machine charge is worth ~5 MJ via `CHARGE_ENERGY_SCALE`, plus 1 MJ per destroyed object and 1 MJ per +1 stat patch), so a single strong round can generate very roughly 1–2k MJ and several hundred charges per round are possible. The shop is scaled to stay a meaningful sink rather than a buy-everything button. Checkbox Fillers are an extreme premium (50000) because they can complete the player's own checklist locations (a square of the player's choice) and advance the "fill N blocks" goal.
+
+**No purchasable progression.** Every code sold maps to a filler/useful/trap item — the Copy Abilities, City Trial Events, and Top Ride Items use the `*_GIVE` codes, not the progression `*_UNLOCK` codes. There is **no Upgrades category**: Patch Cap Increase is AP progression (it gates logic and can be the City Trial goal itself) so energy must never buy it, and Spawn Rate Up is excluded alongside it so no persistent run-altering upgrade can be energy-bought.
+
+**Event purchases are unlock-gated.** A City Trial Event give item can only be bought if the player has unlocked that event — `Buy` checks `ap_save->event_unlocked_mask & (1 << (item_id - AP_EVENT_BASE))` (same `EventKind` mapping as the give path in `ap_item_handler.c`). Without the bit the purchase is rejected (TextBox "Event not unlocked"), so energy can't fire an event the seed hasn't granted, keeping events in logic.
 
 Purchase flow (`Buy`):
 
-1. Reject if `balance < cost` (TextBox "Not enough energy" notification).
-2. Reject if the unprocessed queue is full (`ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS`, 512) — TextBox "Queue full".
-3. Push `item_id` onto `ap_save->unprocessed_items[]` so `APItems_PerFrame` applies it on a later frame, gated by scene/intro — same path as items received from AP.
-4. Subtract `cost` directly from both `ap_data->energy_sent_total` (the cumulative send counter — the client diffs it and forwards `-cost` to the server) and `ap_data->energy_balance` (instant UI feedback + keeps the step-1 gate honest). Both are `s64 -= s64`, inline on PPC32 — no float round-trip, no `__floatdisf`. The integer cost lands on the counter **exactly and immediately**, so the withdrawal reaches the server on the next poll regardless of scene — this is the fix for menu purchases that previously never flushed (no gameplay frame ran in the menu to drain the old mailbox). Auto-Charge's fractional spends still go through `EnergyLink_Withdraw` (counter via `EnergyLink_Emit` + balance carry); purchases take the direct integer path to avoid mixing an exact integer cost into the fractional generation carry.
+1. Reject if the item is a City Trial Event give whose `EventKind` bit is unset in `ap_save->event_unlocked_mask` (TextBox "Event not unlocked"). Non-event items skip this gate.
+2. Reject if `balance < cost` (TextBox "Not enough energy" notification).
+3. Reject if the unprocessed queue is full (`ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS`, 512) — TextBox "Queue full".
+4. Push `item_id` onto `ap_save->unprocessed_items[]` so `APItems_PerFrame` applies it on a later frame, gated by scene/intro — same path as items received from AP.
+5. Subtract `cost` directly from both `ap_data->energy_sent_total` (the cumulative send counter — the client diffs it and forwards `-cost` to the server) and `ap_data->energy_balance` (instant UI feedback + keeps the step-1 gate honest). Both are `s64 -= s64`, inline on PPC32 — no float round-trip, no `__floatdisf`. The integer cost lands on the counter **exactly and immediately**, so the withdrawal reaches the server on the next poll regardless of scene — this is the fix for menu purchases that previously never flushed (no gameplay frame ran in the menu to drain the old mailbox). Auto-Charge's fractional spends still go through `EnergyLink_Withdraw` (counter via `EnergyLink_Emit` + balance carry); purchases take the direct integer path to avoid mixing an exact integer cost into the fractional generation carry.
 
 On its next poll the AP client sees `energy_sent_total` decrease, computes the negative delta, and forwards it to the server as a tagged `Set` with `want_reply: true`, matching the `SetReply` against `pending_withdrawals[tag]` to log any under-subtraction (pool was lower than the mod thought). The mod's local balance is corrected on the next `set_notify` push regardless of whether the server clamped.
 
@@ -133,7 +140,7 @@ If the leak ever matters (cross-world energy farming concerns), add `EnergyLink_
 
 ## Top Ride
 
-Top Ride has no `RiderData`/`MachineData`, so the per-rider hook can't fire. `EnergyLink_OnTopRideLoad` creates a standalone GOBJ that walks `TopRideKirbyMgr.kirbys[0..3]` and tracks each human Kirby's `charge.charge_value` (offset 0xB4 — see `docs/topride-system.md`). Charge is the *only* energy source in Top Ride; there are no patches and no breakable objects.
+Top Ride has no `RiderData`/`MachineData`, so the per-rider hook can't fire. `EnergyLink_OnTopRideLoadEnd` creates a standalone GOBJ that walks `TopRideKirbyMgr.kirbys[0..3]` and tracks each human Kirby's `charge.charge_value` (offset 0xB4 — see `docs/topride-system.md`). Charge is the *only* energy source in Top Ride; there are no patches and no breakable objects.
 
 Human filtering uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN` (per-slot config block at `GameData[slot*9 + 0xD20]`). Iterating `mgr->kirbys[i]` directly would also pick up CPU kirbys; `kirby->start_position` (Kirby+0x0E) is a per-round shuffled grid index, **not** a CPU level. See `docs/topride-system.md` "Player Kind" section.
 
@@ -153,7 +160,7 @@ The engine only *accumulates* charge in its other branch, which runs exactly whe
 | Hook | Action |
 |------|--------|
 | `On3DLoadEnd` | `EnergyLink_On3DLoadEnd()` if toggle on — `ResetTracking(1)` then add per-rider procs at `RDPRI_HITCOLL+1`. |
-| `OnTopRideLoad` | `EnergyLink_OnTopRideLoad()` if toggle on — `ResetTracking(0)` then create standalone TR proc. |
+| `OnTopRideLoadEnd` | `EnergyLink_OnTopRideLoadEnd()` if toggle on — `ResetTracking(0)` then create standalone TR proc. |
 
 `ResetTracking` zeros all per-player snapshots. It does **not** touch `energy_sent_total` or the `energy_frac_accumulator` carry — those are the session-cumulative send channel and persist across scene loads (the channel only resets on a fresh mod boot, via the `OnBoot` `memset`). It still clears `withdraw_balance_remainder` (local display rounding for `energy_balance`, which `set_notify` overwrites anyway). Its `int` argument is the `needs_baseline` value to seed — `1` for AR/CT (defer past intro), `0` for Top Ride. Procs auto-die with their host GObj at scene exit; nothing manual to detach.
 
@@ -161,7 +168,7 @@ The engine only *accumulates* charge in its other branch, which runs exactly whe
 
 ```c
 void EnergyLink_On3DLoadEnd(void);
-void EnergyLink_OnTopRideLoad(void);
+void EnergyLink_OnTopRideLoadEnd(void);
 void EnergyLink_Withdraw(float amount);    // emit -amount into energy_sent_total (via the float carry) AND decrement ap_data->energy_balance by whole MJ (fractional carry). Auto-Charge path; purchases subtract from the counter/balance directly.
 void EnergyLink_Deposit(float amount);     // local-only balance bump (debug). Does NOT queue a server send.
 void EnergyLink_RebaseStats(int ply);      // re-snap prev_stats[ply] to current rider stats

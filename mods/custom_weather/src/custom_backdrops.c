@@ -1,4 +1,4 @@
-// Custom backdrops — random skybox selection in City Trial.
+// Custom backdrops - random skybox selection in City Trial.
 //
 // Replaces City Trial's vanilla backdrop JObj (the city horizon /
 // distant skyline subtree at GrObj+0xF4) with a backdrop carved out
@@ -12,8 +12,8 @@
 //   grdata->model_section (a ModelSection * at grdata + 0x0C) and
 //   instantiates ms.terrain and ms.backdrop as JObj trees. By
 //   overriding ms.backdrop *before* 3D_CreateStageModel reads it,
-//   the stock loader does the work for us — instantiation,
-//   JObj+0x2C scale set-up, attach to GrObj+0xF4 — using the
+//   the stock loader does the work for us - instantiation,
+//   JObj+0x2C scale set-up, attach to GrObj+0xF4 - using the
 //   donor's backdrop description.
 //
 // Selection / lifetime:
@@ -44,9 +44,9 @@
 // stock loader uses CT's own backdrop, which avoids spending heap
 // when the user just wants the base skybox in the random pool.
 //
-// "City 1" is intentionally absent — it would be a duplicate of
+// "City 1" is intentionally absent - it would be a duplicate of
 // "Vanilla" since CT's own archive *is* GrCity1Model.dat. "Simple"
-// (from the 14 MB GrSimpleModel system archive) is also skipped —
+// (from the 14 MB GrSimpleModel system archive) is also skipped -
 // its backdrop subtree is a 4 KB placeholder, almost certainly a
 // dummy that won't render anything useful in CT.
 typedef struct BackdropDef

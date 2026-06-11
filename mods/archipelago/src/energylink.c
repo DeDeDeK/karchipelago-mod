@@ -22,7 +22,7 @@ static int needs_baseline[5];
 // withdrawals (−) from all players fold in here at float precision; whenever the
 // carry crosses a whole MJ, EnergyLink_Emit commits that whole part to
 // ap_data->energy_sent_total and keeps the fractional remainder. Persists across
-// scene loads (it's pending sub-MJ energy, not per-scene state) — ResetTracking
+// scene loads (it's pending sub-MJ energy, not per-scene state) - ResetTracking
 // must not zero it; only a fresh mod boot resets the channel. See EnergyLink_Emit.
 static float energy_frac_accumulator;
 
@@ -35,15 +35,18 @@ static float withdraw_balance_remainder;
 // Scale factor for charge energy: a full 0→1 charge is worth this many energy units
 #define CHARGE_ENERGY_SCALE 5.0f
 
+// Internal: Auto-Charge fractional withdrawal. Called above its definition.
+static void EnergyLink_Withdraw(float amount);
+
 // Commit energy into the cumulative game→client counter.
 // amount: + for a deposit (generation), − for a withdrawal (spend/Auto-Charge).
 // Sub-MJ amounts accumulate in energy_frac_accumulator; whenever the carry
 // crosses a whole MJ, that whole part is committed to ap_data->energy_sent_total
 // and the remainder rolls forward. No flush gate, no slot handshake, no
-// per-frame polling — the client reads-and-diffs the counter on its own ~1s
+// per-frame polling - the client reads-and-diffs the counter on its own ~1s
 // cadence, so any number of Emits between polls collapse into one net delta.
 //
-// The cast goes through s32 deliberately — PowerPC has hardware float→s32
+// The cast goes through s32 deliberately - PowerPC has hardware float→s32
 // (fctiwz) but no float→s64 instruction, and we don't link against the libgcc
 // soft routines (__fixsfdi). The carry only ever holds small per-frame deltas
 // (well under s32 range), so the intermediate s32 is safe. The s64 += s32 on the
@@ -61,7 +64,7 @@ static void EnergyLink_Emit(float amount)
 
 // Per-frame charge-meter gain for each Auto-Charge Rate setting
 // (Slow/Medium/Fast). charge_value spans 0.0–1.0, so ~1/rate frames fill the
-// meter from empty — at 60fps that's roughly 3.0s / 1.5s / 0.75s. Auto-Charge
+// meter from empty - at 60fps that's roughly 3.0s / 1.5s / 0.75s. Auto-Charge
 // adds at most this much per frame so the meter rises steadily and stacks with
 // the player's own charging, rather than snapping straight to full.
 #define AUTOCHARGE_RATE_NUM 3
@@ -78,7 +81,7 @@ static const float AUTOCHARGE_RATES[AUTOCHARGE_RATE_NUM] = {
 //
 // The rate cap keeps the cost (gain * SCALE) well under one energy unit (max
 // ≈ 0.11), so any positive integer balance can pay for a full step. That's why
-// we only gate on balance > 0 here — none of the s64→float partial-affordability
+// we only gate on balance > 0 here - none of the s64→float partial-affordability
 // math the old fill-the-whole-deficit version needed.
 static float AutoCharge_Gain(float charge_value)
 {
@@ -117,7 +120,7 @@ static void EnergyLink_PerFrame(GOBJ *rg)
         return;
     }
 
-    // Objects destroyed (City Trial only — always 0 in Air Ride)
+    // Objects destroyed (City Trial only - always 0 in Air Ride)
     int diff = stc_playerdata[ply].objects_destroyed_num - prev_obj_destroyed[ply];
     prev_obj_destroyed[ply] = stc_playerdata[ply].objects_destroyed_num;
     if (diff > 0)
@@ -150,7 +153,7 @@ static void EnergyLink_PerFrame(GOBJ *rg)
     // avoids the round-trip through SCALE.
     //
     // Skipped for Meta Knight (VCKIND_WINGMETAKNIGHT): his Wing machine has no
-    // chargeable boost meter, so charge_value behaves as a raw speed term —
+    // chargeable boost meter, so charge_value behaves as a raw speed term -
     // pinning it at 1.0 every frame gives him a constant max-speed buff rather
     // than assisting a charge. (Dedede has a normal charge meter and is fine.)
     if (ap_menu_settings.energylink_autocharge && md && md->kind != VCKIND_WINGMETAKNIGHT)
@@ -168,7 +171,7 @@ static void EnergyLink_PerFrame(GOBJ *rg)
 }
 
 // Per-frame proc for Top Ride charge tracking.
-// Top Ride has its own player system (Kirby/Fielder) — no RiderData or MachineData.
+// Top Ride has its own player system (Kirby/Fielder) - no RiderData or MachineData.
 // Charge value is at TopRideKirby.charge.charge_value.
 static void EnergyLink_TopRidePerFrame(GOBJ *g)
 {
@@ -195,17 +198,17 @@ static void EnergyLink_TopRidePerFrame(GOBJ *g)
         // Gated on is_charging (A held) AND charge_ready, because in Top Ride
         // the engine DECAYS charge_value toward 0 every frame that A isn't held:
         // TopRide_ChargeUpdate takes its depletion branch whenever
-        // (!A_held || !charge_ready) and subtracts ~0.3/frame — far more than
+        // (!A_held || !charge_ready) and subtracts ~0.3/frame - far more than
         // our per-frame inject cap (~0.02). So injecting while the player is idle
         // is futile (the engine wipes it next frame, meter never fills). The only
-        // window where the engine ACCUMULATES — so our injection sticks and
-        // stacks — is while the player is actively charging: A held (is_charging)
+        // window where the engine ACCUMULATES - so our injection sticks and
+        // stacks - is while the player is actively charging: A held (is_charging)
         // and not in the post-release boost lockout (charge_ready). Topping up
         // there lets them reach a bigger boost with less hold time.
         //
         // Known limitation vs AR/CT: in 3D mode the engine doesn't bleed off an
         // idle charge, so the AR/CT block above (no is_charging gate) fills the
-        // meter PASSIVELY even when A isn't held. Top Ride can't — the decay
+        // meter PASSIVELY even when A isn't held. Top Ride can't - the decay
         // above makes passive fill physically impossible, so here Auto-Charge
         // only assists active charging.
         if (ap_menu_settings.energylink_autocharge && kirby->charge.is_charging && kirby->charge.charge_ready)
@@ -261,9 +264,9 @@ void EnergyLink_On3DLoadEnd()
     }
 }
 
-void EnergyLink_OnTopRideLoad()
+void EnergyLink_OnTopRideLoadEnd()
 {
-    // Top Ride has no patches or intro sequence — no baseline needed.
+    // Top Ride has no patches or intro sequence - no baseline needed.
     ResetTracking(0);
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, EnergyLink_TopRidePerFrame, 0, 0, 0, 0);
     OSReport("[EnergyLink] Active (Top Ride)\n");
@@ -278,19 +281,19 @@ void EnergyLink_OnTopRideLoad()
 // (AutoCharge_Gain) and the Buy gate both read it to decide whether energy is
 // available. If withdrawals didn't reduce it until the next push, Auto-Charge
 // would keep approving spends against a stale positive balance every frame for
-// up to ~1s — committing far more energy than the pool holds, which the client
+// up to ~1s - committing far more energy than the pool holds, which the client
 // then reports back as "withdrawal under-subtracted ... pool was lower than the
 // mod expected". Decrementing here closes that window: the gate sees the
 // balance fall in real time and stops once the locally-known pool is exhausted.
-// set_notify still overwrites with the authoritative value — it replaces rather
+// set_notify still overwrites with the authoritative value - it replaces rather
 // than subtracts, so the local decrement isn't double-counted.
 //
 // Auto-Charge spends fractional MJ per frame but energy_balance is integer raw
 // MJ, so we accumulate the fraction in withdraw_balance_remainder and commit
 // only whole MJ. amount is always positive (callers withdraw; deposits use
 // EnergyLink_Deposit), so the remainder stays in [0, 1). All casts are hardware
-// float<->s32 (fctiwz) — no s64<->float libgcc helpers.
-void EnergyLink_Withdraw(float amount)
+// float<->s32 (fctiwz) - no s64<->float libgcc helpers.
+static void EnergyLink_Withdraw(float amount)
 {
     // Send: fold the withdrawal into the cumulative counter (fractional-safe).
     EnergyLink_Emit(-amount);

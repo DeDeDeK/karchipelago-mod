@@ -1,4 +1,4 @@
-// Gravity Change — custom City Trial event
+// Gravity Change - custom City Trial event
 //
 // Modifies the stage gravity vector for the duration of the event.
 // The gravity force vector lives in GrData.stage_node->gravity_force

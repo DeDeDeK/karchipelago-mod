@@ -89,7 +89,7 @@ static int ItemKindToUnlockBit(u8 it_kind)
 
 // Per-source weights for the All-Up entry injected into spawn pools when
 // All-Up is unlocked. Tuned so All-Up appears alongside existing +1 patches in
-// each pool (rather than dominating them) — Max Stats Insanity's weight bias
+// each pool (rather than dominating them) - Max Stats Insanity's weight bias
 // runs on top of this and amplifies further. These values were chosen to match
 // the mid-range of vanilla +1 patch weights in each pool family.
 #define ALLUP_BOX_POOL_CHANCE      8
@@ -97,7 +97,7 @@ static int ItemKindToUnlockBit(u8 it_kind)
 #define ALLUP_CHANCE_DYNA          4
 
 // Ensure pool[] contains it_kind. If absent, append with `weight` (if there's
-// room). If already present, leave it alone — vanilla weight is preserved.
+// room). If already present, leave it alone - vanilla weight is preserved.
 static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
                              u8 it_kind, u8 weight)
 {
@@ -266,7 +266,7 @@ static void GateItems_FilterLegendaryPieces()
 }
 
 // Hook after LegendaryPieces_Init returns in CityItemSpawn_Init.
-// Clobbered instruction: lwz r3, 1552(r13) — restored after hook.
+// Clobbered instruction: lwz r3, 1552(r13) - restored after hook.
 CODEPATCH_HOOKCREATE(0x800ec284,
     "",
     GateItems_FilterLegendaryPieces,
@@ -286,7 +286,7 @@ static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
     int bit = ItemKindToUnlockBit(item_kind);
     if (bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit)))
     {
-        OSReport("[GateItems] Legendary piece %d (%s) locked — skipping spawn\n",
+        OSReport("[GateItems] Legendary piece %d (%s) locked - skipping spawn\n",
                  item_kind, ItemUnlockName(bit));
         return;
     }

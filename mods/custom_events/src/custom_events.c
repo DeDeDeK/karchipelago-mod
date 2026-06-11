@@ -344,14 +344,14 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
 
     if (roll < vanilla_total)
     {
-        // Vanilla event won — delegate to Gm_Roll for proper weighted selection
+        // Vanilla event won - delegate to Gm_Roll for proper weighted selection
         int result = Gm_Roll(chance_arr, count);
         OSReport("[CustomEvents] ExtendedRoll: vanilla event %d (roll=%d, vanilla=%d, custom=%d)\n",
                  result, roll, vanilla_total, custom_total);
         return result;
     }
 
-    // Custom event won — find which one
+    // Custom event won - find which one
     roll -= vanilla_total;
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
     {
@@ -365,7 +365,7 @@ static int CustomEvents_ExtendedRoll(int *chance_arr, int count)
                          kind, custom_params[i].label, vanilla_total, custom_total);
                 return -1;
             }
-            // CustomEvent_Do failed (e.g. another event active) — fall back to vanilla
+            // CustomEvent_Do failed (e.g. another event active) - fall back to vanilla
             OSReport("[CustomEvents] ExtendedRoll: custom event %d failed, falling back to vanilla\n", kind);
             return Gm_Roll(chance_arr, count);
         }
@@ -428,7 +428,7 @@ int CustomEvent_Do(int kind)
     if (custom_functions[idx].check && !custom_functions[idx].check(ev_chk))
         return 0;
 
-    // Start the event (enters state 1 — starting/siren phase)
+    // Start the event (enters state 1 - starting/siren phase)
     ev_chk->state = 1;
     ev_chk->cur_kind = kind;
     ev_chk->timer = 0;

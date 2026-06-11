@@ -12,6 +12,7 @@
 #include "deathlink.h"
 #include "city_trial_event.h"
 #include "ap_item_handler.h"
+#include "kirby_scale.h"
 #include "energylink.h"
 #include "traplink.h"
 #include "fake_patches.h"
@@ -61,7 +62,7 @@ ModDesc mod_desc = {
     .OnSceneChange = OnSceneChange,
     .OnFrameStart = OnFrameStart,
     .OnFrameEnd = OnFrameEnd,
-    .OnTopRideLoad = OnTopRideLoad,
+    .OnTopRideLoadEnd = OnTopRideLoadEnd,
 };
 
 
@@ -222,7 +223,7 @@ static void APOptions_ApplyUngatedCategories(void)
     // slots when GameData.topride_extra_unlocks is set, and that is fed by
     // TopRide_OnCourseSelect / TopRide_PreGameThink calling ClearChecker_CheckUnlocked
     // (mod-replaced to read received_checklist_rewards) for TR reward indices
-    // 8/9/10 — and GateTopRideItems_ApplyMask only ANDs (clears, never sets).
+    // 8/9/10 - and GateTopRideItems_ApplyMask only ANDs (clears, never sets).
     // So mark those three rewards received here, exactly as
     // ChecklistRewards_GrantAllCosmetic does for ungated cosmetics, so
     // CheckUnlocked returns true and the engine enables the types at course init.
@@ -235,11 +236,11 @@ static void APOptions_ApplyUngatedCategories(void)
             ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= (1ULL << ri);
 
     // Non-progression checklist rewards: unlock the whole cosmetic set at connect when ungated. Not a
-    // mask category — these unlock via the received_checklist_rewards bitfield (see checklist_rewards.c).
+    // mask category - these unlock via the received_checklist_rewards bitfield (see checklist_rewards.c).
     if (!opts->checklist_rewards_gating_enabled)
         ChecklistRewards_GrantAllCosmetic();
 
-    OSReport("[Main] Gating — machines:%d abilities:%d events:%d patches:%d items:%d boxes:%d AR-stages:%d TR-stages:%d TR-items:%d colors:%d stadiums:%d\n",
+    OSReport("[Main] Gating - machines:%d abilities:%d events:%d patches:%d items:%d boxes:%d AR-stages:%d TR-stages:%d TR-items:%d colors:%d stadiums:%d\n",
              opts->machine_gating_enabled, opts->ability_gating_enabled,
              opts->event_gating_enabled, opts->patch_gating_enabled,
              opts->item_gating_enabled, opts->box_gating_enabled,
@@ -261,7 +262,7 @@ static void APOptions_TransferToSave()
         return;
 
     // One-time transfer: copy options to save data
-    OSReport("[Main] AP client connected — transferring slot options to save data\n");
+    OSReport("[Main] AP client connected - transferring slot options to save data\n");
     memcpy(&ap_save->options, &ap_data->options, sizeof(APSlotOptions));
     ap_save->options_received = 1;
 
@@ -270,15 +271,15 @@ static void APOptions_TransferToSave()
     ap_menu_settings.energylink_enabled = ap_save->options.energy_link_enabled;
     ap_menu_settings.traplink_enabled = ap_save->options.trap_link_enabled;
     SyncLinkMenuStateToAPData();
-    OSReport("[Main] Menu toggles set — DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
+    OSReport("[Main] Menu toggles set - DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
              ap_save->options.death_link_enabled, ap_save->options.energy_link_enabled, ap_save->options.trap_link_enabled);
-    OSReport("[Main] Goals — AirRide: %d, TopRide: %d, CityTrial: %d\n",
+    OSReport("[Main] Goals - AirRide: %d, TopRide: %d, CityTrial: %d\n",
              ap_save->options.goal[GMMODE_AIRRIDE],
              ap_save->options.goal[GMMODE_TOPRIDE],
              ap_save->options.goal[GMMODE_CITYTRIAL]);
-    OSReport("[Main] CityTrial — ProgressivePatchCaps: %d (target: %d)\n",
-             ap_save->options.city_trial_progressive_patch_caps,
-             ap_save->options.city_trial_patch_cap_amount);
+    OSReport("[Main] CityTrial - PatchCap min: %d, max: %d\n",
+             ap_save->options.city_trial_patch_cap_min,
+             ap_save->options.city_trial_patch_cap_max);
     OSReport("[Main] RevealChecklists: %d\n", ap_save->options.reveal_checklists);
 
     if (ap_save->options.reveal_checklists)
@@ -304,7 +305,7 @@ void OnPlayerSelectLoad()
     // City Trial colors persist from prior sessions (no init block to hook
     // like AR/TR), so we validate here on every CSS load. Machine filtering
     // is handled inside CitySelect_CreateMachineIcons / CitySelect_InitPlayerMachines
-    // via the gate_machines hooks — no extra pass needed here.
+    // via the gate_machines hooks - no extra pass needed here.
     if (Scene_GetCurrentMinor() == MNRKIND_CITYPLYSELECT)
         GateColors_ValidateCityTrialColors();
 }
@@ -385,11 +386,14 @@ void On3DLoadEnd()
         TrapLink_On3DLoadEnd();
 
     GoalMaxStatsCT_On3DLoadEnd();
+
+    // Big / Small Kirby model scaling (always available - not an optional link).
+    KirbyScale_On3DLoadEnd();
 }
 
 // Runs after Top Ride gameplay is fully initialized.
 // Top Ride uses minor 19 (not 18), so On3DLoadEnd does not fire.
-void OnTopRideLoad()
+void OnTopRideLoadEnd()
 {
     static const char *const tr_mode_names[] = { "Race", "Time Attack", "Free Run" };
     TopRideMode tr_mode = TopRide_GetMode();
@@ -397,13 +401,16 @@ void OnTopRideLoad()
     OSReport("[Main] Top Ride gameplay loaded (mode: %s).\n", tr_mode_name);
 
     if (ap_menu_settings.energylink_enabled)
-        EnergyLink_OnTopRideLoad();
+        EnergyLink_OnTopRideLoadEnd();
 
     if (ap_menu_settings.traplink_enabled)
-        TrapLink_OnTopRideLoad();
+        TrapLink_OnTopRideLoadEnd();
 
     if (ap_menu_settings.deathlink_enabled)
-        DeathLink_OnTopRideLoad();
+        DeathLink_OnTopRideLoadEnd();
+
+    // Big / Small Kirby model scaling (always available - not an optional link).
+    KirbyScale_OnTopRideLoadEnd();
 }
 
 // Runs when pausing the match. The index of the pausing player is passed in as an argument.
@@ -434,6 +441,10 @@ void OnSceneChange()
              Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
     APItems_OnSceneChange();
+
+    // Drop Kirby model scaling back to neutral - each scene recreates the Kirby
+    // objects at model_scale 1.0, so Big / Small Kirby lasts only until here.
+    KirbyScale_OnSceneChange();
 }
 
 void OnFrameStart()

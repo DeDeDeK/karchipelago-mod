@@ -15,8 +15,8 @@
 // event archive directly.
 //
 // We read it from GrData.event_config rather than *stc_eventcheck_gobj because
-// the event GOBJ is never created when CT events are disabled in the menu —
-// CityEvent_Init bails when Gm_CheckEnemyEnabled returns 0 — but the archive
+// the event GOBJ is never created when CT events are disabled in the menu -
+// CityEvent_Init bails when Gm_CheckEnemyEnabled returns 0 - but the archive
 // is loaded unconditionally by fn_grSetupCityEventData on every City Trial
 // load, so the bgm_sky table is always available.
 static int ProcessFakeItem(GOBJ *item_gobj, void *hurt_params)

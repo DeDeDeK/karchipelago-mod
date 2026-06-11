@@ -8,7 +8,7 @@ notices and license terms are preserved below as required.
 ## HSDLib
 
 Several files under `scripts/hsd/` contain code ported from HSDLib's C#
-implementation (<https://github.com/Ploaj/HSDLib>) — most notably the
+implementation (<https://github.com/Ploaj/HSDLib>) - most notably the
 archive parser, the reachability walker, the public-symbol classifier,
 and the various GX / HSD enum tables used by the explorer and verifier.
 Affected files:

@@ -44,17 +44,21 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
     root_jobj = u32(arc.data, pp_off)
     if root_jobj == 0:
         raise SystemExit("backdrop JOBJDesc pointer is NULL")
-    print(f"  source {src_symbol}[{slot_index}] pp={pp_off:#x} -> JOBJDesc={root_jobj:#x}")
+    print(
+        f"  source {src_symbol}[{slot_index}] pp={pp_off:#x} -> JOBJDesc={root_jobj:#x}"
+    )
 
     walker = Walker(arc)
-    visited = walker.walk(root_jobj, 'JOBJDesc')
+    visited = walker.walk(root_jobj, "JOBJDesc")
     print(f"  reached {len(visited)} objects")
 
     intervals = [(off, off + sz) for off, (_, sz) in visited.items()]
     intervals = merge_intervals(intervals)
     kept_bytes = sum(e - s for s, e in intervals)
-    print(f"  kept {len(intervals)} ranges, {kept_bytes / 1024:.1f} KB total "
-          f"(source data was {len(arc.data) / 1024:.1f} KB)")
+    print(
+        f"  kept {len(intervals)} ranges, {kept_bytes / 1024:.1f} KB total "
+        f"(source data was {len(arc.data) / 1024:.1f} KB)"
+    )
 
     # Build remap: original offset -> new offset within concatenated data.
     # Layout:
@@ -73,13 +77,13 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
         # display lists, and vertex arrays. The source archive lays
         # those at 32-byte-aligned offsets inside its data section.
         # Preserve their relative alignment by making cursor mod 32
-        # match s mod 32 — so every byte inside the interval keeps
+        # match s mod 32 - so every byte inside the interval keeps
         # its source-relative alignment after the shift.
         target_mod = s & 31
         cur_mod = cursor & 31
         pad = (target_mod - cur_mod) & 31
         if pad:
-            new_data.extend(b'\0' * pad)
+            new_data.extend(b"\0" * pad)
             cursor += pad
         for o in range(s, e):
             remap[o] = cursor + (o - s)
@@ -114,24 +118,36 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
     if dropped:
         print(f"  dropped {dropped} relocs to out-of-range targets (zeroed in slop)")
 
-    name_bytes = new_symbol.encode('ascii') + b'\0'
+    name_bytes = new_symbol.encode("ascii") + b"\0"
     public_entries = [(0, 0)]
 
     data_bytes = bytes(new_data)
-    reloc_bytes = b''.join(struct.pack(">I", r) for r in new_relocs)
-    public_bytes = b''.join(struct.pack(">II", do, no) for do, no in public_entries)
+    reloc_bytes = b"".join(struct.pack(">I", r) for r in new_relocs)
+    public_bytes = b"".join(struct.pack(">II", do, no) for do, no in public_entries)
     string_bytes = name_bytes
-    file_size = HSD_HEADER + len(data_bytes) + len(reloc_bytes) \
-              + len(public_bytes) + len(string_bytes)
+    file_size = (
+        HSD_HEADER
+        + len(data_bytes)
+        + len(reloc_bytes)
+        + len(public_bytes)
+        + len(string_bytes)
+    )
     header = struct.pack(
         ">IIIII4s8x",
-        file_size, len(data_bytes), len(new_relocs), len(public_entries), 0, arc.version,
+        file_size,
+        len(data_bytes),
+        len(new_relocs),
+        len(public_entries),
+        0,
+        arc.version,
     )
     out = header + data_bytes + reloc_bytes + public_bytes + string_bytes
-    with open(output_path, 'wb') as f:
+    with open(output_path, "wb") as f:
         f.write(out)
-    print(f"  wrote {output_path} ({len(out) / 1024:.1f} KB, "
-          f"{len(out) * 100 / arc.file_size:.1f}% of source)")
+    print(
+        f"  wrote {output_path} ({len(out) / 1024:.1f} KB, "
+        f"{len(out) * 100 / arc.file_size:.1f}% of source)"
+    )
 
 
 def main(argv):
@@ -146,5 +162,5 @@ def main(argv):
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main(sys.argv))

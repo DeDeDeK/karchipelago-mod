@@ -6,7 +6,7 @@
 #include "textbox.h"
 #include "textbox_colors.h"
 
-// Hook installed at 0x80009084 — the instruction right after the `bl
+// Hook installed at 0x80009084 - the instruction right after the `bl
 // TopRide_CustomRenderer` inside TopRide_PostRenderCallback. TR's post-render
 // kicks off a second HSD_StartRender pass that overdraws the EFB after the
 // standard frame render, wiping anything the screen canvas drew. Re-issuing

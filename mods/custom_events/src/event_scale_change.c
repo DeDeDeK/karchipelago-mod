@@ -1,8 +1,8 @@
-// Scale Change — custom City Trial event. Scales the stage visuals and the
+// Scale Change - custom City Trial event. Scales the stage visuals and the
 // OOB death boundary for the event's duration.
 //
 // Two JOBJs are scaled and matrix-dirtied: the stage visual model (stage GOBJ)
-// and the backdrop/skybox JOBJ at GrObj+0xF4. Collision does NOT scale — it's
+// and the backdrop/skybox JOBJ at GrObj+0xF4. Collision does NOT scale - it's
 // pre-baked spatial data, not a JOBJ (the GetCollisionJObj helper is misnamed;
 // +0xF4 is the backdrop). OOB boundaries are the 6 AABB floats at
 // stage_node+0xCC, scaled proportionally so the kill box matches.

@@ -110,7 +110,7 @@ int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
     int result = Rider_GiveAbility(rd, kind);
 
     // Traplink send: getting sleep from an enemy/item is a natural trap.
-    // Only send on a successful grant — Rider_GiveAbility can return 0 if the
+    // Only send on a successful grant - Rider_GiveAbility can return 0 if the
     // rider is in an unable state, and we don't want to send phantom traps.
     if (result && kind == COPYKIND_SLEEP && !Ply_CheckIfCPU(rd->ply))
         TrapLink_Send(TRAPLINK_KIND_SLEEP);
@@ -163,7 +163,7 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 }
 
 // Per-slot copy ability theme. T0/T1/T2 share the same 24-slot mapping because
-// the copy ability is tied to the archive (data_index), not the tier flags —
+// the copy ability is tied to the archive (data_index), not the tier flags -
 // e.g., T1 Heat Phan-Phan is visually distinct but shares Phan-Phan's Fire
 // archive. Used to zero spawn weights for ability-themed enemies when their
 // ability is locked. The copy chance wheel is random regardless; this table is
@@ -367,7 +367,7 @@ void GateAbilities_On3DLoadEnd()
         case 2: FilterMode2(data); break;
         case 3: FilterMode1Or3(data, 0x06, 0x10, 5); break;
         default:
-            OSReport("[GateAbilities] Unknown spawn mode %d — skipping\n", mode);
+            OSReport("[GateAbilities] Unknown spawn mode %d - skipping\n", mode);
             break;
     }
 }
@@ -377,7 +377,7 @@ void GateAbilities_OnBoot()
     CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility);
     CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility);
     // NOP the Rider_MarkCopyAbilityObtained calls in randomAbility_aPress and
-    // randomAbility_autoSelect — our replacement calls it with the correct
+    // randomAbility_autoSelect - our replacement calls it with the correct
     // (possibly substituted) kind instead of the original wheel kind.
     CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
     CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained

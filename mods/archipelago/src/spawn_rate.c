@@ -9,24 +9,31 @@
 
 // Returns the effective spawn rate scale factor.
 //
-// scale = max(min_pct, 100) / 100  +  level * 0.1, capped at 5.0
+// scale = min_pct / 100  +  level * 0.1, capped at 3.0
 //
-// Floor (`spawn_rate_min`, percent) is set by the AP slot option and represents
-// the rate the player starts at before any items are received. Each Spawn Rate
-// Up item adds +10% on top. Default min is 100 (vanilla baseline).
+// `spawn_rate_min` (percent, 10-100) is the AP slot option for the rate the
+// player starts at before any items are received; values below 100 suppress
+// spawns below vanilla. Each Spawn Rate Up item adds +10% on top. A stored 0
+// means options have not been received yet (memset save default), so we fall
+// back to 100 (vanilla baseline).
 //
-// The 5.0 cap keeps both modes in a similar effective rate ceiling: CT's
-// 4-frame timer floor naturally caps spawns at ~15/sec, and at scale 5 TR's
-// per-frame spawn probability (already small in vanilla) lands in roughly the
-// same range. Without a cap, TR would saturate to "every frame spawns" while
-// CT stayed bounded by the floor.
-#define SPAWN_RATE_SCALE_MAX 5.0f
+// The 3.0 cap matches the AP `spawn_rate_max` option ceiling (300%): the world
+// never seeds enough Spawn Rate Up items to push scale past 3x, so this is the
+// backstop that keeps item density bounded if a malformed save ever reports a
+// higher level. Keeping spawns at or below 3x avoids the excessive-item flood
+// the higher rates produced.
+#define SPAWN_RATE_SCALE_MAX 3.0f
 
 static float SpawnRate_GetScale()
 {
     u32 min_pct = ap_save->options.spawn_rate_min;
-    if (min_pct < 100)
+    // 0 = options not yet received -> vanilla baseline. Otherwise honor the AP
+    // option down to its 10% minimum; the < 10 guard also keeps the scale
+    // strictly positive so the divisions below never divide by zero.
+    if (min_pct == 0)
         min_pct = 100;
+    else if (min_pct < 10)
+        min_pct = 10;
     float scale = (float)min_pct / 100.0f + (float)ap_save->spawn_rate_level * 0.1f;
     if (scale > SPAWN_RATE_SCALE_MAX)
         scale = SPAWN_RATE_SCALE_MAX;
@@ -53,7 +60,7 @@ int SpawnRate_ScaleCTTimer(int timer)
 
 // Hook at 0x800ea8b0: first timer store site in CityItemSpawn_UpdateAndCheckToSpawn.
 // At this point r0 = new timer value, next instruction is stw r0, 44(r3).
-// Clobbered: lwz r3, 1552(r13)   (reloads grBoxGeneInfo* — exactly what we need)
+// Clobbered: lwz r3, 1552(r13)   (reloads grBoxGeneInfo* - exactly what we need)
 CODEPATCH_HOOKCREATE(0x800ea8b0,
     "mr 3, 0\n\t",
     SpawnRate_ScaleCTTimer,
@@ -73,7 +80,7 @@ CODEPATCH_HOOKCREATE(0x800ea990,
 // City Trial: Scale the simultaneous-item cap up.
 //
 // Without this, faster spawning is throttled once the item count reaches the
-// vanilla cap — items just churn faster, density doesn't grow. The vanilla cap
+// vanilla cap - items just churn faster, density doesn't grow. The vanilla cap
 // is `ItemFallDesc.item_max`, compared against `grBoxGeneInfo.cur_num_items`
 // in CityItemSpawn_UpdateAndCheckToSpawn:
 //
@@ -93,6 +100,11 @@ CODEPATCH_HOOKCREATE(0x800ea990,
 int SpawnRate_CTCapReached(int cur_num, int cap)
 {
     int scaled_cap = (int)((float)cap * SpawnRate_GetScale());
+    // Only ever scale the cap up: it exists so faster spawning can build density.
+    // For sub-vanilla rates (scale < 1) the slower timer already suppresses spawns,
+    // and a down-scaled cap could truncate to 0 and block spawning entirely.
+    if (scaled_cap < cap)
+        scaled_cap = cap;
     return cur_num >= scaled_cap;
 }
 

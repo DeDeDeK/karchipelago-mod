@@ -8,7 +8,7 @@ Deathlink synchronizes deaths between players in a multiworld. When enabled, dyi
 
 **Top Ride uses the sand-pit enemy as the death proxy.** TR has no rider/machine/HP/fall-death system, so the AR/CT send hooks (`Rider_CheckToDieOnMachine`, `Machine_SetFallDead`) do not fire there. Instead, TR send fires when a human kirby gets swallowed by the sand-pit enemy on the SAND course and spit back out. See "Top Ride Send" below.
 
-Receive is wired separately via `DeathLink_OnTopRideLoad` (called from `OnTopRideLoad` since TR uses minor 19, not 18, so `On3DLoadEnd` does not fire). The TR receive path picks one random damage state from {Press, Freeze, Numb, Confuse} and applies that same state to all human kirbys — see "Top Ride Receive" below.
+Receive is wired separately via `DeathLink_OnTopRideLoadEnd` (called from `OnTopRideLoadEnd` since TR uses minor 19, not 18, so `On3DLoadEnd` does not fire). The TR receive path picks one random damage state from {Press, Freeze, Numb, Confuse} and applies that same state to all human kirbys — see "Top Ride Receive" below.
 
 ## Sending Deaths
 
@@ -197,7 +197,7 @@ Several other terrain-driven damage states were investigated and excluded:
 
 ## Top Ride Receive
 
-`DeathLink_TopRidePerFrame` runs as a GObj update function created by `DeathLink_OnTopRideLoad` (called from `main.c::OnTopRideLoad`). On `deathlink_receive == 1` (and once `round_state == 2`), it picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)`, then applies that **same** state to every human kirby — it iterates `mgr->kirbys[0..3]`, filters humans via `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`, and calls the chosen state wrapper on each. It finishes by enqueuing a "Deathlink received!" textbox and clearing `deathlink_receive`.
+`DeathLink_TopRidePerFrame` runs as a GObj update function created by `DeathLink_OnTopRideLoadEnd` (called from `main.c::OnTopRideLoadEnd`). On `deathlink_receive == 1` (and once `round_state == 2`), it picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)`, then applies that **same** state to every human kirby — it iterates `mgr->kirbys[0..3]`, filters humans via `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`, and calls the chosen state wrapper on each. It finishes by enqueuing a "Deathlink received!" textbox and clearing `deathlink_receive`.
 
 This replaces the AR/CT kill path entirely: Top Ride has no rider/machine/HP/fall-death system, so there is nothing to zero or to fall off of. A damage state is the closest analog to "death".
 

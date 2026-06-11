@@ -497,6 +497,13 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_CHICKIE,               // TRITEM_CHICKIE
     AP_TOPRIDE_ITEM_GIVE_PARTY_BALL,            // TRITEM_PARTY_BALL - ushiroyurerun variant; canonical Party Ball AP give
 
+    // Cosmetic all-mode filler (972-973). Scale the player's Kirby model on
+    // receipt, applied live in City Trial, Air Ride, and Top Ride, and reset
+    // on scene change. Not an unlock and not gated, so they carry no game-enum
+    // alignment. Must match the APWorld's BIG_KIRBY / SMALL_KIRBY item codes.
+    AP_ITEM_BIG_KIRBY = 972,                    // grow Kirby's model
+    AP_ITEM_SMALL_KIRBY,                        // shrink Kirby's model
+
 } APItemId;
 
 // Archipelago-defined unlock kinds whose bit indices live in the masks below
@@ -600,7 +607,7 @@ typedef struct ArchipelagoAPI
 
     // Debug-only operations. These touch internal AP state (clearchecker
     // flags, sticky goal bits, ArchipelagoData side-channel fields) that
-    // doesn't decompose into clean primitives — they're stable hooks
+    // doesn't decompose into clean primitives - they're stable hooks
     // exposed so the debug mod doesn't have to reimplement them.
 
     // Reveal every checkbox in every mode (visual-only).

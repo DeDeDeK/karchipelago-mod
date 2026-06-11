@@ -7,7 +7,7 @@ description: >
     - Dump a struct region from the live process (RiderData, GameData, etc.)
     - Poke a value to test behavior without rebuilding
     - Resolve a `GKYE01.map` symbol to its current runtime value
-    Requires Dolphin to be running with active emulation. Pairs with manual debugging (breakpoints, frame advance) — does not replace it.
+    Requires Dolphin to be running with active emulation. Pairs with manual debugging (breakpoints, frame advance) - does not replace it.
 ---
 
 # dolphin-memory Skill
@@ -44,7 +44,7 @@ dme.un_hook()                           # detach (optional; process exit detache
 
 `assert_hooked()` raises `RuntimeError("not hooked")` if not currently attached. The read/write functions call this internally, so an unhooked operation raises rather than silently failing.
 
-If `hook()` succeeds but `is_hooked()` is still false, surface the status explicitly to the user — usually means Dolphin is running but no game is loaded (`noEmu`).
+If `hook()` succeeds but `is_hooked()` is still false, surface the status explicitly to the user - usually means Dolphin is running but no game is loaded (`noEmu`).
 
 ## Complete API Reference
 
@@ -66,7 +66,7 @@ All addresses are **console addresses** (the GameCube virtual address space, e.g
 | `read_word(addr) -> int` | `uint32` | byte-swapped to host order |
 | `read_float(addr) -> float` | `float32` | byte-swapped |
 | `read_double(addr) -> float` | `float64` | byte-swapped |
-| `read_bytes(addr, size) -> bytes` | raw bytes | **NOT byte-swapped** — exact GameCube big-endian memory |
+| `read_bytes(addr, size) -> bytes` | raw bytes | **NOT byte-swapped** - exact GameCube big-endian memory |
 
 ### Writing
 | Function | Notes |
@@ -75,7 +75,7 @@ All addresses are **console addresses** (the GameCube virtual address space, e.g
 | `write_word(addr, value)` | byte-swapped to GC order |
 | `write_float(addr, value)` | byte-swapped |
 | `write_double(addr, value)` | byte-swapped |
-| `write_bytes(addr, bytes)` | **NOT byte-swapped** — caller supplies big-endian buffer |
+| `write_bytes(addr, bytes)` | **NOT byte-swapped** - caller supplies big-endian buffer |
 
 ### Pointer Chains
 ```python
@@ -110,7 +110,7 @@ import struct
 
 ## Resolving Symbols from `GKYE01.map`
 
-The map format is `<addr> <size> <addr2> <flag> <name>` (5 columns, addr/size in hex without `0x`). Symbols can be functions or data globals — for r13-relative SDA globals, the absolute address is what's in the map.
+The map format is `<addr> <size> <addr2> <flag> <name>` (5 columns, addr/size in hex without `0x`). Symbols can be functions or data globals - for r13-relative SDA globals, the absolute address is what's in the map.
 
 Lookup helper:
 
@@ -164,7 +164,7 @@ def dump_riderdata(base: int):
 
 `struct` format chars on big-endian (`>`): `B`/`b` = u8/s8, `H`/`h` = u16/s16, `I`/`i` = u32/s32, `Q`/`q` = u64/s64, `f` = float, `d` = double.
 
-When dumping a region that you'll later compare against `mem1.raw`, remember `mem1.raw` is the **vanilla menu snapshot** — heap layout will differ. Map-resolved globals are stable; runtime allocations are not.
+When dumping a region that you'll later compare against `mem1.raw`, remember `mem1.raw` is the **vanilla menu snapshot** - heap layout will differ. Map-resolved globals are stable; runtime allocations are not.
 
 ### Watch loop (poll for changes)
 
@@ -182,7 +182,7 @@ while True:
     time.sleep(0.05)                          # 20 Hz
 ```
 
-Keep poll intervals at ≥16 ms (60 Hz) — anything faster duplicates reads of the same frame and burns CPU. Use `try/except KeyboardInterrupt` so the user can stop the loop cleanly.
+Keep poll intervals at ≥16 ms (60 Hz) - anything faster duplicates reads of the same frame and burns CPU. Use `try/except KeyboardInterrupt` so the user can stop the loop cleanly.
 
 ### Poke a value (write test)
 
@@ -208,7 +208,7 @@ The semantics of `follow_pointers` are: for each offset, dereference the *curren
 ## Common Pitfalls
 
 - **Forgetting to hook**: every read/write calls `assert_hooked` and raises `RuntimeError("not hooked")`. Call `dme.hook()` first.
-- **Dolphin not running / no game loaded**: `get_status()` returns `notRunning` or `noEmu`. Surface this clearly to the user — don't pretend to read.
+- **Dolphin not running / no game loaded**: `get_status()` returns `notRunning` or `noEmu`. Surface this clearly to the user - don't pretend to read.
 - **Using `read_bytes` and expecting host-endian ints**: `read_bytes` is raw GC big-endian. Use `struct.unpack(">...")` or `int.from_bytes(..., "big")`.
 - **Confusing `mem1.raw` with live state**: `scripts/mem1.raw` is the *vanilla menu snapshot*. If the user asks "what is X right now", use this skill, not the dump. Use `mem1.raw` for static analysis (vtables, code patterns) only.
 - **Hard-coded heap addresses across runs**: addresses for allocator-backed objects can shift between sessions. Re-resolve from map symbols or pointer chains rather than baking ephemeral addresses into scripts.
@@ -220,6 +220,6 @@ The user controls Dolphin: breakpoints, frame advance, save/load states, watchpo
 
 - While the game is **paused at a breakpoint**, you can inspect arbitrary memory without disturbing state.
 - While the game is **running**, you can poll values to capture transient behavior.
-- **Writes are intrusive** — they can trip user-set watchpoints, corrupt a repro the user is capturing, or desync the game from a save state. Confirm before writing during an active session.
+- **Writes are intrusive** - they can trip user-set watchpoints, corrupt a repro the user is capturing, or desync the game from a save state. Confirm before writing during an active session.
 
 If the user is iterating on a fix, prefer reads + suggesting code changes over writing memory to mask a bug.

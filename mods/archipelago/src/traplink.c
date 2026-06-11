@@ -41,7 +41,7 @@ void TrapLink_Send(TrapLinkKind kind)
         return;
     if (recv_suppress_frames > 0)
     {
-        OSReport("[TrapLink] Suppressing send (kind %d) — within receive guard window\n", kind);
+        OSReport("[TrapLink] Suppressing send (kind %d) - within receive guard window\n", kind);
         return;
     }
 
@@ -171,7 +171,7 @@ static int ApplyAirRideTrap(void)
 // other players; only items whose dispatcher installs a self-debuff state
 // belong here.
 //
-//   TRITEM_SPEED_DOWN — installs KirbySpeedDown (state ID 18, AC_RUN_LOOP
+//   TRITEM_SPEED_DOWN - installs KirbySpeedDown (state ID 18, AC_RUN_LOOP
 //                       with reduced speed_factor). Reliable trap.
 //
 // TRITEM_PARTY_BALL was tried but its 0x802d9188 dispatcher only resets to
@@ -227,7 +227,7 @@ static void TrapLink_PerFrame(GOBJ *g)
             }
             else if (Gm_IsStadiumMode())
             {
-                OSReport("[TrapLink] Stadium — falling back to sleep ability trap.\n");
+                OSReport("[TrapLink] Stadium - falling back to sleep ability trap.\n");
                 handled = ApplyAirRideTrap();
             }
             else
@@ -259,7 +259,7 @@ void TrapLink_On3DLoadEnd()
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
 }
 
-void TrapLink_OnTopRideLoad()
+void TrapLink_OnTopRideLoadEnd()
 {
     OSReport("[TrapLink] Active (Top Ride)\n");
     recv_suppress_frames = 0;
@@ -317,7 +317,7 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
     // The absorber's position and the TopRideKirby's charge-component
     // position should coincide while the kirby is in pickup range of an
     // item. Find the kirby whose charge position is closest to the
-    // absorber position that just absorbed — that's the one that picked up.
+    // absorber position that just absorbed - that's the one that picked up.
     int closest = -1;
     float closest_dist = 1.0e30f;
     for (int i = 0; i < 4; i++)
@@ -341,7 +341,7 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
 
     TopRideKirby *picker = mgr->kirbys[closest];
     if (TopRide_GetPlayerKind(picker->player_slot) != TR_PKIND_HMN)
-        return; // CPU picked it up — don't send
+        return; // CPU picked it up - don't send
 
     OSReport("[TrapLink] TR ply %d picked up bad item %d\n", closest, item_kind);
     TrapLink_Send(TRAPLINK_KIND_SPEED_DOWN);

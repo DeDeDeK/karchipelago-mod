@@ -7,7 +7,7 @@
 #include "item.h"
 #include "game.h"
 
-// Per-noun text colors. RGB only — alpha is set per-frame by the textbox
+// Per-noun text colors. RGB only - alpha is set per-frame by the textbox
 // lifetime/fade machinery. These are the canonical palette; the cross-mod
 // API (textbox_api.h) re-exports them by value through TextBoxAPI fields.
 

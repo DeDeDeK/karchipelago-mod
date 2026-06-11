@@ -12,13 +12,13 @@ void CheckDetection_OnSaveLoaded(void);
 // Call from OnFrameStart.
 void CheckDetection_OnFrameStart(void);
 
-// Re-run goal evaluation. Idempotent and sticky — once goal_complete is set,
+// Re-run goal evaluation. Idempotent and sticky - once goal_complete is set,
 // further calls are no-ops. Used by external state changes (e.g. max-stats CT
 // detection) that flip a goal-relevant save bit outside the sent_checks flow.
 void CheckDetection_EvaluateGoal(void);
 
 // Reset all sent_checks + goal_complete in both save and shared-memory mirror.
-// Does NOT persist or re-evaluate goal — caller owns those.
+// Does NOT persist or re-evaluate goal - caller owns those.
 void CheckDetection_ResetAll(void);
 
 // Debug menu helpers.

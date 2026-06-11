@@ -8,45 +8,56 @@
 #include "os.h"
 #include "textbox_api.h"
 
-// Cap-progression starting value when progressive patch caps are on.
-// Player starts able to hold 1 of each stat; Patch Cap Increase items grow
-// the cap toward city_trial_patch_cap_amount (the per-slot target).
-#define PATCH_CAP_PROGRESSIVE_START 1
-
-// Returns the per-slot target patch cap chosen via the YAML option. This is
+// Returns the per-slot patch cap ceiling chosen via the YAML option. This is
 // both the ceiling that PatchCap_GetCap clamps to and the threshold the Max
 // Stats goal compares stats against. Clamped to PATCH_STAT_MAX so a malformed
-// option value can never exceed the PowerPC hardware ceiling.
-static int PatchCap_GetTarget()
+// option value can never exceed the PowerPC hardware ceiling. A stored 0 means
+// options have not been received yet (memset save default), so it maps to the
+// hardware ceiling - an uncapped vanilla baseline until the real value arrives.
+static int PatchCap_GetMax()
 {
-    int t = (int)ap_save->options.city_trial_patch_cap_amount;
+    int t = (int)ap_save->options.city_trial_patch_cap_max;
     if (t <= 0) t = PATCH_STAT_MAX;
     if (t > PATCH_STAT_MAX) t = PATCH_STAT_MAX;
     return t;
 }
 
-// Returns the current patch cap value.
-// When progressive patch caps are off, returns the target (player has full
-// cap from the start). When progressive patch caps are on, returns
-// PATCH_CAP_PROGRESSIVE_START + items received, clamped to the target.
+// Returns the current effective patch cap: the player starts at
+// city_trial_patch_cap_min and each Patch Cap Increase item adds one, clamped
+// to the max. min == max yields a flat cap (no Patch Cap Increase items exist).
+// A stored min of 0 means options have not been received yet, so we fall back
+// to the (also-uncapped) max - vanilla behavior until the real options arrive.
 static int PatchCap_GetCap()
 {
-    int target = PatchCap_GetTarget();
-    if (!ap_save->options.city_trial_progressive_patch_caps)
-        return target;
-    int cap = PATCH_CAP_PROGRESSIVE_START + (int)ap_save->patch_cap_count;
-    if (cap > target)
-        cap = target;
+    int min = (int)ap_save->options.city_trial_patch_cap_min;
+    int max = PatchCap_GetMax();
+    if (min == 0)
+        return max;
+    int cap = min + (int)ap_save->patch_cap_count;
+    if (cap > max)
+        cap = max;
     return cap;
 }
 
-// Clamp a positive delta so the stat does not exceed the patch cap.
+// City Trial stats spawn at -2, except HP which spawns at 0. The cap counts
+// patches collected, which is (value - start), so keeping this baseline in one
+// place lets the clamp ceiling and the Max Stats goal use the same per-stat
+// reference.
+float PatchCap_GetStatStart(int kind)
+{
+    return (kind == PATCHKIND_HP) ? 0.0f : -2.0f;
+}
+
+// Clamp a positive delta so the stat does not exceed the patch cap. The cap is
+// measured in patches, and a stat holds (value - start) patches, so the raw
+// ceiling is start + cap. This keeps the number of patches each stat can hold
+// uniform across all nine despite their differing start values.
 // Negative deltas (stat-down patches) are passed through unchanged.
-static int PatchCap_ClampDelta(float current, int delta)
+static int PatchCap_ClampDelta(int kind, float current, int delta)
 {
     if (delta <= 0) return delta;
     int cap = PatchCap_GetCap();
-    float room = (float)cap - current;
+    float room = (PatchCap_GetStatStart(kind) + (float)cap) - current;
     if (room <= 0.0f) return 0;
     if ((float)delta > room) return (int)room;
     return delta;
@@ -57,7 +68,7 @@ static int PatchCap_ClampDelta(float current, int delta)
 // then performs the original function's logic.
 void PatchCap_GivePatch(MachineData *md, PatchKind kind, int num)
 {
-    num = PatchCap_ClampDelta(md->stats.values[kind], num);
+    num = PatchCap_ClampDelta(kind, md->stats.values[kind], num);
     Machine_ApplyStatClamped(md->stats.values, kind, num);
     Machine_UpdateAppearance(md);
     if ((s8)md->xc38 >= 0)
@@ -73,7 +84,7 @@ void PatchCap_GiveAllUp(MachineData *md, int num)
     // Apply individually capped deltas per stat
     for (int i = 0; i < PATCHKIND_NUM; i++)
     {
-        int capped = PatchCap_ClampDelta(md->stats.values[i], num);
+        int capped = PatchCap_ClampDelta(i, md->stats.values[i], num);
         Machine_ApplyStatClamped(md->stats.values, i, capped);
     }
 
@@ -96,13 +107,13 @@ void PatchCap_GiveAllUp(MachineData *md, int num)
 }
 
 // Replacement for Patch_GetMaxValue.
-// Returns the per-slot target so HUD attribute normalization scales to the
+// Returns the per-slot ceiling so HUD attribute normalization scales to the
 // full reachable range. Internal stat-up clamping is handled separately by
 // PatchCap_ClampDelta against PatchCap_GetCap (the current effective cap),
-// so returning the target here doesn't let stats grow past current cap.
+// so returning the ceiling here doesn't let stats grow past current cap.
 int PatchCap_GetMaxValue()
 {
-    return PatchCap_GetTarget();
+    return PatchCap_GetMax();
 }
 
 // Increment the patch cap by 1.
@@ -110,10 +121,10 @@ void PatchCap_Increment()
 {
     ap_save->patch_cap_count++;
     int cap = PatchCap_GetCap();
-    int target = PatchCap_GetTarget();
-    OSReport("[PatchCap] Patch cap increased to %d (target %d).\n", cap, target);
+    int max = PatchCap_GetMax();
+    OSReport("[PatchCap] Patch cap increased to %d (max %d).\n", cap, max);
     tb_api->EnqueueColoredNounFmt(NULL, "Patch cap", tb_api->PatchColors[PATCHKIND_CHARGE],
-                                  " increased! (%d/%d)", cap, target);
+                                  " increased! (%d/%d)", cap, max);
 }
 
 // Apply Machine_GivePatch and Machine_GiveAllUp hooks. Call from OnBoot.

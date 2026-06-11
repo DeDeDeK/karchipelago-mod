@@ -10,7 +10,7 @@
 // Called from the hook at 0x800ede24 in CityEvent_Decide.
 // At this point, the local chance array on the stack has been populated from the
 // weights table but history adjustments have not yet been applied.
-// Zeroing out locked events before history adjustment is correct — if an event
+// Zeroing out locked events before history adjustment is correct - if an event
 // is locked, we don't care about its history weight.
 //
 // chance_arr: pointer to the 16-entry int array of event chances (sp+0x08).

@@ -15,7 +15,7 @@ typedef enum
 } TrapLinkKind;
 
 void TrapLink_On3DLoadEnd();
-void TrapLink_OnTopRideLoad();
+void TrapLink_OnTopRideLoadEnd();
 void TrapLink_OnBoot();
 void TrapLink_Send(TrapLinkKind kind);
 

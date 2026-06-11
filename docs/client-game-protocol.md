@@ -537,7 +537,7 @@ Victory fires only if at least one mode has a non-NONE goal AND every mode's goa
 
 - **Detecting death**: Three code hooks set `deathlink_send = 1` when any human player dies — one inside `Rider_CheckToDieOnMachine` (`0x801a06d0`) for HP-zero deaths, one inside `Machine_SetFallDead` (`0x801e6540`) for fall-off-course deaths, and one in the Top Ride sand-pit death path (`0x80331a94`).
 - **Applying death (3D modes)**: A per-frame GOBJ checks `deathlink_receive` (gated on `GmIntroState == GMINTRO_END`). When `1`, it kills every human player using the right mechanism for the current mode — HP-zeroing in City Trial / Destruction Derby / Melee / Vs. King Dedede, fall-off-course death (via `Machine_SetFallDead` at the player's current checkpoint) in Air Ride and the racing stadiums. Clears the flag to `0` after.
-- **Top Ride is active**: Top Ride has its own DeathLink path (`DeathLink_OnTopRideLoad` installs `DeathLink_TopRidePerFrame`). On receive it applies a random damage-class Kirby state (Press / Freeze / Numb / Confuse) to every human Kirby and clears the flag; on the sand-pit death hook it sends. The TR receive path is **not** gated on `GmIntroState` (Top Ride has no intro countdown).
+- **Top Ride is active**: Top Ride has its own DeathLink path (`DeathLink_OnTopRideLoadEnd` installs `DeathLink_TopRidePerFrame`). On receive it applies a random damage-class Kirby state (Press / Freeze / Numb / Confuse) to every human Kirby and clears the flag; on the sand-pit death hook it sends. The TR receive path is **not** gated on `GmIntroState` (Top Ride has no intro countdown).
 
 ## EnergyLink
 

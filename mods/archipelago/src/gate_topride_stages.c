@@ -55,11 +55,11 @@ static void AdjustCursorToUnlocked(void)
 // Returns 0 = allow (run the vanilla launch test), 1 = block (locked + pressed).
 //
 // IMPORTANT: this hook sits on the per-frame input-dispatch instruction, so it
-// runs EVERY frame — not only when A is pressed. The cursor can only ever rest
+// runs EVERY frame - not only when A is pressed. The cursor can only ever rest
 // on a locked course when ALL courses are locked (the skip-cursor in Hook 2 has
 // nowhere selectable to move to, so it leaves the cursor put). In that state we
 // still want the player to be able to hover the locked course; pressing A just
-// shouldn't launch — and should explain why.
+// shouldn't launch - and should explain why.
 //
 // `launch_buttons` (passed in from r7 by the prologue) is the combined launch
 // button word; 0x1160 is the same A/Start rising-edge mask the clobbered
@@ -92,7 +92,7 @@ static int GateTopRideStages_CourseSelectCanLaunch(u32 launch_buttons)
 }
 
 // Register preservation: the block path (r3 != 0) branches to 0x8003cc18, the
-// D-pad movement handler, which reads `r5 & 0x3000C` at 0x8003cc24 — r5 holds
+// D-pad movement handler, which reads `r5 & 0x3000C` at 0x8003cc24 - r5 holds
 // the combined controller direction bits and is caller-saved. The allow path
 // re-executes the clobbered `andi. r0, r7, 0x1160`, so r7 must survive too.
 // The hoshi codepatch trampoline saves no registers around its `bl`, so both
@@ -135,7 +135,7 @@ CODEPATCH_HOOKCREATE(
 // bitmask (topride_course_select.used_history_mask), with no unlock check. Our replacement picks only from
 // courses that are both unlocked AND not in the used history. If all unlocked courses
 // are used, it resets the used bits for unlocked courses so the cycle can restart.
-// The vanilla loop at 0x8003c7a0 re-checks the used mask after we return — since we
+// The vanilla loop at 0x8003c7a0 re-checks the used mask after we return - since we
 // already ensured the pick isn't used, it won't re-roll.
 static int GateTopRideStages_RandomPick(int unused)
 {
@@ -155,7 +155,7 @@ static int GateTopRideStages_RandomPick(int unused)
             candidates[count++] = i;
     }
 
-    // All unlocked courses are used — reset used bits for unlocked courses
+    // All unlocked courses are used - reset used bits for unlocked courses
     if (count == 0)
     {
         *used_ptr = used & ~unlock;
@@ -189,7 +189,7 @@ void GateTopRideStages_OnBoot()
     // 1) TopRide_CourseSelectRandomInit (0x8003c798): called on scene init
     //    when random was previously selected.
     // 2) TopRide_CourseSelectThink (0x8003cac0): called inline when A is
-    //    pressed on the random button — this is the main random path.
+    //    pressed on the random button - this is the main random path.
     CODEPATCH_REPLACECALL(0x8003c798, GateTopRideStages_RandomPick);
     CODEPATCH_REPLACECALL(0x8003cac0, GateTopRideStages_RandomPick);
 

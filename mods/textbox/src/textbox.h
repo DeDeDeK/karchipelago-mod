@@ -26,7 +26,7 @@ typedef struct TextBoxMessage
     u8 segment_count;
     // Dual-purpose: seeds the peak text alpha at creation (messages top out at
     // 200/255, not fully opaque) and then counts down to 0 as the fade-out
-    // timer — so peak opacity and fade length are both tied to the initial 200.
+    // timer - so peak opacity and fade length are both tied to the initial 200.
     uint lifetime;
     Vec2 scale;
     Text *text;
@@ -82,7 +82,7 @@ void CreateTextBox_OnSceneChange();
 
 // Re-issues the screen canvas's render pass. Called from a hook installed
 // after TopRide_CustomRenderer so the textbox isn't wiped by TR's post-render
-// HSD_StartRender second pass — see textbox.c for details.
+// HSD_StartRender second pass - see textbox.c for details.
 void TextBox_TopRideReRender(void);
 
 // Concrete implementations exported through TextBoxAPI.

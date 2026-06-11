@@ -1,4 +1,4 @@
-// Gourmet Race — custom City Trial event
+// Gourmet Race - custom City Trial event
 //
 // Spawns food items across the city in four passes:
 //   1. Big foods at 5 pre-placed locations (large scale, no city radius check)
@@ -126,9 +126,9 @@ static int scores[5]; // per-player scores
 #define HUD_BG_PAD_X        8.0f
 #define HUD_BG_PAD_Y        5.0f
 
-// Functions not in link.ld
+// Not in link.ld: 0x8042a29c is a CObj render-pass dispatcher (the map labels it
+// CObjThink_Common; used here as the HUD camera's GX callback).
 static void (*CObj_GX)(GOBJ *g, int pass) = (void *)0x8042a29c;
-static void (*pGXSetBlendMode)(int type, int src_factor, int dst_factor, int op) = (void *)0x803cf820;
 
 static GOBJ *hud_camera_gobj;
 static GOBJ *hud_bg_gobj;
@@ -517,7 +517,7 @@ static void GourmetRace_WatcherProc(GOBJ *gobj)
     ScoreHUD_Update();
 }
 
-// Main spawning logic — four passes per spec.
+// Main spawning logic - four passes per spec.
 static void GourmetRace_SpawnFood(void)
 {
     if (!Gm_IsInCity())

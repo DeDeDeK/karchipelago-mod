@@ -39,7 +39,7 @@ static void OnToggleARPermanent(int val)        { OSReport("[Main] AR Permanent 
 
 // Submenu: controls whether accumulated permanent stat patches are re-applied
 // at the start of each round/race. Receiving AP permanent-patch items still
-// increments save counters unconditionally — the toggles only gate round-start
+// increments save counters unconditionally - the toggles only gate round-start
 // application. Default: all On, matching the historical behavior before the
 // toggles existed.
 static MenuDesc permanent_patches_menu = {

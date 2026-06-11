@@ -230,7 +230,7 @@ Hoshi provides `ModDesc` callbacks (defined in `hoshi/mod.h`) that fire at speci
 | `On3DPause` | 0x80041160 | Game paused (receives pause player index) |
 | `On3DUnpause` | 0x80113a30 | Game unpaused (receives pause player index) |
 | `On3DExit` | 0x80015274 | Exiting 3D scene |
-| `OnTopRideLoad` | 0x80008fac | After Top Ride gameplay fully initialized (minor 19) |
+| `OnTopRideLoadEnd` | 0x80008fac | After Top Ride gameplay fully initialized (minor 19) |
 | `OnFrameStart` | 0x80006844 | Every frame, very first |
 | `OnFrameEnd` | 0x80006a60 | Every frame, very last |
 
@@ -276,7 +276,7 @@ Main Menu (minor 2)
 
 Major transitions: `MJRKIND_MENU` → `MJRKIND_TOP` when entering gameplay.
 
-**Note:** Top Ride uses **minor 19** (`MNRKIND_19`), not the shared minor 18 (`MNRKIND_3D`) used by Air Ride and City Trial. It has its own 2D engine and does not go through the 3D-scene instantiation path — so `On3DLoadStart`/`On3DLoadEnd` do not fire; the `OnTopRideLoad` hook (minor 19) is the load notification instead. See `topride-system.md`.
+**Note:** Top Ride uses **minor 19** (`MNRKIND_19`), not the shared minor 18 (`MNRKIND_3D`) used by Air Ride and City Trial. It has its own 2D engine and does not go through the 3D-scene instantiation path — so `On3DLoadStart`/`On3DLoadEnd` do not fire; the `OnTopRideLoadEnd` hook (minor 19) is the load notification instead. See `topride-system.md`.
 
 For the per-mode character/machine select (CSS) screens that sit between the settings/select minors and 3D gameplay — Air Ride CSS (minor 8), City Trial CSS (minor 10), and Top Ride CSS — see `css-system.md`. For where color gating hooks into those CSS load points, see `gate-colors.md`.
 

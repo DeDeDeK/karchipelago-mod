@@ -5,6 +5,7 @@
 
 #include "ap_item_handler.h"
 #include "checklist_rewards.h"
+#include "kirby_scale.h"
 #include "textbox_api.h"
 #include "city_trial_event.h"
 #include "ability_item.h"
@@ -97,7 +98,7 @@ static GXColor ItemReceiveColor(ItemKind k)
         case ITKIND_OFFENSE:    case ITKIND_OFFENSEMAX:return tb_api->PatchColors[PATCHKIND_OFFENSE];
         case ITKIND_DEFENSE:    case ITKIND_DEFENSEMAX:return tb_api->PatchColors[PATCHKIND_DEFENSE];
         case ITKIND_HP:                                return tb_api->PatchColors[PATCHKIND_HP];
-        case ITKIND_ALLUP:                             return tb_api->PatchColors[PATCHKIND_CHARGE]; // affects all stats — gold-ish representative
+        case ITKIND_ALLUP:                             return tb_api->PatchColors[PATCHKIND_CHARGE]; // affects all stats - gold-ish representative
         case ITKIND_HYDRA1:   case ITKIND_HYDRA2:   case ITKIND_HYDRA3:
         case ITKIND_DRAGOON1: case ITKIND_DRAGOON2: case ITKIND_DRAGOON3:
             return tb_api->MachineColor;
@@ -150,7 +151,7 @@ static void SpawnBoxHumansForward(ItemKind kind)
 
 // Handle an AP item by its raw ID. Maps the ID directly to game behavior.
 // Returns an APItemResult: AP_ITEM_APPLIED on success, AP_ITEM_RETRY if it
-// can't be applied yet (wrong scene / event already active — keep and retry),
+// can't be applied yet (wrong scene / event already active - keep and retry),
 // or AP_ITEM_DROP if the ID is unrecognized or out of range (remove without
 // applying, so a malformed ID can't wedge the queue and re-log every frame).
 int APItems_HandleItem(uint ap_item_id)
@@ -178,19 +179,26 @@ int APItems_HandleItem(uint ap_item_id)
             return 1;
     }
 
+    // Big / Small Kirby cosmetic model scaling. Handled here, above the 3D-only
+    // scene gate below, because it also applies in Top Ride (minor 19), which
+    // never satisfies that gate. KirbyScale_HandleItem does its own scene check
+    // and returns RETRY until the player is in a scene with Kirby models.
+    if (ap_item_id == AP_ITEM_BIG_KIRBY || ap_item_id == AP_ITEM_SMALL_KIRBY)
+        return KirbyScale_HandleItem(ap_item_id);
+
     // Checklist rewards (AP_CHECKLIST_REWARD_BASE + mode*50 + reward_index).
-    // Apply immediately regardless of scene — the hook handles all reward checks at runtime.
+    // Apply immediately regardless of scene - the hook handles all reward checks at runtime.
     if (ap_item_id >= AP_CHECKLIST_REWARD_BASE && ap_item_id < AP_CHECKLIST_REWARD_BASE + 150)
     {
         u32 offset = ap_item_id - AP_CHECKLIST_REWARD_BASE;
         GameMode mode = offset / 50;
         u8 ap_reward_index = offset % 50;
         // Reward bands are stride-50 but each mode uses fewer (AR 46, TR 33,
-        // CT 44). IDs in the gaps are not valid rewards — drop rather than
+        // CT 44). IDs in the gaps are not valid rewards - drop rather than
         // grant an out-of-range index.
         if (ap_reward_index >= ChecklistRewards_GetRewardCount(mode))
         {
-            OSReport("[APItems] Checklist reward ID %d out of range (mode %d index %d) — dropping\n",
+            OSReport("[APItems] Checklist reward ID %d out of range (mode %d index %d) - dropping\n",
                      ap_item_id, mode, ap_reward_index);
             return AP_ITEM_DROP;
         }
@@ -238,7 +246,7 @@ int APItems_HandleItem(uint ap_item_id)
     // WHEELKIRBY) are set here but read by no game code, so flipping them is
     // harmless. VCKIND_WHEELDEDEDE (24) is the player-facing Dedede machine and
     // the canonical Dedede unlock. VCKIND_WHEELVSDEDEDE (25) is the Vs. King
-    // Dedede stadium's CPU-only machine and is *not* part of this range — the
+    // Dedede stadium's CPU-only machine and is *not* part of this range - the
     // upper bound stops at it so an erroneous ID 855 falls through to the
     // unknown-item path instead of flipping a dead bit.
     if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
@@ -293,7 +301,7 @@ int APItems_HandleItem(uint ap_item_id)
         ap_item_id < AP_TOPRIDE_ITEM_GIVE_BASE + TRITEM_NUM)
     {
         TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_GIVE_BASE;
-        // Notify here (not inside GateTopRideItems_GiveItem) — TrapLink also
+        // Notify here (not inside GateTopRideItems_GiveItem) - TrapLink also
         // calls that handler and shows its own "Trap received!" message.
         int ok = GateTopRideItems_GiveItem(kind);
         if (ok && (unsigned)kind < TRITEM_NUM && TopRideItemKind_Names[kind])
@@ -305,7 +313,7 @@ int APItems_HandleItem(uint ap_item_id)
     // Copy ability ITKIND items in Top Ride. Top Ride has no RiderData kirbys
     // to receive a real copy ability, and the ITKIND branch further down sits
     // behind the MNRKIND_3D scene gate that Top Ride (MNRKIND_19) never
-    // satisfies — so handle it here, above that gate. Map the ability to its
+    // satisfies - so handle it here, above that gate. Map the ability to its
     // Top Ride item analog (Freeze->Freeze Fan, Fire->Fire, Bomb->Bomb,
     // Mic->Walky) and give that instead. Abilities with no analog (Wheel,
     // Sleep, Sword, Plasma, Needle, Tornado, Wing) fall through to retry once
@@ -319,7 +327,7 @@ int APItems_HandleItem(uint ap_item_id)
         {
             int tr_item = GateTopRideItems_AbilityToItem(copy_kind);
             if (tr_item < 0)
-                return 0; // no Top Ride analog — retry in City Trial / Air Ride
+                return 0; // no Top Ride analog - retry in City Trial / Air Ride
             int ok = GateTopRideItems_GiveItem((TopRideItemKind)tr_item);
             if (ok)
                 tb_api->EnqueueColoredNoun("Received: ", CopyKind_Names[copy_kind],
@@ -335,7 +343,7 @@ int APItems_HandleItem(uint ap_item_id)
         return GateStadiums_UnlockStadium(kind, /*announce=*/1);
     }
 
-    // Permanent +1 patches (AP_PERM_PATCH_BASE + PatchKind). Save-only — the
+    // Permanent +1 patches (AP_PERM_PATCH_BASE + PatchKind). Save-only - the
     // stat application happens at the next round start, so the receive path
     // never needs a 3D scene and stays above the scene gate below.
     if (ap_item_id >= AP_PERM_PATCH_BASE && ap_item_id < AP_PERM_PATCH_BASE + PATCHKIND_NUM)
@@ -381,7 +389,7 @@ int APItems_HandleItem(uint ap_item_id)
 
     // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
     // ITKIND_COPY* always go through Ability_GiveItem so they bypass the
-    // ability gate — an AP-granted copy item is meant to apply regardless of
+    // ability gate - an AP-granted copy item is meant to apply regardless of
     // unlock state, matching the Air Ride path. The nine "+1" stat patches go
     // through Patch_GiveItem, which applies in both City Trial (item pickup) and
     // Air Ride (direct stat change). Other ITKIND items spawn a real pickup in
@@ -423,7 +431,7 @@ int APItems_HandleItem(uint ap_item_id)
         return 0;
     }
 
-    // Drop-patches trap — eject each human rider's stats as physical patches.
+    // Drop-patches trap - eject each human rider's stats as physical patches.
     // City Trial only (Free Run is already blocked by the major+city_mode
     // gate above).
     if (ap_item_id == AP_ITEM_DROP_PATCHES_TRAP)
@@ -436,7 +444,7 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
-    // Legendary machine assembly — give assembled Dragoon/Hydra via cinematic
+    // Legendary machine assembly - give assembled Dragoon/Hydra via cinematic
     if (ap_item_id == AP_ITEM_GIVE_DRAGOON)
     {
         int ok = GateMachines_GiveLegendaryMachine(0);
@@ -452,7 +460,7 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
-    // All Down — lower all stats by 1 for each human player
+    // All Down - lower all stats by 1 for each human player
     if (ap_item_id == AP_ITEM_ALL_DOWN)
     {
         int ok = Patch_AllUp_GiveItem(-1);
@@ -461,7 +469,7 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
-    // All Up — raise all stats by 1 for each human player
+    // All Up - raise all stats by 1 for each human player
     if (ap_item_id == AP_ITEM_ALL_UP)
     {
         int ok = Patch_AllUp_GiveItem(1);
@@ -470,7 +478,7 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
-    // 1 HP trap — set each human player's HP to 1
+    // 1 HP trap - set each human player's HP to 1
     if (ap_item_id == AP_ITEM_1_HP_TRAP)
     {
         int applied = 0;
@@ -494,7 +502,7 @@ int APItems_HandleItem(uint ap_item_id)
         return applied;
     }
 
-    OSReport("[APItems] Unknown AP item ID: %d — dropping\n", ap_item_id);
+    OSReport("[APItems] Unknown AP item ID: %d - dropping\n", ap_item_id);
     return AP_ITEM_DROP;
 }
 

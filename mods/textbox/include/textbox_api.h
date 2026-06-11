@@ -66,9 +66,9 @@ typedef struct TextBoxAPI
     // Indexed palettes.
     const GXColor *AbilityColors; // [COPYKIND_NUM]
     const GXColor *KirbyColors;   // [KIRBYCOLOR_NUM]
-    const GXColor *ModeColors;    // [GMMODE_NUM] — mode name (AR/TR/CT)
-    const GXColor *PatchColors;   // [PATCHKIND_NUM] — per-stat patch color
-    const GXColor *BoxColors;     // [BOXKIND_NUM] — per-box color
+    const GXColor *ModeColors;    // [GMMODE_NUM] - mode name (AR/TR/CT)
+    const GXColor *PatchColors;   // [PATCHKIND_NUM] - per-stat patch color
+    const GXColor *BoxColors;     // [BOXKIND_NUM] - per-box color
 } TextBoxAPI;
 
 #endif // TEXTBOX_API_H

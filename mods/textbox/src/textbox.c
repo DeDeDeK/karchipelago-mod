@@ -208,11 +208,11 @@ static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2
 
     t->kerning = 1;
     t->use_aspect = 1;
-    // trans is a placeholder — TextBoxQueue_RepositionAll runs before the next
+    // trans is a placeholder - TextBoxQueue_RepositionAll runs before the next
     // render and is the single source of truth for on-screen position.
     t->trans = (Vec3){0, 0, 0};
     t->viewport_scale = scale;
-    // Background quad alpha is independent of text alpha — clamped against the
+    // Background quad alpha is independent of text alpha - clamped against the
     // text fade in TextBox_SetAlpha so the bg can't outlast the text.
     t->viewport_color = (GXColor){0, 0, 0, (bg_alpha < lifetime) ? bg_alpha : (u8)lifetime};
 
@@ -279,7 +279,7 @@ void CreateTextBox_OnSceneChange()
             // Re-snapshot the glyph count and re-arm the built-in typewriter on the
             // rebuilt Text. The engine's reveal_count lived in the old (destroyed)
             // Text, but chars_revealed mirrored it every frame (TextBox_PerFrame), so
-            // TextBox_ApplyTypewriter resumes the reveal from there — a finished
+            // TextBox_ApplyTypewriter resumes the reveal from there - a finished
             // message stays fully shown instead of re-typing from scratch.
             msg->chars_total = (u16)Sis_CountGlyphs(msg->text->text_start);
             TextBox_ApplyTypewriter(msg);
@@ -292,7 +292,7 @@ void CreateTextBox_OnSceneChange()
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TextBox_PerFrame, 0, 0, 0, 0);
 }
 
-// The renderer uses text->color.a as a global alpha modulator — TEXTCMD_COLOR
+// The renderer uses text->color.a as a global alpha modulator - TEXTCMD_COLOR
 // only updates temp.color RGB, alpha is sourced from text->color.a at init and
 // applied to every glyph in every subtext. So fading the whole textbox =
 // touching .a only.
@@ -331,7 +331,7 @@ void TextBoxQueue_RepositionAll()
 
     float spacing_extra = Settings_SpacingExtra();
 
-    // edge_y is the canvas y of the next anchor edge — top edge for top
+    // edge_y is the canvas y of the next anchor edge - top edge for top
     // corners, bottom edge for bottom corners.
     float edge_y = is_bottom ? (TEXTBOX_CANVAS_H - TEXTBOX_MARGIN) : TEXTBOX_MARGIN;
 
@@ -416,7 +416,7 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
     // NULL+0xA. Drop the message instead.
     if (!*stc_textcanvas_first)
     {
-        OSReport("[TextBox] Dropping enqueue — no canvas yet (pre-first-scene)\n");
+        OSReport("[TextBox] Dropping enqueue - no canvas yet (pre-first-scene)\n");
         return 0;
     }
 
@@ -474,7 +474,7 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
     entry.typewriter_active = textbox_settings.typewriter_enabled ? 1 : 0;
     entry.typewriter_dwell  = Settings_TypewriterDwell();
     entry.chars_total       = (u16)Sis_CountGlyphs(entry.text->text_start);
-    entry.chars_revealed    = 0; // fresh message — reveal starts from the first glyph
+    entry.chars_revealed    = 0; // fresh message - reveal starts from the first glyph
 
     // Hand the message's reveal to the engine's built-in typewriter.
     TextBox_ApplyTypewriter(&entry);
@@ -592,7 +592,7 @@ static TextBoxMessage *TextBoxQueue_GetAt(int index)
 // Top Ride's `cb_ThinkPostRender` (TopRide_PostRenderCallback @ 0x80009074)
 // runs TopRide_CustomRenderer, which kicks off an entirely new HSD_StartRender
 // pass for the 2D engine. That pass overwrites the EFB after the standard
-// frame render — wiping the textbox drawn by the hoshi screen canvas's
+// frame render - wiping the textbox drawn by the hoshi screen canvas's
 // camera. Re-issuing CObjThink_Common on each canvas's cam_gobj after TR's
 // post-render returns redraws the text on top of the second pass.
 void TextBox_TopRideReRender(void)

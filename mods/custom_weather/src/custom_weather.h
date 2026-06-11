@@ -38,7 +38,7 @@ typedef enum WeatherKind
     WEATHER_COTTON_CANDY,
     WEATHER_FROZEN_DAWN,
     WEATHER_VOID,
-    // Animated prototypes — exercise terrain re-tint, fog modulation, extra LOBJ.
+    // Animated prototypes - exercise terrain re-tint, fog modulation, extra LOBJ.
     WEATHER_STORM,
     WEATHER_AURORA,
     WEATHER_INFERNO,
@@ -50,7 +50,7 @@ typedef enum WeatherAnimKind
 {
     ANIM_NONE = 0,
     // Lightning: fog/EFB-clear flash plus extra LOBJ pulse.
-    //   anim_param = (rgba << 0) — flash color; period/duration hardcoded.
+    //   anim_param = (rgba << 0) - flash color; period/duration hardcoded.
     ANIM_LIGHTNING,
     // Aurora: extra LOBJ slowly cycles through a hue range overhead.
     //   anim_param unused; the cycle is fixed green→cyan→violet.
@@ -81,7 +81,7 @@ typedef struct CustomPresetDef
     u32   terrain_diffuse;
     u32   terrain_specular;
 
-    // ── Character & machine shading (HSD-lit dynamic geometry — riders, vehicles).
+    // ── Character & machine shading (HSD-lit dynamic geometry - riders, vehicles).
     // The AreaLight is the directional key light; the slot-8 ambient LOBJ is the fill.
     u32   char_diffuse;          // AreaLight diffuse
     u32   char_specular;         // AreaLight specular highlight

@@ -1,4 +1,4 @@
-// Cannon event — WIP investigation toward spawning a working cannon yakumono
+// Cannon event - WIP investigation toward spawning a working cannon yakumono
 // in City Trial. See cannon_event.h for the high-level approach.
 
 #include "os.h"
@@ -16,7 +16,7 @@
 #endif
 
 // Disabled by default. Loading GrMachine2Model.dat (1.6MB) in CT exhausts
-// heap 1 — the JObj instantiation needs ~1KB and only ~30 bytes were left
+// heap 1 - the JObj instantiation needs ~1KB and only ~30 bytes were left
 // after the load. CT's memory budget can't accommodate the full model
 // archive.
 #ifndef CANNON_LOAD_ENABLED
@@ -30,7 +30,7 @@
 #define CT_HIJACK_DATA_IDX 31
 
 // Machine Passage path: data_array[1] is the live cannon param block populated
-// by GrMachine2.dat. We spawn a *second* cannon using the same slot — both
+// by GrMachine2.dat. We spawn a *second* cannon using the same slot - both
 // yakumono will share the param read-only and have separate ydata, giving us a
 // clean ydata to dump alongside the param.
 #define MP_CANNON_DATA_IDX 1
@@ -42,7 +42,7 @@
 
 static u8 s_zero_cannon_param[256] __attribute__((aligned(4))) = {0};
 
-// Cache loaded archives — Archive_LoadFile is expensive and we only need to
+// Cache loaded archives - Archive_LoadFile is expensive and we only need to
 // do it once per session. Order matters: model must load first so the
 // stage archive's extern (the cannon animjoint) resolves automatically when
 // HSD_ArchiveParse walks the global archive list.
@@ -134,7 +134,7 @@ static void DumpZeroParamCT(void)
     GrObj *grobj = *stc_grobj;
     if (!grobj || !grobj->gr_data || !grobj->gr_data->yakumono)
     {
-        OSReport("[CannonEvent] spawn-CT: no grobj/grdata/yakumono — skipping\n");
+        OSReport("[CannonEvent] spawn-CT: no grobj/grdata/yakumono - skipping\n");
         return;
     }
 
@@ -170,13 +170,13 @@ static void DumpZeroParamCT(void)
 
 // Machine Passage: data_array[1] is already populated by vanilla. Dump the
 // real param block (with pointer chasing), then spawn a second cannon from
-// the same slot — ydata is fresh and isolated, the param is shared read-only.
+// the same slot - ydata is fresh and isolated, the param is shared read-only.
 static void DumpHealthyMP(void)
 {
     GrObj *grobj = *stc_grobj;
     if (!grobj || !grobj->gr_data || !grobj->gr_data->yakumono)
     {
-        OSReport("[CannonEvent] spawn-MP: no grobj/grdata/yakumono — skipping\n");
+        OSReport("[CannonEvent] spawn-MP: no grobj/grdata/yakumono - skipping\n");
         return;
     }
 
@@ -320,7 +320,7 @@ static void CrossLoadCT(void)
 
     if (!grdata->yakumono)
     {
-        OSReport("[CannonEvent] load: yakumono table is NULL — skipping cannon param dump\n");
+        OSReport("[CannonEvent] load: yakumono table is NULL - skipping cannon param dump\n");
         return;
     }
     YakumonoTable *yt = grdata->yakumono;
@@ -361,7 +361,7 @@ static void CrossLoadCT(void)
             {
                 OSReport("[CannonEvent] load:   grModel+0x%02x = %08x → contents:\n", i * 4, v);
                 DumpRange("[CannonEvent]    ", (const void *)v, 16);
-                // For HSD_SObjDesc, each field is JObjSet** (etc) — the contents
+                // For HSD_SObjDesc, each field is JObjSet** (etc) - the contents
                 // we just dumped should be a NULL-terminated pointer array. Chase
                 // the first entry to see if it points at a real JObjSet.
                 u32 inner = *(u32 *)v;
@@ -379,7 +379,7 @@ static void CrossLoadCT(void)
         DumpRange("[CannonEvent]", grmotion, 0x40);
     }
 
-    // Also dump grdata->stage_node — this is what GrData+0x4 ("stage_node")
+    // Also dump grdata->stage_node - this is what GrData+0x4 ("stage_node")
     // points at; might be a top-level scene-graph node or a struct that
     // bridges grdata and grmodel.
     if (grdata->stage_node)
@@ -437,7 +437,7 @@ void CannonEvent_TryRender(int set_index)
     OSReport("[CannonEvent] render: trying grmodel[%d] = %p, set->jobj = %p\n",
              set_index, set, set->jobj);
 
-    // Pass is_add_anim=0 so the inline doesn't dereference set->animjoint —
+    // Pass is_add_anim=0 so the inline doesn't dereference set->animjoint -
     // those fields are small ints (counts) in this struct, not real pointers.
     GOBJ *g = JObj_LoadSet_SetPri(
         /*is_hidden=*/0, set, /*anim_id=*/0, /*frame=*/0.0f,

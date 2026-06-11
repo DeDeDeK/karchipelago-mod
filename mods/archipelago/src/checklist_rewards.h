@@ -20,7 +20,7 @@ void ChecklistRewards_OnSaveLoaded(void);
 void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce);
 
 // Announce a checkbox filler grant on the TextBox: "Received: Checkbox Filler
-// (<Mode>)". Does not mutate filler state — call Checklist_GrantFiller for that.
+// (<Mode>)". Does not mutate filler state - call Checklist_GrantFiller for that.
 void Checklist_AnnounceFiller(GameMode mode);
 
 // Apply the AP location assignment from APData.
@@ -59,7 +59,7 @@ int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
 
 // Returns 1 if a reward is placed at (mode, clear_kind) AND that reward has
 // already been received from AP. Fast path for "should this cell show the
-// received reward badge?" — used by the backfill path in check_detection.
+// received reward badge?" - used by the backfill path in check_detection.
 int ChecklistRewards_CellHasReceivedReward(u8 mode, u8 clear_kind);
 
 // Number of reward rows for the given mode. Out-of-range modes return 0.

@@ -3,22 +3,22 @@
 // Three customization layers are exercised here, all gated by the active
 // preset's CustomPresetDef (see custom_weather.h):
 //
-//   1. Terrain re-tint  — write to (*stc_main_light)->color/hw_color.
+//   1. Terrain re-tint  - write to (*stc_main_light)->color/hw_color.
 //      The stage's directional LOBJ (for CT: LOBJ[1] of the primary chain,
 //      flags=0x0D INFINITE+DIFFUSE+SPECULAR) is what lights terrain. Sky
 //      presets don't touch it normally.
-//   2. Extra LOBJ       — spawn one INFINITE light overhead and animate its
-//      color per frame. Hits all stage geometry automatically — there is no
+//   2. Extra LOBJ       - spawn one INFINITE light overhead and animate its
+//      color per frame. Hits all stage geometry automatically - there is no
 //      per-material light_mask gating in CT.
-//   3. Fog modulation   — write directly to HSD_Fog at (fog_gobj)->hsd_object
+//   3. Fog modulation   - write directly to HSD_Fog at (fog_gobj)->hsd_object
 //      so fog.start/end/color move independently of the sky preset's lerp.
 //
-// Hook: at 0x800ce648 — the instruction immediately AFTER `bl Sky_Update`.
+// Hook: at 0x800ce648 - the instruction immediately AFTER `bl Sky_Update`.
 // At this point Sky_Update has finished writing fog/sky state for the frame,
 // and r31 still holds grobj (callee-saved across the bl). The original
 // instruction at 0x800ce648 is `lwz r0, 4(r31)`; the CODEPATCH trampoline runs
 // it after our C function returns, so as long as we leave r31 alone (which a
-// normal C call does — r31 is non-volatile) the post-hook lwz is safe.
+// normal C call does - r31 is non-volatile) the post-hook lwz is safe.
 //
 // We hook AFTER Sky_Update rather than at the call site so that:
 //   (a) we don't have to call Sky_Update ourselves and risk register state
@@ -236,14 +236,14 @@ static void RunLightningTick(HSD_Fog *fog, u32 flash_color)
         u8 fg = (flash_color >> 16) & 0xFF;
         u8 fb = (flash_color >> 8) & 0xFF;
 
-        // Spare LOBJ flash — visible on character/machine geometry that does
+        // Spare LOBJ flash - visible on character/machine geometry that does
         // read GX hardware lights (terrain doesn't, but riders do via the
         // diffuse channel).
         SetExtraColor((u8)(fr * num / half),
                       (u8)(fg * num / half),
                       (u8)(fb * num / half));
 
-        // Fog + EFB clear flash — this is what actually lights up terrain.
+        // Fog + EFB clear flash - this is what actually lights up terrain.
         // We lerp the per-frame fog/EFB values (already written this frame
         // by Sky_Update) toward the flash color, and pull fog_start in close
         // so the bright tint reaches near geometry too. Sky_Update overwrites

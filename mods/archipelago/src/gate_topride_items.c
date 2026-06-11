@@ -1,12 +1,10 @@
 #include "game.h"
 #include "os.h"
-#include "scene.h"
 #include "topride.h"
 #include "code_patch/code_patch.h"
 
 #include "main.h"
 #include "gate_topride_items.h"
-#include "gate_abilities.h"
 #include "textbox_api.h"
 #include "inline.h"
 
@@ -19,7 +17,7 @@ static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] 
     { TRITEM_WALKY,      COPYKIND_MIC },
 };
 
-// Bitmask of ability-themed TR items — these are not gated by topride_item_unlocked_mask.
+// Bitmask of ability-themed TR items - these are not gated by topride_item_unlocked_mask.
 #define ABILITY_ITEM_BITS ( \
     (1 << TRITEM_FREEZE_FAN) | (1 << TRITEM_FIRE) | \
     (1 << TRITEM_BOMB) | (1 << TRITEM_WALKY))
@@ -60,7 +58,7 @@ void GateTopRideItems_ApplyMask()
              MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM), MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM), MaskBits(ability_mask, 16));
 }
 
-// Hook at 0x802db05c — right after TopRideItem_MgrInit (0x8034b5f4) returns
+// Hook at 0x802db05c - right after TopRideItem_MgrInit (0x8034b5f4) returns
 // in TopRide_FielderInit (0x802dafb4).
 // Clobbered instruction: lwz r6, 4(r30)
 CODEPATCH_HOOKCREATE(0x802db05c,
@@ -100,7 +98,7 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
 
 // Save r3-r8 (the original args to TopRideItem_SpawnAtPosition) across the
 // bl into our C filter, since the filter's return value clobbers r3 and the
-// function's first instructions deref r3 (lwz r3, 4(r3) at 0x8034bf68 — DSI
+// function's first instructions deref r3 (lwz r3, 4(r3) at 0x8034bf68 - DSI
 // crash if r3 is left at 0 from a "proceed" return).
 //
 // Proceed path: restore args + LR + frame, then `b 0x1c` to skip past the
@@ -214,7 +212,7 @@ int GateTopRideItems_GiveItem(TopRideItemKind kind)
     if (kirby_mgr->round_state != 2)
         return 0;
 
-    // Don't gate on kirby->is_active — that bit is only set during a Race
+    // Don't gate on kirby->is_active - that bit is only set during a Race
     // round, never in Time Attack or Free Run, even while the human is
     // actively playing. round_state == 2 already covers "fully wired up";
     // matches EnergyLink_TopRidePerFrame which uses the same non-null + HMN

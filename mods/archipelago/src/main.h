@@ -25,10 +25,10 @@ extern const TextBoxAPI *tb_api;
 
 // Hard ceiling on per-stat patch totals. PowerPC `extsb` in the original
 // Patch_GetMaxValue caller path sign-extends the low byte, so values >127
-// wrap negative — 127 is the firm hardware limit. The runtime cap (see
-// PatchCap_GetCap in patch_cap.c) is the per-slot target chosen via the
-// city_trial_patch_cap_amount option; PATCH_STAT_MAX is only the absolute
-// clamp ceiling for guards and storage widths.
+// wrap negative - 127 is the firm hardware limit. The runtime cap (see
+// PatchCap_GetCap in patch_cap.c) ranges from the city_trial_patch_cap_min
+// the player starts at up to the city_trial_patch_cap_max ceiling; PATCH_STAT_MAX
+// is only the absolute clamp ceiling for guards and storage widths.
 #define PATCH_STAT_MAX 127
 
 typedef enum APGoalKind
@@ -39,32 +39,33 @@ typedef enum APGoalKind
     GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
     GOAL_NONE,                  // No goal for this mode
     GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
-    GOAL_MAX_STATS_CT,          // City Trial only: reach the runtime patch cap (city_trial_patch_cap_amount, up to 127) on every stat in one CT run
+    GOAL_MAX_STATS_CT,          // City Trial only: reach the patch cap ceiling (city_trial_patch_cap_max, up to 127) on every stat in one CT run
 } APGoalKind;
 
 typedef struct APSlotOptions
 {
     // General
-    u32 death_link_enabled;                // 0 or 1 — sets initial deathlink menu toggle
-    u32 energy_link_enabled;               // 0 or 1 — sets initial energylink menu toggle
-    u32 trap_link_enabled;                 // 0 or 1 — sets initial traplink menu toggle
-    u32 reveal_checklists;                 // 0 or 1 — reveal all checklist squares
+    u32 death_link_enabled;                // 0 or 1 - sets initial deathlink menu toggle
+    u32 energy_link_enabled;               // 0 or 1 - sets initial energylink menu toggle
+    u32 trap_link_enabled;                 // 0 or 1 - sets initial traplink menu toggle
+    u32 reveal_checklists;                 // 0 or 1 - reveal all checklist squares
 
     // Per-mode goal settings
-    u32 goal[GMMODE_NUM];                  // APGoalKind — completion condition per mode
-    u32 checklist_amount[GMMODE_NUM];      // 1-120 — threshold for GOAL_N_CHECKLIST per mode
+    u32 goal[GMMODE_NUM];                  // APGoalKind - completion condition per mode
+    u32 checklist_amount[GMMODE_NUM];      // 1-120 - threshold for GOAL_N_CHECKLIST per mode
 
     // City Trial-specific
-    u32 city_trial_progressive_patch_caps; // 0 or 1 — if on, cap starts at 1 and Patch Cap Increase items grow it toward the target
-    u32 city_trial_patch_cap_amount;       // 1-127 — target patch cap (also the threshold for GOAL_MAX_STATS_CT)
+    u32 city_trial_patch_cap_min;          // 1-127 - per-stat cap the player starts at; Patch Cap Increase items grow it toward max
+    u32 city_trial_patch_cap_max;          // 1-127 - per-stat cap ceiling (also the threshold for GOAL_MAX_STATS_CT). min == max -> flat cap
 
-    // Spawn rate floor, percent (100 = vanilla, capped at 500).
+    // Spawn rate floor, percent (10-100; 100 = vanilla, below 100 suppresses spawns).
+    // 0 means options not yet received; the spawn-rate code falls back to vanilla.
     u32 spawn_rate_min;
 
     // Required checkboxes per mode for GOAL_CHECKLIST_LIST.
     u64 goal_checks[GMMODE_NUM][2];
 
-    // Per-category access gating. 1 = gated (default — players unlock via AP
+    // Per-category access gating. 1 = gated (default - players unlock via AP
     // items). 0 = ungated (mod pre-fills the corresponding unlock mask with
     // all-1s at connect time; AP world ships no unlock items for that
     // category). Order matches APUnlockCategory but each is a flat field so
@@ -122,7 +123,7 @@ typedef struct APSave
 // The Python AP client reads/writes this via dolphin-memory-engine.
 // All 32-bit fields are 4-byte aligned and atomic on PPC at this alignment.
 // 64-bit fields (energy_balance, energy_sent_total, sent_checks, client_backfill,
-// goal_checks) are not atomic on PPC32 — readers may observe a torn value
+// goal_checks) are not atomic on PPC32 - readers may observe a torn value
 // during a writer's update. For energy_sent_total this is self-correcting: it's
 // a cumulative counter the client reads-and-diffs, so a torn read only skews one
 // poll's delta and the next poll's diff compensates exactly (see the field).
@@ -208,7 +209,7 @@ void On3DPause(int pause_ply);
 void On3DUnpause(int pause_ply);
 void On3DExit();
 void OnSceneChange();
-void OnTopRideLoad();
+void OnTopRideLoadEnd();
 void OnFrameStart();
 void OnFrameEnd();
 

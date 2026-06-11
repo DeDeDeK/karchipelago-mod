@@ -8,14 +8,14 @@
 
 // Forward throw impulse on top of the machine's world velocity. Without
 // this, the projectile inherits only md->velocity and rides along with
-// Kirby — looking "attached" — until gravity drops the bomb onto stage
+// Kirby - looking "attached" - until gravity drops the bomb onto stage
 // geometry and detonates it. A constant outward speed keeps the trap's
 // trajectory predictable regardless of how fast Kirby is moving.
 #define THROW_SPEED 30.0f
 
 // Spawn one vanilla projectile of `kind` in front of `ply_idx`'s machine.
 // Uses the machine's world pos/forward/up rather than the rider's hand
-// bone, so there is no dependency on any copy ability being active — this
+// bone, so there is no dependency on any copy ability being active - this
 // is the whole point of bypassing spawnBomb and friends.
 //
 // Position is offset forward by `distance` so the projectile visually spawns
@@ -24,13 +24,13 @@
 // machine's motion AND has its own outbound impulse.
 //
 // Bomb / sensor-bomb / gordo come out of Projectile_Create in state 0
-// (HELD) — the post-init callback puts them in the rider's hand and the
+// (HELD) - the post-init callback puts them in the rider's hand and the
 // detonation logic never runs until a separate throw transition. Bomb and
 // sensor bomb just need a Projectile_SetState(1) to start their flying
 // physics. Gordo additionally needs all the per-kind scratch that vanilla
 // 0x8022a544 sets up (rotation cache, accel from kind_data, lifetime), so
 // for that case we call Gordo_EnterThrownState directly instead of doing
-// our own SetState — a bare SetState(1) leaves the gordo invisible, with
+// our own SetState - a bare SetState(1) leaves the gordo invisible, with
 // no rotation, no real impulse, and a zero lifetime.
 static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float distance)
 {
@@ -41,7 +41,7 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
     if (!md)
         return 0;
 
-    // Pull the rider's owner id if available — vanilla writes rider->x0 into
+    // Pull the rider's owner id if available - vanilla writes rider->x0 into
     // desc.owner_unk1 / unk2, and Projectile_Create copies that into
     // proj->owner_gobj at proj+0x08. Gordo_EnterThrownState reads bone
     // basis vectors via owner_gobj (rd+0x324, rd+0x330), so this needs to
@@ -103,7 +103,7 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
             : SENSOR_BOMB_STATE_ARMED_FLYING;
         // Projectile_Create snapshotted desc.velocity at proj+0x88
         // (spawn_velocity, read-only) but per-frame physics reads
-        // proj+0x94 — vanilla throw writes that explicitly before
+        // proj+0x94 - vanilla throw writes that explicitly before
         // Projectile_SetState. flags=1 matches vanilla throw.
         proj->velocity = throw_vel;
         Projectile_SetState(proj, throw_state, 1.0f, 1.0f, 1);

@@ -4,7 +4,7 @@
 
 Patch cap turns vanilla City Trial's fixed stat ceiling (18) into a configurable / progressive cap. There are two layers:
 
-- **Target cap** — the per-slot ceiling chosen by the YAML option `city_trial_patch_cap_amount` (1–127). This is the highest a stat can ever reach for that slot, and also the threshold the Max Stats goal (`GOAL_MAX_STATS_CT`) measures against.
+- **Target cap** — the per-slot ceiling chosen by the YAML option `city_trial_patch_cap_amount` (1–127). This is the number of **patches** a stat can hold for that slot, and also the threshold the Max Stats goal (`GOAL_MAX_STATS_CT`) measures against. Because CT stats spawn at `-2` (HP at `0`), the cap is measured in patches, not raw value: the raw ceiling is `start + cap` per stat (HP `cap`, every other stat `cap - 2`), so all nine hold the same number of patches. See `PatchCap_GetStatStart` — the single source of that baseline, shared by the clamp and the goal.
 - **Progressive cap** — when `city_trial_progressive_patch_caps` is on, the *effective* cap starts at `PATCH_CAP_PROGRESSIVE_START` (1) and grows by 1 each time an `AP_ITEM_PATCH_CAP_INCREASE` is received, clamped up to the target.
 
 Both options are read at runtime; nothing is precomputed at connect.
@@ -26,10 +26,11 @@ When progressive is **off**, `PatchCap_GetCap()` returns the target directly (a 
 | `PatchCap_Increment()` | public, called from `ap_item_handler.c:142` | bumps `patch_cap_count`, logs + textbox |
 | `PatchCap_GetTarget()` | static | reads `city_trial_patch_cap_amount`, clamps to `PATCH_STAT_MAX` |
 | `PatchCap_GetCap()` | static | current effective cap (target, or `1 + count` clamped to target) |
-| `PatchCap_ClampDelta(float current, int delta)` | static | clamp a positive delta to `cap - current` |
+| `PatchCap_GetStatStart(int kind)` | public, declared in `patch_cap.h` | per-stat spawn baseline (`0` for HP, `-2` otherwise); shared with the Max Stats goal |
+| `PatchCap_ClampDelta(int kind, float current, int delta)` | static | clamp a positive delta to `(start + cap) - current` |
 | `PatchCap_GivePatch` / `PatchCap_GiveAllUp` / `PatchCap_GetMaxValue` | replacement functions | bodies of the three hooks |
 
-Only `PatchCap_OnBoot` and `PatchCap_Increment` are declared in `patch_cap.h`; the rest are file-local (the three replacement functions are non-`static` only so `CODEPATCH_REPLACEFUNC` can take their address).
+`PatchCap_OnBoot`, `PatchCap_Increment`, and `PatchCap_GetStatStart` are declared in `patch_cap.h`; the rest are file-local (the three replacement functions are non-`static` only so `CODEPATCH_REPLACEFUNC` can take their address).
 
 ## Save Data & Options
 
@@ -75,12 +76,16 @@ This is intentional and load-bearing. `Patch_GetMaxValue` is the denominator the
 
 ### Delta Clamping
 
-`PatchCap_ClampDelta(float current, int delta)`:
+`PatchCap_ClampDelta(int kind, float current, int delta)`:
 
 - `delta <= 0` → pass through unchanged. Stat-down patches, the drop-patches trap, and other reductions are never affected by the cap.
-- `delta > 0` → `room = cap - current`; if `room <= 0` return 0; else clamp to `(int)room`. If the stat is already at/above the cap the delta becomes 0 (no-op).
+- `delta > 0` → `room = (PatchCap_GetStatStart(kind) + cap) - current`; if `room <= 0` return 0; else clamp to `(int)room`. If the stat already holds `cap` patches the delta becomes 0 (no-op).
 
-After pre-clamping, the replacements call `Machine_ApplyStatClamped` (0x801e094c), which does its own secondary clamp to `[Patch_GetMinValue, Patch_GetMaxValue]`. Since our pre-clamp is to `cap ≤ target` and the secondary clamp's upper bound is now `target`, the second clamp is a no-op.
+The `start` offset (`-2`, or `0` for HP) is what makes the cap count **patches** rather than raw value: each stat tops out at raw `start + cap`, i.e. exactly `cap` patches, regardless of where it spawned. Without it the eight non-HP stats (spawn `-2`) would hold `cap + 2` patches while HP (spawn `0`) holds `cap`.
+
+After pre-clamping, the replacements call `Machine_ApplyStatClamped` (0x801e094c), which does its own secondary clamp to `[Patch_GetMinValue, Patch_GetMaxValue]`. Since our per-stat raw ceiling is `start + cap ≤ target` and the secondary clamp's upper bound is `target`, the second clamp is a no-op.
+
+Note this means a non-HP stat tops out at raw `cap - 2`, two below the HUD/attribute normalization range (`Patch_GetMaxValue` = target), so a fully-capped non-HP stat bar reads slightly under full while HP reads full. The shortfall is fixed at 2 raw units, so it's only conspicuous at very low cap targets.
 
 ### `PatchCap_GivePatch` / `PatchCap_GiveAllUp` details
 
@@ -161,7 +166,7 @@ Secondary considerations if you ever touch this:
 - `ap_save->permanent_patches[kind]` is `u8` with `< PATCH_STAT_MAX` gates in `patch_item.c:138,153`. At 127 these stay well within `u8`.
 - The APWorld must ship enough `AP_ITEM_PATCH_CAP_INCREASE` items for a progressive slot to reach its target: at most `target - PATCH_CAP_PROGRESSIVE_START` (= `target - 1`) increments are useful.
 - HUD stat-bar segment dividers (if drawn as discrete ticks rather than continuous fill) are **not** on the `Patch_GetMaxValue` path. The bar *fill ratio* scales correctly (denominator goes through our hook), but visual ticks may still render as 18 segments. Eyeball in-game if you push the target high.
-- `GOAL_MAX_STATS_CT` compares each stat against `city_trial_patch_cap_amount` (the target), in `goal_max_stats_ct.c` — **not** against `PATCH_STAT_MAX`. The goal is "reach the slot's target on every stat in one CT run".
+- `GOAL_MAX_STATS_CT` measures the number of *patches collected* on each stat against `city_trial_patch_cap_amount` (the target), in `goal_max_stats_ct.c` — **not** against `PATCH_STAT_MAX`. The goal is "collect the slot's target patches on every stat in one CT run". CT stats spawn at `-2` (HP at `0`), so the per-stat test is `value >= start + target` (HP needs raw `target`, every other stat raw `target - 2`); comparing raw `value >= target` for all would silently make the eight non-HP stats require two extra patches each.
 
 ## Known Limitations
 

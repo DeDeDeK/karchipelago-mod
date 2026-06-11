@@ -56,13 +56,13 @@ The core per-entity hurt state. Every damageable object (rider, machine, enemy, 
 
 Each region in the `regions` array is an **attack hitbox** that contains embedded damage parameters. When `HitColl_CheckCollision` finds a region overlapping a victim's sub-region, the region's damage/knockback values are used.
 
-A region begins with an `active` word at +0x00, followed by the **13-dword HurtParams block at +0x04–0x34** (written by `Trigger_InitParameters`, which also stores its `flags` arg at +0x38). HurtParams field X lands at region offset `X + 0x04`. Verified field offsets (from `getDamageDealt`/`HitColl_CalcKnockback`/`HitColl_CheckCollision` reads):
+A region begins with an `active` word at +0x00, followed by the **13-dword HurtParams block at +0x04–0x34** (written by `Trigger_InitParameters`, which also stores its `flags` arg at +0x38). HurtParams field X lands at region offset `X + 0x04`. Verified field offsets (from `HitColl_GetDamageDealt`/`HitColl_CalcKnockback`/`HitColl_CheckCollision` reads):
 
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
 | 0x00 | int | active | 0 = inactive/skip; nonzero = active (checked first in `HitColl_CheckCollision`) |
-| 0x04 | int | base_damage | Base damage (int; `getDamageDealt` reads region+0x04, converts to float) |
-| 0x08 | float | dmg_distance_factor | Damage scales by relative velocity (`getDamageDealt` reads region+0x08; 0 = fixed) |
+| 0x04 | int | base_damage | Base damage (int; `HitColl_GetDamageDealt` reads region+0x04, converts to float) |
+| 0x08 | float | dmg_distance_factor | Damage scales by relative velocity (`HitColl_GetDamageDealt` reads region+0x08; 0 = fixed) |
 | 0x0C–0x20 | | (HurtParams x08–x1c) | Additional HurtParams dwords (x1c at +0x20 = scale/magnitude factor) |
 | 0x24 | float | base_knockback | Base knockback magnitude (`HitColl_CalcKnockback` reads region+0x24) |
 | 0x28 | float | kb_distance_factor | Knockback scales by relative velocity (`HitColl_CalcKnockback` reads region+0x28; 0 = fixed) |
@@ -72,7 +72,7 @@ A region begins with an `active` word at +0x00, followed by the **13-dword HurtP
 | 0x33 | byte | disabled | Bit 0: if set, region is skipped (`lbz 0x33; clrlwi.,31`) |
 | 0x34 | int | (HurtParams x30) | Last HurtParams dword |
 | 0x38 | int | flags | Set by `Trigger_InitParameters` from its 3rd arg |
-| 0x40–0x48 | Vec3 | pos_cur | Current region position (fallback used by `getDamageDealt`/`HitColl_CalcKnockback` when HurtData.pos_tracker is NULL) |
+| 0x40–0x48 | Vec3 | pos_cur | Current region position (fallback used by `HitColl_GetDamageDealt`/`HitColl_CalcKnockback` when HurtData.pos_tracker is NULL) |
 | 0x50–0x58 | Vec3 | pos_prev | Previous region position (velocity = pos_cur − pos_prev) |
 | 0x4C | float | radius | Collision sphere radius |
 
@@ -99,7 +99,7 @@ Configuration struct that defines attack parameters. Zeroed by `Trigger_ClearPar
 
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
-| 0x00 | int | base_damage | Base damage value (int, converted to float by getDamageDealt) |
+| 0x00 | int | base_damage | Base damage value (int, converted to float by HitColl_GetDamageDealt) |
 | 0x04 | float | dmg_distance_factor | Damage scaling by relative velocity (0 = fixed damage) |
 | 0x08 | float | x08 | Unknown |
 | 0x0C | float | x0c | Unknown |
@@ -213,19 +213,19 @@ Called with two HurtData objects (victim and attacker). The function:
 
 2. **Iterates victim's sub-regions** (stride 0x44): For each pair, calls `Hit_CheckOverlap` for sphere-vs-sphere overlap test.
 
-3. **On overlap**: Calls `HitColl_SetDamageLog` with the attacker's **region entry** as the damage source. The region's fields at offsets 0x04-0x34 provide the damage/knockback values to `getDamageDealt` and `HitColl_CalcKnockback`.
+3. **On overlap**: Calls `HitColl_SetDamageLog` with the attacker's **region entry** as the damage source. The region's fields at offsets 0x04-0x34 provide the damage/knockback values to `HitColl_GetDamageDealt` and `HitColl_CalcKnockback`.
 
 ### HitColl_SetDamageLog (0x8018cf94) — The Core Damage Calculator
 
 Called whenever two collision shapes overlap. For each collision:
 
-1. **Calculates damage** via `getDamageDealt`:
+1. **Calculates damage** via `HitColl_GetDamageDealt`:
    ```
    if dmg_distance_factor == 0:   damage = base_damage          (fixed, no clamp)
    else:                          damage = base_damage + dmg_distance_factor × relative_velocity_magnitude
                                   then clamped to a minimum of 1.0
    ```
-   `getDamageDealt` short-circuits when `dmg_distance_factor` (region+0x08) is exactly 0 and returns `base_damage` unclamped; only the velocity-scaled path applies the 1.0 floor (SDA2 constant at `-22284(r2)`, *not* 0). The relative-velocity magnitude is `|pos_cur − pos_prev|` taken from the attacker's `pos_tracker` (HurtData+0x68) when present, else from region+0x40/+0x50. The result is then scaled by the victim's damage multiplier (`hurtdata->dmg_multiplier`).
+   `HitColl_GetDamageDealt` short-circuits when `dmg_distance_factor` (region+0x08) is exactly 0 and returns `base_damage` unclamped; only the velocity-scaled path applies the 1.0 floor (SDA2 constant at `-22284(r2)`, *not* 0). The relative-velocity magnitude is `|pos_cur − pos_prev|` taken from the attacker's `pos_tracker` (HurtData+0x68) when present, else from region+0x40/+0x50. The result is then scaled by the victim's damage multiplier (`hurtdata->dmg_multiplier`).
 
 2. **Calculates knockback** via `HitColl_CalcKnockback`:
    ```
@@ -323,7 +323,7 @@ vuln.kind = (invuln_timer != 0) ? 1 : 0;
 
 Each enemy has a TriggerData at EnemyData+0x45C, initialized by `zz_80201ba4_` from actor_data descriptors. This contains the enemy's attack parameters (base_damage, knockback, etc.) loaded from the game's data files.
 
-The TriggerData at +0x45C and the HurtData's attack regions at +0x410 both participate in the collision system. The attack regions (stride 0xC8) contain embedded HurtParams at offsets 0x04-0x34 that `getDamageDealt` and `HitColl_CalcKnockback` read during `HitColl_CheckCollision`.
+The TriggerData at +0x45C and the HurtData's attack regions at +0x410 both participate in the collision system. The attack regions (stride 0xC8) contain embedded HurtParams at offsets 0x04-0x34 that `HitColl_GetDamageDealt` and `HitColl_CalcKnockback` read during `HitColl_CheckCollision`.
 
 ### Enemy Receiving Damage (EventActor_ProcDamage, 0x801fc9f0)
 
@@ -424,7 +424,7 @@ This means **writing to region entries directly won't persist** — changes are 
 |----------|---------|-------------|
 | HitColl_Init | 0x8018cf64 | Clears collision log, sets victim hurt_data |
 | HitColl_CheckCollision | 0x8018d284 | Core: iterates attacker regions vs victim sub-regions |
-| getDamageDealt | 0x8018ace4 | Computes damage from region params + velocity |
+| HitColl_GetDamageDealt | 0x8018ace4 | Computes damage from region params + velocity |
 | HitColl_CalcKnockback | 0x8018ab90 | Computes knockback from region params + velocity |
 | HitColl_SetDamageLog | 0x8018cf94 | Logs collision: calculates damage/kb, stores in global log |
 | HitColl_ActOnCollision | 0x8018d878 | Resolves log → strongest knockback → HurtData |

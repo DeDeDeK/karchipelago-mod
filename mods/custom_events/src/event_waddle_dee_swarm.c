@@ -1,9 +1,9 @@
-// Waddle Dee Swarm — custom City Trial event. Spawns standalone Waddle Dees
+// Waddle Dee Swarm - custom City Trial event. Spawns standalone Waddle Dees
 // (ACTORID_WADDLE_DEE, 0x17) that chase the nearest human player and fade out
 // on contact. Two mechanics make standalone chase AI work:
 //
 // Spline snap: every vanilla state transition re-runs the actor's func1, which
-// snaps its position to the nearest spline point — at priority 1, before our
+// snaps its position to the nearest spline point - at priority 1, before our
 // proc runs. We undo it at priority 10 by restoring last frame's saved_pos
 // whenever ed->state changed since the previous frame.
 //
@@ -150,7 +150,7 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
 
     if (!chase_active[slot])
     {
-        // First frame past init — undo the initial state 0x0E spline snap.
+        // First frame past init - undo the initial state 0x0E spline snap.
         ed->pos = saved_pos[slot]; // saved_pos was init'd to desc.position
         saved_state[slot] = ed->state;
         chase_active[slot] = 1;
@@ -286,7 +286,7 @@ void WaddleDeeSwarm_Active(EventCheckData *ev_chk)
 void WaddleDeeSwarm_End2(EventCheckData *ev_chk)
 {
     // Signal chase procs to self-destruct. Don't call EventActor_Destroy
-    // here — pointers may be stale if vanilla already destroyed the enemy
+    // here - pointers may be stale if vanilla already destroyed the enemy
     // (OOB kill, etc.). The chase procs will destroy themselves next frame.
     swarm_active = 0;
 }

@@ -2,7 +2,7 @@
 """Dump LObjDesc / LightGroup chains from a stage .dat file.
 
 The chain head offsets are stage-specific (this script defaults to
-City Trial's `GrCity1.dat` layout — see `docs/sky-lighting-system.md`).
+City Trial's `GrCity1.dat` layout - see `docs/sky-lighting-system.md`).
 Pointers in the file are u32 file-offset values (`stored_value + 0x20
 = real file offset`). NULL is `0` with no reloc entry, but this
 dumper just chases the raw values and reports them.
@@ -10,6 +10,7 @@ dumper just chases the raw values and reports them.
 Usage:
     uv run python scripts/hsd/dump_lights.py [<file.dat>]
 """
+
 import os
 import struct
 import sys
@@ -20,7 +21,7 @@ from hsd.archive import Archive, HSD_HEADER, u16, u32
 
 
 def f32(buf, off):
-    return struct.unpack(">f", buf[off:off+4])[0]
+    return struct.unpack(">f", buf[off : off + 4])[0]
 
 
 def ptr(buf, off):
@@ -36,11 +37,13 @@ def vec3(buf, off):
 
 def dump_wobj_desc(buf, off, label):
     """WObjDesc:
-        +0x00 char *class_name
-        +0x04 Vec3 position (X, Y, Z)
+    +0x00 char *class_name
+    +0x04 Vec3 position (X, Y, Z)
     """
     cn = ptr(buf, off + 0x00)
-    print(f"      {label} @ 0x{off:X}: class={f'0x{cn:X}' if cn else 'NULL'} pos={vec3(buf, off + 0x04)}")
+    print(
+        f"      {label} @ 0x{off:X}: class={f'0x{cn:X}' if cn else 'NULL'} pos={vec3(buf, off + 0x04)}"
+    )
 
 
 def dump_lobj_desc(buf, off, idx):
@@ -65,7 +68,7 @@ def dump_lobj_desc(buf, off, idx):
         dump_wobj_desc(buf, int_p, "int")
     print(f"    u (light) = {f'0x{u_p:X}' if u_p else 'NULL'}")
     if u_p:
-        print(f"      raw 24B: " + " ".join(f"{b:02X}" for b in buf[u_p:u_p + 24]))
+        print("      raw 24B: " + " ".join(f"{b:02X}" for b in buf[u_p : u_p + 24]))
         if attnflags & 1:
             # LOBJ_RAW_PARAM: 6-float attn block
             a0, a1, a2, k0, k1, k2 = (f32(buf, u_p + 4 * i) for i in range(6))
@@ -76,7 +79,9 @@ def dump_lobj_desc(buf, off, idx):
             ref_br = f32(buf, u_p + 0x05)
             ref_dist = f32(buf, u_p + 0x09)
             dist_func = buf[u_p + 0x0D]
-            print(f"      spot/point: cutoff={cutoff} func={func} ref_br={ref_br} ref_dist={ref_dist} dist_func={dist_func}")
+            print(
+                f"      spot/point: cutoff={cutoff} func={func} ref_br={ref_br} ref_dist={ref_dist} dist_func={dist_func}"
+            )
 
 
 def dump_chain(buf, chain_off, name):
@@ -89,17 +94,19 @@ def dump_chain(buf, chain_off, name):
         if lg_p is None:
             print(f"  [end] entry[{i}] = NULL")
             break
-        # LightGroup: {LObjDesc *desc, LightAnim *anim} — 8 bytes
+        # LightGroup: {LObjDesc *desc, LightAnim *anim} - 8 bytes
         desc_p = ptr(buf, lg_p + 0x00)
         anim_p = ptr(buf, lg_p + 0x04)
-        print(f"  LightGroup[{i}] @ 0x{lg_p:X}: desc=0x{desc_p or 0:X} anim={f'0x{anim_p:X}' if anim_p else 'NULL'}")
+        print(
+            f"  LightGroup[{i}] @ 0x{lg_p:X}: desc=0x{desc_p or 0:X} anim={f'0x{anim_p:X}' if anim_p else 'NULL'}"
+        )
         if desc_p:
             dump_lobj_desc(buf, desc_p, idx)
             idx += 1
         i += 1
 
 
-# Chain head file offsets — verified for GrCity1.dat. Sourced from
+# Chain head file offsets - verified for GrCity1.dat. Sourced from
 # stage_resource[+0x14]: {primary, tertiary, secondary} LightGroup**.
 GRCITY1_CHAINS = [
     (0xC1790, "PRIMARY"),

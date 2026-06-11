@@ -123,7 +123,7 @@ static void GateStadiums_DecideStadium()
 }
 
 // Replaces the four vanilla unlock-check functions. ap_save is NULL before
-// OnSaveLoaded runs, but Gm_StadiumCheckUnlocked is called during early init —
+// OnSaveLoaded runs, but Gm_StadiumCheckUnlocked is called during early init -
 // return 0 in that window.
 static int GateStadiums_IsUnlocked(StadiumKind kind)
 {
@@ -137,7 +137,7 @@ void GateStadiums_OnBoot()
     // Replace all four stadium unlock check functions with our mask check.
     // Gm_StadiumIsAvailable inlines its own jump tables for the IsDefault and
     // IsUnlocked checks, so replacing only the underlying funcs would not
-    // redirect it — all four must be replaced independently.
+    // redirect it - all four must be replaced independently.
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsDefaultUnlocked, GateStadiums_IsUnlocked);
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsUnlocked,        GateStadiums_IsUnlocked);
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsAvailable,       GateStadiums_IsUnlocked);
@@ -179,7 +179,7 @@ int GateStadiums_UnlockStadium(StadiumKind kind, int announce)
         return 0;
 
     ap_save->stadium_unlocked_mask |= (1 << kind);
-    // Set the vanilla "NEW" bitfield so the checklist UI shows the badge —
+    // Set the vanilla "NEW" bitfield so the checklist UI shows the badge -
     // its read function (Gm_StadiumCheckNewLabel) is not replaced.
     Gm_StadiumSetNewLabelDirect(kind);
     OSReport("[GateStadiums] Stadium %d (%s) unlocked (mask = %s)\n",

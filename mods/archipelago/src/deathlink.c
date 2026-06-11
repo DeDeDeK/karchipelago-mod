@@ -9,7 +9,7 @@
 #include "deathlink.h"
 #include "textbox_api.h"
 
-// Reentrancy guard — prevents send hooks from echoing when we call
+// Reentrancy guard - prevents send hooks from echoing when we call
 // Machine_SetFallDead or Ply_SetHP from the receive path.
 static int applying_deathlink = 0;
 
@@ -26,7 +26,7 @@ static int DeathLinkSendAllowed(void)
     return 1;
 }
 
-// 3D-mode helper — gates on Ply_CheckIfCPU then sends.
+// 3D-mode helper - gates on Ply_CheckIfCPU then sends.
 static void SendDeathLink(int ply)
 {
     if (!DeathLinkSendAllowed())
@@ -38,7 +38,7 @@ static void SendDeathLink(int ply)
     ap_data->deathlink_send = 1;
 }
 
-// Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0 — fires when Machine_IsDead returns
+// Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0 - fires when Machine_IsDead returns
 // true (HP death). Does NOT fire for fall deaths (different bit in md->x0C35).
 static void DeathLink_OnHpDeath(RiderData *rd)
 {
@@ -46,7 +46,7 @@ static void DeathLink_OnHpDeath(RiderData *rd)
 }
 CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", DeathLink_OnHpDeath, "", 0)
 
-// Hook inside Machine_SetFallDead (0x801e6540) — fires when a machine falls out of
+// Hook inside Machine_SetFallDead (0x801e6540) - fires when a machine falls out of
 // bounds. At this point r31 = MachineData* and rider_gobj is known non-null.
 // Clobbered instruction: stw r4, 0x1b48(r31)
 static void DeathLink_OnFallDeath(MachineData *md)
@@ -148,7 +148,7 @@ void DeathLink_On3DLoadEnd()
 // Top Ride send hook for the sand-pit enemy on the SAND course. The pit
 // has an enemy at its center that swallows kirby and spits them back out;
 // the spit-out animation goes through `KirbyDoodlebugOut` (vtable wrapper
-// at +0xD0 — the same one used when a Doodlebug item ejects its rider,
+// at +0xD0 - the same one used when a Doodlebug item ejects its rider,
 // hence the name). Two call sites for vt[+0xD0] exist: 0x802e2804 (the
 // Doodlebug item) and 0x80331a94 (this enemy, in a per-frame function
 // that loops over all 4 kirby slots). Hooking 0x80331a94 catches only
@@ -157,7 +157,7 @@ void DeathLink_On3DLoadEnd()
 // At the hook site:
 //   r31 = kirby           (set at 0x80331a7c via mr r3, r31 above)
 //   r4  = stack+0x90      (kirby_pos arg)
-//   r5  = stack+0x84      (src_pos arg — center of the pit)
+//   r5  = stack+0x84      (src_pos arg - center of the pit)
 //   r6  = 30, r7 = 60     (immediate u16 args)
 //   r12 = kirby->vtable   (loaded at 0x80331a84)
 // Clobbered: `lwz r12, 0xd0(r12)`. r1 untouched by our prologue (no stack
@@ -247,7 +247,7 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
     ap_data->deathlink_receive = 0;
 }
 
-void DeathLink_OnTopRideLoad()
+void DeathLink_OnTopRideLoadEnd()
 {
     OSReport("[DeathLink] Active (Top Ride)\n");
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_TopRidePerFrame, 0, 0, 0, 0);

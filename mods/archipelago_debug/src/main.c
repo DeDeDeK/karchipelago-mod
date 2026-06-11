@@ -131,7 +131,7 @@ static void OnFrameStart(void)
         {
             // L+Up: queue a random in-game item from the pool that applies to
             // the current major mode. Complements the unlocks pool on D-Pad
-            // Right — these are the items you'd actually pick up in-game.
+            // Right - these are the items you'd actually pick up in-game.
             MajorKind major = Scene_GetCurrentMajor();
             int picked = -1;
             const char *mode_name = 0;
@@ -139,12 +139,12 @@ static void OnFrameStart(void)
             {
                 // Full CT give pool, in three contiguous segments:
                 //   1. the event range (AP_EVENT_BASE + EventKind),
-                //   2. the full ITKIND range — boxes, copies, food, patches,
+                //   2. the full ITKIND range - boxes, copies, food, patches,
                 //      fakes, etc. (AP_ITKIND_BASE + ItemKind),
                 //   3. the standalone CT gives that live in the 1-99 block:
                 //      bulk stat gives, legendary-machine assembly, and the CT
-                //      traps. (The other 1-99 standalones — checkbox filler,
-                //      patch-cap, spawn-rate, permanent patches — are global or
+                //      traps. (The other 1-99 standalones - checkbox filler,
+                //      patch-cap, spawn-rate, permanent patches - are global or
                 //      save-only progression, not in-match pickups, so they're
                 //      left out.)
                 // All three are serviced by ap_item_handler as CT gives, so
@@ -171,7 +171,7 @@ static void OnFrameStart(void)
             }
             else if (major == MJRKIND_AIR)
             {
-                // Only copy abilities are honored outside CT — every other
+                // Only copy abilities are honored outside CT - every other
                 // ITKIND falls through to the Gm_IsInCity gate in
                 // ap_item_handler and no-ops.
                 int range = AP_ITKIND_COPYMIC - AP_ITKIND_COPYBOMB + 1;

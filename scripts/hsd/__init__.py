@@ -13,17 +13,17 @@ Lightweight Python port of the bits of HSDLib we actually need:
   custom_weather mod's BackdropX.dat assets.
 
 Sister scripts (all inside this package):
-- `explore.py` — CLI front-end (ls / tree / find).
-- `carve_backdrop.py` — single-backdrop carve CLI.
-- `carve_all_backdrops.py` — bulk carve over iso/files/Gr*Model.dat.
-- `probe_backdrops.py` — read-only survey of backdrop presence per stage.
-- `verify_carved.py` — sanity-check a carved .dat for in-bounds relocs and pointers.
-- `dump_lights.py` — dump stage LObjDesc chains (City Trial layout by default).
+- `explore.py` - CLI front-end (ls / tree / find).
+- `carve_backdrop.py` - single-backdrop carve CLI.
+- `carve_all_backdrops.py` - bulk carve over iso/files/Gr*Model.dat.
+- `probe_backdrops.py` - read-only survey of backdrop presence per stage.
+- `verify_carved.py` - sanity-check a carved .dat for in-bounds relocs and pointers.
+- `dump_lights.py` - dump stage LObjDesc chains (City Trial layout by default).
 """
 
-from .archive import Archive, u16, u32, cstr, HSD_HEADER
-from .walker import Walker, image_size, merge_intervals, GX_FORMATS
+from .archive import HSD_HEADER, Archive, cstr, u16, u32
 from .symbols import classify_symbol
+from .walker import GX_FORMATS, Walker, image_size, merge_intervals
 
 __all__ = [
     "Archive",

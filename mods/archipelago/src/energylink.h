@@ -2,15 +2,7 @@
 #define ENERGYLINK_H
 
 void EnergyLink_On3DLoadEnd();
-void EnergyLink_OnTopRideLoad();
-
-// Emit a fractional withdrawal into the cumulative send counter (the client
-// reads-and-diffs it and forwards the delta to the server) AND immediately
-// decrement the local balance by whole MJ so affordability gates self-limit.
-// Used by Auto-Charge for its per-frame fractional spends. See the definition
-// for the rationale. (Integer menu purchases bypass this and subtract from the
-// counter and balance directly — see energylink_spend.c Buy.)
-void EnergyLink_Withdraw(float amount);
+void EnergyLink_OnTopRideLoadEnd();
 
 // Credit `amount` to the local energy balance without touching the
 // send accumulator. The polling logic treats this as an AP-side credit
