@@ -60,7 +60,7 @@ LIB_SOURCES := $(shell find $(LIB_ROOT_DIR) -name "*.c")
 # to include everything, or `EXCLUDE_MODS=foo,bar` to drop additional mods.
 # custom_events and custom_weather are excluded by default while they remain
 # WIP and not wired up to the archipelago mod.
-EXCLUDE_MODS ?= custom_events,custom_weather
+EXCLUDE_MODS ?= custom_events,custom_weather,archipelago_debug
 MOD_NAMES ?= $(filter-out $(subst $(comma),$(space),$(EXCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
 
 # 3. Mods Source: For each mod, find its specific source files within its 'src' subdirectory.
