@@ -89,7 +89,7 @@ static MenuDesc typewriter_menu = {
     .options = {
         &(OptionDesc){
             .name = "Enabled",
-            .description = "Reveal textbox messages one glyph at a time instead of all at once",
+            .description = "Reveal textbox messages gradually instead of all at once",
             .kind = OPTKIND_VALUE,
             .val = &textbox_settings.typewriter_enabled,
             .value_num = 2,
@@ -138,7 +138,7 @@ static MenuDesc top_menu = {
         },
         &(OptionDesc){
             .name = "Colored Names",
-            .description = "Color item, machine, and event names by category",
+            .description = "Color item, machine, event names, etc. by category",
             .kind = OPTKIND_VALUE,
             .val = &textbox_settings.colored_names,
             .value_num = 2,

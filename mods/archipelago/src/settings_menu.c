@@ -47,7 +47,7 @@ static MenuDesc permanent_patches_menu = {
     .options = {
         &(OptionDesc){
             .name = "City Trial",
-            .description = "Apply accumulated permanent patches at the start of each City Trial round",
+            .description = "Apply permanent patches at the start of each City Trial round",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.ct_permanent_patches_enabled,
             .value_num = 2,
@@ -59,7 +59,7 @@ static MenuDesc permanent_patches_menu = {
         },
         &(OptionDesc){
             .name = "CT Stadium",
-            .description = "Apply accumulated permanent patches when entering a City Trial stadium",
+            .description = "Apply permanent patches when entering a City Trial stadium",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.ct_stadium_permanent_patches_enabled,
             .value_num = 2,
@@ -71,7 +71,7 @@ static MenuDesc permanent_patches_menu = {
         },
         &(OptionDesc){
             .name = "Air Ride",
-            .description = "Apply accumulated permanent patches at the start of each Air Ride race",
+            .description = "Apply permanent patches at the start of each Air Ride race",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.ar_permanent_patches_enabled,
             .value_num = 2,
@@ -87,7 +87,7 @@ static MenuDesc permanent_patches_menu = {
 // Top-level Archipelago Settings menu. Wired into mod_desc.option_desc in main.c.
 OptionDesc ModSettings = {
     .name = "Archipelago Settings",
-    .description = "Interface with mod settings here.",
+    .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
         .option_num = 4,
@@ -106,7 +106,7 @@ OptionDesc ModSettings = {
             },
             &(OptionDesc){
                 .name = "Energy Link",
-                .description = "Energy Link settings and item shop.",
+                .description = "Energy Link settings and shop",
                 .kind = OPTKIND_MENU,
                 .menu_ptr = &(MenuDesc){
                     .option_num = 4,
@@ -137,7 +137,7 @@ OptionDesc ModSettings = {
                         },
                         &(OptionDesc){
                             .name = "Auto-Charge Rate",
-                            .description = "How fast Auto-Charge fills the meter (slower = energy lasts longer)",
+                            .description = "How fast Auto-Charge fills the meter",
                             .kind = OPTKIND_VALUE,
                             .val = &ap_menu_settings.energylink_autocharge_rate,
                             .value_num = 3,
@@ -150,7 +150,7 @@ OptionDesc ModSettings = {
                         },
                         &(OptionDesc){
                             .name = "Spend",
-                            .description = "Purchase items with pooled energy.",
+                            .description = "Purchase items with pooled energy",
                             .kind = OPTKIND_MENU,
                             .menu_ptr = &energylink_spend_menu,
                         },

@@ -253,8 +253,6 @@ static MenuDesc checkbox_fillers_menu = {
     },
 };
 
-// Cosmetic Kirby model scaling. Purely visual, multiplicative (clamped), and
-// resets on scene change, so it's cheap and run-neutral - safe to energy-buy.
 static MenuDesc cosmetic_menu = {
     .option_num = 2,
     .options = {
@@ -262,11 +260,6 @@ static MenuDesc cosmetic_menu = {
         BUY(AP_ITEM_SMALL_KIRBY, 500, "Small Kirby"),
     },
 };
-
-// Persistent upgrades (Patch Cap Increase, Spawn Rate Up) are intentionally NOT
-// sold here. Patch Cap Increase is AP progression (it gates logic and can be the
-// City Trial goal), so energy must never buy it; Spawn Rate Up is excluded too so
-// no persistent run-altering upgrade can be energy-bought.
 
 MenuDesc energylink_spend_menu = {
     .option_num = 11,
@@ -277,10 +270,10 @@ MenuDesc energylink_spend_menu = {
         CATEGORY("Food",              "Healing items",                           food_menu),
         CATEGORY("Special Items",     "Powerful one-use items",                  special_menu),
         CATEGORY("Legendary Pieces",  "Dragoon and Hydra machine parts",         legendary_menu),
-        CATEGORY("City Trial Items",  "Boxes and standalone items",              ct_items_menu),
+        CATEGORY("City Trial Items",  "Boxes and other CT items",                ct_items_menu),
         CATEGORY("City Trial Events", "Trigger a City Trial event",              ct_events_menu),
         CATEGORY("Top Ride Items",    "Spawn a Top Ride item at your position",  topride_items_menu),
         CATEGORY("Checkbox Fillers",  "Fill a checklist square of your choice",  checkbox_fillers_menu),
-        CATEGORY("Cosmetic",          "Scale your Kirby model (this scene)",     cosmetic_menu),
+        CATEGORY("Cosmetic",          "Cosmetic items",                          cosmetic_menu),
     },
 };

@@ -47,21 +47,21 @@ typedef struct TextBoxAPI
 
     // Named color palette. RGB only - alpha is set per-frame by the lifetime/
     // fade machinery, so the alpha byte here is ignored.
-    GXColor DefaultColor;       // white, used for prefix/suffix
-    GXColor MachineColor;       // sky blue (machines)
-    GXColor EventColor;         // violet (City Trial events)
-    GXColor StadiumColor;       // orange (stadium)
-    GXColor StageColor;         // cyan (Air Ride / Top Ride courses)
-    GXColor TopRideItemColor;   // mustard (TR ability items)
-    GXColor ItemColor;          // light green (general items)
-    GXColor TrapColor;          // dark red (traps)
-    GXColor DeathColor;         // red (deathlink)
-    GXColor EnergyColor;        // cyan (energylink)
-    GXColor CheckColor;         // green (check sent)
-    GXColor GoalColor;          // gold (goal complete)
-    GXColor RewardColor;        // pale yellow (checklist reward)
-    GXColor ShopColor;          // teal (energylink shop purchase)
-    GXColor FillerColor;        // purple (checkbox fillers)
+    GXColor DefaultColor;     
+    GXColor MachineColor;     
+    GXColor EventColor;       
+    GXColor StadiumColor;     
+    GXColor StageColor;       
+    GXColor TopRideItemColor; 
+    GXColor ItemColor;        
+    GXColor TrapColor;        
+    GXColor DeathColor;       
+    GXColor EnergyColor;      
+    GXColor CheckColor;       
+    GXColor GoalColor;        
+    GXColor RewardColor;      
+    GXColor ShopColor;        
+    GXColor FillerColor;      
 
     // Indexed palettes.
     const GXColor *AbilityColors; // [COPYKIND_NUM]
