@@ -1,0 +1,76 @@
+#include "game.h"
+#include "os.h"
+#include "code_patch/code_patch.h"
+
+#include "main.h"
+#include "gate_airride_stages.h"
+#include "textbox_api.h"
+#include "inline.h"
+
+// Replacement for AirRide_CheckCourseUnlocked (0x8000c0e0).
+// The vanilla function only checks stage_kind 8 (Nebula Belt) against the
+// checklist. Our replacement checks ALL stages against the AP unlock mask.
+// Returns 1 if the stage is unlocked, 0 if locked.
+// Stage kind 9 (random button) is only available if at least one stage is unlocked,
+// to prevent a soft-lock in AirRide_RandomStageSelect when no candidates exist.
+static int GateAirRideStages_CheckCourseUnlocked(s8 stage_kind)
+{
+    if (!ap_save || stage_kind < 0)
+        return 0;
+    if (stage_kind >= AIRRIDE_NUM)
+        return ap_save->airride_stage_unlocked_mask != 0 ? 1 : 0;
+    return (ap_save->airride_stage_unlocked_mask & (1 << stage_kind)) ? 1 : 0;
+}
+
+void GateAirRideStages_OnBoot()
+{
+    // Replace AirRide_CheckCourseUnlocked to check AP mask instead of vanilla checklist
+    CODEPATCH_REPLACEFUNC(AirRide_CheckCourseUnlocked, GateAirRideStages_CheckCourseUnlocked);
+
+    // Patch call site 1: AirRideSelect_Init (0x8003c114)
+    // The vanilla code only checks stage_kind == 8 before calling CheckCourseUnlocked.
+    // We patch out the guard so ALL stages go through the unlock check.
+    // Original:  cmpwi r0, 8 / bne skip / li r3, 8
+    // Patched:   mr r3, r0   / nop       / nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8003c210, 0x7c030378); // mr r3, r0
+    CODEPATCH_REPLACEINSTRUCTION(0x8003c214, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8003c218, 0x60000000); // nop
+
+    // Patch call site 2: course init with random select (0x8003b4e8)
+    // Same pattern as site 1.
+    CODEPATCH_REPLACEINSTRUCTION(0x8003b520, 0x7c030378); // mr r3, r0
+    CODEPATCH_REPLACEINSTRUCTION(0x8003b524, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8003b528, 0x60000000); // nop
+
+    // Patch call site 3: AirRide_RandomStageSelect (0x8000dd4c)
+    // Loop var is r27. Original: cmpwi r27, 8 / bne skip / li r3, 8
+    // Patched:   mr r3, r27  / nop       / nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8000ddc4, 0x7f63db78); // mr r3, r27
+    CODEPATCH_REPLACEINSTRUCTION(0x8000ddc8, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8000ddcc, 0x60000000); // nop
+
+    // Call site 4: gmLanMenu_RenderMainMenuUI (0x80052028)
+    // Slightly different layout: cmpwi r28, 8 / beq check / li r0, 1 / b past / li r3, 8
+    // We NOP the guard and unconditional branch so all stages call the check.
+    // Patched: mr r3, r28 / nop / nop / nop / nop
+    CODEPATCH_REPLACEINSTRUCTION(0x80052070, 0x7f83e378); // mr r3, r28
+    CODEPATCH_REPLACEINSTRUCTION(0x80052074, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x80052078, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8005207c, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x80052080, 0x60000000); // nop
+
+    OSReport("[AirRideStages] Air Ride stage gating installed\n");
+}
+
+int GateAirRideStages_UnlockStage(int stage_kind, int announce)
+{
+    if (stage_kind < 0 || stage_kind >= AIRRIDE_NUM)
+        return 0;
+
+    ap_save->airride_stage_unlocked_mask |= (1 << stage_kind);
+    OSReport("[AirRideStages] Air Ride stage %d (%s) unlocked (mask = %s)\n",
+             stage_kind, AirRideCourse_Names[stage_kind], MaskBits(ap_save->airride_stage_unlocked_mask, 16));
+    if (announce)
+        tb_api->EnqueueColoredNoun("Unlocked Course: ", AirRideCourse_Names[stage_kind], tb_api->StageColor, NULL);
+    return 1;
+}

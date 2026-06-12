@@ -1,9 +1,11 @@
 /build/
-/root/
 /out/
 /.temp/
-/install/
 /externals/devkitpro/
+/iso/
+/.claude/settings.local.json
+__pycache__/
+mem1.raw
 notes.txt
 kar.iso
 out.iso
