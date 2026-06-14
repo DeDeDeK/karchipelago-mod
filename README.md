@@ -6,14 +6,11 @@ This repository hosts the native GameCube mod that interfaces with Kirby Air Rid
 
 The repo is based on the [hoshi-mod template project](https://github.com/UnclePunch/hoshi-mod).
 
-
 ## Getting the mod
 
 - **Latest mod release:** https://github.com/DeDeDeK/karchipelago-mod/releases/latest
 - **APWorld (Archipelago integration):** https://github.com/DeDeDeK/KARchipelago
 - **Setup guide (full player walkthrough):** https://github.com/DeDeDeK/KARchipelago/blob/main/worlds/kirby_air_ride/docs/setup_en.md
-
-The APWorld and this mod are released together and must match versions - the mod is the in-game half, the APWorld is the client/generator half. Most players only need the prebuilt release; you only need the build instructions below if you want to modify the mod yourself.
 
 
 ## Installing the mod (Riivolution)
