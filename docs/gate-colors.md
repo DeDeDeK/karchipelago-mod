@@ -36,13 +36,17 @@ The three TR hooks are all load-bearing: `TopRide_InitSelectData` writes `color[
 
 > Note: the symbols above are the current `GKYE01.map` names. The `gate_colors.c` source comments still refer to several of these by their old map placeholders — `zz_80028888_` (= `CSS_airRide_RaceUpdate`), `zz_80029bd8_` (= `CSS_airRide_FreeTimeUpdate`), `zz_8002cfd8_`/`zz_8002d0ec_`/`zz_8002d9e8_`/`zz_8002dc9c_` (the four Top Ride functions). They are the same functions.
 
-### REPLACECALL
+### CPU random color
 
-| Address | Original | Replacement | Purpose |
-|---------|----------|-------------|---------|
-| `0x800236b4` | `HSD_Randi` | `GateColors_GetRandomUnlockedColor` | `loadCPU` — CPU icon color on load |
-| `0x80026534` | `HSD_Randi` | `GateColors_GetRandomUnlockedColor` | `CSS_airRide_inputGrabberReadyScreen` |
-| `0x8002988c` | `HSD_Randi` | `GateColors_GetRandomUnlockedColor` | `CSS_airRide_RaceUpdate` init — CPU random icon color |
+CPUs are given a **random unlocked color** in every mode via `GateColors_RandomUnlockedColor()` (collects the unlocked colors from `color_unlocked_mask`, `HSD_Randi`-picks one, falls back to the first unlocked / Pink). Without this, a CPU would inherit the per-slot `{0,1,2,3}` color default (validated to unlocked, but the same every race and prone to collapsing several CPUs onto the first-unlocked color when their defaults are locked). The color is set at each mode's CPU-aware commit point, after that mode's `color[]` validator has run, so it is the final value:
+
+| Mode | Where | Field |
+|------|-------|-------|
+| Air Ride | `GateColors_SetCpuAirRideColor`, HOOKCREATE at `0x800236a8` (the CPU-slot `ply_kind = 2` write inside `loadCPU`'s per-slot loop; r29 = `airride_select_ply` base + slot, color at +0x51) | `airride_select_ply.color` (`0x15b`) |
+| Top Ride | `GateMachines_FixupTRInit` (RaceInit, runs after `ValidateTopRideColors`), for panels with `panel_pkind == 2`; color at lobby +0x23 | `topride_select_ply.color` (`0x1ba`) |
+| City Trial | `GateMachines_FinalizeCTMachine` (the `0x8002dea0` convergence hook), for slots with `x215 == 2` | `city_select_ply.ply_color` (`0x221`) |
+
+Human color picks are never touched — each hook fires only on the CPU branch/slot. (Note: the `HSD_Randi` calls at `0x800236b4`/`0x80026534`/`0x8002988c` in the AR CSS are **machine-list index** picks, not color picks — `machine[slot] = available_char_list[HSD_Randi(unlocked_count)]` over the `AirRide_CheckCharacterAvailable`-gated list. See [gate-machines.md](gate-machines.md).)
 
 ### Other call sites
 

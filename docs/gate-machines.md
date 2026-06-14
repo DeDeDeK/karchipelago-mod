@@ -69,7 +69,7 @@ Both modes have a **counting pass** (determines total available count → r27) a
 
 The array-building hooks skip all the way to the **flat-copy at `0x8002f0b8`** (`stb r27, 101(r30)` → `machine_select.num`, then the layout thunk), bypassing the vanilla reorder/balance block in between. That reorder was written around vanilla's grid iteration (special characters at fixed col 0/9 positions); our packed arrays violate that assumption and triggered a duplicate-icon bug when only DEDEDE/METAKNIGHT were unlocked. The flat-copy reads `row_counts` + `char_arr` directly, so no reorder is needed.
 
-These hooks fire during `CitySelect_CreateMachineIcons` (before `OnPlayerSelectLoad`), so by the time the player select scene is up, `machine_select.c_kind_arr` is already filtered. Mode 0 (Trial) doesn't populate `machine_select.c_kind_arr` at all — the starting machine is set by the `0x8002de80` hook (see below) and there's no on-screen machine grid to filter.
+These hooks fire during `CitySelect_CreateMachineIcons` (before `OnPlayerSelectLoad`), so by the time the player select scene is up, `machine_select.c_kind_arr` is already filtered. Mode 0 (Trial) doesn't populate `machine_select.c_kind_arr` at all — the starting machine is set by the `0x8002dea0` convergence hook (see below) and there's no on-screen machine grid to filter.
 
 ### Navigation off-by-one fix (`CODEPATCH_REPLACEINSTRUCTION 0x80031350`)
 
@@ -84,11 +84,22 @@ Fix: `CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a)` patches the threshol
 
 ## City Trial — Starting Machine & Respawn
 
-### Default Machine on Entry (`CitySelect_InitPlayerMachines`, entry 0x8002ddd8)
+### Starting Machine (`CitySelect_InitPlayerMachines`, entry 0x8002ddd8)
 
-When the City Trial field loads, vanilla hardcodes the Compact Star as the starting machine for every player. A `CODEPATCH_HOOKCREATE` at `0x8002de80` (inside `CitySelect_InitPlayerMachines`, whose entry is `0x8002ddd8`) replaces the hardcoded `VCKIND_COMPACT` with `GateMachines_GetDefaultCKind()`. The hook epilogue does `stb 3, 97(28)` and skips to `0x8002dea0`.
+`CitySelect_InitPlayerMachines` commits the per-slot starting machine for **every** City Trial mode. Its two branches both write `ply_icon_ckind[slot]` (`+0x61`) and merge at the convergence point `0x8002dea0` (`lbz r3, 97(r28)` → `Character_GetDesc`):
 
-`GateMachines_GetDefaultCKind()` returns `CKIND_COMPACT` when Compact is unlocked. When Compact is locked, it picks one of the unlocked CharacterKinds at random (`HSD_Randi`) so that different CSS loads don't all collapse to the same fallback. The random pick **excludes `CKIND_DEDEDE` and `CKIND_METAKNIGHT`**: their riders rely on rider-specific 3D HUD assets that vanilla's HUD loader short-circuits in Base CT (`major==CITY && cityMode==TRIAL`), so selecting them here would NULL-deref `3DHud_CreateSpeedometerInner` during scene init. If no eligible Kirby-rider machine is unlocked, it falls back to `CKIND_COMPACT`.
+- **Trial** (`city_select_ply.x1d0 == 0`): vanilla hardcodes Compact for every slot. The free-roam start has no machine grid — nobody (human or CPU) picks.
+- **Stadium / Free Run** (`x1d0 != 0`): vanilla sets `ckind = machine_select.c_kind_arr[icon[slot]]` from the gated grid. No CT select function calls `HSD_Randi`, so a CPU's `icon[slot]` stays at its default (~0) — without intervention every CPU collapses to the first unlocked machine.
+
+A single `CODEPATCH_HOOKCREATE` at `0x8002dea0` (prologue `mr 3, 26` → slot; skip target 0 re-executes the clobbered `lbz r3, 97(r28)`, reloading the updated ckind) runs `GateMachines_FinalizeCTMachine(slot)` for each active slot. `r26` = slot index and `r28` = `city_select_ply + slot` are both callee-saved, so they survive the C call.
+
+The **Random Start Machine** menu toggle (`ap_menu_settings.ct_random_start_machine`, default **On**) is the single master and applies **identically to humans and CPUs** wherever neither makes an explicit grid pick:
+
+- `x215[slot]`: `0` = human, `2` = CPU, else inactive (left untouched).
+- **Trial**: toggle drives every active slot the same way. On → `RandomUnlockedKirbyCKind()`; Off → Compact when unlocked, else `RandomUnlockedKirbyCKind()`.
+- **Stadium / Free Run**: humans actively pick on the grid, so a human's selection is always kept. Only auto-assigned **CPU** slots follow the toggle — On → a random entry from the gated `c_kind_arr[0..num-1]`; Off → the vanilla first-unlocked default.
+
+`RandomUnlockedKirbyCKind()` picks a random unlocked CharacterKind for the free-roam Trial start but **excludes `CKIND_DEDEDE` and `CKIND_METAKNIGHT`**: their riders rely on rider-specific 3D HUD assets that vanilla's HUD loader short-circuits in Base CT (`major==CITY && cityMode==TRIAL`), so selecting them there would NULL-deref `3DHud_CreateSpeedometerInner` during scene init. It falls back to `CKIND_COMPACT` when no eligible Kirby-rider machine is unlocked. The Stadium/Free Run CPU path draws straight from `c_kind_arr` instead (Dedede/Meta Knight are valid in stadium contexts).
 
 ### Respawn Machine (`Rider_ResetStartingMachine`, entry 0x80195288)
 
@@ -112,7 +123,7 @@ Seven hooks cover the TR lobby surface:
 | Function | Hook Address | Skip Target | Description |
 |----------|-------------|-------------|-------------|
 | `TopRide_InitSelectData` | 0x8002d070 | 0x8002d074 | Post-init fixup (main-menu reset): vanilla writes panel_machine = 0 (Free); when Free is locked, override to the first unlocked TR machine for all 4 panels |
-| `TopRide_RaceInit` | 0x8002d748 | (fall-through) | Post-reset fixup (TR Main Game / multiplayer race): vanilla's conditional reset block at 0x8002d6c4..0x8002d700 overwrites panel_machine = 0 again, undoing InitSelectData's fixup; this hook re-applies the unlock-aware default |
+| `TopRide_RaceInit` | 0x8002d748 | (fall-through) | Post-reset fixup (TR Main Game / multiplayer race): vanilla's conditional reset block at 0x8002d6c4..0x8002d700 overwrites panel_machine = 0 again, undoing InitSelectData's fixup; this hook re-applies the unlock-aware default — **CPU panels (`panel_pkind == 2`) get a *random* unlocked control type, human panels get the first unlocked machine**. This is the only fixup site that runs after `panel_pkind` is filled, so the CPU-random branch only fires here |
 | `TopRide_SoloInit` | 0x8002db90 | (fall-through) | Post-init fixup (Free Run / Time Attack): same as above for the solo flow, which uses a separate init function that hardcodes panel_machine = 0 at 0x8002db70..0x8002db88 |
 | `TopRide_CSS_PanelThink` | 0x8002be44 | 0x8002c054 / 0x8002be98 | L/R cycler gate (**race lobby**): replaces the entire `lbz`/`stb` cycle block + post-write compare; skips writes that would land on a locked machine. Conditional: returns 0 (no change → function end) or 1 (changed → SFX + UI update) |
 | `TopRide_SoloPanelThink` | 0x8002cb98 | 0x8002cc18 / 0x8002cbf0 | L/R cycler gate (**solo Free Run / Time Attack**): solo counterpart to the race cycler above, reusing `GateMachines_CycleTRMachine`. Without it, solo had no unlock check on the Control Type row. Conditional: returns 0 (no change → function end 0x8002cc18) or 1 (changed → SFX + UI update 0x8002cbf0) |
@@ -148,12 +159,16 @@ Two `CODEPATCH_REPLACEFUNC`:
    - CKIND_DRAGOON, CKIND_HYDRA, CKIND_FLIGHT always return 0 (City Trial-only).
    - Others: uses `CharacterDesc_GetMachineKind()` to resolve the actual VCKIND (accounting for bike-relative indexing — see [css-system.md](css-system.md#bike-relative-indexing)), then checks `machine_unlocked_mask`.
 
-2. **`AirRide_CheckMachineUnlocked` → `GateMachines_CheckAirRideMachineUnlocked`**
-   - Gates CPU random machine assignment in `AirRide_SelectRandomMachine`.
+2. **`TitleScreen_CheckMachineUnlocked` → `GateMachines_CheckTitleDemoMachineUnlocked`**
+   - Gates the **title-screen attract-demo** machine pick (`TitleScreen_SelectRandomMachine`, reachable only via `TitleScreen_MinorExit` → `TitleScreen_SetupDemoMachines`). This does **not** run for CPUs in real Air Ride races.
    - Takes `machine_class` (is_bike) and `machine_id` (bike-relative index from `CharacterDesc.machine_kind`, NOT the absolute VCKIND for bikes).
    - Converts to actual VCKIND (`VCKIND_WHEELNORMAL + machine_id` if bike), then checks `machine_unlocked_mask`.
 
 In vanilla, both functions map to checklist reward indices and check `ClearChecker_CheckUnlocked`. Only Warp Star (CKIND_WARP) is available by default. Compact Star (CKIND_COMPACT) is hardcoded unavailable (`case 0: return 0`).
+
+**Real in-game CPU machine pick:** the actual Air Ride CPU machine is chosen in `loadCPU` (0x80023600) and its sibling setup paths, which do `machine[slot] = available_char_list[HSD_Randi(unlocked_count)]` over the list gated by the `AirRide_CheckCharacterAvailable` replacement (hook #1 above). So CPUs already draw a random **unlocked** machine in real races purely from that character-list gating — no separate machine-pick hook is needed. (An earlier `gate_colors.c` `HSD_Randi` REPLACECALL on those same call sites was a bug — it overwrote the machine-list index with a color value, collapsing CPUs onto Compact; it has been removed. CPU color is gated separately via `color[]` validation; see [gate-colors.md](gate-colors.md).)
+
+**Stale-list clear (`GateMachines_ClearAirRideList`):** the select struct caches its available-machine list at `airride_select_ply +0x66` (the 2x10 = 20-entry icon grid). `AirRide_PopulateSelectIcons` runs **every CSS frame** (called unconditionally at 0x8002896c in `CSS_airRide_RaceUpdate` and 0x80029c74 in `CSS_airRide_FreeTimeUpdate`), but it only (re)writes the first `count` entries and never clears the tail — only the once-per-entry `CSS_airRide_InitSelectData` memset zeroes the whole region. So when `machine_unlocked_mask` is narrowed mid-session (e.g. the debug menu locks machines while you sit in the CSS), `count` drops but stale entries from an earlier fill linger past the new count. Every slot's icon index (`+0x2d`) defaults to 0 and the CSS resolves the displayed **and committed** machine as `list[icon]`, so a stale `list[0]` drives the whole lobby — and the subsequent race — onto a vehicle that is no longer unlocked (observed symptom: lock everything, re-open AR CSS, the entire lobby is on Winged Star). Fix: a `CODEPATCH_HOOKCREATE` at 0x80020a88 (just after `r31 = airride_select_ply` is set up, before the rebuild) zeroes `list[0..19]` each frame, so populate refills `[0..count-1]` and the tail stays 0 (→ `CKIND_COMPACT`). Because populate runs per-frame, the lobby self-heals the next frame rather than needing a full CSS re-entry. (Note: `ply_icon_ckind +0x61` is **not** the rendered/committed field — `list[icon]` is — so clearing the list, not clamping `+0x61`, is the correct fix.)
 
 ### Compact Star Icon Issue
 
