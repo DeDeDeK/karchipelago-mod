@@ -16,6 +16,7 @@ typedef struct APMenuSettings
     int ct_permanent_patches_enabled;
     int ct_stadium_permanent_patches_enabled;
     int ar_permanent_patches_enabled;
+    int ct_random_start_machine; // start City Trial on a random unlocked machine
 } APMenuSettings;
 
 extern APMenuSettings ap_menu_settings;

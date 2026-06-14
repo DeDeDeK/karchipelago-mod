@@ -50,9 +50,10 @@ CSS_airRide_ModeDispatch (0x8002a1b0)
 | `CSS_airRide_colorChanger` | 0x80021654 | 0x2e0 | L/R color cycling |
 | `AirRide_PopulateSelectIcons` | 0x80020a08 | 0xc4c | Builds character icon grid |
 | `AirRide_CheckCharacterAvailable` | 0x8002090c | 0xfc | Character availability check |
-| `AirRide_CheckMachineUnlocked` | 0x8000c364 | 0x124 | Machine unlock check (CPU random) |
-| `AirRide_SelectRandomMachine` | 0x8000daa0 | 0x148 | CPU random machine assignment |
-| `loadCPU` | 0x80023600 | 0x2d4 | CPU player setup |
+| `TitleScreen_CheckMachineUnlocked` | 0x8000c364 | 0x124 | Machine unlock check — **title-screen demo only** |
+| `TitleScreen_SelectRandomMachine` | 0x8000daa0 | 0x148 | Random machine assignment — **title-screen demo only** |
+| `TitleScreen_SetupDemoMachines` | 0x8000dbe8 | 0x164 | Builds the 4 demo riders/machines (calls `TitleScreen_SelectRandomMachine`) |
+| `loadCPU` | 0x80023600 | 0x2d4 | CPU player setup (real in-game CPU machine pick) |
 | `Gm_GetAirRideMode` | 0x8003d5f0 | 0x24 | Returns `airride_mode` |
 | `Gm_GetAirRidePlayerSlot` | 0x8003d644 | 0x24 | Returns active player slot (Free Run / Time Attack) |
 
@@ -152,13 +153,13 @@ Switch on CharacterKind:
 | CKIND_DEDEDE (18) | 0x20 (32) |
 | CKIND_METAKNIGHT (19) | 0x21 (33) |
 
-#### AirRide_CheckMachineUnlocked (0x8000c364)
+#### TitleScreen_CheckMachineUnlocked (0x8000c364) / TitleScreen_SelectRandomMachine (0x8000daa0)
 
-Used by `AirRide_SelectRandomMachine` for CPU machine assignment. Takes `machine_class` (is_bike) and `machine_id` (from `CharacterDesc.machine_kind`). Maps to the same Air Ride checklist reward indices. Returns 0 for unknown machine IDs.
+**Title-screen demo only.** `TitleScreen_SelectRandomMachine` loops CharacterKinds 0–17 (excludes CKIND_DEDEDE/CKIND_METAKNIGHT), skips the 4 most recently assigned CKinds (history at `gd[0x1d]–gd[0x20]`), lets Warp Star (ckind 1) bypass the unlock check, and gates the rest through `TitleScreen_CheckMachineUnlocked` (takes `machine_class`/is_bike and `machine_id`, returns 0 for unknown IDs). The call chain is `TitleScreen_MinorExit` → `TitleScreen_SetupDemoMachines` (0x8000dbe8) → `TitleScreen_SelectRandomMachine` → `TitleScreen_CheckMachineUnlocked`, with no other callers; none of it runs for CPUs in real Air Ride races.
 
-#### AirRide_SelectRandomMachine (0x8000daa0)
+#### Real in-game CPU machine pick (`loadCPU`, 0x80023600)
 
-Loops through CharacterKinds 0–17 (excludes CKIND_DEDEDE and CKIND_METAKNIGHT). Skips the 4 most recently assigned CKinds (history at `gd[0x1d]–gd[0x20]`). Warp Star (ckind 1) always bypasses the unlock check. All others call `AirRide_CheckMachineUnlocked`. Picks randomly with equal weight.
+The actual Air Ride CPU machine is chosen in `loadCPU` (and the sibling ready-screen / setup paths at 0x80026534 and 0x8002988c). Each does `idx = HSD_Randi(gd[0x16f]); icon[slot] = idx; machine[slot] = gd[0x170 + idx]`, where `gd[0x16f]` is the count of unlocked characters and `gd[0x170..]` is the gated available-character list built by `AirRide_PopulateSelectIcons` (via the `AirRide_CheckCharacterAvailable` replacement). So vanilla already picks a random **unlocked** machine here — the mod only needs the available list gated, which it already does. (CPU color is gated separately via the `color[]` validation hooks; see `gate-colors.md`.)
 
 ## Air Ride Select Data
 
@@ -406,13 +407,13 @@ The following mod systems intercept CSS behavior. Each is documented in its own 
 - L/R cycling hooks on all 3 colorChanger functions
 - `color[]` init validation in both Air Ride CSS functions
 - `icon[]` validation via machine-to-color lookup hook
-- CPU random color replacement via `HSD_Randi` REPLACECALL hooks
 - `ValidateCityTrialColors` via `OnPlayerSelectLoad` (CT minor only — CT has no init block to hook)
 
 ### Machine Gating (`gate-machines.md`)
 
-- `AirRide_CheckCharacterAvailable` REPLACEFUNC — gates AR character availability
-- `AirRide_CheckMachineUnlocked` REPLACEFUNC — gates CPU random machine assignment
+- `AirRide_CheckCharacterAvailable` REPLACEFUNC — gates the AR character list; this is what makes the in-game CPU machine pick (`loadCPU`'s gated `HSD_Randi` index) respect the unlock mask
+- `TitleScreen_CheckMachineUnlocked` REPLACEFUNC — gates the **title-screen demo** machine pick only (not real CPU gameplay)
+- CT starting machine: convergence hook at `CitySelect_InitPlayerMachines` (0x8002dea0) sets each active slot's machine per the Random Start Machine toggle
 - CT Free Run: hooks at `CitySelect_CreateMachineIcons` for counting (0x8002e5c0) and array-building (0x8002e738)
 - CT Free Run select list filtering via `GateMachines_FilterSelectList` in `OnPlayerSelectLoad`
 

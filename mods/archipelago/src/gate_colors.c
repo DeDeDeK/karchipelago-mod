@@ -72,27 +72,44 @@ static void GateColors_ValidateTopRideColors(void)
     validate_color_array(gd->topride_select_ply.color);
 }
 
-// Pick a random unlocked color. Replaces HSD_Randi call in loadCPU
-// for Air Ride CPU color assignment.
-static int GateColors_GetRandomUnlockedColor(int unused)
+// Pick a random unlocked Kirby color. The AP world guarantees Pink (color 0)
+// is always granted, so 0 is a safe fallback if the mask is somehow empty.
+int GateColors_RandomUnlockedColor(void)
 {
     int unlocked[KIRBYCOLOR_NUM];
     int count = 0;
-
     for (int i = 0; i < KIRBYCOLOR_NUM; i++)
     {
         if (ap_save->color_unlocked_mask & (1 << i))
             unlocked[count++] = i;
     }
-
     if (count == 0)
         return 0;
-
-    int result = unlocked[HSD_Randi(count)];
-    OSReport("[GateColors] GetRandomUnlockedColor: mask=%s count=%d result=%d\n",
-             MaskBits(ap_save->color_unlocked_mask, 8), count, result);
-    return result;
+    return unlocked[HSD_Randi(count)];
 }
+
+// Give an Air Ride CPU slot a random unlocked color. loadCPU sets up each CPU
+// slot's color from the per-slot color[] default, which is the same for every
+// race; this makes each CPU roll its own random unlocked color instead. Humans
+// keep their CSS color pick (this fires only on the CPU-slot branch). slot_base
+// = airride_select_ply base + slot; color[] is at +0x51 (0x15b - 0x10a).
+void GateColors_SetCpuAirRideColor(u8 *slot_base)
+{
+    slot_base[0x51] = (u8)GateColors_RandomUnlockedColor();
+}
+
+// Hook at 0x800236a8 in loadCPU (`stb r0, 69(r29)`, the CPU-slot ply_kind = 2
+// write inside the per-slot setup loop). At entry r29 = airride_select_ply base
+// + slot (callee-saved). This branch runs only for CPU slots, so we set the
+// CPU's color here. The clobbered `stb r0, 69(r29)` needs r0 = 2 (set just
+// before by `li r0, 2`); our C call wipes r0, so the epilogue restores it before
+// the framework re-executes the store.
+CODEPATCH_HOOKCREATE(0x800236a8,
+    "mr 3, 29\n\t",
+    GateColors_SetCpuAirRideColor,
+    "li 0, 2\n\t",
+    0
+)
 
 // Filter the availability result at the convergence point of each CSS
 // color changer. All code paths (colors 0-3 hardcoded, colors 4-7
@@ -214,11 +231,8 @@ void GateColors_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8002a510);
     CODEPATCH_HOOKAPPLY(0x8002f350);
 
-    // Air Ride CPU color: replace all HSD_Randi calls that assign random
-    // colors to CPU slots. Three call sites across different CSS functions.
-    CODEPATCH_REPLACECALL(0x800236b4, GateColors_GetRandomUnlockedColor); // loadCPU
-    CODEPATCH_REPLACECALL(0x80026534, GateColors_GetRandomUnlockedColor); // CSS_airRide_inputGrabberReadyScreen
-    CODEPATCH_REPLACECALL(0x8002988c, GateColors_GetRandomUnlockedColor); // CSS_airRide unnamed
+    // Air Ride CPU color: give each CPU slot a random unlocked color in loadCPU.
+    CODEPATCH_HOOKAPPLY(0x800236a8);
 
     // Air Ride machine-lookup color: validate the color assigned from the
     // machine-to-color table before it's stored as icon color.

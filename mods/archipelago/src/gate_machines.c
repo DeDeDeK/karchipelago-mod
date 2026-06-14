@@ -8,6 +8,8 @@
 
 #include "main.h"
 #include "gate_machines.h"
+#include "gate_colors.h"
+#include "settings_menu.h"
 #include "textbox_api.h"
 #include "inline.h"
 
@@ -49,23 +51,18 @@ static MachineKind GetFirstUnlockedCTMachine()
     return VCKIND_COMPACT;
 }
 
-// Default CharacterKind for the City Trial mode-0 CSS init. Prefers Compact
-// Star (vanilla default); when Compact is locked, picks one of the unlocked
-// Kirby-rider CharacterKinds at random.
+// Pick a random unlocked Kirby-rider CharacterKind for a City Trial starting
+// machine, excluding CKIND_DEDEDE / CKIND_METAKNIGHT.
 //
-// Excludes CKIND_DEDEDE and CKIND_METAKNIGHT: their riders rely on
-// rider-specific HUD assets (`ScInfSpeedd*`, `ScInfHpd*`, etc.) that vanilla's
-// 3D HUD loader explicitly skips in Base CT (`zz_8011878c_` and friends short-
-// circuit when major==CITY && cityMode==TRIAL). Picking those riders here
-// would NULL-deref `3DHud_CreateSpeedometerInner` during scene init. Vanilla
-// only uses Dedede/Meta Knight in stadium contexts where the conversion
-// happens stadium-side, so excluding them from CT-mode-0 selection matches
-// vanilla's own assumption. Compact is always a safe fallback.
-CharacterKind GateMachines_GetDefaultCKind()
+// Those two are excluded because their riders rely on rider-specific HUD assets
+// (`ScInfSpeedd*`, `ScInfHpd*`, etc.) that vanilla's 3D HUD loader explicitly
+// skips in Base CT (`zz_8011878c_` and friends short-circuit when major==CITY &&
+// cityMode==TRIAL). Picking those riders for the free-roam Trial start would
+// NULL-deref `3DHud_CreateSpeedometerInner` during scene init. Vanilla only uses
+// Dedede / Meta Knight in stadium contexts where the conversion happens
+// stadium-side. Compact is always a safe fallback when nothing else is unlocked.
+static CharacterKind RandomUnlockedKirbyCKind(void)
 {
-    if (IsCKindUnlocked(CKIND_COMPACT))
-        return CKIND_COMPACT;
-
     int unlocked_count = 0;
     for (int ckind = 0; ckind < CKIND_NUM; ckind++)
     {
@@ -76,10 +73,7 @@ CharacterKind GateMachines_GetDefaultCKind()
     }
 
     if (unlocked_count == 0)
-    {
-        OSReport("[GateMachines] GetDefaultCKind: no Kirby-rider machines unlocked, fallback to Compact\n");
         return CKIND_COMPACT;
-    }
 
     int pick = HSD_Randi(unlocked_count);
     for (int ckind = 0; ckind < CKIND_NUM; ckind++)
@@ -118,17 +112,49 @@ static TopRideMachineKind GetFirstUnlockedTRMachine()
     return TR_MACHINE_FREE;
 }
 
+// Pick a random unlocked TR control type (Free / Steer) for a CPU panel.
+// Falls back to GetFirstUnlockedTRMachine when nothing qualifies.
+static TopRideMachineKind GetRandomUnlockedTRMachine()
+{
+    TopRideMachineKind unlocked[TR_MACHINE_NUM];
+    int count = 0;
+    if (IsTRMachineUnlocked(TR_MACHINE_FREE))
+        unlocked[count++] = TR_MACHINE_FREE;
+    if (IsTRMachineUnlocked(TR_MACHINE_STEER))
+        unlocked[count++] = TR_MACHINE_STEER;
+    if (count == 0)
+        return GetFirstUnlockedTRMachine();
+    return unlocked[HSD_Randi(count)];
+}
+
 // Post-init fixup for TopRide_InitSelectData (0x8002cfd8). Vanilla's per-slot
-// init loop unconditionally writes panel_machine[slot] = 0 (Free Star). When
-// Free is locked, walk the 4 panels and force them onto the first unlocked
-// TR machine so the lobby never starts on a locked option.
+// init loop unconditionally writes panel_machine[slot] = 0 (Free Star). Walk
+// the 4 panels and set each one's default: CPU panels get a random unlocked
+// control type so the CPUs don't all share Free Star, while human panels get
+// the first unlocked machine (a human's own L/R pick is gated separately). This
+// keeps the lobby from ever starting on a locked option.
+//
+// Panel kind lives at lobby_base[0x1b + slot] (GameData+0x1b2 panel_pkind:
+// 0=open, 1=HMN, 2=CPU, 3=OFF). Only the RaceInit hook site (0x8002d748) runs
+// after that field is filled, so the CPU branch only meaningfully fires there;
+// the InitSelectData / SoloInit sites see non-CPU kinds and fall through to
+// first-unlocked, unchanged from before. RaceInit also runs after the TR color
+// validator (0x8002d704), so the CPU color set below is the final value.
 void GateMachines_FixupTRInit(u8 *lobby_base)
 {
-    TopRideMachineKind machine = GetFirstUnlockedTRMachine();
+    TopRideMachineKind first = GetFirstUnlockedTRMachine();
     // 0x2f = offsetof(topride_select_ply, panel_machine) - 0x37 (lobby base
-    // is GameData+0x197, not GameData+0x160). See game.h.
+    // is GameData+0x197, not GameData+0x160). color[] is at +0x23 (0x1ba). See game.h.
     for (int i = 0; i < 4; i++)
-        lobby_base[0x2f + i] = (u8)machine;
+    {
+        if (lobby_base[0x1b + i] == 2) // CPU panel
+        {
+            lobby_base[0x2f + i] = (u8)GetRandomUnlockedTRMachine();
+            lobby_base[0x23 + i] = (u8)GateColors_RandomUnlockedColor();
+        }
+        else
+            lobby_base[0x2f + i] = (u8)first;
+    }
 }
 
 // Hook at 0x8002d070 in TopRide_InitSelectData, immediately after the per-slot
@@ -566,17 +592,65 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     }
 }
 
-// Hook at 0x8002de80 in CitySelect_InitPlayerMachines.
-// Vanilla hardcodes ply_icon_ckind = 0 (CKIND_COMPACT) for City Trial mode 0.
-// We replace it with GateMachines_GetDefaultCKind() (Compact if unlocked, else
-// random unlocked) so players start on an unlocked machine. r28 = city_select_ply
-// + player_offset (callee-saved).
-// Skipped instructions: stb r0,97(r28) and b 0x8002dea0 - we handle both.
-CODEPATCH_HOOKCREATE(0x8002de80,
+// Finalize the City Trial starting machine at the convergence point of
+// CitySelect_InitPlayerMachines (0x8002dea0), where the Trial branch (wrote
+// Compact) and the Stadium / Free Run branch (wrote c_kind_arr[icon]) merge to
+// look up the CharacterDesc. Fires once per active slot.
+//
+// The "Random Start Machine" toggle is the single master and applies identically
+// to humans and CPUs wherever neither makes an explicit grid pick:
+//   - x215[slot]: 0 = human, 2 = CPU, else inactive (leave vanilla, return).
+//   - Trial (x1d0 == 0): the free-roam start has no grid, so the toggle drives
+//     every active slot the same way. ON -> random unlocked Kirby machine;
+//     OFF -> Compact when unlocked, else a random unlocked Kirby machine.
+//   - Stadium / Free Run (x1d0 != 0): humans actively pick on the grid, so a
+//     human's selection is always kept; only auto-assigned CPU machines follow
+//     the toggle (ON -> random entry from the gated c_kind_arr; OFF -> leave the
+//     vanilla first-unlocked default). Dedede / Meta Knight are valid here, so
+//     the CPU pick draws straight from the gated grid.
+void GateMachines_FinalizeCTMachine(int slot)
+{
+    GameData *gd = Gm_GetGameData();
+    if (!gd)
+        return;
+
+    u8 kind = gd->city_select_ply.x215[slot];
+    if (kind != 0 && kind != 2)
+        return; // inactive slot
+
+    // CPUs get a random unlocked color (humans keep their CSS color pick). This
+    // is independent of the machine toggle - it always applies to CPU slots.
+    if (kind == 2)
+        gd->city_select_ply.ply_color[slot] = (u8)GateColors_RandomUnlockedColor();
+
+    if (gd->city_select_ply.x1d0 == 0)
+    {
+        CharacterKind ck;
+        if (ap_menu_settings.ct_random_start_machine)
+            ck = RandomUnlockedKirbyCKind();
+        else
+            ck = IsCKindUnlocked(CKIND_COMPACT) ? CKIND_COMPACT : RandomUnlockedKirbyCKind();
+        gd->city_select_ply.ply_icon_ckind[slot] = (u8)ck;
+    }
+    else if (kind == 2 && ap_menu_settings.ct_random_start_machine)
+    {
+        u8 num = gd->city_select_ply.machine_select.num;
+        if (num > 0)
+            gd->city_select_ply.ply_icon_ckind[slot] =
+                gd->city_select_ply.machine_select.c_kind_arr[HSD_Randi(num)];
+    }
+}
+
+// Hook at the convergence point 0x8002dea0 (`lbz r3, 97(r28)`) in
+// CitySelect_InitPlayerMachines. r26 = slot index, r28 = city_select_ply + slot
+// (both callee-saved). The prologue passes the slot; with skip target 0 the
+// framework re-executes the clobbered `lbz r3, 97(r28)`, reloading the ckind we
+// just wrote before the Character_GetDesc lookup that follows.
+CODEPATCH_HOOKCREATE(0x8002dea0,
+    "mr 3, 26\n\t",
+    GateMachines_FinalizeCTMachine,
     "",
-    GateMachines_GetDefaultCKind,
-    "stb 3, 97(28)\n\t",
-    0x8002dea0
+    0
 )
 
 // Hook at 0x801952c8 in Rider_ResetStartingMachine.
@@ -611,10 +685,13 @@ int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
     return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
-// Replace AirRide_CheckMachineUnlocked (0x8000c364).
-// Called from AirRide_SelectRandomMachine (0x8000daa0) for CPU random
-// machine assignment. The second parameter (machine_id) is the MachineKind.
-int GateMachines_CheckAirRideMachineUnlocked(s8 machine_class, s8 machine_id)
+// Replace TitleScreen_CheckMachineUnlocked (0x8000c364). This is the machine
+// unlock query for the title-screen attract demo's random machine picker
+// (TitleScreen_SelectRandomMachine, 0x8000daa0) - it does NOT run for CPUs in
+// real Air Ride races (those draw from the gated character list in loadCPU).
+// Gating it keeps the idle demo from showing locked machines. The second
+// parameter (machine_id) is the MachineKind.
+int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
 {
     // machine_class = CharacterDesc.is_bike, machine_id = CharacterDesc.machine_kind.
     // For bikes, machine_kind is a bike-relative index, not the VCKIND.
@@ -630,6 +707,35 @@ int GateMachines_CheckAirRideMachineUnlocked(s8 machine_class, s8 machine_id)
     return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
+// Zero the Air Ride CSS available-machine list (airride_select_ply +0x66, the
+// 2x10 = 20-entry icon grid). AirRide_PopulateSelectIcons runs every CSS frame
+// but only (re)writes the first `count` entries; it never clears the tail. When
+// machine_unlocked_mask is narrowed mid-session (e.g. a debug-menu lock) the
+// count drops, yet stale entries from an earlier fill linger past the new count.
+// Every slot's icon index defaults to 0 and the CSS resolves the displayed/
+// committed machine as list[icon], so a stale list[0] makes both the icon and
+// the in-game machine a vehicle that is no longer unlocked (the symptom was the
+// whole lobby defaulting to Winged Star after locking everything). Zeroing the
+// list before each rebuild guarantees any entry past the live count reads
+// CKIND_COMPACT (0); since populate runs per-frame the lobby self-heals the next
+// frame instead of needing a full CSS re-entry. base = airride_select_ply.
+void GateMachines_ClearAirRideList(u8 *base)
+{
+    for (int i = 0; i < 20; i++)
+        base[0x66 + i] = 0;
+}
+
+// Hook at 0x80020a88 in AirRide_PopulateSelectIcons (`lbz r0, 123(r31)`), after
+// r31 = airride_select_ply is established and before the list is rebuilt. The
+// re-executed `lbz r0,123(r31)` reloads r0; the epilogue restores r4 = 0 (the
+// function's persistent zero, used by the `stb r4,9(r1)` immediately after).
+CODEPATCH_HOOKCREATE(0x80020a88,
+    "mr 3, 31\n\t",
+    GateMachines_ClearAirRideList,
+    "li 4, 0\n\t",
+    0
+)
+
 void GateMachines_OnBoot()
 {
     // City Trial spawn hooks
@@ -639,8 +745,16 @@ void GateMachines_OnBoot()
     // Air Ride select screen: replace character availability check
     CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
 
-    // Air Ride random machine: replace machine unlock check
-    CODEPATCH_REPLACEFUNC(AirRide_CheckMachineUnlocked, GateMachines_CheckAirRideMachineUnlocked);
+    // Title-screen attract demo: gate the random machine picker's unlock check
+    // so the idle demo never shows a locked machine. (Real Air Ride CPU machine
+    // selection is gated upstream via the character list; see loadCPU.)
+    CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
+
+    // Air Ride CSS: clear the cached available-machine list each frame in
+    // AirRide_PopulateSelectIcons so a narrowed unlock mask (e.g. a mid-session
+    // debug lock) can't leave stale entries that the per-slot icon index then
+    // resolves to a now-locked machine.
+    CODEPATCH_HOOKAPPLY(0x80020a88);
 
     // City Trial Stadium select screen: replace both the counting pass and
     // array-building pass in CitySelect_CreateMachineIcons (0x8002e3c4) for
@@ -668,8 +782,10 @@ void GateMachines_OnBoot()
     // matches the renderer's single-line layout at 10.
     CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a);  // cmpwi r3, 10
 
-    // City Trial mode 0: replace hardcoded Compact Star default with first unlocked machine
-    CODEPATCH_HOOKAPPLY(0x8002de80);
+    // City Trial starting machine: finalize each active slot's machine at the
+    // CSS convergence point per the Random Start Machine toggle (Trial: humans
+    // and CPUs alike; Stadium / Free Run: CPUs only, humans keep their pick).
+    CODEPATCH_HOOKAPPLY(0x8002dea0);
 
     // Respawn machine validation: use starting machine instead of hardcoded Compact
     CODEPATCH_HOOKAPPLY(0x801952c8);
