@@ -368,6 +368,10 @@ void On3DLoadEnd()
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
+    // Reset the per-scene legendary-assembly one-shot guard (piece archives are
+    // preloaded fresh on each scene load).
+    GateMachines_On3DLoadEnd();
+
     // Enemy spawn filtering for ability gating
     GateAbilities_On3DLoadEnd();
 

@@ -374,7 +374,7 @@ int APItems_HandleItem(uint ap_item_id)
     // projectile/enemy traps) aren't interesting there either. Queue for
     // a real game mode.
     if (major == MJRKIND_CITY &&
-        (Gm_GetCityMode() == CITYMODE_FREERUN || Gm_IsStadiumMode()))
+        (Gm_GetCityMode() == CITYMODE_FREERUN || CityTrial_IsInStadium()))
         return 0;
 
     // City Trial events (AP_EVENT_BASE + EventKind)

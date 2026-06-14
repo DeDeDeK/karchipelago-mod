@@ -225,7 +225,7 @@ static void TrapLink_PerFrame(GOBJ *g)
                 OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded).\n");
                 handled = 1;
             }
-            else if (Gm_IsStadiumMode())
+            else if (CityTrial_IsInStadium())
             {
                 OSReport("[TrapLink] Stadium - falling back to sleep ability trap.\n");
                 handled = ApplyAirRideTrap();

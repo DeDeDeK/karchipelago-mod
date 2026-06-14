@@ -725,16 +725,51 @@ int GateMachines_UnlockMachine(MachineKind kind, int announce)
     return 1;
 }
 
+// Set when a legendary machine has been assembled in the current City Trial
+// scene: bit 0 = Dragoon, bit 1 = Hydra. The piece archives (VsDragoon.dat /
+// VsHydra.dat) are a one-shot preloaded resource - the assembly cinematic frees
+// the archive when it finishes, so a second cinematic in the same scene loads a
+// dangling joint and crashes in HSD_JObjLoadJoint. Vanilla only ever assembles
+// each legendary once per round; we mirror that. Reset on each 3D scene load
+// (where the archives are preloaded fresh) via GateMachines_On3DLoadEnd.
+static u8 legendary_assembled_mask;
+
+void GateMachines_On3DLoadEnd(void)
+{
+    legendary_assembled_mask = 0;
+}
+
 // Give a player the assembled legendary machine via the cinematic.
 // machine_index: 0 = Dragoon, 1 = Hydra.
-// Returns 1 if started, 0 if in an unsupported mode or no machine to swap from.
-// City Trial only: Top Ride has no MachineData / Rider pipeline, and the
-// assembly cinematic crashes on Air Ride courses (legendary machines have no
-// AR course support).
+// Returns 1 if started (consume the item), 0 if it can't run yet (keep the item
+// queued and retry).
+//
+// The assembly cinematic loads the legendary machine's piece models and drives
+// the City Trial sky/area-light setup, all of which only exist on the open City
+// Trial map. Running it anywhere else - any stadium (which shares the City
+// major), the trial-ending stadium, or Air/Top Ride - makes the cinematic
+// dereference a null jobj / hit the area-light assert and crash. Gm_IsInCity()
+// is stage-based (true only on the open CT map, stage_kind 9/52), so it excludes
+// every stadium as well as AR/TR. Returning 0 keeps the item queued so it
+// assembles once the player is back on the open map.
 int GateMachines_GiveLegendaryMachine(int machine_index)
 {
-    MajorKind major = Scene_GetCurrentMajor();
-    if (major != MJRKIND_CITY)
+    if (!Gm_IsInCity())
+        return 0;
+
+    // This legendary was already assembled in this scene. Its piece archive has
+    // been freed, so re-running the cinematic would crash. Keep the item queued
+    // (return 0) rather than consuming it - it assembles on the next scene load,
+    // where the archives are preloaded fresh and the one-shot guard is reset.
+    u8 bit = (u8)(1 << machine_index);
+    if (legendary_assembled_mask & bit)
+        return 0;
+
+    // A legendary assembly cinematic is already running (its GObj lives at
+    // GameData+0xA8C for the cinematic's lifetime). Starting a second one tears
+    // down the in-flight cinematic's piece GObjs and leaves a dangling jobj that
+    // crashes on the next update. Wait for it to finish, then re-evaluate.
+    if (Gm_IsLegendaryAssembling())
         return 0;
 
     int given = 0;
@@ -763,6 +798,9 @@ int GateMachines_GiveLegendaryMachine(int machine_index)
                  machine_index == 0 ? "Dragoon" : "Hydra", i);
         given = 1;
     }
+
+    if (given)
+        legendary_assembled_mask |= bit;
 
     return given;
 }
