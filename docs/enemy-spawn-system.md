@@ -353,6 +353,59 @@ event actors (TAC, Dyna Blade, Meteor) are loaded by `Enemy_LoadStageEnemies`
 but do not populate `stc_enemy_spawn_data` — they spawn through the event
 system, not the spawn-position pool.
 
+## Air Ride Per-Course Enemy Rosters
+
+Which enemies each Air Ride course can spawn, extracted statically from the vanilla stage `.dat`
+spawn tables (mode 1: `ids[4]` at entry `+0x1E`, `weights[4]` at `+0x26`, stride `0x38`; meta-enemy
+IDs `0x50-0x5E` expanded through `secondary_table`). An enemy is listed if it appears with a positive
+weight at any spawn position on that course. Tiers T0/T1/T2 of an enemy share one copy ability and
+are collapsed.
+
+**StageKind → GroundKind → stage file** (the surprising part — do NOT infer the file from the course
+name). Resolved from `Stage_GetGrKindFromStageKind` (0x80261ce8: global stage table at
+`*(*(r13+0x7FC))`, stride `0x58`, GroundKind at `+0x00`) plus the stage-def filename table in
+`main.dol`. Note `GrPasture1` is **Kirby Melee 1** (spawn mode 2) and `GrColosseum5` is **Kirby Melee
+2** (mode 3) — neither is an Air Ride course.
+
+### Per-course enemy roster
+
+Copy-ability enemies are **bold** with their ability; the rest are ability-less "garbage" enemies
+(the "swallow garbage enemies" checklist cell takes any of these).
+
+| StageKind | Course | Stage file | Copy-ability enemies | Garbage enemies |
+|---|---|---|---|---|
+| 0 | Fantasy Meadows | GrPlants1.dat | **Bomber** (Bomb), **Dayl** (Fire), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Sword Knight** (Sword), **Walky** (Mic) | Bronto Burt, Bronto Burt B, Broom Hatter, Cappy, Scarfy, Waddle Dee, Waddle Dee Truck |
+| 1 | Magma Flows | GrHeat2.dat | **Bomber** (Bomb), **Dayl** (Fire), **Flappy** (Wing), **Noddy** (Sleep), **Phan Phan** (Fire), **Plasma Wisp** (Plasma), **Sword Knight** (Sword), **Walky** (Mic) | Bronto Burt, Broom Hatter |
+| 2 | Sky Sands | GrDesert1.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Sword Knight** (Sword), **Walky** (Mic), **Wheelie** (Wheel) | Bronto Burt, Bronto Burt B, Broom Hatter, Cappy, Waddle Dee, Waddle Dee Truck |
+| 3 | Frozen Hillside | GrIce1.dat | **Bomber** (Bomb), **Chilly** (Freeze), **Dayl** (Fire), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Sword Knight** (Sword) | Bronto Burt B, Broom Hatter, Scarfy, Waddle Dee Truck |
+| 4 | Beanstalk Park | GrSky2.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Flappy** (Wing), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Walky** (Mic) | Bronto Burt, Broom Hatter, Cappy, Waddle Dee Truck |
+| 5 | Celestial Valley | GrValley2.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Chilly** (Freeze), **Flappy** (Wing), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Plasma Wisp** (Plasma), **Sword Knight** (Sword) | Bronto Burt, Broom Hatter, Cappy, Scarfy, Waddle Dee, Waddle Dee Truck |
+| 6 | Machine Passage | GrMachine2.dat | **Bomber** (Bomb), **Dayl** (Fire), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Plasma Wisp** (Plasma), **Walky** (Mic), **Wheelie** (Wheel) | Bronto Burt B, Gordo, Waddle Dee, Waddle Dee Truck |
+| 7 | Checker Knights | GrCheck2.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Chilly** (Freeze), **Flappy** (Wing), **Noddy** (Sleep), **Phan Phan** (Fire), **Plasma Wisp** (Plasma), **Sword Knight** (Sword), **Walky** (Mic), **Wheelie** (Wheel) | Bronto Burt, Broom Hatter, Waddle Dee, Waddle Dee Truck |
+| 8 | Nebula Belt | GrSpace2.dat | — | — (no enemy spawn table) |
+
+### Copy-ability enemy → courses
+
+The reverse view. The Archipelago world uses the Sword Knight / Wheelie / Chilly / Plasma Wisp rows
+to gate the "swallow this enemy" checklist cells on `HasAny` of those courses when
+`air_ride_courses_gated` is on (`_SWALLOW_ENEMY_COURSE_RULES` in `worlds/kirby_air_ride/KARRules.py`).
+
+| Enemy | Ability | Spawns on |
+|---|---|---|
+| Sword Knight | Sword | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Celestial Valley, Checker Knights |
+| Wheelie | Wheel | Sky Sands, Machine Passage, Checker Knights |
+| Phan Phan | Fire | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Beanstalk Park, Machine Passage, Checker Knights |
+| Noddy | Sleep | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Beanstalk Park, Checker Knights |
+| Chilly | Freeze | Frozen Hillside, Celestial Valley, Checker Knights |
+| Flappy | Wing | Magma Flows, Beanstalk Park, Celestial Valley, Checker Knights |
+| Plasma Wisp | Plasma | Magma Flows, Celestial Valley, Machine Passage, Checker Knights |
+| Bomber | Bomb | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Beanstalk Park, Celestial Valley, Machine Passage, Checker Knights |
+| Pichikuri | Needle | Fantasy Meadows, Sky Sands, Frozen Hillside, Beanstalk Park, Celestial Valley, Machine Passage |
+| Pichikuri B | Needle | Fantasy Meadows, Sky Sands, Frozen Hillside, Beanstalk Park, Celestial Valley, Machine Passage |
+| Dayl | Fire | Fantasy Meadows, Magma Flows, Frozen Hillside, Machine Passage |
+| Caller/Shaturn | Tornado | Sky Sands, Beanstalk Park, Celestial Valley, Checker Knights |
+| Walky | Mic | Fantasy Meadows, Magma Flows, Sky Sands, Beanstalk Park, Machine Passage, Checker Knights |
+
 ## Spawning in City Trial
 
 ### The Problem
