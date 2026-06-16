@@ -113,7 +113,7 @@ static void EnergyLink_PerFrame(GOBJ *rg)
         if (Gm_GetIntroState() != GMINTRO_END)
             return;
         needs_baseline[ply] = 0;
-        prev_obj_destroyed[ply] = stc_playerdata[ply].objects_destroyed_num;
+        prev_obj_destroyed[ply] = stc_playerdata[ply].stat_record.objects_destroyed_num;
         for (int i = 0; i < PATCHKIND_NUM; i++)
             prev_stats[ply][i] = rd->stats.values[i];
         prev_charge_value[ply] = md ? md->charge_value : 0.0f;
@@ -121,8 +121,8 @@ static void EnergyLink_PerFrame(GOBJ *rg)
     }
 
     // Objects destroyed (City Trial only - always 0 in Air Ride)
-    int diff = stc_playerdata[ply].objects_destroyed_num - prev_obj_destroyed[ply];
-    prev_obj_destroyed[ply] = stc_playerdata[ply].objects_destroyed_num;
+    int diff = stc_playerdata[ply].stat_record.objects_destroyed_num - prev_obj_destroyed[ply];
+    prev_obj_destroyed[ply] = stc_playerdata[ply].stat_record.objects_destroyed_num;
     if (diff > 0)
         EnergyLink_Emit((float)diff);
 

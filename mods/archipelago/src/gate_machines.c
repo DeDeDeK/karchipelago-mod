@@ -90,7 +90,7 @@ static CharacterKind RandomUnlockedKirbyCKind(void)
 //
 // TR's lobby panel exposes two machines on its middle ("Control Type") row:
 // Free Star (TR_MACHINE_FREE = 0) and Steer Star (TR_MACHINE_STEER = 1). The
-// committed value lives at GameData.topride_slot[slot].machine_kind; the
+// committed value lives at GameData.topride_config.slots[slot].machine_kind; the
 // pre-confirmation lobby value lives at GameData.topride_select_ply.panel_machine[slot].
 // Both map 1:1 to MachineKind via TOPRIDE_MACHINE_TO_VCKIND, so a single
 // machine_unlocked_mask covers Air Ride, City Trial, and Top Ride.

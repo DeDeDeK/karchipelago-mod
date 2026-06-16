@@ -155,7 +155,7 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
         return 0;
 
     Rider_AbilityRemoveModel(rd);
-    Rider_AbilityRemoveUnk(rd);
+    Rider_AbilityClearQueued(rd);
     Rider_RecordCopyAbility(rd->ply, kind);
     Rider_MarkCopyAbilityObtained(rd->ply, kind);
     stc_ability_init_table[kind](rd);
