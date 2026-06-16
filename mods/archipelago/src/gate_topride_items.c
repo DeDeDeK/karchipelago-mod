@@ -59,7 +59,7 @@ void GateTopRideItems_ApplyMask()
 }
 
 // Hook at 0x802db05c - right after TopRideItem_MgrInit (0x8034b5f4) returns
-// in TopRide_FielderInit (0x802dafb4).
+// in TopRide_KirbyMgrInit (0x802dafb4).
 // Clobbered instruction: lwz r6, 4(r30)
 CODEPATCH_HOOKCREATE(0x802db05c,
     "",

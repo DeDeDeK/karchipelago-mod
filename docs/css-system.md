@@ -298,6 +298,44 @@ All three modes use dedicated `colorChanger` functions called from their input p
 
 Each handles L/R button input to cycle through colors 0–7. Colors 0–3 go through a vanilla unlock check; colors 4–7 are always available in vanilla. The mod hooks all three to gate colors against the AP unlock mask. See `gate-colors.md` § All Hook Sites.
 
+### CPU Level / Handicap Bar Widget
+
+The per-player **CPU difficulty** and **handicap** selectors are drawn as a **segmented bar gauge** — a fixed row of discrete "notch" JOBJs sourced from the menu archive — *not* a numeric digit. The level the player reads (City Trial / Air Ride **1–9**, Top Ride **1–5**) is the count of lit notches.
+
+| Mode | Notches | Internal value | Field |
+|------|---------|----------------|-------|
+| City Trial / Air Ride | **9** | `cpu_level` 0..8 (display 1..9) | `ply_cpu_level` (GameData+0x22d) |
+| Top Ride | **5** | `panel_cpu_level` 0..4 (display 1..5) | `panel_cpu_level` (GameData+0x1be) → committed via `TopRide_SetCpuLevel` |
+
+#### City Trial / Air Ride render path
+
+`CSS_SetBarLevel` (0x80135694) is the generic entry every City Trial bar caller uses; it forwards to `CSS_SetBarLevel_Impl` (0x8015ca8c). Signature `(slot, bar_kind, level)`:
+
+- `bar_kind` selects the bar within `bar_gobj[slot]` (CT scene struct +0x7e8): `0` = handicap, `1` = cpu-level. The "filled" texture frame for each bar kind comes from a 3-byte table (byte +2) at an SDA global.
+- The worker walks the bar GObj's **fixed array of 9 notch JOBJs** (user-data +0x14 … +0x34, stride 4), lighting notches `0..level` with the filled frame and blanking `level+1..8`.
+- The element count is **hardcoded to 9**: `cmpwi r27,8` @ 0x8015cb44 (sibling bounds at 0x8015cbd8 and 0x8015cd3c, plus helper 0x80135f44). The fill loop runs `while r27 <= level`, so **`level > 8` indexes past the 9-JOBJ array → out-of-bounds write (crash/corruption)**, not a cosmetic glitch.
+
+The render is gated on the slot being a CPU (`ply_pkind` == CPU); see the `CSS_SetBarLevel` call sites in `CitySelect_InputUpdate` and `CitySelect_PlayerThink`. Air Ride uses the identical per-player menu struct (`AirRideSelectMenuData`, with `cpu_level_text_j`/`level_bar_pos_j`) and the same 1–9 display, via its own parallel renderer.
+
+#### Top Ride input + render path
+
+Both editing and rendering happen in `TopRide_CSS_PanelThink` (0x8002b8a8), the bottom-panel editor over the `topride_select_ply` fields:
+
+- **Input clamp:** `panel_cpu_level` (+0x1be) increments only while `< 4` — `cmpwi r0,4` @ 0x8002bf8c (`bge` @ 0x8002bf90, store `stb r0,39(r27)` @ 0x8002bf9c). `panel_handicap` (+0x1c2) has a parallel `cmpwi r0,4` @ 0x8002bfcc.
+- **Render:** passes `4 − level` (`subfic r0,r0,4` @ 0x8002bfa8) to the 5-notch Top Ride bar renderers (`zz_80134d44_` / `zz_80134d64_`). The constant `4` is baked into the clamp, the render math, *and* the notch count.
+
+#### Raising the maximum
+
+The bar does **not** auto-scale with the cap — the notch models are fixed art in the menu archives (`MnSelplyctAll.dat` / `MnSelplyAll.dat` / `MnSelplym2dAll.dat`). Extending the maximum past 9 (CT/AR) or 5 (TR) needs **three coordinated changes**, per mode:
+
+1. **Input clamp** — raise the `<9` / `<5` guard (Top Ride: the `cmpwi r0,4` @ 0x8002bf8c; the City Trial / Air Ride clamp on `ply_cpu_level` is bounded ≤8 but is not yet pinned to a specific instruction). Trivial `REPLACEINSTRUCTION`.
+2. **Renderer loop bound(s)** — the hardcoded `8`/`9` (CT/AR: 0x8015cb44 and siblings) and Top Ride's baked `4` (clamp + `4−level` subfic + the TR notch helpers).
+3. **New art** — add notch JOBJ nodes to the menu archive and position them along the bar.
+
+Doing only #1 is **worse than nothing** — it is an out-of-bounds write. Steps 1+2 without 3 read past the JOBJ array.
+
+> **UI vs. behavior are decoupled.** The AI's difficulty is `difficulty_level` (CpuData+0x22, 0..8), set at `Rider_CPUInit` and read by `Rider_CPUDifficultyScale`; CT/AR `cpu_level` (0..8) maps to it **1:1**. Making CPUs *harder* therefore does not require extending the UI bar — remap the existing 1–9 / 1–5 selections onto a steeper internal curve, or drive behavior via the `custom_ai` presets. See `cpu-ai-system.md` § Influencing CPU Behavior.
+
 ### Archive/Icon System
 
 Select screen icons are rendered from HSD archive files using material animation:

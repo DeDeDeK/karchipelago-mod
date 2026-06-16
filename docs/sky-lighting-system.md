@@ -799,8 +799,8 @@ Sky_Update (per frame)
    AreaLight_RegistryWalk (0x8007a2c0)
    ├─ called from Rider_UnkThink (0x8018e9a8 → 0x80190340)
    │     → walk consumer = (rider+0x294); inserts records into rider+0x318
-   ├─ called from cCharacter::AdjustPoseMatrices (0x801d6c00)
-   │     → walk consumer = (character+0x300); inserts records into character+0x400
+   ├─ called from 0x801d6c00 (per-object pose update)
+   │     → walk consumer = (obj+0x300); inserts records into obj+0x400
    └─ called from Machine_Create (0x801c5888 → 0x801d6bd4)
          → machine init
 ```
