@@ -105,10 +105,6 @@ The replacement:
 
 24 unlock items in `AP_STADIUM_UNLOCK_BASE` (400) + `StadiumKind`. IDs 400–423. Routed through `GateStadiums_UnlockStadium`, which sets the mask bit, sets the vanilla "NEW" badge bit (so the checklist UI reflects the unlock), logs, and queues a textbox notification.
 
-## Mod ↔ Client Protocol
-
-None specific to this system. Stadium unlocks flow through the standard AP item pipeline (Python client appends to `unprocessed_items`, mod consumes via `APItem_Handle`).
-
 ## Design Decisions
 
 **Bypassing the game's bitfield entirely.** The mask is read directly at check time rather than synced into the game's bitfield at `0x80536EE8` (via `Gm_StadiumSetUnlockedDirect` / `ClearUnlockedDirect` during `OnSaveLoaded`). Syncing would create two problems: (1) mid-session mask changes (debug menu, late AP delivery) would need an extra sync step, and (2) the checklist cache layer could shadow writes. Reading directly avoids both — and matches every other `gate_*` system.

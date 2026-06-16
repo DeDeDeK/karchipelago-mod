@@ -36,7 +36,7 @@ When Kirby inhales an enemy, a roulette wheel spins and lands on a random abilit
 | `randomAbility_aPress` | 0x801ae7f4 | Stops wheel, calls giveAbility |
 | `randomAbility_autoSelect` | 0x801ae890 | Auto-selects on timer expiry (same logic as aPress) |
 | `randomAbility_getItemID` | 0x801aea30 | Reads wheel position: `rd->x9b0[rd->x99c]` |
-| `randomAbility_giveAbility` | 0x801a61d4 | Gives ability: `Rider_AbilityRemoveModel` → `Rider_AbilityRemoveUnk` → `Rider_RecordCopyAbility` → `stc_ability_init_table[kind](rd)`. (Replacement inserts `Rider_MarkCopyAbilityObtained` before the init call.) |
+| `randomAbility_giveAbility` | 0x801a61d4 | Gives ability: `Rider_AbilityRemoveModel` → `Rider_AbilityClearQueued` → `Rider_RecordCopyAbility` → `stc_ability_init_table[kind](rd)`. (Replacement inserts `Rider_MarkCopyAbilityObtained` before the init call.) |
 | `randomAbility_removeWheelModel` | 0x801a66d0 | Removes wheel 3D model |
 | `randomAbility_queuedGive` | 0x801aec60 | Timer-based give for queued abilities |
 
@@ -88,7 +88,7 @@ Both are function epilogue hooks — safe to call C with no arguments. A stadium
 
 Enemies themed around locked copy abilities are prevented from spawning by zeroing their weights in the spawn data. This is done in `GateAbilities_On3DLoadEnd()`, which reads `*stc_enemy_spawn_data` and dispatches by mode.
 
-**Gate condition:** early-exit when `*stc_enemy_spawn_data == NULL` **or** its `config` pointer is NULL (`if (!data || !data->config) return;`). The spawn-data pointer is NULL in any mode without stage-based enemy spawning — empirically: City Trial city map, Top Ride, and stadiums other than Kirby Melee (Air Glider, Destruction Derby, Single Race, etc.). No explicit mode check needed; the NULL check covers all enemy-less cases.
+**Gate condition:** early-exit when `*stc_enemy_spawn_data == NULL` **or** its `config` pointer is NULL (`if (!data || !data->config) return;`). The spawn-data pointer is NULL in any mode without stage-based enemy spawning: City Trial city map, Top Ride, and stadiums other than Kirby Melee (Air Glider, Destruction Derby, Single Race, etc.). No explicit mode check needed; the NULL check covers all enemy-less cases.
 
 **Spawn data structure** (`EnemySpawnData` in `enemy.h`; accessed via `stc_enemy_spawn_data` at r13 + 0x630 = `0x805dd710`):
 
@@ -103,15 +103,13 @@ typedef struct EnemySpawnData {
 } EnemySpawnData;
 ```
 
-**Three observed modes:**
+**Three modes:**
 
 | Mode | Context | IDs Offset | Weights Offset | Max Slots |
 |------|---------|-----------|---------------|-----------|
 | 1 | Air Ride courses | +0x1E | +0x26 | 4 |
 | 2 | `STKIND_MELEE1` (Kirby Melee 1) | Two-stage selection | Two-stage selection | — |
 | 3 | `STKIND_MELEE2` (Kirby Melee 2) | +0x06 | +0x10 | 5 |
-
-Mode values were verified empirically: AR course → mode=1, KM1 → mode=2, KM2 → mode=3, all other stadiums and CT city map → spawn_data NULL.
 
 **Mode 1 / Mode 3 filtering** (`FilterMode1Or3`):
 
@@ -160,6 +158,6 @@ The ability acquisition hooks are NOT mode-specific — they gate acquisition ev
 
 **Filter chain ownership:** `item_spawn_filter.c` owns the two spawn table hook points and `FilterAllSpawnTables()` dispatches to each gate file. This makes execution order explicit: All-Up injection → (per pool) abilities → patches → items → drop-weight bias.
 
-**Enemy spawn weight zeroing over spawn-time rejection:** An earlier approach substituted `enemy_id=-1` at spawn time. This caused low enemy density because the spawner repeatedly selected locked enemies, got rejected, and cycled through respawn delays. Weight zeroing preserves density because the spawner never selects locked enemies.
+**Enemy spawn weight zeroing over spawn-time rejection:** Substituting `enemy_id=-1` at spawn time causes low enemy density because the spawner repeatedly selects locked enemies, gets rejected, and cycles through respawn delays. Weight zeroing preserves density because the spawner never selects locked enemies.
 
 **AP ability bypass:** `Ability_GiveItem` calls `Rider_GiveAbility` directly rather than through the hooked `Rider_CheckAndGiveAbility`. AP-granted abilities are never blocked by the gate.

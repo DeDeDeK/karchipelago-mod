@@ -120,18 +120,31 @@ SIS (String Information System) files contain pre-authored text commands for the
 
 `Text_FinalizeSisText(text, text_index)` reads `stc_sis_data[text->sis_id][text_index]` and stores a command data pointer at `text->command_data` (offset 0x5C). If `stc_sis_data[sis_id]` is NULL, the lookup is silently skipped.
 
+### Unlock-gated settings menus (City Trial rules)
+
+The City Trial pre-game **settings/rules menu** (minor scene `MNRKIND_CITYSETTINGS`, minor 5) is a *consumer* of `ClearChecker_CheckUnlocked` — distinct from the checklist grid above. Some rule-option rows (the "Extra Rules" reward category) only appear once unlocked, so the menu builder gates them on the clear-checker. This is the City Trial analog of the Top Ride rules-menu builder noted under `ChecklistRewards_CheckUnlocked` below.
+
+| Address | Function | Role |
+|---------|----------|------|
+| `0x8001eaac` | `CitySettings_BuildMenu` | Build/enter handler for the settings menu (registered in the menu's `{build, update, destroy}` handler table at `0x807e0508`). Clears menu state, calls `CitySettings_BuildCellList`, then renders each cell via `CitySettings_RenderCellValue`. |
+| `0x8001da14` | `CitySettings_BuildCellList` | Builds the list of visible setting rows. For the unlock-gated control-kinds it includes a row only if at least one of its candidate `clear_kind`s passes `ClearChecker_CheckUnlocked(mode=2, …)`; ungated kinds are copied verbatim. |
+| `0x8001ddf8` | `CitySettings_RenderCellValue` | Draws (and normalizes) one row's value widget, reading/writing the packed setting bitfields at `GameData+0xb4`/`+0xb5`. |
+| `0x8001ed14` | `CitySettings_UpdateCellHighlight` | Re-applies a cell's highlight / at-limit color after its value changes (called from `CitySettings_MinorThink` / `CitySettings_MinorLoad`). |
+
+Because `ClearChecker_CheckUnlocked` is `REPLACEFUNC`'d to `ChecklistRewards_CheckUnlocked` (keyed on AP `received_checklist_rewards`), these rule options unlock on AP delivery like every other non-gated reward category.
+
 ## AP Integration — Implementation
 
-**Files:** `checklist_rewards.c` / `checklist_rewards.h` (merged from the former `shuffle_rewards.c/h`).
+**Files:** `checklist_rewards.c` / `checklist_rewards.h`.
 
 ### Core Systems
 
 **AP ↔ game reward-index translation:**
 - The apworld numbers each mode's rewards in **clear_kind-sorted order** (the order the checkboxes appear — exactly what `archipelago_api.h`'s `AP_REWARD_*` enum and `docs/checklist-mappings.csv` use). The game's internal reward table (`stc_reward_table_ptrs`) is in a different, ROM-defined order, and the entire mod machinery — `shuffled_rewards`, `received_checklist_rewards`, the parallel audio-preview / stadium lookup tables, the debug `GrantReward`/`GetShuffledReward` API — is keyed on that **internal game index**. Reordering the table in place is unsafe (it would desync the parallel hardcoded tables), so the mod keeps game-table order internally and translates at the two AP-client wire boundaries only.
-- `BuildRewardIndexMaps()` (called from `AllocateRewardTables`, while the copied tables still hold native clear_kinds) builds `ap_to_game_ri[mode][ap_ri]` by ranking each reward's native clear_kind. `ChecklistRewards_ApToGameIndex(mode, ap_ri)` exposes it. Verified to reproduce the apworld's numbering exactly for all three modes (AR 46 / TR 33 / CT 44 entries).
+- `BuildRewardIndexMaps()` (called from `AllocateRewardTables`, while the copied tables still hold native clear_kinds) builds `ap_to_game_ri[mode][ap_ri]` by ranking each reward's native clear_kind. `ChecklistRewards_ApToGameIndex(mode, ap_ri)` exposes it. It reproduces the apworld's numbering exactly for all three modes (AR 46 / TR 33 / CT 44 entries).
 - **Boundary 1 — incoming item ID** (`ap_item_handler.c`): `reward_index = (id-500)%50` is the apworld's clear_kind-sorted index; translate via `ApToGameIndex` before `ChecklistRewards_Grant`.
 - **Boundary 2 — `locations[]`** (`ChecklistRewards_ApplyLocations`): the client writes `locations[m][ap_ri]`; store into `shuffled_rewards[m][ap_to_game_ri[m][ap_ri]]`. The bijection covers `[0, count)` so each game index is written once.
-- Everything inside those boundaries (Grant, the debug API, `ResolveCell`, `GetShuffledReward`) stays in **game-index** space and needs no translation. Without this, a received reward decoded to the wrong game-table row (e.g. the client's "TR Filler 5" → game index 25 = Ending), and `locations[]` placement was scrambled.
+- Everything inside those boundaries (Grant, the debug API, `ResolveCell`, `GetShuffledReward`) stays in **game-index** space and needs no translation. Without this, a received reward would decode to the wrong game-table row (e.g. the client's "TR Filler 5" → game index 25 = Ending), and `locations[]` placement would be scrambled.
 
 **Reward table management:**
 - `AllocateRewardTables()` (OnBoot): Allocates new `RewardEntry` tables via `HSD_MemAlloc`, copies originals, redirects `stc_reward_table_ptrs[mode]`. All game queries go through mod's copies.
@@ -141,7 +154,7 @@ SIS (String Information System) files contain pre-authored text commands for the
 - `IsSameModeLocalPlacement(mode, ri)` = `shuffled_rewards[mode][ri] != 0xFFFF` AND `(shuffled_rewards[mode][ri] >> 8) == mode`. This is the authoritative "this reward is actually placed in THIS mode's checklist" check. Cross-mode source rows fail because their saved encoding has `target_mode != source_mode`. Remote rewards fail because their saved encoding is `0xFFFF`.
 
 **ClearChecker_CheckUnlocked replacement** (CODEPATCH_REPLACEFUNC):
-- `ChecklistRewards_CheckUnlocked(mode, reward_index)`: returns true **iff** the reward's bit is set in AP `received_checklist_rewards` — i.e. AP delivery is the sole authority for a checklist reward being unlocked. There is intentionally **no `has_reward` fallback**: `has_reward` is also raised by in-game checkbox completion (vanilla `SetRewardFlagOnUnlocks`), so a fallback would unlock the reward the moment the player earns the box, *before* the AP server delivers the item. Gated categories (machines/colors/stadiums/stages/TR items/…) don't notice — their vanilla availability checks are `REPLACEFUNC`'d to read mod gate masks and never call this function. But the non-gated "cosmetic" categories (Sound Test, Music, Endings, Bonus Movie, Pause Power-ups, Extra Rules) read this function live (via `MainMenu_SoundTestThink`, `setLevelMusic`, `AirRide_CheckBonusUnlocked`, `MainMenu_OptionsThink`, `Pause_CheckStatsUnlocked`, and the TR rules-menu builder), so the former fallback let *those* unlock pre-delivery for same-mode-local placements. Keying purely on the received bitfield closes that leak. The reward icon still appears on in-game completion via `ChecklistRewards_FindRewardForCell`, which is independent of this function.
+- `ChecklistRewards_CheckUnlocked(mode, reward_index)`: returns true **iff** the reward's bit is set in AP `received_checklist_rewards` — i.e. AP delivery is the sole authority for a checklist reward being unlocked. There is intentionally **no `has_reward` fallback**: `has_reward` is also raised by in-game checkbox completion (vanilla `SetRewardFlagOnUnlocks`), so a fallback would unlock the reward the moment the player earns the box, *before* the AP server delivers the item. Gated categories (machines/colors/stadiums/stages/TR items/…) don't notice — their vanilla availability checks are `REPLACEFUNC`'d to read mod gate masks and never call this function. But the non-gated "cosmetic" categories (Sound Test, Music, Endings, Bonus Movie, Pause Power-ups, Extra Rules) read this function live (via `MainMenu_SoundTestThink`, `setLevelMusic`, `AirRide_CheckBonusUnlocked`, `MainMenu_OptionsThink`, `Pause_CheckStatsUnlocked`, and the TR rules-menu builder), so a `has_reward` fallback would let *those* unlock pre-delivery for same-mode-local placements. Keying purely on the received bitfield closes that leak. The reward icon still appears on in-game completion via `ChecklistRewards_FindRewardForCell`, which is independent of this function.
 
 **ClearChecker_GetRewardFromClearKind replacement** (CODEPATCH_REPLACEFUNC at `0x80049EC4`):
 - `ChecklistRewards_GetRewardFromClearKind(mode, clear_kind, &out_reward_index, &out_reward_param)`: Vanilla's sole caller is the audio/ending preview path at `0x801804dc` inside `Checklist_Think`. A vanilla scan of `RewardEntry.clear_kind` would alias against the cross-mode/remote `clear_kind=0` sentinel and return the wrong row (e.g. play the wrong music when hovering the legitimate same-mode placement at `clear_kind=0`).
@@ -169,7 +182,7 @@ SIS (String Information System) files contain pre-authored text commands for the
 
 **Post-reward-loop hook** (HOOKCREATE at 0x8017E07C):
 - `ChecklistRewards_ApplyCrossModeHasReward(current_mode)`: After the vanilla same-mode reward loop, iterates `cross_mode_slots[current_mode]` and on any checkbox where `(is_unlocked || is_filler) && !has_reward`, sets `has_reward = 1` for the display badge (cross-mode rewards are skipped by the vanilla loop, so their badge is set here).
-- It used to **also** grant a checkbox filler when the source was a `REWARD_FILLER`, but that was removed: filler tokens are now granted once at AP receipt in `ChecklistRewards_Grant` (keyed off the reward's own mode). Granting here too would double-count (the reward is also delivered as an AP item) and credited the wrong mode (`current_mode`, not the reward's mode). See **Checkbox filler grants** below.
+- It does **not** grant a checkbox filler when the source is a `REWARD_FILLER`: filler tokens are granted once at AP receipt in `ChecklistRewards_Grant` (keyed off the reward's own mode). Granting here too would double-count (the reward is also delivered as an AP item) and would credit the wrong mode (`current_mode`, not the reward's mode). See **Checkbox filler grants** below.
 - Clobbered instruction: `lbz r0, 0(r31)` (re-executed in the trampoline epilogue).
 
 **Vanilla reward-loop filler grant — neutralized** (REPLACEINSTRUCTION at 0x8017E00C):
@@ -286,7 +299,7 @@ does **not** use `SetNewUnlock` — it commits every gameplay objective through
 this "silent" variant (51 call sites, all Top Ride). Each call site plays its
 own unlock SFX and prints `ClearChecker(<clear_kind+1>)` before calling, and
 `SetNewUnlockSilent` just sets the `is_new` bit (no SFX, no cache-aware SFX
-cooldown). Before this was replaced, **every Top Ride gameplay check was
+cooldown). Without replacing it, **every Top Ride gameplay check is
 silently dropped** — never added to `sent_checks`, never sent to the server, and
 TR `GOAL_CHECKLIST_LIST` goals (e.g. "Cross the goal 20 or more times!" = TR
 clear_kind 0, "Compete in more than 10 multiplayer races!" = TR clear_kind 2)
@@ -517,7 +530,7 @@ External save-bit goal triggers (e.g. goal_max_stats_ct.c):
 A `REWARD_FILLER` arriving from AP grants exactly **one** usable filler token, in `ChecklistRewards_Grant`, to the **reward's own mode** (matching the `(<Mode>)` the textbox names) — independent of where the reward is placed (`shuffled_rewards`). Placement only drives the `has_reward` display badge.
 
 - The grant fires only on a **real receipt** (`announce=1`): the AP item handler and the debug `GrantReward` API. The replay path (`RegrantAllReceivedRewards`, `announce=0`, run on every save-load and after `ApplyLocations`) must not re-grant, or `checkbox_filler_num` would inflate every boot.
-- Both cell-COMPLETION grant paths are disabled so this is the single grant site: vanilla's reward-loop grant (REPLACEINSTRUCTION at `0x8017e00c`) and `ApplyCrossModeHasReward`'s grant (removed). They keyed off cell completion, not AP receipt; and because `Grant` writes `has_reward` on receipt, it pre-empted vanilla's "grant on `has_reward` 0→1 transition" anyway. The old code only granted the token for **remote** filler placements (`loc == 0xFFFF`); a locally-placed filler received from AP set `has_reward` but never yielded a usable token (observed as Top Ride `filler_num=0` with `is_filler` cells already spent).
+- Both cell-COMPLETION grant paths are disabled so this is the single grant site: vanilla's reward-loop grant (REPLACEINSTRUCTION at `0x8017e00c`) and `ApplyCrossModeHasReward`. They would key off cell completion, not AP receipt; and because `Grant` writes `has_reward` on receipt, it pre-empts vanilla's "grant on `has_reward` 0→1 transition" anyway.
 - Direct filler items (`AP_ITEM_CHECKBOX_FILLER_*`, used by the EnergyLink filler-buy and the debug filler-give) bypass `Grant` entirely — they call `Checklist_GrantFiller` directly in `ap_item_handler.c` — and are unaffected.
 
 ### Filler gate (AP goal protection)
@@ -553,41 +566,3 @@ Implemented in `check_detection.c` alongside the goal-evaluation logic.
 | City Trial | 0x37 (55) | Complete 100 checkboxes |
 | City Trial | 0x6D (109) | Unlock Dragoon Parts on the Checklist (all 3 parts received) |
 | City Trial | 0x6E (110) | Unlock Hydra Parts on the Checklist (all 3 parts received) |
-
-## Future Additions
-
-### AP-controlled grid layout (clear_kind placement)
-
-**Status:** not implemented — vanilla `grid_mapping[]` randomization is currently left untouched, which means the visual layout of objectives in the 12×10 grid is rerolled per new save file via `HSD_Randi` and is not reproducible across saves or across players in a multiworld.
-
-**What we control today:** only reward placement (which item appears at which `clear_kind`), via `shuffled_rewards[mode][reward_index]`. The mapping `clear_kind → physical grid slot` is the game's job.
-
-**What's possible:**
-
-1. **Deterministic seeded layout (smallest change).** `CODEPATCH_REPLACEFUNC` on `Checklist_InitGridMapping` (0x8004A2BC), reusing the AP slot seed (or a derivative) to drive an in-mod LCG/Fisher–Yates. Preserves vanilla's per-mode meta-cell pre-assignments (the table at `0x804973E8` — see below). Gives reproducible layouts across resets and identical layouts across players in the same multiworld.
-
-2. **Client-driven explicit layout (most flexible).** Add `u8 grid_mapping[3][120]` to the Archipelago→game data path and to `APSave`, then have the replacement `InitGridMapping` copy from it. Lets the AP generator do anything the slot wants (themed clusters, difficulty gradients, partial visibility patterns, fixed "tutorial corners", etc.). Cost: another protocol field, another save migration.
-
-3. **Post-init overwrite hook (cheapest).** Same end-state as 1 or 2 without replacing the function — hook after the vanilla call returns and overwrite `grid_mapping[]` from our chosen source.
-
-**Constraints to preserve:**
-
-- **Meta auto-unlock pre-assignments.** `InitGridMapping` reads from a per-mode lookup table at `0x804973E8` and hard-assigns grid slots:
-  - Mode 0 (AR): 1 cell — `clear_kind 0x18` → grid slot `119`
-  - Mode 1 (TR): 1 cell — `clear_kind 0x77` → grid slot `119`
-  - Mode 2 (CT): 3 cells — `clear_kind 0x37` → slot `0`, `0x6D` → slot `11`, `0x6E` → slot `119`
-
-  These slot numbers are the same physical positions the vanilla filler-gate hardcodes for blocking. Our `FillerGate_IsRejected` reads `grid_mapping[]` live, so it doesn't actually require these positions to be preserved — but keeping them keeps the visual "corner/edge" placement vanilla players expect.
-- **Bijection.** `grid_mapping[]` must be a permutation of `0..119` (every grid slot used exactly once) — vanilla's `0xFF`-fill + collision-retry loop enforces this; any replacement must too, or `Checklist_UpdateCellInfo`'s reverse grid lookup will return phantom positions.
-- **Meta cells excluded from the random pass.** Vanilla skips `clear_kind == 0` and `clear_kind == 11` for mode 2 in the random loop because those slots are pre-assigned. Equivalent skip logic must exist in any replacement.
-
-**Things this doesn't unlock:**
-
-- The objectives themselves (each `clear_kind`'s in-game trigger) are hardcoded across 126 `ClearChecker_SetNewUnlock` call sites (plus 51 more through the silent variant for Top Ride). "Shuffling clear_kinds" in the sense of "objective N now triggers when objective M's condition is met" is a much bigger project.
-- The 12×10 grid dimensions are hardcoded as arithmetic constants in 6+ functions; reshaping the grid is impractical.
-
-**Open questions (decide before implementing):**
-
-- Should layout be derived from the AP slot seed (option 1) or shipped explicitly (option 2)? Option 2 is strictly more powerful but only worth it if the AP generator actually wants to express layout intent.
-- Do we want the mod to expose its layout choice back to the client (e.g., for spoiler logs / tracker overlays), or is the client free to recompute it from the same seed?
-- Should the deterministic seed be the AP slot seed verbatim, or `hash(slot_seed, slot_name, "grid_mapping")` so layout reshuffles per-slot in the same multiworld?

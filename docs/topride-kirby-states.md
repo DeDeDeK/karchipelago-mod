@@ -33,7 +33,7 @@ The Kirby vtable contains one wrapper method per "externally invocable" state (t
 
 ## The Kirby Vtable at `0x804d2304`
 
-82 function-pointer entries (`0x000..0x148`), RTTI class name `"Kirby"` (the type-info name string lives at `0x805d9134`; every TR kirby instance is a `Kirby`). RTTI typeinfo record for the vtable itself: `0x805d913c` (a `__si_class_type_info` — its name pointer at `+0x00` resolves to the `"Kirby"` string at `0x805d9134`, so the doc's old `"KirbyDoodlebug"` label was wrong; the header `externals/hoshi/include/topride.h` already says `"Kirby"`).
+82 function-pointer entries (`0x000..0x148`), RTTI class name `"Kirby"` (the type-info name string lives at `0x805d9134`; every TR kirby instance is a `Kirby`). RTTI typeinfo record for the vtable itself: `0x805d913c` (a `__si_class_type_info` — its name pointer at `+0x00` resolves to the `"Kirby"` string at `0x805d9134`).
 
 The 13 invocable state-transition wrappers cluster at byte offsets `0xDC..0x114` (indices 55–69):
 
@@ -84,7 +84,7 @@ Notable non-wrapper slots:
 
 - A **typeinfo** record under `0x805d984x..0x805d9ad0` ("full" RTTI). Some also have a "compact" entry under `0x805d9098..0x805d90f8` used as the dynamic_cast target by Group A wrappers.
 - A **state vtable** (different from the Kirby vtable) — read at runtime as `state_handler->vtable[N]()`.
-- A **state ID** returned by `state_handler->vt[+0x0C]()` (tracked column below). This is the *runtime* value the get_state_id slot returns — verified by decompiling each vtable's `+0x0C` slot. It is **not** the same as the `TopRideKirbyStateId` enum in `topride.h`: the enum assigns `TR_KSTATE_NORMAL = 1`, but **no state's get_state_id ever returns 1** — `KirbyNormal` inherits the same `get_state_id` (`0x802e4a44`, returns 0) as `KirbyDamage`. So the enum value 1 is a nominal label that never appears at runtime; treat "in Normal" as get_state_id == 0 (and disambiguate from the abstract base via vtable pointer — see below).
+- A **state ID** returned by `state_handler->vt[+0x0C]()` (tracked column below). This is the *runtime* value the get_state_id slot returns. It is **not** the same as the `TopRideKirbyStateId` enum in `topride.h`: the enum assigns `TR_KSTATE_NORMAL = 1`, but **no state's get_state_id ever returns 1** — `KirbyNormal` inherits the same `get_state_id` (`0x802e4a44`, returns 0) as `KirbyDamage`. So the enum value 1 is a nominal label that never appears at runtime; treat "in Normal" as get_state_id == 0 (and disambiguate from the abstract base via vtable pointer — see below).
 - A **setter** function that writes the state vtable and constructs the per-state data when transitioning in.
 
 | Class | Compact RTTI | Full typeinfo | State vtable | State ID | get_state_id fn | Wrapper |
@@ -120,7 +120,7 @@ Wrappers fall into four groups by guard logic.
 
 ### Group A — invincibility + dynamic_cast
 
-The standard pattern. Used by **8** wrappers: Press, Burn, Freeze, Crush, Explode, Strike, Spin, SandSpin. (Shortcut and SpeedDown were previously lumped here but do **not** call the invincibility predicate — see Group A2.)
+The standard pattern. Used by **8** wrappers: Press, Burn, Freeze, Crush, Explode, Strike, Spin, SandSpin. (Shortcut and SpeedDown do **not** call the invincibility predicate — see Group A2.)
 
 ```c
 void KirbyXxxMethod(TopRideKirby *kirby, /* state-specific args */)
@@ -229,33 +229,33 @@ Calling a state wrapper before round_state == 2 will likely crash inside `state_
 
 Most wrappers accept extra args (knockback Vec3, hit-frame u16s, damage variant codes). Passing zeros / a zero Vec3 produces a static stun: animation plays in place, no knockback impulse, default hit duration. Matching vanilla-quality knockback would mean synthesizing a fake source position and reusing the per-effector knockback math (mass × normalized direction / distance) — that's a future refinement and is not required for trap effects.
 
-### Empirical results from mod-triggered application
+### Results from mod-triggered application
 
-Tested through the deathlink receive path with zero-args wrappers (`round_state == 2`, single-player Top Ride, kirby running normally at the moment of the trigger). Each row's `state_after` was read via `TopRide_KirbyGetStateId(kirby)` immediately after `apply()`.
+Behavior when invoking the zero-args wrappers from the deathlink receive path (`round_state == 2`, single-player Top Ride, kirby running normally at the moment of the trigger). `state_after` is `TopRide_KirbyGetStateId(kirby)` immediately after `apply()`.
 
-### First pass — bare wrapper, no velocity preconditioning
+#### Bare wrapper, no velocity preconditioning
 
 | State | state_after | Setter wrote vel = | Outcome |
 |---|---|---|---|
-| Press | 2 | (0,0,0) — setter explicitly zeros | Untested visually, predicted safe |
+| Press | 2 | (0,0,0) — setter explicitly zeros | Predicted safe |
 | Crush | 3 | (NaN, ~1.69, NaN) — setter's helper at `0x802f53dc` PSVECNormalizes the `&zero` Vec3 arg | Teleport |
 | Explode | 4 | ~0.5 × vel_before (PSVECScale by per-character mass) | Teleport |
 | Strike | 5 | ~0.31 × vel_before (same path, different scalar) | Teleport |
 | Spin | 6 | unchanged (= entry velocity) | **Full eject from track** |
 | Freeze | 11 | unchanged | Clean ice-block stun |
-| Numb | 7 | unchanged | Untested |
+| Numb | 7 | unchanged | |
 | Elec | 8 | (0,0,0) — setter explicitly zeros | State lands but no observable effect |
 | Confuse | 12 | unchanged | Clean panic-spin stun |
 
-### Second pass — pre-apply velocity zero (`*(Vec3*)(kirby+0xA0) = 0` before wrapper)
+#### Pre-apply velocity zero (`*(Vec3*)(kirby+0xA0) = 0` before wrapper)
 
 | State | vel_after | Visual outcome |
 |---|---|---|
 | Press, Strike, Spin, Freeze, Numb, Elec, Confuse | (0,0,0) | All clean — Strike/Numb no longer teleport |
 | Explode | (0,0,0) | Clean (its PSVECScale of zero entry velocity yields zero) |
-| Crush | **(NaN, 1.69, NaN)** | Still NaN — Crush's setter doesn't read `kirby+0xA0`; its helper PSVECNormalizes the Vec3 *arg* (we pass `&zero`) which is the actual NaN source. Kirby still glitches because the next tick reads the NaN'd `kirby+0xA0`. |
+| Crush | **(NaN, 1.69, NaN)** | Still NaN — Crush's setter doesn't read `kirby+0xA0`; its helper PSVECNormalizes the Vec3 *arg* (passed as `&zero`), which is the NaN source. Kirby still glitches because the next tick reads the NaN'd `kirby+0xA0`. |
 
-### Third pass — pre-apply AND post-apply velocity zero
+#### Pre-apply AND post-apply velocity zero
 
 | State | vel_after (logged before post-zero) | Visual outcome | In current pool? |
 |---|---|---|---|
@@ -269,11 +269,11 @@ Tested through the deathlink receive path with zero-args wrappers (`round_state 
 | Crush | (NaN, 1.69, NaN) (post-zero overrides) | Brief vertical spin only — not a recognizable hit reaction | no |
 | Spin | (0,0,0) at apply time | **Still ejects kirby** — unique tick `0x802fd49c` does `velocity.y -= gravity` then calls `vt[+0xE4]` (rescale) with no PSVECScale drag step | no |
 
-The third pass is the current `mods/archipelago/src/deathlink.c` behavior. Final pool: **Press, Freeze, Numb, Confuse** (4 states).
+The pre-apply-AND-post-apply-zero configuration is the current `mods/archipelago/src/deathlink.c` behavior. Final pool: **Press, Freeze, Numb, Confuse** (4 states).
 
-**Visibility pattern (refined)**: a damage state visibly stuns if and only if its per-frame tick at `vt[+0x28]` is *not* the shared `0x802f3bd0` (which has no input-gating logic), OR its setter installs a JObj overlay (Freeze ice block), OR it uses a distinct animation that reads as a hit without input lock (Press's `AC_FLAT_START` pancake). The tick is the strongest discriminator — Numb's `0x802fd3ac` calls `0x802d1d84`, the same helper Confuse uses, and that helper provides the input-gating that makes both stun visibly. Strike / Explode / Elec all share the bare `0x802f3bd0` tick AND lack any of the alternate visibility mechanisms, so they're silent. The animation string (`AC_SIBIRE` for Numb and Elec, `AC_TOBASARE` for Strike/Explode/Crush) is *not* the discriminator.
+**Visibility pattern**: a damage state visibly stuns if and only if its per-frame tick at `vt[+0x28]` is *not* the shared `0x802f3bd0` (which has no input-gating logic), OR its setter installs a JObj overlay (Freeze ice block), OR it uses a distinct animation that reads as a hit without input lock (Press's `AC_FLAT_START` pancake). The tick is the strongest discriminator — Numb's `0x802fd3ac` calls `0x802d1d84`, the same helper Confuse uses, and that helper provides the input-gating that makes both stun visibly. Strike / Explode / Elec all share the bare `0x802f3bd0` tick AND lack any of the alternate visibility mechanisms, so they're silent. The animation string (`AC_SIBIRE` for Numb and Elec, `AC_TOBASARE` for Strike/Explode/Crush) is *not* the discriminator.
 
-**The AC_TOBASARE rescale callback is at state vtable `[+0xE4]` = `0x802f3cfc`.** It reads `kirby+0xA0` (the inline ChargeComponent's velocity Vec3) via `PSVECMagnitude`, branches `ble` to the epilogue when `magnitude * scale ≤ threshold`, and otherwise normalizes-and-rescales the velocity in place. So a kirby with non-zero entry-velocity has its launch direction "locked" to its running direction and the magnitude re-applied every frame. Zero entry-velocity → branch taken → no transform. **Most damage-derived state vtables carry this exact `0x802f3cfc` slot at `[+0xE4]`** (verified: Crush, Explode, Strike, Elec, Spin, Numb, Freeze all have it). **Exceptions:** Press *overrides* `[+0xE4]` with its own `0x802fe3a0`, and Confuse's vtable is too short to even have a `[+0xE4]` slot (the word there is non-pointer data). The `[+0xE4]` slot's presence is not the discriminator; what matters is whether `[+0x28]` (the per-frame tick) actually invokes `vt[+0xE4]`, *and* whether the setter zeroed velocity before the first tick.
+**The AC_TOBASARE rescale callback is at state vtable `[+0xE4]` = `0x802f3cfc`.** It reads `kirby+0xA0` (the inline ChargeComponent's velocity Vec3) via `PSVECMagnitude`, branches `ble` to the epilogue when `magnitude * scale ≤ threshold`, and otherwise normalizes-and-rescales the velocity in place. So a kirby with non-zero entry-velocity has its launch direction "locked" to its running direction and the magnitude re-applied every frame. Zero entry-velocity → branch taken → no transform. **Most damage-derived state vtables carry this exact `0x802f3cfc` slot at `[+0xE4]`** (Crush, Explode, Strike, Elec, Spin, Numb, Freeze all have it). **Exceptions:** Press *overrides* `[+0xE4]` with its own `0x802fe3a0`, and Confuse's vtable is too short to even have a `[+0xE4]` slot (the word there is non-pointer data). The `[+0xE4]` slot's presence is not the discriminator; what matters is whether `[+0x28]` (the per-frame tick) actually invokes `vt[+0xE4]`, *and* whether the setter zeroed velocity before the first tick.
 
 ### Per-frame tick at state_vt[+0x28]
 
@@ -293,19 +293,19 @@ So the AC_TOBASARE teleport reduces to: **(tick calls `vt[+0xE4]`) AND (setter d
 
 **Elec lands but does nothing visible — the cause is structural inheritance, not a missing runtime precondition.** `state_after` reads 8 (`KirbyElec`) and `vel_after` is zero (setter zeroes it), but kirby continues to run with full input control and no paralysis animation. The KirbyElec state vtable inherits its `[+0x10..+0x24]` predicate slots from KirbyDamage — and those slots are trivial stubs (`li r3, 1; blr` at `0x802da57c..0x802da59c` and `li r3, 0; blr` at `0x802d4b90`). Confuse's vtable, which *does* visibly stun, **overrides** those same slots with non-stub implementations (`0x802d4b98..0x802d4bb8` and `0x802d1d84`). The engine's input/movement code presumably queries one or more of those predicates each frame and only gates input when the state-class supplies its own implementation. Vanilla electric items therefore must do something extra at the call site — either trigger a separate visual/input-lock effect, or write a kirby-level flag that one of the predicates checks — that our zero-arg wrapper does not. Until that extra setup is identified, Elec is silent in mod-triggered application.
 
-**`__assert` overlay-JObj checks in Freeze / Confuse setters are not load-bearing in normal play.** Both setters dereference `kirby+0x80+0x534` (Freeze ice block) and `kirby+0x80+0x544` (Confuse marks) and `__assert` on null. In testing, all overlay JObjs were `set` whenever the deathlink triggered during round_state == 2. Static analysis suggested this could hang the GC; empirically the field is reliably populated, so the worry was overblown. Still worth a runtime null-guard in defensive code — vanilla freeze items reach the same path through a stricter precondition.
+**`__assert` overlay-JObj checks in Freeze / Confuse setters are not load-bearing in normal play.** Both setters dereference `kirby+0x80+0x534` (Freeze ice block) and `kirby+0x80+0x544` (Confuse marks) and `__assert` on null. These overlay JObjs are reliably `set` whenever the deathlink triggers during round_state == 2, so the field is populated in practice. Still worth a runtime null-guard in defensive code — vanilla freeze items reach the same path through a stricter precondition.
 
-**`TopRide_KirbyGetStateId` returns 0 for kirbys in normal play**, because `KirbyNormal`'s `get_state_id` slot (state vtable `[+0x0C]`) is `0x802e4a44` — the *same* function as `KirbyDamage`'s, which `return 0`. This is the table value (State ID column shows `0 (enum 1)` for Normal): the `TR_KSTATE_NORMAL = 1` enum is purely nominal and never matches a runtime get_state_id. The helper's return values are reliable for the damage states (verified per-class: Press=2, Crush=3, Explode=4, Strike=5, Spin/SandSpin=6, Numb=7, Elec=8, Whirlpool=9, Burn=10, Freeze=11, Confuse=12, DoodlebugOut/Doodlebug-self=13, Grind=14, Shortcut=15, Transparent=16, SpeedUp=17, SpeedDown=18). Only the "running normally" (Normal vs. abstract Damage base) reading is ambiguous, since both return 0. If you need to distinguish "in Normal" from anything else, check `state_handler->vtable == 0x804d6f5c` directly (`TR_KSTATE_VT_NORMAL`).
+**`TopRide_KirbyGetStateId` returns 0 for kirbys in normal play**, because `KirbyNormal`'s `get_state_id` slot (state vtable `[+0x0C]`) is `0x802e4a44` — the *same* function as `KirbyDamage`'s, which `return 0`. This is the table value (State ID column shows `0 (enum 1)` for Normal): the `TR_KSTATE_NORMAL = 1` enum is purely nominal and never matches a runtime get_state_id. The helper's return values are reliable for the damage states (per-class: Press=2, Crush=3, Explode=4, Strike=5, Spin/SandSpin=6, Numb=7, Elec=8, Whirlpool=9, Burn=10, Freeze=11, Confuse=12, DoodlebugOut/Doodlebug-self=13, Grind=14, Shortcut=15, Transparent=16, SpeedUp=17, SpeedDown=18). Only the "running normally" (Normal vs. abstract Damage base) reading is ambiguous, since both return 0. If you need to distinguish "in Normal" from anything else, check `state_handler->vtable == 0x804d6f5c` directly (`TR_KSTATE_VT_NORMAL`).
 
 ## Per-State Animation IDs
 
-Animations are written by setters as a string-pointer at `kirby->state_anim_ptr` (struct offset `+0x4F4` from the inner state-data block, i.e. `state_handler[1] + 0x4F4`). The string is later resolved against the per-character anim table to a frame range. Strings observed in the setters:
+Animations are written by setters as a string-pointer at `kirby->state_anim_ptr` (struct offset `+0x4F4` from the inner state-data block, i.e. `state_handler[1] + 0x4F4`). The string is later resolved against the per-character anim table to a frame range. The strings each setter writes:
 
 | Setter | State | Animation string | Notes |
 |--------|-------|------------------|-------|
 | `0x802df844` | KirbyNormal | `AC_RUN_LOOP` | Default running anim. |
 | `0x802f4068` | KirbyPress | `AC_FLAT_START` | Pancake/squish. |
-| `0x802f4a48` | KirbyCrush | `AC_TOBASARE` | "Blown away" — actually a knockback launch, despite the doc historically calling Crush a squish. The squish animation is KirbyPress. |
+| `0x802f4a48` | KirbyCrush | `AC_TOBASARE` | "Blown away" — a knockback launch, not a squish. The squish animation is KirbyPress. |
 | `0x802f6138` | KirbyExplode | `AC_TOBASARE` | Same launch anim as Crush; the state itself differs in duration / state-machine transitions. |
 | `0x802f6c28` | KirbyStrike | `AC_TOBASARE` | |
 | `0x802f7718` | KirbySpin | `AC_TOBASARE` | |
@@ -329,10 +329,10 @@ Durations aren't a single u16 in the setter — most states use a per-frame tick
 
 1. **`KirbySandSpin` (idx 62) is a `KirbySpin` subclass.** Its dynamic_cast guard tests `KirbySpin` (the parent), so it correctly blocks re-entry from either Spin variant. The "pure" KirbySpin entry (idx 61) installs the parent class's vtable; KirbySandSpin's setter calls KirbySpin's setter as super-init then overrides the vtable.
 2. **No win/lose/dance state classes exist** — the round-end animations live outside this state machine.
-3. **`KirbyCrush` is a knockback/launch state, not a squish.** The squish animation is owned by `KirbyPress` (setter `0x802f4068`, `AC_FLAT_START`). The doc previously implied Crush was the squish state because `EffectorCrush_ApplyToKirby` is the bridge from heavy-machine landings; the bridge name is engine-original and is misleading. Verify in-game before relying on Crush vs. Press for trap visuals.
-4. **AC_TOBASARE rescale is gated by both setter velocity-zeroing and tick `vt[+0xE4]` invocation.** See "Empirical results from mod-triggered application" above. The teleport happens iff (a) the per-frame tick at `vt[+0x28]` calls `vt[+0xE4]` (the rescale callback `0x802f3cfc`) AND (b) `kirby+0xA0` is non-zero entering the next tick. Pre-apply velocity zero handles most cases; Crush also needs a post-apply zero because its setter PSVECNormalizes the Vec3 *arg* (which we pass as `&zero`) and writes the resulting NaN back to `kirby+0xA0`. Spin cannot be fixed by apply-time zeroing because its per-frame tick lacks the PSVECScale drag step that the shared tick uses, so velocity accumulates each frame until the rescale fires. Spin is therefore excluded from any deathlink/traplink pool unless paired with continuous per-frame velocity zeroing or an engine-level patch on the gravity store at `0x802fd578`.
+3. **`KirbyCrush` is a knockback/launch state, not a squish.** The squish animation is owned by `KirbyPress` (setter `0x802f4068`, `AC_FLAT_START`). `EffectorCrush_ApplyToKirby` is the bridge from heavy-machine landings; the bridge name is engine-original and is misleading (it does not imply a squish). Verify in-game before relying on Crush vs. Press for trap visuals.
+4. **AC_TOBASARE rescale is gated by both setter velocity-zeroing and tick `vt[+0xE4]` invocation.** See "Results from mod-triggered application" above. The teleport happens iff (a) the per-frame tick at `vt[+0x28]` calls `vt[+0xE4]` (the rescale callback `0x802f3cfc`) AND (b) `kirby+0xA0` is non-zero entering the next tick. Pre-apply velocity zero handles most cases; Crush also needs a post-apply zero because its setter PSVECNormalizes the Vec3 *arg* (which we pass as `&zero`) and writes the resulting NaN back to `kirby+0xA0`. Spin cannot be fixed by apply-time zeroing because its per-frame tick lacks the PSVECScale drag step that the shared tick uses, so velocity accumulates each frame until the rescale fires. Spin is therefore excluded from any deathlink/traplink pool unless paired with continuous per-frame velocity zeroing or an engine-level patch on the gravity store at `0x802fd578`.
 5. **`KirbyElec`, `KirbyExplode`, and `KirbyStrike` are silent when invoked from mod code.** Common cause: all three use the shared per-frame tick `0x802f3bd0`, which lacks input-gating logic, AND none of them installs a JObj overlay or uses a distinct animation that reads as a hit. Confuse visibly stuns because it overrides the predicate slots `[+0x10..+0x24]` AND its tick `0x802d1d84` does the gating. Numb is visible because its tick `0x802fd3ac` calls `0x802d1d84` as a sub-step (and so inherits the gating from there), even though its vtable predicate slots are the same KirbyDamage stubs as Elec/Strike/Explode. Freeze visibly stuns via its ice-block JObj overlay. Press visibly stuns via its distinct `AC_FLAT_START` pancake animation. Strike / Explode / Elec hit none of those visibility mechanisms — they're mechanically harmless but useless as a deathlink visual when invoked via the bare wrapper. To make any of them usable, either find and replicate the vanilla effector's extra setup at the call site, or rely on Press / Freeze / Numb / Confuse.
 
 6. **`KirbyCrush` produces only a brief vertical spin animation, not a recognizable hit reaction.** Its setter calls `0x802f53dc` which PSVECNormalizes the Vec3 arg (we pass `&zero` → NaN), and the engine animation that gets selected is `AC_TOBASARE` but the state's per-frame physics keep the visual confined to a vertical axis spin. Mechanically harmless once post-apply velocity-zero overrides the NaN, but visually too generic to be useful as a deathlink/traplink hit; not worth a slot in the pool when Press / Freeze / Confuse give clearer stuns.
 
-7. **`KirbyBurn` cannot be invoked from mod code without a real non-zero float arg — value still unknown.** The wrapper at `0x802d55c0` dereferences `arg2` as a pointer at `0x802d5674` (`lwz r0, 0(r30)`), so passing literal 0 DSI's on null. Even with `&zero`, the setter `0x802f958c` reads `*arg2` as a *float* (`lfs f29, 0(r30)` at `0x802f9890`) and uses it to seed `state.f04+0x24` (init = `*arg2 / 60.0`). The state's per-frame proc at `0x802f3bd0` decrements that field by 6.0 every frame with no branch on the value — termination is gated by some unidentified external check. With `*arg2 = 0.0` the engine effectively freezes and kirby never visibly burns. Vanilla callers at `0x80299dd4` and `0x80321a14` both pass real non-zero floats derived from effector context (`this+0x48`) or per-tick math (`frame*0.277`); no symbol-named `EffectorBurn` exists, so we have no static constant to copy. **Path forward to fix**: live-debug in Dolphin — break at `0x80299e0c`, trigger an in-game burn (lava tile / fire effector), read the float at `*(r5)` at the moment of the bctrl. Excluded from the deathlink pool until that value is pinned down.
+7. **`KirbyBurn` cannot be invoked from mod code without a real non-zero float arg — value still unknown.** The wrapper at `0x802d55c0` dereferences `arg2` as a pointer at `0x802d5674` (`lwz r0, 0(r30)`), so passing literal 0 DSI's on null. Even with `&zero`, the setter `0x802f958c` reads `*arg2` as a *float* (`lfs f29, 0(r30)` at `0x802f9890`) and uses it to seed `state.f04+0x24` (init = `*arg2 / 60.0`). The state's per-frame proc at `0x802f3bd0` decrements that field by 6.0 every frame with no branch on the value — termination is gated by some unidentified external check. With `*arg2 = 0.0` the engine effectively freezes and kirby never visibly burns. Vanilla callers at `0x80299dd4` and `0x80321a14` both pass real non-zero floats derived from effector context (`this+0x48`) or per-tick math (`frame*0.277`); no symbol-named `EffectorBurn` exists, so there is no static constant to copy. **What's needed**: the live float a vanilla burn passes — break at `0x80299e0c` in Dolphin, trigger an in-game burn (lava tile / fire effector), and read the float at `*(r5)` at the moment of the bctrl. Excluded from the deathlink pool until that value is known.

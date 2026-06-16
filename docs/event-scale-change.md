@@ -1,4 +1,4 @@
-# Scale Change Event — Research & Findings
+# Scale Change Event
 
 > **Status: IMPLEMENTED & ACTIVE (visual/skybox only — WIP).** `event_scale_change.c/h`
 > are registered as `CUSTOM_EVKIND_SCALE_CHANGE` (18) in `custom_events.c` with all
@@ -40,7 +40,7 @@ The stage scale is stored in `GrData.stage_node->scale` (offset 0x8 within stage
 +0x04  float  machine_accel
 +0x08  float  scale
 +0x0C  float  gravity_unk
-+0x10  Vec3   gravity_force        (confirmed: (0, -1, 0) for City Trial)
++0x10  Vec3   gravity_force        ((0, -1, 0) for City Trial)
 +0x1C  int    fog_flags
 ...
 +0xCC  float  oob_min_x            (OOB death boundary AABB)
@@ -51,7 +51,7 @@ The stage scale is stored in `GrData.stage_node->scale` (offset 0x8 within stage
 +0xE0  float  oob_max_z
 ```
 
-### Visual Model Scaling (verified)
+### Visual Model Scaling
 
 The stage model is a JOBJ hierarchy. At init, `3D_CreateStageModel` (0x800dcbf0,
 size 0x318; symbol `CreateStageModel_3D` in `link.ld`) reads `grGetStageScale()` and
@@ -109,12 +109,12 @@ grobj->gr_data->stage_node->scale = new_scale;
 `ApplyJObjScale` writes `jobj->scale.{X,Y,Z}` then calls `JObj_SetMtxDirtySub(jobj)`.
 
 `ScaleChange_Active` re-applies the scale + OOB every frame as insurance.
-`ScaleChange_End2` **restores** the saved original scale + OOB box (restore logic
-confirmed present). State is tracked via a static `scale_modified` flag.
+`ScaleChange_End2` **restores** the saved original scale + OOB box. State is tracked
+via a static `scale_modified` flag.
 
 Whether `grobj->gobj->hsd_object` is the playable terrain JObj (and therefore whether
 the visible ground actually changes size, or only the skybox + stage_node->scale field)
-is **unverified at runtime** — see open questions.
+is an open question — see below.
 
 ### grGetStageScale Callers
 
@@ -149,14 +149,14 @@ int EnvColl_Raycast(float *ray_origin, float *ray_endpoint, float *out_normal)
 
 This data includes pre-baked bounding boxes at world-scale coordinates (offsets +0x14/0x18/0x1c for center, +0x20/0x24/0x28 for extents) used for broad-phase culling before per-triangle intersection tests via `zz_800d95dc_`.
 
-**Key finding: this collision data is computed once at stage load and is NOT affected by JOBJ scale changes.** Scaling the JOBJ only changes the visual model; the collision mesh stays at original scale.
+**This collision data is computed once at stage load and is NOT affected by JOBJ scale changes.** Scaling the JOBJ only changes the visual model; the collision mesh stays at original scale.
 
 ### OOB Death Boundary
 
 `Machine_CheckFallDeath` (0x801e6464, size 0xBC) calls `calcDistanceFromOOB`
 (0x800d4f20, size 0x98) with the ray position at `r30+1000`, and that routine reads
-the AABB at `stage_node+0xCC..0xE0` (verified by disasm: X uses +0xCC/+0xD8, Y uses
-+0xD0/+0xDC, Z uses +0xD4/+0xE0). These CAN be modified at runtime (just floats in the
+the AABB at `stage_node+0xCC..0xE0` (X uses +0xCC/+0xD8, Y uses +0xD0/+0xDC, Z uses
++0xD4/+0xE0). These CAN be modified at runtime (just floats in the
 stage_node struct). `ScaleChange_Start`/`_Active` scale all 6 by `SCALE_MULTIPLIER` and
 `ScaleChange_End2` restores them, but this only adjusts the kill boundary — it doesn't
 fix ground collision.
@@ -189,7 +189,7 @@ int ScaleChange_RaycastHook(float *origin, float *endpoint, float *out_normal)
 }
 ```
 
-**Unresolved**: Callers use the raycast result (hit distance, hit normal) to position objects. If inputs are in original space, the computed hit position will be in original space too. Callers would place objects at original-scale positions, not scaled positions. The output transform needs investigation:
+**Unresolved**: Callers use the raycast result (hit distance, hit normal) to position objects. If inputs are in original space, the computed hit position will be in original space too. Callers would place objects at original-scale positions, not scaled positions. The output transform is the open piece:
 - `out_normal` (Vec3) — direction vector, scale-invariant, probably fine
 - Hit distance — returned somehow (possibly in f1 register or via the int return value), would need to be multiplied by S
 - Hit position — likely computed by callers from origin + distance * direction; if distance is wrong, position is wrong
@@ -235,8 +235,3 @@ Accept that scaling is visual only. The event would create a surreal visual effe
 | `Machine_CheckFallDeath` | 0x801e6464 | 0xBC | Calls calcDistanceFromOOB |
 | `JObj_SetMtxDirtySub` (`HSD_JObjSetMtxDirtySub` in map) | 0x8040d92c | 0x334 | Recompute JObj transform after scale write |
 | `zz_800d95dc_` | 0x800d95dc | ? | Per-triangle intersection test (unverified) |
-
-Not in `link.ld` (cannot be called from mod code directly; documented as game
-internals): `grGetStageScale`, `Raycast_Do`, `calcDistanceFromOOB`,
-`Machine_CheckFallDeath`. `JObj_SetMtxDirtySub` and `EnvColl_Raycast` /
-`CreateStageModel_3D` are exposed in `link.ld`.

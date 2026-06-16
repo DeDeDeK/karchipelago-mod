@@ -2,7 +2,7 @@
 
 ## Overview
 
-Each non-patch, non-copy item type gets its own unlock bit (30 total). When locked, the item is removed from all spawn pools and cannot appear in City Trial. This was upgraded from an earlier group-based system (7 groups: food/allup/maxmin/candy/special/gordo/legendary) to individual item unlocks for finer-grained AP progression.
+Each non-patch, non-copy item type gets its own unlock bit (30 total). When locked, the item is removed from all spawn pools and cannot appear in City Trial. Individual item unlocks give finer-grained AP progression than a group-based system would.
 
 ## What is Gated
 
@@ -80,7 +80,7 @@ Box pools are filtered by `FilterItemsFromPool()`: a stable two-pointer (read/wr
 
 ## Save Data
 
-`u32 item_unlocked_mask` in `APSave` (accessed via `ap_save->item_unlocked_mask`) — bit N = `ItemUnlockKind` N. This replaced the old `u8` group-based mask when we moved from 7 groups to 30 individual items.
+`u32 item_unlocked_mask` in `APSave` (accessed via `ap_save->item_unlocked_mask`) — bit N = `ItemUnlockKind` N. The `u32` width accommodates all 30 individual item bits.
 
 ## AP Items
 
@@ -143,6 +143,6 @@ The caller advances `next_piece_index` and updates `x1c[idx]` / `x28[idx]` regar
 
 ## Design Decisions
 
-**Individual over grouped:** The original 7-group system (food, allup, maxmin, candy, special, gordo, legendary) was simpler but too coarse for interesting AP progression. Individual items mean each food type, each legendary piece, etc. becomes its own AP item — more items in the pool, more progression granularity. The mask grew from `u8` to `u32` to accommodate 30 bits.
+**Individual over grouped:** A coarse group-based system (food, allup, maxmin, candy, special, gordo, legendary) is simpler but too coarse for interesting AP progression. Individual items mean each food type, each legendary piece, etc. is its own AP item — more items in the pool, more progression granularity, at the cost of a `u32` mask for the 30 bits.
 
 **Legendary machine pieces as items:** Hydra and Dragoon parts (3 each) are gated here as spawn items, separate from machine gating in `gate_machines.c`. This is intentional — gating whether the *pieces* appear in boxes is different from gating whether the *assembled machine* is available. Both can be used together or independently via YAML options.

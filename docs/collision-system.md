@@ -73,7 +73,7 @@ Each entry contains a triangle reference and result data:
 
 ## Item Collision — coll_kind Dispatch
 
-Items use the `coll_kind` field (3-bit field in ItemData+0x359, **bits 2-4, mask 0x1C**) to select their collision strategy. This is set during `Item_Create` from the `coll_kind` parameter of `Item_InitDesc`, and stored by `CityItem_AllocCollData` (0x80254318) via `rlwimi r0,kind,2,27,29` (insert 3 bits at byte position 2). It is read back in `Item_GenericEnvColl` via `rlwinm. r0,byte,30,29,31` (rotate right 2, mask low 3 bits). **Note:** the `item.h` bitfield models `coll_kind : 3` at the low 3 bits (mask 0x07); per the actual rlwimi/rlwinm the field is at bits 2-4 (mask 0x1C) — header bitfield/mask comment is a known discrepancy (see open question in the reconciliation notes).
+Items use the `coll_kind` field (3-bit field in ItemData+0x359, **bits 2-4, mask 0x1C**) to select their collision strategy. This is set during `Item_Create` from the `coll_kind` parameter of `Item_InitDesc`, and stored by `CityItem_AllocCollData` (0x80254318) via `rlwimi r0,kind,2,27,29` (insert 3 bits at byte position 2). It is read back in `Item_GenericEnvColl` via `rlwinm. r0,byte,30,29,31` (rotate right 2, mask low 3 bits). **Note:** the `item.h` bitfield models `coll_kind : 3` at the low 3 bits (mask 0x07), but the `rlwimi`/`rlwinm` place the field at bits 2-4 (mask 0x1C); the header bitfield/mask comment is a known discrepancy.
 
 ### coll_kind Values
 
@@ -176,7 +176,7 @@ void Item_InitDesc(
 | zz_80253ad0_ (item spawn) | 1 | 1 | -1 | -1 |
 | **Mod code (recommended)** | **1** | **3** | **-1** | **-1** |
 
-(`3DDebug_CheckToSpawnItem` = `zz_80081600_`, `Box_SpawnContents` = `zz_80253610_` in the Ghidra project; verified caller args by disassembly. The actual map symbol for `Item_InitDesc` is `CityItem_InitDesc` at 0x802509a0 — `Item_InitDesc` is the link.ld export name used by mod code.)
+(`3DDebug_CheckToSpawnItem` = `zz_80081600_`, `Box_SpawnContents` = `zz_80253610_` in the Ghidra project. The map symbol for `Item_InitDesc` is `CityItem_InitDesc` at 0x802509a0 — `Item_InitDesc` is the link.ld export name used by mod code.)
 
 ## Item Environment Collision Pipeline
 

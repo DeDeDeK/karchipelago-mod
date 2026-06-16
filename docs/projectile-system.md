@@ -6,11 +6,10 @@ firecrackers. All live on a single GObj/proc class (entity class 23, p_link 14)
 with a shared update pipeline and a per-kind vtable that specialises behaviour
 for each of the 17 `ProjectileKind` values.
 
-Everything below was derived from disassembly of the base game
-(`scripts/mem1.raw`). Sections are tagged with confidence:
+Sections are tagged with confidence:
 
-- **Solid** — verified against multiple disassembly traces.
-- **Plausible** — inferred from strong contextual evidence, but not directly traced.
+- **Solid** — high confidence.
+- **Plausible** — inferred from strong contextual evidence.
 - **Speculative** — best-guess; call out explicitly before relying on it.
 
 ## 1. High-level shape
@@ -23,8 +22,8 @@ A projectile is a GObj with two pieces of user data:
 - The **inner `ProjectileData`** — a 0x220-byte (544-byte) block allocated from
   the HSD object pool at `0x8055a8f8`. Zero-initialised by `Projectile_Create`
   via `memset(proj, 0, 544)` at `0x8021f4a4`. This is where all per-projectile
-  state lives: kind, current state, position, velocity, HurtData, audio voices,
-  and per-state callback pointers.
+  state lives: kind, current state, position, velocity, HurtData,
+  particle-effect handles, and per-state callback pointers.
 
 Each projectile is registered as a GObj with:
 
@@ -44,8 +43,8 @@ points to an 8-word (0x20-byte) **per-kind vtable**:
 | +0x08  | `init(proj)`      | `Projectile_Create` @ 0x8021f660      | One-shot, early. Clears/inits per-kind scratch fields.      |
 | +0x0c  | `refreshXfmA(proj)` | per-frame (see §4)            | Copies the model's JObj matrix into `proj` scratch.         |
 | +0x10  | `refreshXfmB(proj)` | per-frame (see §4)            | Byte-identical to `refreshXfmA` in every kind sampled.      |
-| +0x14  | `auxA(proj)`      | state-exit / despawn            | State-exit cleanup. E.g. bomb's `0x8022634c` stops per-state sound. Can be NULL. |
-| +0x18  | `postInit(proj)`  | `Projectile_Create` @ 0x8021f7a0      | One-shot, late. Typical body: `Projectile_SetState(this, 0, …)` + play spawn SFX. |
+| +0x14  | `auxA(proj)`      | state-exit / despawn            | State-exit cleanup. E.g. bomb's `Bomb_AuxA_RemoveEffect` (`0x8022634c`) removes its lingering FADE particle effect. Can be NULL. |
+| +0x18  | `postInit(proj)`  | `Projectile_Create` @ 0x8021f7a0      | One-shot, late. Typical body: `Projectile_SetState(this, 0, …)` + spawn the spawn-time particle effect (`Effect_SpawnSync`). |
 | +0x1c  | `auxB(proj)`      | state dispatcher (per-frame)    | Kind-specific rendering/cleanup hook. Can be NULL.          |
 
 Two kind pairs share a vtable — the aliases are at the pointer level:
@@ -78,14 +77,13 @@ struct ProjectileStateEntry {
    `proj+0x28` is hardcoded to 0 by `Projectile_Create` (@ 0x8021f508) and
    never rewritten, so `index < 0` is never true and the `proj+0x30` branch
    is dead.** Every vanilla dispatch uses `proj+0x34`, which `Projectile_Create`
-   (@ 0x8021f51c) loads with the per-kind `state_table` (vtable[0]). The
-   `proj+0x30` slot was labeled "primary" in earlier drafts of this doc —
-   that was backwards and is corrected here.
+   (@ 0x8021f51c) loads with the per-kind `state_table` (vtable[0]).
 2. Writes `proj+0x24 = index`, `proj+0x2c = entry.state_id`, copies
    `entry.fn0..fn3` into `proj+0x150..0x15c`, and writes
    `proj+0x38 = kind_data[0x0C] + state_id*16` (per-state animation/blend
    spec, 16 bytes per entry — NOT the 24-byte state_table entry).
-3. Runs the animation/SFX transition (per-kind state-enter setup).
+3. Runs the animation transition (per-kind state-enter setup, via
+   `Projectile_AssignStateFlags`).
 
 All four `fn0..fn3` slots are **per-frame** callbacks, not on-enter/on-exit
 hooks. State transitions are driven by `Projectile_SetState` calls from inside
@@ -93,11 +91,11 @@ hooks. State transitions are driven by `Projectile_SetState` calls from inside
 vtable's `init` (one-shot at create) or `postInit` (one-shot at create) —
 there's no entry-level on-enter slot.
 
-Evidence: `Projectile_SetState` (0x8021f7dc) stores `fn0..fn3` at
+`Projectile_SetState` (0x8021f7dc) stores `fn0..fn3` at
 `proj+0x150..0x15c`; the ten GObj procs registered by `Projectile_Create`
 (at priorities 0, 1, 4, 5, 6, 7, 8, 9, 10, 21) dispatch into those slots each
 frame — specifically prio 1 calls `proj+0x150`, prio 4 calls `proj+0x154`,
-prio 5 calls `proj+0x158`, prio 6 calls `proj+0x15c`. (Agent-4 trace.)
+prio 5 calls `proj+0x158`, prio 6 calls `proj+0x15c`.
 
 ### 3.1 Per-kind state tables
 
@@ -127,8 +125,7 @@ that ends up in `proj+0x2c`; **use the index** as the argument to
 
 ### 3.2 State semantics (Solid for thrown/held; Plausible for auras)
 
-Indices from the agent-1 per-callback trace. These are the values to pass to
-`Projectile_SetState`.
+These are the values to pass to `Projectile_SetState`.
 
 **`PROJKIND_BOMB`** (4 states)
 - 0 HELD — fn3 snaps to rider hand bone (`bl 0x80191ffc`), all other fn slots blr.
@@ -188,39 +185,46 @@ Indices from the agent-1 per-callback trace. These are the values to pass to
 ### 3.3 flags field meanings (Solid upper byte; Plausible low byte)
 
 The `flags` word at entry+0x04 is routed through `Projectile_AssignStateFlags`
-at **`0x80222298`** (size 0x74, still `zz_80222298_` in the map; called from
-`Projectile_SetState` at `0x8021f92c`). Its body, in order:
+at **`0x80222298`** (size 0x74; called from `Projectile_SetState` at
+`0x8021f92c`). Its body, in order:
 
 ```
-stw  r4, 8(r1)              ; spill the flags arg to stack
-lbz  r3, 11(r1)             ; r3 = flags & 0xff  (the LOW byte / anim-class tag)
+mr    r31, r3              ; r31 = proj
+stw   r4, 8(r1)            ; spill the flags arg to stack
+lbz   r3, 11(r1)           ; r3 = flags & 0xff  (the LOW byte = anim-class tag)
 cmplwi r3, 0
-beq  .skip                  ; if low byte == 0, skip the lookup
-lbz  r0, 0x17f(r3=proj)     ; r0 = prev low byte at proj+0x17f
+beq   .mint                ; low == 0  -> mint a fresh id (this is NOT a skip)
+lbz   r0, 0x17f(r31)       ; r0 = previous low byte (LSB of the proj+0x17c word)
 cmplw r3, r0
-beq  .skip                  ; unchanged → skip
-bl   0x80231b68             ; resolve an anim/material id from the low byte
-sth  r3, 0x194(proj)        ; cache the resolved id at proj+0x194
-.skip:
-lwz  r0, 8(r1)
-stw  r0, 0x17c(proj)        ; proj+0x17c = flags (full 32 bits)
-stw  r3=0, 0x184(proj)      ; proj+0x184 = 0
-lhz  r0, 0x18a(proj)
-rlwimi r0, r3=0, 1, 23, 30  ; clear middle 8 bits of proj+0x18a
-sth  r0, 0x18a(proj)
-lbz  r0, 0x18b(proj)
-rlwimi r0, r3=0, 0, 31, 31  ; clear bit 31 of proj+0x18b
-stb  r0, 0x18b(proj)
+beq   .store               ; low unchanged from last time -> keep the current id
+.mint:
+bl    0x80231b68           ; AllocSeqId16(): next nonzero u16 from a global counter
+sth   r3, 0x194(r31)       ; proj+0x194 = freshly minted sequence id
+.store:
+lwz   r0, 8(r1)
+stw   r0, 0x17c(r31)       ; proj+0x17c = flags (full 32 bits; its LSB feeds the +0x17f compare next time)
+stw   r3=0, 0x184(r31)     ; proj+0x184 = 0
+lhz   r0, 0x18a(r31)
+rlwimi r0, r3=0, 1, 23, 30 ; clear middle 8 bits of proj+0x18a
+sth   r0, 0x18a(r31)
+lbz   r0, 0x18b(r31)
+rlwimi r0, r3=0, 0, 31, 31 ; clear bit 31 of proj+0x18b
+stb   r0, 0x18b(r31)
 ```
 
-So the flag word is stored verbatim at `proj+0x17c`; the **low byte** drives a
-conditional lookup (`0x80231b68`) whose result is cached at `proj+0x194`
-whenever the per-kind animation-class tag changes (this is the actual consumer
-of the low byte — it is *not* dead); and `proj+0x184` plus parts of
-`proj+0x18a/0x18b` are zeroed each state transition. (Earlier drafts of this
-section reproduced only the trailing zeroing stores and omitted the low-byte
-lookup at the top — corrected here.) The full set of observed flag values
-across the 17 kinds' state tables:
+So the flag word is stored verbatim at `proj+0x17c` (and its low byte is what
+`proj+0x17f` reads back next transition). The **low byte** does *not* index a
+lookup table: `0x80231b68` (`AllocSeqId16`) takes **no arguments** — it reads,
+increments, and writes back a global `u16` counter at `0x805DD8A0`
+(`r13+0x7c0`), returning the pre-increment value and resetting to 1 on
+wrap-to-0. What the low byte actually gates is *whether a fresh id is minted*:
+`proj+0x194` gets a new sequence id whenever the low byte is 0 **or** differs
+from the previous transition's low byte; if the anim-class is unchanged and
+nonzero, the old id is kept. `proj+0x194` is therefore an
+**animation-instance/generation counter** that bumps on every anim-class
+change — not an id "resolved from" the low byte. `proj+0x184` and parts of
+`proj+0x18a/0x18b` are zeroed each transition. The full set of flag
+values across the 17 kinds' state tables:
 
 | value   | used by (kind / state)                                           |
 |---------|------------------------------------------------------------------|
@@ -242,14 +246,15 @@ Upper byte is either 0 or 1 — a boolean "animated state". Lower byte groups
 states by kind (one unique value per kind for active states). None of the
 state tables use more than two distinct flag values (an "animated" one and
 0x0000 for held/sentinel), so the lower byte is effectively a per-kind
-animation-class tag, not a general-purpose bit field. The disassembly of
-`Projectile_AssignStateFlags` above confirms this: the low byte is consumed as
-a whole value (passed to the `0x80231b68` id-resolver), not tested bit-by-bit.
+animation-class tag, not a general-purpose bit field: in
+`Projectile_AssignStateFlags` the low byte is compared as a whole value
+against the previous one, not tested bit-by-bit.
 
-`proj+0x17c` keeps the full 32-bit flag word; `proj+0x194` caches the id
-resolved from the low byte; `proj+0x184 / 0x18a / 0x18b` are zeroed every
-transition. These are the inputs the per-kind `refreshXfm*` callbacks read
-each frame to drive the HSD animation object.
+`proj+0x17c` keeps the full 32-bit flag word; `proj+0x194` holds a fresh
+animation-instance id minted (from the global counter, not from the byte's
+value) whenever the anim class changes; `proj+0x184 / 0x18a / 0x18b` are zeroed
+every transition. These are the inputs the per-kind `refreshXfm*` callbacks
+read each frame to drive the HSD animation object.
 
 ## 4. Per-frame update (the 10 procs)
 
@@ -314,9 +319,17 @@ Each of these reads `Projectile_GetOwnerGObj(proj) = *(projGObj+0x2c+0x08)`
 ### 5.3 Damage values
 
 Per-region params (damage, knockback, radius) are stored in the projectile's
-HurtData, populated at init time from `per_kind_data+0x10`. Explosion-class
-projectiles also cache per-kind damage scalars at `proj+0x1e4..0x1ec` during
-their EXPLODING state, read back from `per_kind_data+0x18..0x30`.
+HurtData, populated at init time from `kind_data+0x10` (the `hurt_region_spec`,
+whose `+0x00` is the region-descriptor array base and `+0x04` the region count;
+regions are built by `HurtData_Create` @ `0x8018c1c8` + `HurtData_InitRegion`
+@ `0x8018c598`, 0x18-byte stride). Explosion-class projectiles cache a handful
+of scalars at `proj+0x1d0..0x1ec` when entering the EXPLODING→FADE transition,
+but these come from **per-projectile** blocks, not from `kind_data`:
+`proj+0x1e4/0x1e0` are copied from HurtData regions 0/1 (via
+`*(proj+0x108)+0x0c`, field `+0x18`), and the fade/alpha ramp
+(`proj+0x1d8` alpha, `proj+0x1dc` lifetime, `proj+0x1e8/0x1ec` rate) is read
+from the render-state block at `proj+0x104`. No bomb state function
+dereferences `kind_data` at all.
 
 If you want to override projectile damage:
 
@@ -351,10 +364,6 @@ Setting only one risks the hit being silently dropped depending on which
 scan path resolves it first. Setting both is safe because the flag *only*
 gates same-player exclusion; non-owner targets are unaffected.
 
-(Earlier drafts of this doc only mentioned the inbound flag — that was
-incomplete. The outbound flag was discovered tracing the rider-list scan
-in `Projectile_CheckRiderCollision`.)
-
 ## 6. Lifecycle
 
 ### 6.1 Creation
@@ -371,17 +380,21 @@ in `Projectile_CheckRiderCollision`.)
    type_flag, charge) into proj. Set flag bits at `proj+0x1b5` bit 2 and
    `proj+0x218` bit 0 (always-on "alive" markers).
 7. Build orientation matrix via `0x80220250` (PSMTXNormalize/Cross).
-8. Allocate sub-resources: scratch mtx, sub-vtable table (`proj+0x6c`), two
-   audio voices (`proj+0x114/0x118`), text/vfx slot (`proj+0x10`), `mpColl`
-   CollData (`proj+0x138`, if kind wants one), anim object (`proj+0x140/148`),
-   HurtData via `Projectile_InitHurtData` (`0x80221440`).
+8. Allocate sub-resources: scratch mtx, sub-vtable table (`proj+0x6c`),
+   render-state block (`proj+0x104`, `HSD_ObjAlloc` from its own pool — holds
+   the alpha/color/scale ramp fields), two particle-effect handles
+   (`proj+0x114/0x118`), text/vfx slot (`proj+0x10`), `mpColl` CollData
+   (`proj+0x138`, if kind wants one), anim object (`proj+0x140/148`), HurtData
+   via `Projectile_InitHurtData` (`0x80221440`). The model joint itself is
+   loaded by `HSD_JObjLoadJoint` (`0x8040afe8`) from `kind_data+0x08` (or a
+   global default when that pointer is NULL).
 9. Call per-kind **init** (vtable +0x08).
 10. Register the ten GObj procs (priorities 0, 1, 4, 5, 6, 7, 8, 9, 10, 21).
 11. Run the reset chain (`0x8021f2a0`, `0x80220310`, `0x80220654`,
     `0x80220230`, `0x80221c9c`, `0x80220578`, `0x80221534`, `0x80221300`,
     `0x80222240`) to zero accel/velocity and enter state 0.
-12. Call per-kind **postInit** (vtable +0x18). For throwable kinds this sets
-    the audible "spawn" SFX via `0x80236c40`.
+12. Call per-kind **postInit** (vtable +0x18). For throwable kinds this spawns
+    the "spawn" particle effect via `Effect_SpawnSync` (`0x80236c40`).
 13. Return the outer gobj.
 
 The inner `ProjectileData` pointer is reached via `*(gobj + 0x2c)`.
@@ -400,15 +413,19 @@ Both paths unwind through the GObj destructor, which invokes the userdata
 dtor at `0x8021ff54`. That dtor:
 
 - Destroys HurtData.
-- Stops + frees the two audio voices.
-- Destroys text/vfx, anim obj, mpColl CollData.
+- Stops + frees the two particle-effect handles (`proj+0x114/0x118`, via the
+  Effect-module helpers `0x8023641c` + `0x80236778`).
+- Runs the per-kind `aux_a` (vtable +0x14) — for BOMB this reaps the lingering
+  FADE-state effect at `proj+0x1c8/0x1cc` (see §7).
+- Destroys text/vfx, anim obj (`proj+0x140/0x148`), render-state block
+  (`proj+0x104`), mpColl CollData.
 - Returns the `ProjectileData` block to its HSD pool.
 
 ### 6.3 Auras and rider backref
 
 Aura kinds (`PROJKIND_FIRE_AURA`, `SPIKE_AURA`, `ICE_AURA`) are spawned with
 zero velocity. Each copy ability's `AbilityInit` handler stores the returned
-GObj handle at **`rider+0x3F0`** (1008 bytes in). Confirmed sites:
+GObj handle at **`rider+0x3F0`** (1008 bytes in). The sites:
 
 | Ability | Init (stores handle)          | Lose (reads & destroys)            |
 |---------|-------------------------------|------------------------------------|
@@ -422,9 +439,9 @@ Each `*_LoseAbility_Exit` does the same three things:
 2. Test a rider flag byte (Fire reads bit 4 of `rider+0x824`). If the bit is
    set, call `GObj_Destroy` directly (hard teardown, skips `aux_a`); otherwise
    call `Projectile_DespawnGObj` (`0x802230a0`) which runs the per-kind
-   `aux_a` cleanup before `GObj_Destroy`. The gating bit's exact meaning
-   wasn't traced — likely "destroy-without-particle-cleanup", used when the
-   rider is being wholesale reset (respawn, round end).
+   `aux_a` cleanup before `GObj_Destroy`. The gating bit is likely
+   "destroy-without-particle-cleanup", used when the rider is being wholesale
+   reset (respawn, round end).
 3. Zero `rider+0x3F0`.
 
 `Projectile_DespawnGObj` itself is just `proj = *(gobj+0x2c); Projectile_Despawn(proj); return;`.
@@ -432,8 +449,7 @@ Each `*_LoseAbility_Exit` does the same three things:
 Only these three auras use the `rider+0x3F0` slot. Throwable kinds
 (`BOMB`, `SENSORBOMB`, `GORDO`) do not — their `AbilityInit` flow keeps the
 projectile handle inside the ability's own state block, not in a rider-level
-slot. (Earlier notes that called out `rider+0xfc` were incorrect; the actual
-offset is `0x3F0`.)
+slot.
 
 ## 7. `ProjectileData` known-offset reference
 
@@ -456,7 +472,7 @@ for the struct declaration.
 | 0x34   | `state_table`        | Primary state table (loaded by `Projectile_Create` from vtable[0]). Every vanilla `SetState` dispatch reads from here. |
 | 0x38   | `state_anim_spec`    | Per-state 16-byte animation/blend spec (`kind_data[0x0C] + state_id*16`). Not the 24-byte state_table entry. |
 | 0x70   | `velocity_scale`     | Copy of `desc.velocity_scale`.                       |
-| 0x78   | `type_flag`          | Copy of `desc.type_flag`. Every traced vanilla spawner writes 1 (`BOMB` confirmed via disasm of `spawnBomb` @ 0x801a954c). The earlier 1/aura, 3/directed, 4/thrown guess is wrong — BOMB is thrown but writes 1. Field exists; semantics for non-1 values are uncharted. |
+| 0x78   | `type_flag`          | Copy of `desc.type_flag`. Every vanilla spawner writes 1 (including `spawnBomb` @ 0x801a954c — BOMB is thrown but writes 1). Field exists; semantics for non-1 values are uncharted. |
 | 0x88   | `spawn_velocity`     | Vec3. Snapshot of `desc.velocity`. Read-only after creation. |
 | 0x94   | `velocity`           | Vec3. Live physics velocity. Integrated into `position` each frame by prio 4. |
 | 0xac   | `position`           | Vec3. Live world position.                           |
@@ -464,8 +480,10 @@ for the struct declaration.
 | 0xc4   | `position_init`      | Vec3. Spawn position; used as collision anchor.      |
 | 0x10c  | `lifetime`           | Frames remaining; prio-1 decrements, triggers despawn at 0. (**Plausible.**) |
 | 0x110  | `frame_counter`      | Monotonic counter incremented by prio-0.             |
-| 0x114  | `audio_voice_a`      | Allocated by `0x802364e0`.                           |
-| 0x118  | `audio_voice_b`      | Allocated by `0x802364e0`.                           |
+| 0x104  | `render_state`       | `HSD_ObjAlloc`'d block (`0x802205b0`) holding the alpha/color/scale ramp fields read by the FADE state (`+0x10` alpha, `+0x14` lifetime, `+0x2c/0x30` fade endpoints). Freed at teardown. **Not** `kind_data`. |
+| 0x108  | `hurt_data`          | HurtData created by `Projectile_InitHurtData`; `+0x0c` points at its region array (0xC8 stride). |
+| 0x114  | `effect_handle_a`    | Particle-effect handle (Effect module). Allocated by `0x802364e0`; passed to `Effect_SpawnSync` as the attach parent. Freed in the dtor. |
+| 0x118  | `effect_handle_b`    | Second particle-effect handle. Freed alongside `0x114`. |
 | 0x14c  | `charge`             | Copy of `desc.charge`.                               |
 | 0x150  | `state_fn0`          | Copied by `Projectile_SetState` from entry+0x08.     |
 | 0x154  | `state_fn1`          | … from entry+0x0c.                                   |
@@ -477,36 +495,44 @@ for the struct declaration.
 | 0x16c  | `user_hook_on_hit`   | Per-state on-hit callback, invoked by prio 10. Return non-zero to request state transition. |
 | 0x1b4  | `flag_a`             | Bit 0 = allow-self-hit (default 0). Other bits set during damage logging. |
 | 0x1b5  | `flag_b`             | Bit 0 = env-colliding this frame (set by `mpColl` tick). Bit 2 = alive (always-on). |
-| 0x1b6  | `flag_c`             | Audio-state bits: bit 0 stop-pending, bit 1 in-play, bit 5 anim-dirty, bit 7 state-changed-this-frame. |
+| 0x1b6  | `flag_c`             | Effect/anim-state bits. Bit 7 = state-changed-this-frame (set by every state transition, e.g. `Bomb_State2End_TransitionToFade`). Lower bits flag effect-handle liveness. |
 | 0x218  | `flag_d`             | Subproc-gating bits. Bit 0 always set by `Projectile_Create`. |
 
 The span from roughly 0x1c0 through 0x1f8 is **per-kind scratch**. Treat as
-opaque unless you're the kind's own state code. Mapped BOMB usage:
+opaque unless you're the kind's own state code. The bomb overloads these
+offsets across states, and the handles it stores there are **particle-effect
+handles** (Effect module, `Effect_SpawnSync` @ `0x80236c40` /
+`abilityTimer_Plasma_removeEffect` @ `0x8023624c`), not audio. Mapped BOMB
+usage:
 
 - **HELD (state 0):** The `proj+0x1c0..0x1cc` region stays at its memset-0
   default. HELD's fn3 snaps `proj+0xac` (position) to the rider hand bone
   and writes orientation vectors at `proj+0xd0`/`0xdc`/`0xe8` — it never
-  touches the 0x1c0 band. (Earlier drafts described this region as an
-  owner-info Vec3 in HELD; that was wrong.)
+  touches the 0x1c0 band.
 - **THROWN (state 1):** Still zero — the state 1 fn slots integrate physics
   (`proj+0x94`/`0xac`) and scan mpColl collision; no 0x1c0-band writes.
-- **EXPLODING (state 2):** `proj+0x1c0` is the detonation countdown. State-2
-  fn0 (`0x80225d48`) decrements it each frame; at zero it calls the bomb
-  state-2-end transition at `0x80225f90`.
-- **Transition to FADE (`0x80225f90`):** Calls `Projectile_SetState` to
-  advance the state, then cleans up any audio already tracked at
-  `proj+0x1f8`/`0x1fc` (one pre-existing handle pair) via `0x8023624c`,
-  then allocates a new audio voice via `0x80236c40`, storing the handle
-  at `proj+0x1c0` and an associated id at `proj+0x1c4`.
-- **FADE cleanup (BOMB `aux_a` @ `0x8022634c`):** Reads the audio handles
-  at `proj+0x1c8` and `proj+0x1cc` — a **different** pair from the ones
-  written in the transition — and calls `0x8023624c` to stop them.
+- **EXPLODING (state 2):** `proj+0x1c0` is reused as the **detonation
+  countdown** here (seeded by `Bomb_DetonationTrigger` @ `0x80225c8c`,
+  decremented by state-2 fn0 `Bomb_State2_DetonationTimerTick` @ `0x80225d48`).
+  The detonation burst effect is spawned at this point and tracked in
+  `proj+0x1f8/0x1fc`.
+- **EXPLODING→FADE (`Bomb_State2End_TransitionToFade` @ `0x80225f90`):**
+  removes the EXPLODING burst at `proj+0x1f8/0x1fc` (then zeroes it), then
+  spawns **two** new effects via `Effect_SpawnSync` — a one-shot at
+  `proj+0x1c0/0x1c4` (overwriting the now-dead countdown) and a positional one
+  (attached to `proj+0xac`) at `proj+0x1c8/0x1cc` — and computes the alpha/
+  lifetime fade ramp into `proj+0x1d0..0x1ec` from the render-state block
+  (`proj+0x104`) and HurtData regions (`proj+0x108`).
+- **Teardown (BOMB `aux_a` @ `0x8022634c`):** removes the lingering positional
+  effect at `proj+0x1c8/0x1cc` and zeroes it.
 
-So the bomb actually uses at least three audio-handle slots across its
-lifecycle (`proj+0x1c0..0x1c4`, `proj+0x1c8..0x1cc`, `proj+0x1f8..0x1fc`),
-layered by state. A complete mapping of which slot is written by which
-state-enter would need tracing of the bomb's state-1-end / state-2-enter
-setup code; the above covers the paths observed so far.
+So the complete bomb effect-handle lifecycle is:
+`proj+0x114/0x118` (the persistent anchors) are freed by the dtor; the
+EXPLODING burst at `proj+0x1f8/0x1fc` is removed when FADE begins; the
+positional FADE effect at `proj+0x1c8/0x1cc` is removed by `aux_a` at teardown;
+and the one-shot FADE effect at `proj+0x1c0/0x1c4` has no explicit teardown —
+it self-terminates when its `Effect_SpawnSync` animation completes. No slot
+leaks.
 
 ## 8. Spawn helpers
 
@@ -643,10 +669,9 @@ Projectile_SetState(proj, /*BOMB_STATE_THROWN / SENSOR_BOMB_STATE_ARMED_FLYING=*
 ```
 
 `flags=1` matches vanilla throw: skip the rider-attached cleanup path that
-post-init ran for state 0. (The flag-setting and `Projectile_GetData` are
-exactly what the live `SpawnProjectileForPlayer` does; the earlier draft of
-this recipe omitted the self-hit flags, which the actual code sets — without
-them the trap can silently miss the player who is its own owner.)
+post-init ran for state 0. The flag-setting and `Projectile_GetData` are
+exactly what the live `SpawnProjectileForPlayer` does; without the self-hit
+flags the trap can silently miss the player who is its own owner.
 
 ### 9.1 Kinds requiring per-kind throw setup
 
@@ -697,24 +722,16 @@ The outer GObj is always `r3` in `Projectile_Create` at return; the inner
 
 ## 11. Open questions
 
-- **BOMB audio-handle slot layering across states.** We've mapped three
-  separate audio handle slots (`proj+0x1c0/0x1c4`, `proj+0x1c8/0x1cc`,
-  `proj+0x1f8/0x1fc`), each written by a different state-enter path. The
-  `aux_a` cleanup at `0x8022634c` only covers the `0x1c8/0x1cc` pair; where
-  the other two slots are torn down hasn't been fully walked. Treat as
-  opaque per-kind scratch unless you're extending BOMB's state code.
-- **Per-kind data table at `0x8055a9a8`** — partially mapped (see
-  `ProjKindData` in `projectile.h`). Known fields: `+0x00 state_table`,
-  `+0x04 NULL`, `+0x0c state_anim_spec_array`, `+0x10 hurt_region_spec`.
-  Open: the meaning of `+0x08` (loaded as a struct whose first two words
-  land at `proj+0x18`/`0x1c`, probably a model/archive pair), and the exact
-  per-offset layout from `+0x14..0x30` used by explosion-class kinds
-  (BOMB / SENSORBOMB) for damage/knockback/radius/timers. A runtime dump
-  taken mid-stage would pin these; the main-menu dump leaves the table
-  NULL because the per-stage loader writes to it from data, not code.
-- **`flags` low byte → `0x80231b68` resolver.** §3.3 establishes the low byte
-  is consumed as a whole-value id (fed to `0x80231b68`, result cached at
-  `proj+0x194`), not bit-by-bit. What `0x80231b68` resolves the id *into* (a
-  material? an animation index?) and how `proj+0x194` is later read by the
-  `refreshXfm*` callbacks hasn't been traced. Low priority — the values we
-  have already decode every vanilla state.
+- **Concrete contents of `kind_data+0x14..0x30`.** The structural fields of the
+  per-kind data table are mapped (see `ProjKindData` in `projectile.h`):
+  `+0x00 state_table`, `+0x04 NULL`, `+0x08 model descriptor` (word0 →
+  `HSD_JObjLoadJoint`, NULL falls back to a global default model), `+0x0c
+  state_anim_spec_array`, `+0x10 hurt_region_spec`. What remains unknown is
+  whether anything lives at `+0x14..0x30` and what it is. No bomb state
+  function dereferences `kind_data` at all — its damage comes from the HurtData
+  built at create (from `+0x10`), and its fade params from the per-projectile
+  `proj+0x104` block. So `+0x14..0x30` may simply be unused by the kinds
+  covered so far. Pinning it down needs a mid-stage runtime dump: the per-stage
+  loader writes the `0x8055a9a8` table from data, not code, so the values only
+  exist while a stage is loaded. **Low priority** — nothing in the known code
+  paths reads it.

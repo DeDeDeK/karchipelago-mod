@@ -126,11 +126,11 @@ case AP_ITEM_PATCH_CAP_INCREASE:
 2. `OSReport("[PatchCap] Patch cap increased to %d (target %d).\n", cap, target)`
 3. Textbox via `tb_api->EnqueueColoredNounFmt(NULL, "Patch cap", tb_api->PatchColors[PATCHKIND_CHARGE], " increased! (%d/%d)", cap, target)` — yellow "Patch cap" noun, denominator is the **target** (not 18, not 127).
 
-## Consumer Coverage (Verified)
+## Consumer Coverage
 
-A Ghidra cross-reference trace confirms every consumer of the stat cap goes through `Patch_GetMaxValue`. No code path reads `gmGameParams.patch_max` (+0x18) directly.
+Every consumer of the stat cap goes through `Patch_GetMaxValue`. No code path reads `gmGameParams.patch_max` (+0x18) directly.
 
-**Callers of `Patch_GetMaxValue` (0x8000aaf0) — 16 call sites across 7 functions** (Ghidra `x-ref to`):
+**Callers of `Patch_GetMaxValue` (0x8000aaf0) — 16 call sites across 7 functions:**
 
 | Function | Address | Sites |
 |----------|---------|-------|
@@ -153,7 +153,7 @@ The 9 `PlayerView_Think?` sites correspond to `PATCHKIND_NUM` (9 stats); the bar
 | Warp Star (VCKIND 0, `vcDataCommon @ 0x804b1658`) | `Machine_CopyCommonAttributes?` (0x801e812c) — attribute memcpy, does not touch `patch_max` | `Machine_AdjustAttributesStar` (0x801e906c) → `Machine_ApplyStarStatScaling` (0x801e81e4) → `Machine_GetStatRatio` + `Machine_ScaleFromRatio` (0x801cab4c) — **routes through `Patch_GetMaxValue`** |
 | Rex Wheelie (VCKIND 1, `vcDataCommon @ 0x804b1c40`) | `RexWheelie_InitAttr` (0x801f3c94) — attribute memcpy | `Machine_AdjustAttributesBike` (0x801f4dac) → `Machine_ApplyBikeStatScaling` (0x801f3d44) → `Machine_GetStatRatio` + `Machine_GetStatRatio2` — **routes through `Patch_GetMaxValue`** |
 
-The shared normalizers `Machine_GetStatRatio` (0x801caa8c) and `Machine_GetStatRatio2` (0x801cabd4) both unconditionally `bl 0x8000aaf0` — verified at the instruction level (`0x801caae8: bl 0x8000aaf0` and `0x801cac38: bl 0x8000aaf0`, each followed by `extsb r3,r3`). There is no direct-read escape hatch.
+The shared normalizers `Machine_GetStatRatio` (0x801caa8c) and `Machine_GetStatRatio2` (0x801cabd4) both unconditionally `bl 0x8000aaf0`. There is no direct-read escape hatch.
 
 **Bottom line:** our `CODEPATCH_REPLACEFUNC` on `Patch_GetMaxValue` is a complete interception. The returned target value scales the entire attribute-interpolation curve and the HUD stat-bar fill ratio.
 

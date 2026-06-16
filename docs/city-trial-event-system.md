@@ -65,7 +65,7 @@ The main event state struct, stored as GOBJ userdata. Pointer to the GOBJ is at 
 | 0x08 | 70 | occur_chance | Weight for "event occurs" in occur/skip roll |
 | 0x0C | 30 | skip_chance | Weight for "skip this cycle" |
 | 0x10 | — | (unknown) | Not read by the state machine (see note below) |
-| 0x14 | 2200 | min_time | Min match time before events start (~37s). `CityEvent_StateIdle` gates on `City_GetMinSecMs?() >= event->[0x14]` (confirmed via disasm/Ghidra) |
+| 0x14 | 2200 | min_time | Min match time before events start (~37s). `CityEvent_StateIdle` gates on `City_GetMinSecMs?() >= event->[0x14]` |
 | 0x18 | 4 | prev_kind_max | Max history entries |
 | 0x1C | 180 | music_fadeout_frames | Frames to fade out BGM (3s) |
 | 0x20 | 180 | starting_delay | Frames in state 1 before transitioning to state 2 (3s) |
@@ -74,7 +74,7 @@ The main event state struct, stored as GOBJ userdata. Pointer to the GOBJ is at 
 | 0x2C | PTR | weights | -> `int[STGROUP_NUM][EVKIND_NUM]` chance weights |
 | 0x30 | PTR | param | -> EventParam table (0xC bytes per kind) |
 
-> **`min_time` offset:** `min_time` lives at inner-config `+0x14` (not `+0x10`); `+0x10` is an unverified slot. Confirmed via disasm/Ghidra of `CityEvent_StateIdle` (0x800ee270), whose match-time gate reads `City_GetMinSecMs?() >= *(inner_config + 0x14)`. `externals/hoshi/include/event.h` was corrected to match this layout (2026-06-08).
+> **`min_time` offset:** `min_time` lives at inner-config `+0x14` (not `+0x10`); `+0x10` is not read by the state machine. `CityEvent_StateIdle`'s (0x800ee270) match-time gate reads `City_GetMinSecMs?() >= *(inner_config + 0x14)`.
 
 ### EventParam (per-event, 0xC bytes each)
 

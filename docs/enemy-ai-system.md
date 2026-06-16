@@ -73,7 +73,7 @@ typedef struct AnimScriptState {  // ed+0x4C
 
 ### Execution Loop
 
-Each frame, the timer decrements. When timer <= 0.0, the next command byte is read. The command ID is extracted as `(byte >> 2) & 0x3F` (verified in `EventActor_StateMachine` at 0x80201884: `rlwinm r30,r0,30,26,31`) — i.e. the upper 6 bits of the byte, not the low 6. The low 2 bits carry a separate sub-field.
+Each frame, the timer decrements. When timer <= 0.0, the next command byte is read. The command ID is extracted as `(byte >> 2) & 0x3F` — i.e. the upper 6 bits of the byte, not the low 6. The low 2 bits carry a separate sub-field.
 
 `EventActor_StateMachine` dispatches each command by first calling the generic HSD handler `zz_80068d74_` with the command ID. That function handles commands 0-10 via a 4-byte-entry jump table at 0x80499628 (`cmd < 11` → `table[cmd]`, returns 1) and returns 0 for `cmd >= 11`. When it returns 0, the state machine falls back to the enemy command table at 0x804b26b0, indexed by `(cmd - 11) * 12`.
 
@@ -188,7 +188,7 @@ typedef struct StateTableEntry {
     - 10h. Begin script execution
 11. Restore position if flag 0x08
 12. Copy func1-4 from state table entry to `ed+0xAB8-0xAC4` -- **always happens, regardless of flag 0x01**
-13. Clear `ed+0xAC8` (per-type cb) to 0 **unconditionally**; clear `ed+0xAD4` to 0 **unless flag 0x10** (verified at 0x801fc634: the `ed+0xAC8` store is unconditional, only the `ed+0xAD4` store at 0x801fc63c is guarded by the flag-0x10 branch)
+13. Clear `ed+0xAC8` (per-type cb) to 0 **unconditionally**; clear `ed+0xAD4` to 0 **unless flag 0x10** (the `ed+0xAC8` store is unconditional, only the `ed+0xAD4` store is guarded by the flag-0x10 branch)
 
 ### Common State Table (0x804b2950)
 
@@ -238,7 +238,7 @@ Only func1 is set (enter-only state). On entry:
 4. Sets `death_frame_counter` (ed+0x9C8) to 600
 5. Increments counter each frame -- since 601 > 120 (the destruction threshold), the actor is destroyed on the **next frame** after entering the death state
 
-The "30 frames of death animation" described in some references is incorrect. Death is effectively instantaneous (1 frame).
+Death is effectively instantaneous (1 frame).
 
 **State 0x0A (Inhaled):**
 
@@ -270,7 +270,7 @@ States 0x0E+ are type-specific. Each enemy type has its own state table pointed 
 
 T1 and T2 variants of the same enemy always share the same descriptor pointer (so they have identical per-type state tables).
 
-> **Per-type state-table entry counts and the "-1" entry.** Each per-type table is an array of 0x14-byte entries, the same format as the common table. The **first entry (relative index 0) is reached by state ID 0x0E**, and its `anim_idx` is -1 (the default/spawn entry). The tables below were re-counted from the live state-table layouts in `scripts/mem1.raw`; the *behavioral* descriptions of individual states are partial/inferred and have not all been validated by per-function disassembly.
+> **Per-type state-table entry counts and the "-1" entry.** Each per-type table is an array of 0x14-byte entries, the same format as the common table. The **first entry (relative index 0) is reached by state ID 0x0E**, and its `anim_idx` is -1 (the default/spawn entry). The *behavioral* descriptions of individual states below are partial/inferred.
 
 **Waddle Dee (0x17)** -- state table at 0x804b3e78, **5 entries (states 0x0E-0x12)**:
 
@@ -334,7 +334,7 @@ All callback addresses fall in the range 0x8020EA44-0x8021E0D4 (~60KB block).
 
 ### Per-Type State Complexity
 
-Per-type state counts (re-counted from the live state tables in `scripts/mem1.raw`; count = entries between the table pointer and the next datum). Counts for enemies not listed here have not been individually verified.
+Per-type state counts (count = entries between the table pointer and the next datum). Counts for enemies not listed here are not individually established.
 
 | Enemy | State Table | Per-Type States (entry count) | Notes |
 |-------|-------------|-------------------------------|-------|
@@ -497,7 +497,7 @@ More sophisticated targeting with field-of-view check:
 void EnemyActor_RumblePlayer(int player_idx, int intensity, int duration);
 ```
 
-This function gets the player's rider GObj and triggers controller rumble with `(controller_idx, 2, intensity, duration)`. Despite the old name `EnemyActor_DamagePlayer`, it does **not** apply direct damage. Actual damage to players flows through the HitColl collision pipeline (see [hurtdata-system.md](hurtdata-system.md)).
+This function gets the player's rider GObj and triggers controller rumble with `(controller_idx, 2, intensity, duration)`. It does **not** apply direct damage. Actual damage to players flows through the HitColl collision pipeline (see [hurtdata-system.md](hurtdata-system.md)).
 
 ## Knockback System
 
@@ -950,7 +950,7 @@ To create custom enemy AI (e.g., for traps), you can:
 | EventActor_SetupVelocity | 0x80205310 | 0x1d4 | Configure movement speed/direction |
 | EventActor_CleanupVfxA3C | 0x8020c6e0 | 0x2c | Stop SFX/VFX at ed+0xA3C handle |
 | EventActor_CleanupVfxA40 | 0x8020c70c | 0x2c | Stop SFX/VFX at ed+0xA40 handle |
-| `zz_80236358_` (SoundStop) | 0x80236358 | 0xc4 | Low-level sound stop (called by the cleanup helpers). Still `zz_` in map. |
+| `zz_80236358_` (SoundStop) | 0x80236358 | 0xc4 | Low-level sound stop (called by the cleanup helpers). |
 | Enemy_GetActorData | 0x801fd498 | 0xe8 | Look up actor_data by ID |
 
 ## Data Addresses

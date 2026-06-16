@@ -63,7 +63,7 @@ Both passes are gated by `prev_kind_num` (skipped entirely when it is 0). The re
 
 When few events are unlocked this exclusion pass can deadlock: if every enabled event
 is already recorded in `prev_kind[]`, all their chances get zeroed and nothing can
-fire. Our hook fixes this by capping `prev_kind_num` (see below).
+fire. The hook fixes this by capping `prev_kind_num` (see below).
 
 For the full state machine, weights/param/BGM tables, and reserve queue, see
 [city-trial-event-system.md](city-trial-event-system.md).

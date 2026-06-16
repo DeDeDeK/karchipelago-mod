@@ -34,18 +34,7 @@ Filtering note: locked items get all six chance fields zeroed by the per-gate `*
 | `chance_chamber` | Secret chamber |
 | `chance_ufo` | UFO |
 
-### How this was confirmed
-
-With the debug menu set to "everything locked except hot dog" — leaving `FOODHOTDOG` as the only entry with nonzero chances (`tac=2`, `destructible=2`, `chamber=2`; `dyna=0`, `meteor=0`, `ufo=0`) — the following tests were run:
-
-| Source broken | Hot dog dropped? | Conclusion |
-|---|---|---|
-| Star pole | Yes | → on a field where FOODHOTDOG ≠ 0; by elimination, `chance_destructible` |
-| Event pillar | Yes | → also `chance_destructible` (shared pool with star pole) |
-| Volcano walls | Yes | → also `chance_destructible` (shared pool) |
-| Dyna Blade hit/exit | No | → on a field where FOODHOTDOG = 0; by elimination, `chance_dyna` |
-
-Of the three sources, only Dyna Blade keys off `chance_dyna`; the volcano walls and star pole are the destructible-structures pool (`chance_destructible`).
+Star pole, event pillar, and volcano walls share the destructible-structures pool (`chance_destructible`); only Dyna Blade keys off `chance_dyna`.
 
 ## Drop Pipeline
 
@@ -87,7 +76,7 @@ The per-instance descriptor passed to `City_SpawnMiscItems` (0x80104db0) carries
 | 10-11 | — | unmapped, returns -1 | — |
 | 12 | `chance_ufo` | UFO | `spawnUFOItems` + 4 unnamed UFO event handlers |
 
-The unmapped slots (4-8, 10-11) suggest the enum was originally sized for 13 distinct sources and some were removed or never wired up.
+The unmapped slots (4-8, 10-11) suggest the enum is sized for 13 distinct sources, with several never wired up.
 
 Note that `chance_destructible` (input 3) is **never passed as a literal** by any caller. It is reached exclusively through the per-instance descriptor's `drop_source` field, populated from stage data. This is why the same drop column is shared by every yaku-break object that drops items.
 
@@ -122,7 +111,7 @@ This is why two instances of the same yaku-break kind can behave differently: th
 
 ## Enumerated Table — City Trial (`GrCity1.dat`)
 
-Captured via runtime dump in `FilterAllSpawnTables`. `num=60` entries; only nonzero rows shown. All-zero rows in the table: every `*DOWN` patch, SPEEDMAX, SPEEDMIN, OFFENSEMAX, DEFENSEMAX, CHARGENONE, CANDY, every COPY* not listed, and every FAKE patch. Indices 0-2 (`BOX*`) and 55-60 (Hydra/Dragoon pieces) are absent from the table entirely.
+`num=60` entries; only nonzero rows shown. All-zero rows in the table: every `*DOWN` patch, SPEEDMAX, SPEEDMIN, OFFENSEMAX, DEFENSEMAX, CHARGENONE, CANDY, every COPY* not listed, and every FAKE patch. Indices 0-2 (`BOX*`) and 55-60 (Hydra/Dragoon pieces) are absent from the table entirely.
 
 | Item | dyna | tac | meteor | destructible | chamber | ufo |
 |---|---:|---:|---:|---:|---:|---:|

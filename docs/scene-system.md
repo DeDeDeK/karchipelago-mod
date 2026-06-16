@@ -71,6 +71,24 @@ Vanilla table at `0x80495058` (`stc_major_scene_desc`).
    f. Call `cb_Enter()` if present
    g. Inner loop, while `!request_major_exit`: call `Gm_Minor()`, then call `cb_ExitMinor()` after that minor completes (skipped for the memcard-unplug scene and during reboot)
 
+### Per-Major Callback Functions
+
+The `cb_Enter` (+0x4) and `cb_ExitMinor` (+0x8) slots of each `MajorSceneDesc` are filled by these functions (the records in `stc_major_scene_desc` are ordered by `major_id`):
+
+| Major | `cb_Enter` (+0x4) | `cb_ExitMinor` (+0x8) |
+|-------|-------------------|------------------------|
+| `MJRKIND_TITLE` | `TitleScreen_MajorEnter` (0x8000da34) | `TitleScreen_MinorExit` (0x8000e1d8) |
+| `MJRKIND_MENU` | `MainMenu_MajorEnter` (0x80015bb4) | `MainMenu_MinorExit` (0x80015be8) |
+| `MJRKIND_TOP` | `TopRide_MajorEnter` (0x8003ed34) | `TopRide_MinorExit` (0x8003eed8) |
+| `MJRKIND_CITY` | `CityTrial_MajorEnter` (0x8003fc5c) | `CityTrial_MinorExit` (0x8003fdd4) |
+
+(`MJRKIND_CARD` and `MJRKIND_LAN` also carry `cb_Enter` callbacks — `CardPrompt_MajorEnter` at 0x800476b8 and `LAN_MajorEnter` at 0x8004f654.)
+
+`cb_Enter` runs once on major entry to set up the major's data. `cb_ExitMinor` runs after each minor scene exits and is the major's **minor-transition decider**: a jump table on the major's scene-state field that advances the sub-scene, (re)initializes data, runs the checklist new-unlock flow, or exits the major. The state field is per-major:
+
+- `CityTrial_MinorExit` switches on the City Trial scene field `GameData+0x39b` (3 = player select, 4 = in game, 5 = properties graph, 6 = stadium splash, 7 = stadium, 8 = results). It calls `CityTrial_Init`, snapshots per-player stats, runs `CityTrial_CheckForNewUnlocks`, and in the stadium-results state calls **`Stadium_RecordResults`** (0x8004223c) to record the round's per-player result (keyed by stadium kind) into the clear-checker results block.
+- `TopRide_MinorExit` switches on the Top Ride scene field `GameData+0x385`, branching on `topride_mode` (`GameData+0x381`). It drives course-select → race → results and runs the Top Ride new-unlock flow.
+
 ## Minor Scenes
 
 ### MinorKind Enum
@@ -158,7 +176,7 @@ struct MinorScene {
 };
 ```
 
-The active major's `MinorScene` list is selected at major entry. The address `0x807e0580` has been observed at runtime as the live table location, but it sits in the high heap region (not static `.data`) and is not a fixed symbol — treat it as informational rather than a stable pointer.
+The active major's `MinorScene` list is selected at major entry. At runtime the live table sits at `0x807e0580`, but that address is in the high heap region (not static `.data`) and is not a fixed symbol — treat it as informational rather than a stable pointer.
 
 ### Minor Scene Lifecycle
 
@@ -202,7 +220,7 @@ From `scene.h` comments:
 | `stc_minor_scene_desc` | 0x80495154 | Vanilla minor scene descriptor table |
 | `stc_scene_menu_common` | 0x80558788 | `ScMenuCommon` — shared menu/select screen state |
 | `stc_menu_select` | 0x804962b0 | `ScMenuSelect` — select screen GObj/model data |
-| Runtime minor table | 0x807e0580 | `MinorScene` entries for the active major (runtime-observed, heap-region — not a stable symbol) |
+| Runtime minor table | 0x807e0580 | `MinorScene` entries for the active major (runtime, heap-region — not a stable symbol) |
 
 ## Hoshi Scene Extension
 
@@ -314,7 +332,7 @@ Both enums are defined in `menu.h`.
 | Function | Address | Size | Purpose |
 |----------|---------|------|---------|
 | `MainMenu_Init` | 0x80131d44 | 0x108 | Menu initialization |
-| `MainMenu_InitAllVariables?` | 0x80007808 | 0x38 | Initializes all menu variables |
+| `MainMenu_InitAllVariables` | 0x80007808 | 0x38 | Initializes all menu variables |
 | `MainMenu_MinorEnter` | 0x80018548 | 0x47c | Minor scene entry |
 | `MainMenu_MinorExit` | 0x80015be8 | 0x1cc | Minor scene exit |
 | `MainMenu_MinorThink` | 0x800189e4 | 0x20 | Per-frame minor think |

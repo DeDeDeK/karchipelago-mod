@@ -56,7 +56,7 @@ The core per-entity hurt state. Every damageable object (rider, machine, enemy, 
 
 Each region in the `regions` array is an **attack hitbox** that contains embedded damage parameters. When `HitColl_CheckCollision` finds a region overlapping a victim's sub-region, the region's damage/knockback values are used.
 
-A region begins with an `active` word at +0x00, followed by the **13-dword HurtParams block at +0x04–0x34** (written by `Trigger_InitParameters`, which also stores its `flags` arg at +0x38). HurtParams field X lands at region offset `X + 0x04`. Verified field offsets (from `HitColl_GetDamageDealt`/`HitColl_CalcKnockback`/`HitColl_CheckCollision` reads):
+A region begins with an `active` word at +0x00, followed by the **13-dword HurtParams block at +0x04–0x34** (written by `Trigger_InitParameters`, which also stores its `flags` arg at +0x38). HurtParams field X lands at region offset `X + 0x04`. Field offsets (read by `HitColl_GetDamageDealt`/`HitColl_CalcKnockback`/`HitColl_CheckCollision`):
 
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
@@ -76,7 +76,7 @@ A region begins with an `active` word at +0x00, followed by the **13-dword HurtP
 | 0x50–0x58 | Vec3 | pos_prev | Previous region position (velocity = pos_cur − pos_prev) |
 | 0x4C | float | radius | Collision sphere radius |
 
-> **Note:** earlier drafts placed `current_pos`/`prev_pos` at +0x1C/+0x28 and a `joint_idx` at +0x18; those overlap the HurtParams block and are incorrect. Per-frame velocity is normally computed from the **`HurtData.pos_tracker` object** (HurtData+0x68): `HurtData_UpdatePerFrame` writes the new contact position to pos_tracker+0x00 and rolls the previous into pos_tracker+0x0C. The region's own +0x40/+0x50 pair is only the no-tracker fallback. Exact word offsets for `radius` (0x4C) and the geometry past +0x40 are read from live (gameplay) instances and are **not verifiable from the vanilla main-menu mem1.raw snapshot**.
+> **Note:** there is no `current_pos`/`prev_pos` at +0x1C/+0x28 or `joint_idx` at +0x18 — those offsets overlap the HurtParams block. Per-frame velocity is normally computed from the **`HurtData.pos_tracker` object** (HurtData+0x68): `HurtData_UpdatePerFrame` writes the new contact position to pos_tracker+0x00 and rolls the previous into pos_tracker+0x0C. The region's own +0x40/+0x50 pair is only the no-tracker fallback. Exact word offsets for `radius` (0x4C) and the geometry past +0x40 are read from live (gameplay) instances and are **not verifiable from the vanilla main-menu mem1.raw snapshot**.
 
 ### Sub-Region Entry (stride 0x44 = 68 bytes)
 
@@ -149,7 +149,7 @@ The collision system iterates GObj linked lists by p_link class:
 | 8 | +0x20 | Stage Hazards (GrYaku) | `GrYaku_GetHurtData` (0x800f8248) — reads GObj userdata (+0x2C) then +0xEC |
 | 12 (0xC) | +0x30 | Event Actors / Enemies | `EventActorGObj_GetHurtData` (0x80204878) — reads GObj userdata (+0x2C) then +0x410 |
 
-**Naming note (resolved):** the getter at 0x800f8248 is named **`GrYaku_GetHurtData`** in the current map (it reads GrYakuData+0xEC, not EnemyData — an earlier draft of this doc called it the misnamed `Enemy_GetHitColl`). Likewise, the per-frame stage-hazard check at 0x801d72a4 is named **`Machine_CheckStageHazardCollision`** (an earlier draft called it the misnamed `Machine_CheckEnemyCollision`). Enemy/event actors are checked by `Machine_CheckEventCollision` (0x801d71ec, p_link 12); it loads stc_gobj_lookup+0x30, calls `EventActorGObj_GetHurtData` per actor, then `HitColl_CheckCollision` against the machine's hurt_data (MachineData+0x660).
+**Naming note:** the getter at 0x800f8248 is **`GrYaku_GetHurtData`** (it reads GrYakuData+0xEC, not EnemyData). The per-frame stage-hazard check at 0x801d72a4 is **`Machine_CheckStageHazardCollision`**. Enemy/event actors are checked by `Machine_CheckEventCollision` (0x801d71ec, p_link 12); it loads stc_gobj_lookup+0x30, calls `EventActorGObj_GetHurtData` per actor, then `HitColl_CheckCollision` against the machine's hurt_data (MachineData+0x660).
 
 ## Damage Pipeline — Per-Frame Flow
 

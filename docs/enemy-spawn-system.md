@@ -130,7 +130,7 @@ The final visual scale is computed as: `mode_scale * spawn_scale * tier_base_sca
 
 ### Descriptor Struct (EventActorDesc)
 
-`EventActor_Create` takes a pointer to a descriptor struct (0x60 bytes, 24 fields). Reconstructed from `EventActor_InitFromDesc` (0x801fb53c, the setup function that copies descriptor -> EnemyData), cross-referenced with `Enemy_SpawnActor` and `event_dynablade`/`event_meteor` callers.
+`EventActor_Create` takes a pointer to a descriptor struct (0x60 bytes, 24 fields). `EventActor_InitFromDesc` (0x801fb53c) is the setup function that copies descriptor -> EnemyData; the other callers are `Enemy_SpawnActor` and `event_dynablade`/`event_meteor`.
 
 ```c
 typedef struct EventActorDesc
@@ -154,7 +154,7 @@ typedef struct EventActorDesc
 
 #### Descriptor -> EnemyData Field Mapping
 
-Traced from `EventActor_InitFromDesc` (0x801fb53c), which copies descriptor fields into the EnemyData userdata:
+`EventActor_InitFromDesc` (0x801fb53c) copies descriptor fields into the EnemyData userdata:
 
 | Desc Field | Offset | -> EnemyData[N] | ED Offset | Purpose |
 |------------|--------|-----------------|-----------|---------|
@@ -346,7 +346,7 @@ Config struct at spawn_data+0x10:
 | +0x26 | s16 | random respawn range |
 | +0x28 | s16 | mode (1=Air Ride courses, 2=STKIND_MELEE1, 3=STKIND_MELEE2) |
 
-Empirically, `stc_enemy_spawn_data` is NULL in the City Trial city map (whether
+`stc_enemy_spawn_data` is NULL in the City Trial city map (whether
 timed or Free Run), Top Ride, and stadiums that don't use stage-based enemy
 spawning (Air Glider, Destruction Derby, Single Race, etc.). The CT city's
 event actors (TAC, Dyna Blade, Meteor) are loaded by `Enemy_LoadStageEnemies`
@@ -355,14 +355,14 @@ system, not the spawn-position pool.
 
 ## Air Ride Per-Course Enemy Rosters
 
-Which enemies each Air Ride course can spawn, extracted statically from the vanilla stage `.dat`
+Which enemies each Air Ride course can spawn, from the vanilla stage `.dat`
 spawn tables (mode 1: `ids[4]` at entry `+0x1E`, `weights[4]` at `+0x26`, stride `0x38`; meta-enemy
 IDs `0x50-0x5E` expanded through `secondary_table`). An enemy is listed if it appears with a positive
 weight at any spawn position on that course. Tiers T0/T1/T2 of an enemy share one copy ability and
 are collapsed.
 
-**StageKind → GroundKind → stage file** (the surprising part — do NOT infer the file from the course
-name). Resolved from `Stage_GetGrKindFromStageKind` (0x80261ce8: global stage table at
+**StageKind → GroundKind → stage file** — do NOT infer the file from the course
+name. The mapping comes from `Stage_GetGrKindFromStageKind` (0x80261ce8: global stage table at
 `*(*(r13+0x7FC))`, stride `0x58`, GroundKind at `+0x00`) plus the stage-def filename table in
 `main.dol`. Note `GrPasture1` is **Kirby Melee 1** (spawn mode 2) and `GrColosseum5` is **Kirby Melee
 2** (mode 3) — neither is an Air Ride course.
@@ -544,7 +544,7 @@ return 3;
 | 2 | 21.0 - 31.9 | 40 | 4.0 | 6.0 |
 | 3 | >= 32.0 | 50 | 5.0 | 8.0 |
 
-These thresholds and response values are **global** — shared across all enemy types regardless of tier. (The classification *structure* above — three thresholds at +0x08/+0x0C/+0x10 returning tiers 0-3 — is verified from `Enemy_ClassifyDamageTier`. The specific numeric values for thresholds, stun frames, knockback speeds, and stun durations live in the runtime-populated param table and are **not** confirmable from the vanilla menu memory snapshot.)
+These thresholds and response values are **global** — shared across all enemy types regardless of tier. The classification *structure* above — three thresholds at +0x08/+0x0C/+0x10 returning tiers 0-3 — comes from `Enemy_ClassifyDamageTier`. The specific numeric values for thresholds, stun frames, knockback speeds, and stun durations live in the runtime-populated param table, which is populated only at runtime (resolving them requires Dolphin).
 
 ### Death Sequence
 
@@ -596,8 +596,6 @@ EnemyPath_Init(ed);           // finds nearest spline
 ```
 
 The `splArcLengthPoint_Safe` patch (installed by `SpawnEnemy_OnBoot`) provides null-safety for actors whose init callbacks try to use splines before path setup.
-
-> **WIP / not integrated.** The standalone-spawn entry points in `mods/custom_events/src/spawn_enemy.c` — `SpawnEnemy_OnBoot` (installs the `EventActor_GetParentScale_Safe` and `splArcLengthPoint_Safe` `CODEPATCH_REPLACEFUNC` patches plus the meteor fake-event-data), `SpawnEnemy_Random`, and `SpawnEnemy_MeteorTrap` — are currently **uncalled** (no callers anywhere in `mods/`). They are exploratory scaffolding; the null-safety patches are therefore **not** active in builds, and the recipes above are validated by analysis, not by a live integration. Treat this whole section as a reference for *how* standalone spawning would work, not as a description of shipped behavior.
 
 ## Key Functions Reference
 

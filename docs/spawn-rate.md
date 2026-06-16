@@ -172,7 +172,7 @@ Showing absolute rate (e.g. `Spawn rate increased (250%)`) rather than a delta (
 
 The field at `grBoxGeneInfo + 0x20` (`cur_num_items` in `game.h`) is a running count, not the cap — despite a name like `cur_max_items` being the tempting read. `CityItemSpawn_IncrementNum` (0x800ec57c) and `CityItemSpawn_DecrementNum` (0x800ec670) read/write it: incremented when an item spawns, decremented when one is destroyed. The actual cap lives in `ItemFallDesc.item_max`.
 
-The adjacent `+0x24` (`total_spawn_count`) is a lifetime-only counter, written exclusively on positive deltas in `IncrementNum`. The field at `+0x28` (`total_num`) is touched by neither `IncrementNum` nor `DecrementNum`, so that label is unverified.
+The adjacent `+0x24` (`total_spawn_count`) is a lifetime-only counter, written exclusively on positive deltas in `IncrementNum`. The field at `+0x28` (`total_num`) is touched by neither `IncrementNum` nor `DecrementNum`, so that label is uncertain.
 
 ## Known Limitations
 
@@ -194,6 +194,6 @@ A single `SpawnRate_GetScale()` drives both CT and TR, with one shared `spawn_ra
 
 Receiving Spawn Rate Up while playing AR has no observable effect. The textbox still fires ("Spawn rate increased (X%)"), which could be confusing if AR were the player's only mode. Acceptable — the AP item is most useful in CT/TR, and a player exclusively in AR shouldn't see the item in their pool.
 
-### `total_num` (+0x28) label is unverified
+### `total_num` (+0x28) label is uncertain
 
-`IncrementNum` does not touch `+0x28`, so it's not the running count. The current `total_num` label in `game.h` is suspect. If a future investigation pins down its real purpose, rename it then.
+`IncrementNum` does not touch `+0x28`, so it's not the running count. The current `total_num` label in `game.h` is therefore suspect; its real purpose is unknown. What's needed: the writer(s) of `+0x28` to pin down its meaning, then a rename.

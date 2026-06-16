@@ -1,7 +1,7 @@
 # Gourmet Race Event
 
-> **Status (verified 2026-06): IMPLEMENTED but NOT REACHABLE in the current build.**
-> The Gourmet Race event itself is fully coded and correctly registered in the custom-events tables (params + function table, `CUSTOM_EVKIND_GOURMET_RACE` = 19). All three callbacks, food spawning, respawn watcher, scoring, and the score HUD are present and complete.
+> **Status: IMPLEMENTED but NOT REACHABLE in the current build.**
+> The Gourmet Race event itself is fully coded and registered in the custom-events tables (params + function table, `CUSTOM_EVKIND_GOURMET_RACE` = 19). All three callbacks, food spawning, respawn watcher, scoring, and the score HUD are present and complete.
 >
 > **However, the entire `custom_events` framework is currently dormant:** in `mods/custom_events/src/main.c` both `.OnBoot = OnBoot` and `.On3DLoadEnd = On3DLoadEnd` are **commented out** in `mod_desc`. As a result `CustomEvents_OnBoot()` is never called, so the `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` selection hook is never installed and the state-handler wrappers are never patched in. No other mod imports/triggers the `CustomEventsAPI` (the archipelago mod does not reference it). Consequently Gourmet Race — like all four custom events — **cannot be selected or triggered at runtime as the repo currently stands.** To activate it, the `ModDesc` hooks must be uncommented. See `custom-events.md` for the framework wiring.
 
@@ -30,7 +30,7 @@ Custom City Trial event where food items are scattered across the map. Players c
 
 `custom_functions[...]`: `.start = GourmetRace_Start`, `.active = GourmetRace_Active`, `.end2 = GourmetRace_End2`.
 
-Selection (when the framework is active): `CustomEvents_ExtendedRoll` adds each custom event's `weight` to the vanilla `Gm_Roll` pool; on a Gourmet Race win it calls `CustomEvent_Do(19)`. (As noted in the status banner above, this roll hook is currently not installed because the `ModDesc` boot hooks are commented out.)
+Selection (when the framework is active): `CustomEvents_ExtendedRoll` adds each custom event's `weight` to the vanilla `Gm_Roll` pool; on a Gourmet Race win it calls `CustomEvent_Do(19)`. This roll hook is currently not installed because the `ModDesc` boot hooks are commented out (see the status banner above).
 
 ### Entry points
 
@@ -169,7 +169,7 @@ When a food disappears, the watcher finds the nearest player (by 3D distance fro
 
 ### Item System Integration
 - Items created via `Item_InitDesc` + `Item_Create` (standard item spawning API). `SpawnFoodItem` passes the food kind, scale, `pos`, and the `coll_kind` as the collision param, then overrides `ItemData.lifetime` (0x48) to `GOURMET_ITEM_LIFETIME` (30000).
-- `coll_kind` is the collision param of `Item_InitDesc` (stored to `ItemData.coll_kind`, 0x4C). The code uses `coll_kind=3` for surface (high-up) spawns and `coll_kind=2` for underground/pre-placed spawns; the doc's prose interprets these as "ground-snap with rejection" vs "no rejection". (Per `item.h`, `coll_kind` 3 = point collision used by most items; the precise snap/reject behavior for 2 vs 3 is the spawner's intent and is best confirmed in-game.)
+- `coll_kind` is the collision param of `Item_InitDesc` (stored to `ItemData.coll_kind`, 0x4C). The code uses `coll_kind=3` for surface (high-up) spawns and `coll_kind=2` for underground/pre-placed spawns, treating these as "ground-snap with rejection" vs "no rejection" respectively. (Per `item.h`, `coll_kind` 3 = point collision used by most items; the precise snap/reject behavior for 2 vs 3 reflects the spawner's intent.)
 - Item hard cap: `Item_Create` returns NULL once the city item limit is hit; the spawner simply records fewer foods and the respawn path retries next frame.
 - Items spawn on `p_link = 13` (`GAMEPLINK_ITEM`); `entity_class` is set internally by `Item_Create`.
 
@@ -177,7 +177,7 @@ When a food disappears, the watcher finds the nearest player (by 3D distance fro
 - `Spline_GetCount()` returns number of spline segments in current stage
 - `Spline_GetForward(seg)` returns HSD spline pointer for a segment
 - `splGetSplinePoint(&out, spline, 0.5f)` evaluates spline midpoint
-- Candidates buffer is capped at `MAX_CANDIDATES` (802); `CollectCandidates` keeps only midpoints inside the city radius. City Trial yields on the order of a couple hundred such points (observed ~233 in playtesting).
+- Candidates buffer is capped at `MAX_CANDIDATES` (802); `CollectCandidates` keeps only midpoints inside the city radius. City Trial yields on the order of a couple hundred such points (~233).
 
 ## Score HUD
 

@@ -4,7 +4,7 @@
 
 The patch drop system spawns patch items behind/in front of a rider when something forces them to "drop their stats" (typically damage, boost overuse, or our trap item). It's a producer/consumer queue: `Rider_DropPatches` enqueues an event by writing fields on `RiderData`, then `Rider_TickDropPatches` runs per-frame and drains the queue, spawning one item at a time on a cooldown.
 
-This doc captures what we learned reverse-engineering the pipeline; the in-game implementation is unmodified by the mod (we only call into it from `Patch_DropTrap` in `patch_item.c`).
+The in-game implementation is unmodified by the mod; it is only called into from `Patch_DropTrap` in `patch_item.c`.
 
 ## Function Map
 
@@ -16,7 +16,7 @@ This doc captures what we learned reverse-engineering the pipeline; the in-game 
 | 0x8019d9b4 | `Rider_TickDropPatch` | Patch sub-handler. Two paths: while `patch_drop_progress < Game3dData.patch_drop_burst_threshold`, calls `Rider_SpawnDropPatchSeq`; once the threshold is crossed, switches to a **silent** burst path (random single stat, or all-stats dump if count ≥ 9 and all 9 stats are positive). The burst path mutates stats but does **not** call `CityItem_Throw` — see "Burst path is silent" below. |
 | 0x8019ce50 | `Rider_SpawnDropPatchSeq` | Inner sequential spawner. Two branches, gated by the consolidation predicate at 0x8019d274 (`patch_drop_count >= 9 && all 9 stats > 0`): if it holds, throws a single **All Up** item (table index 9 = `ITKIND_ALLUP`), dumps all 9 stats via 0x80191294 (`delta = -1`), and drains `patch_drop_count` by 9; otherwise picks one random positive stat, looks up its ItemKind in the table at 0x804AE2C8, throws it, and drains count by 1. Both branches call `CityItem_Throw` and increment `patch_drop_progress` by 1. |
 | 0x8022fb58 | `Ply_DecrementItemCollectNum` | Drop-side accounting partner of `Ply_IncrementItemCollectNum` (0x8022fbcc). Decrements one slot of the per-itemkind collection counter array on `PlyData` and (for itemkind > 2 and a guard field) the aggregate counter. Called by both drop sub-handlers after a successful `CityItem_Throw`. |
-| 0x80253ce4 | `CityItem_Throw` | Spawns one item with a randomized throw velocity. Builds a spawn descriptor via `CityItem_InitDesc` (0x802509a0), maps the `ItemKind` via `CityItem_GetUnkKindFromItemKind` (0x8024ea54), hands the descriptor to `CityItem_Create` (0x8024eef4), then asserts the throw direction is non-zero/non-pathological (`__assert` in `itlib.c`: `"*** Item throw front dir is Zero!"` / `"*** Item throw front dir is Irregul(%f, %f, %f)!"`). Rotates the rider's `forward` (via `VEC_CrossNormalizeSnap` + `RotateVecAroundAxis`) into the item's velocity and writes the caller-supplied flag to item+0x248. The second int arg is the spawn-group tag stored on the descriptor: the patch-drop pipeline passes **3** (verified `li r4,3` before the call in both drop sub-handlers); the yakumono-break helpers (`zz_8021c8ec_`, `zz_8021db44_`, `zz_8021efd8_`) pass 4/5/6 respectively. |
+| 0x80253ce4 | `CityItem_Throw(item_kind, spawn_group, pos, throw_dir, flag, elev_angle, speed)` | Spawns one item with a randomized throw velocity. Builds a spawn descriptor via `CityItem_InitDesc` (0x802509a0), maps the `ItemKind` via `CityItem_GetUnkKindFromItemKind` (0x8024ea54), hands the descriptor to `CityItem_Create` (0x8024eef4), then asserts the throw direction is non-zero/non-pathological (`__assert` in `itlib.c`: `"*** Item throw front dir is Zero!"` / `"*** Item throw front dir is Irregul(%f, %f, %f)!"`). **Computes the launch velocity from the two `f32` args:** `Gm_GetDownVector` + `VEC_CrossNormalizeSnap(down, throw_dir)` build a horizontal axis, `RotateVecAroundAxis` pitches `throw_dir` around it by `elev_angle` (radians), and each component of the pitched direction is multiplied by `speed` and written to the item's velocity at `(item+0x2c)+0xc4/0xc8/0xcc`. Writes the caller-supplied `flag` to `(item+0x2c)+0x248`. The `spawn_group` int is a source tag: the patch-drop pipeline passes **3** from both drop sub-handlers; the yakumono-break helpers (`zz_8021c8ec_`, `zz_8021db44_`, `zz_8021efd8_`) pass 4/5/6. It rides the descriptor at desc+8 and `CityItem_InitData` copies it onto the item — see "Spawn-Source Tag" below. |
 
 Helpers still unnamed (broader use across the codebase, not just drops):
 
@@ -39,7 +39,7 @@ Helpers still unnamed (broader use across the codebase, not just drops):
 
 ## Drop Mode Semantics
 
-`drop_mode` is the third argument to `Rider_DropPatches` (matching the `rider.h` declaration). The verified behavior:
+`drop_mode` is the third argument to `Rider_DropPatches` (matching the `rider.h` declaration). The behavior:
 
 | Mode | Drop Count | All-ups | Direction |
 |------|------------|---------|-----------|
@@ -57,11 +57,11 @@ Each block is three (lo, hi) float pairs:
 
 | Field | Offset | Use in sub-handlers |
 |-------|--------|---------------------|
-| `lo_a` / `hi_a` | +0x00 / +0x04 | `lerp(lo, hi, rand)` → **second** float arg to `CityItem_Throw` (plain scalar, no further scaling) |
-| `lo_b` / `hi_b` | +0x08 / +0x0c | `lerp(lo, hi, rand)` × `deg2rad` (≈0.01745) → **first** float arg to `CityItem_Throw` (an angle supplied in degrees) |
-| `lo_c` / `hi_c` | +0x10 / +0x14 | `lerp(lo, hi, rand)` → spawn-velocity multiplier (scales the rotated, normalized throw direction) |
+| `lo_a` / `hi_a` | +0x00 / +0x04 | `lerp(lo, hi, rand)` → **second** `CityItem_Throw` f32 arg = throw **speed** (magnitude the pitched throw direction is scaled by to set the item's launch velocity). |
+| `lo_b` / `hi_b` | +0x08 / +0x0c | `lerp(lo, hi, rand)` × `deg2rad` (≈0.01745) → **first** `CityItem_Throw` f32 arg = throw **elevation angle** (radians; pitches the throw direction up/down around the horizontal axis). |
+| `lo_c` / `hi_c` | +0x10 / +0x14 | `lerp(lo, hi, rand)` → forward **spawn offset**: scales the normalized (horizontally-fanned) forward and adds it to the hand-bone position, placing the spawn origin ahead of the rider (before `patch_drop_spawn_y_bias`). |
 
-Note the cross-mapping (verified in both `Rider_TickDropAllUp` and `Rider_SpawnDropPatchSeq`): pair **A** feeds the *second* `CityItem_Throw` float arg and pair **B** the *first*. Pair B's lerp result is multiplied by a degrees-to-radians constant (`≈0.01745`) immediately before the call, so that argument is an **angle in degrees**; pair A's is passed through unscaled. Both flow into `CityItem_InitDesc` and end up on the spawn descriptor — their exact role inside the throw isn't fully traced. The third pair is unambiguously a velocity scale.
+The throw geometry, in order: `Rider_SpawnDropPatchSeq` first fans the rider's `forward` left/right by `patch_drop_throw_spread` (sign flipped on odd `patch_drop_count`) to get the throw direction. Pair **C** then scales the *normalized* fanned-forward and adds it to the hand-bone position — that's the spawn origin, not a velocity. The fanned direction is handed to `CityItem_Throw`, which pitches it up/down by pair **B** (the elevation angle, after a `deg2rad` multiply at the call site) and scales it by pair **A** (the speed) to produce the item's launch velocity. Neither f32 arg is written to the spawn descriptor.
 
 Other patch-drop tuning fields in `Game3dData` (all named in `game.h`):
 
@@ -72,7 +72,7 @@ Other patch-drop tuning fields in `Game3dData` (all named in `game.h`):
 | `patch_drop_spawn_y_bias` | 0x1c4 | Float added to spawn position Y before calling `CityItem_Throw` (lifts drops off the hand bone). |
 | `patch_drop_mode2_factor` | 0x1c8 | Float; multiplied with the sum of positive stats to size mode-2 drops. |
 | `patch_drop_mode1_factor` | 0x1cc | Same role for mode 1. |
-| `patch_drop_throw_spread` | 0x1d0 | Max throw-spread half-angle (degrees, `f32`). Read by `Rider_TickDropAllUp` and `Rider_SpawnDropPatchSeq`: multiplied by `deg2rad` (≈0.01745) and a random `[0,1)` factor, then — with the sign flipped on odd `patch_drop_count` values — used to rotate the throw direction so successive drops fan out left/right. (Previously documented as the unused `x1d0`.) |
+| `patch_drop_throw_spread` | 0x1d0 | Max throw-spread half-angle (degrees, `f32`). Read by `Rider_TickDropAllUp` and `Rider_SpawnDropPatchSeq`: multiplied by `deg2rad` (≈0.01745) and a random `[0,1)` factor, then — with the sign flipped on odd `patch_drop_count` values — used to rotate the throw direction so successive drops fan out left/right. |
 | `patch_drop_cooldown_init` | 0x21c | Frame count written into `RiderData.patch_drop_cooldown` after each successful spawn. |
 | `patch_drop_burst_threshold` | 0x220 | Once `patch_drop_progress` reaches this, the patch sub-handler switches from sequential to silent-burst. |
 | `patch_drop_allup_rng_max` | 0x224 | Mode-0 only: ceiling for the all-up RNG roll (`HSD_Randi(this) >= remaining_quota` → no all-up this drop). |
@@ -104,7 +104,7 @@ The caller — `APItems_HandleItem` in `ap_item_handler.c` — only reaches `Pat
 
 ## Burst Path Is Silent
 
-When `patch_drop_progress >= patch_drop_burst_threshold`, the patch sub-handler switches paths and **stops spawning items entirely** (no `CityItem_Throw` call). Tracing the all-stats path (`Rider_TickDropPatch` → 0x80191294) and the random-single-stat path (→ `Stats_ClampValues?` at 0x80194d80):
+When `patch_drop_progress >= patch_drop_burst_threshold`, the patch sub-handler switches paths and **stops spawning items entirely** (no `CityItem_Throw` call). In the all-stats path (`Rider_TickDropPatch` → 0x80191294) and the random-single-stat path (→ `Stats_ClampValues?` at 0x80194d80):
 
 - Both helpers only mutate `stat_array` (clamping against `Patch_GetMinValue`/`Patch_GetMaxValue`) and, for the all-stats variant, the all-up collected counter (`Ply_GetAllUpCollected`/`Ply_SetAllUpCollected`).
 - The only post-mutation calls `Rider_TickDropPatch` makes are appearance/HUD-refresh helpers — 0x80191334 (which itself calls 0x80193e78 and 0x80191374) and 0x80193718. None of them reach `CityItem_Throw`. (The 0x8019xxxx helper names are inferred from usage; they are still `zz_`-labelled in the map.)
@@ -114,7 +114,8 @@ The burst path mirrors the sequential spawner's two branches — "all 9 positive
 
 So once you cross the burst threshold, stats are deleted with no flying patch visual. This is fine for vanilla because `Rider_DropPatches` only generates large drop counts in mode 1 / mode 2 (proportional to summed stats), and the threshold is tuned so a normal-stats rider doesn't hit it. But it's worth knowing for `Patch_DropTrap`: if we ever pass a very large `patch_drop_count`, we'll silently zero out stats past the threshold rather than fountain patches.
 
-## Open Questions
+## Spawn-Source Tag
 
-- The role inside `CityItem_Throw` of its two `f32` args — the **first** sourced from `lo_b/hi_b` (a degrees angle, ×`deg2rad`), the **second** from `lo_a/hi_a` (a plain scalar). They flow through `CityItem_InitDesc` onto the spawn descriptor (offsets +0x30/+0x34 observed but unconfirmed) — the angle is plausibly an extra throw rotation and the scalar a lifetime/duration — but how they are consumed still needs confirmation.
-- The "spawn group" tag passed as `CityItem_Throw`'s second int arg (3 = rider drop, 4/5/6 = various yakumono breaks). Stored on the spawn descriptor; the consumer hasn't been traced.
+`CityItem_Throw`'s `spawn_group` argument (the second int) identifies what spawned the item: the patch-drop pipeline passes **3** from both drop sub-handlers; the yakumono-break helpers (`zz_8021c8ec_`, `zz_8021db44_`, `zz_8021efd8_`) pass **4/5/6**. `CityItem_InitDesc` stores it at desc+8 and `CityItem_InitData` (0x8024eaf4) copies it onto the item's data sub-struct at `(item+0x2c)+0x20`, where it is written once at creation and never overwritten.
+
+No gameplay logic branches on this field. Within the city-item subsystem it is read only by two ground-collision assertions — in `CityItem_LifetimeThink` (`"Item pos is ground center(%d:%d,%d)"`) and the under-ground check (`"*** Error : Why? Item under ground not found!(%d,%d:%d,%d)"`) — which print it next to the item id (`+0x1c`) and the spawn-location indices (`+0x34`/`+0x38`). So it is effectively a debug **source-attribution** tag carried on each item, not a control input.

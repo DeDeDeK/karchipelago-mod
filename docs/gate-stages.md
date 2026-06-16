@@ -47,7 +47,7 @@ The vanilla game only has one locked stage: Nebula Belt (stage 8), gated by a ch
 
 The random button is blocked when every stage is locked, which prevents a soft-lock in `AirRide_RandomStageSelect` (no candidates to pick from). Stages are granted via `GateAirRideStages_UnlockStage(stage_kind, announce)`, which sets the mask bit and — when `announce` is set — posts an `"Unlocked Course: <name>"` textbox.
 
-The four caller sites needed instruction patching to remove the `stage_kind == 8` guard. Each originally had `cmpwi rX, 8` / `bne` / `li r3, 8` which was patched to `mr r3, rX` / `nop` / `nop`:
+The four caller sites need instruction patching to remove the `stage_kind == 8` guard. Each has a vanilla `cmpwi rX, 8` / `bne` / `li r3, 8` that is patched to `mr r3, rX` / `nop` / `nop`:
 
 | # | Function | Patch Addresses | Description |
 |---|----------|-----------------|-------------|
@@ -68,7 +68,7 @@ Site 4 has a slightly different layout (`cmpwi r28, 8` / `beq` / `li r0, 1` / `b
 
 ### Design Decisions
 
-**Instruction patching over function replacement:** The caller functions are large and complex. Rather than replacing them entirely (which would require re-implementing hundreds of lines of unrelated logic), we surgically patched the 2–3 guard instructions at each call site. This is minimal, easy to verify, and doesn't risk breaking unrelated behavior in those functions.
+**Instruction patching over function replacement:** The caller functions are large and complex. Rather than replacing them entirely (which would require re-implementing hundreds of lines of unrelated logic), the gating surgically patches the 2–3 guard instructions at each call site. This is minimal and doesn't risk breaking unrelated behavior in those functions.
 
 ---
 

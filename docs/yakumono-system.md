@@ -156,12 +156,12 @@ Steps:
    - `GrYaku_AllocMiscTable` — alloc misc table (`ydata->[+0x10c]`)
    - `GrYaku_InitLighting` — sky/lighting hookup (calls `zz_800dcab8_` with stage's lights pointer)
    - `GrYaku_NoOp` — no-op stub (`blr` only)
-   - `GrYaku_AllocJObj` — JObj allocator (sets `ydata->[+0x64]` JObj root)
+   - `GrYaku_AllocJObj` — JObj allocator (sets `ydata->[+0x64]` JObj root); gated on `param+0x04` (the JObj data block)
    - `ydata->[+0x70] = 0` — zero a status field
    - `GrYaku_InitMatrix` — JObj matrix setup
-   - `GrYaku_AttachModel` — model attach (uses `grdata->lights` for lighting)
-   - `GrYaku_InitAudio` — audio source/track alloc (from stage's `pos_data` block)
-   - `GrYaku_AttachAnim` — anim attach (from stage's `motion` block)
+   - `GrYaku_AttachModel` — model attach (uses `grdata->lights` for lighting); gated on `param+0x0c` (the model data block)
+   - `GrYaku_InitAudio` — fgm/audio init; gated on `param+0x14` (the audio descriptor); fills `ydata->[+0x118..0x124]`
+   - `GrYaku_AttachAnim` — anim attach; re-reads `param+0x04` (no separate field) and gates on `jobj_data[0][+0x10]`
    - `GrYaku_InitHurtData` — HurtData create + region init (`HurtData_Create(gobj, 6, 2, regionCount, 0)` → `ydata->[+0xec]`)
 7. **Add 7 procs** (see proc table below).
 8. `GrYaku_FinalSetup` — final touches (zero a flag bit, init bbox at `+0xe0..+0xe8`).
@@ -184,7 +184,7 @@ Key writes:
 - Initializes orientation vectors at `+0x88` (right) and `+0x94` (up) from constant `(0,0,1)`
 - Zeros all 7 per-type proc slots (+0xf0..+0x108)
 - `ydata->[+0x74] = -1` (state)
-- Looks up `stc_yaku_descs[desc_id]` (with `desc_id < 70` and non-NULL guard) and stores `desc->[+0x0]` into `ydata->[+0x84]` — this is the kind descriptor pointer used by per-frame helpers.
+- Looks up `stc_yaku_descs[desc_id]` (with `desc_id < 70` and non-NULL guard) and stores `desc->[+0x0]` (the descriptor's "back-pointer") into `ydata->[+0x84]` — this is the per-kind **state-table base**, indexed by state in `Gr_StateChange` (entry = base + state·16). See "How `yd->state_table` (+0x84) is used" below.
 
 ## YakumonoData layout
 
@@ -204,7 +204,7 @@ YakumonoData is the single user-data slot stored at `gobj->user_data[0]` (offset
 | 0x78 | `int` | Previous anim id (?) |
 | 0x7c | `int` | Previous joint id (?) |
 | 0x80 | `int` | Anim flags (?) |
-| 0x84 | `void *` | Active kind descriptor pointer (`desc->[+0x0]`) |
+| 0x84 | `void *` | **State-table base** — `desc->[+0x0]` (the descriptor "back-pointer"). Array of 16-byte state entries; `Gr_StateChange` reads `base + state·16` and installs the state's handler into `proc1` (+0xF0). All-zero for passive kinds (zones); real handlers for active kinds (cannon: state0=`GrYakuCannon_State0`, state1=`GrYakuCannon_State1`) |
 | 0x88 | `Vec3` | Right/forward axis (init `(0,0,1)`) |
 | 0x94 | `Vec3` | Up axis (init `(0,0,1)`) |
 | 0xA0 | `int` | (set 0 in InitData) |
@@ -214,7 +214,7 @@ YakumonoData is the single user-data slot stored at `gobj->user_data[0]` (offset
 | 0xB4 | `int` | (init `0`) |
 | 0xB8 | `int` | (init `0`) |
 | 0xE0 | `Vec3` | BBox / center (init from constants in `GrYaku_FinalSetup`) |
-| 0xEC | `HurtData *` | **HurtData pointer** — read by `GrYaku_GetHurtData` (`0x800f8248`); same offset as `EnemyData.xec`. The map/Ghidra symbol at this address is now correctly `GrYaku_GetHurtData` (a prior `Enemy_GetHitColl` label was a misnomer — it reads `YakumonoData+0xEC`, not `EnemyData`). See `hurtdata-system.md`, which still carries the old `Enemy_GetHitColl` note. |
+| 0xEC | `HurtData *` | **HurtData pointer** — read by `GrYaku_GetHurtData` (`0x800f8248`); same offset as `EnemyData.xec`. |
 | 0xF0 | `void(*)(GOBJ*)` | **proc1** callback — called from `GrYakumono_Think` (priority 1) |
 | 0xF4 | `void(*)(GOBJ*)` | **proc2** callback — called from priority-4 proc |
 | 0xF8 | `void(*)(GOBJ*)` | **proc3** callback — called from priority-5 proc |
@@ -225,10 +225,10 @@ YakumonoData is the single user-data slot stored at `gobj->user_data[0]` (offset
 | 0x10C | `int` | Misc table (alloc'd by `GrYaku_AllocMiscTable`) |
 | 0x110 | `int` | (zeroed in init) |
 | 0x114 | `int` | (zeroed in init) |
-| 0x118 | `int` | Audio anim event handle |
-| 0x11C | `int` | Audio loop count |
-| 0x120 | `AudioTrack` | Allocated audio track |
-| 0x124 | `AudioSource` | Allocated audio source |
+| 0x118 | `void *` | **`gyp->fgm.idData`** — FGM (field SFX/effect-id) data ptr. Filled by `GrYaku_InitAudio` from the param+0x14 audio descriptor `[+0x00]` |
+| 0x11C | `int` | **`gyp->fgm.idDataNum`** — FGM id count (audio descriptor `[+0x04]`). The break families' `0 <= fgmId && fgmId < gyp->fgm.idDataNum` assert reads this offset |
+| 0x120 | `AudioTrack` | Allocated audio track (`Map_AllocAudioTrack`, from audio descriptor `[+0x08]`) |
+| 0x124 | `AudioEmitter` | Allocated audio emitter (`Map_AllocAudioEmitter(1)`) |
 | 0x12C | `byte` | Flag byte (bits 3, 4, 6, 7 cleared on init) |
 | 0x130 | `int` | (used by post-init helpers, e.g. `zz_800fe60c_`) |
 | 0x134 | `int` | (used by post-init helpers) |
@@ -431,22 +431,34 @@ The "back-pointer" appears to be a HSD-class artifact, not load-bearing for the 
 
 ### Indices 16..69 — per-instance descriptors
 
-These are referenced by the per-grkind hook path (e.g. `grDataCity1_CreateYakumono`). They have a **different layout** with the function pointer at **+0x08** instead of +0x1c, and they embed source-file/assertion strings starting at +0x1c:
+These are referenced by the per-grkind hook path (e.g. `grDataCity1_CreateYakumono`). They have a **different, variable layout** from the paired descriptors and embed the kind's source filename + assertion strings (which is how each one is identified):
 
 | Offset | Type | Value |
 |---:|---|---|
-| +0x00 | `void *` | back-pointer (vestigial, as above) |
+| +0x00 | `void *` | **state-table back-pointer** — points to the per-kind state table just before this block (see "How `yd->state_table` (+0x84) is used") |
 | +0x04 | — | zero |
-| +0x08 | `void(*)(...)` | per-kind init/check function pointer |
-| +0x0c..0x18 | — | zeros |
-| +0x1c | `char[]` | source filename (e.g. `"gryakudownforcezone.c"`, null-terminated) |
-| (after) | `char[]` | assertion expression (e.g. `"gyp->kind == Gr_YakuKind_DownForceZone"`) |
+| +0x08 | `void(*)(...)` | per-kind init/check fn ptr (present for some kinds — e.g. DownForceZone `0x800f9ed0` — but **zero for the cannon**, whose handlers live in its state table) |
+| +0x0c..0x10 | — | zeros |
+| +0x14 | `char[]` | source filename (e.g. `"gryakudownforcezone.c"`), followed by the assertion expression (`"gyp->kind == Gr_YakuKind_DownForceZone"`) |
 
-Block size varies: the strings determine the size (40 to ~136 bytes per block). `grDataCity1_CreateYakumono` and the other named per-instance creators hardcode the `desc_id` literal that maps to one of these blocks.
+Block size varies with the strings (40 to ~136 bytes). Some kinds (the cannon) also embed a trailing 4-entry function-pointer table after the strings. `grDataCity1_CreateYakumono` and the other named per-instance creators hardcode the `desc_id` literal that maps to one of these blocks.
 
-### How `yd->desc_subblock` (+0x84) is used
+**Kind identification.** Every per-instance descriptor names its YakuKind in an embedded source-file string. In address order the kinds run: DownForceZone, CatchZone, RecoveryZone, RotJumpHill, InvisibleBall, RisingCube(Ctrl), Gondola, Cannon, PushOutWall(Ctrl), LightTunnel, Pillar(Ctrl), BreakRock, BreakHouse, AnimFloor, BreakCoral, BreakIcicle (+ BreakCommon helper), LaserGate(Ctrl), BreakFloor, BreakFan, BreakColl, BreakHpColl, WhispyWoods. Anchored `desc_id` values (descriptor string maps cleanly to one block, matching a known creator):
 
-`GrYaku_InitData` stores `*(stc_yaku_descs[desc_id])` — i.e. the back-pointer field — into `yd[+0x84]`. For paired descriptors this lands on a zero pad; for per-instance descriptors it lands on a kind-specific data block 16 bytes before the descriptor proper. Per-frame helpers reading `yd[+0x84]` therefore see different "context" depending on path. The full schema for what those preceding regions encode is still opaque — they are mostly zeros at rest and presumably populated by the per-kind init.
+| desc_id | YakuKind | Source file |
+|---:|---|---|
+| 16 | DownForceZone | `gryakudownforcezone.c` |
+| 17 | CatchZone | `gryakucatchzone.c` |
+| 20 | RecoveryZone | `gryakurecoveryzone.c` |
+| 48 | Cannon | `gryakucannon.c` |
+| 68 | Lighthouse | (own creator, `Lighthouse_Create`) |
+| 69 | WhispyWoods | `gryakuwhispywoods.c` |
+
+The remaining desc_ids interleave small helper/variant sub-descriptors between the primary kind blocks; each maps to a kind through its creator's hardcoded `desc_id` literal.
+
+### How `yd->state_table` (+0x84) is used
+
+`GrYaku_InitData` stores `*(stc_yaku_descs[desc_id])` — the descriptor's +0x00 "back-pointer" — into `yd[+0x84]`. It is the base of the kind's **state table** (16-byte entries), which sits in memory immediately before the descriptor block. `Gr_StateChange` indexes it as `base + state·16` and installs the active state's handler into `proc1` (+0xF0). For passive kinds (zones) the table is all-zero (a single null state); for active kinds it holds real handlers — e.g. the cannon's table at `0x804a6430` is `{state0 → GrYakuCannon_State0 (0x800fee40), state1 → GrYakuCannon_State1 (0x800ff010), …}`. The back-pointer's distance from the descriptor varies with the table size (0x10 for zones, 0x20 for the cannon).
 
 ## Generic dispatch table (16 entries at `0x804a5ba8`)
 
@@ -475,7 +487,9 @@ The table is organized as **8 pairs**, one pair per generic kind. Each pair shar
 
 **Tail-init structure.** Pairs 0..3 use `zz_800d79c0_` to allocate kind-specific collision data. Pairs 4..5 use `zz_800d7a40_` (same role + extra param `10`). Pairs 6..7 skip the alloc and just transition state — these are the lightweight kinds (likely zones / non-collidable hazards). All eight pairs end with a `Gr_StateChange` whose initial-state floats are read from r2-relative SDA2 at `0x805df868..0x805df8a4` (one pair of floats per base kind, 8 bytes apart).
 
-The generic `entries[].kind` value is therefore in 0..15 with bit 0 acting as the "ctrl" flag and bits 1..3 selecting the base kind. **This is a separate enum from `YakuKind`** — `YakuKind` covers all per-kind handlers (rising-cube, lasergate, pillar, …, the BREAK family, the HP-coll family, lighthouse, whispywoods), while the 0..15 generic-dispatch enum is just the eight base behaviors that the framework's stock walker can spawn from `Yakumono.dat`. The mapping from base-kind 0..7 to the YakuKind names of the four documented "with-Ctrl" pairs (RisingCube, PushOutWall, LaserGate, Pillar) is not yet pinned down by static data — the four extra base kinds presumably correspond to other paired or zone-style kinds.
+The generic `entries[].kind` value is therefore in 0..15 with bit 0 acting as the "ctrl" flag and bits 1..3 selecting the base kind. **This is a separate enum from `YakuKind`** — `YakuKind` covers all per-kind handlers (rising-cube, lasergate, pillar, …, the BREAK family, the HP-coll family, lighthouse, whispywoods), while the 0..15 generic-dispatch enum is just the eight base behaviors that the framework's stock walker can spawn from `Yakumono.dat`.
+
+**The generic path is kind-agnostic in code.** None of the eight `GrYaku_BaseKindN_TailInit` or the five non-null `GrYaku_BaseKindN_DescFunc` reference a source-file or `Gr_YakuKind_*` — the wrappers/tail-inits bake in no specific YakuKind. The base kinds differ only structurally: collision-allocator variant (kinds 0–3 → `zz_800d79c0_`; kinds 4–5 → `zz_800d7a40_` with extra param `10`; kinds 6–7 → no collision, lightweight), `DescFunc` form (kinds 0–2 share the flag-aware 3-step form, kinds 3–4 a 2-step form, kinds 5–7 have no `DescFunc`), and the per-kind `Gr_StateChange` floats. Everything else — model, joint, collision shape, and thus the concrete kind — comes from the `Yakumono.dat` entry data at runtime. So the base-kind→YakuKind table is **not derivable from static code**; it requires reading `Yakumono.dat` live (Dolphin). The four Ctrl-paired YakuKinds the open question references (RisingCube, PushOutWall, Pillar, LaserGate) are spawned through the *per-instance* descriptor path (range 16..69, with real handlers), not necessarily the generic walker; the lightweight generic kinds 6–7 (no collision, `Gr_StateChange`-only) line up with the non-collidable zone kinds (DownForceZone/CatchZone/RecoveryZone).
 
 ## Per-grkind hook table (`PTR_PTR_804a322c`)
 
@@ -519,21 +533,21 @@ GroundKinds **28..33** (`GRKIND_SINGLERACE5..9`, `GRKIND_VSKINGDEDEDE`) are **no
 
 ## `gyp->fgm` substruct
 
-Source-level field name confirmed by two assertion strings in the binary:
+`YakumonoData` includes a substruct `fgm` containing `int idDataNum` (count of FGM ids) plus an array of FGM ids. Two assertion strings name the field — `0x804a6fc4` and `0x804a7130`, both `"0 <= fgmId && fgmId < gyp->fgm.idDataNum"` (referenced from `gryakubreakcoll.c` and `gryakubreakhpcoll.c`). The substruct is only consumed by the BREAK and BREAK-HP-COLL families — other yakumono kinds never read `gyp->fgm`.
 
-- `0x804a6fc4`: `"0 <= fgmId && fgmId < gyp->fgm.idDataNum"` (referenced from `gryakubreakcoll.c`)
-- `0x804a7130`: `"0 <= fgmId && fgmId < gyp->fgm.idDataNum"` (referenced from `gryakubreakhpcoll.c`)
+**`fgm.idDataNum` is at +0x11c, and the `fgm` substruct overlays the +0x118 audio block** — the same region `GrYaku_InitAudio` fills from the `param+0x14` audio descriptor (fitting, since "FGM" in this engine is the field SFX/effect-id manager). The substruct reads:
 
-So `YakumonoData` includes a substruct `fgm` containing at least `int idDataNum` (count of FGM ids) plus an array of FGM ids. The substruct is only consumed by the BREAK and BREAK-HP-COLL families — other yakumono kinds never read `gyp->fgm`.
+| Offset | `gyp->fgm` field |
+|---:|---|
+| +0x118 | `fgm.idData` — ptr to the FGM id-data (deref'd as `{ptr @0, byte @4}`) |
+| +0x11c | `fgm.idDataNum` — id count |
+| +0x120 | (audio track — `Map_AllocAudioTrack`) |
+| +0x124 | (audio emitter — `Map_AllocAudioEmitter`) |
 
-The actual offset is **not directly visible** in the optimized binary because the bounds check has been dead-code-eliminated under `-O1` (the call to `__assert(..., "0 <= fgmId && fgmId < gyp->fgm.idDataNum")` is unreachable: the surrounding `cmpwi/ble/bgt` triplet always branches around it). What *is* visible from `hitWeakObject` (`0x80107914`, the relevant tail-access code sits around `+0x128`/`0x80107a3c`) and `zz_801080ec_` is the contiguous tail of YakumonoData used by the break families:
+The full break-family tail (transient region handles, allocated from the FGM data) continues past it:
 
 | Offset | Used as |
 |---:|---|
-| +0x118 | audio anim event handle (existing) |
-| +0x11c | audio loop count (existing) |
-| +0x120 | audio track (existing) |
-| +0x124 | audio source (existing) |
 | +0x130 | pointer to per-region audio handle array (one per HitColl region) |
 | +0x134 | pointer to per-region damage/HP state array (BREAK-coll), or counter (BREAK-hp-coll) |
 | +0x138, +0x13c | transient model+gobj handles for the current region (overwritten per iteration) |
@@ -542,13 +556,13 @@ The actual offset is **not directly visible** in the optimized binary because th
 | +0x150 | pointer to per-region 4-byte audio source allocations (BREAK-coll) |
 | +0x160 | same idea for BREAK-hp-coll |
 
-So `YakumonoData` extends to **at least +0x18c**: independently of the break families, `GrYakuCannon_TailInit` (`0x800fed48`) zeros a contiguous run of ydata words from `+0x130` through `+0x188` (the cannon's `userInfo[]`/local-context slots), so the struct cannot end before `+0x18c`. (The `+0x164` figure derived from the break-family reads is a smaller lower bound; the earlier header estimate of `sizeof = 0x13c` is well short.) The `fgm` substruct most likely lives in the +0x118..+0x14c region (mixed with the audio fields, since "FGM" in this engine means SFX). The exact `idDataNum` offset and the ID-array layout are still not pinned, but the substruct boundaries are now bracketed.
+So `YakumonoData` extends to **at least +0x18c**: independently of the break families, `GrYakuCannon_TailInit` (`0x800fed48`) zeros a contiguous run of ydata words from `+0x130` through `+0x188` (the cannon's `userInfo[]`/local-context slots), so the struct cannot end before `+0x18c`. The `fgm` substruct begins at `+0x118` (= the audio block) with `idDataNum` at `+0x11c`; the trailing `+0x130..+0x160` slots above hold the per-region transient handles the break families allocate from it.
 
 ## Spawning yakumono in stages they don't normally appear in
 
-> **Status: dormant RE scaffolding.** The cannon investigation below lives in `mods/custom_events/src/cannon_event.c`. It is **not** a registered custom event (it does not appear in the `CustomEventsAPI` event tables) and is gated off by default (`CANNON_LOAD_ENABLED = 0`; the spawn path runs only when `CANNON_SPAWN_ENABLED` is built in). Per CLAUDE.md, future cannon RE findings belong in this doc. The findings here are correct as recorded but no production code path spawns a cannon in City Trial.
+> **Status: dormant RE scaffolding.** The cannon code below lives in `mods/custom_events/src/cannon_event.c`. It is **not** a registered custom event (it does not appear in the `CustomEventsAPI` event tables) and is gated off by default (`CANNON_LOAD_ENABLED = 0`; the spawn path runs only when `CANNON_SPAWN_ENABLED` is built in). No production code path spawns a cannon in City Trial.
 
-Empirically confirmed (RE scaffolding in `mods/custom_events/src/cannon_event.c`, build-gated by `CANNON_SPAWN_ENABLED`; dormant by default — see status note above): you can call `GrYaku_Create(48, data_idx)` + `GrYakuCannon_TailInit(gobj)` from `On3DLoadEnd` in City Trial — well after `grInitYakumono` has finished — and the framework runs without asserting, even though City Trial's per-grkind hook never spawns a cannon. The yakumono counter (`(*stc_grobj)[+0x6fc]`) increments by 1 per call, so the GObj is fully wired and registered.
+Calling `GrYaku_Create(48, data_idx)` + `GrYakuCannon_TailInit(gobj)` from `On3DLoadEnd` in City Trial — well after `grInitYakumono` has finished — runs without asserting, even though City Trial's per-grkind hook never spawns a cannon. The yakumono counter (`(*stc_grobj)[+0x6fc]`) increments by 1 per call, so the GObj is fully wired and registered.
 
 But "runs without asserting" is not the same as "fully spawned." The Create init pipeline silently skips graphical setup when the param block doesn't supply the data those steps need. With a zeroed param block, the post-spawn ydata looks like this:
 
@@ -560,12 +574,12 @@ But "runs without asserting" is not the same as "fully spawned." The Create init
 | `+0x040..+0x06f` matrix | **all zero** (InitMatrix bailed) |
 | `+0x064` JObj root | **NULL** (AllocJObj bailed) |
 | `+0x074` state | 0 (tail-init's `Gr_StateChange` ran) |
-| `+0x084` desc_subblock | populated (descriptor back-pointer target) |
+| `+0x084` state_table | populated (descriptor back-pointer target — the per-kind state table) |
 | `+0x088..+0x09c` axis vectors | populated (1.0 entries) |
 | `+0x0a4` scale | 1.0 |
 | `+0x0e8..` bbox | populated (FinalSetup ran) |
 | `+0x0ec` hurt_data | **populated** (HurtData_Create ran) |
-| `+0x0f0` proc1 | `0x800fee40` (auto-installed from descriptor subblock) |
+| `+0x0f0` proc1 | `0x800fee40` (auto-installed from the per-kind state table) |
 | `+0x0f4..+0x108` proc2..proc5, on/off_damage | NULL (cannon doesn't use them) |
 | audio_track / audio_source | NULL (no per-stage audio events) |
 
@@ -577,14 +591,16 @@ Two helpers in the init pipeline branch on fields inside the `YakumonoParam` blo
 
 | Helper | Address | Gate | If non-zero | If zero |
 |---|---|---|---|---|
-| `GrYaku_AllocJObj` | `0x800f7308` | `data_ptr->[+0x04]` | full alloc with model joint data → writes JObj to `ydata+0x64` | empty no-op alloc, leaves `+0x64` as 0 |
+| `GrYaku_AllocJObj` | `0x800f7308` | `data_ptr->[+0x04]` | full alloc with model joint data (reads `jobj_data[0]` words `[0]/[4]/[8]/[0xc]`) → writes JObj to `ydata+0x64` | empty no-op alloc, leaves `+0x64` as 0 |
 | `GrYaku_AttachModel` | `0x800f6274` | `data_ptr->[+0x0c]` | reads `grobj+0x54` / `grobj+0x0c` (lights & motion), attaches model to `ydata+0x64` | falls into the no-model branch, only sets default position bytes at `ydata+0x1c` |
+| `GrYaku_AttachAnim` | `0x800f6394` | `data_ptr->[+0x04]` **then** `jobj_data[0][+0x10]` | attaches anim to `ydata+0x64` (`zz_800e5b20_`). **No separate param field** — anim data is bundled under the same JObj-data block the JObj alloc uses | no-anim init (`zz_800e5b0c_`) |
+| `GrYaku_InitAudio` | `0x800f77dc` | `data_ptr->[+0x14]` | reads the audio descriptor `{idData @0x00, idDataNum @0x04, track_param @0x08}` → fills `ydata+0x118` (`fgm.idData`), `+0x11c` (`fgm.idDataNum`), `+0x120` (`Map_AllocAudioTrack`), `+0x124` (`Map_AllocAudioEmitter(1)`) | leaves the fgm/audio block zero |
 
-These gates are real, but they describe **whether the yakumono framework allocates its own attached JObj/model**, not whether the yakumono ends up visible. Many yakumono kinds — including the cannon — leave both gates zero and get their visible mesh from elsewhere. Always check the actual vanilla param block at runtime before assuming a kind needs framework-managed assets.
+These gates are real, but the JObj/model ones describe **whether the yakumono framework allocates its own attached JObj/model**, not whether the yakumono ends up visible. Many yakumono kinds — including the cannon — leave both gates zero and get their visible mesh from elsewhere. Always check the actual vanilla param block at runtime before assuming a kind needs framework-managed assets.
 
 ### Cannon: visible model lives in the stage's static scene graph
 
-Confirmed by dumping vanilla Machine Passage's `data_array[1]` and the resulting ydata of both a vanilla cannon GObj and a duplicate spawn (RE scaffolding in `mods/custom_events/src/cannon_event.c`):
+Vanilla Machine Passage's `data_array[1]` and the ydata of a vanilla cannon GObj:
 
 - Vanilla cannon param `+0x04` = 0, `+0x0c` = 0. Both framework gates are intentionally NULL.
 - Vanilla cannon ydata `+0x040..+0x06f` (matrix) = all zero. `+0x064` (JObj root) = NULL. Same as a zeroed-param ghost spawn.
@@ -610,7 +626,7 @@ The cannon's param block (sized at least `+0x80`) decodes as:
 +0x78  physics block 5  ┘
 ```
 
-Each `trigger_desc` (0x20 bytes) holds `[self-back-ptr, 1, 0, 1, angle_float, 0, packed_joint_ref, 0]` where `packed_joint_ref = 0x000f00XX` with `XX` = stage-joint index for that barrel (observed: 5, 6, 8). Each `physics block` (0x20 bytes) holds `[count, kind, force, factor, scale, angle, factor, value]` — eject parameters per barrel.
+Each `trigger_desc` (0x20 bytes) holds `[self-back-ptr, 1, 0, 1, angle_float, 0, packed_joint_ref, 0]` where `packed_joint_ref = 0x000f00XX` with `XX` = stage-joint index for that barrel (5, 6, 8 in Machine Passage). Each `physics block` (0x20 bytes) holds `[count, kind, force, factor, scale, angle, factor, value]` — eject parameters per barrel.
 
 The trigger_desc's joint reference is what binds the yakumono to the static stage geometry: the cannon framework reads joint positions from the live scene graph and overlays HitColl regions / launch impulse there. There is no separate "cannon model" asset to load — only the stage joints have to exist.
 
@@ -628,7 +644,7 @@ The framework plumbing is stage-agnostic — `GrYaku_Create(48, idx)` + `GrYakuC
 |---|---|---|---|
 | Yakumono framework (Create, procs, state machine) | No | works | — already works |
 | HurtData / collision regions | No | works | — already works |
-| `proc1` callback (cannon's state machine) | No | works (auto-installed from descriptor) | — already works |
+| `proc1` callback (cannon's state machine) | No | works (installed by `Gr_StateChange` from the per-kind state table at `state_table`/+0x84) | — already works |
 | Audio emitter (`AudioEmitter_UpdatePosition`) | Indirectly (via stage audio source) | works in MP, bare in CT | works in CT too once stage audio source is allocated |
 | **Visible model (mesh + barrels)** | **Yes — lives in `GrMachine2Model.dat`** | **absent in CT** | **load+splice or author custom mesh** |
 | **Anchor joints (referenced by `0x000f00XX`)** | **Yes — joints in stage scene graph** | **absent in CT** | **must exist for yakumono to position barrels correctly** |
@@ -636,16 +652,13 @@ The framework plumbing is stage-agnostic — `GrYaku_Create(48, idx)` + `GrYakuC
 
 ## Open questions (remaining)
 
-- **Mapping the eight generic base kinds to YakuKind names**. We know there are 8 base kinds × 2 (ctrl) variants = 16 generic dispatch entries. RisingCube/PushOutWall/LaserGate/Pillar account for four of the paired YakuKinds — the other four base kinds need to be matched up, likely by tracing `Yakumono.dat`'s actual kind contents at runtime or by walking each tail-init's anim/state IDs.
-- **`gyp->fgm` exact field offsets**. Bracketed to +0x118..+0x14c by the BREAK-family use; still need to confirm whether `fgm.idDataNum` lives at one of the existing audio offsets (treated as a substruct view onto +0x118..) or at a distinct field.
-- **What lives in the back-pointer's preceding 16-byte slot** for the per-instance descriptors (16..69). At rest these are zeros; runtime population (if any) by the per-kind init code is unverified.
-- **Cannon `YakumonoParam` full layout**. RE'd to ~`+0x80`: a metadata-block ptr at `+0x00`, framework gates at `+0x04`/`+0x0c` (both intentionally zero — see "Cannon: visible model lives in the stage's static scene graph"), and five repeating `(trigger_desc, physics_block)` pairs at 0x18 stride covering five barrels. Each trigger_desc encodes a stage joint index in a `0x000f00XX` packed value, each physics block holds eject force/angle/scale params. Cannon-specific fields beyond `+0x80` not yet inspected.
-- **Anim-attach and audio gating fields**. `GrYaku_AttachAnim` and `GrYaku_InitAudio` follow the same "param-gate or skip" pattern as JObj/Model but the exact param offsets they read are not yet identified. Likely in the `+0x10..+0x20` region of `YakumonoParam`.
-- **Cross-stage asset injection mechanism**. The yakumono framework is stage-agnostic; the visible model is stage geometry. Bringing the cannon's mesh into CT requires loading `GrMachine2Model.dat` and either splicing its cannon JObj subtree into CT's main scene graph, rendering it as a parallel scene graph, or authoring a substitute cannon mesh from scratch.
+- **Exact base-kind→YakuKind table for the generic dispatch path.** As established under "Generic dispatch table", the eight generic base kinds are kind-agnostic in code — the concrete YakuKind each `entries[].kind` produces is carried by the `Yakumono.dat` entry data, not by any wrapper/tail-init. Building the table therefore requires reading `Yakumono.dat` at runtime (live Dolphin) and observing which kind each generic entry resolves to; it cannot be recovered from the static binary. (The per-instance descriptor path, by contrast, names every kind in an embedded string — see "Kind identification" above.)
+- **Cannon `YakumonoParam` fields beyond `+0x80`.** Decoded through ~`+0x80`: a metadata-block ptr at `+0x00`, framework gates at `+0x04`/`+0x0c` (both intentionally zero — see "Cannon: visible model lives in the stage's static scene graph"), and five repeating `(trigger_desc, physics_block)` pairs at 0x18 stride covering five barrels. Each trigger_desc encodes a stage joint index in a `0x000f00XX` packed value, each physics block holds eject force/angle/scale params. The slots past `+0x80` need the live runtime param block (the per-stage `data_array` is populated only while a stage is loaded), so resolving them requires Dolphin with Machine Passage loaded.
+- **Cross-stage asset injection mechanism.** The yakumono framework is stage-agnostic; the visible model is stage geometry. Bringing the cannon's mesh into CT requires loading `GrMachine2Model.dat` and either splicing its cannon JObj subtree into CT's main scene graph, rendering it as a parallel scene graph, or authoring a substitute cannon mesh from scratch. This is an implementation task, not an RE gap; the findings below scope it.
 
-  **Heap-budget finding.** A naive `Archive_LoadFile("GrMachine2.dat")` + `Archive_LoadFile("GrMachine2Model.dat")` from CT's `On3DLoadEnd` succeeds — both archives load and `Archive_GetPublicAddress` resolves `grDataMachine2` (in stage.dat) and `grModelMachine2` / `grModelMotionMachine2` (in model.dat). **But there's no headroom left.** Stage.dat is ~207KB and Model.dat is ~1.6MB; after the loads heap 1 has ~30 bytes free. Any subsequent allocation (e.g. `JObj_LoadSet_SetPri` on `grmodel[0]` needs ~1KB) trips `assertion "addr" failed in initialize.c on line 397`. So loading the full Model archive in CT is non-viable.
+  **Heap-budget constraint.** Loading both full archives in CT — `Archive_LoadFile("GrMachine2.dat")` + `Archive_LoadFile("GrMachine2Model.dat")` from `On3DLoadEnd` — does load (and `Archive_GetPublicAddress` resolves `grDataMachine2` in stage.dat plus `grModelMachine2` / `grModelMotionMachine2` in model.dat), but leaves no headroom. Stage.dat is ~207KB and Model.dat is ~1.6MB; after the loads heap 1 has ~30 bytes free, so any subsequent allocation (e.g. `JObj_LoadSet_SetPri` on `grmodel[0]` needs ~1KB) trips `assertion "addr" failed in initialize.c on line 397`. The full Model archive is therefore too large to load in CT.
 
-  **Archive layout discovered.** `GrMachine2Model.dat` exposes 2 public symbols: `grModelMachine2` (the scene-models entry) and `grModelMotionMachine2` (the motion-anim entry). `GrMachine2.dat` exposes `grDataMachine2` plus 1 unresolved extern: `GrdMachine2_CannonSAN1_ACTION_Cannon1_animjoint` — the cannon's animated joint, which `Archive_LoadFile` does not auto-resolve against globally-loaded archives (so `*slot=0` even after model.dat is loaded; `grLoadStageArchive` does the post-parse extern resolution by walking `0x8041e434`/`0x8041e46c`).
+  **Archive layout.** `GrMachine2Model.dat` exposes 2 public symbols: `grModelMachine2` (the scene-models entry) and `grModelMotionMachine2` (the motion-anim entry). `GrMachine2.dat` exposes `grDataMachine2` plus 1 unresolved extern: `GrdMachine2_CannonSAN1_ACTION_Cannon1_animjoint` — the cannon's animated joint, which `Archive_LoadFile` does not auto-resolve against globally-loaded archives (so `*slot=0` even after model.dat is loaded; `grLoadStageArchive` does the post-parse extern resolution by walking `0x8041e434`/`0x8041e46c`).
 
   **`grModelMachine2` shape** (read at `*(JOBJSet **)grmodel`): an array of 3 JOBJSet pointers (terminated by NULL at index 3) plus extra fields at +0x10..+0x14 (anim_joint, matanim_joint pointers shared with `grModelMotionMachine2`). Each JOBJSet has the layout `(JObjDesc *jobj, int n_joints, int n_dobjs, int n_mobjs)` — NOT the typedef in `obj.h` (which has 4 pointers). The other fields are counts, not pointers, so `JObj_LoadSet_SetPri` must be called with `is_add_anim=0` to avoid dereferencing them. `grmodel[0]` = main 122-joint stage tree; `grmodel[1]` = smaller tree (likely cannon-bearing — root JObj has flags 0x10040008 with a DObj at +0x10); `grmodel[2]` = lights/cameras region.
 

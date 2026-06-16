@@ -24,8 +24,7 @@ values consumed elsewhere) for it to affect rendering. Both objects coexist
 during gameplay.
 
 There is **no `LOBJ` creation in `Sky_SetupLights`** — that function only
-toggles JOBJ render-node visibility flags on a per-stage helper table. Earlier
-versions of this doc said otherwise; that was wrong.
+toggles JOBJ render-node visibility flags on a per-stage helper table.
 
 The fog GObj (`grobj+0x168`) is a separate HSD object with its own GX
 callback (`Fog_GX`). The lbfade screen-tint overlay is a fourth subsystem.
@@ -153,8 +152,8 @@ Allocated as part of the fog/sky GObj. Accessed via `grobj->gobj + 0x168 -> +0x2
 +0x0C  float  start_fog_start
 +0x10  float  start_fog_end
 +0x14  RGBA   start_sky_color
-+0x18  RGBA   current_output_sky_color   - written every frame; consumer not
-                                           identified by static disasm
++0x18  RGBA   current_output_sky_color   - written every frame; no identified
+                                           per-frame consumer
 +0x1C  int    current_preset_index
 +0x20  AreaLightData (0x2C bytes)        - start values for AreaLight_Lerp
 ```
@@ -243,7 +242,7 @@ next pass; the EFB clear color is a separate path (see below).
 
 ## Vanilla CT Preset Reference
 
-The 17 presets shipped in `GrCity1.dat`, dumped from the live preset array
+The 17 presets shipped in `GrCity1.dat`, in the live preset array
 (`(*stc_grobj)->gr_data + 0x34 -> [4] -> [0]`). Useful as a tuning reference
 when authoring new custom presets — each row's columns map 1-to-1 to the
 `SkyPresetEntry` fields documented above.
@@ -331,7 +330,7 @@ Early-out when target preset is NULL or `transition_frames == 0`. Otherwise:
 | 4 | 800dc71c | `*(u32*)0x80557484` ← lerped RGBA | global EFB clear color, consumed by `World_CObj` next clear |
 | 5 | 800dc734 | `HSD_Fog.start` (+0x10) ← lerped float | fog near plane |
 | 6 | 800dc750 | `HSD_Fog.end` (+0x14) ← lerped float | fog far plane |
-| 7 | 800dc764 | `sky_state+0x18` ← `GXColor_Lerp(state+0x14, preset+0x14)` | `current_output_sky_color`. Writer-only — no per-frame consumer found via static disasm. |
+| 7 | 800dc764 | `sky_state+0x18` ← `GXColor_Lerp(state+0x14, preset+0x14)` | `current_output_sky_color`. Writer-only — no identified per-frame consumer. |
 | 8 | 800dc778 | `AreaLight_LerpToLive(grobj, sky_state+0x20, preset+0x18, ratio)` → `AreaLight_Lerp(0x800797a8)` | Writes light color, hw_color, direction, intensity (if flags bit 2) into the live AreaLight at `grobj+0x718`. |
 
 ## Fog Rendering Pipeline
@@ -379,7 +378,7 @@ color. `Sky_Update` writes both.
 
 ## Sky_SetupLights — what it really does
 
-Disassembled at 0x800db774, total size 0x5C bytes:
+At 0x800db774, total size 0x5C bytes:
 
 ```
 slwi   r0, r4, 3            ; r0 = jobj_index * 8
@@ -421,8 +420,8 @@ foreach obj in registry:
         obj[+0x38] = (obj[+0x38] & ~0x80) | (vis_flag_bit0 << 7)
 ```
 
-Decoded `rlwimi r0,r4,7,24,24`: bit 0 of `vis_flag` is replicated into bit
-0x80 of byte +0x38 of every AreaLight in the registry. The same +0x38 bit is
+Bit 0 of `vis_flag` is replicated into bit 0x80 of byte +0x38 of every
+AreaLight in the registry (`rlwimi r0,r4,7,24,24`). The same +0x38 bit is
 force-set to 1 inside `AreaLight_Create`, so the default state is "visible".
 
 This broadcast is **only fired by Sky_LoadPreset** (via the same code path
@@ -478,14 +477,12 @@ than going through HSD lights or material colors. This is what's used by:
   Low Vis (`2800006E`) all rely on the overlay for their characteristic
   darkness, *not* on lighting changes alone.
 
-**Behavior confirmed empirically (2026-05) by sampling
-`ScreenFade_GetState(slot_id, &out)` per frame for 14 s on a tinted preset:**
+Overlay behavior:
 
 - **The overlay sustains at target color.** `ScreenFade_Begin` lerps from
   current to target over `frames`, then **holds at target indefinitely** —
   it does not fade back to clear. Setting it once is enough; no per-frame
-  re-trigger needed. Confirmed: live RGBA reached the 0x086E target after
-  ~30 frames and held it for the rest of the round.
+  re-trigger needed.
 - **HUD/UI is not covered.** The 640×480 quad is rendered before the HUD
   pass in z order, so timer/checklist/charge meters keep their original
   colors. This is exactly why event darkening reads as "scene-only."
@@ -494,8 +491,8 @@ than going through HSD lights or material colors. This is what's used by:
   near geometry (inside `fog_start`) gets darkened by the overlay even
   though fog skipped it.
 
-**Pitfall — the City Trial GrObj is reused across exit/re-entry.** Empirical:
-the same `grobj` pointer is reused for the *next* CT round, so per-stage
+**Pitfall — the City Trial GrObj is reused across exit/re-entry.** The
+same `grobj` pointer is reused for the *next* CT round, so per-stage
 state guarded by `if (grobj != last_grobj)` won't reset on re-entry. The
 `grobj+0x714` slot ID, however, is fresh on every entry (each
 `Sky_AllocFade` → `ScreenFade_Alloc` increments the global counter at
@@ -507,8 +504,8 @@ slot whose state is still 0x00000000 and your overlay never arms.
 **Triggering it from custom code (no event needed):**
 
 ```c
-// Once Sky_AllocFade has run during stage init (verified by checking
-// that grobj+0x714 is non-NULL — true by the first per-frame tick):
+// Once Sky_AllocFade has run during stage init (grobj+0x714 is non-NULL —
+// true by the first per-frame tick):
 u32 tint = 0x00000866;  // RGBA: dark blue, alpha = strength
 Sky_BeginFade(grobj, &tint, 30);  // 30-frame lerp; then sustains
 ```
@@ -556,14 +553,14 @@ The actual rendering path (`HSD_LObjSetCurrentAll` + `HSD_LObjSetupInit`) is
 shared.
 
 **The primary and secondary chains are dispatched by the SAME camera,
-World_CObj** — see "World_CObj GX-Link Dispatch" below. The "secondary"
-naming is historical; in practice both chains contribute LObjs to the same
-world render pass via separate GObjs at separate gx_link slots.
+World_CObj** — see "World_CObj GX-Link Dispatch" below. Both chains
+contribute LObjs to the same world render pass via separate GObjs at
+separate gx_link slots.
 
 ### Concrete CT chain contents
 
-Walked from `iso/files/GrCity1.dat` via `scripts/dump_lights.py`. All
-three chains are NULL-terminated `LightGroup**` arrays of length 2:
+In `iso/files/GrCity1.dat`, all three chains are NULL-terminated
+`LightGroup**` arrays of length 2:
 
 **Primary chain (gx_link 0)** — LObjDescs at file 0xC176C, 0xC1730:
 
@@ -596,7 +593,7 @@ list, so it consumes no hardware slot.
 The defaults-chain values seed the AreaLight's diffuse/direction; the
 secondary chain re-uses those exact values as additional GX hardware lights.
 
-Search of every `bl HSD_LObjLoadDesc` (24 callers in `mem1.raw`) returned:
+Of the 24 `bl HSD_LObjLoadDesc` call sites:
 - 1 in `LObj_CreateAll` (the stage chain itself)
 - 23 in menu / CSS / mode-select / HUD / effects code
 
@@ -737,11 +734,11 @@ needed.
 
 **Caveat:** a stage MObj could in principle override the global path by
 carrying its own pre-built `MatColorChan` chain (read by `HSD_SetupChannel`
-at +0x14/+0x1c/+0x28). Static analysis shows `MObjLoad` (0x803f9f04) only
-copies a 0x14-byte HSD_Material — no chan-ctrl chain is built — and the
-only callers of the chain walker `HSD_SetupChannelAll` are at 0x8041d32c
-(a shadow/scratch path, not stage geometry). So the global aggregation
-path covers all CT stage MObjs.
+at +0x14/+0x1c/+0x28). `MObjLoad` (0x803f9f04) only copies a 0x14-byte
+HSD_Material — no chan-ctrl chain is built — and the only callers of the
+chain walker `HSD_SetupChannelAll` are at 0x8041d32c (a shadow/scratch
+path, not stage geometry). So the global aggregation path covers all CT
+stage MObjs.
 
 ### How to track a moving entity
 
@@ -978,13 +975,13 @@ Function 0x800a9cb4 contains a debug controller handler:
 `ExtendPresetArray` repoints to 29 — so with the mod loaded, this selector
 also cycles the custom presets (17–28).
 
-## User-Discovered Runtime Addresses (corrected)
+## Runtime Addresses
 
-Heap-allocated during a live City Trial session. Cross-referenced against
-the static SkyState / HSD_Fog / AreaLight layouts above.
+Heap-allocated during a live City Trial session, mapped against the static
+SkyState / HSD_Fog / AreaLight layouts above.
 
-| Address | Confirmed identity | Source |
-|---------|-------------------|--------|
+| Address | Identity | Source |
+|---------|----------|--------|
 | 0x80557484 | **Global EFB clear color (BSS)**, RGBA8888. Written by `Sky_Update` step 4; read by `World_CObj+0x144`. | static |
 | 0x81367530 / 0x81367534 / 0x81367538 | Likely `sky_state+0x14` / `+0x18` / `+0x1C` — start_sky_color, current_output_sky_color, current_preset_index. The 12-byte stride matches. | inferred |
 | 0x8137a7ec | `HSD_Fog.start` (parent base ≈ 0x8137a7d4 + 0x18 for parent header + 0x10) | matches obj.h:715-723 |
@@ -996,9 +993,9 @@ the static SkyState / HSD_Fog / AreaLight layouts above.
 | 0x80ada07c | Heap address inside the loaded `GrCt1.dat` buffer. Reachable from `(*stc_grobj)->gr_data + …`. | static |
 
 0x80557484 is BSS (loaded with the `main.dol`), not heap. The address
-0x800b05ec is **not** `World_CObj` — it's the load instruction inside
-`World_CObj` (the function starts at 0x800b04a8) that reads the global fog
-color into HSD_SetEraseColor.
+0x800b05ec is the load instruction inside `World_CObj` (the function starts
+at 0x800b04a8) that reads the global fog color into HSD_SetEraseColor — not
+the function entry.
 
 ## Cross-references
 

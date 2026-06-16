@@ -34,8 +34,6 @@ Coverage spans CSS color cycling (L/R), CPU random color assignment, the machine
 
 The three TR hooks are all load-bearing: `TopRide_InitSelectData` writes `color[]` first; both `TopRide_RaceInit` and `TopRide_SoloInit` then conditionally re-assign `color[]` after their init-flag check, so each mode's post-init point also needs validation.
 
-> Note: the symbols above are the current `GKYE01.map` names. The `gate_colors.c` source comments still refer to several of these by their old map placeholders — `zz_80028888_` (= `CSS_airRide_RaceUpdate`), `zz_80029bd8_` (= `CSS_airRide_FreeTimeUpdate`), `zz_8002cfd8_`/`zz_8002d0ec_`/`zz_8002d9e8_`/`zz_8002dc9c_` (the four Top Ride functions). They are the same functions.
-
 ### CPU random color
 
 CPUs are given a **random unlocked color** in every mode via `GateColors_RandomUnlockedColor()` (collects the unlocked colors from `color_unlocked_mask`, `HSD_Randi`-picks one, falls back to the first unlocked / Pink). Without this, a CPU would inherit the per-slot `{0,1,2,3}` color default (validated to unlocked, but the same every race and prone to collapsing several CPUs onto the first-unlocked color when their defaults are locked). The color is set at each mode's CPU-aware commit point, after that mode's `color[]` validator has run, so it is the final value:
@@ -102,7 +100,3 @@ AP_COLOR_UNLOCK_WHITE  = 887   // KIRBYCOLOR_WHITE
 ```
 
 Dispatched by `ap_item_handler.c` (`ap_item_id >= AP_COLOR_UNLOCK_BASE && < AP_COLOR_UNLOCK_BASE + KIRBYCOLOR_NUM`), which calls `GateColors_UnlockColor(ap_item_id - AP_COLOR_UNLOCK_BASE, /*announce=*/1)`. The vanilla checklist also grants colors via the same `GateColors_UnlockColor` entry point — `checklist_rewards.c` maps `REWARD_COLOR_GREEN`/`PURPLE`/`BROWN`/`WHITE` (colors 4–7 only) to `GateColors_UnlockColor(..., /*announce=*/0)` — so checklist rewards and AP item unlocks share the same mask.
-
-## Mod ↔ AP Client Protocol
-
-None. Color unlocks come in via the standard `APData.incoming_item_id` mailbox; the mod owns the mask and never publishes color state to `APData`.

@@ -1,12 +1,10 @@
-# Gravity Change Event — Research & Findings
+# Gravity Change Event
 
-> **Status: IMPLEMENTED & ACTIVE.** Verified 2026-06-08 against
-> `mods/custom_events/src/event_gravity_change.c` / `.h` and
-> `mods/custom_events/src/custom_events.c`. The event is registered in the
+> **Status: IMPLEMENTED & ACTIVE.** The event is registered in the
 > custom-events framework as `CUSTOM_EVKIND_GRAVITY_CHANGE` (17) with weight 20,
 > wired into both `custom_params[]` and `custom_functions[]`, and reachable
 > through the extended event roll (`CustomEvents_ExtendedRoll`, which replaces
-> the `Gm_Roll` call at `0x800ee098`). It is *not* dead/unregistered code.
+> the `Gm_Roll` call at `0x800ee098`).
 
 ## Concept
 
@@ -37,7 +35,7 @@ GrObj *grobj = *stc_grobj;
 Vec3 *grav = &grobj->gr_data->stage_node->gravity_force;
 ```
 
-### Confirmed Values
+### Values
 
 City Trial default gravity: `(0.0, -1.0, 0.0)` — pure downward gravity, unit magnitude.
 
@@ -54,12 +52,12 @@ City Trial default gravity: `(0.0, -1.0, 0.0)` — pure downward gravity, unit m
 
 ### How Gravity Is Applied
 
-The exact code path from `gravity_force` to machine physics was not fully traced. What we know:
+The exact code path from `gravity_force` to machine physics is not fully mapped:
 
 - `Machine_PhysicsThink` (0x801c6368) accumulates several Vec3 components into position each frame: acceleration (0x318) → velocity (0x324) → position (0x3e8), plus additional vectors at 0x330, 0x33c, 0x348, 0x3a8, 0x3c8. One of these carries the gravity contribution.
 - The machine physics chain (`MachinePhys_Charge` → `zz_801d85c0_` → sub-functions) reads from `DAT_805dd848` (vehicle common data pointer, NOT stage_node) for many physics parameters.
 - `DAT_805dd848` is loaded from `VcCommon.dat` by `vcLoadCommon` (0x801c6d0c). It is massively referenced (~140 xrefs) across the machine code for acceleration, friction, damage, knockback, etc.
-- The gravity_force vector is read separately from the stage_node by some part of the physics pipeline, but the exact reader function was not identified. It is likely read each frame since modifying it at runtime has immediate effect.
+- The gravity_force vector is read separately from the stage_node by some part of the physics pipeline; the exact reader function is unidentified. It is likely read each frame since modifying it at runtime has immediate effect.
 - `gravity_unk` (stage_node+0xC) is adjacent to gravity_force — purpose unknown, may be a gravity scaling factor or damping parameter.
 
 ### Gravity Zones (Separate System)
@@ -95,7 +93,7 @@ Items have a `fall_dir` (Vec3 at ItemData+0x1C8) used for ground raycasting dire
 | `label`      | `"Gravity Change"` |
 | `hud_text`   | `"Gravity is changing!"` |
 
-### Observed Behavior
+### Behavior
 
 - **Ground physics**: Works well. Machines feel floaty, take longer to decelerate, drift more.
 - **Airborne physics**: Machines behave "very weirdly" in the air at 0.2x. The physics code likely has additional gravity-dependent calculations for air control, landing detection, and trajectory that expect normal gravity magnitude. Air time is greatly extended.
@@ -123,10 +121,9 @@ Items have a `fall_dir` (Vec3 at ItemData+0x1C8) used for ground raycasting dire
 | `DAT_805dd848` | 0x805dd848 | ptr | Vehicle common data (r13+0x768), ~140 xrefs |
 | `grGetStageScale` | 0x800d3058 | 0x24 | Reads stage_node->scale (adjacent field) |
 
-All symbols and addresses in the table above were re-verified against
-`externals/hoshi/GKYE01.map` on 2026-06-08. Note `zz_801d85c0_` is `0x238`
-bytes and `zz_801d8108_` is `0x88` bytes in the map (the table's `~0x240` /
-`~0x90` are approximate). `DAT_805dd848` = r13 (`0x805dd0e0`) + `0x768`.
+In `externals/hoshi/GKYE01.map`, `zz_801d85c0_` is `0x238` bytes and
+`zz_801d8108_` is `0x88` bytes (the table's `~0x240` / `~0x90` are
+approximate). `DAT_805dd848` = r13 (`0x805dd0e0`) + `0x768`.
 
 ## See Also
 

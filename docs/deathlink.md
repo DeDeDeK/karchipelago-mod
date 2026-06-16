@@ -186,10 +186,10 @@ Single hook on the sand-pit enemy's "spit kirby out" path. Sets `deathlink_send 
 
 ### Why not other TR scenery / damage paths
 
-Several other terrain-driven damage states were investigated and excluded:
+Several other terrain-driven damage states are excluded:
 
-- **KirbyBurn (lava / fire tiles)** — `BurnAreaTickAll` (`zz_803218dc_`) calls `KirbyBurnMethod` once per kirby per frame, AND KirbyBurn's per-frame tick transitions back to Normal between frames. Both a vtable-equality gate and a state-ID gate failed to suppress per-frame spam; only a per-kirby frame-counter rising-edge gate worked, but the complexity wasn't worth it for the lava case alone.
-- **KirbySpin / KirbySandSpin / KirbyWhirlpool** (spin-class effector functions at `0x802e7570 / 0x802e7750 / 0x802e79a4`) — all hooked at one point, but none fired for the actual in-game sand pit. The sand-pit ejection uses `KirbyDoodlebugOut` instead.
+- **KirbyBurn (lava / fire tiles)** — `BurnAreaTickAll` (`zz_803218dc_`) calls `KirbyBurnMethod` once per kirby per frame, AND KirbyBurn's per-frame tick transitions back to Normal between frames. Neither a vtable-equality gate nor a state-ID gate suppresses the per-frame spam; only a per-kirby frame-counter rising-edge gate would, and the complexity isn't worth it for the lava case alone.
+- **KirbySpin / KirbySandSpin / KirbyWhirlpool** (spin-class effector functions at `0x802e7570 / 0x802e7750 / 0x802e79a4`) — none of these fire for the in-game sand pit. The sand-pit ejection uses `KirbyDoodlebugOut` instead.
 - **KirbyCrush** (heavy-machine landing on a kirby) is kirby-vs-machine, not pure terrain.
 - **KirbyFreeze** is item-derived in TR (the Freeze projectile item, not a stage hazard).
 - **KirbyPress** has both terrain-effector and physics-internal entry paths; neither is unambiguously scenery.

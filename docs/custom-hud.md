@@ -60,7 +60,7 @@ typedef struct HUDElementData
 } HUDElementData;
 ```
 
-This mirrors the canonical layout in `externals/hoshi/include/hud.h` (the `city_stat_bar` union member). The child-index → field mapping above is the **real** one used by `City_CreateStatChartBar` (verified by decompile): index 1 → `bar_j` (0x24), index 4 → `num_right_j` (0x28), index 5 → `num_left_j` (0x2c), index 6 → `sign_j` (0x30). The field names encode struct storage order, **not** on-screen left/right position.
+This mirrors the canonical layout in `externals/hoshi/include/hud.h` (the `city_stat_bar` union member). The child-index → field mapping above is the one used by `City_CreateStatChartBar`: index 1 → `bar_j` (0x24), index 4 → `num_right_j` (0x28), index 5 → `num_left_j` (0x2c), index 6 → `sign_j` (0x30). The field names encode struct storage order, **not** on-screen left/right position.
 
 ### HUDKind Values
 
@@ -390,7 +390,7 @@ for (u32 i = 0; i < arch->header.nb_public; i++)
 ### Creation Flow
 
 `CityHUD_CreateStatChart(ply, ply2)` (map: `City_CreateStatChart`, 0x80128bb8):
-1. Picks the background model by player count (`Gm_GetHMNNum` → 1/2/4P slot) from `Game3dData` and loads it via `HUD_CreateMiscGObj(jobj, 0x1b, 0x15, 1)` — i.e. **p_link = 0x1b (27, PAUSEHUD)**, gx_link = 0x15 (21), gx_pri = 1
+1. Picks the background model by player count (`Gm_GetPlyViewNum` → 1/2/4P slot) from `Game3dData` and loads it via `HUD_CreateMiscGObj(jobj, 0x1b, 0x15, 1)` — i.e. **p_link = 0x1b (27, PAUSEHUD)**, gx_link = 0x15 (21), gx_pri = 1
 2. Attaches `HUDElementData` via `3DHud_AddData(..., kind = 0x42)` — `0x42` is the **HUDKind** (`CITYSTATBG`), not an entity id; the GOBJ's `entity_class` is always 27
 3. Extracts world positions (`JOBJ_GetWorldPosition`) from background child JOBJs **1-9** (the 9 stat slot positions)
 4. Stores those positions in the background's `HUDElementData` at +0x14, +0x20, +0x2c … +0x74 (9 `Vec3`s)
@@ -420,9 +420,9 @@ Root (index 0) — positioned at stat slot location
 └── Child 6: sign_j — minus sign (struct +0x30)
 ```
 
-**Index 4 and 5 are the two digit JOBJs; index 6 is the sign.** The `HUDElementData` field names `num_left_j`/`num_right_j` reflect their storage order in the struct, not their visual position — the gourmet ScoreHUD experimentally maps child 5 → "left/tens" and child 4 → "right/ones" (see `event_gourmet_race.c`). All children are siblings at the root level (parent = root).
+**Index 4 and 5 are the two digit JOBJs; index 6 is the sign.** The `HUDElementData` field names `num_left_j`/`num_right_j` reflect their storage order in the struct, not their visual position — the gourmet ScoreHUD maps child 5 → "left/tens" and child 4 → "right/ones" (see `event_gourmet_race.c`). All children are siblings at the root level (parent = root).
 
-### Value Display Logic (verified by decompile)
+### Value Display Logic
 
 ```
 value = Patch_GetPlySavedValue(ply, stat_kind, 0)   // current stat value
@@ -492,7 +492,7 @@ void ScoreHUD_Update(GOBJ *g)
 }
 ```
 
-> The exact "which digit is left vs right" is a cosmetic choice; what matters is that **indices 4 and 5 are the digit JOBJs and index 6 is the sign** (not 5/6 digits + 4 sign as an earlier draft of this doc claimed). See `event_gourmet_race.c` for the live mapping.
+> The exact "which digit is left vs right" is a cosmetic choice; what matters is that **indices 4 and 5 are the digit JOBJs and index 6 is the sign**. See `event_gourmet_race.c` for the live mapping.
 
 ### Other Reusable Elements
 
@@ -530,7 +530,7 @@ Examples:
 - Bottom-right corner: `(640, -480, 0)`
 - Screen center: `(320, -240, 0)`
 
-Confirmed at multiple call sites: the gourmet ScoreHUD and hoshi's screen-cam code both call `CObj_SetOrtho(cobj, 0.0, -480.0, 0.0, 640.0)` (the cobj is the first arg; the four floats are top, bottom, left, right). The map symbol is `HSD_CObjSetOrtho` (0x80402f08); `Text_CreateCanvas` / `Text_CreateTextCanvas` are the same symbol (0x8044f674, map name `Text_CreateTextCanvas`). The HUD archive COBJDescs use matching projection parameters.
+The gourmet ScoreHUD and hoshi's screen-cam code both call `CObj_SetOrtho(cobj, 0.0, -480.0, 0.0, 640.0)` (the cobj is the first arg; the four floats are top, bottom, left, right). The map symbol is `HSD_CObjSetOrtho` (0x80402f08); `Text_CreateCanvas` / `Text_CreateTextCanvas` are the same symbol (0x8044f674, map name `Text_CreateTextCanvas`). The HUD archive COBJDescs use matching projection parameters.
 
 ## Timer Model Hierarchy (ScInfTime)
 
@@ -538,7 +538,7 @@ Two variants loaded from IfAll1c:
 - `ScInfTime_scene_models` — 1-2 player (stored at Game3dData +0xB4)
 - `ScInfTime4_scene_models` — 3-4 player (stored at Game3dData +0xB8)
 
-Selected at runtime by `3DHud_CreateTimer` (0x80119218) based on `Gm_GetHMNNum()` (human-player count): `< 2` → the +0xB4 (1-2P) model, else the +0xB8 (3-4P) model. It is then created via `HUD_CreateMiscGObj(jobj, p_link, 0x15, 1)` (p_link 0x1a/0x1b depending on scene) with a per-frame proc at priority 20.
+Selected at runtime by `3DHud_CreateTimer` (0x80119218) based on `Gm_GetPlyViewNum()` (human-player count): `< 2` → the +0xB4 (1-2P) model, else the +0xB8 (3-4P) model. It is then created via `HUD_CreateMiscGObj(jobj, p_link, 0x15, 1)` (p_link 0x1a/0x1b depending on scene) with a per-frame proc at priority 20.
 
 ### JOBJ Children: 6 Digit Slots
 
@@ -611,7 +611,7 @@ The game uses a two-level rendering system:
 
 (`CObj_GX` / `GObjGXLink` are descriptive names used in this doc; the matching `GKYE01.map` symbols are `CObjThink_Common` / `CObj_RenderGXLinks`.)
 
-**Critical finding:** `GObjGXLink` does **NOT** check the rendered object's `cobj_links` field. Only the camera's `cobj_links` matters. Setting `cobj_links` on a non-camera GOBJ has no effect on rendering.
+`GObjGXLink` does **NOT** check the rendered object's `cobj_links` field. Only the camera's `cobj_links` matters. Setting `cobj_links` on a non-camera GOBJ has no effect on rendering.
 
 ### `cobj_links` Initialization
 
@@ -636,7 +636,7 @@ All three ultimately call `JObj_GX`. The wrappers add visibility gating and view
 | 20 | `GAMEGX_HUDMAPDOTS` | Active during gameplay | Minimap dots |
 | 21 | `GAMEGX_HUD` | Active during gameplay | Timer, stat bars, misc HUD (`HUD_CreateMiscGObj`, `HUD_CreateElement`) |
 
-All four have active cameras during City Trial gameplay. The timer (GX link 21) and player numbers (GX link 18) are confirmed visible.
+All four have active cameras during City Trial gameplay. The timer (GX link 21) and player numbers (GX link 18) are visible.
 
 **GX link 18 (`GAMEGX_HUDORTHO`)** is the safest choice for custom HUD elements created with `JObj_LoadSet_SetPri` / `JObj_GX`, since the game's own per-player elements use this link with custom GX callbacks (not the `is_visible`-checking wrappers).
 

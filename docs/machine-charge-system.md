@@ -58,7 +58,7 @@ MachinePhys_Charge (each frame)
       Machine_IncrementCharge (0x801CC480)
 ```
 
-**`Machine_IncrementCharge` formula** (cleaned up from decompilation):
+**`Machine_IncrementCharge` formula:**
 
 ```c
 // 1. Compute steering angle factor (0.0 = straight, 1.0 = max turn) from the

@@ -1,6 +1,6 @@
 # Meteor Event Actor (0x4E)
 
-The meteor is a special event actor that falls from the sky and damages players on impact. Actor type ID `ACTORID_METEOR = 0x4E` (`enemy.h`), data_index `0x15` (confirmed in `EventActor_Create`).
+The meteor is a special event actor that falls from the sky and damages players on impact. Actor type ID `ACTORID_METEOR = 0x4E` (`enemy.h`), data_index `0x15` (used in `EventActor_Create`).
 
 **Related docs:** `enemy-spawn-system.md` (actor IDs / spawn manager / EventActorDesc), `enemy-ai-system.md` (EnemyData + state machine), `event-source-drops.md` (City Trial drop pipeline). Globals declared in `externals/hoshi/include/event.h` (lines 139-143).
 
@@ -167,7 +167,7 @@ Constants (`spawn_enemy.c`): `METEOR_FALL_SPEED = 8.0f`, `METEOR_DROP_HEIGHT = 4
    - `JObj_ClearFlagsAll(root_jobj, JOBJ_HIDDEN)` — clears JObj hidden flag on model tree (root from `meteor->hsd_object`)
 8. **`MeteorDespawnProc`** (priority 0x14): increments `ed->lifetime_counter` each frame. When `ed->state == 16`, records the impact frame in `ed->spawn_index`, waits `METEOR_LANDING_FRAMES`, then runs cleanup (`EventActor_CleanupCollisionSphere`, `EventActor_CleanupVfxA3C`, `EventActor_CleanupVfxA40`) and `EventActor_Destroy`.
 
-> ⚠️ **Suspected bug:** `MeteorDespawnProc` waits for `ed->state == 16`, but the physics-driven (state 15) path that `Meteor_BehaviorInit` puts standalone meteors into lands in **state 17** via `Meteor_Landing`, never state 16 (state 16 is only reachable from state 14's hit detection — see the State Machine section). So the despawn timer likely never fires for these spawns and they may leak. The check probably should test `state == 17` (or `state >= 16`). Flagged for human/in-game verification; not changed here. Note also that vanilla state-17/Landing has no func3 self-destruct, which is the original motivation for `MeteorDespawnProc`.
+> ⚠️ **Suspected bug:** `MeteorDespawnProc` waits for `ed->state == 16`, but the physics-driven (state 15) path that `Meteor_BehaviorInit` puts standalone meteors into lands in **state 17** via `Meteor_Landing`, never state 16 (state 16 is only reachable from state 14's hit detection — see the State Machine section). So the despawn timer likely never fires for these spawns and they may leak. The check probably should test `state == 17` (or `state >= 16`). Note also that vanilla state-17/Landing has no func3 self-destruct, which is the motivation for `MeteorDespawnProc`.
 
 ### Why BehaviorInit is required
 
@@ -195,7 +195,7 @@ Without save/restore, writing fake values corrupts the active event's state — 
 
 ## Key EnemyData Fields (Meteor)
 
-All offsets verified against `externals/hoshi/include/enemy.h` (`EnemyData`).
+All offsets are defined in `externals/hoshi/include/enemy.h` (`EnemyData`).
 
 | Offset | Type | Field | Purpose |
 |--------|------|-------|---------|

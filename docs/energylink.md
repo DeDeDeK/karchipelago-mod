@@ -15,7 +15,7 @@ Two shared fields in `APData` (`docs/client-game-protocol.md` is canonical):
 
 Cumulative-counter model: the game maintains a running net total and writes it freely — generation adds, spends/Auto-Charge subtract — as many times per frame as it likes. The client reads the counter once per ~1s poll, computes `delta = current − last_seen`, forwards that delta to the server, and advances `last_seen`. Any number of game-side writes between two polls collapse into one net delta, so there is **no flush, no slot handshake, and no per-frame polling**. Sub-MJ generation accumulates in a `float` carry (`energy_frac_accumulator`); only whole MJ are committed to the counter, and the fractional remainder rolls forward.
 
-64-bit fields are not atomic on PPC32, so a client poll mid-write could see a torn value. With the counter this is **self-correcting**: a torn read skews one poll's delta, but the client sets `last_seen` to whatever it read and the next poll's diff compensates exactly — unlike the old mailbox, which applied a torn delta permanently. The client re-seeds `last_seen` on a fresh `game_ready` transition so the boot reset (counter → 0) is never misread as a giant withdrawal. See `docs/client-game-protocol.md` "APData Layout" / "EnergyLink" for the full contract.
+64-bit fields are not atomic on PPC32, so a client poll mid-write could see a torn value. With the counter this is **self-correcting**: a torn read skews one poll's delta, but the client sets `last_seen` to whatever it read and the next poll's diff compensates exactly. The client re-seeds `last_seen` on a fresh `game_ready` transition so the boot reset (counter → 0) is never misread as a giant withdrawal. See `docs/client-game-protocol.md` "APData Layout" / "EnergyLink" for the full contract.
 
 The mod side stores raw MJ; the AP server stores integer Joules (`ENERGY_LINK_EXCHANGE_RATE = 1_000_000`). The client scales between them. See `docs/client-game-protocol.md` "EnergyLink" for the conversion contract.
 
@@ -65,7 +65,7 @@ EnergyLink_Withdraw(charge_gain * SCALE)         // emit -delta to the counter +
 prev_charge_value[ply] = md->charge_value        // mask injection from next-frame send delta
 ```
 
-Because the per-frame cap keeps the cost (`gain * SCALE`, max ≈ 0.11) well under one energy unit, any positive integer `balance` can pay for a full step — so the affordability check collapses to `balance > 0`, with none of the `s64→float` partial-affordability math (`balance / SCALE`) the old fill-the-whole-deficit version needed. The small per-frame deltas also shrink the torn-read window on the 64-bit fields.
+Because the per-frame cap keeps the cost (`gain * SCALE`, max ≈ 0.11) well under one energy unit, any positive integer `balance` can pay for a full step — so the affordability check collapses to `balance > 0`, with no `s64→float` partial-affordability math (`balance / SCALE`) needed. The small per-frame deltas also shrink the torn-read window on the 64-bit fields.
 
 ### Passive vs. active charging — mode difference (limitation)
 
@@ -116,7 +116,7 @@ Purchase flow (`Buy`):
 2. Reject if `balance < cost` (TextBox "Not enough energy" notification).
 3. Reject if the unprocessed queue is full (`ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS`, 512) — TextBox "Queue full".
 4. Push `item_id` onto `ap_save->unprocessed_items[]` so `APItems_PerFrame` applies it on a later frame, gated by scene/intro — same path as items received from AP.
-5. Subtract `cost` directly from both `ap_data->energy_sent_total` (the cumulative send counter — the client diffs it and forwards `-cost` to the server) and `ap_data->energy_balance` (instant UI feedback + keeps the step-1 gate honest). Both are `s64 -= s64`, inline on PPC32 — no float round-trip, no `__floatdisf`. The integer cost lands on the counter **exactly and immediately**, so the withdrawal reaches the server on the next poll regardless of scene — this is the fix for menu purchases that previously never flushed (no gameplay frame ran in the menu to drain the old mailbox). Auto-Charge's fractional spends still go through `EnergyLink_Withdraw` (counter via `EnergyLink_Emit` + balance carry); purchases take the direct integer path to avoid mixing an exact integer cost into the fractional generation carry.
+5. Subtract `cost` directly from both `ap_data->energy_sent_total` (the cumulative send counter — the client diffs it and forwards `-cost` to the server) and `ap_data->energy_balance` (instant UI feedback + keeps the step-1 gate honest). Both are `s64 -= s64`, inline on PPC32 — no float round-trip, no `__floatdisf`. The integer cost lands on the counter **exactly and immediately**, so the withdrawal reaches the server on the next poll regardless of scene — this is required because no gameplay frame runs in the menu to drive a per-frame flush. Auto-Charge's fractional spends still go through `EnergyLink_Withdraw` (counter via `EnergyLink_Emit` + balance carry); purchases take the direct integer path to avoid mixing an exact integer cost into the fractional generation carry.
 
 On its next poll the AP client sees `energy_sent_total` decrease, computes the negative delta, and forwards it to the server as a tagged `Set` with `want_reply: true`, matching the `SetReply` against `pending_withdrawals[tag]` to log any under-subtraction (pool was lower than the mod thought). The mod's local balance is corrected on the next `set_notify` push regardless of whether the server clamped.
 
@@ -124,12 +124,12 @@ On its next poll the AP client sees `energy_sent_total` decrease, computes the n
 
 The client logs `[EnergyLink] withdrawal under-subtracted by N J (asked X, got Y). Pool was lower than the mod expected.` whenever the server pool couldn't cover a withdrawal the mod queued. Two distinct causes:
 
-- **Stale-balance over-commit (mod bug, fixed).** Historically `EnergyLink_Withdraw` didn't touch the local balance, so Auto-Charge kept spending against a stale positive `energy_balance` every frame within the client's ~1s poll window — committing several MJ more than the pool held, often a full meter-fill (`asked 5000000, got 0`). `EnergyLink_Withdraw` now decrements the local balance immediately, so the affordability gate stops once the locally-known pool is exhausted. This was the source of the *repeated* spam, and especially visible in Top Ride where boosts (hence meter-refills) come fast.
+- **Stale-balance over-commit.** If `EnergyLink_Withdraw` didn't decrement the local balance, Auto-Charge would keep spending against a stale positive `energy_balance` every frame within the client's ~1s poll window — committing several MJ more than the pool held, often a full meter-fill (`asked 5000000, got 0`), and producing *repeated* log spam (especially visible in Top Ride where boosts, hence meter-refills, come fast). `EnergyLink_Withdraw` decrements the local balance immediately, so the affordability gate stops once the locally-known pool is exhausted.
 - **Shared-pool race (inherent, benign).** In a multiworld the pool is shared and each client only resyncs every ~1s, so two players can both see the same balance and both spend it before either withdrawal reaches the server. The server clamps at 0 and one client under-subtracts. This can't be eliminated mod-side without server-authoritative ask-before-spend, which the polling protocol doesn't provide. Expect occasional lines of this kind under concurrent play; they're informational, not a fault.
 
 ## Received-patch feedback prevention
 
-When AP delivers a stat patch (e.g. another player buys you "HP Patch" via energylink trade), the patch goes through `Patch_GiveItem` / `Patch_AllUp_GiveItem` in `patch_item.c`. The naive consequence: stats go up → next EnergyLink frame sees a positive `stat_diff` → energy is generated, partially refunding the cost.
+When AP delivers a stat patch (e.g. another player buys you "HP Patch" via energylink trade), the patch goes through `Patch_GiveItem` / `Patch_AllUp_GiveItem` in `patch_item.c`. Without masking, stats go up → next EnergyLink frame sees a positive `stat_diff` → energy is generated, partially refunding the cost.
 
 `Patch_GiveItem` has two delivery paths:
 

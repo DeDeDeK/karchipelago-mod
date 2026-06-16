@@ -67,7 +67,7 @@ Both `CSS_airRide_RaceUpdate` and `CSS_airRide_FreeTimeUpdate` have their own co
 
 `AirRide_PopulateSelectIcons` (0x80020a08) has two display modes: a 2×10 grid layout (≥10 available characters) and a linear strip (<10 available).
 
-2 rows × 10 columns stored at `0x80495800` (raw CKIND bytes verified against `scripts/mem1.raw`):
+2 rows × 10 columns stored at `0x80495800` (raw CKIND bytes):
 
 ```
 Row 0: DRAGOON FORMULA WINGED WARP    COMPACT FLIGHT SHADOW WAGON   SWERVE HYDRA
@@ -76,7 +76,7 @@ Row 1: DEDEDE  JET     ROCKET TURBO   BULK    SLICK  WLBIKE WLSCOOT REXWHL METAK
        (18)    (10)    (11)   (2)     (7)     (4)    (13)   (12)    (14)   (19)
 ```
 
-Linear strip order (used when <10 available). The table lives at `0x804957ec`; `SelIcon_GetCKindLinear` (0x8000b9a8, a small function — `lis r4,0x8049; addi r3,r4,0x57ec; lbzx r3,r3,idx`) indexes into it. Raw CKIND bytes verified against `scripts/mem1.raw`:
+Linear strip order (used when <10 available). The table lives at `0x804957ec`; `SelIcon_GetCKindLinear` (0x8000b9a8, a small function — `lis r4,0x8049; addi r3,r4,0x57ec; lbzx r3,r3,idx`) indexes into it. Raw CKIND bytes:
 ```
 DEDEDE DRAGOON JET ROCKET TURBO BULK FORMULA WINGED WARP COMPACT
 FLIGHT SHADOW WAGON SWERVE SLICK WLBIKE WLSCOOT REXWHL HYDRA METAKN
@@ -383,12 +383,12 @@ JObj@0x35be8 (root, container, no display)
 
 The 64×64 CMPR texture is the character icon. The MatAnimJoint (bank 0, at data offset 0x36bd0) controls which texture is displayed by swapping the material's texture image based on the animation frame value (= CharacterKind).
 
-#### MatAnimJoint Structure (Partially Traced)
+#### MatAnimJoint Structure
 
 ```
 MatAnimJoint root @0x36bd0: child=0x36bdc, next=NULL, matanim=NULL
   └─ MatAnimJoint child @0x36bdc: (corresponds to child JObj with display objects)
-       └─ [contains MatAnim → TexAnim with ImageDesc array and keyframes — needs further tracing]
+       └─ MatAnim → TexAnim with ImageDesc array and keyframes
 ```
 
 The TexAnim structure (within MatAnim) should contain:
@@ -396,7 +396,7 @@ The TexAnim structure (within MatAnim) should contain:
 - `ImageDesc**` array of texture images (one per character)
 - `n_images` count
 
-**Investigation paused here.** Next step is to follow the MatAnimJoint child at 0x36bdc → MatAnim → TexAnim to enumerate the actual texture images and keyframe mapping. This will confirm whether frame 0 (CKIND_COMPACT) has a valid texture or is blank/missing.
+**Open question:** whether frame 0 (CKIND_COMPACT) has a valid texture or is blank/missing. Resolving it needs the MatAnimJoint child at 0x36bdc → MatAnim → TexAnim enumerated for its texture images and keyframe mapping.
 
 ## Mod Hook Points
 

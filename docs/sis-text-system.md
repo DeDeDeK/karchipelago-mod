@@ -73,7 +73,7 @@ The renderer keeps a per-Text state-history buffer (`text->state_stack`, `+0x68`
 
 ### Opcode table — complete
 
-"Size" is total bytes including the opcode byte itself. Verified against decompilation of `Text_GXLink` (0x804516e4), `Text_DetermineHeightAndWidth` (0x80451344), and the parse table in `Text_StorePremadeText` (0x8044f9d4).
+"Size" is total bytes including the opcode byte itself. The opcodes are interpreted by `Text_GXLink` (0x804516e4), `Text_DetermineHeightAndWidth` (0x80451344), and the parse table in `Text_StorePremadeText` (0x8044f9d4).
 
 | Op | Size | Data | Behavior |
 |----|------|------|----------|
@@ -83,7 +83,7 @@ The renderer keeps a per-Text state-history buffer (`text->state_stack`, `+0x68`
 | `0x03` LINEBREAK | 1 | — | Advances `cursor.y` by `16 * scale_y * pos_scale_y`. Newline. |
 | `0x04` LINEBREAK_REFLOW | 1 | — | Newline + sets `temp.x4b=1` so the next frame re-enters the renderer in reflow mode. |
 | `0x05` SET_DELAY | 3 | u16 frames | Sets `temp.delay_frames = u16` — typewriter pause. |
-| `0x06` SET_TIMING | 5 | u16 char, u16 space | Sets `temp.char_delay` then `temp.space_delay` (operand order verified @ `0x80451e20`). |
+| `0x06` SET_TIMING | 5 | u16 char, u16 space | Sets `temp.char_delay` then `temp.space_delay` (operand order @ `0x80451e20`). |
 | `0x07` POS (subtext header) | 5 | s16 x, s16 y | **Subtext header.** x = pixels right of canvas-left, y = lines down (`y * 16 * scale_y`). Width is measured, alignment offset applied (`temp.align`). |
 | `0x08` JUMP | 5 | s32 abs ptr | Absolute pointer jump (HSD-relocated). |
 | `0x09` CALL | 5 | s32 abs ptr | Push `kind=5` return marker, jump absolute. Subroutine into a glossary entry; `0x00` at the end of the callee returns. |
@@ -178,7 +178,7 @@ So **color is per-character RGB** (driven by the COLOR opcode stack) but **alpha
 
 `Text_SetText(text, subtext_idx, fmt, ...)` (`0x8045031c`) walks the buffer, finds the N-th `0x07`, and replaces only the body — so per-subtext color/pos/scale persist across `SetText` calls.
 
-Both `vsnprintf` into a stack buffer first, then run **`Text_ConvertASCIIToShiftJIS`** (`0x8044fb0c`). The name is only partly accurate: the output is a SIS opcode/character stream, but the 2-byte codes it emits for letters/digits are SIS glyph codes (`0x20xx`) while for a few punctuation marks it emits genuine full-width **Shift-JIS** codes (`0x81xx`) — verified by disasm:
+Both `vsnprintf` into a stack buffer first, then run **`Text_ConvertASCIIToShiftJIS`** (`0x8044fb0c`). The name is only partly accurate: the output is a SIS opcode/character stream, but the 2-byte codes it emits for letters/digits are SIS glyph codes (`0x20xx`) while for a few punctuation marks it emits genuine full-width **Shift-JIS** codes (`0x81xx`):
 
 | ASCII input | Emits |
 |------|-------|
@@ -199,7 +199,7 @@ There is no `{...}` brace syntax for inline opcodes. To inject COLOR/SCALE/POS m
 
 ### `Text_AddSubtext` chaining and the missing TERMINATE
 
-Each `Text_AddSubtext` call writes the trailer `0f 0d 00` (SCALE_POP, COLOR_POP, TERMINATE) at the heap cell's write pointer **without advancing the pointer past the `0x00`** (verified at `0x804502d8`-`0x804502dc`). The next `Text_AddSubtext` call overwrites that `0x00` with its own `0x07` POS header. Net result: a chain of N subtexts ends with a single `0x00` after the *last* subtext only — there is **no** inline TERMINATE between subtexts.
+Each `Text_AddSubtext` call writes the trailer `0f 0d 00` (SCALE_POP, COLOR_POP, TERMINATE) at the heap cell's write pointer **without advancing the pointer past the `0x00`** (`0x804502d8`-`0x804502dc`). The next `Text_AddSubtext` call overwrites that `0x00` with its own `0x07` POS header. Net result: a chain of N subtexts ends with a single `0x00` after the *last* subtext only — there is **no** inline TERMINATE between subtexts.
 
 This is what makes `Text_GetSubtext` (which stops walking on `0x00`) able to find subtext indices > 0.
 
@@ -447,7 +447,7 @@ The SIS file loaded into slot 0 during City Trial gameplay. Event text uses `Tex
 
 `stadiumPrediction` (`0x80127864`) reads `int table[event_kind]` from `0x804a7b98` (declared as `static int *stc_event_sis_id_table = (int *)0x804a7b98;` in `event.h`) to get the SIS entry index. For vanilla events 0-15, the value is `event_kind + 2`.
 
-Entries at `table[16+]` contain sequential values (18, 19, 20...) and **are actively read** — the prediction event (kind 10) computes a derived index `stadium_kind + EVKIND_NUM` (= `stadium_kind + 16`; verified at `stadiumPrediction` `0x801279a4`/`0x801279b4`, where a stadium index in `[0,STKIND_NUM)` is `+16`-offset), writes it back into the event-check struct's kind field (`+0x18`), and on the next pass reads `table[that_index]`. Indices 16-39 in the table (24 = `STKIND_NUM` entries) are used by this prediction lookup. Table entries at index 40+ (`EVKIND_NUM + STKIND_NUM`) are safe to overwrite for custom events.
+Entries at `table[16+]` contain sequential values (18, 19, 20...) and **are actively read** — the prediction event (kind 10) computes a derived index `stadium_kind + EVKIND_NUM` (= `stadium_kind + 16`; at `stadiumPrediction` `0x801279a4`/`0x801279b4`, a stadium index in `[0,STKIND_NUM)` is `+16`-offset), writes it back into the event-check struct's kind field (`+0x18`), and on the next pass reads `table[that_index]`. Indices 16-39 in the table (24 = `STKIND_NUM` entries) are used by this prediction lookup. Table entries at index 40+ (`EVKIND_NUM + STKIND_NUM`) are safe to overwrite for custom events.
 
 ### Extending for custom events
 

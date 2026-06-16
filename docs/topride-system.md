@@ -56,14 +56,23 @@ GameSession (TopRide_GameSessionInit, per-scene)
 | Address | Name | Description |
 |---------|------|-------------|
 | 0x805ddb44 | KirbyMgr | Fielder singleton. NULL when not in Top Ride gameplay. |
-| 0x805ddb38 | GameSession | Session-level manager (contains KirbyMgr) |
-| 0x805ddb60 | EnemyMgr | Sub-object of KirbyMgr |
-| 0x805ddb5c | MineMgr | Sub-object of KirbyMgr |
-| 0x805ddb58 | EmberMgr | Sub-object of KirbyMgr |
-| 0x805ddb54 | SmokeMgr | Sub-object of KirbyMgr |
-| 0x805ddb50 | MissileMgr | Sub-object of KirbyMgr |
+| 0x805ddb48 | ChickMgr | Sub-object of KirbyMgr |
+| 0x805ddb4c | ItemBall | Sub-object of KirbyMgr (item-ball manager) |
+| 0x805ddb50 | KurakkoMgr | Sub-object of KirbyMgr |
+| 0x805ddb54 | MissileMgr | Sub-object of KirbyMgr |
+| 0x805ddb58 | SmokeMgr | Sub-object of KirbyMgr |
+| 0x805ddb5c | EmberMgr | Sub-object of KirbyMgr (clear-checker reads field +0x18) |
+| 0x805ddb60 | MineMgr | Sub-object of KirbyMgr |
+| 0x805ddb64 | GrenadeMgr | Sub-object of KirbyMgr (clear-checker reads field +0x1c) |
+| 0x805ddb68 | EnemyMgr | Sub-object of KirbyMgr |
+| 0x805ddb84 | GameSession | Session-level singleton (contains KirbyMgr) |
+| 0x805ddb38 | CpuObstacleMgr | Created in `TopRide_GameSessionInit` |
 | 0x805ddb8c | SoundHandles | Sub-object of KirbyMgr |
 | 0x805ddbec | GameSession sub | Scene-level sub-object |
+
+(Manager classes are identified by RTTI `dynamic_cast` typeinfo and the construction
+stores in `TopRide_FielderInit` / `TopRide_GameSessionInit`. The hierarchy diagram
+above lists KirbyMgr-struct member offsets, a separate mapping.)
 
 ## Round State
 
@@ -252,8 +261,6 @@ if charge_value == 0.0:
 | 0x802de0e4 | 0xC | TopRide_GetDataTable | Returns data table ptr (0x804d40f0) |
 | 0x80296264 | 0x8 | TopRide_GetFrameScale | Returns frame rate scale (1.0 at 60fps) |
 | 0x802d1d84 | 0x264 | TopRide_VelocityDecay | Post-boost velocity decay |
-
-> **Map note.** A few related functions have no discovered name yet and are still `zz_`-named in `externals/hoshi/GKYE01.map` — grep them by address: the round_state writers `zz_8029e334_` (→1, write at 0x8029ec04) and `zz_8029eda4_` (→2, write at 0x8029efa4), and the `+0x40` config writer `zz_802c50ac_`.
 
 ### Data Table
 
