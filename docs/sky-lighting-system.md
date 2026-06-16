@@ -96,13 +96,14 @@ GrObj  (gr_kind=9, City Trial)
 | 0x800d61e8  | `Light_GetAreaLightDefaults(out_amb, out_inf, out_pos)` | Getter that returns the three default values stashed by `Light_CreateAreaLightDefaults`. Calls `HSD_LObjGetColor` on `r13[+0x5F0]` and `r13[+0x5F4]`, `HSD_LObjGetPosition` on `r13[+0x5F4]`. If `r13[+0x5F8]==0` (no chain), writes (0,0,0,0xFF) defaults. |
 | 0x800d5444  | `Sky_TransitionGlobal(idx)`                | `Sky_BeginTransition` using `*stc_grobj` (0x805dd6cc-ish; see `stc_grobj` in stage.h:171). |
 | 0x800d546c  | `Sky_RestoreGlobal`                        | Restores the original preset after an event. |
-| 0x800d5414  | `Sky_GetPresetCount`                       | Returns total preset count from stage data: `(*stc_grobj)->gr_data + 0x34 + 0x04 + 0x04`. |
+| 0x800d5414  | `Sky_GetPresetCount`                       | Returns total preset count from stage data: `(*stc_grobj)->gr_data->sky_block->preset_header->preset_count`. |
 | 0x800db2b8  | `Gm_Roll(weights, count)`                  | Weighted random selection. |
 
 ## Sky Preset Entry (0x48 bytes)
 
-Stored in the stage file, accessed via `grobj->gr_data + 0x34 -> [4] -> [0]`.
-The C struct in use is `SkyPresetEntry` in `externals/hoshi/include/stage.h:205-217`
+Stored in the stage file, accessed via
+`grobj->gr_data->sky_block->preset_header->preset_array`. The C struct in use
+is `SkyPresetEntry` in `externals/hoshi/include/stage.h`
 (with the embedded `AreaLightData` at `externals/hoshi/include/obj.h:734-748`).
 `mods/custom_weather/src/custom_weather.c` builds its custom entries against
 this struct in `ExtendPresetArray`.
@@ -226,11 +227,11 @@ next pass; the EFB clear color is a separate path (see below).
                                {LObjDesc *desc, LightAnim *anim})
            +0x0C  ModelSection {terrain, backdrop, ...} - see sky-backdrop-system.md
            +0x30  EventConfigData *event_config (CT only)
-           +0x34  sky_block:
-                    [0]  HSD_FogDesc *               - initial fog parameters
-                    [1]  preset_subheader:
-                            [0]  preset_array (0x48 each)
-                            [1]  preset_count (int)
+           +0x34  SkyBlock *sky_block (named in stage.h):
+                    +0x00  HSD_FogDesc *fog_desc       - initial fog parameters
+                    +0x04  SkyPresetSubHeader *preset_header:
+                            +0x00  SkyPresetEntry *preset_array (0x48 each)
+                            +0x04  s32 preset_count
   +0x54   light helper records (0x98 stride, count at offset)
   +0x104  light JOBJ table (8 bytes per entry; first word = JOBJ*)
   +0x168  fog/sky GObj
@@ -243,7 +244,7 @@ next pass; the EFB clear color is a separate path (see below).
 ## Vanilla CT Preset Reference
 
 The 17 presets shipped in `GrCity1.dat`, in the live preset array
-(`(*stc_grobj)->gr_data + 0x34 -> [4] -> [0]`). Useful as a tuning reference
+(`(*stc_grobj)->gr_data->sky_block->preset_header->preset_array`). Useful as a tuning reference
 when authoring new custom presets — each row's columns map 1-to-1 to the
 `SkyPresetEntry` fields documented above.
 
@@ -856,13 +857,13 @@ its own presets. It is the consumer-side companion to everything above.
 **repoints** the stage sub-header so the game itself sees the longer array:
 
 ```
-sky_block = *(void***)((u8*)grobj->gr_data + 0x34);  // gr_data+0x34 -> sub-header ptr
-sub_header = sky_block[1];
-sub_header[0] = extended_presets;   // was: stage-file preset array base
-sub_header[1] = (void*)WEATHER_TOTAL; // was: 17 — now the extended count
+SkyBlock *sky_block = grobj->gr_data->sky_block;
+SkyPresetSubHeader *sub_header = sky_block->preset_header;
+sub_header->preset_array = extended_presets;   // was: stage-file preset array base
+sub_header->preset_count = WEATHER_TOTAL;       // was: 17 — now the extended count
 ```
 
-This is the exact `[4]->[0]`/`[4]->[1]` (array base / count) pair documented
+This is the `SkyPresetSubHeader` (array base / count) pair documented
 under "Sky Preset Entry" and read by `Sky_GetPresetCount` (0x800d5414) and
 `Sky_BeginTransition`. After the repoint, vanilla code (event transitions,
 `Sky_BeginTransition`, the debug selector) can index custom presets too.

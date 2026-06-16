@@ -95,10 +95,10 @@ static void KillPlayer(RiderData *rd, MachineData *md)
         // Air Ride / Top Ride: trigger fall-off-course death.
         // respawn_pos contains spline params {segment, progress, y_offset}
         // updated per-frame by the checkpoint system. Use backup_respawn_pos
-        // when xc37 bit 6 is set (spline lookup failed), matching the vanilla
-        // Machine_CheckFallDeath OOB-distance path. Pass -1 for ground_handle
+        // when use_backup_checkpoint is set (spline lookup failed), matching the
+        // vanilla Machine_CheckFallDeath OOB-distance path. Pass -1 for ground_handle
         // (vanilla does this when no dead zone surface is found).
-        float *pos = (md->xc37 & 0x40) ? md->backup_respawn_pos : md->respawn_pos;
+        float *pos = md->use_backup_checkpoint ? md->backup_respawn_pos : md->respawn_pos;
         Machine_SetFallDead(md, -1, pos);
     }
 }
@@ -228,13 +228,13 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
         if (TopRide_GetPlayerKind(kirby->player_slot) != TR_PKIND_HMN)
             continue;
 
-        // Zero ChargeComponent.velocity (kirby+0xA0) before AND after apply()
-        // to neutralize the AC_TOBASARE per-frame rescale callback. Pre-zero
-        // pre-empts setters that read kirby+0xA0 and scale it (Strike/Explode);
-        // post-zero overrides Crush, whose setter ignores kirby+0xA0 and
+        // Zero charge.velocity before AND after apply() to neutralize the
+        // AC_TOBASARE per-frame rescale callback. Pre-zero pre-empts setters
+        // that read charge.velocity and scale it (Strike/Explode); post-zero
+        // overrides Crush, whose setter ignores charge.velocity and
         // PSVECNormalizes its Vec3 arg (we pass &zero) into NaN which it
-        // writes to kirby+0xA0.
-        Vec3 *vel = (Vec3 *)((char *)kirby + 0xA0);
+        // writes to charge.velocity.
+        Vec3 *vel = &kirby->charge.velocity;
         vel->X = vel->Y = vel->Z = 0.0f;
         apply(kirby);
         vel->X = vel->Y = vel->Z = 0.0f;

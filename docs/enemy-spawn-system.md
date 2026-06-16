@@ -326,17 +326,54 @@ Array at EnemyMgr+0x04. One entry per spawn position defined in the stage data.
 
 ### Spawn Data Structure
 
-From stage .dat file, pointed to by r13+0x630 (0x805DD710).
+From stage .dat file, pointed to by r13+0x630 (0x805DD710). Defined as
+`EnemySpawnData` in `enemy.h`.
 
 | Offset | Type | Description |
 |--------|------|-------------|
 | +0x00 | s16 | spawn_count |
-| +0x04 | ptr | spawn_entries (stride **0x38** per entry; see `EnemySpawnData` in `enemy.h`). Indexed by `position_index * 0x38` in `Enemy_SpawnActor`. |
+| +0x04 | ptr | spawn_entries — table of `EnemySpawnEntry` (stride **0x38** per entry). Indexed by `position_index`. |
 | +0x08 | int | (mode-dependent) |
 | +0x0C | ptr | secondary_table — pointer-array of meta-enemy sub-tables (0x50-0x5E). May be NULL. Read by `Enemy_SpawnerDecide`. |
 | +0x10 | ptr | config struct |
 
 Note: the **0x5C stride** is the per-position *extended data* array at `EnemyMgr+0x04` (runtime), not the stage-file `spawn_entries` (0x38).
+
+### Spawn Entry Struct (EnemySpawnEntry, 0x38 bytes)
+
+One entry per spawn position, loaded verbatim from the stage `.dat` (the engine
+only reads it). Defined as `EnemySpawnEntry` in `enemy.h`. The id/weight arrays
+live at **mode-dependent offsets** (the three modes pack them differently), so
+the struct models them as a union keyed on `config.mode`.
+
+Common fields:
+
+| Offset | Type | Name | Description |
+|--------|------|------|-------------|
+| +0x00 | s16 | location_index | Index into the stage enemy-position table (`GrData+0x138`, stride 0x24 of three Vec3s). Resolved by `loadEnemy_spawnXYLocation`; the position/direction/ground-normal go into the runtime per-position extended data, not back into this entry. |
+| +0x02 | s16 | pad02 | — |
+| +0x04 | s16 | entry_type | Sub-kind selector (modes 2/3): e.g. point vs spline spawn. |
+| +0x30 | f32 | scale | Per-spawn model scale (negated if negative, 1.0 if zero). |
+| +0x34 | s32 | variant | Copied into the actor descriptor's parent/variant slot. |
+
+Mode-dependent id/weight/lifetime fields (the union at +0x06..+0x2F):
+
+| Mode | ids | weights | lifetime base/range |
+|------|-----|---------|---------------------|
+| 1 (Air Ride courses) | s16[4] @ +0x1E | s16[4] @ +0x26 (-1 terminates) | +0x1A / +0x1C |
+| 2 (STKIND_MELEE1) | s16 enemy_id @ +0x06 | s16 weight_columns[N] @ +0x08 (one per meta-enemy category) | +0x24 / +0x26 |
+| 3 (STKIND_MELEE2) | s16[5] @ +0x06 | s16[5] @ +0x10 (-1 terminates) | +0x1A / +0x1C |
+
+Field readers: `location_index`, `scale`, `lifetime`, `variant` are read by
+`Enemy_SpawnActor` (modes 1/3) and `Enemy_SpawnActorMode2` (mode 2). The
+`ids`/`weights` arrays are read by `Enemy_SpawnerDecide` (modes 1/3) and
+`Enemy_SpawnerDecideMode2` (mode 2). Lifetime values 0 or 1 mean "no lifetime";
+values > 1 get +/- random jitter from the range field.
+
+Mode 2 is two-stage: `Enemy_SpawnerDecideMode2` weighted-picks a meta-enemy
+category from `secondary_table[0]` (biased by `EnemyMgr.time_progress`), then
+picks a concrete enemy from that category's per-entry `weight_columns` and
+returns the entry's `enemy_id`.
 
 Config struct at spawn_data+0x10:
 
@@ -612,8 +649,10 @@ For meteor-specific documentation (state machine, standalone spawn, patches), se
 | EventActor_CopyParentState | 0x80219fd4 | 0x9c | State function: copy position/direction from parent |
 | EventActor_GetParentScale | 0x802049b8 | 0xc | Reads parent_gobj->userdata + 0x2B0 (scale). Crashes if null. |
 | EnemyPath_Init | 0x80206e2c | 0xd4 | Find nearest spline and assign path data to EnemyData |
-| Enemy_SpawnActor | 0x800f13a8 | 0x318 | Spawn-slot wrapper: variant extraction, meta-enemy expansion, calls EventActor_Create |
+| Enemy_SpawnActor | 0x800f13a8 | 0x318 | Spawn-slot wrapper (modes 1/3): variant extraction, meta-enemy expansion, calls EventActor_Create |
+| Enemy_SpawnActorMode2 | 0x800f16c0 | 0x354 | Mode-2 spawn helper: builds descriptor from a spawn entry, calls EventActor_Create |
 | Enemy_SpawnerDecide | 0x800f1a14 | 0xa54 | Decides what enemy to spawn at a position (weighted random, mode-branched) |
+| Enemy_SpawnerDecideMode2 | 0x800f0efc | 0x1f8 | Mode-2 two-stage picker: meta-enemy category from secondary[0], then concrete enemy from its weight column |
 | Enemy_UnregisterFromSpawnSlot | 0x800f3b28 | 0xbc | Remove actor from spawn-slot tracking, set respawn timer |
 | Enemy_GetActorData | 0x801fd498 | 0xe8 | Look up loaded archive data pointer by ActorID (tier-aware) |
 | Enemy_CheckAndLoad | 0x801fd060 | 0x5c | Load archive for actor ID |

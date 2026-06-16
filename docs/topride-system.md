@@ -132,19 +132,42 @@ Vanilla provides accessors:
 
 ## Kirby Object Layout
 
-Each player is represented by a Kirby object (~0x500+ bytes). Vtable at `0x804d2304`, RTTI name "Kirby". Created by `TopRide_KirbyInit` (0x802d4d64, size 0x788).
+Each player is represented by a Kirby object (>0x1400 bytes — an `Absorber`
+sub-object lives at +0xD00). Vtable at `0x804d2304`, RTTI name "Kirby". Created
+by `TopRide_KirbyInit` (0x802d4d64, size 0x788). The struct `TopRideKirby` in
+`topride.h` maps the head plus the inline charge component (the 0x00..~0x530
+region); the rest of the object is unmapped.
+
+`session_data` (+0x04) points at the inline charge component (kirby+0x80) — this
+is how `TopRide_KirbyModelThink` reaches `model_jobj` / `model_scale` via
+`session_data[+0x460]` / `session_data[+0x4A4]` (absolute kirby+0x4E0 / +0x524).
 
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
 | 0x00 | ptr | vtable | `0x804d2304` |
-| 0x04 | ptr | session_data | Points to game session config |
+| 0x04 | ptr | session_data | Aliases the inline charge component (= kirby+0x80) |
 | 0x0C | u8 | player_slot | Controller slot (0–3). Pass to `TopRide_GetPlayerKind` to discriminate human vs CPU vs empty. |
 | 0x0D | u8 | char_type | Character kind |
 | 0x0E | u8 | start_position | Fisher-Yates shuffled grid position (0–3), reset each round in `TopRide_FielderInit`. **Not** a CPU level — every kirby (human or CPU) is assigned a starting position 0–3. |
-| 0x10 | u8 | is_active | Set on race start; stays 0 in Time Attack and Free Run even while the human is playing. **Do not gate solo-mode mod code on this bit** — use `round_state == 2` + `TopRide_GetPlayerKind() == TR_PKIND_HMN` instead (see `gate_topride_items.c` / `energylink.c`). |
-| 0x4C | Vec3 | position | World position |
-| 0x58 | Vec3 | target_pos | Camera target |
-| 0x64 | int[3] | angles | Rotation |
+| 0x0F | u8 | place | Current race placement / finish rank, written each frame by the ranking pass in `TopRide_KirbyMgrUpdate`. 0 while still racing; gated `== 0` as "not yet finished". |
+| 0x10 | u8 | is_active | Final standings byte set by the same ranking pass on race start; stays 0 in Time Attack and Free Run even while the human is playing. **Do not gate solo-mode mod code on this bit** — use `round_state == 2` + `TopRide_GetPlayerKind() == TR_PKIND_HMN` instead (see `gate_topride_items.c` / `energylink.c`). |
+| 0x14 | int | lap_progress | Accumulates the per-frame CheckLine cross result (init -1); going positive completes a lap/segment. |
+| 0x18 | u8 | lap_pending | Set when a checkpoint is crossed backward; gates the lap-completion branch. |
+| 0x1C | u32 | finish_time | Total frame counter; latched to the master race timer (`KirbyMgr+0x402C`) when `finished` is set. |
+| 0x20 | u32 | prev_lap_frames | Snapshot of `cur_lap_frames` at lap completion. |
+| 0x24 | u32 | cur_lap_frames | Current-lap frame counter; reset to 0 on lap completion, incremented every frame. |
+| 0x2C | float | mass | Per-character mass / scale base (read constantly in physics; scales knockback). |
+| 0x30 | float | gravity | Gravity / vertical-accel base. |
+| 0x34 | float | accel_param | Frame-scaled acceleration parameter. |
+| 0x38 | float | decel_param | Frame-scaled deceleration parameter. |
+| 0x3E | u8 | finished | Set to 1 when the kirby crosses the finish line; gates the per-frame counter increments in `TopRide_KirbyPhysUpdate`. |
+| 0x40 | u8 | direction_sign | Movement-direction sign flag, refreshed each frame from the run mode. |
+| 0x42 | u16 | screen_w | Viewport width (init 320). |
+| 0x44 | u16 | screen_h | Viewport height (init 240). |
+| 0x48 | ptr | input_reader | Controller / input source object (vt+0x14 polls the stick). |
+| 0x4C | Vec3 | position | Spawn / default pos — **not** tracked per frame. Use `charge.position` (0x88) for the live in-world position. |
+| 0x58 | Vec3 | target_pos | Initial camera target / lookat. |
+| 0x64 | u8[0x18] | history | 10-entry circular history ring (head index + paired byte values), pushed by `TopRide_KirbyHistoryPush` (0x80311f88) and queried by `TopRide_KirbyHistoryQuery` (0x80312000) for an anti-jitter snap. Constructed by `TopRide_KirbyHistoryInit` (0x80311f2c). |
 | 0x7C | ptr | state_handler | Input/state handler (charge state machine) |
 | 0x80 | — | **charge_component** | Start of charge component (inline sub-object) |
 
@@ -261,6 +284,9 @@ if charge_value == 0.0:
 | 0x802de0e4 | 0xC | TopRide_GetDataTable | Returns data table ptr (0x804d40f0) |
 | 0x80296264 | 0x8 | TopRide_GetFrameScale | Returns frame rate scale (1.0 at 60fps) |
 | 0x802d1d84 | 0x264 | TopRide_VelocityDecay | Post-boost velocity decay |
+| 0x80311f2c | 0x5C | TopRide_KirbyHistoryInit | Constructs the per-kirby anti-jitter history ring (kirby+0x64) |
+| 0x80311f88 | 0x78 | TopRide_KirbyHistoryPush | Pushes the current paired sign values into the ring |
+| 0x80312000 | 0xC0 | TopRide_KirbyHistoryQuery | Queries the ring (used for the spline-snap / direction smoothing) |
 
 ### Data Table
 

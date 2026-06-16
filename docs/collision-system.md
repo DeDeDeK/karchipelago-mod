@@ -256,6 +256,29 @@ CityItem_EnvColl (0x8024f814)          — GObj proc callback
 | 0x800D1860 | 0x90 | PointCollision_GetNormalByID | Looks up triangle normal (stride 0x40 per entry) |
 | 0x800D1AC4 | 0x70 | EnvColl_Raycast | Wrapper around Raycast_Do |
 | 0x800D9958 | 0x4DC | Raycast_Do | Core raycast against map geometry |
+| 0x800D4F20 | 0x98 | calcDistanceFromOOB | Minimum signed clearance from the stage OoB death box |
+
+## Stage Out-of-Bounds Death Box
+
+The playfield is bounded by an axis-aligned box stored in the stage file,
+separate from the triangle-mesh collision above. It lives in the
+`StageNode` sub-block at `GrData+0x04` (`externals/hoshi/include/stage.h`):
+
+```
+StageNode.oob_min   // +0xCC  Vec3 (minX, minY, minZ)
+StageNode.oob_max   // +0xD8  Vec3 (maxX, maxY, maxZ)
+```
+
+For City Trial (`GrCity1.dat`) these are `(-1300, -300, -1300)` /
+`(1300, 1500, 1300)`.
+
+`calcDistanceFromOOB(Vec3 *pos)` (0x800d4f20) reads the box from
+`(*stc_grobj)->gr_data->stage_node` and returns the minimum signed distance to
+any of the six planes: positive while `pos` is inside the box, negative once
+it has crossed a wall. Out-of-bounds death/fall logic uses this clearance.
+The box is plain spatial data (not a JObj), so scaling the stage visuals does
+not move it — `event_scale_change.c` rescales `oob_min`/`oob_max` explicitly
+to keep the kill box matched to the resized stage.
 
 ## Who Uses What
 

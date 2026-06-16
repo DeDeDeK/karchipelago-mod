@@ -243,7 +243,7 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
 
     for (int i = 0; i < data->spawn_count; i++)
     {
-        char *entry = data->spawn_entries + i * 0x38;
+        char *entry = (char *)&data->spawn_entries[i];
         short *ids = (short *)(entry + ids_offset);
         short *weights = (short *)(entry + weights_offset);
 
@@ -307,17 +307,16 @@ static void FilterMode2(EnemySpawnData *data)
     int zeroed_entries = 0;
     for (int i = 0; i < data->spawn_count; i++)
     {
-        char *entry = data->spawn_entries + i * 0x38;
-        int enemy_id = *(short *)(entry + 0x06);
+        EnemySpawnEntry *entry = &data->spawn_entries[i];
+        int enemy_id = entry->mode2.enemy_id;
 
         if (enemy_id < 0)
             continue;
 
         if (IsEnemyAbilityLocked(enemy_id))
         {
-            short *weights = (short *)(entry + 0x08);
             for (int col = 0; col < num_categories; col++)
-                weights[col] = 0;
+                entry->mode2.weight_columns[col] = 0;
             zeroed_entries++;
         }
     }
@@ -330,8 +329,7 @@ static void FilterMode2(EnemySpawnData *data)
         int has_valid = 0;
         for (int i = 0; i < data->spawn_count; i++)
         {
-            short *weights = (short *)(data->spawn_entries + i * 0x38 + 0x08);
-            if (weights[cat] > 0)
+            if (data->spawn_entries[i].mode2.weight_columns[cat] > 0)
             {
                 has_valid = 1;
                 break;
@@ -363,6 +361,8 @@ void GateAbilities_On3DLoadEnd()
 
     switch (mode)
     {
+        // Offsets match EnemySpawnEntry.mode1 (ids 0x1e, weights 0x26) and
+        // EnemySpawnEntry.mode3 (ids 0x06, weights 0x10).
         case 1: FilterMode1Or3(data, 0x1e, 0x26, 4); break;
         case 2: FilterMode2(data); break;
         case 3: FilterMode1Or3(data, 0x06, 0x10, 5); break;

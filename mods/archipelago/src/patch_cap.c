@@ -71,7 +71,7 @@ void PatchCap_GivePatch(MachineData *md, PatchKind kind, int num)
     num = PatchCap_ClampDelta(kind, md->stats.values[kind], num);
     Machine_ApplyStatClamped(md->stats.values, kind, num);
     Machine_UpdateAppearance(md);
-    if ((s8)md->xc38 >= 0)
+    if (!md->suppress_attr_recalc)
         Machine_AdjustAttributes(md);
 }
 
@@ -102,7 +102,7 @@ void PatchCap_GiveAllUp(MachineData *md, int num)
     }
 
     Machine_UpdateAppearance(md);
-    if ((s8)md->xc38 >= 0)
+    if (!md->suppress_attr_recalc)
         Machine_AdjustAttributes(md);
 }
 

@@ -93,9 +93,11 @@ Both replacements finish by refreshing visuals and (conditionally) attributes:
 
 ```c
 Machine_UpdateAppearance(md);
-if ((s8)md->xc38 >= 0)            // xc38 @ 0xc38; skip attribute recalc when negative
+if (!md->suppress_attr_recalc)    // 0xc3b bit 0x80; replicates the vanilla gate
     Machine_AdjustAttributes(md);
 ```
+
+`suppress_attr_recalc` is the sign bit of the per-vehicle model/variant flag byte at `MachineData+0xc3b`, set by the vehicle's model-setup callback (`vcDataCommon+0x18`) at spawn. It is only set for the special transformation star variants — Wing Kirby (`VCKIND_WINGKIRBY`, kind 0x11) and Compact Star (`VCKIND_COMPACT`, kind 0x1) — whose derived attributes are fixed rather than patch-driven, so vanilla `Machine_GivePatch` / `Machine_GiveAllUp` skip `Machine_AdjustAttributes` for them. The replacements preserve that gate exactly.
 
 `PatchCap_GiveAllUp` loops `PATCHKIND_NUM` (9) stats, pre-clamping each individually, then credits the player's all-up counter — but only when the machine is occupied:
 

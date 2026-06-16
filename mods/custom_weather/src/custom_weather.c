@@ -225,13 +225,10 @@ static char *toggle_names[] = {"Disabled", "Enabled"};
 // Safe to call each stage load (idempotent).
 static void ExtendPresetArray(GrObj *grobj)
 {
-    // Access path (confirmed via disasm of Sky_GetPresetCount / Sky_BeginTransition):
-    //   grobj->gr_data (+0x08) -> sky_block (+0x34) -> sub_header (+0x04)
-    //   sub_header[0] = preset array base pointer
-    //   sub_header[1] = preset count (int stored as pointer-width)
-    void **sky_block = *(void ***)((u8 *)grobj->gr_data + 0x34);
-    void **sub_header = (void **)sky_block[1];
-    SkyPresetEntry *vanilla_array = (SkyPresetEntry *)sub_header[0];
+    // grobj->gr_data->sky_block->preset_header holds {preset_array, preset_count}.
+    SkyBlock *sky_block = grobj->gr_data->sky_block;
+    SkyPresetSubHeader *sub_header = sky_block->preset_header;
+    SkyPresetEntry *vanilla_array = sub_header->preset_array;
 
     // Copy all vanilla presets
     memcpy(extended_presets, vanilla_array,
@@ -259,8 +256,8 @@ static void ExtendPresetArray(GrObj *grobj)
     }
 
     // Repoint game data to our extended array
-    sub_header[0] = (void *)extended_presets;
-    sub_header[1] = (void *)WEATHER_TOTAL;
+    sub_header->preset_array = extended_presets;
+    sub_header->preset_count = WEATHER_TOTAL;
 }
 
 // Replaces vanilla random/fixed sky selection.

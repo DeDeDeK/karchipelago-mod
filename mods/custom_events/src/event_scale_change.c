@@ -4,8 +4,8 @@
 // Two JOBJs are scaled and matrix-dirtied: the stage visual model (stage GOBJ)
 // and the backdrop/skybox JOBJ at GrObj+0xF4. Collision does NOT scale - it's
 // pre-baked spatial data, not a JOBJ (the GetCollisionJObj helper is misnamed;
-// +0xF4 is the backdrop). OOB boundaries are the 6 AABB floats at
-// stage_node+0xCC, scaled proportionally so the kill box matches.
+// +0xF4 is the backdrop). OOB boundaries are StageNode.oob_min / oob_max (6
+// AABB floats), scaled proportionally so the kill box matches.
 
 #include "game.h"
 #include "os.h"
@@ -15,8 +15,8 @@
 
 #define SCALE_MULTIPLIER 1.5f
 
-// OOB boundary: 6 floats at stage_node + 0xCC (minX, minY, minZ, maxX, maxY, maxZ)
-#define OOB_OFFSET     0xCC
+// OOB boundary: StageNode.oob_min then oob_max, 6 contiguous floats
+// (minX, minY, minZ, maxX, maxY, maxZ) starting at oob_min.X (stage_node+0xCC).
 #define OOB_FLOAT_COUNT 6
 
 static float original_scale;
@@ -44,7 +44,7 @@ static float *GetOOBBounds(void)
     GrObj *grobj = *stc_grobj;
     if (!grobj || !grobj->gr_data || !grobj->gr_data->stage_node)
         return NULL;
-    return (float *)((char *)grobj->gr_data->stage_node + OOB_OFFSET);
+    return &grobj->gr_data->stage_node->oob_min.X;
 }
 
 static void ApplyJObjScale(JOBJ *jobj, float s)
