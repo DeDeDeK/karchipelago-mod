@@ -9,6 +9,7 @@
 #include "stadium.h"
 
 #include "main.h"
+#include "save_icon.h"
 #include "deathlink.h"
 #include "city_trial_event.h"
 #include "ap_item_handler.h"
@@ -81,6 +82,9 @@ void OnBoot()
     // Place pointer to this allocation at a static address so the Python client can find it
     APData **static_ptr = (APData **)0x805d52d4;
     (*static_ptr) = ap_data;
+
+    // Give the shared hoshi memory-card file an Archipelago icon (otherwise its tile is blank)
+    Hoshi_SetSaveIcon("KARchipelago", "Save Data", ap_save_icon, 1, CARD_STAT_SPEED_MIDDLE);
 
     // Replace ClearChecker_CheckUnlocked with AP bitfield hook
     ChecklistRewards_OnBoot();
