@@ -5,9 +5,11 @@
 #include "hoshi/func.h"
 
 #include "archipelago_api.h"
+#include "custom_events_api.h"
 #include "debug_menu.h"
 
 const ArchipelagoAPI *ap_api = 0;
+static const CustomEventsAPI *ce_api = 0;
 
 static void TryImportApi(void)
 {
@@ -15,6 +17,10 @@ static void TryImportApi(void)
         ap_api = (const ArchipelagoAPI *)Hoshi_ImportMod(
             (char *)ARCHIPELAGO_MOD_NAME,
             ARCHIPELAGO_API_MAJOR, ARCHIPELAGO_API_MINOR);
+    if (!ce_api)
+        ce_api = (const CustomEventsAPI *)Hoshi_ImportMod(
+            (char *)CUSTOM_EVENTS_MOD_NAME,
+            CUSTOM_EVENTS_API_MAJOR, CUSTOM_EVENTS_API_MINOR);
 }
 
 static void OnSaveLoaded(void)
@@ -25,6 +31,8 @@ static void OnSaveLoaded(void)
         OSReport("[ApDebug] failed to import KARchipelago API\n");
         return;
     }
+    if (!ce_api)
+        OSReport("[ApDebug] custom_events API unavailable (Gourmet Race trigger disabled)\n");
     // Reflect archipelago's masks into our local toggle state so the menu
     // matches reality after AP grants from save load.
     DebugMenu_RefreshStateFromMasks();
@@ -200,8 +208,13 @@ static void OnFrameStart(void)
         }
         else
         {
-            ap_api->DebugTriggerTraplinkReceive();
-            OSReport("[ApDebug] triggered traplink_receive\n");
+            // Plain Up: trigger the custom Gourmet Race City Trial event.
+            // Do() returns 0 outside City Trial, when an event is already
+            // active, or if custom_events didn't export its API.
+            if (ce_api && ce_api->Do(CUSTOM_EVKIND_GOURMET_RACE))
+                OSReport("[ApDebug] triggered Gourmet Race event\n");
+            else
+                OSReport("[ApDebug] Gourmet Race trigger unavailable (needs City Trial, no active event, custom_events loaded)\n");
         }
     }
 

@@ -1,9 +1,9 @@
 # Gourmet Race Event
 
-> **Status: IMPLEMENTED but NOT REACHABLE in the current build.**
-> The Gourmet Race event itself is fully coded and registered in the custom-events tables (params + function table, `CUSTOM_EVKIND_GOURMET_RACE` = 19). All three callbacks, food spawning, respawn watcher, scoring, and the score HUD are present and complete.
+> **Status: IMPLEMENTED and ACTIVE — the only enabled custom event.**
+> The Gourmet Race event is fully coded and registered in the custom-events tables (params + function table, `CUSTOM_EVKIND_GOURMET_RACE` = 19): all three callbacks, food spawning, respawn watcher, scoring, and the score HUD are present and complete.
 >
-> **However, the entire `custom_events` framework is currently dormant:** in `mods/custom_events/src/main.c` both `.OnBoot = OnBoot` and `.On3DLoadEnd = On3DLoadEnd` are **commented out** in `mod_desc`. As a result `CustomEvents_OnBoot()` is never called, so the `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` selection hook is never installed and the state-handler wrappers are never patched in. No other mod imports/triggers the `CustomEventsAPI` (the archipelago mod does not reference it). Consequently Gourmet Race — like all four custom events — **cannot be selected or triggered at runtime as the repo currently stands.** To activate it, the `ModDesc` hooks must be uncommented. See `custom-events.md` for the framework wiring.
+> The `custom_events` framework is enabled: `mods/custom_events/src/main.c` wires `.OnBoot` and `.On3DLoadEnd` in `mod_desc`, so `CustomEvents_OnBoot()` installs the `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` selection hook and the state-handler wrappers. The other three custom events (Waddle Dee Swarm, Gravity Change, Scale Change) carry `weight = 0` so they never naturally occur; Gourmet Race keeps `weight = 20`, so it can both roll naturally and be triggered on demand. The cannon investigation diagnostic (`CannonEvent_On3DLoadEnd`) is left disabled. The `archipelago_debug` mod imports the `CustomEventsAPI` and fires `Do(CUSTOM_EVKIND_GOURMET_RACE)` on a **plain D-Pad Up** press. See `custom-events.md` for the framework wiring.
 
 Custom City Trial event where food items are scattered across the map. Players compete to collect the most food within the time limit. The winner receives All Up patches as a reward.
 
@@ -30,7 +30,7 @@ Custom City Trial event where food items are scattered across the map. Players c
 
 `custom_functions[...]`: `.start = GourmetRace_Start`, `.active = GourmetRace_Active`, `.end2 = GourmetRace_End2`.
 
-Selection (when the framework is active): `CustomEvents_ExtendedRoll` adds each custom event's `weight` to the vanilla `Gm_Roll` pool; on a Gourmet Race win it calls `CustomEvent_Do(19)`. This roll hook is currently not installed because the `ModDesc` boot hooks are commented out (see the status banner above).
+Selection: `CustomEvents_ExtendedRoll` adds each custom event's `weight` to the vanilla `Gm_Roll` pool; on a Gourmet Race win it calls `CustomEvent_Do(19)`. Gourmet Race carries `weight = 20`; the other three custom events are at `weight = 0`, so only Gourmet Race participates in the natural roll.
 
 ### Entry points
 
@@ -50,7 +50,8 @@ Selection (when the framework is active): `CustomEvents_ExtendedRoll` adds each 
 | `mods/custom_events/src/event_gourmet_race.c` | Full event implementation |
 | `mods/custom_events/include/custom_events_api.h` | `CUSTOM_EVKIND_GOURMET_RACE` enum entry (= 19; public API header) |
 | `mods/custom_events/src/custom_events.c` | Event params (duration, sky, BGM, weight, SIS label) + function-table registration; `CustomEvents_ExtendedRoll` selection hook |
-| `mods/custom_events/src/main.c` | `ModDesc` — **`.OnBoot`/`.On3DLoadEnd` currently commented out**, so the framework (and thus this event) is inactive |
+| `mods/custom_events/src/main.c` | `ModDesc` — wires `.OnBoot`/`.On3DLoadEnd`, activating the framework (cannon diagnostic left disabled) |
+| `mods/archipelago_debug/src/main.c` | Imports `CustomEventsAPI`; plain D-Pad Up calls `Do(CUSTOM_EVKIND_GOURMET_RACE)` |
 
 ## Food Spawning — Four-Pass System
 
@@ -168,7 +169,10 @@ When a food disappears, the watcher finds the nearest player (by 3D distance fro
 ## Technical Details
 
 ### Item System Integration
-- Items created via `Item_InitDesc` + `Item_Create` (standard item spawning API). `SpawnFoodItem` passes the food kind, scale, `pos`, and the `coll_kind` as the collision param, then overrides `ItemData.lifetime` (0x48) to `GOURMET_ITEM_LIFETIME` (30000).
+- Items created via `Item_InitDesc` + `Item_Create` (standard item spawning API). `SpawnFoodItem` passes the food kind, scale, `pos`, the `coll_kind` as the collision param, and an explicit forward vector (`{0,0,1}`; up left `NULL`), then overrides `ItemData.lifetime` (0x48) to `GOURMET_ITEM_LIFETIME` (30000).
+- **The forward vector must stay non-zero, including after landing.** The engine builds each item's model render matrix (the user-defined matrix at the JObj root, `JOBJ_USER_DEFINED_MTX`) from `ItemData.up` (0x10C) and `ItemData.forward` (0x100). A zero forward makes the basis (`up × forward`) collapse to rank-1, squashing the model into an invisible sliver. Collision uses point/position data independently, so such a food is still pickable - just unseen. Two places matter:
+  - **Spawn:** `SpawnFoodItem` passes an explicit forward (`{0,0,1}`) and leaves up `NULL` so the food tilts to the ground normal on landing.
+  - **Settle:** the item's settle state (state 4, on landing) **zeroes `ItemData.forward`**, so a one-time spawn value is not enough. `GourmetRace_WatcherProc` re-asserts `forward = {0,0,1}` on every live food each frame; up keeps the ground normal, so the food stays ground-aligned and visible.
 - `coll_kind` is the collision param of `Item_InitDesc` (stored to `ItemData.coll_kind`, 0x4C). The code uses `coll_kind=3` for surface (high-up) spawns and `coll_kind=2` for underground/pre-placed spawns, treating these as "ground-snap with rejection" vs "no rejection" respectively. (Per `item.h`, `coll_kind` 3 = point collision used by most items; the precise snap/reject behavior for 2 vs 3 reflects the spawner's intent.)
 - Item hard cap: `Item_Create` returns NULL once the city item limit is hit; the spawner simply records fewer foods and the respawn path retries next frame.
 - Items spawn on `p_link = 13` (`GAMEPLINK_ITEM`); `entity_class` is set internally by `Item_Create`.
@@ -184,9 +188,10 @@ When a food disappears, the watcher finds the nearest player (by 3D distance fro
 A real-time per-player score display (`ScoreHUD`) is implemented and shown on-screen during the event. See `custom-hud.md` for the general GObj/JObj/GX-link HUD pattern this follows.
 
 `ScoreHUD_Create` builds, for each non-`PKIND_NONE` player (up to `HUD_MAX_PLAYERS` = 4):
-- A dedicated ortho camera GObj (`GOBJ_EZCreator` → `HSD_OBJKIND_COBJ`, `CObj_SetOrtho`) driving two GX links: BG = 22, FG = 23.
-- A background-rect GObj on the BG link (`ScoreHUD_BGRender` → `GX_DrawRect`, semi-transparent black box behind the rows).
+- A dedicated ortho camera GObj (`GOBJ_EZCreator` → `HSD_OBJKIND_COBJ`, `CObj_SetOrtho`) driving a single GX link, FG = 23.
 - A player-number label model (`ScInfPlynum_scene_models`) and a gauge model (`ScInfPausegaugect_scene_models`), both pulled from the all-city archive (`Gm_GetIfAllCityArchive` → `Archive_GetPublicAddress`) and instantiated via `JObj_LoadSet_SetPri` on `GAMEPLINK_HUD`.
+
+The rows render directly over the scene with no backing panel.
 
 The gauge's digit JOBJs are cached by depth-first index via `GObj_GetJObjIndex`:
 
@@ -203,9 +208,9 @@ typedef struct ScoreHUD
 } ScoreHUD;
 ```
 
-`ScoreHUD_Update` (called from the watcher proc each frame) re-renders digits only when a player's score changes, clamped to 99, using `HUD_UpdateElement`. The bar and sign JOBJs are kept hidden (re-hidden each update in case AnimAll re-clears the flags). `ScoreHUD_Destroy` tears down all label/gauge/BG/camera GObjs in `GourmetRace_End2`.
+`ScoreHUD_Update` (called from the watcher proc each frame) re-renders digits only when a player's score changes, clamped to 99, using `HUD_UpdateElement`. The bar and sign JOBJs are kept hidden (re-hidden each update in case AnimAll re-clears the flags). `ScoreHUD_Destroy` tears down all label/gauge/camera GObjs in `GourmetRace_End2`.
 
-Note: `CObj_GX` (`0x8042a29c`) and `pGXSetBlendMode` (`0x803cf820`) are accessed as raw function-pointer casts in the source (not in `link.ld`); they correspond to `CObjThink_Common` and `GXSetBlendMode` respectively in `GKYE01.map`. `pGXSetBlendMode` is declared but not currently called.
+Note: `CObj_GX` (`0x8042a29c`) is accessed as a raw function-pointer cast in the source (not in `link.ld`); it corresponds to `CObjThink_Common` in `GKYE01.map`, used here as the HUD camera's GX callback.
 
 ## Future Work
 

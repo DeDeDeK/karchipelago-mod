@@ -28,7 +28,7 @@ CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 5,   // Dark Vignette
         .bgm_file = 0x34,  // Runamok BGM
-        .weight = 20,
+        .weight = 0,       // disabled: only Gourmet Race is active for now
         .label = "Waddle Dee Swarm",
         .hud_text = "Waddle Dee swarm incoming!",
     },
@@ -37,7 +37,7 @@ CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 8,   // Pink Sky
         .bgm_file = 0x31,  // Meteor BGM
-        .weight = 20,
+        .weight = 0,       // disabled: only Gourmet Race is active for now
         .label = "Gravity Change",
         .hud_text = "Gravity is changing!",
     },
@@ -46,7 +46,7 @@ CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 3,   // Dusk 2
         .bgm_file = 0x32,  // Dyna Blade BGM
-        .weight = 20,
+        .weight = 0,       // disabled: only Gourmet Race is active for now
         .label = "Scale Change",
         .hud_text = "The world is growing!",
     },

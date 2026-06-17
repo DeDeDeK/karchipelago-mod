@@ -117,21 +117,13 @@ static int scores[5]; // per-player scores
 #define HUD_ROW_SPACING     (-40.0f)
 #define HUD_GAUGE_X_OFFSET  40.0f
 #define HUD_GAUGE_Y_OFFSET  35.0f   // nudge gauge up to align with label
-#define GOURMET_HUD_BG_GXLINK   22  // background renders first
-#define GOURMET_HUD_FG_GXLINK   23  // foreground (labels + digits) renders on top
-#define HUD_BG_COLOR_R      0
-#define HUD_BG_COLOR_G      0
-#define HUD_BG_COLOR_B      0
-#define HUD_BG_COLOR_A      50
-#define HUD_BG_PAD_X        8.0f
-#define HUD_BG_PAD_Y        5.0f
+#define GOURMET_HUD_FG_GXLINK   23  // labels + digits
 
 // Not in link.ld: 0x8042a29c is a CObj render-pass dispatcher (the map labels it
 // CObjThink_Common; used here as the HUD camera's GX callback).
 static void (*CObj_GX)(GOBJ *g, int pass) = (void *)0x8042a29c;
 
 static GOBJ *hud_camera_gobj;
-static GOBJ *hud_bg_gobj;
 
 typedef struct ScoreHUD
 {
@@ -147,25 +139,6 @@ typedef struct ScoreHUD
 static ScoreHUD score_huds[HUD_MAX_PLAYERS];
 static int num_score_huds;
 
-static void ScoreHUD_BGRender(GOBJ *gobj, int pass)
-{
-    if (pass != 0 || num_score_huds == 0)
-        return;
-
-    // Compute bounding box around all HUD rows.
-    float top = HUD_Y_START + HUD_BG_PAD_Y;
-    float bottom = HUD_Y_START + HUD_ROW_SPACING * (num_score_huds - 1)
-                   - HUD_BG_PAD_Y;
-    float left = HUD_X - HUD_BG_PAD_X;
-    float right = HUD_X + HUD_GAUGE_X_OFFSET + 60.0f + HUD_BG_PAD_X;
-
-    // Use GX_DrawRect (known working), then we'll address transparency later.
-    Vec3 bl = { left, bottom, 0 };
-    Vec3 tr = { right, top, 0 };
-    GXColor color = { HUD_BG_COLOR_R, HUD_BG_COLOR_G, HUD_BG_COLOR_B, HUD_BG_COLOR_A };
-    GX_DrawRect(&bl, &tr, &color);
-}
-
 static void ScoreHUD_Create(void)
 {
     HSD_Archive **arch = Gm_GetIfAllCityArchive();
@@ -177,21 +150,16 @@ static void ScoreHUD_Create(void)
         return;
     }
 
-    // Create a dedicated ortho camera for our HUD.
-    // Two GX links: BG (22) renders first, FG (23) renders on top.
+    // Create a dedicated ortho camera for our HUD, driving the FG GX link
+    // (player labels + score digits).
     hud_camera_gobj = GOBJ_EZCreator(0, 0, 0,
                                       0, 0,
                                       HSD_OBJKIND_COBJ, (COBJDesc *)0x805096a0,
                                       0, 0,
                                       CObj_GX, 0, 5);
-    hud_camera_gobj->cobj_links = (1ULL << GOURMET_HUD_BG_GXLINK)
-                                | (1ULL << GOURMET_HUD_FG_GXLINK);
+    hud_camera_gobj->cobj_links = (1ULL << GOURMET_HUD_FG_GXLINK);
     COBJ *cam_cobj = hud_camera_gobj->hsd_object;
     CObj_SetOrtho(cam_cobj, 0.0f, -480.0f, 0.0f, 640.0f);
-
-    // Background rectangle GOBJ on BG link (renders behind everything)
-    hud_bg_gobj = GObj_Create(0, 0, 0);
-    GObj_AddGXLink(hud_bg_gobj, ScoreHUD_BGRender, GOURMET_HUD_BG_GXLINK, 0);
 
     num_score_huds = 0;
 
@@ -311,11 +279,6 @@ static void ScoreHUD_Destroy(void)
     }
     num_score_huds = 0;
 
-    if (hud_bg_gobj)
-    {
-        GObj_Destroy(hud_bg_gobj);
-        hud_bg_gobj = NULL;
-    }
     if (hud_camera_gobj)
     {
         GObj_Destroy(hud_camera_gobj);
@@ -388,9 +351,17 @@ static void RecordSpawn(Vec3 *pos)
 // Spawn a single food item. Returns the GObj or NULL.
 static GOBJ *SpawnFoodItem(ItemKind kind, Vec3 *pos, float scale, int coll_kind)
 {
+    // The engine builds each item's render matrix from its up/forward vectors;
+    // a zero forward collapses that matrix to rank-1 and makes the model an
+    // invisible sliver (collision still works, so the food stays pickable).
+    // Give the spawn an explicit forward; up is left NULL so the food tilts to
+    // the ground normal on landing. The settle state later zeroes forward, so
+    // GourmetRace_WatcherProc re-asserts it every frame.
+    Vec3 forward = { 0.0f, 0.0f, 1.0f };
+
     ItemDesc desc;
     Item_InitDesc(&desc, kind, scale, 0,
-                  pos, NULL, NULL, -1, -1,
+                  pos, NULL, &forward, -1, -1,
                   0, coll_kind, -1, -1);
     GOBJ *item = Item_Create(&desc);
     if (item)
@@ -475,7 +446,19 @@ static void GourmetRace_WatcherProc(GOBJ *gobj)
                     break;
                 }
             }
-            if (!alive)
+            if (alive)
+            {
+                // The settle state zeroes ItemData.forward when the item lands,
+                // which collapses the model's render matrix to rank-1 and makes
+                // the food invisible (still pickable). Re-assert a valid forward
+                // every frame; up is left as the ground normal so the food keeps
+                // tilting with the terrain.
+                ItemData *id = slot->gobj->userdata;
+                id->forward.X = 0.0f;
+                id->forward.Y = 0.0f;
+                id->forward.Z = 1.0f;
+            }
+            else
             {
                 // Attribute to nearest player
                 int ply = FindNearestPlayer(&slot->spawn_pos);

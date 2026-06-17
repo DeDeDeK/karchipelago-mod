@@ -3,6 +3,10 @@
 
 #include "event.h"
 
+// Mod name as registered in custom_events' ModDesc. Pass to Hoshi_ImportMod
+// alongside the version macros below to resolve this API from another mod.
+#define CUSTOM_EVENTS_MOD_NAME "custom_events"
+
 // API version: bump major on breaking changes, minor on additions.
 #define CUSTOM_EVENTS_API_MAJOR 1
 #define CUSTOM_EVENTS_API_MINOR 0

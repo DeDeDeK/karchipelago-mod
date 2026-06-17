@@ -1,10 +1,10 @@
 # Custom City Trial Events
 
-> **⚠️ WIP — currently DORMANT (not wired up).** The whole framework is implemented but disabled at the mod entry point: in `mods/custom_events/src/main.c` the `ModDesc` has both `.OnBoot` and `.On3DLoadEnd` **commented out**. Because `CustomEvents_OnBoot()` never runs, the state-handler wrappers are never installed, the extended-roll `CODEPATCH_REPLACECALL` is never applied, and the `CustomEventsAPI` is never `Hoshi_ExportMod`'d. `CustomEvents_InitSis()` and `CannonEvent_On3DLoadEnd()` likewise never fire. No other mod imports `CustomEventsAPI` (the header `custom_events_api.h` is included only inside this mod), and nothing calls `CustomEvent_Do`. Treat all "active/working" language below as describing the design when the hooks are re-enabled, not current runtime behavior.
+> **⚠️ WIP — framework wired; only Gourmet Race enabled; mod excluded from the default build.** `mods/custom_events/src/main.c` wires both `.OnBoot` and `.On3DLoadEnd` in its `ModDesc`, so when the mod is built `CustomEvents_OnBoot()` installs the state-handler wrappers + the extended-roll `CODEPATCH_REPLACECALL` and exports `CustomEventsAPI` via `Hoshi_ExportMod`; `CustomEvents_InitSis()` runs on City Trial load. **Only Gourmet Race is enabled** — the other three events carry `weight = 0` (never naturally occur). `archipelago_debug` imports `CustomEventsAPI` and triggers Gourmet Race via `CustomEvent_Do` on a plain D-Pad Up press. The cannon investigation harness is left off (the `CannonEvent_On3DLoadEnd()` call in `On3DLoadEnd` is commented out). **Build note:** `custom_events` and `archipelago_debug` are in the Makefile's default `EXCLUDE_MODS`, so the standard `make deploy` omits them — include them with `make deploy EXCLUDE_MODS=custom_weather`.
 
 ## Overview
 
-The custom event system is designed to extend the vanilla City Trial event system to support mod-defined events with custom behavior, triggered via the extended natural-selection roll (and, when re-wired, via `CustomEvent_Do`). Custom events integrate with the vanilla event state machine (siren, sky transitions, HUD announcements, lifecycle states) without breaking existing events.
+The custom event system is designed to extend the vanilla City Trial event system to support mod-defined events with custom behavior, triggered via the extended natural-selection roll (and directly via `CustomEvent_Do`). Custom events integrate with the vanilla event state machine (siren, sky transitions, HUD announcements, lifecycle states) without breaking existing events.
 
 Implementation: `mods/custom_events/src/custom_events.c` / `custom_events.h`. Mod entry/registration: `main.c`. Public API: `mods/custom_events/include/custom_events_api.h`. Per-event logic in separate `event_*.c/h` files. The shared spawn helpers live in `spawn_enemy.c` / `spawn_projectile.c`.
 
@@ -106,7 +106,7 @@ The vanilla system has 16 event kinds (0–15) with data structures hardcoded to
 Custom events use kind values >= `EVKIND_NUM` (16+) but **never pass through vanilla dispatch code**. The state handler function pointers in the dispatch table at `0x804a5604` are replaced with wrappers at boot time:
 
 ```
-CustomEvents_OnBoot():   // NOT currently invoked — main.c ModDesc.OnBoot is commented out
+CustomEvents_OnBoot():   // wired via main.c ModDesc.OnBoot
     state_table = stc_event_state_table   // 0x804a5604
     Save original state handlers: orig_state1, orig_state2, orig_state3
     Replace state_table[1] = CustomEvent_State1Wrapper
@@ -221,7 +221,7 @@ typedef struct CustomEventsAPI {
 } CustomEventsAPI;
 ```
 
-The exported `api` instance (in `custom_events.c`) is `{ .Do = CustomEvent_Do, .params = custom_params, .event_count = CUSTOM_EVENT_COUNT, .SetWeightFilter = SetWeightFilter }`. **No mod currently imports this API** (it is only exported when the dormant `OnBoot` hook runs, and nothing calls `Hoshi_ImportMod` for it).
+The exported `api` instance (in `custom_events.c`) is `{ .Do = CustomEvent_Do, .params = custom_params, .event_count = CUSTOM_EVENT_COUNT, .SetWeightFilter = SetWeightFilter }`. `archipelago_debug` imports it (`Hoshi_ImportMod(CUSTOM_EVENTS_MOD_NAME, ...)`) and calls `Do(CUSTOM_EVKIND_GOURMET_RACE)` from its D-Pad Up handler. No consumer installs a weight filter, so default `CustomEventParam.weight` values are used.
 
 ### Event Registration
 
@@ -271,11 +271,11 @@ On success:
 
 The secondary BGM is started later, in the State 1 → 2 wrapper, not here: when transitioning to the active phase, the wrapper calls `BGM_PlaySecondaryFile(bgm_file)` if `bgm_file != 0`, and the State 3 wrapper calls `BGM_StopSecondary()` on cleanup.
 
-> **No current caller.** `CustomEvent_Do` is **not** routed from any AP item — there is no `AP_ITEM_EVENT_CUSTOM` in `ap_item_handler.c`, and the archipelago_debug d-pad DOWN control triggers a DeathLink receive, not a custom event. No mod imports `CustomEventsAPI`. The only invocation of `CustomEvent_Do` is from `CustomEvents_ExtendedRoll` (the natural-selection path), which is itself dormant because the boot hook is disabled. This is aspirational wiring.
+> **Callers.** `CustomEvent_Do` is invoked from two places: `archipelago_debug`'s D-Pad Up handler (plain Up → `Do(CUSTOM_EVKIND_GOURMET_RACE)`), and `CustomEvents_ExtendedRoll` (the natural-selection path). It is **not** routed from any AP item — there is no `AP_ITEM_EVENT_CUSTOM` in `ap_item_handler.c`; the archipelago mod itself does not import `CustomEventsAPI`.
 
 ### Natural Selection
 
-Custom events are designed to participate in the vanilla selection cycle. `CustomEvents_ExtendedRoll` would be installed via `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` in `CustomEvents_OnBoot` (`0x800ee098` is the `bl Gm_Roll` site inside `CityEvent_Decide`, with `r4 = 16` set just before — i.e. `Gm_Roll(chance_arr, 16)`). The replacement sums the 16 vanilla weights and the custom weights, rolls once over the grand total, and either delegates to `Gm_Roll` (vanilla won) or calls `CustomEvent_Do(EVKIND_NUM + i)` and returns `-1` (custom won; vanilla interprets `-1` as "no event, set new delay"). Each custom event's `weight` field from `CustomEventParam` feeds the roll. **Because `CustomEvents_OnBoot` is not called, this patch is never applied** — custom events cannot currently be selected.
+Custom events participate in the vanilla selection cycle. `CustomEvents_ExtendedRoll` is installed via `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` in `CustomEvents_OnBoot` (`0x800ee098` is the `bl Gm_Roll` site inside `CityEvent_Decide`, with `r4 = 16` set just before — i.e. `Gm_Roll(chance_arr, 16)`). The replacement sums the 16 vanilla weights and the custom weights, rolls once over the grand total, and either delegates to `Gm_Roll` (vanilla won) or calls `CustomEvent_Do(EVKIND_NUM + i)` and returns `-1` (custom won; vanilla interprets `-1` as "no event, set new delay"). Each custom event's `weight` field from `CustomEventParam` feeds the roll. With the other three events at `weight = 0`, Gourmet Race (`weight = 20`) is the only custom event the roll can select.
 
 ### Weight Filter (gating hook)
 
@@ -283,14 +283,14 @@ The API exposes `SetWeightFilter(CustomEventWeightFilter)` (one filter at a time
 
 ## Registered Events
 
-All four kinds below are registered in `custom_params[]` / `custom_functions[]` (`custom_events.c`) and enumerated in `CustomEventKind` (`custom_events_api.h`). They are reachable via `CustomEvents_ExtendedRoll` and `CustomEvent_Do` **only once the framework is re-enabled** (see the dormant-status banner at top). The enum is contiguous from `EVKIND_NUM` (16); `CUSTOM_EVENT_COUNT` = `CUSTOM_EVKIND_NUM - EVKIND_NUM` = 4.
+All four kinds below are registered in `custom_params[]` / `custom_functions[]` (`custom_events.c`) and enumerated in `CustomEventKind` (`custom_events_api.h`). They are reachable via `CustomEvents_ExtendedRoll` and `CustomEvent_Do`, but only Gourmet Race is enabled — the other three carry `weight = 0` (see the status banner at top). The enum is contiguous from `EVKIND_NUM` (16); `CUSTOM_EVENT_COUNT` = `CUSTOM_EVKIND_NUM - EVKIND_NUM` = 4.
 
 | Kind | ID | Name | File | Duration | is_siren | sky_preset | bgm_file | weight | Status |
 |------|------|------|------|----------|----------|-----------|----------|--------|--------|
-| `CUSTOM_EVKIND_WADDLE_DEE_SWARM` | 16 | Waddle Dee Swarm | `event_waddle_dee_swarm.c` | 1800f (~30s) | 1 | 5 (Dark Vignette) | 0x34 | 20 | Implemented (chase AI, fade-out despawn); dormant |
-| `CUSTOM_EVKIND_GRAVITY_CHANGE` | 17 | Gravity Change | `event_gravity_change.c` | 900f (~15s) | 1 | 8 (Pink Sky) | 0x31 | 20 | Implemented (air physics weird at low multiplier); dormant |
-| `CUSTOM_EVKIND_SCALE_CHANGE` | 18 | Scale Change | `event_scale_change.c` | 900f (~15s) | 1 | 3 (Dusk 2) | 0x32 | 20 | Implemented, visual only (collision doesn't scale); dormant |
-| `CUSTOM_EVKIND_GOURMET_RACE` | 19 | Gourmet Race | `event_gourmet_race.c` | 3600f (~60s) | 1 | -1 (no change) | 0x34 | 20 | Implemented (food spawn / scoring / HUD); dormant |
+| `CUSTOM_EVKIND_WADDLE_DEE_SWARM` | 16 | Waddle Dee Swarm | `event_waddle_dee_swarm.c` | 1800f (~30s) | 1 | 5 (Dark Vignette) | 0x34 | 0 | Implemented (chase AI, fade-out despawn); disabled (weight 0) |
+| `CUSTOM_EVKIND_GRAVITY_CHANGE` | 17 | Gravity Change | `event_gravity_change.c` | 900f (~15s) | 1 | 8 (Pink Sky) | 0x31 | 0 | Implemented (air physics weird at low multiplier); disabled (weight 0) |
+| `CUSTOM_EVKIND_SCALE_CHANGE` | 18 | Scale Change | `event_scale_change.c` | 900f (~15s) | 1 | 3 (Dusk 2) | 0x32 | 0 | Implemented, visual only (collision doesn't scale); disabled (weight 0) |
+| `CUSTOM_EVKIND_GOURMET_RACE` | 19 | Gourmet Race | `event_gourmet_race.c` | 3600f (~60s) | 1 | -1 (no change) | 0x34 | 20 | Implemented (food spawn / scoring / HUD); **enabled** |
 
 See `event-waddle-dee-swarm.md`, `event-gravity-change.md`, `event-scale-change.md`, and `gourmet-race-event.md` for detailed per-event research.
 
@@ -303,7 +303,7 @@ See `event-waddle-dee-swarm.md`, `event-gravity-change.md`, `event-scale-change.
 - `CANNON_SPAWN_ENABLED` (default 1): from `CannonEvent_On3DLoadEnd`, dumps yakumono param/ydata. In City Trial it hijacks spare `data_array` slot 31 for a zeroed-param "ghost" spawn (`DumpZeroParamCT`); in Machine Passage (grkind 6) it dumps the real cannon param + every vanilla cannon's ydata, then spawns a duplicate (`DumpHealthyMP`).
 - `CANNON_LOAD_ENABLED` (default 0): cross-loads `GrMachine2Model.dat` + `GrMachine2.dat` (`CrossLoadCT`) and a render path (`CannonEvent_TryRender`). Disabled because loading the 1.6 MB model archive in CT exhausts heap 1.
 
-`CannonEvent_On3DLoadEnd` is only reachable from the custom_events `On3DLoadEnd`, which (like `OnBoot`) is **commented out** in `main.c` — so even the dump harness does not currently run. See `docs/yakumono-system.md` for the cannon-spawn investigation. A standalone doc for the cannon event is **not yet warranted**: it's pure RE scaffolding with no shippable behavior; its findings belong in `yakumono-system.md` until a real cannon event is implemented.
+`CannonEvent_On3DLoadEnd` is only reachable from the custom_events `On3DLoadEnd`. Although that hook is now wired, the `CannonEvent_On3DLoadEnd()` call inside it is **commented out** — so the dump harness does not run even with the framework active. See `docs/yakumono-system.md` for the cannon-spawn investigation. A standalone doc for the cannon event is **not yet warranted**: it's pure RE scaffolding with no shippable behavior; its findings belong in `yakumono-system.md` until a real cannon event is implemented.
 
 ## Symbols
 

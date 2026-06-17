@@ -17,7 +17,9 @@ static void On3DLoadEnd(void)
     if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
         CustomEvents_InitSis();
 
-    CannonEvent_On3DLoadEnd();
+    // Cannon is WIP investigation scaffolding that runs diagnostic spawns/dumps
+    // on every City Trial load. Keep it off while only Gourmet Race is enabled.
+    // CannonEvent_On3DLoadEnd();
 }
 
 ModDesc mod_desc = {
@@ -25,6 +27,6 @@ ModDesc mod_desc = {
     .author = "DeDeDK",
     .version.major = CUSTOM_EVENTS_API_MAJOR,
     .version.minor = CUSTOM_EVENTS_API_MINOR,
-    // .OnBoot = OnBoot,
-    // .On3DLoadEnd = On3DLoadEnd,
+    .OnBoot = OnBoot,
+    .On3DLoadEnd = On3DLoadEnd,
 };
