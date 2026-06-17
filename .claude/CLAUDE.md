@@ -95,6 +95,7 @@ Never attempt to read ISO files, memory dumps, or other large binary/text files 
 - `patch-cap.md` - Progressive patch cap system: replacement hooks, consumer coverage, how to raise the ceiling.
 - `patch-drop-system.md` - Patch drop pipeline (`Rider_DropPatches` producer, `Rider_TickDropPatches` consumer): drop_mode 0/1/2 semantics, RiderData queue fields, stat→ItemKind table, used by `Patch_DropTrap`.
 - `permanent-patches.md` - Permanent patch system: round-start re-application, all-up consolidation.
+- `pluggable-mods-riivolution.md` - Design note (not yet implemented): making each hoshi mod an independently toggleable Riivolution option. The `/mods` FST scan as the on/off contract, target XML shape, separate-repos distribution model, and dependency/save caveats.
 - `projectile-system.md` - Projectile system documentation.
 - `scene-system.md` - Game scene/mode transition system.
 - `sis-text-system.md` - SIS text system: commands, lookup tables, custom event text extension.
