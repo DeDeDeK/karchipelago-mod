@@ -47,7 +47,9 @@ HSD_JObjSetMtxDirtySub(m);
 Accessed from mod code via `TopRide_KirbyModelScalePtr` (see `topride.h`).
 
 Unlike City Trial / Air Ride — where the rider (`RiderData`) and machine
-(`MachineData`) are separate objects and `model_scale` touches only the rider —
+(`MachineData`) are separate objects and `RiderData.model_scale` touches only the
+rider (the machine has its own analogous `MachineData.model_scale` at +0x310,
+baked by `Machine_ApplyModelMatrix`; the Scale Change event drives both) —
 Top Ride merges Kirby and his star into a **single JObj tree** under the scaled
 root (`RdKirby.dat` + a `VcStar*.dat`, combined at runtime). `model_scale` scales
 that shared root, so Big / Small Kirby grows / shrinks Kirby **and** the star

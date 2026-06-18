@@ -1,17 +1,3 @@
-// Waddle Dee Swarm - custom City Trial event. Spawns standalone Waddle Dees
-// (ACTORID_WADDLE_DEE, 0x17) that chase the nearest human player and fade out
-// on contact. Two mechanics make standalone chase AI work:
-//
-// Spline snap: every vanilla state transition re-runs the actor's func1, which
-// snaps its position to the nearest spline point - at priority 1, before our
-// proc runs. We undo it at priority 10 by restoring last frame's saved_pos
-// whenever ed->state changed since the previous frame.
-//
-// Chase override: we reinstall func2/func3/func4 every frame for movement,
-// ground-snap, and facing (func1 left alone, so walk animations keep playing).
-// FindNearestPlayer's range cap is bypassed by pre-setting target_player_idx
-// with a non-zero retarget_cooldown.
-
 #include "game.h"
 #include "os.h"
 #include "inline.h"

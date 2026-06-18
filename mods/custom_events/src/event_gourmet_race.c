@@ -1,14 +1,3 @@
-// Gourmet Race - custom City Trial event
-//
-// Spawns food items across the city in four passes:
-//   1. Big foods at 5 pre-placed locations (large scale, no city radius check)
-//   2. Regular foods at 5-10 of 15 pre-placed locations (no city radius check)
-//   3. Random foods at spline midpoints, high up + ground snap (city radius check)
-//   4. Random foods at spline midpoints underground, just above spline (city radius check)
-//
-// Total target: up to 60 foods (capped by city item limit of ~100).
-// Eaten foods respawn at the same location after a cooldown.
-
 #include "game.h"
 #include "os.h"
 #include "inline.h"
@@ -20,7 +9,6 @@
 
 #include "event_gourmet_race.h"
 
-// --- Configuration ---
 #define GOURMET_MAX_FOOD            60
 #define GOURMET_BIG_COUNT           5
 #define GOURMET_PREPLACED_COUNT     15
@@ -42,7 +30,6 @@
 #define GOURMET_BIG_POINTS          10
 #define GOURMET_REGULAR_POINTS      1
 
-// --- Food item kinds for random selection ---
 static const ItemKind food_kinds[] = {
     ITKIND_FOODMAXIMTOMATO,
     ITKIND_FOODENERGYDRINK,
@@ -64,7 +51,6 @@ static ItemKind RandomFoodKind(void)
     return food_kinds[HSD_Randi(NUM_FOOD_KINDS)];
 }
 
-// --- Pre-placed locations ---
 static const Vec3 big_food_positions[GOURMET_BIG_COUNT] = {
     { 71.00f, 140.00f, -345.00f },   // tower high
     { 71.00f,  88.00f, -345.00f },   // tower low
@@ -91,7 +77,6 @@ static const Vec3 preplaced_positions[GOURMET_PREPLACED_COUNT] = {
     { -39.09f,  -2.61f,  134.16f },
 };
 
-// --- Food slot tracking for respawn ---
 typedef struct FoodSlot
 {
     Vec3 spawn_pos;     // position to spawn at (with Y offset already applied)
@@ -109,7 +94,6 @@ static GOBJ *watcher_gobj;
 static int gourmet_active;
 static int scores[5]; // per-player scores
 
-// --- Score HUD ---
 #define HUD_MAX_PLAYERS     4
 #define HUD_SCALE           8.0f
 #define HUD_X               20.0f

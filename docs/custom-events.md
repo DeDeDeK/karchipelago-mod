@@ -1,10 +1,10 @@
 # Custom City Trial Events
 
-> **⚠️ WIP — framework wired; only Gourmet Race enabled; mod excluded from the default build.** `mods/custom_events/src/main.c` wires both `.OnBoot` and `.On3DLoadEnd` in its `ModDesc`, so when the mod is built `CustomEvents_OnBoot()` installs the state-handler wrappers + the extended-roll `CODEPATCH_REPLACECALL` and exports `CustomEventsAPI` via `Hoshi_ExportMod`; `CustomEvents_InitSis()` runs on City Trial load. **Only Gourmet Race is enabled** — the other three events carry `weight = 0` (never naturally occur). `archipelago_debug` imports `CustomEventsAPI` and triggers Gourmet Race via `CustomEvent_Do` on a plain D-Pad Up press. The cannon investigation harness is left off (the `CannonEvent_On3DLoadEnd()` call in `On3DLoadEnd` is commented out). **Build note:** `custom_events` and `archipelago_debug` are in the Makefile's default `EXCLUDE_MODS`, so the standard `make deploy` omits them — include them with `make deploy EXCLUDE_MODS=custom_weather`.
-
 ## Overview
 
-The custom event system is designed to extend the vanilla City Trial event system to support mod-defined events with custom behavior, triggered via the extended natural-selection roll (and directly via `CustomEvent_Do`). Custom events integrate with the vanilla event state machine (siren, sky transitions, HUD announcements, lifecycle states) without breaking existing events.
+The custom event system extends the vanilla City Trial event system with mod-defined events that run through the same state machine (siren, sky transitions, HUD announcements, lifecycle states) without breaking the existing events. Custom events are selected through the extended natural-selection roll and can also be triggered directly via `CustomEvent_Do`.
+
+The framework is wired through `main.c`'s `ModDesc`: `.OnBoot` (`CustomEvents_OnBoot`) installs the state-handler wrappers, the extended-roll patch, and exports `CustomEventsAPI`; `.On3DLoadEnd` runs `CustomEvents_InitSis` on City Trial load. An event occurs naturally only with a nonzero selection `weight` — all four registered events currently carry weight 20.
 
 Implementation: `mods/custom_events/src/custom_events.c` / `custom_events.h`. Mod entry/registration: `main.c`. Public API: `mods/custom_events/include/custom_events_api.h`. Per-event logic in separate `event_*.c/h` files. The shared spawn helpers live in `spawn_enemy.c` / `spawn_projectile.c`.
 
@@ -170,13 +170,18 @@ The vanilla code path in `stadiumPrediction` reads `0x804a7b98[event_kind]` → 
 
 SIS text uses opcodes < 0x20 for commands and 2-byte character codes >= 0x20 (via `Text_CharToCommand`). `ComposeSisText` (in `custom_events.c`) emits, in order:
 
-- Header: `0x12` (ALIGNLEFT), `0x18` (command_18), `0x16` (KERNING), `0x0c bb bb bb` (COLOR, gray for event text), `0x0e 00 b3 00 b3` (SCALE ~0.70)
+- Header: `0x12` (ALIGN_LEFT), `0x18` (FIT_ON), `0x16` (KERNING_ON), `0x0c bb bb bb` (COLOR, gray for event text), `0x0e 00 b3 00 b3` (SCALE ~0.70)
 - Body: each char → `Text_CharToCommand` 2-byte code; a literal space → `0x1a` (SIS space command)
-- Trailer: `0x03 0f 0d 17 19 13 00` (`0x13` = end align, `0x00` = TERMINATE)
+- Trailer: `0x03` (LINEBREAK), `0x0f` (SCALE_POP), `0x0d` (COLOR_POP), `0x17` (KERNING_OFF), `0x19` (FIT_OFF), `0x13` (ALIGN_POP), `0x00` (TERMINATE)
 
-### Edge Case: First Event in Match
+### HUD display paths (first vs. subsequent events)
 
-The very first event in a match takes a different code path in `stadiumPrediction` (0x80127950 area) that creates HUD infrastructure from a hardcoded 20-byte data block and does NOT call `CityEvent_SetSisText` (0x801169fc, the SIS text setter). If the first event is custom, the initial text may not display correctly. Subsequent events always use the SIS lookup path and display correctly. This edge case has not been addressed.
+`stadiumPrediction` (0x80127864) drives the popup through a cached HUD GObj pointer in the D-data global (`+0xbe8`), with two paths:
+
+- **First event of the match** (cached GObj == 0): creates the popup GObj, stores the kind → SIS-table index at HUD-data `+0x18`, and installs the per-frame proc `CityEvent_HudPredictionThink` (0x801276c0), which calls `CityEvent_SetSisText(stc_event_sis_id_table[data+0x18])` once the slide-in animation finishes.
+- **Subsequent events** (GObj cached): reuse the GObj and call `CityEvent_SetSisText(stc_event_sis_id_table[data+0x18])` directly.
+
+Both paths resolve the text through `stc_event_sis_id_table` (`0x804a7b98[kind]`) — the same table `CustomEvents_InitSis` extends — so custom event text displays through whichever path runs. The first path additionally special-cases `kind == 10`/PREDICTION, remapping it to a stadium-name SIS id; this does not affect custom kinds (≥ 40).
 
 ## Custom Event Data Structures
 
@@ -187,10 +192,10 @@ typedef struct CustomEventParam {
     int duration;           // frames in state 2 (active phase)
     int is_siren;           // play siren SFX + fade music + sky transition
     int sky_preset;         // sky transition preset (-1 = no change)
-    int bgm_file;           // BGM file index to play during event (-1 = no change)
-    int weight;             // weight for natural selection (weighted roll)
-    const char *label;      // short event name (ASCII, converted to SIS at init)
-    const char *hud_text;   // HUD popup text displayed when event starts
+    int bgm_file;           // secondary BGM file index 1..0x43 (0 = none)
+    int weight;             // weight for natural selection (weighted roll; 0 = never naturally occurs)
+    const char *label;      // short event name for menus/notifications (not composed to SIS)
+    const char *hud_text;   // HUD popup text; composed to SIS binary by ComposeSisText at init
 } CustomEventParam;
 ```
 
@@ -221,7 +226,7 @@ typedef struct CustomEventsAPI {
 } CustomEventsAPI;
 ```
 
-The exported `api` instance (in `custom_events.c`) is `{ .Do = CustomEvent_Do, .params = custom_params, .event_count = CUSTOM_EVENT_COUNT, .SetWeightFilter = SetWeightFilter }`. `archipelago_debug` imports it (`Hoshi_ImportMod(CUSTOM_EVENTS_MOD_NAME, ...)`) and calls `Do(CUSTOM_EVKIND_GOURMET_RACE)` from its D-Pad Up handler. No consumer installs a weight filter, so default `CustomEventParam.weight` values are used.
+The exported `api` instance (in `custom_events.c`) is `{ .Do = CustomEvent_Do, .params = custom_params, .event_count = CUSTOM_EVENT_COUNT, .SetWeightFilter = SetWeightFilter }`. It is imported via `Hoshi_ImportMod(CUSTOM_EVENTS_MOD_NAME, ...)`. No consumer installs a weight filter, so default `CustomEventParam.weight` values are used.
 
 ### Event Registration
 
@@ -251,7 +256,7 @@ New events require:
 
 ## Event Triggering
 
-### AP Item Trigger
+### Direct Trigger (`CustomEvent_Do`)
 
 Custom events are triggered via `CustomEvent_Do(kind)`:
 
@@ -271,11 +276,11 @@ On success:
 
 The secondary BGM is started later, in the State 1 → 2 wrapper, not here: when transitioning to the active phase, the wrapper calls `BGM_PlaySecondaryFile(bgm_file)` if `bgm_file != 0`, and the State 3 wrapper calls `BGM_StopSecondary()` on cleanup.
 
-> **Callers.** `CustomEvent_Do` is invoked from two places: `archipelago_debug`'s D-Pad Up handler (plain Up → `Do(CUSTOM_EVKIND_GOURMET_RACE)`), and `CustomEvents_ExtendedRoll` (the natural-selection path). It is **not** routed from any AP item — there is no `AP_ITEM_EVENT_CUSTOM` in `ap_item_handler.c`; the archipelago mod itself does not import `CustomEventsAPI`.
+> **Callers.** `CustomEvent_Do` is reached from the natural-selection path (`CustomEvents_ExtendedRoll`) and through the exported `CustomEventsAPI.Do`. It is **not** routed from any AP item — the archipelago mod does not import `CustomEventsAPI`, so custom events are not yet AP-gated.
 
 ### Natural Selection
 
-Custom events participate in the vanilla selection cycle. `CustomEvents_ExtendedRoll` is installed via `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` in `CustomEvents_OnBoot` (`0x800ee098` is the `bl Gm_Roll` site inside `CityEvent_Decide`, with `r4 = 16` set just before — i.e. `Gm_Roll(chance_arr, 16)`). The replacement sums the 16 vanilla weights and the custom weights, rolls once over the grand total, and either delegates to `Gm_Roll` (vanilla won) or calls `CustomEvent_Do(EVKIND_NUM + i)` and returns `-1` (custom won; vanilla interprets `-1` as "no event, set new delay"). Each custom event's `weight` field from `CustomEventParam` feeds the roll. With the other three events at `weight = 0`, Gourmet Race (`weight = 20`) is the only custom event the roll can select.
+Custom events participate in the vanilla selection cycle. `CustomEvents_ExtendedRoll` is installed via `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` in `CustomEvents_OnBoot` (`0x800ee098` is the `bl Gm_Roll` site inside `CityEvent_Decide`, with `r4 = 16` set just before — i.e. `Gm_Roll(chance_arr, 16)`). The replacement sums the 16 vanilla weights and the custom weights, rolls once over the grand total, and either delegates to `Gm_Roll` (vanilla won) or calls `CustomEvent_Do(EVKIND_NUM + i)` and returns `-1` (custom won; vanilla interprets `-1` as "no event, set new delay"). Each custom event's `weight` field from `CustomEventParam` (optionally overridden by the weight filter) feeds the roll; a `weight = 0` event can never be selected.
 
 ### Weight Filter (gating hook)
 
@@ -283,27 +288,18 @@ The API exposes `SetWeightFilter(CustomEventWeightFilter)` (one filter at a time
 
 ## Registered Events
 
-All four kinds below are registered in `custom_params[]` / `custom_functions[]` (`custom_events.c`) and enumerated in `CustomEventKind` (`custom_events_api.h`). They are reachable via `CustomEvents_ExtendedRoll` and `CustomEvent_Do`, but only Gourmet Race is enabled — the other three carry `weight = 0` (see the status banner at top). The enum is contiguous from `EVKIND_NUM` (16); `CUSTOM_EVENT_COUNT` = `CUSTOM_EVKIND_NUM - EVKIND_NUM` = 4.
+All four kinds below are registered in `custom_params[]` / `custom_functions[]` (`custom_events.c`) and enumerated in `CustomEventKind` (`custom_events_api.h`). They are reachable via `CustomEvents_ExtendedRoll` and `CustomEvent_Do`; an event occurs naturally only with a nonzero `weight`. All four currently carry equal weight (20). The enum is contiguous from `EVKIND_NUM` (16); `CUSTOM_EVENT_COUNT` = `CUSTOM_EVKIND_NUM - EVKIND_NUM` = 4.
 
-| Kind | ID | Name | File | Duration | is_siren | sky_preset | bgm_file | weight | Status |
+| Kind | ID | Name | File | Duration | is_siren | sky_preset | bgm_file | weight | Notes |
 |------|------|------|------|----------|----------|-----------|----------|--------|--------|
-| `CUSTOM_EVKIND_WADDLE_DEE_SWARM` | 16 | Waddle Dee Swarm | `event_waddle_dee_swarm.c` | 1800f (~30s) | 1 | 5 (Dark Vignette) | 0x34 | 0 | Implemented (chase AI, fade-out despawn); disabled (weight 0) |
-| `CUSTOM_EVKIND_GRAVITY_CHANGE` | 17 | Gravity Change | `event_gravity_change.c` | 900f (~15s) | 1 | 8 (Pink Sky) | 0x31 | 0 | Implemented (air physics weird at low multiplier); disabled (weight 0) |
-| `CUSTOM_EVKIND_SCALE_CHANGE` | 18 | Scale Change | `event_scale_change.c` | 900f (~15s) | 1 | 3 (Dusk 2) | 0x32 | 0 | Implemented, visual only (collision doesn't scale); disabled (weight 0) |
-| `CUSTOM_EVKIND_GOURMET_RACE` | 19 | Gourmet Race | `event_gourmet_race.c` | 3600f (~60s) | 1 | -1 (no change) | 0x34 | 20 | Implemented (food spawn / scoring / HUD); **enabled** |
+| `CUSTOM_EVKIND_WADDLE_DEE_SWARM` | 16 | Waddle Dee Swarm | `event_waddle_dee_swarm.c` | 1800f (~30s) | 1 | 5 (Dark Vignette) | 0x34 | 20 | Chase AI, fade-out despawn |
+| `CUSTOM_EVKIND_GRAVITY_CHANGE` | 17 | Gravity Change | `event_gravity_change.c` | 900f (~15s) | 1 | 8 (Pink Sky) | 0x31 | 20 | Scales `stage_node->gravity_strength` — random 0.5x or 2x |
+| `CUSTOM_EVKIND_SCALE_CHANGE` | 18 | Scale Change | `event_scale_change.c` | 900f (~15s) | 1 | 3 (Dusk 2) | 0x32 | 20 | Shrinks every player (model + machine collision sphere) + slows movement; world untouched |
+| `CUSTOM_EVKIND_GOURMET_RACE` | 19 | Gourmet Race | `event_gourmet_race.c` | 3600f (~60s) | 1 | -1 (no change) | 0x34 | 20 | Food spawn / scoring / HUD |
 
-See `event-waddle-dee-swarm.md`, `event-gravity-change.md`, `event-scale-change.md`, and `gourmet-race-event.md` for detailed per-event research.
+See `event-waddle-dee-swarm.md`, `event-gravity-change.md`, `event-scale-change.md`, and `gourmet-race-event.md` for per-event detail.
 
-> Note: `cannon_event.c` is **not** a registered custom event — it has no `CustomEventKind` enum value and no `custom_params[]`/`custom_functions[]` entry. It is a separate debug/RE harness (see "Cannon Event (investigation harness)" below).
-
-## Cannon Event (investigation harness)
-
-`cannon_event.c` / `cannon_event.h` is **not a registered custom event** — it has no `CustomEventKind` enum value and no `custom_params[]`/`custom_functions[]` entry, so it can never be selected or triggered through the framework. It is a reverse-engineering harness toward eventually spawning a working cannon yakumono in City Trial, currently gated behind compile-time flags:
-
-- `CANNON_SPAWN_ENABLED` (default 1): from `CannonEvent_On3DLoadEnd`, dumps yakumono param/ydata. In City Trial it hijacks spare `data_array` slot 31 for a zeroed-param "ghost" spawn (`DumpZeroParamCT`); in Machine Passage (grkind 6) it dumps the real cannon param + every vanilla cannon's ydata, then spawns a duplicate (`DumpHealthyMP`).
-- `CANNON_LOAD_ENABLED` (default 0): cross-loads `GrMachine2Model.dat` + `GrMachine2.dat` (`CrossLoadCT`) and a render path (`CannonEvent_TryRender`). Disabled because loading the 1.6 MB model archive in CT exhausts heap 1.
-
-`CannonEvent_On3DLoadEnd` is only reachable from the custom_events `On3DLoadEnd`. Although that hook is now wired, the `CannonEvent_On3DLoadEnd()` call inside it is **commented out** — so the dump harness does not run even with the framework active. See `docs/yakumono-system.md` for the cannon-spawn investigation. A standalone doc for the cannon event is **not yet warranted**: it's pure RE scaffolding with no shippable behavior; its findings belong in `yakumono-system.md` until a real cannon event is implemented.
+> `cannon_event.c` is **not** a registered custom event (no `CustomEventKind` / `custom_params[]` entry) and is not wired into the framework's `On3DLoadEnd`. It is a reverse-engineering harness toward spawning a cannon yakumono in City Trial; its findings live in `docs/yakumono-system.md`.
 
 ## Symbols
 
@@ -326,7 +322,9 @@ All declared in `externals/hoshi/include/event.h` (as `static` casts) / `text.h`
 | `CityEvent_Decide` | 0x800edcf8 | Event selection, weight copy, `Gm_Roll`. The `Gm_Roll(chance_arr, 16)` call hooked by `CustomEvents_ExtendedRoll` is at 0x800ee098 |
 | `CityEvent_ShowHudText` | 0x80113fb4 | Gates on IsInCity/IsInStadium, calls stadiumPrediction |
 | `CityEvent_SetSisText` | 0x801169fc | Creates/replaces HUD text with SIS entry |
-| `stadiumPrediction` | 0x80127864 | HUD slide-in animation, reads SIS ID from 0x804a7b98 |
+| `stadiumPrediction` | 0x80127864 | Creates/updates the event-name HUD popup, reads SIS ID from 0x804a7b98 |
+| `CityEvent_HudPredictionThink` | 0x801276c0 | Per-frame proc the first-event path installs; calls `CityEvent_SetSisText` once the slide-in finishes (deferred text path) |
+| `stc_bgm_desc` | 0x80498750 | BGM descriptor table (69 × 0x10: `bgm_id`, `source`, `char *name`); idx → `audio/jp/<name>.hps` |
 | `Gm_FadeOutMusic` | 0x80061df0 | Music fadeout for siren events (frame count from `data->event->music_fadeout_frames`) |
 | `SFX_Play` | 0x800615f0 | `SFX_Play(0x130002)` for event siren |
 | `Sky_TransitionGlobal` | 0x800d5444 | Sky preset transition |
@@ -336,13 +334,38 @@ All declared in `externals/hoshi/include/event.h` (as `static` casts) / `text.h`
 | `BGM_StopSecondary` | 0x800620e8 | Stops secondary BGM, resumes main; called on cleanup |
 | `Text_CharToCommand` | inline (text.h) | ASCII char → 2-byte SIS character code (not a linked symbol) |
 
+## Secondary BGM File Indices
+
+Each `CustomEventParam.bgm_file` (0 = none) is played via `BGM_PlaySecondaryFile` on the state 1→2 transition and stopped via `BGM_StopSecondary` on cleanup. `BGM_PlaySecondaryFile` (0x80061e7c) accepts an index `1 ≤ idx < 0x44` (the hard gate is `0 < idx && idx < 0x44`), maps it through the descriptor table `stc_bgm_desc` (0x80498750, 69 entries × 0x10: `{int bgm_id; int source; char *name; ...}`) to an `audio/jp/<name>.hps` path, and hands it to `BGM_PlayFile` → `_BGM_PlayFile` (which re-checks `idx ≤ stc_bgm_file_count`, the runtime count at r13+0x60). The table is 1:1 — `idx == bgm_id`. Full set:
+
+| Range | Tracks |
+|-------|--------|
+| 0x01 | `stageauto` |
+| 0x02 | `menu` |
+| 0x03–0x24 | the 2D/3D stage tracks (`2d_*`, `3d_*`, each with an `_ura` variant) |
+| 0x25 | `stadiumintro` |
+| 0x26–0x28 | `city`, `city_isogi` (hurry-up), `city_ura` |
+| 0x29–0x2c | `clearchecker`, `dragoon`, `ending`, `ending_city_us` |
+| **0x2d–0x36** | **event tracks** — `event_fog`, `event_gordo`, `event_itembound`, `event_kyoseki`, `event_meteo`, `event_monster`, `event_stationfire`, `event_supercharge`, `event_syoukinkubi`, `event_toudai` |
+| 0x37–0x3e | `finish_1/2/cp`, `graph`, `howto`, `menu`, `opening`, `retire` |
+| 0x3f–0x43 | stadium tracks (`studium_04`, `studium_airgrider`, `studium_battle`, `studium_dedede`, `studium_point`) |
+
+The event range 0x2D–0x36 is what the registered custom events draw from (0x31 = `event_meteo`, 0x32 = `event_monster`, 0x34 = `event_supercharge`). Any index in the table is valid; pick one whose mood fits.
+
+## Item Spawn Modification (vanilla-kind only)
+
+Vanilla events bias item drops through `CityEvent_ModifyItemFallDesc(kind)` (0x800ed784), and the path is keyed entirely on the vanilla event kind:
+
+- the public wrapper's special-flag step (`grBoxGeneInfo+0x38`) only recognizes kind 15 (fake-powerups → bit 2) and kind 7 (same-item → bit 4);
+- the worker `_CityEvent_ModifyItemFallDesc` (0x800ed5b0) linear-searches an event table by `entry[0] == kind`, so a custom kind matches nothing and falls back to default chances;
+- `CityItemSpawn_SetEventsItemFallChances` (0x800eb568) reads each item's per-event chance at `*(short *)(entry + 4 + kind*2)`, an array sized to the 16 vanilla kinds inside each `0x28`-byte entry — a custom kind indexes past it into adjacent struct fields.
+
+So a custom event cannot drive this path with its own kind; it yields meaningless chances. To bias item drops, pass a vanilla kind to borrow its chance profile, or write `grBoxGeneInfo`/`grBoxGeneObj` fields directly. None of the registered events use it — Gourmet Race spawns its food directly.
+
 ## Open Questions
 
-### Secondary BGM
-Custom events **do** use secondary BGM: each `CustomEventParam.bgm_file` (0 = none) is played via `BGM_PlaySecondaryFile` on the state 1→2 transition and stopped via `BGM_StopSecondary` on cleanup. Currently registered events use 0x31 (Meteor), 0x32 (Dyna Blade), and 0x34 (Runamok). Open question: the full set of valid BGM file indices (vanilla events use roughly 0x2D–0x40).
+Residual unknowns, all minor and non-blocking:
 
-### Item Spawn Modification
-Vanilla events call `CityEvent_ModifyItemFallDesc` to change item spawn rates. The `event_spawn` field in `grBoxGeneObj` has per-event-kind chance arrays sized to `EVKIND_NUM` — custom kinds can't index into these. Custom events that want to modify item spawns would need their own mechanism.
-
-### First-Event Edge Case
-The very first event in a match takes a different `stadiumPrediction` code path that doesn't call the SIS text setter. If the first event is custom, HUD text may be wrong for that one instance. Not yet addressed.
+- `EventCheckData+0xC` (`xc`) — read but purpose unidentified.
+- Inner-config `+0x10` (`x10[4]`) — present in the archive but not read by the state machine.
+- The map symbol names for the state handlers are shifted by one relative to the state they handle: table slot 1 (the "Starting" state) is named `CityEvent_StateActive`, slot 2 (the "Active" state) is named `CityEvent_StateEnding`. The custom wrappers index by slot number so they are unaffected; the names are a vanilla-RE cosmetic snag (already annotated in the city-trial event doc).

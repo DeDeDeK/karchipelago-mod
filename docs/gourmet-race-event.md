@@ -1,11 +1,6 @@
 # Gourmet Race Event
 
-> **Status: IMPLEMENTED and ACTIVE — the only enabled custom event.**
-> The Gourmet Race event is fully coded and registered in the custom-events tables (params + function table, `CUSTOM_EVKIND_GOURMET_RACE` = 19): all three callbacks, food spawning, respawn watcher, scoring, and the score HUD are present and complete.
->
-> The `custom_events` framework is enabled: `mods/custom_events/src/main.c` wires `.OnBoot` and `.On3DLoadEnd` in `mod_desc`, so `CustomEvents_OnBoot()` installs the `CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll)` selection hook and the state-handler wrappers. The other three custom events (Waddle Dee Swarm, Gravity Change, Scale Change) carry `weight = 0` so they never naturally occur; Gourmet Race keeps `weight = 20`, so it can both roll naturally and be triggered on demand. The cannon investigation diagnostic (`CannonEvent_On3DLoadEnd`) is left disabled. The `archipelago_debug` mod imports the `CustomEventsAPI` and fires `Do(CUSTOM_EVKIND_GOURMET_RACE)` on a **plain D-Pad Up** press. See `custom-events.md` for the framework wiring.
-
-Custom City Trial event where food items are scattered across the map. Players compete to collect the most food within the time limit. The winner receives All Up patches as a reward.
+Custom City Trial event where food items are scattered across the map. Players compete to collect the most food within the time limit. The winner receives All Up patches as a reward. It is the only custom event currently enabled (`weight = 20`, vs `weight = 0` for the other three); see `custom-events.md` for the framework.
 
 ## Event Overview
 
@@ -50,8 +45,8 @@ Selection: `CustomEvents_ExtendedRoll` adds each custom event's `weight` to the 
 | `mods/custom_events/src/event_gourmet_race.c` | Full event implementation |
 | `mods/custom_events/include/custom_events_api.h` | `CUSTOM_EVKIND_GOURMET_RACE` enum entry (= 19; public API header) |
 | `mods/custom_events/src/custom_events.c` | Event params (duration, sky, BGM, weight, SIS label) + function-table registration; `CustomEvents_ExtendedRoll` selection hook |
-| `mods/custom_events/src/main.c` | `ModDesc` — wires `.OnBoot`/`.On3DLoadEnd`, activating the framework (cannon diagnostic left disabled) |
-| `mods/archipelago_debug/src/main.c` | Imports `CustomEventsAPI`; plain D-Pad Up calls `Do(CUSTOM_EVKIND_GOURMET_RACE)` |
+| `mods/custom_events/src/main.c` | `ModDesc` — wires `.OnBoot`/`.On3DLoadEnd`, activating the framework |
+| `mods/archipelago_debug/src/main.c` | Imports `CustomEventsAPI` to trigger the event for testing |
 
 ## Food Spawning — Four-Pass System
 

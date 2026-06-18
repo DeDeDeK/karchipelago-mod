@@ -32,7 +32,7 @@ static void OnSaveLoaded(void)
         return;
     }
     if (!ce_api)
-        OSReport("[ApDebug] custom_events API unavailable (Gourmet Race trigger disabled)\n");
+        OSReport("[ApDebug] custom_events API unavailable (Scale Change trigger disabled)\n");
     // Reflect archipelago's masks into our local toggle state so the menu
     // matches reality after AP grants from save load.
     DebugMenu_RefreshStateFromMasks();
@@ -208,13 +208,13 @@ static void OnFrameStart(void)
         }
         else
         {
-            // Plain Up: trigger the custom Gourmet Race City Trial event.
+            // Plain Up: trigger the custom Scale Change City Trial event.
             // Do() returns 0 outside City Trial, when an event is already
             // active, or if custom_events didn't export its API.
-            if (ce_api && ce_api->Do(CUSTOM_EVKIND_GOURMET_RACE))
-                OSReport("[ApDebug] triggered Gourmet Race event\n");
+            if (ce_api && ce_api->Do(CUSTOM_EVKIND_SCALE_CHANGE))
+                OSReport("[ApDebug] triggered Scale Change event\n");
             else
-                OSReport("[ApDebug] Gourmet Race trigger unavailable (needs City Trial, no active event, custom_events loaded)\n");
+                OSReport("[ApDebug] Scale Change trigger unavailable (needs City Trial, no active event, custom_events loaded)\n");
         }
     }
 

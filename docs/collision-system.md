@@ -287,7 +287,9 @@ to keep the kill box matched to the resized stage.
 Machines use full mpColl through their own collision processing:
 - `Machine_EnvCollThink` (0x801c65a8) — GObj proc for environment collision
 - `Machine_ProcessEnvColl` (0x801e5108) — main collision processing
-- CollData stored at an offset in MachineData (not yet fully mapped)
+- CollData at `MachineData+0x6F8` (`coll_data`): created at spawn, `mpColl_Update`
+  target in `Machine_InitialCollisionCheck` (radius source `MachineData+0x46C`),
+  and passed to the mpColl query helpers each frame in `Machine_ProcessEnvColl`
 
 ### Riders (RiderData)
 

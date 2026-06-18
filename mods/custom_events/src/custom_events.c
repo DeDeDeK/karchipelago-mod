@@ -28,7 +28,7 @@ CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 5,   // Dark Vignette
         .bgm_file = 0x34,  // Runamok BGM
-        .weight = 0,       // disabled: only Gourmet Race is active for now
+        .weight = 20,
         .label = "Waddle Dee Swarm",
         .hud_text = "Waddle Dee swarm incoming!",
     },
@@ -37,7 +37,7 @@ CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 8,   // Pink Sky
         .bgm_file = 0x31,  // Meteor BGM
-        .weight = 0,       // disabled: only Gourmet Race is active for now
+        .weight = 20,
         .label = "Gravity Change",
         .hud_text = "Gravity is changing!",
     },
@@ -46,7 +46,7 @@ CustomEventParam custom_params[CUSTOM_EVENT_COUNT] = {
         .is_siren = 1,
         .sky_preset = 3,   // Dusk 2
         .bgm_file = 0x32,  // Dyna Blade BGM
-        .weight = 0,       // disabled: only Gourmet Race is active for now
+        .weight = 20,
         .label = "Scale Change",
         .hud_text = "The world is growing!",
     },
@@ -75,6 +75,7 @@ static CustomEventFunc custom_functions[CUSTOM_EVENT_COUNT] = {
     [CUSTOM_EVKIND_SCALE_CHANGE - EVKIND_NUM] = {
         .start = ScaleChange_Start,
         .active = ScaleChange_Active,
+        .end = ScaleChange_End,
         .end2 = ScaleChange_End2,
     },
     [CUSTOM_EVKIND_GOURMET_RACE - EVKIND_NUM] = {
@@ -105,9 +106,9 @@ static void ComposeSisText(u8 *buf, const char *str)
     u8 *p = buf;
 
     // Header (matches vanilla event text formatting)
-    *p++ = 0x12; // ALIGNLEFT
-    *p++ = 0x18; // command_18
-    *p++ = 0x16; // KERNING
+    *p++ = 0x12; // ALIGN_LEFT
+    *p++ = 0x18; // FIT_ON
+    *p++ = 0x16; // KERNING_ON
     *p++ = 0x0c;
     *p++ = 0xbb;
     *p++ = 0xbb;
@@ -175,7 +176,7 @@ void CustomEvents_InitSis(void)
     stc_sis_data[0] = (SISData *)extended_sis_ptrs;
 
     // Write custom SIS IDs into the event name lookup table at 0x804a7b98.
-    // Indices 0-15 are vanilla event names. Indices 16-38 are used by the
+    // Indices 0-15 are vanilla event names. Indices 16-39 are used by the
     // vanilla prediction event (kind 10) as stadium name lookups: it stores
     // (stadium_kind + EVKIND_NUM) into the HUD control and the per-frame
     // update re-reads the table. We must place custom entries AFTER the
@@ -201,8 +202,6 @@ static void CustomEvent_State1Wrapper(EventCheckData *ev_chk)
 {
     if (ev_chk->cur_kind < EVKIND_NUM)
     {
-        if (ev_chk->timer == 0)
-            OSReport("[CustomEvents] Vanilla event %d started\n", ev_chk->cur_kind);
         orig_state1(ev_chk);
         return;
     }
@@ -399,6 +398,9 @@ void CustomEvents_OnBoot(void)
     // Replace Gm_Roll call in CityEvent_Decide with extended roll
     // that includes custom events in the selection pool.
     CODEPATCH_REPLACECALL(0x800ee098, CustomEvents_ExtendedRoll);
+
+    // Per-event persistent patches (Scale Change's camera-distance shim).
+    ScaleChange_InstallHooks();
 
     // Export API for other mods to use
     Hoshi_ExportMod(&api);

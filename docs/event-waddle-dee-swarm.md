@@ -1,6 +1,6 @@
 # Waddle Dee Swarm Event
 
-Custom City Trial event (`event_waddle_dee_swarm.c`, `CUSTOM_EVKIND_WADDLE_DEE_SWARM`). Spawns a rolling swarm of Waddle Dees (enemy actor `ACTORID_WADDLE_DEE`, 0x17) that chase the nearest human player, fading out on contact and being replenished up to a cap for the event's duration. Currently **dormant** along with the rest of the custom-events framework.
+Custom City Trial event (`event_waddle_dee_swarm.c`, `CUSTOM_EVKIND_WADDLE_DEE_SWARM`). Spawns a rolling swarm of Waddle Dees (enemy actor `ACTORID_WADDLE_DEE`, 0x17) that chase the nearest human player, fading out on contact and being replenished up to a cap for the event's duration. The custom-events framework itself is wired (only Gourmet Race is enabled), but this event is **disabled** — `weight = 0`, so the extended roll never selects it, and nothing calls `CustomEvent_Do(CUSTOM_EVKIND_WADDLE_DEE_SWARM)`. Its spawn helper's null-safety patches (`SpawnEnemy_OnBoot` in `spawn_enemy.c`) are also not installed, so it must not be triggered as-is.
 
 This is the reference implementation for **standalone enemy actors with custom chase AI** — spawning a vanilla enemy outside its scripted path and steering it manually. The two non-obvious problems it solves (the spline snap and the detection-range cap) apply to any custom use of the enemy-actor system.
 
