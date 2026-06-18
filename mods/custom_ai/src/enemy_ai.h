@@ -28,11 +28,21 @@ typedef enum EnemyAIPreset
     ENEMY_AI_MENU_NUM,      // Total selectable menu entries (presets + Random)
 } EnemyAIPreset;
 
-// Per-preset tuning knobs. The multipliers scale the matching EnemyData
-// behavioral params (param_detect_range / param_chase_range / param_move_speed,
-// declared in enemy.h) when an enemy spawns; 1.0 keeps the vanilla value.
+// Per-preset tuning knobs; 1.0 keeps the vanilla value.
 //
-// NOT applied yet - the enemy-spawn hook that consumes the table is still a TODO.
+// NOT applied yet - the enemy hook that consumes the table is still a TODO.
+//
+// IMPORTANT (RE finding): the obvious targets EnemyData.param_detect_range
+// (ed+0x378), param_chase_range (ed+0x37c) and param_move_speed (ed+0x3c0) are
+// DEAD copies - nothing in the enemy code reads them, so scaling them is a no-op.
+// The real levers (see docs/enemy-ai-system.md "Influencing Enemy Behavior"):
+//   detect_range  -> global param table +0x80 (Enemy_LoadCommonParams), or the
+//                    actor_data param-root +0x10/+0x14 (EnemyActor_ClassifyRange)
+//   move_speed    -> ed+0x964 (movement_speed) / ed+0x974 (idle_wander_speed),
+//                    re-asserted each frame (the state funcs overwrite them)
+//   target_pref   -> overwrite ed+0xb24 (target_player_idx)/ed+0xb38
+//                    (chase_direction), or inject via the dead per_type_cb slot
+//                    (ed+0xAC8, dispatched at GObj proc priority 7).
 typedef struct EnemyAIPresetDef
 {
     const char *name;           // Menu label

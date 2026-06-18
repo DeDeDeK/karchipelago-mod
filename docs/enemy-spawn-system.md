@@ -279,7 +279,7 @@ Pointed to by r13+0x634 (0x805DD714). Manages all spawning state for the current
 | +0x10 | u32 | total_spawns | Total enemies spawned (lifetime) |
 | +0x14 | u16 | active_count | Current alive enemy count |
 | +0x16 | u16 | active_event_count | Alive "event" enemies (actor_id >= 0x18). CT mode 3 only. |
-| +0x18 | u16 | unknown_counter | |
+| +0x18 | u16 | (reserved) | Unused — memset-0 at manager init (`Enemy_InitPositionData`), never read or written afterward by any spawn/think/unregister code. The live near-neighbor counters are +0x14/+0x16/+0x1A/+0x1C. |
 | +0x1A | s16 | slots_initialized | Count of initialized spawn slots |
 | +0x1C | s16 | last_spawn_slot | Last spawn slot index used |
 | +0x20 | u32[3] | ct_time | City_GetMinSecMs output (min, sec, ms) |
@@ -443,15 +443,47 @@ to gate the "swallow this enemy" checklist cells on `HasAny` of those courses wh
 | Caller/Shaturn | Tornado | Sky Sands, Beanstalk Park, Celestial Valley, Checker Knights |
 | Walky | Mic | Fantasy Meadows, Magma Flows, Sky Sands, Beanstalk Park, Machine Passage, Checker Knights |
 
-## Spawning in City Trial
+## Which modes spawn regular enemies
 
-### The Problem
+Regular per-type AI enemies spawn **only** when the loaded stage's `.dat` ships a non-NULL enemy-spawn array. The decision is **data-driven, not derived from a stadium/mode constant**:
 
-In City Trial Free Run, `Enemy_LoadStageEnemies` is skipped, so no enemy archives are loaded by default. In City Trial mode, `Enemy_LoadStageEnemies` runs normally and loads all stage enemies including event actors (TAC, Dyna Blade, Meteor).
+1. `grLoadStage` → `Enemy_InitPositionData` (0x800f2634) → gate `0x8000a228` (GameData+0xAA6 bit 4, "enemies enabled", effectively always on) → spawn-data provider `0x800da4c4`.
+2. `0x800da4c4` reads `GrData+0x28`. **If it is NULL, no enemies** (returns NULL). Otherwise it indexes a per-stage `EnemySpawnData` array (stride 0x18) by the stage's EnemyposId and stores the result at `stc_enemy_spawn_data` (0x805DD710).
+3. `Enemy_InitPositionData` then bails to the no-spawn path if `spawn_count == 0` / `config == 0` / `spawn_entries == 0`. Otherwise the **`mode` is read straight from `config->mode` (config+0x28)** — baked into the stage file, never computed from a stadium kind.
 
-### Spawning Custom Actors
+So spawning regular enemies requires (a) the always-on enemies-enabled bit and (b) a stage file that ships a populated enemy-spawn array.
 
-In City Trial mode, event actor archives are already loaded. To spawn actors in modes where they aren't loaded (Free Run, Air Ride), call `Enemy_CheckAndLoad(actor_id)` first — it's idempotent and no-ops if already loaded. Then call `EventActor_Create` with a descriptor struct.
+| Mode group | Stage file | Spawns regular enemies? | mode |
+|------------|-----------|-------------------------|------|
+| Air Ride courses 0-7 | GrPlants1 / Heat2 / Desert1 / Ice1 / Sky2 / Valley2 / Machine2 / Check2 | **Yes** | 1 |
+| Air Ride — Nebula Belt | GrSpace2 | No (NULL spawn array) | — |
+| City Trial — **Kirby Melee 1** | GrPasture1 | **Yes** | 2 |
+| City Trial — **Kirby Melee 2** | GrColosseum5 | **Yes** | 3 |
+| City Trial — Drag Race / Air Glider / Target Flight / High Jump / Destruction Derby / Single Race / Vs. Dedede | GrZeroyon* / GrSimple* / GrJump* / GrColosseum1,3 / GrDedede1 | No (NULL spawn array) | — |
+| City Trial — open city (timed) | GrCity1 | No — `GrData+0x28` base is non-NULL but the selected `EnemySpawnData` entry is empty (spawn_count 0), so the spawner is inert | — |
+| City Trial — Free Run | GrCity1 | No (`Enemy_LoadStageEnemies` skipped entirely) | — |
+
+**Kirby Melee 1 and Kirby Melee 2 are the only City Trial events that spawn the regular AI enemy pool.** Every other City Trial context (open city, Free Run, all other stadiums) produces only **event actors** (TAC, Dyna Blade, Event Gordo, Meteor), which spawn through the event system, not this pool.
+
+> **The three index spaces — StadiumKind vs StageKind vs physical GroundKind.** Three different "kind" numbers get conflated here, and the `stage.h` `GroundKind` enum actually holds **StageKind** values, not physical ground-file indices:
+>
+> - **Physical GroundKind** (the `gr_kind → stage file` table in `main.dol` at `0x804A2FFC`, an array of stage-def pointers **indexed by GroundKind from 0**): `0=GrPlants1 … 8=GrIce1, 9=GrCity1, 10–13=GrZeroyon1/3/4/5, 14=GrPasture1, 15=GrColosseum1, 16=GrColosseum3, 17=GrColosseum5, 18–20=GrJump1/2/3, 21=GrDedede1, 23–25=GrTest*, 26–27=GrSimple*`. (Anchor check: `GrCity1` lands at index 9 = `GRKIND_CITY1=9`, `GrZeroyon1` at 10 = `GRKIND_DRAG1=10`.) So **Kirby Melee 1 = GroundKind 14 (GrPasture1)** and **Kirby Melee 2 = GroundKind 17 (GrColosseum5)**.
+> - **StageKind** (the global 0–59 index `Gm_GetCurrentGrKind()` actually returns — it reads r13[0x7F8], confirmed by the cannon-event note in `mods/custom_events/src/cannon_event.c`): `Kirby Melee 1 = StageKind 17`, `Kirby Melee 2 = StageKind 18`.
+> - **StadiumKind** (`stadium.h` `STKIND_*`, the City Trial event index, 0-based): `STKIND_MELEE1 = 7`, `STKIND_MELEE2 = 8`.
+>
+> The runtime `Stage_GetGrKindFromStageKind` remap (`0x80261ce8`, table `*(*(r13+0x7FC))`, stride `0x58`, GroundKind at `+0x00`) maps StageKind→GroundKind. Live read (Dolphin): **StageKind 17 → gr_kind 14 (GrPasture1)**, **StageKind 18 → gr_kind 17 (GrColosseum5)** — confirming the `.dat` evidence above (GrPasture1 = mode-2 enemy data, GrColosseum5 = mode-3). The relationship is exact: each `GroundKind` enum member from 9 on equals `STKIND_x + 10` (so `GRKIND_KIRBYMELEE1=17 = STKIND_MELEE1+10`).
+>
+> **Caveat — the `stage.h` `GroundKind` enum is mislabeled.** Its members from index 14 on (`GRKIND_AIRGLIDER`…`GRKIND_KIRBYMELEE2`) are **StageKind** values, not physical GroundKinds — e.g. `GRKIND_KIRBYMELEE1=17` is the *StageKind* of Kirby Melee 1, whose physical GroundKind is 14. The enum is **deliberately left unchanged**: it is load-bearing precisely because `Gm_GetCurrentGrKind()` returns StageKind, so existing `== GRKIND_CITY1` comparisons (9 in both spaces) work as written. Renumbering it to physical GroundKinds is a separate stage-system task; the `yakumono.h` "gr_kind 17 = GRKIND_KIRBYMELEE1" note inherits the same StageKind-vs-GroundKind ambiguity.
+
+## Spawning custom actors in City Trial
+
+### Archive loading
+
+In City Trial Free Run, `Enemy_LoadStageEnemies` is skipped, so no enemy archives are loaded by default. In timed City Trial and the Melee stadiums, `Enemy_LoadStageEnemies` runs normally and loads the stage's enemy archives (including event actors TAC, Dyna Blade, Meteor).
+
+### Spawning custom actors
+
+To spawn actors in modes where their archive isn't already loaded (Free Run, Air Ride), call `Enemy_CheckAndLoad(actor_id)` first — it's idempotent and no-ops if already loaded. Then call `EventActor_Create` with a descriptor struct.
 
 ```c
 // Example: spawn Dyna Blade near a player
@@ -565,23 +597,25 @@ Enemies do **not** have traditional HP. Death is determined by per-hit knockback
 
 ### Per-Hit Response
 
-Each hit is classified into a response tier (0-3) by `Enemy_ClassifyDamageTier` (0x8020b740). It loads a pointer from `r13+0x798` (= `0x805dd878`, `stc_enemy_param_table`) and compares the incoming damage against three float thresholds at that struct's `+0x08`, `+0x0C`, `+0x10`:
+Incoming damage is first scaled ×**0.4** (`Enemy_ScaleDamage` 0x8020b71c, reads table `+0x04`), then classified into a response tier (0-3) by `Enemy_ClassifyDamageTier` (0x8020b740). The classifier compares against three float thresholds at the param table's `+0x08`, `+0x0C`, `+0x10`:
 
 ```
-if (dmg < thr[+0x08]) return 0;
-if (dmg < thr[+0x0C]) return 1;
-if (dmg < thr[+0x10]) return 2;
+if (dmg < thr[+0x08]) return 0;   // 10.0
+if (dmg < thr[+0x0C]) return 1;   // 21.0
+if (dmg < thr[+0x10]) return 2;   // 32.0
 return 3;
 ```
 
-| Tier | Damage Threshold | Stun Frames | Knockback Speed | Stun Duration |
-|------|-----------------|-------------|-----------------|---------------|
-| 0 | < 10.0 | 20 | 2.0 | 2.0 |
-| 1 | 10.0 - 20.9 | 30 | 3.0 | 4.0 |
-| 2 | 21.0 - 31.9 | 40 | 4.0 | 6.0 |
-| 3 | >= 32.0 | 50 | 5.0 | 8.0 |
+`Enemy_ApplyKnockback` (0x8020b784) then indexes four per-tier arrays in the table by the tier (`ed+0xA1C`) and writes the results into EnemyData:
 
-These thresholds and response values are **global** — shared across all enemy types regardless of tier. The classification *structure* above — three thresholds at +0x08/+0x0C/+0x10 returning tiers 0-3 — comes from `Enemy_ClassifyDamageTier`. The specific numeric values for thresholds, stun frames, knockback speeds, and stun durations live in the runtime-populated param table, which is populated only at runtime (resolving them requires Dolphin).
+| Tier | Damage | Stun frames (ed+0xA18, +0x60) | Launch speed (ed+0x9D8, +0x50) | KB scale (ed+0x878, +0x40) | KB base mag (+0x30) |
+|------|--------|-------------------------------|--------------------------------|----------------------------|---------------------|
+| 0 | < 10.0 | 2 | 2.0 | 1.0 | 20 |
+| 1 | 10.0 - 20.9 | 4 | 3.0 | 0.8 | 30 |
+| 2 | 21.0 - 31.9 | 6 | 4.0 | 0.6 | 40 |
+| 3 | >= 32.0 | 8 | 5.0 | 0.5 | 50 |
+
+These values are **global** (shared across all enemy types/tiers) and **static** — they live in `Enemy.dat` (public `emDataAll`), loaded into RAM by `Enemy_LoadCommonParams` (0x801fd580) which stores the table pointer to `*0x805dd878`. They are NOT runtime-computed; the main-menu `mem1.raw` simply shows `0x805dd878` NULL because no stage with enemies has loaded yet. The knockback magnitude passed to the launch is `int(KB_base_mag[tier] × actor_data->+0x00->+0xA0 × KB_scale[tier])` (clamped ≥ 1), so the per-tier `actor_data` launch multiplier (`+0xA0`) further scales how far that enemy flies.
 
 ### Death Sequence
 
@@ -674,7 +708,9 @@ For meteor-specific documentation (state machine, standalone spawn, patches), se
 | EnemyActor_DistToPlayer | 0x801fffa4 | 0x60 | Returns distance from enemy to player by index (named in the map, link.ld + enemy.h) |
 | EnemyActor_RumblePlayer | 0x801ff80c | 0x58 | `(player_idx, rumble_type, intensity)` -- triggers controller rumble for player |
 | giveEnemyDamage | 0x8020b680 | 0x9c | Apply damage to enemy (writes accumulators) |
-| Enemy_ClassifyDamageTier | 0x8020b740 | 0x44 | Classify hit damage into response tier (0-3) via 3 thresholds |
+| Enemy_ScaleDamage | 0x8020b71c | -- | Scale incoming damage by the global multiplier (table +0x04 = 0.4) |
+| Enemy_ClassifyDamageTier | 0x8020b740 | 0x44 | Classify hit damage into response tier (0-3) via 3 thresholds (10/21/32) |
+| Enemy_LoadCommonParams | 0x801fd580 | -- | Load `Enemy.dat` `emDataAll`; store the param-table pointer to `*0x805dd878` (was `fn_emLoadCommon`) |
 | Enemy_ApplyKnockback | 0x8020b784 | 0x554 | Full knockback state transition: sets stun_frames, computes velocity, enters knockback state |
 | EnemyState_AnimExit | 0x8020c558 | 0xdc | func3 for states 0-8: decrement stun_frames each frame, ground physics, stun spark VFX; triggers death at 0 |
 | EnemyPath_FollowUpdate | 0x80209ce4 | 0x35c | Enemy path-following movement update |
@@ -690,7 +726,7 @@ For meteor-specific documentation (state machine, standalone spawn, patches), se
 | Archive loaded flags | 0x8055a210 | -- | byte per data_index, 1 = loaded |
 | Archive filename ptrs | 0x804b2204 | -- | 2 pointers per data_index (dat, group) |
 | Per-type callback table | 0x804b1d98 | -- | pointer per actor ID |
-| Enemy parameter table | 0x805dd878 | -- | Global knockback thresholds and response values |
+| Enemy parameter table pointer | 0x805dd878 | -- | Holds a pointer to the param table (from `Enemy.dat` `emDataAll`; set by `Enemy_LoadCommonParams`, NULL until enemies load). Fields: damage scale +0x04, thresholds +0x08/+0x0C/+0x10, per-tier KB mag/scale/launch/stun +0x30/+0x40/+0x50/+0x60, mode scale +0x70, detection range +0x80, retarget cooldown +0x94/+0x98 |
 | EnemyMgr pointer | 0x805DD714 | +0x634 | EnemyMgr struct (0x3C bytes) |
 | SpawnSlot array | 0x805DD70C | +0x62C | Array of 4 SpawnSlot structs (0x48 each) |
 | Enemy spawn data | 0x805DD710 | +0x630 | Per-stage spawn config pointer |
