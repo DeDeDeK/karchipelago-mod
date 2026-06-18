@@ -5,6 +5,7 @@
 #include "custom_ai.h"
 #include "enemy_ai.h"
 #include "cpu_ai.h"
+#include "cpu_stat_growth.h"
 
 // Menu labels for each selector. Ordered to match the preset enums (concrete
 // presets then the "Random" sentinel) - keep in sync with the preset tables in
@@ -25,6 +26,20 @@ static char *stc_cpu_names[] = {
     "Cautious",
     "Reckless",
     "Random",
+};
+
+// City Trial passive CPU stat-growth toggles. Order must match the enums in
+// cpu_stat_growth.h.
+static char *stc_growth_toggle_names[] = {
+    "Disabled",
+    "Enabled",
+};
+
+static char *stc_growth_budget_names[] = {
+    "Default",
+    "Low",
+    "Medium",
+    "High",
 };
 
 static void OnBoot(void)
@@ -52,9 +67,19 @@ static void OnChangeEnemy(int val)
     OSReport("[CustomAI] Air Ride enemy preset set to %s\n", EnemyAI_GetSelectionName(val));
 }
 
+static void OnChangeStatGrowth(int val)
+{
+    OSReport("[CustomAI] City Trial CPU stat growth %s\n", val ? "enabled" : "disabled");
+}
+
+static void OnChangeStatBudget(int val)
+{
+    OSReport("[CustomAI] City Trial CPU stat budget set to %s\n", stc_growth_budget_names[val]);
+}
+
 // City Trial: CPU riders only.
 static MenuDesc ct_menu = {
-    .option_num = 1,
+    .option_num = 3,
     .options = {
         &(OptionDesc){
             .name = "CPU AI",
@@ -64,6 +89,24 @@ static MenuDesc ct_menu = {
             .value_num = CPU_AI_MENU_NUM,
             .value_names = stc_cpu_names,
             .on_change = OnChangeCpuCT,
+        },
+        &(OptionDesc){
+            .name = "CPU Stat Growth",
+            .description = "CPUs passively gain machine stats over a City Trial round",
+            .kind = OPTKIND_VALUE,
+            .val = &cpu_stat_growth_enabled,
+            .value_num = 2,
+            .value_names = stc_growth_toggle_names,
+            .on_change = OnChangeStatGrowth,
+        },
+        &(OptionDesc){
+            .name = "CPU Stat Budget",
+            .description = "Scales the free-stat pool CPUs receive (Low 0.5x .. High 2x)",
+            .kind = OPTKIND_VALUE,
+            .val = &cpu_stat_growth_amount,
+            .value_num = CPU_STAT_BUDGET_NUM,
+            .value_names = stc_growth_budget_names,
+            .on_change = OnChangeStatBudget,
         },
     },
 };
