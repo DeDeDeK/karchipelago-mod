@@ -152,13 +152,12 @@ Decoded entries:
 | 26 | `GrSimple`    | system archive (14 MB), backdrop is a 4 KB placeholder |
 | 27 | `GrSimple2`   | no backdrop |
 
-> **The `GroundKind` enum in `stage.h` is partially incorrect.**
-> `GRKIND_CITY1 = 9` is right, but everything after that does not match
-> the real archive (e.g. the enum claims `GRKIND_DESTRUCTIONDERBY3 = 21`,
-> but the real archive at gr_kind=21 is `GrDedede1`). The
-> custom_backdrops mod only references `GRKIND_CITY1`, so the mismatch
-> doesn't matter for shipping code, but the enum should be rewritten as
-> a follow-up.
+> **The physical ground indices above are `stage.h`'s `GroundKind` enum (`GR_*`
+> members)** — the file-table index decoded here: `GR_CITY1 = 9`, `GR_PASTURE1 =
+> 14`, `GR_COLOSSEUM5 = 17`, `GR_DEDEDE1 = 21`. Do **not** confuse this with
+> `StageKind` (the menu/selection index): the two spaces coincide only at 0/1/2 and
+> City Trial (9) and diverge elsewhere. `custom_backdrops` keys on
+> `grobj->gr_kind == GR_CITY1`.
 
 ### StageKind table (Table B)
 

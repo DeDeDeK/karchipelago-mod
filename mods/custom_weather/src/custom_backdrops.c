@@ -124,7 +124,7 @@ static int PickEnabled(void)
 
 static void CustomBackdrop_Override(GrObj *grobj)
 {
-    if (grobj == NULL || grobj->gr_kind != GRKIND_CITY1)
+    if (grobj == NULL || grobj->gr_kind != GR_CITY1)
         return;
 
     int picked = PickEnabled();

@@ -337,7 +337,7 @@ void On3DLoadEnd()
             StadiumKind sk = Gm_GetCurrentStadiumKind();
             const char *sk_name = ((unsigned)sk < STKIND_NUM) ? StadiumKind_Names[sk] : "?";
             OSReport("[Main] Starting City Trial: Stadium (%s) Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                     sk_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                     sk_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
                      Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
                      Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
         }
@@ -345,7 +345,7 @@ void On3DLoadEnd()
         {
             const char *cm_name = ((unsigned)cm < 3) ? city_mode_names[cm] : "?";
             OSReport("[Main] Starting City Trial: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                     cm_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                     cm_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
                      Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
                      Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
         }
@@ -355,7 +355,7 @@ void On3DLoadEnd()
         AirRideMode ar_mode = Gm_GetAirRideMode();
         const char *ar_mode_name = ((unsigned)ar_mode < 3) ? ar_mode_names[ar_mode] : "?";
         OSReport("[Main] Starting Air Ride: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                 ar_mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                 ar_mode_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
                  Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
                  Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
     }

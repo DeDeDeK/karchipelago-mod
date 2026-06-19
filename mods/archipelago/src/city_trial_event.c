@@ -45,7 +45,7 @@ int Event_Do(EventKind kind)
 
 int Event_GiveItem(EventKind kind)
 {
-    if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
+    if (stGetCurrentStageKind() == STAGEKIND_CITY1)
     {
         if (Event_Do(kind))
         {

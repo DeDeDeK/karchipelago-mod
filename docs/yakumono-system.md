@@ -127,7 +127,7 @@ The two arrays are independent: stages may populate one, the other, or both. Cit
 
 ### Per-grkind hook table
 
-`grInitYakumono` checks `(&PTR_PTR_804a322c)[grobj->gr_kind].fn_at_4` and calls it before iterating `entries[]`. For City Trial (`GRKIND_CITY1`) this hook is `grDataCity1_CreateYakumono` (0x8010f268), which manually invokes 31 per-instance creators (data_idx 0..30), each hardcoding its own descriptor id. This bypass keeps the City Trial spawn order deterministic and well-known, instead of relying on the data file's `entries[]` order.
+`grInitYakumono` checks `(&PTR_PTR_804a322c)[grobj->gr_kind].fn_at_4` and calls it before iterating `entries[]`. For City Trial (GroundKind 9 / `GrCity1`) this hook is `grDataCity1_CreateYakumono` (0x8010f268), which manually invokes 31 per-instance creators (data_idx 0..30), each hardcoding its own descriptor id. This bypass keeps the City Trial spawn order deterministic and well-known, instead of relying on the data file's `entries[]` order.
 
 The hook table at `0x804a322c` is indexed by `GroundKind`. Entries that are NULL fall through to the generic `entries[]` walk.
 
@@ -493,43 +493,47 @@ The generic `entries[].kind` value is therefore in 0..15 with bit 0 acting as th
 
 ## Per-grkind hook table (`PTR_PTR_804a322c`)
 
-The table is 28 entries (`gr_kind` 0..27, indexing into `GroundKind`). Each entry is a pointer to a per-grkind block whose `+0x04` slot is the optional init hook called by `grInitYakumono`. Block size and layout vary; what matters for dispatch is whether `+0x04` is non-NULL.
+The table is 28 entries, indexed by the physical `GroundKind` (`gr_kind` 0..27). Each entry is a pointer to a per-grkind block whose `+0x04` slot is the optional init hook called by `grInitYakumono`. Block size and layout vary; what matters for dispatch is whether `+0x04` is non-NULL.
 
 Of the 28 entries:
 
-- **15 grkinds have a real init hook** (do explicit per-instance spawns before the `entries[]` walker runs): 0, 1, 2, 3, 4, 5, 7, 8, **9 (= GRKIND_CITY1)**, 10, 15, 19, 21, 26, 27.
-- **1 grkind has a 4-byte stub hook** (`blr` only — same effect as NULL): 17 (= `GRKIND_KIRBYMELEE1`, fn `0x8010faac`, size 4).
-- **12 grkinds have NULL hooks** (rely entirely on the generic `entries[]` walker): 6, 11, 12, 13, 14, 16, 18, 20, 22, 23, 24, 25.
+- **15 GroundKinds have a real init hook** (do explicit per-instance spawns before the `entries[]` walker runs): 0, 1, 2, 3, 4, 5, 7, 8, **9 (= GrCity1)**, 10, 15, 19, 21, 26, 27.
+- **1 GroundKind has a 4-byte stub hook** (`blr` only — same effect as NULL): 17 (= `GrColosseum5` / Kirby Melee 2, fn `0x8010faac`, size 4).
+- **12 GroundKinds have NULL hooks** (rely entirely on the generic `entries[]` walker): 6, 11, 12, 13, 14, 16, 18, 20, 22, 23, 24, 25.
 
-Translating the indices via `stage.h`'s GroundKind enum (which has `GRKIND_CITY1 = 9`):
+The table is indexed by the **physical GroundKind** (file order — the ground geometry file that loads), not by StageKind. Ground-file names below come from the stage-file table decoded in `docs/sky-backdrop-system.md`:
 
-| `gr_kind` | GroundKind | Init hook | Notes |
+| `gr_kind` | Ground file | Init hook | Notes |
 |---:|---|---|---|
-| 0 | Air Ride course | hook `0x8010e09c` (block 0x804a7528, size 0x10) | minimal block — embedded source strings live in the *next* block |
-| 1 | Air Ride course | hook `0x8010e1c8` (block 0x804a7538, size 0x88) | source `grheat2.c` (Magma Flows) |
-| 2 | Air Ride course | hook `0x8010e378` (block 0x804a75c0, size 0x40) | source `grdesert1.c` (Sky Sands) |
-| 3 | Air Ride course | hook `0x8010e5dc` (block 0x804a7600, size 0x10) | minimal block |
-| 4 | Air Ride course | hook `0x8010e87c` (block 0x804a7610, size 0x88) | source `grvalley2.c` |
-| **5** | **Air Ride course (Machine Passage)** | **hook `0x8010ea40` (block 0x804a7698, size 0x88)** | **source `grmachine2.c` — calls `GrYakuCannon_Create` (data_idx=1) plus 4 more per-instance creators. This is the *only* Air Ride stage with a cannon yakumono.** |
-| 6 | Air Ride course | NULL hook (block 0x804a7720, size 0x10) | this stage relies entirely on the generic `entries[]` walker |
-| 7 | Air Ride course | hook `0x8010ec90` (block 0x804a7730, size 0x40) | source `grsky2.c` |
-| 8 | Air Ride course | hook `0x8010edf8` (block 0x804a7770) | source `grice1.c` |
-| 9 | `GRKIND_CITY1` | `grDataCity1_CreateYakumono` (`0x8010f268`) | spawns 31 explicit per-instance yakumono; **does NOT call `GrYakuCannon_Create`** |
-| 10 | `GRKIND_DRAG1` | `0x8010f880` (real) | Top Ride course 1 has explicit yakumono |
-| 11..13 | `GRKIND_DRAG2..4` | NULL | other Top Ride courses use only the generic walker (or have empty entries) |
-| 14 | `GRKIND_AIRGLIDER` | NULL | |
-| 15 | `GRKIND_TARGETFLIGHT` | `0x8010fa0c` (real) | |
-| 16 | `GRKIND_HIGHJUMP` | NULL | |
-| 17 | `GRKIND_KIRBYMELEE1` | `0x8010faac` (4-byte stub) | functionally NULL |
-| 18 | `GRKIND_KIRBYMELEE2` | NULL | |
-| 19..23 | `GRKIND_DESTRUCTIONDERBY1..5` | DD1, DD3 real; DD2, DD4, DD5 NULL | |
-| 24..25 | `GRKIND_SINGLERACE1..2` | NULL | |
-| 26 | `GRKIND_SINGLERACE3` | `0x8010fbd4` (real) | |
-| 27 | `GRKIND_SINGLERACE4` | `0x8010ff08` (large, 0x1dc bytes) | also calls `GrYakuCannon_Create` (data_idx=18) — second of the only two cannon callers in the game |
+| 0 | `GrPlants1` (Fantasy Meadows) | hook `0x8010e09c` (block 0x804a7528, size 0x10) | minimal block — embedded source strings live in the *next* block |
+| 1 | `GrHeat2` (Magma Flows) | hook `0x8010e1c8` (block 0x804a7538, size 0x88) | source `grheat2.c` |
+| 2 | `GrDesert1` (Sky Sands) | hook `0x8010e378` (block 0x804a75c0, size 0x40) | source `grdesert1.c` |
+| 3 | `GrCheck2` (Checker Knights) | hook `0x8010e5dc` (block 0x804a7600, size 0x10) | minimal block |
+| 4 | `GrValley2` (Celestial Valley) | hook `0x8010e87c` (block 0x804a7610, size 0x88) | source `grvalley2.c` |
+| **5** | **`GrMachine2` (Machine Passage)** | **hook `0x8010ea40` (block 0x804a7698, size 0x88)** | **source `grmachine2.c` — calls `GrYakuCannon_Create` (data_idx=1) plus 4 more per-instance creators. The *only* Air Ride stage with a cannon yakumono.** |
+| 6 | `GrSpace2` (Nebula Belt) | NULL hook (block 0x804a7720, size 0x10) | relies entirely on the generic `entries[]` walker |
+| 7 | `GrSky2` (Beanstalk Park) | hook `0x8010ec90` (block 0x804a7730, size 0x40) | source `grsky2.c` |
+| 8 | `GrIce1` (Frozen Hillside) | hook `0x8010edf8` (block 0x804a7770) | source `grice1.c` |
+| 9 | `GrCity1` (City Trial) | `grDataCity1_CreateYakumono` (`0x8010f268`) | spawns 31 explicit per-instance yakumono; **does NOT call `GrYakuCannon_Create`** |
+| 10 | `GrZeroyon1` | `0x8010f880` (real) | drag-race ground |
+| 11..13 | `GrZeroyon3/4/5` | NULL | other drag-race grounds use only the generic walker |
+| 14 | `GrPasture1` (Kirby Melee 1) | NULL | |
+| 15 | `GrColosseum1` | `0x8010fa0c` (real) | |
+| 16 | `GrColosseum3` | NULL | |
+| 17 | `GrColosseum5` (Kirby Melee 2) | `0x8010faac` (4-byte stub) | functionally NULL |
+| 18 | `GrJump1` (High Jump) | NULL | |
+| 19 | `GrJump2` | real | |
+| 20 | `GrJump3` | NULL | |
+| 21 | `GrDedede1` | real | King Dedede arena |
+| 22 | (no ground file) | NULL | `param_9 == 0x16` special-case in `grLoadStageArchive` |
+| 23 | `GrTest` | NULL | debug |
+| 24..25 | `GrTest6` / `GrTest7` | NULL | debug |
+| 26 | `GrSimple` | `0x8010fbd4` (real) | system ground |
+| 27 | `GrSimple2` | `0x8010ff08` (large, 0x1dc bytes) | hook is `grDataSingleRace4_CreateYakumono` (a single-race stadium that loads this ground); also calls `GrYakuCannon_Create` (data_idx=18) — second of the only two cannon callers in the game |
 
 **`GroundKind` ≠ `AirRideCourse`.** The `AirRideCourse` enum in `stage.h` is the in-game course-selection index used in menus and `GameData` (`MACHINE_PASSAGE = 6`), but the internal `GroundKind` for that same stage is **5**. The two enums share the "0..8 = Air Ride courses" range but use different orderings. When indexing the per-grkind hook table at `0x804a322c`, always use `GroundKind`, never `AirRideCourse`.
 
-GroundKinds **28..33** (`GRKIND_SINGLERACE5..9`, `GRKIND_VSKINGDEDEDE`) are **not in the table** — the table truncates at 28 entries while `GRKIND_NUM = 34`. This means `grInitYakumono` must not be called for those gr_kinds (or the lookup is bounded elsewhere). VSKINGDEDEDE is plausibly a special boss arena that doesn't go through `grLoadStage`'s yakumono path at all.
+There is no physical GroundKind **≥ 28** — the table's 28 entries (0..27) cover every ground file. The City Trial stadiums not represented by their own ground above (the remaining single races, Vs. King Dedede) are *StageKinds* that reuse one of these physical grounds rather than shipping a new ground file, so they dispatch through whichever GroundKind they load (or, like a boss arena, may skip `grLoadStage`'s yakumono path entirely).
 
 ## `gyp->fgm` substruct
 

@@ -14,7 +14,7 @@
 static void FilterAllSpawnTables()
 {
     OSReport("[SpawnFilter] FilterAllSpawnTables called (GrKind=%d, StageKind=%d)\n",
-             Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind());
+             Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind());
 
     // Inject All-Up into the box/sky and destructible/dyna pools first. Only
     // active when the Max Stats Insanity CT goal is on - see the function for
@@ -68,7 +68,7 @@ void ItemSpawnFilter_On3DLoadEnd()
     if (!Gm_IsInCity() && *stc_grBoxGeneObj)
     {
         OSReport("[SpawnFilter] Filtering spawn tables for non-CT mode (GrKind=%d)\n",
-                 Gm_GetCurrentGrKind());
+                 Gr_GetCurrentGrKind());
         FilterAllSpawnTables();
     }
 }

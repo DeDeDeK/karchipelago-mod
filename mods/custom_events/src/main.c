@@ -14,7 +14,7 @@ static void OnBoot(void)
 static void On3DLoadEnd(void)
 {
     // Initialize custom event SIS text entries when in City Trial
-    if (Gm_GetCurrentGrKind() == GRKIND_CITY1)
+    if (stGetCurrentStageKind() == STAGEKIND_CITY1)
         CustomEvents_InitSis();
 
     // Cannon is WIP investigation scaffolding that runs diagnostic spawns/dumps

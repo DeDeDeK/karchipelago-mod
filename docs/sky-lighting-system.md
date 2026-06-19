@@ -275,7 +275,7 @@ In `Sky_Init` (0x8010f114), the initial preset is chosen by stage:
 
 | GroundKind | Stages | Preset Selection |
 |-----------|--------|-----------------|
-| 9 (GRKIND_CITY1) | City Trial | Random from 4 presets: {0, 10, 11, 12} via `Gm_Roll` |
+| 9 (GR_CITY1) | City Trial | Random from 4 presets: {0, 10, 11, 12} via `Gm_Roll` |
 | 10-22 (0x0A-0x16) | Air Ride stadiums/courses | Fixed: preset 15 (0x0F) |
 | 23 (0x17) | Air Ride course | Fixed: preset 16 (0x10) |
 | 52 (0x34) | Top Ride | Fixed: preset 0 |

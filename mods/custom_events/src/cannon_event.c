@@ -34,11 +34,9 @@
 // yakumono will share the param read-only and have separate ydata, giving us a
 // clean ydata to dump alongside the param.
 #define MP_CANNON_DATA_IDX 1
-// Gm_GetCurrentGrKind reads r13[0x7f8] which actually stores StageKind /
-// AirRideCourse (Machine Passage = 6), NOT the per-grkind hook table index
-// (which is 5 for MP). The doc's "GroundKind = 5" refers to the internal
-// dispatch table, not this runtime accessor. CT happens to be 9 in both.
-#define MACHINE_PASSAGE_GRKIND 6
+// Machine Passage is StageKind 6 (== AIRRIDE_MACHINE_PASSAGE). Note this differs
+// from its physical GroundKind 5 (GrMachine2), which is what the yakumono
+// per-grkind hook table is indexed by - see yakumono.h.
 
 static u8 s_zero_cannon_param[256] __attribute__((aligned(4))) = {0};
 
@@ -394,10 +392,10 @@ void CannonEvent_On3DLoadEnd(void)
 {
 #if CANNON_SPAWN_ENABLED
     {
-        GroundKind grkind = Gm_GetCurrentGrKind();
+        StageKind stage_kind = stGetCurrentStageKind();
         if (Gm_IsInCity())
             DumpZeroParamCT();
-        else if (grkind == MACHINE_PASSAGE_GRKIND)
+        else if (stage_kind == AIRRIDE_MACHINE_PASSAGE)
             DumpHealthyMP();
     }
 #endif
