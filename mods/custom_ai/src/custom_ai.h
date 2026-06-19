@@ -5,12 +5,13 @@
 
 // Shared module for the custom AI mod. The settings menu is organized by game
 // mode, each mode exposing only the AI domains it actually has:
-//   - City Trial : CPU riders
-//   - Air Ride   : CPU riders + inhalable enemies
+//   - City Trial : CPU riders + Kirby Melee stadium enemies
+//   - Air Ride   : CPU riders + enemies
 //   - Top Ride   : CPU riders
 // Two preset tables back these selectors:
 //   - cpu_ai.*   : CPU-controlled riders (one shared preset set; per-mode select)
-//   - enemy_ai.* : Air Ride enemies (Waddle Dee, Sword Knight, ...)
+//   - enemy_ai.* : pool enemies (Waddle Dee, Sword Knight, ...) - one shared
+//                  preset set with independent Air Ride / City Trial selection
 // Every selector exposes a "Random" entry that resolves to a concrete preset via
 // CustomAI_RollRandom.
 

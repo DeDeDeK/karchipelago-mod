@@ -99,29 +99,27 @@ These are generic HSD animation/timing commands shared across the engine.
 
 ### Enemy-Specific Commands (11-25) -- Table at 0x804b26b0
 
-The enemy command table has **12-byte entries `{handler_ptr (word0), word1, word2}`** — only **word0** is the handler the dispatcher calls (`(cmd-11)*12; lwzx r12, table, …; bctrl`); word1/word2 are per-entry data. Handlers read their operands directly from the bytecode stream.
+**Calling convention.** The dispatcher `EventActor_StateMachine` (0x802017d0) loads the opcode byte from the script pointer (script-state struct at `ed+0x4c`, current script ptr at `+0x08`). The command is `(byte >> 2) & 0x3F`; the low 2 bits are an inline sub-selector consumed by some handlers. Commands 0-10 dispatch through the generic HSD table at 0x80499628. Commands `>= 11` index the enemy table at 0x804b26b0 as **12-byte entries `{word0 = handler, word1, word2 = operand-word-count}`**; dispatch is `word0`. Handlers receive **r3 = `EnemyData*`** and **r4 = `ed+0x4c`** (the script-state struct); they read operands via the script ptr at `+0x08`, advancing it `+4` per operand word.
 
-**Real handlers run cmd 11–25 (15 entries).** The table's cmd-26 word0 is NULL, and cmds 27–28 have non-pointer word0s (`0x01000000`, then all-`0xFFFFFFFF`) — they are **terminator/degenerate slots, not callable handlers** (the earlier "commands 26-28 rarely used" was wrong).
+The callable range is exactly **cmd 11-25 (15 handlers)**. The trailing slots are non-callable: index 15 (cmd 26) `word0 = NULL`, index 16 (cmd 27) `word0 = 0x01000000`, index 17 (cmd 28) `word0 = 0xFFFFFFFF`. The 0x80201928/0x80201948 values that appear in that region are leftover thunk pointers sitting in the `word1` column and are never dispatched.
 
-> ⚠️ **The Purpose column below is unverified/inferred** except the four rows marked **[verified]**. A spot-check disassembled cmds 11/13/16/22 and **all four labels were wrong**, so treat the rest as guesses until disassembled.
-
-| Cmd | Handler | Purpose |
-|-----|---------|---------|
-| 11 | 0x80200e58 | **[verified]** Flag/attribute setter — writes flag bits to `ed+0xB00` (and a float to `ed+0xB04`). *Not* a state change. |
-| 12 | 0x80200eb8 | (inferred) animation parameters |
-| 13 | 0x80201138 | **[verified]** Disable a HitColl hitbox by index (`Hit_SetInactive` on `ed->hurtdata` entry). *Not* VFX. |
-| 14 | 0x80201180 | (inferred) set flag/attribute |
-| 15 | 0x802011bc | (inferred) enable/disable collision |
-| 16 | 0x80201418 | **[verified]** Broadcast controller rumble (extracts 2 bit-fields → `zz_801ff864_`→`zz_80192174_`, per-human-player). *Not* a movement target. |
-| 17 | 0x80201488 | (inferred) damage region setup |
-| 18 | 0x80201498 | (inferred) sound effect variant |
-| 19 | 0x80201504 | (inferred) velocity/impulse |
-| 20 | 0x8020152c | (inferred) ground attachment |
-| 21 | 0x80201578 | (inferred) scale/transform |
-| 22 | 0x802016ac | **[verified]** Store a 24-bit script constant into one of `ed+0xAF0/0xAF4/0xAF8/0xAFC` (low-2-bit selector). *Not* a child/projectile spawn. |
-| 23 | 0x8020172c | (inferred) AI target |
-| 24 | 0x8020174c | (inferred) timer/counter set |
-| 25 | 0x80201798 | (inferred) callback registration |
+| Cmd | Handler | Purpose | Proposed name |
+|-----|---------|---------|---------------|
+| 11 | 0x80200e58 | Set attribute flag bits in `ed+0xB00` and a float in `ed+0xB04` | `EnemyAnimCmd_SetAttrFlag` |
+| 12 | 0x80200eb8 | Define/emit a HitColl attack-box descriptor: decodes ~6 operand words (int16 offsets/sizes → float-scaled + packed flag bits) into a collision-box descriptor and emits it into the enemy's HurtData (`ed+0x410`), indexing a fn-pointer table at `ed+0x2b4` | `EnemyAnimCmd_SetHitDesc` |
+| 13 | 0x80201138 | Disable a HitColl box by index (operand `& 0x03FFFFFF`) via `Hit_SetInactive` on an `ed+0x410` region | `EnemyAnimCmd_DisableHit` |
+| 14 | 0x80201180 | Flush/deactivate the pending HitColl boxes (iterates the `ed+0x410` box array, `Hit_SetInactive` on each, clears the enable flag) | `EnemyAnimCmd_FlushHitColls` |
+| 15 | 0x802011bc | Spawn a projectile / sub-actor (optional random variant; decodes transform operands, calls sub-actor spawn 0x8020c738) | `EnemyAnimCmd_SpawnSubActor` |
+| 16 | 0x80201418 | Broadcast controller rumble (per human player) | `EnemyAnimCmd_Rumble` |
+| 17 | 0x80201488 | No-op: advance script ptr 1 word | `EnemyAnimCmd_Nop` |
+| 18 | 0x80201498 | Spawn/refresh a persistent particle effect (`Effect_SpawnSync`; handle stored to `ed+0xA70`/`ed+0xA74`, prior one destroyed) | `EnemyAnimCmd_SpawnEffect` |
+| 19 | 0x80201504 | No-op: advance script ptr 3 words | `EnemyAnimCmd_Nop3` |
+| 20 | 0x8020152c | Play a sound/voice (2-bit selector + word arg; AudioEmitter from `ed+0xA58[]`, handle cached to `ed+0xA60`, sentinel `ed+0xA68`) | `EnemyAnimCmd_PlaySound` |
+| 21 | 0x80201578 | Play a random 1-of-N sound (`HSD_Randi` pick, then same audio path as cmd 20) | `EnemyAnimCmd_PlayRandSound` |
+| 22 | 0x802016ac | Store a 24-bit script constant into one of `ed+0xAF0/0xAF4/0xAF8/0xAFC` (low-2-bit selector) | `EnemyAnimCmd_SetConst` |
+| 23 | 0x8020172c | Set event/state flag bit (bit 1 of byte `ed+0xB0A`) | `EnemyAnimCmd_SetEventBit` |
+| 24 | 0x8020174c | Apply a color animation (`ColAnim_Apply` on the ColAnim component at `ed+0x70`) | `EnemyAnimCmd_ApplyColAnim` |
+| 25 | 0x80201798 | Reset the color animation (`ColAnim_Reset` on `ed+0x70`) | `EnemyAnimCmd_ResetColAnim` |
 
 ## State Machine
 
@@ -510,6 +508,14 @@ Descriptor 0x804b4288 → state table 0x804b41e8 (8 states 0x0E-0x15), init_cb 0
 
 > **Param caveat.** Both actors' concrete tuning values (`param[N] = *(actor_data+4)[N]`: detect range, dash speed, item-drop counts, swoop count) live in `Enemy.dat` and are not in the `mem1.raw` menu snapshot — the *gating structure* above is verified from disassembly, but the numeric thresholds need a live dump to pin down.
 
+## Enemy Offensive Hitboxes
+
+The enemy's attack hitboxes live in its HurtData at `ed+0x410`, built by `EventActor_HurtDataCreate` (0x80201ee8): **2 attack regions for normal enemies, 8 for Meteor (0x4D)**. It sets the `on_damage_callback` (`HurtData+0x8C`) `= 0x80201c78` and builds the defensive sub-regions from the actor's joint descriptor.
+
+Per attack frame the params are refreshed from the current animation frame's hurt descriptor into the TriggerData at `ed+0x45C` by `EventActor_RefreshAttackParams` (0x80201ba4). Enable is `Trigger_SetState1` (data-driven, when the anim frame carries hurt data); disable is anim-script **cmd 13** (`EnemyAnimCmd_DisableHit`).
+
+**Inbound vs outbound.** `EventActor_ProcHitColl` (priority 9, 0x801fc8ec) is **INBOUND only** — the enemy as victim, tested against the rider/machine/enemy/hazard hurtdata lists. The enemy's **OUTBOUND** attack on a rider is delivered on the **MACHINE side**: `Machine_CheckEventCollision` (0x801d71ec) reads the enemy's `ed+0x410` attack regions as the attacker against the machine's HurtData (`MachineData+0x660`). Riders are damaged **through their machine** — there is no `Rider_CheckEventCollision` against enemies. See [hurtdata-system.md](hurtdata-system.md) for the full pipeline.
+
 ## Movement System
 
 ### Path Following (`EnemyPath_FollowUpdate`, 0x80209ce4)
@@ -609,7 +615,7 @@ float EnemyActor_DistToPlayer(int player_idx, Vec3 *enemy_pos);
 
 The main player targeting function. Stores target at `ed+0xB24` (s16, player index; -1 = none) with a retarget cooldown at `ed+0xB26` (s16).
 
-**Detection range:** Read from the global enemy param table at `*(stc_enemy_param_table) + 0x80` = **50.0** (a single scalar, not tier-indexed). This is the max acquisition distance; players beyond it are never targeted.
+**Detection range:** Read from the global enemy param table at `*(stc_enemy_param_table) + 0x80` = **50.0** (a single scalar, not tier-indexed). This is the max acquisition radius; players beyond it are never targeted. It is the first rung of a distance ladder in the table (from `Enemy.dat` `emDataAll`, file offset 0x30): `+0x80`=50.0 (acquisition radius, here), `+0x84`=30.0 (close range), `+0x88`=30.0, `+0x8C`=300.0 (mid range), `+0x90`=500.0 (max/leash — the dominant range constant, read by ~15 AI state funcs).
 
 **Retarget cooldown:** Random value in `[table+0x94, table+0x98]` = `20 + HSD_Randi(40-20)` = **20–39 frames**, preventing simultaneous retargeting of all enemies when a player moves.
 
@@ -658,9 +664,12 @@ A random 3-bit value from `HSD_Randi(8)` (in `Enemy_ApplyKnockback`, 0x8020b784)
 |------|--------|----------|
 | 0 | Normal (from HitColl) | Standard damage-driven knockback |
 | 1 | From attacker position | Direction computed from attacker to enemy |
-| 2 | Unused | -- |
-| 3 | Enemy-on-enemy | Collision between two enemies |
-| 5 | Special | Used by scripted events |
+| 2 | Generic default | Reachable (mapped from hit-type 2 by `EnemyKnockback_Default`) but no distinct behavior — falls into the generic default block (hardcoded direction constant, no source lookup), identical to kind 4 |
+| 3 | Enemy-on-enemy | Collision between two enemies (uses attacker pos at `ed+0xA24`) |
+| 4 | Generic default | Same generic default block as kind 2 (hardcoded direction constant, no source lookup) |
+| 5 | Special | Shares the kind-0/1 HitColl/attacker-position direction path; used by scripted events |
+
+`EnemyKnockback_Default` (0x8020bcd8) maps the hurtdata hit-type (`+0x38`) to a kind via the identity jump table at 0x804b2b50 (type N → kind N for 0..7, type > 7 → skip). Inside `Enemy_ApplyKnockback` (0x8020b784) the dispatch on `ed+0x99C` is: kinds 0/1 → HitColl/attacker-position direction path; kind 5 → shares that same path; kind 3 → enemy-on-enemy (attacker pos at `ed+0xA24`); kinds 2 **and** 4 → the generic default block (hardcoded direction constant, no source lookup).
 
 ### Default Knockback Handler (`EnemyKnockback_Default`, 0x8020bcd8)
 
@@ -692,10 +701,21 @@ The returned pointer points to a per-tier data block:
 |--------|------|---------|-------------|
 | +0x00 | ptr | **Parameter block root** -- behavioral floats | `*actor_data` in InitFromDesc, bulk copy in `zz_802006b4_` |
 | +0x04 | ptr | **Per-type secondary params** -- detection/attack | Per-type callback [3] copies 16 bytes to `ed+0x40C` |
-| +0x08 | ptr | **Anim/model joint data** | Animation init |
-| +0x0C | ptr | **Animation state table** -- 0x10-byte entries | `EnemyStateChange` indexes by `anim_idx * 0x10` |
+| +0x08 | int | **`-1` sentinel word** (param header). NOT joint/anim data. | Param-block header |
+| +0x0C | ptr | **Animation state table** -- 0x10-byte animseq entries | `EnemyStateChange` indexes by `anim_idx * 0x10` |
 | +0x10 | ptr | **Material/texture animation data** | Material update |
 | +0x14 | ptr | Additional data | |
+
+**Animseq entry layout (0x10 bytes).** Each entry in the animation state table at `actor_data + 0x0C` is:
+
+| Offset | Type | Purpose |
+|--------|------|---------|
+| +0x00 | `AnimJoint*` (HSD) | Skeletal animation joint |
+| +0x04 | `MatAnimJoint*` (HSD) | Material animation joint |
+| +0x08 | float/int | End-frame / flags |
+| +0x0C | byte | Flags byte (bit `0x80` gates per-frame anim work) |
+
+**Resolution.** `ed+0x48` (`anim_data`) `= *(actor_data + 0x0C) + anim_idx * 0x10`, where `anim_idx` is the state-table entry's `word0`. The animation is applied by `EventActor_AnimDataInit` (0x80200c04): `HSD_JObjRemoveAnimAll`, then `HSD_JObjAddAnimAll(rootJObj, AnimJoint, MatAnimJoint, 0)`, then `HSD_JObjReqAnimAllByFlags`. The model's root JObj is reached via `ed+0x00` (HSD container) → `+0x28`, **NOT** via `actor_data + 0x08`.
 
 ### Parameter Block Root
 
@@ -732,6 +752,24 @@ Mapped fields (Waddle Dee T0 as reference):
 | +0x98 | (direct) | 2.0 | float | **Turn rate param 1** |
 | +0x9C | (direct) | 0.05 | float | **Turn rate param 2** |
 | +0xA0 | (direct) | -- | float | **Knockback launch multiplier** |
+
+### Per-Enemy Tier-0 Param Values
+
+Tier-0 values extracted from each enemy's `Em*Data.dat` archive (the 0xA4-byte param-block root). `detect`/`chase` here are the `+0x10`/`+0x14` fields the live `EnemyActor_ClassifyRange` reads from the actor_data root.
+
+| Enemy | base_scale (+0x00) | detect (+0x10) | chase (+0x14) | move_speed (+0x58) | gravity (+0x3C) | frames (+0x44) | hp_threshold (+0x48) |
+|-------|-----------|--------|-------|------------|---------|--------|--------------|
+| Waddle Dee | 2.4 | 10 | 4 | 0.1 | 0.02 | 60 | 1 |
+| Sword Knight | 3.6 | 10 | 4 | 2 | 0.025 | 60 | 1 |
+| Scarfy | 4.5 | 10 | 4 | 3 | 0.025 | 60 | 1 |
+| Bronto Burt | 3.2 | 10 | 4 | 1.8 | 0.02 | 60 | 1 |
+| Gordo | 3.6 | 10 | 4 | 3 | 0.025 | 60 | 1e8 |
+| Broom Hatter | 4 | 10 | 4 | 4 | 0.02 | 60 | 1 |
+| Wheelie | 4.5 | 10 | 4 | 0.1 | 0.02 | 60 | 1 |
+| TAC | 4.5 | 10 | 4 | 0.1 | 0.1 | 60 | 40 |
+| Dyna Blade | 3 | 2 | 1 | 0.1 | 0.25 | 60 | 150 |
+
+Nearly all regular enemies share **`detect = 10` (+0x10) / `chase = 4` (+0x14)** — these are the live proximity-bucket ranges read by `EnemyActor_ClassifyRange` from the actor_data root, distinct from the global `+0x80`=50 acquisition radius and from the dead `ed+0x378`/`ed+0x37c` per-enemy copies. `hp_threshold` (+0x48) is the damage-to-kill gate: Gordo ~1e8 (effectively invincible), TAC 40, Dyna Blade 150, all others 1. **Dyna Blade is the outlier** (detect 2 / chase 1 / gravity 0.25). Higher tiers (T1/T2) exist for most enemies but their values are not all captured.
 
 ### Per-Type Secondary Params
 
@@ -777,7 +815,7 @@ Waddle Dee T0 values:
 | 0x03C | int | anim_idx | Animation index from state table entry. -1 = no animation. Written by `EnemyStateChange` (`stw r0,60(r28)`). |
 | 0x040 | void* | common_state_table | Pointer to common states 0x00-0x0D (0x804b2950). Read by `EnemyStateChange` for `state_id < 0x0E` (`lwz r3,64(r28)`). |
 | 0x044 | void* | per_type_state_table | Per-type state table (states >= 0x0E). Initialized to `descriptor[0x00]` (the per-type descriptor's state-table pointer). Read by `EnemyStateChange` for `state_id >= 0x0E` (`lwz r3,68(r28)`). |
-| 0x048 | void* | anim_data | Current animation data pointer (`*(actor_data + 0x0C) + anim_idx * 0x10`) |
+| 0x048 | void* | anim_data | Current animseq entry pointer (`*(actor_data + 0x0C) + anim_idx * 0x10`). 0x10-byte entry: `+0x00 AnimJoint*`, `+0x04 MatAnimJoint*`, `+0x08 end-frame/flags`, `+0x0C flags byte` (bit `0x80` gates per-frame anim work). Applied by `EventActor_AnimDataInit` (0x80200c04). |
 | 0x04C | float | anim_timer | Animation script timer. Initialized to -1.0 for immediate first-command execution. |
 | 0x050 | float | anim_frame | Current animation frame accumulator (`ed+0x2A8 + ed+0x2AC`, written each frame by `EventActor_StateMachine`) |
 | 0x054 | void* | anim_command_ptr | Animation script bytecode pointer (NULL = stopped) |
@@ -1041,9 +1079,10 @@ For applying behavior presets (e.g. `mods/custom_ai`), there are two strategies,
 ### 1. Tweak — adjust vanilla parameters
 
 - **Global enemy param table** (`*(stc_enemy_param_table)`, loaded from `Enemy.dat`'s `emDataAll` by `Enemy_LoadCommonParams` 0x801fd580; NULL until a stage with enemies loads). It is RAM-resident, so writing it retunes **all** enemies at once:
-  - `+0x80` **detection range** (50.0, not tier-indexed) — the radius `EnemyActor_FindNearestPlayer` uses to acquire a rider. Raise it for an *Aggressive* feel; drop it for *passive/Coward*.
+  - **Distance ladder** (from `Enemy.dat` `emDataAll`, file offset 0x30): `+0x80`=50.0 **acquisition radius** (`EnemyActor_FindNearestPlayer`), `+0x84`=30.0 (close range), `+0x88`=30.0, `+0x8C`=300.0 (mid range), `+0x90`=500.0 (**max/leash — the dominant range constant, read by ~15 AI state funcs**). Raise the acquisition/leash rungs for an *Aggressive* feel; drop them for *passive/Coward*.
   - `+0x94`/`+0x98` **retarget cooldown** (20/40 → 20–39 frames) — how often an enemy re-picks its nearest target. Lower = twitchy / *Erratic* switching.
   - `+0x04` damage scale (0.4), `+0x08/+0x0C/+0x10` tier thresholds (10/21/32), `+0x30/+0x40/+0x50/+0x60` per-tier knockback magnitude/scale/launch/stun — tune how hard enemies are to knock out (see [enemy-spawn-system.md](enemy-spawn-system.md) § Damage & Knockback System).
+  - Int array at `+0x14..+0x20` = {10,30,50,70} — consumer not yet identified (open).
 - **Per-enemy speed** — the live movement speeds are `ed+0x964` (`movement_speed`; `Enemy_AIPhysicsTick` early-exits if 0) and `ed+0x974` (`idle_wander_speed`). The state funcs rewrite these each frame, so a one-time post-spawn write is overwritten — re-assert it every frame (e.g. from an injected per_type_cb, below).
 - **Per-archive detect/chase range** — `EnemyActor_ClassifyRange` reads detect/chase range from the **actor_data param-root** (`*(ed+0x14)+0x10`/`+0x14`), shared by every enemy of that data_index/tier. Patching the archive root scales the proximity bucket for all instances of that type.
 
@@ -1142,7 +1181,7 @@ Alternative hooks: override the state callbacks `ed+0xAB8`–`ed+0xAC4` directly
 | Actor data table | 0x804b22b4 | {data_index, flags} per ActorID, stride 8 |
 | Archive loaded flags | 0x8055a210 | byte per data_index (22 entries) |
 | Archive root pointers | 0x8055a228 | pointer per data_index (22 entries) |
-| Enemy parameter table pointer | 0x805dd878 | Holds a **pointer** to the param table (from `Enemy.dat` `emDataAll`, set by `Enemy_LoadCommonParams`; NULL until enemies load). Table fields: detection range (+0x80=50.0), retarget cooldown (+0x94/+0x98=20/40), damage thresholds (+0x08/+0x0C/+0x10), per-tier knockback (+0x30/+0x40/+0x50/+0x60). See [enemy-spawn-system.md](enemy-spawn-system.md) § Damage & Knockback System. |
+| Enemy parameter table pointer | 0x805dd878 | Holds a **pointer** to the param table (from `Enemy.dat` `emDataAll`, set by `Enemy_LoadCommonParams`; NULL until enemies load). Distance ladder: `+0x80`=50.0 (acquisition radius, `FindNearestPlayer`), `+0x84`=30.0 (close), `+0x88`=30.0, `+0x8C`=300.0 (mid), `+0x90`=500.0 (max/leash — dominant range constant, ~15 AI state funcs). Other fields: retarget cooldown (+0x94/+0x98=20/40), damage thresholds (+0x08/+0x0C/+0x10), per-tier knockback (+0x30/+0x40/+0x50/+0x60). Int array at `+0x14..+0x20` = {10,30,50,70} (consumer not yet identified). See [enemy-spawn-system.md](enemy-spawn-system.md) § Damage & Knockback System. |
 | Animation script table (enemy) | 0x804b26b0 | Enemy-specific script commands 11-28, 12-byte entries |
 | Animation script table (HSD) | 0x80499628 | Generic animation script commands 0-10 (11 entries) |
 | Knockback jump table | 0x804b2b50 | 8 entries for hit type mapping |

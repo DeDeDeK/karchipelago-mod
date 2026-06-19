@@ -151,6 +151,15 @@ The collision system iterates GObj linked lists by p_link class:
 
 **Naming note:** the getter at 0x800f8248 is **`GrYaku_GetHurtData`** (it reads GrYakuData+0xEC, not EnemyData). The per-frame stage-hazard check at 0x801d72a4 is **`Machine_CheckStageHazardCollision`**. Enemy/event actors are checked by `Machine_CheckEventCollision` (0x801d71ec, p_link 12); it loads stc_gobj_lookup+0x30, calls `EventActorGObj_GetHurtData` per actor, then `HitColl_CheckCollision` against the machine's hurt_data (MachineData+0x660).
 
+**HurtData getters per entity** (each reads the GObj userdata then the entity-local offset):
+
+| Getter | Address | Reads |
+|--------|---------|-------|
+| `RiderGObj_GetHurtData` | 0x80192788 | RiderData+0x390 |
+| `MachineGObj_GetHurtData` | 0x801c8660 | MachineData+0x660 |
+| `EventActorGObj_GetHurtData` | 0x80204878 | EnemyData+0x410 |
+| `GrYaku_GetHurtData` | 0x800f8248 | GrYakuData+0xEC |
+
 ## Damage Pipeline — Per-Frame Flow
 
 ### Machine Side (Machine_UpdateHitColl, 0x801c67a0)
@@ -183,9 +192,11 @@ Each frame, for every machine:
        └── Machine_EnterHitReaction(md)  → state 5 (bounce)
 ```
 
-### Enemy Side (EventActor_ProcHitColl, 0x801fc8ec)
+### Enemy Side — INBOUND only (EventActor_ProcHitColl, 0x801fc8ec)
 
-Each frame, for each enemy actor — this is the **priority 9** GOBJProc (priority 8, `EventActor_ProcHitCollInit` at 0x801fc8e8, is a no-op `blr` stub; see the proc-priority list in `enemy.h`):
+This is the **priority 9** GOBJProc (priority 8, `EventActor_ProcHitCollInit` at 0x801fc8e8, is a no-op `blr` stub; see the proc-priority list in `enemy.h`). It is the enemy-as-**victim** (inbound) pipeline **only**: it tests the enemy against other entities' attack hurtdata and accumulates damage *the enemy receives*. The enemy's own outbound attack on a rider is **not** delivered here — see "Enemy Outbound Attack" below.
+
+Each frame, for each enemy actor:
 
 ```
 1. Gating checks before running collision:
@@ -194,20 +205,28 @@ Each frame, for each enemy actor — this is the **priority 9** GOBJProc (priori
    - type NOT in [0x48, 0x4A] (meteor variants skip)
    (plus a flag/state check that can still let some types through)
 
-2. HitColl_Init(ed->hurtdata)  // at EnemyData+0x410
+2. HitColl_Init(ed->hurtdata)  // enemy at EnemyData+0x410 is the VICTIM
 
-3. Collision checks against machines/riders/etc.
+3. Sub-checks testing the enemy against each attacker's hurtdata list:
+   rider / machine / other event-actor / stage-hazard
    (zz_8020200c_ through zz_80202198_)
 
 4. HitColl_ActOnCollision(ed->hurtdata)
 
 5. Post-collision handler (zz_802021fc_)
-   └── If damage received, queues for EventActor_ProcDamage (priority 10)
+   └── If damage received, sets the damage-pending slot (EnemyData+0xA20/+0xA24)
+       feeding EventActor_ProcDamage (priority 10)
 ```
+
+### Enemy Outbound Attack — delivered on the MACHINE side
+
+An enemy's contact damage to a rider does **not** flow through any rider-side check. `Machine_CheckEventCollision` (0x801d71ec, p_link 12) iterates the event-actor list and calls `HitColl_CheckCollision` with **victim = MachineData+0x660 hurtdata** and **attacker = enemy ed+0x410** (obtained via `EventActorGObj_GetHurtData`). So the enemy's contact damage enters the *machine's* HurtData, and the rider feels it through the machine's hit reaction / HP.
+
+There is **no** `Rider_CheckEventCollision`: `Rider_UpdateHitColl` (0x8018f95c) has no event-actor sub-check and no `EventActorGObj_GetHurtData` caller. **Riders take enemy contact damage through their machine, not directly.**
 
 ### How Collision Checks Work (HitColl_CheckCollision, 0x8018d284)
 
-Called with two HurtData objects (victim and attacker). The function:
+Called with two HurtData objects (victim and attacker). Argument convention, confirmed from disassembly: **r3 = victim** (its sub-regions are iterated, and the player-index collision-mask source is read from victim+0x00), **r4 = attacker** (the loop reads `region_count = *(attacker+0x08)` and `regions = *(attacker+0x0C)`, iterating the **attacker's** regions). The function:
 
 1. **Iterates attacker's regions** (stride 0xC8): For each active region, checks collision mask against victim's player index.
 
@@ -316,14 +335,24 @@ vuln.kind = (invuln_timer != 0) ? 1 : 0;
 `EventActor_HurtDataCreate` (0x80201ee8) creates HurtData for enemies at EnemyData+0x410:
 - **Meteor** (type 0x4D): `HurtData_Create(gobj, HURTKIND_3, 8, joint_count, 0)` — 8 attack regions
 - **All other enemies**: `HurtData_Create(gobj, HURTKIND_3, 2, joint_count, 0)` — 2 attack regions
-- Sets `on_damage_callback = EventActor_OnDamageCallback` (0x80201c78)
-- Iterates model joints to initialize **defensive sub-regions** via `HurtData_InitRegion`
+- Sets `on_damage_callback` (HurtData+0x8C) = `EventActor_OnDamageCallback` (0x80201c78)
+- Iterates the actor's joint descriptor to build the **defensive sub-regions** via `HurtData_InitRegion`
+
+### Enemy Attack Hitbox Enable / Disable (per frame)
+
+Enemy attack hitboxes are **not** statically on — they are toggled per animation frame:
+
+- **Per-frame param refresh:** `EventActor_RefreshAttackParams` (0x80201ba4) reads the current animation frame's hurt descriptor and writes the attack params into the enemy's TriggerData at EnemyData+0x45C.
+- **ENABLE:** activation is **data-driven by the animation frame** — there is no dedicated "activate" anim command. When the current anim frame carries hurt data, `EventActor_RefreshAttackParams` invokes `Trigger_SetState1` (0x8018a0e8), which sets `region.active = 1` and (optionally) calls `Trigger_InitParameters` to copy the 0x34-byte HurtParams block. `Trigger_SetState1` is the de-facto `Hit_SetActive` (mirror of `Hit_SetInactive`); keep its library name.
+- **DISABLE:** anim-script **cmd-13** (handler 0x80201138) is an explicit per-frame OFF switch the script can fire. It calls `Hit_SetInactive` (0x80189d1c, sets `region.active = 0`) through the index wrapper at 0x8018c7f8, which computes `regions[idx]` (stride 0xC8 off HurtData+0x0C). The region index is `bytecode_operand & 0x03FFFFFF`.
 
 ### Enemy TriggerData
 
-Each enemy has a TriggerData at EnemyData+0x45C, initialized by `zz_80201ba4_` from actor_data descriptors. This contains the enemy's attack parameters (base_damage, knockback, etc.) loaded from the game's data files.
+Each enemy has a TriggerData at EnemyData+0x45C, initialized/refreshed by `EventActor_RefreshAttackParams` (0x80201ba4) from actor_data descriptors. This contains the enemy's attack parameters (base_damage, knockback, etc.) loaded from the game's data files for the active animation frame.
 
-The TriggerData at +0x45C and the HurtData's attack regions at +0x410 both participate in the collision system. The attack regions (stride 0xC8) contain embedded HurtParams at offsets 0x04-0x34 that `HitColl_GetDamageDealt` and `HitColl_CalcKnockback` read during `HitColl_CheckCollision`.
+The TriggerData at +0x45C and the HurtData's attack regions at +0x410 both participate in the collision system. The attack regions (stride 0xC8) contain embedded HurtParams at offsets 0x04-0x34 that `HitColl_GetDamageDealt` and `HitColl_CalcKnockback` read during `HitColl_CheckCollision` (driven from the machine side by `Machine_CheckEventCollision`).
+
+**Open item:** the exact plumbing from the +0x45C TriggerData into the +0x410 attack regions that `Machine_CheckEventCollision` reads — whether +0x45C backs region[0]'s params directly or a per-frame copy step writes them in — is not fully traced. Resolving it needs a live attacking-enemy instance; the main-menu mem1.raw snapshot has none.
 
 ### Enemy Receiving Damage (EventActor_ProcDamage, 0x801fc9f0)
 
@@ -413,7 +442,7 @@ Region entry (0xC8 bytes):
   +0x3C: ... position data, collision geometry ...
 ```
 
-**However, region parameters are refreshed every frame** from animation data. The per-frame chain is: `zz_801ff520_` → `zz_80201ba4_` → `Trigger_SetState1` → `Trigger_InitParameters`, which reads from `*(*(enemyData+0x14) + 0x14)` (the current animation frame's hurt parameter data) and overwrites the region's HurtParams. Additionally, `zz_80200eb8_` parses packed binary collision data from animation streams into regions.
+**However, region parameters are refreshed every frame** from animation data. The per-frame chain is: `zz_801ff520_` → `EventActor_RefreshAttackParams` (0x80201ba4) → `Trigger_SetState1` → `Trigger_InitParameters`, which reads from `*(*(enemyData+0x14) + 0x14)` (the current animation frame's hurt parameter data) and overwrites the region's HurtParams. The animation script can also explicitly disable a region mid-attack via cmd-13 (`Hit_SetInactive`). Additionally, `zz_80200eb8_` parses packed binary collision data from animation streams into regions.
 
 This means **writing to region entries directly won't persist** — changes are overwritten next frame. To customize enemy damage, use Method 1 (direct damage in a GOBJProc) instead.
 
@@ -432,6 +461,8 @@ This means **writing to region entries directly won't persist** — changes are 
 | HitColl_CalcKnockbackDir | 0x8018ab10 | Computes knockback direction from contact data |
 | HitColl_ClearLogEntry | 0x80189e3c | Clears collision log entries matching attacker kind |
 | HitColl_ResolveLogEntry | 0x8018db10 | Retrieves entry data for Machine_ActOnHitCollision |
+| Hit_SetInactive | 0x80189d1c | Sets `region.active = 0` (region OFF); reached via index wrapper 0x8018c7f8 |
+| Trigger_SetState1 | 0x8018a0e8 | Sets `region.active = 1` (region ON); de-facto `Hit_SetActive`, calls Trigger_InitParameters |
 | HurtData_CheckVulnerability | 0x8018cd9c | Returns non-zero if target is protected |
 | Machine_ApplyHurt | 0x8018d1a8 | Applies hurt via collision system from HurtParams (calls Trigger_InitParameters then HitColl_SetDamageLog). Also aliased `Machine_ApplyHurtFinal` = HitColl_SetDamageLog in machine.h |
 | Machine_GiveDamage | 0x801e1ee8 | `(md, float damage, GOBJ *source_gobj)` — subtracts HP, triggers death at min HP. source_gobj must be non-NULL in City Trial. No knockback by itself |
@@ -441,8 +472,13 @@ This means **writing to region entries directly won't persist** — changes are 
 | Machine_ActOnHitCollision | 0x801d7308 | Reacts to strongest hit: attacker ID + hit reaction |
 | Machine_InitHurtData | 0x801d6e84 | Creates HurtData for a machine |
 | Rider_InitHurtData | 0x80196170 | Creates HurtData for a rider |
-| EventActor_HurtDataCreate | 0x80201ee8 | Creates HurtData for an enemy/event actor |
-| EventActor_ProcHitColl | 0x801fc8ec | Enemy per-frame hitcoll processing (receiving damage) |
+| Rider_UpdateHitColl | 0x8018f95c | Per-frame pipeline (rider side); has NO event-actor sub-check (riders don't check enemies) |
+| RiderGObj_GetHurtData | 0x80192788 | Returns rider HurtData (RiderData+0x390) |
+| MachineGObj_GetHurtData | 0x801c8660 | Returns machine HurtData (MachineData+0x660) |
+| EventActorGObj_GetHurtData | 0x80204878 | Returns enemy/event-actor HurtData (EnemyData+0x410) |
+| EventActor_HurtDataCreate | 0x80201ee8 | Creates HurtData for an enemy/event actor (2 attack regions; 8 for meteor 0x4D) |
+| EventActor_RefreshAttackParams | 0x80201ba4 | Per attack frame: refreshes hurt params from the anim frame's descriptor into TriggerData (EnemyData+0x45C); enables region via Trigger_SetState1 |
+| EventActor_ProcHitColl | 0x801fc8ec | Enemy INBOUND per-frame hitcoll processing (enemy as victim only) |
 | EventActor_ProcDamage | 0x801fc9f0 | Processes received damage → knockback (via EnemyData+0xAD0 custom handler or EnemyKnockback_Default) |
 | EnemyKnockback_Default | 0x8020bcd8 | Default enemy knockback dispatcher (region+0x38 type → Enemy_ApplyKnockback). |
 | EventActor_OnDamageCallback | 0x80201c78 | Enemy on-damage callback (set in HurtData+0x8C) |

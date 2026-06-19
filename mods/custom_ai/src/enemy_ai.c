@@ -1,53 +1,55 @@
 #include "custom_ai.h"
 #include "enemy_ai.h"
 
-// Menu selection, bound to the settings menu (see main.c). May hold
+// Air Ride / City Trial Melee enemy preset selections. Each may hold
 // ENEMY_AI_RANDOM; resolve to a concrete preset with EnemyAI_Resolve.
-int enemy_ai_preset = ENEMY_AI_DEFAULT;
+int enemy_ai_preset_ar = ENEMY_AI_DEFAULT;
+int enemy_ai_preset_ct = ENEMY_AI_DEFAULT;
 
-// Preset tuning table. Multipliers stack on top of each enemy's stock
-// behavioral params; 1.0 keeps the vanilla value. First-pass numbers - expect
-// to retune once the spawn hook that applies them exists.
+// Multipliers stack on top of the vanilla global param-table values; 1.0 keeps
+// vanilla. EnemyAI_ApplyParams writes base * mult once per enemy-system load.
 static const EnemyAIPresetDef enemy_presets[ENEMY_AI_PRESET_NUM] = {
     [ENEMY_AI_DEFAULT] = {
         .name = "Default",
         .description = "Vanilla enemy behavior - no changes",
-        .detect_range_mult = 1.0f,
-        .chase_range_mult  = 1.0f,
-        .move_speed_mult   = 1.0f,
-        .target_pref       = ENEMY_TARGET_VANILLA,
+        .range_mult     = 1.0f,
+        .retarget_mult  = 1.0f,
+        .knockback_mult = 1.0f,
     },
     [ENEMY_AI_AGGRESSIVE] = {
         .name = "Aggressive",
-        .description = "Spots players from farther, chases relentlessly, attacks on sight",
-        .detect_range_mult = 2.0f,
-        .chase_range_mult  = 2.0f,
-        .move_speed_mult   = 1.35f,
-        .target_pref       = ENEMY_TARGET_PLAYER,
+        .description = "Spots riders from much farther and chases the closest one",
+        .range_mult     = 1.75f,
+        .retarget_mult  = 0.6f,  // re-picks the nearest threat more often
+        .knockback_mult = 1.0f,
     },
-    [ENEMY_AI_ITEM_HOARDER] = {
-        .name = "Item Hoarder",
-        .description = "Ignores players to grab item boxes and dropped patches",
-        .detect_range_mult = 1.5f,
-        .chase_range_mult  = 1.5f,
-        .move_speed_mult   = 1.2f,
-        .target_pref       = ENEMY_TARGET_ITEM,
+    [ENEMY_AI_RELENTLESS] = {
+        .name = "Relentless",
+        .description = "Enormous engage range, locks onto a target, shrugs off hits",
+        .range_mult     = 2.5f,
+        .retarget_mult  = 2.0f,  // commits to one target instead of switching
+        .knockback_mult = 0.65f,
     },
-    [ENEMY_AI_COWARD] = {
-        .name = "Coward",
-        .description = "Flees from nearby players instead of engaging",
-        .detect_range_mult = 1.75f,
-        .chase_range_mult  = 1.0f,
-        .move_speed_mult   = 1.25f,
-        .target_pref       = ENEMY_TARGET_FLEE,
+    [ENEMY_AI_DOCILE] = {
+        .name = "Docile",
+        .description = "Short reaction range - enemies mostly leave you alone",
+        .range_mult     = 0.4f,
+        .retarget_mult  = 1.3f,
+        .knockback_mult = 1.0f,
     },
     [ENEMY_AI_ERRATIC] = {
         .name = "Erratic",
-        .description = "Unpredictable - switches targets often and wanders",
-        .detect_range_mult = 1.25f,
-        .chase_range_mult  = 0.75f,
-        .move_speed_mult   = 1.1f,
-        .target_pref       = ENEMY_TARGET_VANILLA,
+        .description = "Normal range but constantly switches targets - jittery",
+        .range_mult     = 1.15f,
+        .retarget_mult  = 0.3f,  // very twitchy retargeting
+        .knockback_mult = 1.0f,
+    },
+    [ENEMY_AI_TANKY] = {
+        .name = "Tanky",
+        .description = "Normal aggression but very hard to knock out of the arena",
+        .range_mult     = 1.0f,
+        .retarget_mult  = 1.0f,
+        .knockback_mult = 0.4f,
     },
 };
 

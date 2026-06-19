@@ -13,9 +13,10 @@
 static char *stc_enemy_names[] = {
     "Default",
     "Aggressive",
-    "Item Hoarder",
-    "Coward",
+    "Relentless",
+    "Docile",
     "Erratic",
+    "Tanky",
     "Random",
 };
 
@@ -62,9 +63,14 @@ static void OnChangeCpuTR(int val)
     OSReport("[CustomAI] Top Ride CPU preset set to %s\n", CpuAI_GetSelectionName(val));
 }
 
-static void OnChangeEnemy(int val)
+static void OnChangeEnemyAR(int val)
 {
     OSReport("[CustomAI] Air Ride enemy preset set to %s\n", EnemyAI_GetSelectionName(val));
+}
+
+static void OnChangeEnemyCT(int val)
+{
+    OSReport("[CustomAI] City Trial enemy preset set to %s\n", EnemyAI_GetSelectionName(val));
 }
 
 static void OnChangeStatGrowth(int val)
@@ -77,9 +83,9 @@ static void OnChangeStatBudget(int val)
     OSReport("[CustomAI] City Trial CPU stat budget set to %s\n", stc_growth_budget_names[val]);
 }
 
-// City Trial: CPU riders only.
+// City Trial: CPU riders + the pool enemies in the Kirby Melee stadiums.
 static MenuDesc ct_menu = {
-    .option_num = 3,
+    .option_num = 4,
     .options = {
         &(OptionDesc){
             .name = "CPU AI",
@@ -89,6 +95,15 @@ static MenuDesc ct_menu = {
             .value_num = CPU_AI_MENU_NUM,
             .value_names = stc_cpu_names,
             .on_change = OnChangeCpuCT,
+        },
+        &(OptionDesc){
+            .name = "Enemy AI",
+            .description = "Behavior preset for enemies in the Kirby Melee stadiums",
+            .kind = OPTKIND_VALUE,
+            .val = &enemy_ai_preset_ct,
+            .value_num = ENEMY_AI_MENU_NUM,
+            .value_names = stc_enemy_names,
+            .on_change = OnChangeEnemyCT,
         },
         &(OptionDesc){
             .name = "CPU Stat Growth",
@@ -128,10 +143,10 @@ static MenuDesc ar_menu = {
             .name = "Enemy AI",
             .description = "Behavior preset for Air Ride enemies",
             .kind = OPTKIND_VALUE,
-            .val = &enemy_ai_preset,
+            .val = &enemy_ai_preset_ar,
             .value_num = ENEMY_AI_MENU_NUM,
             .value_names = stc_enemy_names,
-            .on_change = OnChangeEnemy,
+            .on_change = OnChangeEnemyAR,
         },
     },
 };
@@ -179,7 +194,7 @@ static MenuDesc top_menu = {
 
 OptionDesc ModSettings = {
     .name = "Custom AI",
-    .description = "Behavior presets for CPU riders (all modes) and Air Ride enemies",
+    .description = "Behavior presets for CPU riders (all modes) and enemies (Air Ride + City Trial Melee)",
     .kind = OPTKIND_MENU,
     .menu_ptr = &top_menu,
 };
