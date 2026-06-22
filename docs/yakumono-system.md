@@ -157,8 +157,8 @@ Steps:
    - `GrYaku_InitLighting` — sky/lighting hookup (calls `zz_800dcab8_` with stage's lights pointer)
    - `GrYaku_NoOp` — no-op stub (`blr` only)
    - `GrYaku_AllocJObj` — JObj allocator (sets `ydata->[+0x64]` JObj root); gated on `param+0x04` (the JObj data block)
-   - `ydata->[+0x70] = 0` — zero a status field
-   - `GrYaku_InitMatrix` — JObj matrix setup
+   - `ydata->[+0x70] = 0` — null the `xform_jobj` pointer (set later only for movable yakumono; so `GrYaku_InitMatrix` is a no-op at Create and stays one for static/break props)
+   - `GrYaku_InitMatrix` — JObj matrix setup (reads `+0x70`; no-op while it is NULL)
    - `GrYaku_AttachModel` — model attach (uses `grdata->lights` for lighting); gated on `param+0x0c` (the model data block)
    - `GrYaku_InitAudio` — fgm/audio init; gated on `param+0x14` (the audio descriptor); fills `ydata->[+0x118..0x124]`
    - `GrYaku_AttachAnim` — anim attach; re-reads `param+0x04` (no separate field) and gates on `jobj_data[0][+0x10]`
@@ -196,10 +196,10 @@ YakumonoData is the single user-data slot stored at `gobj->user_data[0]` (offset
 | 0x04 | `int` | `desc_id` — descriptor index (passed to Create) |
 | 0x08 | `void *` | `data_ptr` — per-instance param block (from `data_array[data_idx]`); `gyp->param` in source |
 | 0x10 | — | (unread in lifecycle) |
-| 0x1c | `Vec3` | Position (`+0x1c`..`+0x28`) — 3 floats |
+| 0x1c | `Vec3` | Position (`+0x1c`..`+0x28`) — single-instance world pos, written by `GrYaku_AttachModel`. **0,0,0 for the multi-instance break families** (their per-prop positions live in the `+0x130` child records, not here). |
 | 0x40 | `Mat3x4?` | Local transform (used by `+0x4c` matrix copy) |
-| 0x64 | `JObj *` | Root JObj (model tree), set by init pipeline |
-| 0x70 | `int` | Status flags (set to 0 in Create) |
+| 0x64 | `JObj *` | `model_jobj` — model JObj root, allocated by `GrYaku_AllocJObj`, positioned by `GrYaku_AttachModel`. **NULL for break families** (their geometry lives in the stage scene graph). |
+| 0x70 | `JObj *` | `xform_jobj` — transform JObj that `GrYaku_InitMatrix` (`0x800f73fc`) transforms; its world matrix (`JObj+0x44`) is copied into the GObj render object. Zeroed at Create, set later only for **movable** yakumono (cannon/gondola/rising-cube/…). **Stays NULL for static + break-family props.** |
 | 0x74 | `int` | **`state`** — current state-machine state (read by `GrYakumono_GetState`); `-1` initially |
 | 0x78 | `int` | Previous anim id (?) |
 | 0x7c | `int` | Previous joint id (?) |
@@ -230,8 +230,8 @@ YakumonoData is the single user-data slot stored at `gobj->user_data[0]` (offset
 | 0x120 | `AudioTrack` | Allocated audio track (`Map_AllocAudioTrack`, from audio descriptor `[+0x08]`) |
 | 0x124 | `AudioEmitter` | Allocated audio emitter (`Map_AllocAudioEmitter(1)`) |
 | 0x12C | `byte` | Flag byte (bits 3, 4, 6, 7 cleared on init) |
-| 0x130 | `int` | (used by post-init helpers, e.g. `zz_800fe60c_`) |
-| 0x134 | `int` | (used by post-init helpers) |
+| 0x130 | `void *` | Break families: **per-prop child array** — `count*4` bytes of `0x98`-byte scene-instance record pointers (one per placed prop; each carries the prop's own JObj/world-matrix/hurt region; `record+0x90` = this parent GObj). BREAK-coll families overlay it as the per-region audio-handle array. (Also used by other post-init helpers, e.g. `zz_800fe60c_`.) |
+| 0x134 | `int` | Break families: **child-array count** (trees/coral; the strong/house families keep the count at `+0x140` and use `+0x134/+0x138/+0x13c` for parallel arrays). |
 | 0x138 | `int` | Set by `GrYaku_BaseKind0_TailInit` to `ydata->[+0x0]` (gobj backref into model node) |
 
 Source-level field names (from asserts) map onto these:
@@ -301,26 +301,63 @@ Three of these are named or identified:
 
 ### City Trial spawn manifest
 
-`grDataCity1_CreateYakumono` (`0x8010f268`) makes 31 calls (data_idx 0..30) and CT's `yakumono->entries[]` is empty (`entry_count = 0`), so the generic walker contributes nothing — CT loads exactly 31 yakumono instances. **`data_array` actually has 33 slots, however** (`data_count = 33`), so slots **31 and 32 are spare** — they're allocated but no vanilla creator references them. Mod code can repoint them to a custom `YakumonoParam` block and spawn a 32nd or 33rd yakumono (the cannon, for example) without disturbing any vanilla slot. The hardcoded descriptor ids:
+`grDataCity1_CreateYakumono` (`0x8010f268`) makes 31 calls (data_idx 0..30) and CT's `yakumono->entries[]` is empty (`entry_count = 0`), so the generic walker contributes nothing — CT creates exactly 31 yakumono **GObjs**. Note this is **31 GObjs, not 31 props**: the break families (trees/rocks/houses/holes/coral) are *multi-instance* — each creator call fans out to many placed sub-instances (one GObj manages a child array at `YakumonoData+0x130`), so the actual visible/collidable prop count is in the hundreds. See "Instance model per CT yakumono type" below for the per-type breakdown (which of the 14 descriptors are multi-instance, single-prop, or pool-backed singles), and "World positioning → Multi-instance break families" for the pool internals. **`data_array` actually has 33 slots, however** (`data_count = 33`), so slots **31 and 32 are spare** — they're allocated but no vanilla creator references them. Mod code can repoint them to a custom `YakumonoParam` block and spawn a 32nd or 33rd yakumono (the cannon, for example) without disturbing any vanilla slot. The hardcoded descriptor ids:
 
-| data_idx | helper | desc_id | Notes |
-|---:|---|---:|---|
-| 0 | `0x800fa2a0` | 17 | |
-| 1 | `0x800fa610` | 18 | |
-| 2..17 | `0x800fe5d4` | 46 | 16 instances of the same descriptor (likely factory chimneys / stacks) |
-| 18..19 | `0x80109db4` | 61 | |
-| 20 | `Lighthouse_Create` | 68 | Lighthouse |
-| 21 | `whispyLogic` | 69 | WhispyWoods (Forest event) |
-| 22..23 | `0x80106824` | 32 | |
-| 24 | `0x80108f10` | 37 | |
-| 25 | `0x80108ce8` | 36 | |
-| 26 | `0x80109138` | 38 | |
-| 27 | `0x80107bfc` | 33 | |
-| 28 | `0x80107d64` | 34 | |
-| 29 | `0x80107ecc` | 35 | |
-| 30 | `0x801043c8` | 29 | |
+| data_idx | helper | desc_id | source file / YakuKind | object (see inventory below) |
+|---:|---|---:|---|---|
+| 0 | `0x800fa2a0` | 17 | `gryakucatchzone.c` (CatchZone) | catch zone (passive) |
+| 1 | `0x800fa610` | 18 | RecoveryZone (passive) | recovery zone (passive) |
+| 2..17 | `0x800fe5d4` | 46 | `gryakugondola.c` (Gondola) ×16 | gondola / cable-car loop (animated, not breakable) |
+| 18..19 | `0x80109db4` | 61 | whispy-TU decorative ×2 | small decorative props (animated) |
+| 20 | `Lighthouse_Create` | 68 | Lighthouse | Lighthouse |
+| 21 | `whispyLogic` | 69 | `gryakuwhispywoods.c` (WhispyWoods) | WhispyWoods boss tree (Forest event) |
+| 22..23 | `0x80106824` | 32 | `gryakubreakfloor.c` (BreakFloor) | **forest pitfall** (multi-stage cracking floor) |
+| 24 | `0x80108f10` | 37 | break "strong" (`hitStrongObject`) | **volcano-base hole covers** |
+| 25 | `0x80108ce8` | 36 | break "strong" (`hitStrongObject`) | breakable strong prop — candidate **volcano rock walls** (no checklist cell) |
+| 26 | `0x80109138` | 38 | break "strong" (`hitStrongObject`) | **dilapidated city houses** |
+| 27 | `0x80107bfc` | 33 | break "weak" (`hitWeakObject`) | breakable weak prop — candidate **coral** (no checklist cell) |
+| 28 | `0x80107d64` | 34 | break "weak" (`hitWeakObject`) | **forest trees** |
+| 29 | `0x80107ecc` | 35 | break "weak" (`hitWeakObject`) | **volcano + high-plains rocks** |
+| 30 | `0x801043c8` | 29 | `gryakubreakcoral.c` (BreakCoral / BigStar) | **star pole** (BigStar) |
 
-City Trial therefore uses 14 distinct descriptor ids: **17, 18, 29, 32, 33, 34, 35, 36, 37, 38, 46, 61, 68, 69**. Of the 70 descriptors, the rest are referenced by Air Ride / Top Ride stage creators (not yet enumerated).
+City Trial therefore uses 14 distinct descriptor ids: **17, 18, 29, 32, 33, 34, 35, 36, 37, 38, 46, 61, 68, 69**. Of the 70 descriptors, the rest are referenced by Air Ride / Top Ride stage creators (not yet enumerated). Note: the "huge pillars" the Forest event spawns are a *separate* BreakRock descriptor (≈39/40) created at event time, **not** part of this 31-instance manifest.
+
+### City Trial breakable inventory — desc_id ↔ in-game object
+
+Identity is anchored by the **break-count bucket array** (`checklist-stat-tracking.md`): `GrYaku_IncrementBreakCount` (`0x80105d80`) reads the broken prop's `desc_id` (`YakumonoData+0x04`) and bumps `PlayerData+0x62b+desc_id`, so the **stat-index equals the desc_id**, and each checklist cell's human-readable text pins a desc_id to a concrete object. (Family/handler comes from the descriptor's embedded source string + its `coll_func`; see "the break path" below.)
+
+| desc_id | object | break family / `coll_func` | identity source | confidence |
+|---:|---|---|---|---|
+| 29 | **star pole (BigStar)** | `gryakubreakcoral.c` / `hitBigStar` (`0x80103eb8`) | break-count idx `0x1d`; "bust the star pole" | high |
+| 32 | **forest pitfall** | `gryakubreakfloor.c` / `hitBreakableFloor` (`0x80106bd0`) | break-count idx `0x20`; "open the pitfall in the forest" | high |
+| 34 | **forest trees** (53) | "weak" / `hitWeakObject` (`0x80107914`) | break-count idx `0x22`; "knock down all forest trees" | high |
+| 35 | **volcano + high-plains rocks** (41) | "weak" / `hitWeakObject` | break-count idx `0x23`; "break all volcano + high-plains rocks" | high |
+| 37 | **volcano-base hole covers** | "strong" / `hitStrongObject` (`0x801086d0`) | break-count idx `0x25`; "open all volcano-base holes" | high |
+| 38 | **dilapidated houses** (30) | "strong" / `hitStrongObject` | break-count idx `0x26`; "destroy all dilapidated houses" | high |
+| 33 | candidate **coral** | "weak" / `hitWeakObject` | no checklist cell (idx `0x21` unused) — weak/brittle family | candidate (family-inferred) |
+| 36 | candidate **volcano rock walls** | "strong" / `hitStrongObject` | no checklist cell (idx `0x24` unused) — strong family | candidate (family-inferred) |
+
+So in City Trial: **trees = 34, rocks (plains+volcano share one bucket) = 35, houses = 38, volcano-base holes = 37, forest pitfall = 32, star pole = 29.** The two remaining break instances (33 weak, 36 strong) have no dedicated checklist cell; by family they are the leading candidates for **coral** (33) and the **breakable volcano rock walls** (36). The "high-plains hole you fall into" is tracked by a *separate* counter (`PlayerData+0x834`), distinct from the `desc_id` break buckets.
+
+### Instance model per CT yakumono type
+
+Not every yakumono is the "one GObj → many props" fan-out. Each of the 31 creator calls in the manifest produces exactly **one GObj**, but where that GObj's geometry/transform lives differs by family. There are **four** binding models, from the per-instance creator/tail-init (`grDataCity1_CreateYakumono`'s callees). The discriminator that matters most for tooling is *which instance pool a prop lives in and where its owner back-reference is written* — because that is exactly what a pool-scanning mod (e.g. Hypernova) keys on.
+
+| desc_id(s) | object(s) | instance model | binding mechanism (per-instance creator) |
+|---|---|---|---|
+| 34, 35, 33 (weak) · 38, 37, 36 (strong) | trees / rocks / coral · houses / holes / walls | **Multi-instance break family** — 1 GObj, **N props** | creator allocates a child-pointer array at `ydata+0x130`, count at `+0x134`; loops `grScene_FindInstanceByKey(grobj+0x54, key_i)` to claim **N `0x98` records** in the yakumono pool (`grobj+0x64`); sets each `record+0x90 = gobj`. *weak* adds a `0xFF`-seeded audio-handle overlay; *strong* adds parallel arrays at `+0x134/+0x138/+0x13c`. |
+| 29 (BigStar), 32 (BreakFloor), 69 (WhispyWoods) | star pole · forest pitfall · WhispyWoods boss | **Single-prop break family** — 1 GObj, **1 prop** | same path as above but **one** `0x98` record stored directly at `ydata+0x130` with `record+0x90 = gobj` (pitfall may claim one optional linked second part). 69 uses this shape but is a boss, not a checklist break bucket. |
+| 17 (CatchZone), 18 (RecoveryZone) | catch / recovery trigger volumes | **Single-instance, pool-backed (static)** | tail-init claims **one** `0x98` record (via `zz_800d79c0_`), stores it at `ydata+0x130`, and writes the owner back-ref at **`record+0x138`** — *not* `+0x90`. |
+| 46 (Gondola) ×16 | cable-car loop (16 cars) | **Single-instance, pool-backed (movable)** | 16 separate GObjs; each tail-init claims one `0x98` record (pointer stored at `ydata+0x138`), sets `ydata+0x130 = 0`, and clears the matrix-dirty bit (`ydata+0x13c & 0x7f`) so it animates its own transform each frame. |
+| 68 (Lighthouse) | lighthouse | **Multi-part structure, separate pool** | iterates its sub-parts in the **`0x140`-stride model-instance pool at `grobj+0x74`** (a different pool from the `0x98` yakumono pool); `ydata+0x130 = 0`. Not breakable, not in the `0x98` pool. |
+| 61 (decorative) ×2 | small whispy-TU decorations | **Classic single-instance** | no scene-instance record at all; uses the standard `GrYaku_AttachModel` path (own model JObj at `ydata+0x64`, pos at `ydata+0x1c`); `ydata+0x130/+0x144` are anim scratch. |
+
+**Takeaways:**
+- "Many CT yakumono are one object with many children" is true **only for the break families** (34/35/33/38/37/36). Those, plus the single-prop break families (29/32/69), are the props that live in the `0x98` pool with `record+0x90 = gobj` — i.e. the set a `+0x90`-keyed pool scan reaches.
+- The **zones and gondola are also in the `0x98` pool** but write their owner back-ref at `record+0x138`, leaving `+0x90` unset. A `+0x90` pointer-match therefore **excludes** them automatically — which is why Hypernova's vacuum can safely walk the whole pool. (The Hypernova breakable set is `29,32,33,34,35,36,37,38`; it deliberately omits 69 (boss) and the non-break families.)
+- **Lighthouse** lives in a *separate* `0x140`-stride pool (`grobj+0x74`), and **decorative** props in no pool at all — neither is touched by a `0x98`-pool scan.
+- The owner back-ref works because `YakumonoData[0]` (`+0x00`) is the GObj back-pointer, so `record+0x90 = *ydata = gobj`.
+- **The weak families' props are `JOBJ_SKELETON` joints; the others are static.** Each prop's render JObj (`record+0x00`) has its flags at `JObj+0x14` — trees (34)/rocks (35)/coral (33) = `0x9` (`JOBJ_SKELETON | JOBJ_CLASSICAL_SCALING`), while houses (38)/walls (36)/holes (37)/floor (32)/BigStar (29)/whispy (69) = `0x40008` (`JOBJ_OPA | JOBJ_CLASSICAL_SCALING`, **no skeleton bit**). Consequence for **moving** a prop: a direct write to the skeleton joints' world matrix (`JObj+0x44`) is **rebuilt from the joint SRT every frame** by `HSD_JObjSetupMatrixSub` (`0x8040d6b4`) and so gets clobbered — to move them you must first set `JOBJ_USER_DEFINED_MTX` (`0x800000`) on the joint (via `JObj_SetFlags`, single-joint), which makes that setup early-return and honor your matrix. The static (non-skeleton) families need no such flag. See the MOVE recipe.
 
 ## Yaku-break families and item drops
 
@@ -369,10 +406,65 @@ To detect a GObj is a yakumono: `gobj->kind == 15` is the canonical test (used b
 ## Loading and persistence
 
 - **Common archive loaders**: `grLoadYakumono_Common` and `_Main` lazily load `YkCommon.dat` and `Yakumono.dat` into globals at `r13[0x5e0]` and `r13[0x5e4]`. These hold `ykDataCommon` and `ykDataAll` structures referenced from descriptor lookups.
-- **Position table**: `grdata->yakumono_pos` (at **GrData+0x20**, declared `yakumono_pos` in `stage.h`) carries a sub-block at `[+0x2C]` whose `[+0x8]` is the position-record count. `grGetYakumonoposNum` reads this chain; `loadYakumonoLocations?` loads the records. (This is a distinct field from the `pos_data` member at GrData+0x18.)
+- **Position table**: `grdata->yakumono_pos` (at **GrData+0x20**, declared `yakumono_pos` in `stage.h`) carries a sub-block at `[+0x2C]` whose `[+0x8]` is the position-record count. `grGetYakumonoposNum` reads this chain; `loadYakumonoLocations?` loads the records. This is category 8 of the unified 9-category placement system — see "World positioning → (A) The unified 9-category stage-placement table system" below. It is a distinct field from `pos_data` (GrData+0x18), which feeds the scene/collision instance pool that CT breakables actually bind to (placement system (B)).
 - **Stage preload**: `Yakumono_Preload` calls `stGetStageKind_3Cyakumono?` (which dereferences the stage table at offset `0x3C`) and, if non-NULL, invokes the GX preloader at `0x80072c90` with shape parameters `(2, 4, 4, 0, 1, 8, 16)` — a small fixed-size preallocation for yakumono GX state.
 - **Counter**: `stc_grobj->[+0x6fc]` is the live yakumono count (incremented on every `GrYaku_Create`).
 - **Index array**: `stc_grobj->[+0x710]` is the per-stage array of YakumonoData pointers, allocated by `grInitYakumono` at `num*4` bytes and filled as each yakumono spawns. This lets the framework iterate "all currently-loaded yakumono" in O(num) without walking the GObj list. **`num` here is `entry_count` (length of `entries[]`), not `data_count`** — stages that use only the per-grkind hook path (City Trial: `entry_count = 0`) end up with this slot **NULL**, since `HSD_MemAlloc(0 * 4)` returns NULL. Per-frame procs do not depend on the array, so a NULL value here is harmless; only mod code that wants to enumerate live yakumono needs to handle that case.
+
+## World positioning: where props are actually placed
+
+> The visible/breakable City Trial props are authored at **local origin (0,0,0)** in the stage *model* archive (e.g. `GrCity1Model.dat`) — that is what HSDRaw shows. Their map placement is **data-driven and applied at load** from placement tables that live *outside* the model tree, which is why the model node itself reads 0,0,0. There are two independent placement representations, and CT breakables use the second one.
+
+### (A) The unified 9-category stage-placement table system
+
+KAR has a generic "where does object N of category C go" system. Every category has a `grGet<C>posNum` (count) and a `load<C>Locations` (record reader), and **every record is the same shape: `0x24` bytes = 9 floats = 3 `Vec3`s** (position + two more vectors — an orientation basis or rotation/scale; the loaders copy all 9 floats verbatim, so the meaning is set by the consumer). The categories (the `case` index in the resolver) are:
+
+| C | Category | Count fn | addr | Loader | addr |
+|--:|---|---|---|---|---|
+| 0 | start positions | `grGetStartposNum` | `0x800d0b30` | `grGetStartPosition` | `0x800d0b7c` |
+| 1 | enemy spawns | `grGetEnemyposNum` | `0x800d0c88` | `loadEnemy_spawnXYLocation?` | `0x800d0cd4` |
+| 2 | items | `grGetItemposNum` | `0x800d1090` | `grLoadItemPosition` | `0x800d10dc` |
+| 3 | item areas | `grGetItemAreaposNum` | `0x800d1550` | `loadItemAreaLocations?` | `0x800d15a8` |
+| 4 | events | `grGetEventposNum` | `0x800d11d4` | `loadEventLocations` | `0x800d11fc` |
+| 5 | vehicles | `grGetVehicleposNum` | `0x800d12f0` | `loadVehicleLocations?` | `0x800d133c` |
+| 6 | vehicle areas | `grGetVehicleAreaposNum` | `0x800d16c4` | `loadVehicleAreaLocations?` | `0x800d171c` |
+| 7 | global-dead | `grGetGlobalDeadPosNum` | `0x800e5318` | `loadGlobalDeadLocations?` | `0x800e5340` |
+| **8** | **yakumono** | **`grGetYakumonoposNum`** | **`0x800d1434`** | **`loadYakumonoLocations?`** | **`0x800d145c`** |
+
+`loadYakumonoLocations?(int index, Vec3 *out0, Vec3 *out1, Vec3 *out2)` copies record `index` from the per-stage record array (cached pointer at `stc_grobj+0x15c`; **count** read via `grdata->yakumono_pos` = GrData+0x20 → `[+0x2C]` → `[+0x8]`). Each category caches its array base in a different `stc_grobj` slot (start at `+0x134`, yakumono at `+0x15c`).
+
+Only **two** call sites read the yakumono table:
+- `grResolvePlacementRef` (`0x80088408`) — a small, **generic, stage-agnostic** per-descriptor placement resolver, **not** a City-Trial-init routine. Given a placement-reference object (`ref`), it reads the embedded placement-group record at `ref->[+0x2c]` and `switch`es on that record's category (`grp->[+0x14]`), dispatching to the matching per-category loader (`grGetStartPosition`/`loadEnemyLocations`/`grLoadItemPosition`/`loadEventLocations`/`loadVehicleLocations`/`loadGlobalDeadLocations`/`loadYakumonoLocations?`). Each loader is called with `count = grp->[+0x04]` and the group's vec/data fields (`grp->[+0x18/+0x24/+0x30]`). For category 8 (yakumono) it calls `loadYakumonoLocations?`. The whole body is just this dispatch — the heavy lifting is in the loaders. **It handles categories 0,1,2,4,5,7,8 only — there is no `case 3` (itemArea) or `case 6` (vehicleArea)**, so those two area categories are resolved by a different path. It has no direct xrefs (reached through a function pointer / callback slot); the actual CT placement work is `grDataCity1_CreateYakumono` plus the table-(B) pool build (`zz_800d6dcc_`), not this leaf.
+- `dbPosition_Load` (`0x800869cc`) — a **debug position editor**. It destroys existing marker GObjs, calls the category's count fn, then loops `0..count` calling the category loader and `dbPosition_CreateGObj` to drop a visible marker at each record. It covers every category including yakumono. Its existence is direct evidence that these placement coordinates are designed to be enumerated and **moved**. (Companion: `dbPosition_Render` `0x80086d64`.)
+
+### (B) The ground scene/collision instance pool — what CT breakables actually use
+
+The breakable props bind to the **ground runtime object's instance pool**, not table (A). At stage load `zz_800d6dcc_` (the ground collision/scene-section allocator; asserts reference `grcoll.c` / `ground.h` / `zone_num`) allocates several parallel instance arrays inside `stc_grobj` and fills them from `grdata->pos_data` (GrData+0x18). The relevant one is the **`0x98`-byte placed-instance array at `stc_grobj+0x64`** (live count at `+0x68`); each record holds a positioned `JObj` at `[+0x00]` whose world matrix (`JObj+0x44`) is also cached into the record at `[+0x2C]` by `zz_800d6a70_`. Translation of that cached `3x4` row-major matrix lives at record `+0x38 / +0x48 / +0x58` (matrix col 3).
+
+`grScene_FindInstanceByKey` (`zz_800d7954_`, `0x800d7954`) searches that pool for the record whose `[+0x00]` key matches, returning the record pointer.
+
+Each `0x98` record also owns its **mpColl regions inline**: an array pointer at `record+0x0c`, a region count at `record+0x10`, `0x40`-byte stride per region. Each region's `+0x3c` byte holds the **collidable/intact** flag in bit 6 (`0x40`); `+0x38` is the back-key the colliding object stamps so the break path can map a hit → this record. The break finalizer toggles that bit on every region of a record: `grScene_SetInstanceColl` (`0x800d7ad0`, `(record, enabled)` — `0` = broken/non-collidable) sets/clears it, and `grScene_IsInstanceCollAll` (`0x800d7b0c`, `(record, state)`) returns 1 iff every region matches `state` (the break's "still whole?" guard). **These regions are NOT repositioned when the record's `JObj+0x44` world matrix is moved** — they stay baked at the prop's origin. So relocating a prop's model does not relocate its collision, and they can't be cheaply moved onto a puller (they're a fixed slice of the global region array at `*(stc_grobj+0x5c)`, the array the **ground scene-collision holder `stc_grobj+0x54`** exposes at its `+0x08`, found by spatial broadphase). To break a pulled/consumed prop with all genuine consequences, synthesize a `collideWithObject` call rather than trying to move or fake the regions — see "Driving yakumono → Option (b)" below.
+
+These `+0x0c` regions ARE the prop's solid collision — there is **no separate static wall**. The records' regions are a contiguous slice of the 14040-region global array at `*(stc_grobj+0x5c)` (e.g. a house record's region array sits at global index ~9451). The rider's penetration response `mpResponse_DispatchSceneObjColl` (`0x80248bb4`) reads `region+0x3c` bit 6 and **drops any contact whose bit is clear**, so `grScene_SetInstanceColl(record, 0)` is exactly what makes a broken (or vacuumed) prop pass-through. Only break/init code writes that bit — **nothing re-arms it per frame** — so a clear sticks until something re-arms it. The holder is `stc_grobj+0x54` (`+0x08` region base, `+0x10` record pool = `*(stc_grobj+0x64)`, `+0x14` count); `stc_grobj+0x454` is an unrelated struct.
+
+### Multi-instance break families — one GObj, many props
+
+**This is the crux for "which position?":** the break-family creators do **not** make one yakumono per visible prop. Each makes **one parent yakumono `GObj`** (one `YakumonoData`, one `HurtData` with N regions) that manages **N placed sub-instances**:
+
+1. `GrYaku_Create(desc, data_idx)` → the parent.
+2. The creator reads a per-instance list from the param block, allocates a child array at **`YakumonoData+0x130`** (count at `+0x134`; the strong/house families spread extra arrays across `+0x134/+0x138/+0x13c` with the count at `+0x140`), then loops once per prop:
+   - resolve a scene-instance key: `entries[i].posfield` → `grdata->[+0x104][key*8]`,
+   - `grScene_FindInstanceByKey(stc_grobj+0x54, key)` → the `0x98` placed-instance record,
+   - store it in the child array and set `record[+0x90] = parent_gobj` (back-ref).
+
+So **"53 forest trees" = 1 yakumono GObj + 53 scene-instance records**, each with its own JObj/world-matrix/position and its own hurt region. The same holds for rocks (35), houses (38), volcano holes (37), etc. **Consequence:** the City Trial manifest's "31 instances" counts *creator calls / GObjs*, not props — the real visible/collidable prop count is in the hundreds. And the parent yakumono's own transform is unused for these: consistent with the header note that `pos` (+0x1c), `model_jobj` (+0x64) and `xform_jobj` (+0x70) are all NULL/zero for break-family props.
+
+### Reading / moving a breakable prop's real position
+
+- **Get** (per prop): walk the parent's child array `YakumonoData+0x130[0 .. +0x134]`; for each `0x98` record, the world position is the JObj translation `record[+0x00] → JObj+0x44` (floats 3/7/11), or the cached copy at `record[+0x38/+0x48/+0x58]`. Do **not** read the parent `YakumonoData+0x1c` for breakables — it is 0,0,0.
+- **Move** (per prop, live): rewrite that sub-instance's JObj world-matrix translation (and the cached `record+0x2c` matrix to match). The hurt region tracks the JObj automatically each frame (`HurtData_UpdatePerFrame` in priority-7 proc). See the MOVE/SCALE recipes below — but apply them to the **sub-instance JObj**, not the parent ydata, for break families.
+- **Move** (single-instance / active yakumono — cannon, gondola, rising cube, …): those *do* own a positioned `xform_jobj` (+0x70) and use the parent-ydata MOVE recipe directly.
+- **Move** (permanent / data level): edit the placement records — the 9-float yakumono table (`grdata->yakumono_pos`) and/or the scene-instance transforms sourced from `grdata->pos_data` — to relocate props at load.
 
 ## Shared helpers and assertions
 
@@ -388,13 +480,87 @@ From the descriptor strings, every yakumono kind passes through these centralize
 
 The `GrYakuCommon_Group_Max` and `GrYakuCommon_Random_Set_Num` constants govern the "common" group system in `gryakucommon.c` (a way to randomly pick subsets of yakumono — used by `GrYakuCommon_SelectRandomGroup`, called at the end of `grInitYakumono`, which selects a random subset of entries with `entries[].x8` group ids and disables the unselected ones via `zz_800f5744_(yd, 0)`).
 
+## Driving yakumono from mod code (break / move / scale)
+
+This is the lever set a mod (e.g. Hypernova) needs to manipulate City Trial props. The move/scale recipes below apply to the **single-instance / active** yakumono shape (one positioned JObj at `YakumonoData+0x70`); the **multi-instance break families** (CT trees/rocks/houses/holes/coral) work differently — one parent GObj with no positioned JObj managing N placed sub-instances — so for those, apply the recipes to each sub-instance JObj (child array at `+0x130`), not the parent. See "World positioning" above.
+
+### The break path is collision-force-driven via the descriptor's `coll_func` — NOT the `+0x100` damage proc
+
+The break families do **not** install a `+0x100` damage-on callback — `GrYaku_InitData` zero-inits `+0x100`/`+0x104` and none of the per-instance creators set them (the *only* exception is BigStar, which sets `+0x100` to its phase-2 handler `0x801040fc` **after** a first collision arms it). So `GrYakumono_Proc10` (`0x800f5454`) — even with a seeded lethal hit in HurtData (`+0x24` hit-gate ≠ 0, `+0x28` damage) — just accumulates into `+0xac` (via `0x800f875c`) and returns without breaking anything, because the `+0x100` slot it would call is NULL. **Seeding HurtData + calling Proc10 is a no-op for every CT break family except an already-armed BigStar.**
+
+The real break is the **`coll_func`** in the prop's descriptor. `collideWithObject` (`0x800f5004`) does: `desc = YakumonoData+0x04` → `entry = stc_yaku_descs[desc]` (the 70-entry table at `0x804a5be8`) → `coll_func = entry[+0x04]` → asserts `coll_func != NULL` (the gryaku.c:518 assert) → calls `coll_func(yaku_gobj, otherCollData, collB, regionIdx, collC)`. (The "16-entry `grYakuFuncTable` at `0x804a5ba8`" elsewhere in this doc is the *generic-spawn* Create-wrapper table — a different table from this per-`desc_id` descriptor table whose `+0x04` holds the break handler.) The handler computes an impact **force** and compares it to the prop's **HP**:
+
+- **`0x80104cd4` (one-shot threshold, non-subtractive)** — used by `hitWeakObject` and BigStar phase 1. `force = otherCollData.radius (CollData+0x344) × impactSpeed²`; breaks iff `force > HP[0]` (HP read from the prop's param block). Does **not** modify HP, so a too-weak hit leaves nothing behind — there is no accumulation.
+- **`0x80104be0` (subtractive HP)** — used by `hitStrongObject` and the rock/house drop handlers. Same force, but `HP -= force` is written back; breaks only when remaining HP ≤ 0, so it accumulates across hits.
+
+**`impactSpeed` is a normal projection, not `|delta|`.** `grScene_GetImpactSpeed` (`0x800d8edc`) projects `otherCollData.pos_delta (CollData+0x14)` onto the contacted region's outward normal (`region+0x0c`), **negates** it (the internal scale const at `0x805df634` = −1.0), and clamps a non-positive result to **0**. So the delta must point **into** the surface (against the outward normal); a delta whose dot with the normal is `≥ 0` yields `impactSpeed 0` → `force 0` → no break. This is the trap for a synthesized collider: an arbitrary delta direction can silently fail to break.
+
+Per-family break trigger:
+
+| family (desc) | handler | trigger |
+|---|---|---|
+| weak (33,34,35) | `hitWeakObject` | single hit with `force > HP` (one-shot threshold; weak hits do nothing) |
+| strong (36,37,38) | `hitStrongObject` | per-region subtractive HP; may take several hits |
+| floor / pitfall (32) | `hitBreakableFloor` | multi-stage crack — one stage per hit, final break after N stages (max from param) |
+| BigStar / star pole (29) | `hitBigStar` | phase 1 needs `force ≥ HP`; if too weak it *arms* phase 2 (sets `+0x100 = 0x801040fc`), and any later damage event then destroys it |
+
+**Implications for a no-contact "vacuum" break.** Because the break is gated on a real collider's mass×velocity, there is no clean "apply N damage" entry point that ignores collision. Options, cleanest first: (a) let the 2× Hypernova rider physically ram props (the natural collision drives the real break — drops, score, anim, teardown — for free); (b) **synthesize a `collideWithObject` call** with a fabricated high-force collider; (c) skip the break entirely and just move/scale. Driving the state machine straight to the broken state via `Gr_StateChange` would skip the drops/score/effects and is not recommended.
+
+**Option (b) is what Hypernova uses, because (a) can't work for a *pulled* prop — the prop's regions stay baked at its origin so the rider never overlaps a model that's been drawn in.** The synthesis recipe (see `Hypernova_BreakInstanceNative`):
+
+- `collideWithObject(yaku_gobj, coll, holder, region_idx, contact)`.
+- **`yaku_gobj`** = the prop's parent GObj (`record+0x90`).
+- **`holder`** = the ground scene-collision holder `stc_grobj+0x54`; `holder+0x08` is the base of the global mpColl region array (0x40 stride), `holder+0x10`/`+0x14` the placed-instance record pool/count. This is the holder the engine's own break-dispatch path (and `grScene_FindInstanceByKey`) uses. (`stc_grobj+0x454` is a *different* struct — passing it makes `(record+0x0c − *(holder+8))/0x40` negative, so the synthesize silently no-ops.)
+- **`region_idx`** = `(record+0x0c − *(holder+0x08)) / 0x40` (a record's regions are a contiguous slice of the global array, so its first region's global index is this difference / stride).
+- **`region_idx`** must point at a region with a **usable (non-degenerate) outward normal**, since the impact-speed calc projects the delta onto `region+0x0c`. Scan the record's regions (`record+0x0c` array, count at `record+0x10`) for the first with `|normal|² > 0` and use its global index.
+- **`coll`** = a SYNTHETIC `CollData` (zeroed `0x400` buffer): `+0x344` radius is the reliable force lever (`force = radius × impactSpeed²`, computed via `grScene_GetImpactSpeed` `0x800d8edc` → `GrYaku_TestImpactBreak`/`GrYaku_ApplyImpactDamage`) — crank it astronomically for a guaranteed one-hit break even at a small impact speed. `+0x14` frame-delta = **`−normalize(region_normal) × M`** (any `M > 0`) so it projects to a positive impact speed (see the normal-projection note above). `+0x04` = the human rider GObj (read by `GrYakuBreak_GetAttackerPly` `0x80105cb0` for the break-count credit). `+0x44` = a zeroed `mpCollInfo` buffer with `+0x1d0 = −1` ("no BigStar region") — `destroyBigStar` (`0x800d7b8c`, called first by every `coll_func`) walks the collider's coll-info hit entries and would otherwise treat record-0 as a match; with `−1` it returns 0 and the break proceeds.
+- Temporarily clear the target region's `+0x34` bit `0x20` for the call: when set, `grScene_GetImpactSpeed` takes a geometry-refined path (using `record+0x2c`/`+0x5c` and the contact point) that can zero a synthetic delta. Restore afterward (live collision data).
+- **`contact`** = any valid Vec3 (the prop's current world pos works); only used by the geometry path, which we suppress.
+
+`collideWithObject` then dispatches to the family `coll_func`, which runs the full genuine break tail (collision retire, mesh hide, debris + family drops, SFX, `GrYaku_IncrementBreakCount`, `Gr_StateChange`). The prop must be fully collidable when the call fires (`grScene_IsInstanceCollAll(record, 1)` must be true), so if collision was retired beforehand (e.g. Hypernova retires it during the pull so the moved model leaves no stranded wall) **re-arm it with `grScene_SetInstanceColl(record, 1)` right before the call** — and detect success by re-checking `grScene_IsInstanceCollAll(record, 1)` after (the tail clears it on a real break). The multi-stage floor (desc 32) advances one crack-stage per call.
+
+### Destroying a prop directly is collision-safe
+
+`GObj_Destroy` (`0x80428f64`) calls the GObj's registered user-data destructor `(*gobj+0x30)(gobj+0x2c)` synchronously — for a yakumono that is `GrYaku_DestroyCallback` (`0x800f4f0c`), which frees the HurtData (`+0xec` → `HurtData_Destroy 0x8018c2e4`), the effect group (`+0x10c`, an *Effect-module* eflib handle allocated by `0x800f666c→0x802364e0`, **not** a collision registry), the JObj tree (`+0x64`), and unlinks the prop. So a raw `GObj_Destroy` does **not** dangle any collision entry. The reason to prefer the break path is gameplay fidelity (item drops, break-count/score, break anim + SFX), **not** collision safety. (Always capture `gobj->next` before destroying while walking the p_link list.)
+
+> **Multi-instance caveat:** for the break families this destroys the **whole group**, not one prop — `GObj_Destroy` tears down the single parent yakumono that manages all N props. And `+0x64` (the destructor's JObj target) is NULL for break families: the visible meshes are sub-instance JObjs owned by the **ground scene pool**, not the yakumono, so the destructor does not free them — they keep rendering after the parent is gone. To remove a single breakable prop, drive its break (collision) rather than destroying the GObj.
+
+### MOVE recipe
+
+> **Applies to single-instance / active yakumono** (cannon, gondola, rising cube, …) that own a positioned `xform_jobj` at `YakumonoData+0x70`. **The multi-instance break families (CT trees/rocks/houses/holes/coral) do NOT** — their parent `+0x70`/`+0x64`/`+0x1c` are all 0, and each prop is a separate `0x98` scene-instance record in the parent's child array (`YakumonoData+0x130`). To move one of those, apply the same matrix writes to the **sub-instance's** JObj (`record[+0x00] → JObj+0x44`) and its cached matrix (`record+0x2c`), not the parent ydata. See "World positioning → Multi-instance break families" above.
+
+An instance's render matrix and its hurtbox both derive from its **transform JObj's world matrix** (`JObj+0x44`) — for a single-instance yakumono that JObj is `*(YakumonoData+0x70)`; for a break-family prop it is the **sub-instance's** JObj (`record[+0x00]`, see box above). There is no separate static solid-wall shape for the City Trial breakables (their only collision is the HurtData hurtbox, recomputed from the JObj each frame — see SCALE). To relocate a single-instance prop:
+
+- write the new **local translation** on the root JObj (`JObj+0x10` Vec3), then set `YakumonoData+0x12c |= 0x80` (the matrix-dirty bit). The next frame, `GrYakumono_Proc4` (`0x800f52e8`) sees bit 7 set and calls `GrYaku_InitMatrix` (`0x800f73fc`), which rebuilds `JObj+0x44` from the local transform and copies it into the render object; or
+- write the translation column of `JObj+0x44` directly (one-shot) — durable only while bit 7 stays clear (it normally is: a static prop builds its matrix once at spawn and Proc4 never rebuilds it).
+- Also update `YakumonoData+0x1c` (the cached world-pos used by drops/SFX).
+
+Bit 7 is **sticky** (nothing clears it), so a one-shot move = set it for one frame; continuous motion = keep it set and rewrite each frame. The hurtbox follows automatically (next point).
+
+> **Skeleton-joint caveat (CT weak break families: trees 34, rocks 35, coral 33).** Those props' sub-instance JObjs carry `JOBJ_SKELETON` (flags `0x9` at `JObj+0x14`), so their world matrix (`JObj+0x44`) is rebuilt **from the joint SRT every frame by `HSD_JObjSetupMatrixSub`** (`0x8040d6b4`) — a path *independent* of `YakumonoData+0x12c` bit 7 / `GrYaku_InitMatrix`. A direct `JObj+0x44` write is therefore clobbered next frame. To drive these, first set `JOBJ_USER_DEFINED_MTX` (`0x800000`) on the joint — `JObj_SetFlags(jobj, JOBJ_USER_DEFINED_MTX)` (`0x8040bd64`, single-joint, does not recurse) — which makes `HSD_JObjSetupMatrixSub` early-return and honor your written matrix. The static (non-skeleton) families (houses 38 / walls 36 / holes 37 / floor 32 / BigStar 29) need no flag; setting it on them anyway is idempotent and harmless. (Used by Hypernova's vacuum so it can pull every breakable family, not just the static ones.)
+
+### SCALE recipe
+
+`YakumonoData+0xa4` (`Gr_DefaultScale = 1.0`) is the **hurtbox** scale: priority-7 proc `GrYakumono_Proc7` (`0x800f53a8`) calls `HurtData_UpdatePerFrame(scale = +0xa4, …)` every frame, which recomputes each region's world center from the JObj world matrix and its radius as `base × (+0xa4)`. So:
+
+- **hurtbox / break collision:** write `+0xa4` — instant, every frame, no flag needed. A non-1.0 value does **not** trip an assert (the only `Gr_DefaultScale` assert is an init-time float↔int round-trip on the constant, not a check of the live field) and does not corrupt break logic.
+- **visual model:** `+0xa4` does **not** scale the rendered JObj (`GrYaku_InitMatrix` ignores it). For the visual, scale the transform JObj's local scale (`JObj+0x24/+0x28/+0x2c`) and dirty the matrix (same pattern as the rider's `gmLanMenu_Scale3DObject`). For a coherent 2× prop, set both `+0xa4` (hurtbox) and the JObj local scale (model).
+
+> **Multi-instance caveat:** for break families, `+0xa4` lives on the parent ydata, so writing it scales **every** sub-instance's hurtbox at once (each region's radius is `base × +0xa4`). But there is no parent JObj for the visual, so the model scale must be written on each **sub-instance** JObj (`record[+0x00]`) individually.
+
+**The HurtData hurtbox tracks the model — the solid mpColl regions do NOT.** These are two different collision systems and they behave oppositely when you move a prop:
+- The **HurtData hurtbox** (`ydata+0xec`, recomputed each frame by `GrYakumono_Proc7` from the JObj world matrix and `+0xa4`) follows a moved/scaled JObj for free.
+- The **solid mpColl regions** (`record+0x0c`, the slice of the global array at `*(stc_grobj+0x5c)`) are **baked at the prop's origin and never repositioned** — moving the JObj leaves the solid collision behind. This holds for ALL break families including the "strong" ones (36/37/38): there is **no extra separate solid shape** — the `record+0x0c` regions are the whole solid collision, and they stay put.
+
+The strong families do **not** carry a second baked solid shape. Their solid collision is exactly the `record+0x0c` regions: those regions slice into `*(stc_grobj+0x5c)`, the rider response reads their `+0x3c` bit 6, and clearing it via `grScene_SetInstanceColl(record,0)` makes the prop pass-through with nothing left behind. So a vacuum that *moves* a prop must **retire** its collision (clear bit 6) to avoid a stranded wall at the origin — moving the JObj alone is not enough.
+
 ## Mod implications
 
 For KARchipelago, the yakumono system is relevant for:
 
 1. **Drop gating** — already covered by `item_spawn_filter.c` filtering `event_source_drop[].chance_destructible`.
 2. **Damage-source attribution** — when a player breaks a star pole, event pillar, or volcano wall, the credit goes through the HitColl pipeline at proc 9. To gate yakumono damage (e.g. for a "no breakables" challenge), hook `GrYakumono_Proc9_HitColl` (priority 9 stage HitColl) or the per-kind `damage-on` callback at `+0x100`.
-3. **Counting yakumono interactions** — `stc_grobj->[+0x6fc]` tells you the live count. The per-kind `damage-on` callback fires once per damage event, which is the natural extension point for "X yakumono broken" location checks. The **vanilla** break-count path is already wired up: every break-family drop handler (`GrYakuBreakRock_DropItems`, `GrYakuBreakHouse_DropItems`, `GrYakuBreakCoral_DropItems`, `hitBigStar`, `hitWeakObject`) calls `GrYaku_IncrementBreakCount` (`0x80105d80`), which extracts the broken yakumono's `desc_id` via `GrYakumono_GetDescId` and bumps a per-`desc_id` byte counter in the player struct (`Ply_IncrementYakumonoBreakCount`, `0x8022fed8`, counters at PlayerData `+0x62b+desc_id`). This counter array is what the checklist's "break N of object X" cells read — see `checklist-stat-tracking.md` ("The yakumono-break bucket array (`+0x62b`)").
+3. **Counting yakumono interactions** — `stc_grobj->[+0x6fc]` is the live **GObj** count (incremented once per `GrYaku_Create`), *not* the visible prop count: a break-family GObj manages many props, so this is ~31 in CT while the prop count is in the hundreds. The per-kind `damage-on` callback fires once per damage event, which is the natural extension point for "X yakumono broken" location checks. The **vanilla** break-count path is already wired up: every break-family drop handler (`GrYakuBreakRock_DropItems`, `GrYakuBreakHouse_DropItems`, `GrYakuBreakCoral_DropItems`, `hitBigStar`, `hitWeakObject`) calls `GrYaku_IncrementBreakCount` (`0x80105d80`), which extracts the broken yakumono's `desc_id` via `GrYakumono_GetDescId` and bumps a per-`desc_id` byte counter in the player struct (`Ply_IncrementYakumonoBreakCount`, `0x8022fed8`, counters at PlayerData `+0x62b+desc_id`). This counter array is what the checklist's "break N of object X" cells read — see `checklist-stat-tracking.md` ("The yakumono-break bucket array (`+0x62b`)").
 4. **Goal hooks** — the WhispyWoods kind at desc_id 69 is a candidate for a "defeat WhispyWoods" goal: hook its damage-on or its terminal state via `Gr_StateChange` instrumentation. The Lighthouse (desc_id 68) is similarly addressable.
 
 The 70-descriptor table at `0x804a5be8` is read-only ROM data; modifying it would require a CODEPATCH pointing at a replacement table. For most mod purposes, hooking `GrYaku_Create` (to observe spawns) or the priority-9/10 procs (to observe damage) is sufficient and avoids touching the descriptor structure.
@@ -489,7 +655,7 @@ The table is organized as **8 pairs**, one pair per generic kind. Each pair shar
 
 The generic `entries[].kind` value is therefore in 0..15 with bit 0 acting as the "ctrl" flag and bits 1..3 selecting the base kind. **This is a separate enum from `YakuKind`** — `YakuKind` covers all per-kind handlers (rising-cube, lasergate, pillar, …, the BREAK family, the HP-coll family, lighthouse, whispywoods), while the 0..15 generic-dispatch enum is just the eight base behaviors that the framework's stock walker can spawn from `Yakumono.dat`.
 
-**The generic path is kind-agnostic in code.** None of the eight `GrYaku_BaseKindN_TailInit` or the five non-null `GrYaku_BaseKindN_DescFunc` reference a source-file or `Gr_YakuKind_*` — the wrappers/tail-inits bake in no specific YakuKind. The base kinds differ only structurally: collision-allocator variant (kinds 0–3 → `zz_800d79c0_`; kinds 4–5 → `zz_800d7a40_` with extra param `10`; kinds 6–7 → no collision, lightweight), `DescFunc` form (kinds 0–2 share the flag-aware 3-step form, kinds 3–4 a 2-step form, kinds 5–7 have no `DescFunc`), and the per-kind `Gr_StateChange` floats. Everything else — model, joint, collision shape, and thus the concrete kind — comes from the `Yakumono.dat` entry data at runtime. So the base-kind→YakuKind table is **not derivable from static code**; it requires reading `Yakumono.dat` live (Dolphin). The four Ctrl-paired YakuKinds the open question references (RisingCube, PushOutWall, Pillar, LaserGate) are spawned through the *per-instance* descriptor path (range 16..69, with real handlers), not necessarily the generic walker; the lightweight generic kinds 6–7 (no collision, `Gr_StateChange`-only) line up with the non-collidable zone kinds (DownForceZone/CatchZone/RecoveryZone).
+**The generic path is kind-agnostic in code.** None of the eight `GrYaku_BaseKindN_TailInit` or the five non-null `GrYaku_BaseKindN_DescFunc` reference a source-file or `Gr_YakuKind_*` — the wrappers/tail-inits bake in no specific YakuKind. The base kinds differ only structurally: collision-allocator variant (kinds 0–3 → `zz_800d79c0_`; kinds 4–5 → `zz_800d7a40_` with extra param `10`; kinds 6–7 → no collision, lightweight), `DescFunc` form (kinds 0–2 share the flag-aware 3-step form, kinds 3–4 a 2-step form, kinds 5–7 have no `DescFunc`), and the per-kind `Gr_StateChange` floats. Everything else — model, joint, collision shape, and thus the concrete kind — comes from the `Yakumono.dat` entry data at runtime. So the base-kind→YakuKind table is **not derivable from static code**; it is carried by the `Yakumono.dat` entry data at runtime. The four Ctrl-paired YakuKinds (RisingCube, PushOutWall, Pillar, LaserGate) are spawned through the *per-instance* descriptor path (range 16..69, with real handlers), not necessarily the generic walker; the lightweight generic kinds 6–7 (no collision, `Gr_StateChange`-only) line up with the non-collidable zone kinds (DownForceZone/CatchZone/RecoveryZone).
 
 ## Per-grkind hook table (`PTR_PTR_804a322c`)
 
@@ -564,7 +730,7 @@ So `YakumonoData` extends to **at least +0x18c**: independently of the break fam
 
 ## Spawning yakumono in stages they don't normally appear in
 
-> **Status: dormant RE scaffolding.** The cannon code below lives in `mods/custom_events/src/cannon_event.c`. It is **not** a registered custom event (it does not appear in the `CustomEventsAPI` event tables) and is gated off by default (`CANNON_LOAD_ENABLED = 0`; the spawn path runs only when `CANNON_SPAWN_ENABLED` is built in). No production code path spawns a cannon in City Trial.
+> **Status: dormant scaffolding.** The cannon code below lives in `mods/custom_events/src/cannon_event.c`. It is **not** a registered custom event (it does not appear in the `CustomEventsAPI` event tables) and is gated off by default (`CANNON_LOAD_ENABLED = 0`; the spawn path runs only when `CANNON_SPAWN_ENABLED` is built in). No production code path spawns a cannon in City Trial.
 
 Calling `GrYaku_Create(48, data_idx)` + `GrYakuCannon_TailInit(gobj)` from `On3DLoadEnd` in City Trial — well after `grInitYakumono` has finished — runs without asserting, even though City Trial's per-grkind hook never spawns a cannon. The yakumono counter (`(*stc_grobj)[+0x6fc]`) increments by 1 per call, so the GObj is fully wired and registered.
 
@@ -654,11 +820,11 @@ The framework plumbing is stage-agnostic — `GrYaku_Create(48, idx)` + `GrYakuC
 | **Anchor joints (referenced by `0x000f00XX`)** | **Yes — joints in stage scene graph** | **absent in CT** | **must exist for yakumono to position barrels correctly** |
 | Position / matrix | Derived from anchor joints | unset (matrix all zero, but irrelevant — vanilla MP cannon also has unset matrix; positioning happens through joint refs) | works once anchor joints exist |
 
-## Open questions (remaining)
+## Cross-stage cannon spawning: remaining work
 
-- **Exact base-kind→YakuKind table for the generic dispatch path.** As established under "Generic dispatch table", the eight generic base kinds are kind-agnostic in code — the concrete YakuKind each `entries[].kind` produces is carried by the `Yakumono.dat` entry data, not by any wrapper/tail-init. Building the table therefore requires reading `Yakumono.dat` at runtime (live Dolphin) and observing which kind each generic entry resolves to; it cannot be recovered from the static binary. (The per-instance descriptor path, by contrast, names every kind in an embedded string — see "Kind identification" above.)
-- **Cannon `YakumonoParam` fields beyond `+0x80`.** Decoded through ~`+0x80`: a metadata-block ptr at `+0x00`, framework gates at `+0x04`/`+0x0c` (both intentionally zero — see "Cannon: visible model lives in the stage's static scene graph"), and five repeating `(trigger_desc, physics_block)` pairs at 0x18 stride covering five barrels. Each trigger_desc encodes a stage joint index in a `0x000f00XX` packed value, each physics block holds eject force/angle/scale params. The slots past `+0x80` need the live runtime param block (the per-stage `data_array` is populated only while a stage is loaded), so resolving them requires Dolphin with Machine Passage loaded.
-- **Cross-stage asset injection mechanism.** The yakumono framework is stage-agnostic; the visible model is stage geometry. Bringing the cannon's mesh into CT requires loading `GrMachine2Model.dat` and either splicing its cannon JObj subtree into CT's main scene graph, rendering it as a parallel scene graph, or authoring a substitute cannon mesh from scratch. This is an implementation task, not an RE gap; the findings below scope it.
+- **Exact base-kind→YakuKind table for the generic dispatch path.** As established under "Generic dispatch table", the eight generic base kinds are kind-agnostic in code. The concrete YakuKind each `entries[].kind` produces is carried by the `Yakumono.dat` entry data at runtime, not recoverable from the static binary. (The per-instance descriptor path, by contrast, names every kind in an embedded string — see "Kind identification" above.)
+- **Cannon `YakumonoParam` fields beyond `+0x80`.** Decoded through ~`+0x80`: a metadata-block ptr at `+0x00`, framework gates at `+0x04`/`+0x0c` (both intentionally zero — see "Cannon: visible model lives in the stage's static scene graph"), and five repeating `(trigger_desc, physics_block)` pairs at 0x18 stride covering five barrels. Each trigger_desc encodes a stage joint index in a `0x000f00XX` packed value, each physics block holds eject force/angle/scale params. The slots past `+0x80` are not yet decoded.
+- **Cross-stage asset injection mechanism.** The yakumono framework is stage-agnostic; the visible model is stage geometry. Bringing the cannon's mesh into CT requires loading `GrMachine2Model.dat` and either splicing its cannon JObj subtree into CT's main scene graph, rendering it as a parallel scene graph, or authoring a substitute cannon mesh from scratch. This is an implementation task; the findings below scope it.
 
   **Heap-budget constraint.** Loading both full archives in CT — `Archive_LoadFile("GrMachine2.dat")` + `Archive_LoadFile("GrMachine2Model.dat")` from `On3DLoadEnd` — does load (and `Archive_GetPublicAddress` resolves `grDataMachine2` in stage.dat plus `grModelMachine2` / `grModelMotionMachine2` in model.dat), but leaves no headroom. Stage.dat is ~207KB and Model.dat is ~1.6MB; after the loads heap 1 has ~30 bytes free, so any subsequent allocation (e.g. `JObj_LoadSet_SetPri` on `grmodel[0]` needs ~1KB) trips `assertion "addr" failed in initialize.c on line 397`. The full Model archive is therefore too large to load in CT.
 

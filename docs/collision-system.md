@@ -345,3 +345,41 @@ GOBJ *item = Item_Create(&desc);
 ### Destroying Items with CollData
 
 If you create an item with coll_kind=1 (has CollData), the system handles cleanup automatically — when the bounce settles, `Item_GenericEnvColl` calls `mpColl_Destroy` and NULLs the pointer. If you destroy the item GObj directly, the item's destructor should handle freeing CollData.
+
+## Scene-Object Collision (breakable stage props)
+
+Distinct from the static triangle-mesh map collision above, the rider/machine `mpColl` query also tests against **scene objects** — the placed-instance records that City Trial breakable props (houses, trees, rocks, walls, holes, star pole, pitfall) bind to. This is the solid collision that stops you driving through a house *and* the path that breaks it. (The yakumono side — records, `desc_id`s, the break tail — is in `yakumono-system.md`; this section is the collision-engine view.)
+
+### The holder and the global region array
+
+The ground runtime object (`*stc_grobj`, at `*(r13+0x5ec)`) carries a **scene-collision holder at `stc_grobj+0x54`**:
+
+| Holder offset | Meaning |
+|---|---|
+| `+0x08` | base of the **global mpColl region array** (`0x40`-byte stride). For City Trial this is `*(stc_grobj+0x5c)` and holds ~14000 regions. |
+| `+0x10` | base of the **placed-instance record pool** (`0x98`-byte records; == `*(stc_grobj+0x64)`). |
+| `+0x14` | live record count (== `*(stc_grobj+0x68)`). |
+
+Each `0x98` record owns a contiguous **slice** of the global region array: pointer at `record+0x0c`, count at `record+0x10`. So a record's global region index is `(record+0x0c − *(holder+0x08)) / 0x40`. Each region:
+
+| Region offset | Meaning |
+|---|---|
+| `+0x0c` | outward surface normal (Vec3). |
+| `+0x34` | flags word; bit `0x20` selects a geometry-refined impact-speed path. |
+| `+0x38` | back-pointer to the owning `0x98` record (so a hit maps back to its prop; `record+0x90` is then the yakumono GObj). |
+| `+0x3c` | flags byte; **bit 6 (`0x40`) = collidable/intact**, bit 7 (`0x80`) asserted clear. |
+
+> **Caution:** `stc_grobj+0x454` is a *different, unrelated* struct whose `+0x08` is **not** the region array — indexing regions against it yields negative indices. (This was a long-standing mis-identification; the correct holder is `stc_grobj+0x54`.)
+
+### Per-frame query and the bit-6 lever
+
+`mpColl_UpdateCollision` (`0x802485e0`) drives the rider/machine sphere each frame in two phases:
+
+1. **Sweep** (`mpColl_SphereSceneObjColl` `0x8024d414`): finds the geometrically nearest facing region **without checking bit 6**, then gates a `collideWithObject` break-test on `mpColl_SceneObjBreakGate` (`0x80241574`: collider `+0x34c` bit 2 set **and** `record+0x8c == 3`). If `collideWithObject` breaks the prop it recurses; otherwise it records the contact.
+2. **Response** (`mpResponse_DispatchSceneObjColl` `0x80248bb4`): walks the accumulated floor/wall/ceil contacts and, for each, **reads `region+0x3c` bit 6 — if clear, removes the contact** (`zz_80242508_`) so the rider is *not* pushed out of it.
+
+**Consequence:** clearing bit 6 on a record's regions (`grScene_SetInstanceColl(record, 0)` `0x800d7ad0`) makes the prop pass-through, because the response stops resolving its penetration. Only break/init code writes that bit — **nothing re-arms it per frame** — so the clear sticks until something re-arms it. This is exactly what the vanilla break tail does on destruction, and what a mod (Hypernova) uses to retire a vacuumed prop's collision so the moved model leaves no invisible wall behind.
+
+### Breaking a prop
+
+The break is reached only through the region's family `coll_func`, dispatched by `collideWithObject(yaku_gobj, collider, holder, regionIdx, contact)` (`0x800f5004`): it reads `stc_yaku_descs[record_desc_id]->+0x04` and calls it. The handler computes `force = collider.radius (CollData+0x344) × impactSpeed²` and compares to the prop's HP. `impactSpeed` comes from `grScene_GetImpactSpeed` (`0x800d8edc`), which **normalizes** the collider delta (`CollData+0x14`), scales by −1.0, and projects onto `region+0x0c` (clamping ≤0 → 0) — so the delta must point *into* the surface and its magnitude is irrelevant. On `force > HP` the handler runs the full break tail (retire collision, hide mesh, debris, drops, SFX, break-count, broken-state). See `yakumono-system.md` for the tail and for synthesizing a no-contact break.
