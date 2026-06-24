@@ -400,9 +400,7 @@ static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, void *record)
     pos.Y = jmtx[7];
     pos.Z = jmtx[11];
 
-    Vec3 gap;
-    VECSubtract(&rd->pos, &pos, &gap); // gap = rider - prop
-    float dist2 = VECSquareMag(&gap);
+    float dist2 = VECSquareDistance(&rd->pos, &pos);
 
     // Arrived: snap onto the rider and break now.
     if (dist2 <= HYPERNOVA_YAKU_BREAK_RADIUS * HYPERNOVA_YAKU_BREAK_RADIUS)
@@ -686,26 +684,28 @@ void Hypernova_VacuumProcessClaimed(void)
     }
 }
 
-void Hypernova_VacuumFinishClaimed(void)
+void Hypernova_VacuumFinishClaimedPlayer(int player)
 {
-    for (int k = 0; k < hn_claim_count; k++)
-    {
-        void *record = hn_claims[k].record;
-        if (record == NULL)
-            continue;
-        GOBJ *rg = Ply_GetRiderGObj(hn_claims[k].owner);
-        if (rg == NULL)
-        {
-            grScene_SetInstanceColl(record, 1); // restore collision we retired in flight
-            continue;
-        }
-        if (!Hypernova_BreakInstanceNative(rg, record))
-            grScene_SetInstanceColl(record, 1); // couldn't break it - leave it collidable
-    }
-    hn_claim_count = 0;
+    GOBJ *rg = Ply_GetRiderGObj(player);
 
-    // In-flight items need no forced finish - just release them back to vanilla physics.
-    hn_item_claim_count = 0;
+    // Break this player's in-flight props (or restore collision if unbreakable).
+    for (int k = hn_claim_count - 1; k >= 0; k--)
+    {
+        if (hn_claims[k].owner != player)
+            continue;
+        void *record = hn_claims[k].record;
+        if (record != NULL)
+        {
+            if (rg == NULL || !Hypernova_BreakInstanceNative(rg, record))
+                grScene_SetInstanceColl(record, 1); // restore the collision we retired
+        }
+        Hypernova_RemoveClaimAt(k);
+    }
+
+    // Release this player's in-flight items back to vanilla physics (no forced finish).
+    for (int k = hn_item_claim_count - 1; k >= 0; k--)
+        if (hn_item_claims[k].owner == player)
+            Hypernova_RemoveItemClaimAt(k);
 }
 
 void Hypernova_VacuumReset(void)

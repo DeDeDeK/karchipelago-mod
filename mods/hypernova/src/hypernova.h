@@ -123,7 +123,8 @@ void Hypernova_OnFrameEnd(void);
 void Hypernova_OnSceneChange(void);
 
 // Public API implementation
-int  Hypernova_Activate(int duration_frames);
+int  Hypernova_Activate(int duration_frames);            // all human players
+int  Hypernova_ActivatePlayer(int player, int duration_frames); // one player slot
 void Hypernova_Deactivate(void);
 int  Hypernova_IsActive(void);
 int  Hypernova_FramesRemaining(void);
@@ -138,8 +139,9 @@ void Hypernova_VacuumProcessClaimedItems(void);
 // Pull every claimed prop one frame toward its owner; shrink when close, break on arrival.
 void Hypernova_VacuumProcessClaimed(void);
 
-// Break every claimed prop now and drop all claims (call when Hypernova ends mid-run).
-void Hypernova_VacuumFinishClaimed(void);
+// Break one player's claimed props and drop that player's item claims (call when a
+// single player's Hypernova ends, leaving other players' claims in flight).
+void Hypernova_VacuumFinishClaimedPlayer(int player);
 
 // Drop all claims without touching the targets (call on scene change / leaving City Trial).
 void Hypernova_VacuumReset(void);

@@ -411,11 +411,16 @@ and a wide cone can't starve later props of a claim slot.
 
 ## Activation / state model
 
-Hypernova is a **timed power-up state**, per player:
+Hypernova is a **timed power-up state**, tracked **per player** (`stc_active[5]` /
+`stc_timer[5]`, with the model-scale ease also per player) so it can be granted to
+one rider at a time or to everyone at once:
 
-- `hypernova_timer[player]` (frames remaining) + an active flag.
-- A trigger sets the timer: the exported `HypernovaAPI` (consumed by `archipelago_debug`) or the
-  debug self-test toggle; an AP item / EnergyLink purchase can drive the same API.
+- A trigger sets a player's timer. The exported `HypernovaAPI` offers
+  `ActivatePlayer(player, duration)` for a single slot and `Activate(duration)` for
+  every human at once (the debug self-test and AP / EnergyLink triggers use the
+  all-players form). The **Miracle Fruit** custom item grants it to its collector:
+  `hypernova`'s boot registers a `custom_items` pickup handler that calls
+  `ActivatePlayer` for the player who picks it up.
 - Each frame while `timer > 0`: ease `model_scale` (`+0x348`) toward 2.0; if the attack
   button is held, run the cone scan + pull. On expiry: ease scale back to 1.0, stop the
   vacuum. The trigger is **`B`** (`HYPERNOVA_TRIGGER_BUTTON`), not `A` — `A` is the

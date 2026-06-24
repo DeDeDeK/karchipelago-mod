@@ -5,7 +5,7 @@
 
 #define HYPERNOVA_MOD_NAME  "hypernova"
 #define HYPERNOVA_API_MAJOR 1
-#define HYPERNOVA_API_MINOR 0
+#define HYPERNOVA_API_MINOR 1
 
 typedef struct HypernovaAPI
 {
@@ -13,6 +13,11 @@ typedef struct HypernovaAPI
     // Returns 1 if it started (mod enabled + in a City Trial gameplay scene), else 0.
     // Calling while already active refreshes the timer.
     int (*Activate)(int duration_frames);
+
+    // Activate for one player slot (0..4) for `duration_frames` (0 = menu default).
+    // Returns 1 if it started (mod enabled, CT gameplay, slot is a human), else 0.
+    // Refreshes that player's timer if already active. (API minor 1+.)
+    int (*ActivatePlayer)(int player, int duration_frames);
 
     // Stop immediately. Kirby eases back to normal size.
     void (*Deactivate)(void);

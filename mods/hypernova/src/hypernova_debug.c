@@ -9,11 +9,10 @@
 // Cached only to avoid recreating it every frame; never dereferenced (the engine owns it).
 static GOBJ *stc_cone_gobj = NULL;
 
-// One base-circle subdivision step (360 / HYPERNOVA_DEBUG_CONE_SEGS = 15deg), as cos/sin
-// constants so the circle is walked by incremental 2D rotation - one complex multiply per rim
-// point instead of a trig call per vertex every frame.
-#define CONE_STEP_COS 0.96592583f // cos(15deg)
-#define CONE_STEP_SIN 0.25881905f // sin(15deg)
+// Base-circle rim as unit (cos, sin) pairs, evenly spaced over 360 / HYPERNOVA_DEBUG_CONE_SEGS.
+// Seeded once in Hypernova_DebugConeEnsure() so the per-frame draw does no trig - it just scales
+// and orients these into world space.
+static Vec2 stc_cone_unit[HYPERNOVA_DEBUG_CONE_SEGS];
 
 // Build an orthonormal basis (u, v) spanning the plane perpendicular to unit `aim`.
 static void ConeBasis(Vec3 *aim, Vec3 *u, Vec3 *v)
@@ -46,18 +45,15 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
     VECScale(aim, &axis, HYPERNOVA_RANGE);
     VECAdd(apex, &axis, &center);
 
-    // Rim points around the base circle, by incremental rotation of (u, v).
+    // Rim points around the base circle: scale each precomputed unit pair by the radius and
+    // project onto the (u, v) basis.
     Vec3 rim[HYPERNOVA_DEBUG_CONE_SEGS];
-    float cx = 1.0f, cy = 0.0f;
     for (int i = 0; i < HYPERNOVA_DEBUG_CONE_SEGS; i++)
     {
+        float cx = stc_cone_unit[i].X, cy = stc_cone_unit[i].Y;
         rim[i].X = center.X + radius * (cx * u.X + cy * v.X);
         rim[i].Y = center.Y + radius * (cx * u.Y + cy * v.Y);
         rim[i].Z = center.Z + radius * (cx * u.Z + cy * v.Z);
-        float nx = cx * CONE_STEP_COS - cy * CONE_STEP_SIN;
-        float ny = cx * CONE_STEP_SIN + cy * CONE_STEP_COS;
-        cx = nx;
-        cy = ny;
     }
 
     // GX state: flat per-vertex color (no texture/lighting), alpha blend, depth-tested but not
@@ -144,6 +140,15 @@ void Hypernova_DebugConeEnsure(void)
         return;
     GObj_AddGXLink(g, Hypernova_DebugConeGX, HYPERNOVA_DEBUG_GX_LINK, HYPERNOVA_DEBUG_GX_PRI);
     stc_cone_gobj = g;
+
+    // Seed the base-circle rim once (cos/sin per subdivision), so the per-frame draw is trig-free.
+    for (int i = 0; i < HYPERNOVA_DEBUG_CONE_SEGS; i++)
+    {
+        float a = (6.28318531f * i) / HYPERNOVA_DEBUG_CONE_SEGS; // i * (2*pi / segs)
+        stc_cone_unit[i].X = cosf(a);
+        stc_cone_unit[i].Y = sinf(a);
+    }
+
     OSReport("[HypernovaDebug] Inhale-cone overlay installed\n");
 }
 

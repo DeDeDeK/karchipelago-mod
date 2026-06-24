@@ -20,22 +20,33 @@ int hypernova_suck_yaku    = 1;
 int hypernova_selftest     = 0;
 int hypernova_debug_cone   = 0;
 
-static int   stc_active = 0;
-static int   stc_timer  = 0;
+// Per-player power-up state, indexed by player slot (0..4). Hypernova is granted
+// to one player at a time (whoever picks up a Miracle Fruit); Hypernova_Activate
+// grants it to every human at once.
+static u8  stc_active[5];
+static int stc_timer[5];
 
 // Per-human inhale phase (see DriveInhale), indexed by player slot.
 enum { HYPERNOVA_PHASE_IDLE, HYPERNOVA_PHASE_GULP, HYPERNOVA_PHASE_LOOP };
 static u8 stc_inhale_phase[5];
 
-// Model-scale ease: ease stc_scale_current from stc_scale_start toward the target.
-static float stc_scale_current = HYPERNOVA_SCALE_NEUTRAL;
-static float stc_scale_start   = HYPERNOVA_SCALE_NEUTRAL;
-static int   stc_scale_anim    = HYPERNOVA_SCALE_ANIM_FRAMES;
+// Model-scale ease, per player: ease stc_scale_current toward the target. Init to
+// neutral/settled so an inactive player's model_scale is never written until it
+// activates (and so a cold first frame can't shrink anyone to zero).
+static float stc_scale_current[5] = { HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
+                                      HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
+                                      HYPERNOVA_SCALE_NEUTRAL };
+static float stc_scale_start[5]   = { HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
+                                      HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
+                                      HYPERNOVA_SCALE_NEUTRAL };
+static int   stc_scale_anim[5]    = { HYPERNOVA_SCALE_ANIM_FRAMES, HYPERNOVA_SCALE_ANIM_FRAMES,
+                                      HYPERNOVA_SCALE_ANIM_FRAMES, HYPERNOVA_SCALE_ANIM_FRAMES,
+                                      HYPERNOVA_SCALE_ANIM_FRAMES };
 
 // Rainbow hue phase (0..1), advanced once per active frame, shared by all riders.
 static float stc_hue = 0.0f;
 
-static void StopRainbow(void);
+static void StopRainbowPlayer(int player);
 
 // City Trial gameplay, round underway (riders exist, intro/countdown done).
 static int InCityTrialGameplay(void)
@@ -49,67 +60,72 @@ static int InCityTrialGameplay(void)
     return 1;
 }
 
-// Begin a fresh scale ease from the size currently on screen.
-static void RetargetScale(void)
+// Begin a fresh scale ease for one player from the size currently on screen.
+static void RetargetScale(int p)
 {
-    stc_scale_start = stc_scale_current;
-    stc_scale_anim  = 0;
+    stc_scale_start[p] = stc_scale_current[p];
+    stc_scale_anim[p]  = 0;
 }
 
-// Advance the scale one frame toward the target (2x while active, neutral otherwise).
-static float TickScale(void)
+// Advance one player's scale a frame toward its target (2x while active, neutral otherwise).
+static float TickScale(int p)
 {
-    float target = stc_active ? HYPERNOVA_SCALE_TARGET : HYPERNOVA_SCALE_NEUTRAL;
+    float target = stc_active[p] ? HYPERNOVA_SCALE_TARGET : HYPERNOVA_SCALE_NEUTRAL;
 
-    if (stc_scale_anim < HYPERNOVA_SCALE_ANIM_FRAMES)
+    if (stc_scale_anim[p] < HYPERNOVA_SCALE_ANIM_FRAMES)
     {
-        stc_scale_anim++;
-        float t = (float)stc_scale_anim / (float)HYPERNOVA_SCALE_ANIM_FRAMES;
+        stc_scale_anim[p]++;
+        float t = (float)stc_scale_anim[p] / (float)HYPERNOVA_SCALE_ANIM_FRAMES;
         t = t * t * (3.0f - 2.0f * t); // smoothstep
-        stc_scale_current = stc_scale_start + (target - stc_scale_start) * t;
+        stc_scale_current[p] = stc_scale_start[p] + (target - stc_scale_start[p]) * t;
     }
     else
     {
-        stc_scale_current = target;
+        stc_scale_current[p] = target;
     }
-    return stc_scale_current;
+    return stc_scale_current[p];
 }
 
-// Stop the power-up but let the scale ease back down.
-static void StopInternal(void)
+// Stop the power-up for one player but let their scale ease back down.
+static void StopPlayer(int p)
 {
-    if (!stc_active)
+    if (!stc_active[p])
         return;
-    stc_active = 0;
-    stc_timer  = 0;
-    for (int i = 0; i < 5; i++)
-        stc_inhale_phase[i] = HYPERNOVA_PHASE_IDLE;
-    Hypernova_VacuumFinishClaimed(); // break anything still in flight
-    RetargetScale();
-    StopRainbow();
-    OSReport("[Hypernova] Deactivated\n");
+    stc_active[p]        = 0;
+    stc_timer[p]         = 0;
+    stc_inhale_phase[p]  = HYPERNOVA_PHASE_IDLE;
+    Hypernova_VacuumFinishClaimedPlayer(p); // break this player's in-flight targets
+    RetargetScale(p);
+    StopRainbowPlayer(p);
+    OSReport("[Hypernova] Player %d deactivated\n", p);
 }
 
 // Hard reset (scene change): models are recreated at scale 1.0, so snap to neutral, no ease.
 static void ResetState(void)
 {
-    stc_active        = 0;
-    stc_timer         = 0;
-    stc_scale_current = HYPERNOVA_SCALE_NEUTRAL;
-    stc_scale_start   = HYPERNOVA_SCALE_NEUTRAL;
-    stc_scale_anim    = HYPERNOVA_SCALE_ANIM_FRAMES;
-    stc_hue           = 0.0f;
     for (int i = 0; i < 5; i++)
-        stc_inhale_phase[i] = HYPERNOVA_PHASE_IDLE;
+    {
+        stc_active[i]        = 0;
+        stc_timer[i]         = 0;
+        stc_scale_current[i] = HYPERNOVA_SCALE_NEUTRAL;
+        stc_scale_start[i]   = HYPERNOVA_SCALE_NEUTRAL;
+        stc_scale_anim[i]    = HYPERNOVA_SCALE_ANIM_FRAMES;
+        stc_inhale_phase[i]  = HYPERNOVA_PHASE_IDLE;
+    }
+    stc_hue = 0.0f;
     Hypernova_VacuumReset();    // drop in-flight claims (the scene is being torn down)
     Hypernova_DebugConeReset(); // the overlay GObj is freed with the scene
 }
 
-int Hypernova_Activate(int duration_frames)
+int Hypernova_ActivatePlayer(int player, int duration_frames)
 {
     if (!hypernova_enabled)
         return 0;
     if (!InCityTrialGameplay())
+        return 0;
+    if (player < 0 || player >= 5)
+        return 0;
+    if (Ply_GetPKind(player) != PKIND_HMN)
         return 0;
 
     if (duration_frames <= 0)
@@ -120,33 +136,55 @@ int Hypernova_Activate(int duration_frames)
         duration_frames = hypernova_duration_table[sel];
     }
 
-    stc_timer = duration_frames;
-    if (!stc_active)
+    stc_timer[player] = duration_frames;
+    if (!stc_active[player])
     {
-        stc_active = 1;
-        RetargetScale(); // grow in
+        stc_active[player] = 1;
+        RetargetScale(player); // grow in
     }
-    OSReport("[Hypernova] Activated for %d frames\n", duration_frames);
+    OSReport("[Hypernova] Player %d activated for %d frames\n", player, duration_frames);
     return 1;
+}
+
+// Activate for every human player at once (menu self-test, debug, AP triggers).
+int Hypernova_Activate(int duration_frames)
+{
+    int any = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) != PKIND_HMN)
+            continue;
+        any |= Hypernova_ActivatePlayer(i, duration_frames);
+    }
+    return any;
 }
 
 void Hypernova_Deactivate(void)
 {
-    StopInternal();
+    for (int i = 0; i < 5; i++)
+        StopPlayer(i);
 }
 
 int Hypernova_IsActive(void)
 {
-    return stc_active;
+    for (int i = 0; i < 5; i++)
+        if (stc_active[i])
+            return 1;
+    return 0;
 }
 
 int Hypernova_FramesRemaining(void)
 {
-    return stc_active ? stc_timer : 0;
+    int most = 0;
+    for (int i = 0; i < 5; i++)
+        if (stc_active[i] && stc_timer[i] > most)
+            most = stc_timer[i];
+    return most;
 }
 
 static const HypernovaAPI stc_api = {
     .Activate        = Hypernova_Activate,
+    .ActivatePlayer  = Hypernova_ActivatePlayer,
     .Deactivate      = Hypernova_Deactivate,
     .IsActive        = Hypernova_IsActive,
     .FramesRemaining = Hypernova_FramesRemaining,
@@ -254,7 +292,7 @@ static void DriveRainbow(RiderData *rd, float hue)
     *(u32 *)(slot + HYPERNOVA_COLANIM_DATA_OFF) = 0;
 
     // Pin max priority so a pickup flash can't win the selector or overwrite via the apply-gate.
-    // Cleared on Hypernova end by StopRainbow, so normal hurt/invincibility flashes resume.
+    // Cleared on Hypernova end by StopRainbowPlayer, so normal hurt/invincibility flashes resume.
     slot[HYPERNOVA_COLANIM_PRI_OFF] = (char)HYPERNOVA_COLANIM_PRI_MAX;
 
     // Hold color-override active; with the tick frozen nothing else sets this and the selector
@@ -278,19 +316,16 @@ static void DriveRainbow(RiderData *rd, float hue)
     slot[HYPERNOVA_COLANIM_FLAGA_OFF]  = (char)0xff;    // ratio/blend path off
 }
 
-// Clear the rainbow overlay from every human Kirby (Hypernova ending).
-static void StopRainbow(void)
+// Clear the rainbow overlay from one human Kirby (their Hypernova ending).
+static void StopRainbowPlayer(int player)
 {
-    for (int i = 0; i < 5; i++)
-    {
-        if (Ply_GetPKind(i) != PKIND_HMN)
-            continue;
-        GOBJ *rg = Ply_GetRiderGObj(i);
-        if (!rg)
-            continue;
-        RiderData *rd = rg->userdata;
-        ColAnim_Reset((char *)rd + HYPERNOVA_COLANIM_BODY_OFF);
-    }
+    if (Ply_GetPKind(player) != PKIND_HMN)
+        return;
+    GOBJ *rg = Ply_GetRiderGObj(player);
+    if (!rg)
+        return;
+    RiderData *rd = rg->userdata;
+    ColAnim_Reset((char *)rd + HYPERNOVA_COLANIM_BODY_OFF);
 }
 
 // Tint one TEV color register's RGB, leaving its alpha untouched (alpha = constant.a * TEXA
@@ -384,19 +419,17 @@ void Hypernova_OnFrameEnd(void)
 
     SelfTestPoll();
 
-    if (stc_active && --stc_timer <= 0)
-        StopInternal();
+    // Tick each active player's timer; expire individually.
+    for (int i = 0; i < 5; i++)
+        if (stc_active[i] && --stc_timer[i] <= 0)
+            StopPlayer(i);
 
-    // Idle once fully settled and inactive: leave model_scale alone.
-    int scaling = stc_active
-        || stc_scale_current != HYPERNOVA_SCALE_NEUTRAL
-        || stc_scale_anim < HYPERNOVA_SCALE_ANIM_FRAMES;
-    if (!scaling)
-        return;
+    int any_active = 0;
+    for (int i = 0; i < 5; i++)
+        any_active |= stc_active[i];
 
-    float s = TickScale();
-
-    if (stc_active)
+    // Shared rainbow hue advances while any player is powered up.
+    if (any_active)
     {
         stc_hue += 1.0f / (float)HYPERNOVA_RAINBOW_PERIOD;
         if (stc_hue >= 1.0f)
@@ -412,20 +445,31 @@ void Hypernova_OnFrameEnd(void)
             continue;
         RiderData *rd = rg->userdata;
 
-        rd->model_scale = s;
+        // Idle once this player is settled and inactive: leave their model_scale alone.
+        int scaling = stc_active[i]
+            || stc_scale_current[i] != HYPERNOVA_SCALE_NEUTRAL
+            || stc_scale_anim[i] < HYPERNOVA_SCALE_ANIM_FRAMES;
+        if (!scaling)
+            continue;
 
-        if (!stc_active)
+        rd->model_scale = TickScale(i);
+
+        if (!stc_active[i])
             continue;
 
         DriveRainbow(rd, stc_hue);
 
-        int held = (rd->input.held & HYPERNOVA_TRIGGER_BUTTON) != 0;
+        // The inhale drives vanilla action-states whose per-frame procs dereference the rider's
+        // machine, so starting one while dismounted faults on the null machine_gobj. Gate the
+        // gesture on being mounted; off-machine reads as a release, so DriveInhale cleanly ends
+        // any suck that was already running, and the vacuum is skipped.
+        int held = Rider_IsOnMachine(rd) && (rd->input.held & HYPERNOVA_TRIGGER_BUTTON) != 0;
         DriveInhale(rd, i, held);
         if (held)
             Hypernova_VacuumPlayer(i, rd); // claim in-cone items/props for this rider
     }
 
-    if (stc_active)
+    if (any_active)
     {
         // Pull every claimed item and prop this frame, including ones the cone no longer covers.
         Hypernova_VacuumProcessClaimedItems();
