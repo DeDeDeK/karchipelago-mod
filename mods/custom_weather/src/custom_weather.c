@@ -9,13 +9,7 @@
 
 #include "custom_weather.h"
 
-// CustomPresetDef + WeatherAnimKind live in custom_weather.h. SkyPresetEntry
-// and AreaLightData live in hoshi (stage.h, obj.h). RGBA() is in gx.h. The
-// vanilla CT preset table is used as base values below.
-
 const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
-    // Deep Blue - based on Night (12)
-    // Deep ocean feel: dark blue fog, cool blue light from above
     { .base_preset = WEATHER_NIGHT,
       .fog_color = RGBA(8, 20, 40, 255),
       .fog_start = 120.0f,
@@ -25,9 +19,8 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(100, 120, 180, 255),
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
+      .fog_curve = FOG_CURVE_EXP2,
     },
-    // Golden Hour - based on Dusk (11)
-    // Warm sunset: orange fog, deep warm light, low sun
     { .base_preset = WEATHER_DUSK,
       .fog_color = RGBA(200, 128, 48, 255),
       .fog_start = 280.0f,
@@ -38,8 +31,6 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.20f, 0.50f },
       .char_dir_lit = 1,
     },
-    // Blood Red - based on Red Vignette (15)
-    // Hellscape: intense red fog, sickly red light from above
     { .base_preset = WEATHER_RED_VIGNETTE,
       .fog_color = RGBA(96, 8, 8, 255),
       .fog_start = 80.0f,
@@ -50,20 +41,32 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 1,
     },
-    // Whiteout - based on Dense Fog (9)
-    // Blizzard: white fog, flat diffuse light, no directional source
     { .base_preset = WEATHER_DENSE_FOG,
       .fog_color = RGBA(224, 224, 232, 255),
-      .fog_start = 15.0f,
-      .fog_end = 80.0f,
+      .fog_start = 20.0f,
+      .fog_end = 150.0f,
       .sky_color = RGBA(208, 208, 224, 255),
       .char_diffuse = RGBA(220, 220, 240, 255),
       .char_specular = RGBA(230, 230, 250, 255),
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
+      .fog_curve = FOG_CURVE_EXP2,
+      .rain = {
+          .enabled = 1,
+          .color = RGBA(255, 255, 255, 220),          
+          .density = 1200,
+          .fall_speed = 8.0f,                         
+          .line_width = 30,                           
+          .streak = 0.3f,                             
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 4.5f,
+          .heading = 60.0f,
+          .gustiness = 0.6f,
+          .chaos = 0.5f,
+      },
     },
-    // Toxic Green - based on Dark Vignette (5)
-    // Poisonous: dark green fog, eerie green-tinted light
     { .base_preset = WEATHER_DARK_VIGNETTE,
       .fog_color = RGBA(16, 48, 16, 255),
       .fog_start = 120.0f,
@@ -74,8 +77,6 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 0,
     },
-    // Neon - based on Dark Purple (14)
-    // Cyberpunk: magenta fog, vivid purple-pink light
     { .base_preset = WEATHER_DARK_PURPLE,
       .fog_color = RGBA(128, 32, 192, 255),
       .fog_start = 450.0f,
@@ -86,8 +87,6 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 0,
     },
-    // Cotton Candy - based on Pink Sky (8)
-    // Pink sky with contrasting teal fog, warm pink light
     { .base_preset = WEATHER_PINK_SKY,
       .fog_color = RGBA(0, 160, 160, 255),
       .fog_start = 200.0f,
@@ -98,8 +97,6 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 1,
     },
-    // Frozen Dawn - based on Blue Sky (7)
-    // Yellow sky with cool blue fog, cold blue-white light
     { .base_preset = WEATHER_BLUE_SKY,
       .fog_color = RGBA(40, 60, 140, 255),
       .fog_start = 250.0f,
@@ -110,8 +107,6 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 1,
     },
-    // Void - based on Night (12)
-    // Black sky with white fog creeping in, very dim light from below
     { .base_preset = WEATHER_NIGHT,
       .fog_color = RGBA(200, 200, 210, 255),
       .fog_start = 150.0f,
@@ -122,17 +117,12 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir = { 0.00f, -1.00f, 0.00f },
       .char_dir_lit = 0,
     },
-    // ---- Animated prototype presets ----
-    // Storm - base Dark Vignette. Heavy near-fog so terrain visibly hazes
-    // (KAR stage geometry doesn't read HSD light colors - fog + screen_tint
-    // are the only levers that darken terrain). Lightning is a per-frame
-    // fog/EFB-clear override punched in by ANIM_LIGHTNING.
     { .base_preset = WEATHER_DARK_VIGNETTE,
       .fog_color = RGBA(14, 18, 28, 255),
       .fog_start = 10.0f,
       .fog_end = 220.0f,
       .sky_color = RGBA(20, 24, 36, 220),
-      .terrain_diffuse = RGBA(55, 65, 85, 255),       // cold dim directional
+      .terrain_diffuse = RGBA(55, 65, 85, 255),       
       .terrain_specular = RGBA(45, 55, 75, 255),
       .char_diffuse = RGBA(80, 90, 110, 255),
       .char_specular = RGBA(60, 70, 95, 255),
@@ -140,44 +130,107 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_dir_lit = 0,
       .char_ambient = RGBA(35, 40, 60, 255),
       .char_ambient_specular = RGBA(30, 35, 50, 255),
-      .screen_tint = RGBA(0, 0, 8, 110),              // dark-blue lbfade overlay
-      .anim_kind = ANIM_LIGHTNING,
-      .anim_param = RGBA(255, 250, 240, 255),         // flash color
+      .screen_tint = RGBA(0, 0, 8, 110),              
+      .lightning = {
+          .enabled = 1,
+          .flash_color = RGBA(255, 250, 240, 255),
+      },
+      .rain = {
+          .enabled = 1,
+          .color = RGBA(170, 185, 205, 150),          
+          .density = 1300,
+          .fall_speed = 38.0f,                        
+          .line_width = 7,                            
+          .streak = 1.0f,                             
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 9.0f,
+          .heading = 90.0f,
+          .gustiness = 0.6f,
+          .chaos = 0.5f,
+      },
     },
-    // Aurora - base Night. Slowly cycling green/cyan/violet directional light
-    // overhead. Faint blue terrain tint. Exercises ANIM_AURORA + extra LOBJ +
-    // terrain re-tint.
-    { .base_preset = WEATHER_NIGHT,
-      .fog_color = RGBA(8, 12, 28, 255),
-      .fog_start = 180.0f,
-      .fog_end = 800.0f,
-      .sky_color = RGBA(0, 4, 12, 220),
-      .terrain_diffuse = RGBA(80, 110, 140, 255),     // chilly blue terrain
-      .terrain_specular = RGBA(120, 160, 200, 255),
-      .char_diffuse = RGBA(120, 200, 200, 255),
-      .char_specular = RGBA(100, 220, 220, 255),
-      .char_dir = { 0.00f, 1.00f, 0.00f },
-      .char_dir_lit = 1,
-      .anim_kind = ANIM_AURORA,
-      .anim_param = 0,
+    { .base_preset = WEATHER_GRAY_SKY,
+      .fog_color = RGBA(58, 68, 84, 255),
+      .fog_start = 140.0f,
+      .fog_end = 850.0f,
+      .sky_color = RGBA(92, 102, 118, 170),
+      .char_diffuse = RGBA(150, 160, 180, 255),
+      .char_specular = RGBA(140, 152, 175, 255),
+      .char_dir = { -0.20f, 0.85f, 0.40f },
+      .char_dir_lit = 0,
+      .char_ambient = RGBA(95, 105, 125, 255),
+      .screen_tint = RGBA(18, 24, 36, 70),            
+      .rain = {
+          .enabled = 1,
+          .color = RGBA(165, 180, 215, 120),          
+          .density = 900,
+          .fall_speed = 26.0f,
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 3.0f,
+          .heading = 90.0f,
+          .gustiness = 0.2f,
+          .chaos = 0.15f,
+      },
     },
-    // Inferno - base Red Vignette. Hot orange terrain tint, sinusoidal fog
-    // pulse so the heat haze visibly breathes. Exercises ANIM_PULSE_FOG +
-    // terrain re-tint.
     { .base_preset = WEATHER_RED_VIGNETTE,
-      .fog_color = RGBA(180, 60, 20, 255),
-      .fog_start = 220.0f,
-      .fog_end = 600.0f,
-      .sky_color = RGBA(140, 32, 8, 200),
-      .terrain_diffuse = RGBA(255, 200, 130, 255),    // hot warm terrain
-      .terrain_specular = RGBA(255, 180, 90, 255),
-      .char_diffuse = RGBA(255, 200, 140, 255),
-      .char_specular = RGBA(255, 180, 100, 255),
-      .char_dir = { -0.40f, 0.60f, 0.50f },
+      .fog_color = RGBA(130, 36, 14, 255),
+      .fog_start = 60.0f,
+      .fog_end = 480.0f,
+      .sky_color = RGBA(150, 44, 18, 185),
+      .char_diffuse = RGBA(225, 125, 80, 255),
+      .char_specular = RGBA(245, 110, 70, 255),
+      .char_dir = { -0.30f, 0.80f, 0.40f },
       .char_dir_lit = 1,
-      .screen_tint = RGBA(90, 20, 0, 90),             // burnt orange-red overlay
-      .anim_kind = ANIM_PULSE_FOG,
-      .anim_param = 80,                               // ±80 distance amplitude
+      .char_ambient = RGBA(90, 35, 25, 255),
+      .screen_tint = RGBA(36, 6, 4, 85),              
+      .rain = {
+          .enabled = 1,
+          .color = RGBA(210, 45, 30, 155),            
+          .density = 1100,
+          .fall_speed = 28.0f,
+      },
+      .lightning = {
+          .enabled = 1,
+          .flash_color = RGBA(255, 80, 50, 255),
+      },
+    },
+    { .base_preset = WEATHER_GRAY_SKY,
+      .fog_color = RGBA(64, 74, 90, 255),
+      .fog_start = 320.0f,                            
+      .fog_end = 1300.0f,
+      .sky_color = RGBA(88, 98, 114, 160),
+      .char_diffuse = RGBA(138, 146, 164, 255),
+      .char_specular = RGBA(128, 138, 158, 255),
+      .char_dir = { -0.20f, 0.85f, 0.40f },
+      .char_dir_lit = 0,
+      .char_ambient = RGBA(86, 94, 110, 255),
+      .screen_tint = RGBA(14, 20, 30, 95),            
+      .rain = {
+          .enabled = 1,
+          .color = RGBA(150, 165, 195, 100),          
+          .density = 450,
+          .fall_speed = 20.0f,
+          .line_width = 6,
+          .streak = 1.2f,
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 2.0f,
+          .heading = 70.0f,
+          .gustiness = 0.2f,
+          .chaos = 0.2f,
+      },
+      .puddles = {
+          .enabled = 1,
+          .color = RGBA(150, 178, 205, 195),          
+          .count = 28,
+          .radius = 32.0f,
+          .slow_factor = 0.90f,                       
+      },
     },
 };
 
@@ -195,7 +248,7 @@ static const char *preset_names[WEATHER_TOTAL] = {
     "Red Vignette", "Dark Low Vis",
     "Deep Blue", "Golden Hour", "Blood Red", "Whiteout",
     "Toxic Green", "Neon", "Cotton Candy", "Frozen Dawn", "Void",
-    "Storm", "Aurora", "Inferno",
+    "Storm", "Rain", "Blood Rain", "Puddles",
 };
 
 const char *CustomWeather_GetPresetName(int weather_kind)
@@ -213,12 +266,27 @@ static SkyPresetEntry extended_presets[WEATHER_TOTAL];
 static int weather_enabled[WEATHER_TOTAL] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 };
 _Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_TOTAL,
                "weather_enabled init must match WEATHER_TOTAL");
 
 static char *toggle_names[] = {"Disabled", "Enabled"};
+
+// Global "Fog Distance" multiplier written into HSD_Fog.scale every frame by
+// the anim runtime. Index into fog_distance_factors; the engine emits
+// GXSetFog(..., end * scale, ...), so <1 pulls the fog wall in (denser, closer)
+// and >1 pushes it out (clearer). Default 100% = no change. Persisted by hoshi
+// menu save (keyed by option name).
+static const float fog_distance_factors[] = {0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
+static char *fog_distance_names[] = {"50%", "75%", "100%", "125%", "150%", "200%"};
+#define FOG_DISTANCE_NUM (sizeof(fog_distance_factors) / sizeof(fog_distance_factors[0]))
+static int fog_distance_index = 2; // default 100%
+
+float CustomWeather_GetFogScale(void)
+{
+    return fog_distance_factors[fog_distance_index];
+}
 
 // Copy vanilla presets into our static buffer, append custom presets,
 // and repoint the game's sub-header to use the extended array.
@@ -346,8 +414,16 @@ static int DisableAllWeather(OptionDesc *self)
     }
 
 MenuDesc weather_menu = {
-    .option_num = WEATHER_TOTAL + 2,
+    .option_num = WEATHER_TOTAL + 3,
     .options = {
+        &(OptionDesc){
+            .name = "Fog Distance",
+            .description = "Scale how far the fog wall sits in every CT preset (lower = denser/closer)",
+            .kind = OPTKIND_VALUE,
+            .val = &fog_distance_index,
+            .value_num = FOG_DISTANCE_NUM,
+            .value_names = fog_distance_names,
+        },
         &(OptionDesc){
             .name = "Enable All",
             .description = "Enable all weather presets",
@@ -388,9 +464,10 @@ MenuDesc weather_menu = {
         WEATHER_TOGGLE(WEATHER_COTTON_CANDY,   "Cotton Candy"),
         WEATHER_TOGGLE(WEATHER_FROZEN_DAWN,    "Frozen Dawn"),
         WEATHER_TOGGLE(WEATHER_VOID,           "Void"),
-        // Animated prototypes
+        // Effect-layer presets
         WEATHER_TOGGLE(WEATHER_STORM,          "Storm"),
-        WEATHER_TOGGLE(WEATHER_AURORA,         "Aurora"),
-        WEATHER_TOGGLE(WEATHER_INFERNO,        "Inferno"),
+        WEATHER_TOGGLE(WEATHER_RAIN,           "Rain"),
+        WEATHER_TOGGLE(WEATHER_BLOOD_RAIN,     "Blood Rain"),
+        WEATHER_TOGGLE(WEATHER_PUDDLES,        "Puddles"),
     },
 };

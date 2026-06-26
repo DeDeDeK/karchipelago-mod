@@ -30,10 +30,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hsd.archive import Archive, HSD_HEADER, u32
+from hsd.geom_bounds import measure_root, scale_geometry
 from hsd.walker import Walker, merge_intervals
 
 
-def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
+def carve(input_path, src_symbol, slot_index, output_path, new_symbol,
+          target_radius=None):
     arc = Archive(input_path)
     if src_symbol not in arc.publics:
         raise SystemExit(f"public symbol {src_symbol!r} not found")
@@ -47,6 +49,24 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
     print(
         f"  source {src_symbol}[{slot_index}] pp={pp_off:#x} -> JOBJDesc={root_jobj:#x}"
     )
+
+    # Normalize the backdrop's on-screen size. 3D_CreateStageModel stamps
+    # the host stage's grStageScale onto the instantiated root joint,
+    # overwriting the donor's own. City Trial's scale is 0.70, so a donor
+    # whose geometry radius differs from City's renders its sky dome at a
+    # different distance (too close -> obscures the map; too far -> tiny).
+    # Pre-scaling the geometry to City's reference radius makes every
+    # carved backdrop render at the same distance as vanilla City Trial.
+    gdata = arc.data
+    if target_radius is not None:
+        rad = measure_root(arc, root_jobj)["radius"]
+        if rad <= 0:
+            print(f"  WARN: measured radius {rad:.1f}; skipping size normalization")
+        else:
+            f = target_radius / rad
+            gdata = scale_geometry(arc, root_jobj, f)
+            print(f"  geometry radius {rad:.1f} -> x{f:.4f} -> {target_radius:.1f} "
+                  f"(City reference)")
 
     walker = Walker(arc)
     visited = walker.walk(root_jobj, "JOBJDesc")
@@ -87,7 +107,7 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
             cursor += pad
         for o in range(s, e):
             remap[o] = cursor + (o - s)
-        new_data.extend(arc.data[s:e])
+        new_data.extend(gdata[s:e])
         cursor += e - s
 
     # ModelSection: ms[1] = pp slot offset (relocated)
@@ -151,14 +171,17 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
 
 
 def main(argv):
-    if len(argv) != 6:
+    if len(argv) not in (6, 7):
         print(__doc__)
+        print("usage: carve_backdrop.py <in.dat> <symbol> <slot> <out.dat> "
+              "<new_symbol> [target_radius]")
         return 1
-    _, in_path, sym, slot_s, out_path, new_sym = argv
+    in_path, sym, slot_s, out_path, new_sym = argv[1:6]
+    target = float(argv[6]) if len(argv) == 7 else None
     print("Carving backdrop:")
     print(f"  in  = {in_path}")
     print(f"  out = {out_path}")
-    carve(in_path, sym, int(slot_s), out_path, new_sym)
+    carve(in_path, sym, int(slot_s), out_path, new_sym, target_radius=target)
     return 0
 
 

@@ -20,13 +20,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hsd.archive import Archive, NotAnHSDArchive
 from hsd.carve_backdrop import carve
+from hsd.geom_bounds import backdrop_root, measure_root
 
 INPUT_GLOB = "iso/files/Gr*Model.dat"
 OUTPUT_DIR = "mods/custom_weather/assets"
 
+# Every backdrop is normalized to City Trial's own backdrop radius so the
+# grafted sky dome renders at the same distance as vanilla CT (the host
+# scale 3D_CreateStageModel stamps is City's, regardless of the donor).
+CITY_MODEL = "iso/files/GrCity1Model.dat"
+CITY_SYMBOL = "grModelCity1"
+
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    city = Archive(CITY_MODEL)
+    target_radius = measure_root(city, backdrop_root(city, CITY_SYMBOL))["radius"]
+    print(f"City reference backdrop radius = {target_radius:.1f}\n")
     archives = sorted(glob.glob(INPUT_GLOB))
     summary = []
     for path in archives:
@@ -58,7 +68,7 @@ def main():
 
         print(f"\n=== {name} ({sym}) ===")
         try:
-            carve(path, sym, 1, out_path, new_sym)
+            carve(path, sym, 1, out_path, new_sym, target_radius=target_radius)
             sz = os.path.getsize(out_path)
             summary.append(
                 (name, suffix, f"OK -> Backdrop{suffix}.dat ({sz / 1024:.1f} KB)")

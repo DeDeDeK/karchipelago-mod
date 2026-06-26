@@ -46,11 +46,19 @@ JOBJDesc *desc = *ms.terrain;            // (or *ms.backdrop)
 JObj    *jobj = HSD_JObjLoadJoint(desc); // instantiate
 // terrain: GObj_AddObject(grobj_gobj, kind, jobj)
 // backdrop: grobj->backdrop_jobj_at_0xF4 = jobj
-// both: copy grdata->stage_node->scale into JObj+0x2C/30/34
+// both: stamp grGetStageScale() into JObj scale at +0x2C/30/34
 ```
 
 If `ms.backdrop == NULL`, slot `GrObj+0xF4` is set to NULL and the
 second `HSD_JObjLoadJoint` is skipped — no crash.
+
+`grGetStageScale` (0x800d3058) returns `grdata->stage_node->StageScale`
+(`StageNode+0x08`) of the **current** stage. The loader writes that one
+float into all three of the instantiated root joint's scale components
+(`JObj+0x2C/30/34`), uniformly **overwriting** whatever scale the loaded
+`JOBJDesc` carried. So a grafted backdrop never keeps its donor's native
+scale — it is forced to City Trial's `StageScale` (0.70). This is the
+source of the size-normalization problem solved at carve time below.
 
 ### Override hook
 
@@ -64,6 +72,29 @@ backdrop subtree as if it were native to this stage.
 This is the simplest possible swap — no manual `HSD_JObjLoadJoint` /
 `HSD_JObjAddNext`, no scale patching, no GX callback. The loader
 handles all of it; we just lie about which `JOBJDesc *` it should use.
+
+### Distance scaling
+
+Because every carved backdrop is normalized to one geometry radius and
+the loader stamps City Trial's `StageScale` (0.70) into the root joint,
+all backdrops render at a single fixed distance. A second hook into
+`3D_CreateStageModel` at `0x800dce84` — immediately after the backdrop
+branch stores the JObj at `GrObj+0xF4` and stamps `grGetStageScale()`
+into the root joint scale at `JOBJ+0x2C/30/34` — multiplies that scale by
+a user-selected factor, moving the whole sky dome nearer or farther. At
+the hook `r30 = grobj` and `r29 = backdrop JObj` (both non-volatile); the
+macro replays the clobbered `lwz r0, 20(r29)` so the classical-scaling
+flag handling that follows sees the rescaled joint, and the change lands
+before the per-frame matrix build.
+
+The factor is exposed as a "Backdrop Distance" value option in the
+backdrop menu (`100% / 125% / 150% / 175% / 200%`, default 125% since the
+stamped distance reads as too close in City Trial). A `gr_kind == GR_CITY1`
+guard keeps the scaling out of every other stage's backdrop. The factor
+multiplies the loader's stamped scale, so it composes with the carve-time
+normalization rather than replacing it: 100% leaves the vanilla-distance
+sky dome, higher values push it out uniformly across all backdrops
+including Vanilla.
 
 ### Donor archive lifetime
 
@@ -103,6 +134,36 @@ carving ranges from ~5% to ~75% of the source archive (most cluster
 reports which archives have backdrops; `scripts/hsd/verify_carved.py`
 walks a carved file and confirms every reachable pointer lands inside
 its data section.
+
+### Size normalization
+
+Because the loader stamps City Trial's `StageScale` (0.70) onto every
+grafted backdrop's root joint regardless of donor, each backdrop's
+on-screen sphere radius is `0.70 × (its own geometry radius)`. Donor
+backdrops are modelled at wildly different raw sizes — from ~1300 units
+(Colosseum 5) to ~10000 (Check 2, Jump 3) — so untreated they render at
+radically different distances: small ones wrap in and obscure the map,
+large ones recede to nothing. A donor's *native* `StageScale` does **not**
+predict this (native on-screen radius ranges ~1260–16500), so there is no
+runtime scalar that equalizes them.
+
+The carve fixes it at the source. `scripts/hsd/geom_bounds.py` walks the
+backdrop subtree, parses each POBJ's display list for the positions
+actually drawn, accumulates the joint transforms, and computes the
+geometry radius about the root origin (with the root joint's scale forced
+to 1, since the loader overwrites it). `carve()` then uniformly scales the
+subtree to a target radius — City Trial's own backdrop radius (~2856) — by
+multiplying every joint translation and every drawn position vertex by
+`target / measured` (an exact uniform scale of the hierarchy, since
+rotations and per-node scales are dimensionless). `carve_all_backdrops.py`
+measures City's radius once and normalizes all donors to it. Every carved
+`Backdrop*.dat` therefore has the same geometry radius, so after the
+loader stamps 0.70 they all render at City Trial's backdrop distance.
+
+KAR backdrop positions are all `F32`, so the rescale is a plain float
+multiply; integer position buffers would need re-quantization and the
+carve raises instead. Re-measuring a carved asset with `geom_bounds.py`
+reports the normalized radius as a built-in check.
 
 ## Stage table reference
 
@@ -198,7 +259,8 @@ The other 4 archives skipped during batch carving (`GrSimple2`,
 ## See also
 
 - `mods/custom_weather/src/custom_backdrops.c` — the implementation
-  (one hook, one override callback, one menu).
+  (two `3D_CreateStageModel` hooks: the `ms.backdrop` override and the
+  post-stamp distance scale, plus the backdrop menu).
 - `mods/custom_weather/src/custom_weather.c` — sister system,
   preset extension. Same hoshi menu pattern.
 - `scripts/hsd/carve_backdrop.py`, `scripts/hsd/carve_all_backdrops.py`,

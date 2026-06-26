@@ -12,8 +12,8 @@ description: >
     Wraps `scripts/hsd/explore.py` (general explorer), the carve scripts
     (`scripts/hsd/carve_backdrop.py`, `scripts/hsd/carve_all_backdrops.py`),
     and supporting tools (`probe_backdrops.py`, `verify_carved.py`,
-    `dump_lights.py`, all under `scripts/hsd/`). Reads files directly from
-    disc - does not require Dolphin to be running.
+    `dump_lights.py`, `geom_bounds.py`, all under `scripts/hsd/`). Reads files
+    directly from disc - does not require Dolphin to be running.
 ---
 
 # dat-explore Skill
@@ -182,6 +182,14 @@ only need backdrops today. If a new carve target comes up, copy
   LightGroup/LObjDesc chains at the hardcoded City Trial layout (see
   `docs/sky-lighting-system.md`). Adjust the chain head offsets in
   `GRCITY1_CHAINS` for other stages.
+- `scripts/hsd/geom_bounds.py <Model.dat> <grModelX> [slot]` - measures a
+  backdrop subtree's bounding box / radius about the root origin (root
+  scale forced to 1, since `3D_CreateStageModel` overwrites it). Parses
+  each POBJ's display list for drawn positions and accumulates joint
+  transforms. Exposes `measure_root(arc, root)` and `scale_geometry(arc,
+  root, f)` (uniform rescale by multiplying every translation + position
+  vertex); the carve uses these to normalize each backdrop to City's
+  radius. Re-run on a carved asset to confirm the normalized size.
 
 ## Library entry points (`scripts/hsd/`)
 
