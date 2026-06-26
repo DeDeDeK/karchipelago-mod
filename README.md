@@ -1,3 +1,5 @@
+<img src="https://github.com/DeDeDeK/karchipelago-mod/blob/main/art/karchipelago-logo.png" alt="karchipelago logo" width="300"/>
+
 # karchipelago-mod
 
 This is the mod portion of the [Kirby Air Ride APWorld (KARchipelago)](https://github.com/DeDeDeK/KARchipelago) for [Archipelago](https://archipelago.gg/).
@@ -109,6 +111,12 @@ make patch
 ```
 
 The patch is written to `out/patch.xdelta`.
+
+
+## Credits
+
+- Swiggity - karchipelago logo design
+- Taco - KAR Deluxe logo + font design
 
 ---
 
