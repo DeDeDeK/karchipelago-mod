@@ -14,14 +14,22 @@
 #include "inline.h"
 
 // Machines that don't naturally spawn in CT: Top Ride stars, transformation
-// forms, and debug wheelie kinds. Force these to 0 chance regardless of mask.
-#define CT_SPAWN_EXCLUDED_MASK \
-    ((1u << VCKIND_FREE)        | \
-     (1u << VCKIND_STEER)       | \
-     (1u << VCKIND_WINGKIRBY)   | \
-     (1u << VCKIND_WHEELNORMAL) | \
-     (1u << VCKIND_WHEELKIRBY)  | \
-     (1u << VCKIND_WHEELDEDEDE) | \
+// forms, and the Dedede / Meta Knight character forms. Force these to 0 chance
+// regardless of mask.
+//
+// VCKIND_WINGMETAKNIGHT and VCKIND_WHEELDEDEDE are the machine forms behind the
+// Meta Knight and King Dedede character unlocks: unlocking either sets its bit
+// in machine_unlocked_mask. Both have a 0 base spawn chance in vanilla, so
+// without exclusion the unlocked-but-zero-chance fallback (weight 10) below
+// would leak these debug character machines onto the City Trial field.
+#define CT_SPAWN_EXCLUDED_MASK     \
+    ((1u << VCKIND_FREE)         | \
+     (1u << VCKIND_STEER)        | \
+     (1u << VCKIND_WINGKIRBY)    | \
+     (1u << VCKIND_WINGMETAKNIGHT) | \
+     (1u << VCKIND_WHEELNORMAL)  | \
+     (1u << VCKIND_WHEELKIRBY)   | \
+     (1u << VCKIND_WHEELDEDEDE)  | \
      (1u << VCKIND_WHEELVSDEDEDE))
 
 static int IsCKindUnlocked(CharacterKind ckind)
