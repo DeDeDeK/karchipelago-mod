@@ -20,6 +20,7 @@
 #include "patch_item.h"
 #include "checklist_rewards.h"
 #include "check_detection.h"
+#include "ap_checklist.h"
 #include "gate_stadiums.h"
 #include "patch_cap.h"
 #include "gate_events.h"
@@ -92,6 +93,11 @@ void OnBoot()
     // Replace ClearChecker_SetNewUnlock with the check-detection wrapper.
     // Must run after ChecklistRewards_OnBoot since they touch related code.
     CheckDetection_OnBoot();
+
+    // Add the AP checklist (4th checklist mode): redirect gmGetClearcheckerTypeP
+    // for AP_CHECKLIST_MODE. After CheckDetection_OnBoot so its SetNewUnlock
+    // replacement is the one our custom checks funnel through.
+    APChecklist_OnBoot();
 
     // Patches for stadium unlocks
     GateStadiums_OnBoot();
@@ -468,10 +474,15 @@ void OnFrameStart()
 
     // Process client backfill writes and poll meta auto-unlocks.
     CheckDetection_OnFrameStart();
+
+    // Evaluate AP-checklist custom checks and record any newly completed.
+    APChecklist_OnFrameStart();
 }
 
 // Runs every game tick after the frame has been processed.
 void OnFrameEnd()
 {
-    
+    // Re-apply the AP checklist's blue tint after the menu's per-frame material
+    // animation has set the green; no-op unless the AP tab is on screen.
+    APChecklist_OnFrameEnd();
 }

@@ -23,6 +23,15 @@ extern const TextBoxAPI *tb_api;
 // Number of checkboxes per mode (clear_kind range 0..CLEAR_KIND_NUM-1).
 #define CLEAR_KIND_NUM 120
 
+// The AP checklist is a synthetic 4th checklist, rendered by the same vanilla
+// code as the 3 real game modes but driven entirely by mod-defined custom
+// checks. GMMODE_NUM stays 3 (it means "the real game modes" in many places);
+// AP_CHECKLIST_MODE is the extra mode index, CHECKLIST_MODE_NUM the count that
+// includes it. Only the structures that store per-checklist-mode state (e.g.
+// sent_checks) extend to the 4th slot.
+#define AP_CHECKLIST_MODE  GMMODE_NUM        // mode index 3
+#define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)  // 4 (3 real modes + AP checklist)
+
 // Hard ceiling on per-stat patch totals. PowerPC `extsb` in the original
 // Patch_GetMaxValue caller path sign-extends the low byte, so values >127
 // wrap negative - 127 is the firm hardware limit. The runtime cap (see
@@ -117,6 +126,7 @@ typedef struct APSave
     u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit the runtime patch cap target on all 9 stats during a CT trial round
     APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
+    u64 sent_checks_ap[2];                              // AP-checklist (AP_CHECKLIST_MODE) completed-checkbox bitmask; the 4th-mode parallel of sent_checks[]. Appended at the struct tail so existing saves migrate cleanly.
 } APSave;
 
 // Shared data struct stored at a static location in memory.
@@ -193,6 +203,13 @@ typedef struct APData
     u32 deathlink_menu_enabled;
     u32 energylink_menu_enabled;
     u32 traplink_menu_enabled;
+
+    // AP-checklist (AP_CHECKLIST_MODE) completed-checkbox mirror, the 4th-mode
+    // parallel of sent_checks[]. Appended at the struct tail (rather than
+    // widening sent_checks[3] to [4]) so the existing field offsets the Python
+    // client reads for the 3 real modes are preserved; the client reads this
+    // trailing field for the AP checklist.
+    u64 sent_checks_ap[2];
 } APData;
 
 extern APData *ap_data;
