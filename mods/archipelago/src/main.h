@@ -23,14 +23,22 @@ extern const TextBoxAPI *tb_api;
 // Number of checkboxes per mode (clear_kind range 0..CLEAR_KIND_NUM-1).
 #define CLEAR_KIND_NUM 120
 
-// The AP checklist is a synthetic 4th checklist, rendered by the same vanilla
-// code as the 3 real game modes but driven entirely by mod-defined custom
-// checks. GMMODE_NUM stays 3 (it means "the real game modes" in many places);
-// AP_CHECKLIST_MODE is the extra mode index, CHECKLIST_MODE_NUM the count that
-// includes it. Only the structures that store per-checklist-mode state (e.g.
-// sent_checks) extend to the 4th slot.
-#define AP_CHECKLIST_MODE  GMMODE_NUM        // mode index 3
-#define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)  // 4 (3 real modes + AP checklist)
+// The AP checklist is a synthetic extra checklist mode, rendered by the same
+// vanilla code as the 3 real game modes but driven entirely by mod-defined custom
+// checks. It is a tab registered with the custom_checklist framework, which
+// appends each registered tab to the next free mode index in registration order -
+// so the AP tab's mode is assigned at runtime (ap_checklist_mode), not fixed. The
+// mod adapts to whatever slot it lands on, so registration order across mods does
+// not matter. GMMODE_NUM stays 3 (it means "the three real game modes" in many
+// places); only the structures that store per-checklist-mode state (sent_checks_ap)
+// extend past it, and they key on "mode >= GMMODE_NUM", not a specific index.
+
+// The checklist mode the custom_checklist framework assigned to the AP tab. The AP
+// record path passes it to ClearChecker_SetNewUnlock, and check_detection routes it
+// to sent_checks_ap. Initialized to GMMODE_NUM (the value before registration / if
+// the framework is absent); set by APChecklist_Register to the returned mode.
+// Always >= GMMODE_NUM.
+extern int ap_checklist_mode;
 
 // Hard ceiling on per-stat patch totals. PowerPC `extsb` in the original
 // Patch_GetMaxValue caller path sign-extends the low byte, so values >127
@@ -126,7 +134,7 @@ typedef struct APSave
     u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit the runtime patch cap target on all 9 stats during a CT trial round
     APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
-    u64 sent_checks_ap[2];                              // AP-checklist (AP_CHECKLIST_MODE) completed-checkbox bitmask; the 4th-mode parallel of sent_checks[]. Appended at the struct tail so existing saves migrate cleanly.
+    u64 sent_checks_ap[2];                              // AP-checklist completed-checkbox bitmask; the extra-mode parallel of sent_checks[] (used for any mode >= GMMODE_NUM). Appended at the struct tail so existing saves migrate cleanly.
 } APSave;
 
 // Shared data struct stored at a static location in memory.
@@ -204,8 +212,8 @@ typedef struct APData
     u32 energylink_menu_enabled;
     u32 traplink_menu_enabled;
 
-    // AP-checklist (AP_CHECKLIST_MODE) completed-checkbox mirror, the 4th-mode
-    // parallel of sent_checks[]. Appended at the struct tail (rather than
+    // AP-checklist completed-checkbox mirror, the extra-mode parallel of
+    // sent_checks[]. Appended at the struct tail (rather than
     // widening sent_checks[3] to [4]) so the existing field offsets the Python
     // client reads for the 3 real modes are preserved; the client reads this
     // trailing field for the AP checklist.

@@ -43,6 +43,10 @@ APData *ap_data;
 APSave *ap_save;
 const TextBoxAPI *tb_api = 0;
 
+// The checklist mode the custom_checklist framework assigned to the AP tab.
+// GMMODE_NUM until APChecklist_Register lands; see main.h.
+int ap_checklist_mode = GMMODE_NUM;
+
 ModDesc mod_desc = {
     .name = "KARchipelago",                     // Name of the mod.
     .author = "DeDeDK",                         // Creator of the mod.
@@ -93,11 +97,6 @@ void OnBoot()
     // Replace ClearChecker_SetNewUnlock with the check-detection wrapper.
     // Must run after ChecklistRewards_OnBoot since they touch related code.
     CheckDetection_OnBoot();
-
-    // Add the AP checklist (4th checklist mode): redirect gmGetClearcheckerTypeP
-    // for AP_CHECKLIST_MODE. After CheckDetection_OnBoot so its SetNewUnlock
-    // replacement is the one our custom checks funnel through.
-    APChecklist_OnBoot();
 
     // Patches for stadium unlocks
     GateStadiums_OnBoot();
@@ -197,6 +196,11 @@ void OnSaveLoaded()
     // Mirror sent_checks/goal_complete into shared memory and run initial
     // goal evaluation.
     CheckDetection_OnSaveLoaded();
+
+    // Register the AP checklist tab with the custom_checklist framework. Deferred
+    // to OnSaveLoaded (not OnBoot) because the framework mod boots after us, so its
+    // API only resolves once every mod has exported.
+    APChecklist_Register();
 
     // Publish restored link-toggle state. Hoshi's Mod_CopyFromSave has run
     // by now, so ap_menu_settings reflects the player's persisted choices.
@@ -475,14 +479,11 @@ void OnFrameStart()
     // Process client backfill writes and poll meta auto-unlocks.
     CheckDetection_OnFrameStart();
 
-    // Evaluate AP-checklist custom checks and record any newly completed.
-    APChecklist_OnFrameStart();
+    // The AP checklist tab's custom-check evaluation and blue-theme recolor are
+    // driven by the custom_checklist framework mod (OnFrameStart / OnFrameEnd).
 }
 
 // Runs every game tick after the frame has been processed.
 void OnFrameEnd()
 {
-    // Re-apply the AP checklist's blue tint after the menu's per-frame material
-    // animation has set the green; no-op unless the AP tab is on screen.
-    APChecklist_OnFrameEnd();
 }

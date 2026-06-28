@@ -28,9 +28,18 @@
 // Forward declaration: defined mid-file, called from earlier helpers.
 void CheckDetection_EvaluateGoal(void);
 
+// A checklist mode this mod records: the 3 real game modes plus the AP checklist
+// tab's framework-assigned mode (ap_checklist_mode, >= GMMODE_NUM). Other custom
+// checklist tabs (if any) own their own recording and never reach this mod's
+// SetNewUnlock path, so they are not accepted here.
+static inline int IsRecordedChecklistMode(int mode)
+{
+    return mode < GMMODE_NUM || mode == ap_checklist_mode;
+}
+
 // sent_checks storage for a checklist mode. The 3 real game modes use the wire
-// array; AP_CHECKLIST_MODE uses the appended sent_checks_ap slot - kept separate
-// so the 3-mode wire offsets the Python client reads stay fixed.
+// array; the AP-checklist mode uses the appended sent_checks_ap slot - kept
+// separate so the 3-mode wire offsets the Python client reads stay fixed.
 static inline u64 *SaveSentChecks(u8 mode)
 {
     return mode < GMMODE_NUM ? ap_save->sent_checks[mode] : ap_save->sent_checks_ap;
@@ -75,7 +84,7 @@ static inline int PopcountMode(u8 mode)
 // No-op if the bit was already set. Caller is responsible for bounds checking.
 static void RecordCheck(u8 mode, u8 clear_kind)
 {
-    if (mode >= CHECKLIST_MODE_NUM || clear_kind >= CLEAR_KIND_NUM)
+    if (!IsRecordedChecklistMode(mode) || clear_kind >= CLEAR_KIND_NUM)
         return;
     if (!SetSentCheck(mode, clear_kind))
         return;
@@ -104,9 +113,10 @@ static void RecordCheck(u8 mode, u8 clear_kind)
 // RecordCheck, then run the vanilla logic so the UI still works (SFX cue included).
 static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
 {
-    // CHECKLIST_MODE_NUM, not GMMODE_NUM: the AP-checklist evaluator drives
-    // completions through here via ClearChecker_SetNewUnlock(AP_CHECKLIST_MODE, ..).
-    if ((unsigned)mode >= CHECKLIST_MODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
+    // Accept the AP-checklist mode too, not just the 3 real modes: the AP-checklist
+    // evaluator drives completions through here via
+    // ClearChecker_SetNewUnlock(ap_checklist_mode, ..).
+    if (!IsRecordedChecklistMode(mode) || (unsigned)clear_kind >= CLEAR_KIND_NUM)
         return;
     GameClearData *cd = gmGetClearcheckerTypeP(mode);
     if (!cd)

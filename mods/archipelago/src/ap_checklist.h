@@ -1,21 +1,13 @@
 #ifndef ARCHIPELAGO_AP_CHECKLIST_H
 #define ARCHIPELAGO_AP_CHECKLIST_H
 
-#include "game.h"
-
-// Install the AP-checklist (AP_CHECKLIST_MODE) clear-checker plumbing: the
-// mod-owned GameClearData and the gmGetClearcheckerTypeP REPLACEFUNC that serves
-// it. Call from OnBoot.
-void APChecklist_OnBoot(void);
-
-// Per-frame evaluator: completes any custom check whose condition is now met by
-// calling ClearChecker_SetNewUnlock(AP_CHECKLIST_MODE, clear_kind). Idempotent.
-// Call from OnFrameStart; no-ops until the save is loaded.
-void APChecklist_OnFrameStart(void);
-
-// Per-frame blue-theme recolor for the AP tab. Must run after the menu's
-// material-animation pass (which re-applies the green tint each frame), so call
-// from OnFrameEnd. No-ops unless the AP tab is the current scene.
-void APChecklist_OnFrameEnd(void);
+// Register the AP checklist as a custom checklist tab with the custom_checklist
+// framework: imports the framework API and hands it the AP descriptor (checks,
+// blue theme, tab art, and the sent_checks_ap record callbacks). The framework
+// owns the tab's presentation and per-frame check evaluation thereafter.
+//
+// Call from OnSaveLoaded (not OnBoot): the framework mod boots after archipelago,
+// so its API only resolves once all mods have exported. Idempotent.
+void APChecklist_Register(void);
 
 #endif // ARCHIPELAGO_AP_CHECKLIST_H

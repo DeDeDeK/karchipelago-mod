@@ -13,6 +13,7 @@
                 "${workspaceFolder}/mods/archipelago/include",
                 "${workspaceFolder}/mods/hypernova/include",
                 "${workspaceFolder}/mods/custom_items/include",
+                "${workspaceFolder}/mods/custom_checklist/include",
                 "${workspaceFolder}/mods/**/src"
             ],
             "defines": ["HW_DOL", "_DEBUG", "_UNICODE", "WIN32", "ARM7", "ARM9"],
