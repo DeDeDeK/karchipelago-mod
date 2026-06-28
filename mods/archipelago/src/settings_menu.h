@@ -17,6 +17,7 @@ typedef struct APMenuSettings
     int ct_stadium_permanent_patches_enabled;
     int ar_permanent_patches_enabled;
     int ct_random_start_machine; // start City Trial on a random unlocked machine
+    int drop_ability_enabled;    // press B to discard the current copy ability (CT/AR)
 } APMenuSettings;
 
 extern APMenuSettings ap_menu_settings;

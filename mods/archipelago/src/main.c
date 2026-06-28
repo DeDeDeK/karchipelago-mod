@@ -14,6 +14,7 @@
 #include "city_trial_event.h"
 #include "ap_item_handler.h"
 #include "kirby_scale.h"
+#include "drop_ability.h"
 #include "energylink.h"
 #include "traplink.h"
 #include "fake_patches.h"
@@ -407,6 +408,9 @@ void On3DLoadEnd()
 
     // Big / Small Kirby model scaling (always available - not an optional link).
     KirbyScale_On3DLoadEnd();
+
+    // Press-B-to-drop copy ability (off by default; not an optional link).
+    DropAbility_On3DLoadEnd();
 }
 
 // Runs after Top Ride gameplay is fully initialized.

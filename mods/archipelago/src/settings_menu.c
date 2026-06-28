@@ -38,6 +38,7 @@ static void OnToggleCTPermanent(int val)        { OSReport("[Main] CT Permanent 
 static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleARPermanent(int val)        { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Start Machine toggled %s\n", stc_off_on[val]); }
+static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
 
 // Submenu: controls whether accumulated permanent stat patches are re-applied
 // at the start of each round/race. Receiving AP permanent-patch items still
@@ -92,7 +93,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 5,
+        .option_num = 6,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -188,6 +189,18 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleRandomStartMachine,
+            },
+            &(OptionDesc){
+                .name = "Drop Ability",
+                .description = "Press Z to discard your current copy ability (City Trial / Air Ride)",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.drop_ability_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleDropAbility,
             },
         },
     },
