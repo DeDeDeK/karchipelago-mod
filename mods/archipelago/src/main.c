@@ -435,6 +435,9 @@ void OnTopRideLoadEnd()
 
     // Big / Small Kirby model scaling (always available - not an optional link).
     KirbyScale_OnTopRideLoadEnd();
+
+    // Press-Z-to-drop ability power (off by default; not an optional link).
+    DropAbility_OnTopRideLoadEnd();
 }
 
 // Runs when pausing the match. The index of the pausing player is passed in as an argument.

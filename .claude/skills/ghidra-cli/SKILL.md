@@ -1,7 +1,7 @@
 ---
 name: ghidra-cli
 description: >
-    Use ghidra-cli for reverse engineering tasks: binary analysis, decompilation, function inspection, cross-reference analysis, pattern discovery, and binary patching.
+    Use ghidra-cli for reverse engineering tasks: binary analysis, decompilation, function inspection, cross-reference analysis, pattern discovery, binary patching, and type system management.
     Activate when the user requests:
     - Binary analysis or reverse engineering
     - Decompilation or disassembly
@@ -10,6 +10,9 @@ description: >
     - String or byte pattern searches
     - Binary patching or modification
     - Ghidra project management
+    - Type management (structs, enums, typedefs, struct fields)
+    - Function signature editing (return type, calling convention, full signature)
+    - Variable retyping in decompiled functions
 ---
 
 # ghidra-cli Agent Reference
@@ -41,9 +44,8 @@ CLI (Rust/clap) ──TCP──► GhidraCliBridge.java (GhidraScript in Ghidra 
 ## Quick Start
 
 ```bash
-# Fastest path: import + analyze, bridge starts automatically
+# Fastest path: import runs auto-analysis automatically; bridge starts on demand
 ghidra import ./binary --project myproject
-ghidra analyze --project myproject --program mybinary
 
 # All subsequent queries reuse the running bridge
 ghidra function list --project myproject
@@ -74,11 +76,13 @@ ghidra project delete NAME
 ### Import & Analysis
 
 ```bash
-ghidra import BINARY [--project P] [--program PROG] [--detach]
+ghidra import BINARY [--project P] [--program PROG] [--no-analyze] [--detach]
 ghidra analyze [--project P] [--program PROG] [--detach]
 ```
 
-Both auto-start bridge. `--detach` returns immediately.
+Both auto-start the bridge. `ghidra import` runs auto-analysis by default (and
+persists the program); pass `--no-analyze` for a raw import without analysis.
+`--detach` returns immediately.
 
 ### Program Management
 
@@ -96,21 +100,29 @@ ghidra program export FORMAT [--project P] [-o OUTPUT]   # FORMAT: xml, json, as
 ```bash
 ghidra function list [QUERY_OPTS]           # aliases: fn, func, functions
 ghidra function get TARGET [QUERY_OPTS]     # TARGET = name or 0xADDRESS
-ghidra function decompile TARGET [QUERY_OPTS]
+ghidra function decompile TARGET [--with-vars] [--with-params] [QUERY_OPTS]
 ghidra function disasm TARGET [QUERY_OPTS]
 ghidra function calls TARGET [QUERY_OPTS]   # outgoing calls
 ghidra function xrefs TARGET [QUERY_OPTS]   # incoming references
 ghidra function rename OLD NEW [--project P] [--program PROG]
 ghidra function create ADDRESS [NAME] [--project P] [--program PROG]
 ghidra function delete TARGET [QUERY_OPTS]
+ghidra function set-signature TARGET --signature "int foo(int x, char *y)" [--project P] [--program PROG]
+ghidra function set-return-type TARGET --type TYPE [--project P] [--program PROG]
+ghidra function set-calling-convention TARGET --convention CC [--project P] [--program PROG]
+ghidra function set-var-type TARGET --var VARNAME --type TYPE [--project P] [--program PROG]
 ```
 
 ### Top-level Shortcuts
 
 ```bash
-ghidra decompile TARGET [QUERY_OPTS]        # aliases: decomp, dec
+ghidra decompile TARGET [--with-vars] [--with-params] [QUERY_OPTS]   # aliases: decomp, dec
 ghidra disasm TARGET [-n COUNT] [QUERY_OPTS]   # TARGET = name or 0xADDRESS; aliases: disassemble, dis
 ```
+
+`--with-vars` includes local variable details (name, type, storage) in the response.
+`--with-params` includes parameter details (name, type, storage) in the response.
+Both flags add structured data alongside the decompiled C code; use `--json` to see the full output.
 
 ### String Operations
 
@@ -151,10 +163,16 @@ Note: `x-ref list` currently accepts an optional target in clap, but runtime ign
 ### Type Operations
 
 ```bash
-ghidra type list [QUERY_OPTS]               # alias: types
-ghidra type get NAME [QUERY_OPTS]
-ghidra type create DEFINITION [--project P] [--program PROG]
+ghidra type list [QUERY_OPTS]               # alias: types  (includes "kind" field: struct/union/enum/typedef/pointer/array/other)
+ghidra type get NAME [QUERY_OPTS]           # shows struct fields, enum members, typedef base type, kind
+ghidra type create DEFINITION [--project P] [--program PROG]        # create empty struct
 ghidra type apply ADDRESS TYPE_NAME [--project P] [--program PROG]
+ghidra type delete NAME [--project P] [--program PROG]              # alias: rm
+ghidra type rename OLD NEW [--project P] [--program PROG]           # alias: mv
+ghidra type create-enum NAME --values "A=0,B=1,C=2" [--size 4] [--project P] [--program PROG]
+ghidra type typedef NAME BASE_TYPE [--project P] [--program PROG]   # create type alias
+ghidra type add-field STRUCT_NAME --name FIELD --type TYPE [--offset N] [--size N] [--project P] [--program PROG]
+ghidra type del-field STRUCT_NAME --name FIELD [--project P] [--program PROG]
 ```
 
 ### Comment Operations
@@ -303,14 +321,14 @@ All query commands accept these:
 --filter "size >= 50"
 
 # String
---filter "name contains 'crypt'"
+--filter "name ~ 'crypt'"
 
 # Combined
---filter "size > 100 and name contains 'main'"
+--filter "size > 100 AND name ~ 'main'"
 --filter "name != 'main'"
 ```
 
-Operators: `>`, `<`, `>=`, `<=`, `=`, `!=`, `contains`, `in`, `and`, `or`.
+Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `~` (contains), `^` (starts with), `$` (ends with), `=~` (regex), `AND`, `OR`, `NOT`, `IN`, `EXISTS`.
 
 ## Agent Best Practices
 
@@ -370,10 +388,11 @@ ghidra analyze --project analysis
 # 2. Recon
 ghidra summary --project analysis
 ghidra function list --count --project analysis
-ghidra function list --filter "NOT name contains 'FUN_'" --fields name,address,size --limit 30 --project analysis
+ghidra function list --filter "NOT name ^ 'FUN_'" --fields name,address,size --limit 30 --project analysis
 
 # 3. Investigate
 ghidra decompile main --project analysis
+ghidra decompile main --with-vars --with-params --json --project analysis  # structured output
 ghidra find crypto --project analysis
 ghidra find string "password" --project analysis
 
@@ -382,7 +401,18 @@ ghidra graph callers suspicious_func --depth 3 --project analysis
 ghidra x-ref to 0x401000 --project analysis
 ghidra function disasm 0x401000 --project analysis
 
-# 5. Patch
+# 5. Type annotation (improves decompile output)
+ghidra type create MyStruct --project analysis
+ghidra type add-field MyStruct --name fd --type int --project analysis
+ghidra type add-field MyStruct --name flags --type uint --project analysis
+ghidra type create-enum ErrorCode --values "OK=0,ENOENT=2,EPERM=1" --project analysis
+ghidra type typedef HANDLE void --project analysis
+ghidra function set-return-type main --type int --project analysis
+ghidra function set-signature parse_data --signature "int parse_data(char *buf, int len)" --project analysis
+ghidra function set-var-type main --var local_10 --type "MyStruct *" --project analysis
+ghidra decompile main --project analysis  # re-decompile with new types applied
+
+# 6. Patch
 ghidra patch nop 0x401234 --count 3 --project analysis
 ghidra patch export -o patched.exe --project analysis
 ```

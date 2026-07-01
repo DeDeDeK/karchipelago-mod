@@ -83,6 +83,21 @@ The acquiring state is just the visual handshake. The actual effect application 
 
 **Implication for mod code:** to give a TR item directly to a specific kirby (no flying projectile, no position-based pickup), call `TopRide_KirbyApplyItem(kirby, kind)` directly. This applies the effect this frame, skips the absorption animation, and is unaffected by other kirbys' positions. Used by `GateTopRideItems_GiveItem` (AP item give + traplink TR receive).
 
+### Ability-Power Item States (held powers)
+
+The four **ability-themed** items — Fire (11), Freeze Fan (9), Bomb (13), Walky (16), the TR analogs of copy abilities — are not instantaneous: `TopRide_KirbyApplyItem` transitions the kirby's state machine (`state_handler` at TopRideKirby+0x7c) into a per-item **state** that persists for the power's duration, and records the active kind at `TopRideKirby+0x11` (`active_item_kind`; `0xFF` = none). Each item's setter calls `TopRide_KirbyNormalSetter` (0x802df844) to reset the state object, then overwrites its vtable with the item state:
+
+| Item | Kind | Setter | State vtable |
+|------|------|--------|--------------|
+| Fire | 11 | `TopRide_KirbyItemFireSetter` (0x80302d04) | `0x804db288` |
+| Freeze Fan | 9 | `TopRide_KirbyItemFreezeFanSetter` (0x8030b398) | `0x804dc6e4` |
+| Bomb | 13 | `TopRide_KirbyItemBombSetter` (0x80303a98) | `0x804db088` |
+| Walky | 16 | `TopRide_KirbyItemWalkySetter` (0x8030668c) | `0x804dc150` |
+
+So a held ability power is detected by comparing `*(void**)kirby->state_handler` against these vtables (`TopRide_KirbyHasStateVtable`). `active_item_kind` is *not* reset on natural expiry, so it is not a reliable "currently active" indicator — use the state vtable.
+
+**Reverting (drop):** `TopRide_KirbyNormalMethod` (0x802da0f4, Kirby `vtable[50]` / +0xC8, wrapped as `TopRide_KirbyNormal`) exits the current state via its `vt[2]` teardown — removing the power's aura/model/effects — then installs `KirbyNormal`. This is the engine's own revert when one power replaces another or a power times out. The AP "drop ability" control (`drop_ability.c`, gated by `drop_ability_enabled`) reuses it: on the owning player's Z-press it calls `TopRide_KirbyNormal` and clears `active_item_kind`.
+
 ### Item Selection Algorithm (`TopRideItem_SpawnTimed`, 0x8034b8c8)
 
 1. Roll `HSD_Randf()` against a spawn probability threshold (varies by time, player count, position).

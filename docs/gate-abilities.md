@@ -4,6 +4,8 @@
 
 11 CopyKinds (FIRE, WHEEL, SLEEP, SWORD, BOMB, PLASMA, NEEDLE, MIC, FREEZE, TORNADO, BIRD) can be individually locked. When locked, the ability cannot be obtained from *any* source — copy panels, copy chance wheels, or enemy inhale. The ability item panels are also filtered from spawn tables, and ability-themed enemies are filtered from enemy spawn tables across all modes (Air Ride, City Trial stadiums).
 
+This doc covers only the *gating* (whether an ability may be obtained). For the engine's copy-ability mechanics — grant, per-frame tick, and teardown — see `copy-ability-system.md`.
+
 ## Game Systems — Three Acquisition Paths
 
 Copy abilities can be obtained three ways, all of which need gating:
