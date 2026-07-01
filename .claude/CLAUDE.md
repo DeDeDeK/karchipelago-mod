@@ -68,6 +68,7 @@ Never attempt to read ISO files, memory dumps, or other large binary/text files 
 
 Current-state reference material - engine/mod facts and design rationale, not the RE process or verification steps (see the comments/docs convention under Code Conventions).
 
+- `checklist-grid-geometry.md` - The checklist's visible 12×10=120 cell layout: the procedural (not baked) grid built by instancing single-quad cell models, the `MainMenuData+0xf0c[120]` cell-GObj array, the grid builder (`Checklist_SetRewardFlagOnUnlocks`), `Pos`-joint spacing, and exactly which functions hardcode the column count / total for a resize. Sister doc to `clearchecker-system.md`.
 - `checklist-mappings.csv` - Combined checklist mappings for all three modes (Air Ride, City Trial, Top Ride). Contains memory addresses, checkbox descriptions, and rewards. Primary reference for checklist clear kind indices and item IDs.
 - `checklist-stat-tracking.md` - The `plclearcheckerlib` stat-measurement layer beneath the clear bits: the per-player stat struct (`Ply_GetItemCollectArray`), the verified item-collect subsystem (array at `+0x4c8`, increment/decrement, `Ply_GetItemCollectNum`/`Ply_GetItemCollectTotal`/`Ply_GetBoxCollectTotal`), and how `CityTrial_CheckForNewUnlocks` accumulates totals and fires the "pick up N items" / "break N boxes" / "get 10 of patch X" cells. Sister doc to `clearchecker-system.md`.
 - `city-trial-event-system.md` - Full documentation of the City Trial event system: state machine, event function table, param/BGM/sky tables, reserve queue, selection logic.

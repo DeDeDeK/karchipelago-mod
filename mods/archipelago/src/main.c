@@ -9,7 +9,6 @@
 #include "stadium.h"
 
 #include "main.h"
-#include "save_icon.h"
 #include "deathlink.h"
 #include "city_trial_event.h"
 #include "ap_item_handler.h"
@@ -89,8 +88,11 @@ void OnBoot()
     APData **static_ptr = (APData **)0x805d52d4;
     (*static_ptr) = ap_data;
 
-    // Give the shared hoshi memory-card file an Archipelago icon (otherwise its tile is blank)
-    Hoshi_SetSaveIcon("KARchipelago", "Save Data", ap_save_icon, 1, CARD_STAT_SPEED_MIDDLE);
+    // Give the shared hoshi memory-card file an Archipelago tile (otherwise it is blank). The art
+    // is loaded from disc (ApIcon.dat / ApBanner.dat) into the tile when the save is created, so
+    // no image is baked into this mod. Set the banner after the icon: the icon call clears the tile.
+    Hoshi_SetSaveIconFile("KARchipelago", "Save Data", "ApIcon", 1, CARD_STAT_SPEED_MIDDLE);
+    Hoshi_SetSaveBannerFile("ApBanner");
 
     // Replace ClearChecker_CheckUnlocked with AP bitfield hook
     ChecklistRewards_OnBoot();

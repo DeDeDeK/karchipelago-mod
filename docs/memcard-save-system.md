@@ -57,8 +57,9 @@ hoshi keeps mod data in its **own** card file named `"hoshi"`, sized up to a who
 rewrites it (hash-gated) on main-menu entry. Both hooks piggyback on the vanilla memcard
 init so the prompt/no-card flow is shared.
 
-`KARPlusSave` (`save.h`) is a header (`version`, `mod_num`, a 50-entry `metadata[]`) followed
-by a flat `data[]`. Each mod is handed a sub-region of that one file by `KARPlusSave_Alloc`
+`KARPlusSave` (`save.h`) is a small version header, then the card tile, then a 50-entry
+`metadata[]`, then a flat `data[]`. The tile sits up front (ahead of `metadata[]`) on purpose -
+see the tile section below. Each mod is handed a sub-region of `data[]` by `KARPlusSave_Alloc`
 (keyed by a hash of the mod name), with `KARPlusSave_VerifySize` resizing in place across
 versions. **All mods share this single file**, so the file has exactly one tile.
 
@@ -70,25 +71,48 @@ versions. **All mods share this single file**, so the file has exactly one tile.
 - Card files can't grow in place, and isolation means a corrupt/oversized/version-mismatched
   mod save can never endanger the vanilla save; uninstalling hoshi leaves it pristine.
 
-### The tile (icon API)
+### The tile (icon + banner API)
 
 By default the `"hoshi"` file has a blank card-manager tile: `KARPlusSave_CreateOrLoad` only
-`CARDCreate`s/`CARDWrite`s, so `bannerFormat`/`iconFormat` stay `NONE`. A mod gives it an icon via:
+`CARDCreate`s/`CARDWrite`s, so `bannerFormat`/`iconFormat` stay `NONE`. A mod populates it via:
 
 ```c
-void Hoshi_SetSaveIcon(const char *title, const char *description,
-                       const void *frames_rgb5a3, int frame_num, int speed);
+void Hoshi_SetSaveIconFile(const char *title, const char *description,
+                           const char *icon_file, int frame_num, int speed);
+void Hoshi_SetSaveBannerFile(const char *banner_file); // 96×32 RGB5A3; call AFTER the icon
 ```
 
-- `KARPlusSave` carries a fixed `KARPlusSaveTile` header (comment + `HOSHI_SAVE_ICON_FRAMES`
-  RGB5A3 32×32 frames, no banner) ahead of the per-mod `data[]`. The frame count dominates the
-  file size; `HOSHI_SAVE_ICON_FRAMES` defaults to 1 (static icon, save stays one 8 KB block),
-  raise it (≤ `CARD_ICON_MAX`) for an animated icon at the cost of a bigger save.
-- `Hoshi_SetSaveIcon` (→ `KARPlusSave_SetIcon`) writes straight into the live struct's tile; mods
-  boot after `KARPlusSave_Init`, so the struct already exists. Call it once at boot.
+- `KARPlusSave` carries a fixed `KARPlusSaveTile` (comment, an optional 96×32 RGB5A3 banner, and
+  `HOSHI_SAVE_ICON_FRAMES` RGB5A3 32×32 icon frames) **between the version header and `metadata[]`**,
+  not after it. This placement is required: `CARDSetStatus` rejects an `iconAddr` ≥ 512 with
+  `CARD_RESULT_FATAL_ERROR`, and `metadata[]` alone is 1000 bytes, so a tile after it would put the
+  image past the file's first 512 bytes - `CARDWrite` still stores the image bytes, but the
+  directory entry is never updated and the tile silently stays blank.
+- The image block is one **contiguous banner-then-icon run**: the CARD library derives each icon
+  frame's offset as `iconAddr + banner size`, so `iconAddr` points at the banner when one is present
+  (and the banner must physically precede the icon in the struct). With no banner `iconAddr` points
+  straight at the icon.
+- Size: `HOSHI_SAVE_ICON_FRAMES` (default 1) keeps the save at one 8 KB block, and each extra frame
+  (≤ `CARD_ICON_MAX`) adds 2 KB. `HOSHI_SAVE_BANNER` (off unless a mod ships a banner) reserves
+  `CARD_BANNER_SIZE_RGB5A3` (6 KB), which pushes the save to two blocks.
+- **The art is loaded from disc, not baked into the mod.** `Hoshi_SetSaveIconFile`/`SetSaveBannerFile`
+  (→ `KARPlusSave_SetIconFile`/`SetBannerFile`) only record the comment, animation params, and the
+  RGB5A3 blob filenames (`<name>.dat`, raw `frame_num*2 KB` / 6 KB pixel files at the disc root). The
+  registered names carry **no `_` or `.`** (the AP tab ships `ApIcon.dat` / `ApBanner.dat`): the DVD
+  loader appends `.dat` only to a name without one, and treats any name that already contains a `_`/`.`
+  as a complete path (so an `ap_icon` would be looked up verbatim, with no extension, and not found).
+  The pixels are read into the tile by `KARPlusSave_LoadTileArt` on the **create path** of
+  `KARPlusSave_CreateOrLoad`, just before `CARDWrite` - an existing file already carries its art, so
+  the load path takes the pixels straight off the card. Because the create/load runs at the CardPrompt
+  scene (after boot), the read can bounce through a *freeable* `HSD_MemAlloc` buffer (presence check via
+  `KARPlusSave_FileExists` → `File_GetSize` size-check → `File_LoadSync` into an aligned temp → `memcpy`
+  into the unaligned tile field → `HSD_Free`); nothing image-sized stays resident outside the save
+  struct itself. The presence check matters because `File_GetSize`/`File_LoadSync` **panic** (assert)
+  on a missing file - a build that ships without the blob just gets a blank tile instead of a crash.
+  Call once at boot, and register the banner **after** the icon - the icon call clears the whole tile
+  first.
 - `KARPlusSave_CreateOrLoad` calls `KARPlusSave_ApplyTile` (`CARDGetStatus` → set
-  `commentAddr`/`iconAddr`/`iconFormat`/`iconSpeed` → `CARDSetStatus`) whenever `tile.is_set`. The
-  icon bytes ride along in the normal `CARDWrite` of the save struct.
-- There is no save migration: the tile changed `KARPlusSave`'s size, and an on-card file whose
-  size ≠ `SAVE_SIZE` just fails to load (the player is expected to start fresh). `VERSION_MAJOR`
-  was bumped to mark the layout change but is informational only.
+  `commentAddr`/`iconAddr`/`bannerFormat`/`iconFormat`/`iconSpeed` → `CARDSetStatus`) whenever
+  `tile.is_set`. The comment/banner/icon bytes ride along in the normal `CARDWrite` of the struct.
+- There is no save migration: changing the tile changes `KARPlusSave`'s layout, and an on-card file
+  from an older `VERSION_MAJOR`/size is expected to be deleted by hand (the player starts fresh).

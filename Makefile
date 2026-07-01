@@ -20,6 +20,7 @@ OUT_DIR 		= out
 MODS_OUT_DIR 	= $(OUT_DIR)/files/mods
 MODS_ROOT_DIR = mods
 DOLPHIN_RIIVOLUTION_DIR ?= $(HOME)/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution
+DOLPHIN_GC_DIR ?= $(HOME)/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC
 
 # --- File Paths ---
 ISO_PATH		?= kar.iso
@@ -204,4 +205,6 @@ clean:
 	@echo "Cleaning Dolphin Riivolution dir..."
 	trash-put -f "$(DOLPHIN_RIIVOLUTION_DIR)/"*
 	@echo "Cleaning Dolphin KAR memory cards..."
-	trash-put -f "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC/USA/Card A/01-GKYE-"*
+	@# Raw single-file cards (Dolphin's default format) plus the GCI-folder layout, which is
+	@# only populated when Dolphin is set to GCI-folder mode.
+	trash-put -f "$(DOLPHIN_GC_DIR)/MemoryCard"?".USA.raw" "$(DOLPHIN_GC_DIR)/USA/Card A/01-GKYE-"*

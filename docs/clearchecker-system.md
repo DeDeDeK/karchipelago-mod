@@ -525,10 +525,10 @@ External save-bit goal triggers (e.g. goal_max_stats_ct.c):
 
 ### Checklist Grid
 
-- **12 columns × 10 rows = 120 cells**, hardcoded throughout 6+ functions as arithmetic constants.
-- `grid_mapping[120]` maps clear_kind → visual grid position. Filled by `Checklist_InitGridMapping` (0x8004A2BC) using `HSD_Randi`.
+- **12 columns × 10 rows = 120 cells**, hardcoded as arithmetic constants (`col + row*12`, `% 12`, the 120 bound) across the builder + cursor functions.
+- `grid_mapping[120]` maps clear_kind → visual grid position. Filled by `Checklist_InitGridMapping` (0x8004A2BC) using `HSD_Randi`; custom tabs override it with an identity mapping.
 - Pre-assigned positions exist for "meta" objectives (100-checkbox completion, Dragoon/Hydra assembly).
-- Grid dimensions are deeply hardcoded and impractical to change.
+- The grid is **rendered procedurally** — single-quad cell models instanced into the `MainMenuData+0xf0c[120]` cell-GObj array by `Checklist_SetRewardFlagOnUnlocks`, positioned from the `Pos` model's corner joints. A non-visible cell gets no GObj, so the box count already equals the visible-cell count. Reshaping the grid (column count / total) is a mode-scoped code change, not an art change — see `checklist-grid-geometry.md`.
 
 ### Checkbox Fillers
 
