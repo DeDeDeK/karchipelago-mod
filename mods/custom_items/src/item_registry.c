@@ -223,10 +223,20 @@ int CustomItemRegistry_RegisterAll(void)
             stc_model_pair[n].flag = (int)flag;
             stc_ext_itdata[kind].model = (void *)&stc_model_pair[n];
         }
-        if (desc->effect_info != NULL && stc_ext_itdata[base].attr != NULL)
+
+        // Override attributes (stat-grant effect and/or render scale) by cloning
+        // the base kind's attribute record and repointing itData at the clone.
+        // scale is v3+; a 0 or 1.0 multiplier means inherit the base's native size.
+        int want_effect = (desc->effect_info != NULL);
+        float scale = (desc->version >= 3) ? desc->scale : 0.0f;
+        int want_scale = (scale > 0.0f && scale != 1.0f);
+        if ((want_effect || want_scale) && stc_ext_itdata[base].attr != NULL)
         {
             stc_custom_attr[n] = *stc_ext_itdata[base].attr;
-            stc_custom_attr[n].effect_info = (PatchEffectInfo *)desc->effect_info;
+            if (want_effect)
+                stc_custom_attr[n].effect_info = (PatchEffectInfo *)desc->effect_info;
+            if (want_scale)
+                stc_custom_attr[n].scale_factor *= scale;
             stc_ext_itdata[kind].attr = &stc_custom_attr[n];
         }
 
@@ -234,8 +244,12 @@ int CustomItemRegistry_RegisterAll(void)
         e->assigned_kind = kind;
 
         // Box/sky weights: apply now and remember for the per-event re-inject.
+        // The engine's pool chance is a u8, so PoolAppend saturates at 255.
         for (int b = 0; b < BOXKIND_NUM; b++)
         {
+            if (desc->weight_box[b] > 255)
+                OSReport("[CustomItems] %s box weight %d > 255, clamped (weights are relative)\n",
+                         e->name, desc->weight_box[b]);
             stc_box_weight[n][b] = desc->weight_box[b];
             if (g != NULL)
                 PoolAppend(g, b, kind, desc->weight_box[b]);

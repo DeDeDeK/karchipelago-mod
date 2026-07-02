@@ -14,9 +14,11 @@ int custom_items_enabled = 1;
 static CustomItemEntry stc_registry[CUSTOM_ITEM_MAX];
 static int stc_registry_count;
 
-// Handler fired by the pickup hook (item_registry.c) when a custom item is
-// collected. NULL until a consumer registers one via the API.
-static CustomItemPickupFn stc_pickup_handler;
+// Subscriber list of handlers fired by the pickup hook (item_registry.c) when a
+// custom item is collected. Multiple consumer mods may subscribe; each is
+// invoked on every pickup. Empty until a consumer registers one via the API.
+#define CUSTOM_ITEM_PICKUP_HANDLERS_MAX 4
+static CustomItemPickupFn stc_pickup_handlers[CUSTOM_ITEM_PICKUP_HANDLERS_MAX];
 
 int CustomItems_GetCount(void)
 {
@@ -49,6 +51,7 @@ CustomItemEntry *CustomItems_AppendEntry(void)
     e->file_entrynum = -1;
     e->id_hash = 0;
     e->name[0] = '\0';
+    e->menu_label[0] = '\0';
     e->enabled = 1;
     e->assigned_kind = -1;
     return e;
@@ -103,16 +106,58 @@ static int Api_GetAssignedKind(u32 id_hash)
     return e != NULL ? e->assigned_kind : -1;
 }
 
+static void Api_AddPickupHandler(CustomItemPickupFn handler)
+{
+    if (handler == NULL)
+        return;
+    int free_slot = -1;
+    for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
+    {
+        if (stc_pickup_handlers[i] == handler)
+            return; // already subscribed
+        if (stc_pickup_handlers[i] == NULL && free_slot < 0)
+            free_slot = i;
+    }
+    if (free_slot < 0)
+    {
+        OSReport("[CustomItems] pickup handler table full (max %d)\n",
+                 CUSTOM_ITEM_PICKUP_HANDLERS_MAX);
+        return;
+    }
+    stc_pickup_handlers[free_slot] = handler;
+}
+
+static void Api_RemovePickupHandler(CustomItemPickupFn handler)
+{
+    for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
+    {
+        if (stc_pickup_handlers[i] == handler)
+            stc_pickup_handlers[i] = NULL;
+    }
+}
+
+// Legacy single-handler setter. NULL clears every subscriber; a non-NULL handler
+// is added (deduplicated), matching the old replace-then-fire behavior for the
+// common case of a single consumer while coexisting with AddPickupHandler.
 static void Api_SetPickupHandler(CustomItemPickupFn handler)
 {
-    stc_pickup_handler = handler;
+    if (handler == NULL)
+    {
+        for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
+            stc_pickup_handlers[i] = NULL;
+        return;
+    }
+    Api_AddPickupHandler(handler);
 }
 
 // Invoked by the pickup hook (item_registry.c) on each custom-item collection.
 void CustomItems_FirePickup(u32 id_hash, const char *name, int player)
 {
-    if (stc_pickup_handler != NULL)
-        stc_pickup_handler(id_hash, name, player);
+    for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
+    {
+        if (stc_pickup_handlers[i] != NULL)
+            stc_pickup_handlers[i](id_hash, name, player);
+    }
 }
 
 static const CustomItemsAPI stc_api = {
@@ -123,6 +168,8 @@ static const CustomItemsAPI stc_api = {
     .SetEnabled       = Api_SetEnabled,
     .GetAssignedKind  = Api_GetAssignedKind,
     .SetPickupHandler = Api_SetPickupHandler,
+    .AddPickupHandler = Api_AddPickupHandler,
+    .RemovePickupHandler = Api_RemovePickupHandler,
 };
 
 void CustomItems_OnBoot(void)

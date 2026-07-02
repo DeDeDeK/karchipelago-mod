@@ -21,6 +21,8 @@ typedef struct CustomItemEntry
     int  file_entrynum;             // FST entry of the .dat (re-openable across scenes)
     u32  id_hash;                   // stable identity = hash of the full FST path
     char name[CUSTOM_ITEM_NAME_MAX]; // display name (filename at discovery; descriptor name once loaded)
+    char menu_label[CUSTOM_ITEM_NAME_MAX]; // stable settings-menu label (filename, extension stripped) -
+                                    // never overwritten, so the per-item toggle's save hash is stable
     int  enabled;                   // per-item spawn gate (menu / API)
     int  assigned_kind;             // ItemKind in the extended itData[] this scene; -1 until registered
 } CustomItemEntry;

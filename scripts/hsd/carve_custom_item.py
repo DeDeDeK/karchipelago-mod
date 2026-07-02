@@ -12,8 +12,8 @@ pair whose `j` is the model's JOBJDesc root (and whose `flags` we carry into the
 descriptor's model_flag). We walk that subtree (reusing the backdrop walker),
 then emit:
 
-    new_data[0x00 .. 0x33] : CustomItemDesc
-    new_data[0x34 ..      ] : name string, then the carved model ranges
+    new_data[0x00 .. 0x37] : CustomItemDesc
+    new_data[0x38 ..      ] : name string, then the carved model ranges
 
 The descriptor's `model` (and optional `effect_info`) become synthetic
 relocations exactly as carve_backdrop.py synthesizes its ModelSection/pp slots.
@@ -21,13 +21,17 @@ relocations exactly as carve_backdrop.py synthesizes its ModelSection/pp slots.
 Usage:
     uv run python scripts/hsd/carve_custom_item.py \
         iso/files/Item.dat <source_kind> <out.dat> <name> \
-        [--base-kind K] [--group {bad,good,fake}] \
+        [--base-kind K] [--scale F] \
         [--weight-blue N] [--weight-green N] [--weight-red N]
 
 `source_kind` selects the model to carve (e.g. 3 = Boost patch, 28 = Bomb copy
 panel). `--base-kind` is the vanilla kind the custom item clones behavior from
 (default: the source kind), so by default the carved item behaves like the kind
 it was carved from, just under a new kind number with author-set spawn weights.
+`--scale` multiplies the render size when the carved model's native size differs
+from the base kind's (e.g. a legendary model on a flat-panel base). The item's
+BAD/GOOD/FAKE group follows base_kind, so choose a base_kind in the intended
+family rather than setting a group directly.
 """
 
 import argparse
@@ -43,10 +47,9 @@ from hsd.walker import Walker, merge_intervals
 
 # Must match include/custom_items_api.h.
 CUSTOM_ITEM_MAGIC = 0x4349544D  # 'CITM'
-CUSTOM_ITEM_DESC_VERSION = 2
-DESC_SIZE = 0x34
+CUSTOM_ITEM_DESC_VERSION = 3
+DESC_SIZE = 0x38
 ITDATA_STRIDE = 0x18
-GROUPS = {"bad": 0, "good": 1, "fake": 2}
 GX_TF_RGB5A3 = 5
 GX_FORMATS = {0: "I4", 1: "I8", 2: "IA4", 3: "IA8", 4: "RGB565",
               5: "RGB5A3", 6: "RGBA8", 8: "C4", 9: "C8", 10: "C14X2", 14: "CMPR"}
@@ -93,7 +96,7 @@ def encode_rgb5a3(im):
     return bytes(out)
 
 
-def carve(item_dat, source_kind, out_path, name, base_kind, group, weight_box,
+def carve(item_dat, source_kind, out_path, name, base_kind, scale, weight_box,
           weight_event, texture_png, texture_index, texture_fit):
     arc = Archive(item_dat)
     if "itData" not in arc.publics:
@@ -178,13 +181,14 @@ def carve(item_dat, source_kind, out_path, name, base_kind, group, weight_box,
     struct.pack_into(">H", new_data, 0x06, 0)
     struct.pack_into(">I", new_data, 0x08, name_off)            # name (reloc)
     struct.pack_into(">i", new_data, 0x0C, base_kind)
-    struct.pack_into(">i", new_data, 0x10, group)
+    struct.pack_into(">i", new_data, 0x10, 0)                   # reserved (group follows base_kind)
     struct.pack_into(">I", new_data, 0x14, remap[root_jobj])    # model (reloc)
     struct.pack_into(">I", new_data, 0x18, 0)                   # effect_info (inherit base)
     struct.pack_into(">HHH", new_data, 0x1C, *weight_box)       # weight_box[3]
     struct.pack_into(">H", new_data, 0x22, 0)                   # weight_free (reserved)
     struct.pack_into(">HHHHHH", new_data, 0x24, *weight_event)  # weight_event[6]
     struct.pack_into(">I", new_data, 0x30, model_flag)          # model_flag (v2)
+    struct.pack_into(">f", new_data, 0x34, scale)               # scale (v3)
 
     new_relocs = [0x08, 0x14]  # name, model
     dropped = 0
@@ -237,7 +241,9 @@ def main(argv):
     p.add_argument("name", help="display name")
     p.add_argument("--base-kind", type=int, default=None,
                    help="vanilla kind to clone behavior from (default: source_kind)")
-    p.add_argument("--group", choices=GROUPS, default="good")
+    p.add_argument("--scale", type=float, default=1.0,
+                   help="render-scale multiplier over the base kind's native size "
+                        "(1.0 = inherit; raise if a carved model renders too small)")
     p.add_argument("--weight-blue", type=int, default=10)
     p.add_argument("--weight-green", type=int, default=0)
     p.add_argument("--weight-red", type=int, default=0)
@@ -261,9 +267,14 @@ def main(argv):
     base_kind = args.base_kind if args.base_kind is not None else args.source_kind
     weight_event = (args.ev_dyna, args.ev_tac, args.ev_meteor,
                     args.ev_destructible, args.ev_chamber, args.ev_ufo)
+    # Box/sky pool chances are stored as u8 in the engine, so they saturate at
+    # 255 (weights are relative - values well under 255 are the norm).
+    for label, w in (("blue", args.weight_blue), ("green", args.weight_green), ("red", args.weight_red)):
+        if w > 255:
+            print(f"  warning: --weight-{label} {w} exceeds 255; the engine clamps box weights to 255")
     print(f"Carving custom item '{args.name}' from {args.item_dat} kind {args.source_kind}:")
     carve(args.item_dat, args.source_kind, args.out_path, args.name, base_kind,
-          GROUPS[args.group], (args.weight_blue, args.weight_green, args.weight_red),
+          args.scale, (args.weight_blue, args.weight_green, args.weight_red),
           weight_event, args.texture, args.texture_index, args.texture_fit)
     return 0
 

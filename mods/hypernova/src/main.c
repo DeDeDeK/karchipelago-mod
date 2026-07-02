@@ -40,9 +40,9 @@ static void TryRegisterPickupHandler(void)
     if (stc_ci_api == NULL)
         stc_ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
-    if (stc_ci_api != NULL && stc_ci_api->SetPickupHandler != NULL)
+    if (stc_ci_api != NULL && stc_ci_api->AddPickupHandler != NULL)
     {
-        stc_ci_api->SetPickupHandler(OnCustomItemPickup);
+        stc_ci_api->AddPickupHandler(OnCustomItemPickup);
         stc_pickup_registered = 1;
         OSReport("[Hypernova] Miracle Fruit pickup handler registered\n");
     }

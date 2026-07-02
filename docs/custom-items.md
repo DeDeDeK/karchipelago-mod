@@ -73,13 +73,21 @@ imposed by the 68-entry weight arrays, not an arbitrary limit.
 A custom-item `.dat` exports one HSD public symbol, `customItem`, whose address
 is a `CustomItemDesc` (`include/custom_items_api.h`). It is a clone model: the new
 kind inherits behavior (state class, trigger, hurt, animation) from a vanilla
-`base_kind` and optionally overrides the visual `model` and stat-grant
-`effect_info`, plus per-source spawn weights (`weight_box[3]`, `weight_event[6]`).
-`magic` is `'CITM'` (`0x4349544D`); `version` gates forward compatibility (v2
-adds `model_flag`, the model's itData render flag - `0x02000000` for flat panels,
-`0x03/0x05/0x0b000000` for the legendary pieces - so skinned models render
-correctly). `weight_free` is reserved: the sky/free-fall picker draws from the
-union of the three box pools, so `weight_box` already governs sky drops too.
+`base_kind` and optionally overrides the visual `model`, stat-grant `effect_info`,
+and render `scale`, plus per-source spawn weights (`weight_box[3]`,
+`weight_event[6]`). `magic` is `'CITM'` (`0x4349544D`); `version` gates forward
+compatibility: v2 adds `model_flag`, the model's itData render flag - `0x02000000`
+for flat panels, `0x03/0x05/0x0b000000` for the legendary pieces - so skinned
+models render correctly; v3 adds `scale`, a render-scale multiplier over the base
+kind's native size (0 or 1.0 = inherit). Older descriptors stay supported; the
+loader rejects only versions newer than it knows. `weight_free` is reserved: the
+sky/free-fall picker draws from the union of the three box pools, so `weight_box`
+already governs sky drops too. The engine's box/sky pools store the chance as a
+`u8`, so `weight_box` values saturate at 255 (weights are relative - typical
+values are well under 255); `weight_event` is `u16` and used unclamped. The
+BAD/GOOD/FAKE group is not a standalone field: it is read from the effect record
+(`PatchEffectInfo.group`), so it follows `base_kind` (or the `effect_info`
+override), and the descriptor's `reserved_group` slot is unused.
 
 `CustomItems_LoadDescriptor` (`item_registry.c`) performs the load + validate:
 `Archive_LoadFile` → `Archive_GetPublicAddress(arc, "customItem")` → magic/version
@@ -136,13 +144,20 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    and `event_source_drop_num` are repointed/bumped. This covers Tac, meteor,
    broken structures, secret chamber, UFO, and Dyna Blade drops.
 
-Remaining nuance: a custom `effect_info` that grants novel stats is wired (the
-descriptor override repoints the cloned attribute record's `effect_info`), but the
-clamp makes the pickup path resolve behavior through the `base_kind`, so pick a
-`base_kind` in the intended effect family. The model is rendered/scaled from the
-cloned `base_kind`'s attribute record (`scale_factor`, `cull_distance`), so a
-legendary model on a flat-panel base renders at the base's scale (≈20% off the
-piece's native size) — close enough; a per-model scale override is a future add.
+Effect and scale overrides. On pickup, `Machine_OnTouchItem` (`0x801db34c`)
+applies stat grants generically from the instance's `effect_data`
+(`ItemData+0x140`, copied from the kind's `attr->effect_info` by
+`CityItem_CopyCommonAttr`) via `Patch_GetEffectData` (`0x80252e90`), then reads
+the instance kind (`ItemData+0x1c`) to drive category-specific reaction/SFX.
+Because the descriptor's `effect_info` override repoints the cloned attribute
+record's `effect_info`, a custom item can grant any combination of stat entries;
+but the behavior clamp routes the category reaction through `base_kind`, so pick a
+`base_kind` in the intended family (e.g. a stat patch). The model is rendered at
+the cloned attribute record's `scale_factor`, so a model carved onto a
+differently-scaled base kind (a legendary piece on a flat-panel base) can render
+off its native size; the descriptor's `scale` (v3) multiplies `scale_factor` on
+the clone to correct it (the `custom_items` register step clones `attr` whenever
+`effect_info` or `scale` is overridden).
 
 ## Authoring a custom item — the carve tool
 
@@ -159,15 +174,18 @@ boxes/sky and from broken structures, Tac, and UFOs:
 ```
 uv run python scripts/hsd/carve_custom_item.py iso/files/Item.dat 55 \
     mods/custom_items/assets/items/MegaHydra.dat "Mega Hydra" \
-    --base-kind 3 --group good \
+    --base-kind 3 --scale 1.2 \
     --weight-blue 40 --weight-green 40 --weight-red 40 \
     --ev-destructible 80 --ev-tac 40 --ev-ufo 40
 ```
 
 `source_kind` (here `55`) is the model to carve; `--base-kind` is the behavior to
-clone (default: the source kind). `--weight-*` set the box/sky weights; `--ev-*`
-(`dyna`/`tac`/`meteor`/`destructible`/`chamber`/`ufo`) set the event-source drop
-weights. `--texture PNG` re-encodes a custom texture (RGB5A3) into one ImageDesc;
+clone (default: the source kind), and the item's group follows it. `--scale`
+multiplies the render size when the carved model's native size differs from the
+base kind's (default 1.0 = inherit). `--weight-*` set the box/sky weights (0-255,
+saturating); `--ev-*` (`dyna`/`tac`/`meteor`/`destructible`/`chamber`/`ufo`) set
+the event-source drop weights. `--texture PNG` re-encodes a custom texture
+(RGB5A3) into one ImageDesc;
 on a multi-texture model add `--texture-index N` to choose which slot, and
 `--texture-fit cover|contain` to center-crop or letterbox a mismatched aspect
 instead of stretching it. Dropping the output in `assets/items/` stages it to the
@@ -185,24 +203,31 @@ const char *GetName(int index);
 int  IsEnabled(u32 id_hash);             // master toggle AND per-item gate
 void SetEnabled(u32 id_hash, int enabled);
 int  GetAssignedKind(u32 id_hash);       // ItemKind this round, or -1
-void SetPickupHandler(CustomItemPickupFn h); // fired when a custom item is collected
+void SetPickupHandler(CustomItemPickupFn h);    // legacy single-handler setter
+void AddPickupHandler(CustomItemPickupFn h);    // subscribe (multiple allowed)
+void RemovePickupHandler(CustomItemPickupFn h); // unsubscribe
 ```
 
-`SetPickupHandler` registers a `void (*)(u32 id_hash, const char *name, int player)`
-invoked from a hook on `Machine_OnTouchItem` (`0x801db34c`) whenever a custom item
-is collected — the collected kind is recovered from `ItemData->itData` (which still
+A pickup handler is a `void (*)(u32 id_hash, const char *name, int player)` invoked
+from a hook on `Machine_OnTouchItem` (`0x801db34c`) whenever a custom item is
+collected — the collected kind is recovered from `ItemData->itData` (which still
 points into the grown array after the behavior clamp), and the collector's slot
 comes from `Machine_GetRiderPly`. Because hoshi's hook trampoline does not preserve
 registers across the C call, the hook's prologue/epilogue save and restore `r3`
-(MachineData), `r4` (ItemData), and `LR` around it. This is how the **Miracle Fruit**
-grants Hypernova:
-the `hypernova` mod registers a handler that calls `HypernovaAPI.ActivatePlayer` for
-the collector when the picked-up item's name matches.
+(MachineData), `r4` (ItemData), and `LR` around it. Multiple consumer mods may
+subscribe (a small fixed subscriber list); each is invoked on every pickup.
+`SetPickupHandler` is retained for compatibility — a non-NULL handler is added
+(deduplicated), NULL clears every subscriber. This is how the **Miracle Fruit**
+grants Hypernova: the `hypernova` mod adds a handler that calls
+`HypernovaAPI.ActivatePlayer` for the collector when the picked-up item's name
+matches.
 
 ## File layout
 
-- `src/main.c` — `ModDesc`, settings menu (master enable; per-item toggles
-  deferred since the set is runtime-discovered).
+- `src/main.c` — `ModDesc` and the settings menu, built at boot: a master enable
+  toggle plus one enable toggle per discovered item, each bound to its registry
+  entry's `enabled` flag and labeled by the stable `menu_label` (so the saved
+  per-item state, hashed on the option name, survives reboots).
 - `src/custom_items.c` — boot, registry storage, exported API.
 - `src/item_discovery.c` — FST scan + path hashing.
 - `src/item_registry.c` — descriptor load/validate, the per-round itData /

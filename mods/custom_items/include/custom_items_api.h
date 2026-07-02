@@ -21,7 +21,7 @@
 
 #define CUSTOM_ITEMS_MOD_NAME  "custom_items"
 #define CUSTOM_ITEMS_API_MAJOR 1
-#define CUSTOM_ITEMS_API_MINOR 1
+#define CUSTOM_ITEMS_API_MINOR 2
 
 // Each custom-item .dat must export one public symbol named `customItem` whose
 // address is a CustomItemDesc. (Big-endian magic, ASCII "CITM".)
@@ -30,7 +30,10 @@
 // v1: model is a JOBJDesc root; render flag assumed flat (0x02000000).
 // v2: adds model_flag, carrying the model's itData render flag so complex /
 //     skinned models (Hydra/Dragoon pieces use 0x03/0x05/0x0b) render correctly.
-#define CUSTOM_ITEM_DESC_VERSION  2
+// v3: adds scale, a render-scale multiplier over the base kind's native size so
+//     a model carved onto a differently-scaled base kind renders at true size.
+// Older descriptors remain supported (the loader rejects only newer versions).
+#define CUSTOM_ITEM_DESC_VERSION  3
 
 // Folder (relative to FST root) and extension scanned for drop-in items.
 #define CUSTOM_ITEM_DROPIN_DIR    "items"
@@ -69,20 +72,32 @@ typedef struct CustomItemDesc
     const char *name;   // 0x08 display name (NUL-terminated)
 
     int base_kind;      // 0x0c ItemKind to clone behavior from (0..ITKIND_NUM-1)
-    int group;          // 0x10 ItemGroup: 0=BAD, 1=GOOD, 2=FAKE
+    int reserved_group; // 0x10 reserved. ItemGroup (BAD/GOOD/FAKE) is not a free
+                        //      standalone field: it is read from the effect record
+                        //      (PatchEffectInfo.group), so it follows base_kind, or
+                        //      the effect_info override below when one is supplied.
 
     void *model;        // 0x14 optional JOBJDesc* model override (NULL = inherit base_kind)
-    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit)
+    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit).
+                        //      Applied generically on pickup, so it can grant any
+                        //      combination of stat entries; base_kind still drives
+                        //      category-specific pickup reaction (pick base_kind in
+                        //      the intended family, e.g. a stat patch).
 
     // Spawn weights. The sky/free-fall picker draws from the union of the three
     // box pools, so weight_box already governs both box breaks and sky drops;
     // weight_free is reserved (there is no separate free-fall pool to weight).
-    u16 weight_box[3];  // 0x1c spawn weight in the blue/green/red box pools (0 = never)
+    // NOTE: the engine's box/sky pools store the chance as a u8, so weight_box
+    // values saturate at 255 (weights are relative - values well under 255 are
+    // the norm). Event weights are u16 and are used unclamped.
+    u16 weight_box[3];  // 0x1c spawn weight in the blue/green/red box pools (0-255; 0 = never)
     u16 weight_free;    // 0x22 reserved - sky drops are covered by weight_box
     u16 weight_event[CUSTOM_ITEM_EVSRC_NUM]; // 0x24 weight per event source (0 = never)
 
     u32 model_flag;     // 0x30 (v2+) itData model render flag for `model`
                         //      (0x02000000 flat; 0x03/0x05/0x0b legendary/skinned)
+    float scale;        // 0x34 (v3+) render-scale multiplier applied over the base
+                        //      kind's native scale (0 or 1.0 = inherit base size)
 } CustomItemDesc;
 
 // Handler invoked when a custom item is collected by a rider. `id_hash` and
@@ -115,9 +130,17 @@ typedef struct CustomItemsAPI
     // round, or -1 if it has not been registered yet this scene.
     int (*GetAssignedKind)(u32 id_hash);
 
-    // Register a handler fired when any custom item is collected by a rider
-    // (NULL clears it). Only one handler at a time. (API minor 1+.)
+    // Legacy single-handler setter (API minor 1+). Kept for compatibility: a
+    // non-NULL handler is added to the subscriber list (deduplicated); NULL
+    // clears all subscribers. Prefer AddPickupHandler/RemovePickupHandler.
     void (*SetPickupHandler)(CustomItemPickupFn handler);
+
+    // Subscribe/unsubscribe a handler fired when any custom item is collected by
+    // a rider (API minor 2+). Multiple consumer mods may subscribe; every
+    // registered handler is invoked on each pickup. Add is a no-op if the handler
+    // is already registered or the subscriber table is full.
+    void (*AddPickupHandler)(CustomItemPickupFn handler);
+    void (*RemovePickupHandler)(CustomItemPickupFn handler);
 } CustomItemsAPI;
 
 #endif // CUSTOM_ITEMS_API_H

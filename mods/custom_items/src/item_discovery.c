@@ -43,7 +43,21 @@ static void IndexCb(int entrynum, void *args)
 
     // Provisional display name = filename. The descriptor's own name supersedes
     // this once the archive is loaded at registration time.
-    CustomItems_CopyName(e->name, FST_GetFilenameFromEntrynum(entrynum));
+    char *filename = FST_GetFilenameFromEntrynum(entrynum);
+    CustomItems_CopyName(e->name, filename);
+
+    // Stable settings-menu label = filename with the extension stripped. Unlike
+    // `name` this is never overwritten by the descriptor, so the per-item toggle's
+    // save hash (keyed on the option name) stays stable across reboots.
+    CustomItems_CopyName(e->menu_label, filename);
+    int dot = -1;
+    for (int i = 0; e->menu_label[i] != '\0'; i++)
+    {
+        if (e->menu_label[i] == '.')
+            dot = i;
+    }
+    if (dot > 0) // keep a leading-dot name intact; strip only a real extension
+        e->menu_label[dot] = '\0';
 }
 
 int CustomItems_Discover(void)
