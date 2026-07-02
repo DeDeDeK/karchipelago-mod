@@ -25,6 +25,7 @@ target is never stranded and the two pull at the same rate.
 | Activation | **Temporary power-up state** | A trigger (the exported `HypernovaAPI` or the debug self-test) turns Hypernova on for a timed duration. While active + attack button held, the vacuum runs and Kirby is 2×. |
 | Modes | **City Trial only** | Items + yakumono live in City Trial. (Air Ride enemies and Top Ride's separate C++ item system are out of scope.) |
 | Sucked items | **Claimed, then pulled in and collected** | Like yakumono below, an item is **claimed** when the cone first sweeps it and then pulled toward the rider every frame thereafter — even after it leaves the cone or the trigger is released — so a swept item is never left behind. The pull runs the item all the way into the rider so the **vanilla pickup trigger fires** — proper credit, SFX, and effects for free. Items and props share one per-frame approach step (`max(SPEED×dist, MIN)`) so they pull at an identical rate. Both **arc up and over** (the pull aims at a point lifted above the rider by a hump of horizontal distance, so a swept target never scrapes/clips the ground) and **tumble** end-over-end (random per-target spin direction) while flying in. |
+| Sucked machines | **Claimed (unridden only), pulled in, then KO'd on arrival** | Loose machines nobody is riding (`rider_gobj == NULL`, which also excludes CPU riders) are claimed by the cone and pulled into the rider, then destroyed on arrival via `Machine_OnKO` so they run their **own vanilla break/explosion** (VFX + break SFX + `GObj_Destroy`). Rider-safe on a parked machine (the destroy tail guards every rider deref on the `+0x1b48 == 5` sentinel). Behind the "Suck Machines" toggle. See "Machines" below. |
 | Sucked yakumono | **Claimed, pulled/shrunk, then broken via synthesized collision** | Yakumono aren't collectibles. A prop is **claimed** when the cone first sweeps it and then pulled to destruction every frame (even after leaving the cone) so nothing is stranded half-shrunk; it shrinks only once close and breaks on arrival. The break is **synthesized**: `collideWithObject` is called with a fabricated high-force collider whose delta points **into** the contacted region's normal (the engine projects+negates+clamps it, so an arbitrary delta reads as zero impact and won't break), running the family's genuine `coll_func` break tail in one hit (collision retire, debris, SFX, break-count credit, broken-state). The visible result differs by family: **strong** (houses/holes/walls) shatter+drop+hide inline at the contact; **weak** (trees/coral/rocks) show their break as **debris effects** the engine pins to a *separate* grobj node at the prop's **baked spot**, and never hide the dragged intact mesh — so Hypernova (a) **relocates that debris node onto the rider** for the break instant so the rubble erupts at Kirby, and (b) collapses the dragged intact mesh after the break so it doesn't linger (see "Yakumono" below). The collision can't be *moved* with the model (a fixed slice of the static map mesh), so it's **retired for the flight** (no stranded wall) and re-armed for the break instant. |
 
 ## Reusing the vanilla inhale: suction vs. presentation
@@ -409,6 +410,54 @@ structures (Lighthouse 68, WhispyWoods 69). The full identity table is in
 (not only during flight) and the claim cap is 200, so a swept-up prop goes non-solid immediately
 and a wide cone can't starve later props of a claim slot.
 
+### Machines: scan → pull → KO
+
+City Trial litters the map with loose machines (stars/bikes). The vacuum claims the ones **nobody
+is riding** and pulls them into the rider, then **KOs each on arrival** so it plays its **own
+vanilla break/explosion** — the same destruction a machine shows when its HP is depleted in a
+brawl. This is behind the "Suck Machines" menu toggle (default on).
+
+**Enumerate** the machine p_link bucket (`(*stc_gobj_lookup)[GAMEPLINK_MACHINE]`, bucket 9;
+`gobj->entity_class == GAMEENTITY_MACHINE` (16), `MachineData = gobj->userdata`). A machine is a
+target only while:
+
+- **unridden** — `MachineData.rider_gobj` (`+0x4`) is NULL. This naturally excludes **both** human
+  and CPU riders, so only parked machines are swept.
+- **not already dying** — `is_dead` (`+0xc35` bit 0x20) and `is_fall_dead` (`+0xc35` bit 0x80) clear.
+
+Claims are keyed by the `MachineData` pointer and re-validated against the live bucket every frame,
+so a machine that gets mounted, despawns, or dies self-heals out of the claim set (a dangling
+pointer is never dereferenced). Claim cap is 32.
+
+**Pull** each claimed machine via the shared `Hypernova_StepToward` step — the same arc/rate items
+and props use — writing `MachineData.pos` (`+0x3e8`). `Machine_PhysicsThink` (proc priority 4)
+integrates `pos += accel + velocity + …` every frame, so the pull zeroes `accel` (`+0x318`) and
+`velocity` (`+0x324`) each frame to keep the position override from being fought (the analog of the
+item pull zeroing `vel`/`accel`). The write lands in `OnFrameEnd`, after the machine's procs, and
+is picked up by the next frame's `Machine_ApplyModelMatrix` (priority 6). Machines aren't shrunk —
+a full-size machine erupting on a 2× Kirby reads better, and the break radius is wider than the
+yakumono one (`HYPERNOVA_MACHINE_BREAK_RADIUS`) so it detonates before the model clips into the
+rider.
+
+**KO** on arrival (within the break radius): `Hypernova_KOMachine` arms the break gate
+(`MachineData[0x78] |= 0x40`) and calls **`Machine_OnKO`** (`0x801e568c`). That captures the rider
+ply into `+0x1b48` (sentinel **5** when unridden), sets `is_dead`, disables the machine's
+hit-collision, and enters the **BreakDown** state (29); the BreakDown proc runs the explosion VFX
+(`Effect_SpawnSync` 0x2799 + a debris effect), plays the break SFX, and `GObj_Destroy`s the
+machine. The whole destroy tail is **rider-safe**: every rider dereference guards on the
+`+0x1b48 == 5` sentinel, so an unridden machine spawns the VFX and frees cleanly with no rider
+eject and no out-of-range player index. The break gate (`+0x78` bit 0x40) is what the BreakDown
+proc checks before running the explosion + `GObj_Destroy`, so Hypernova ORs it in first. The claim
+is dropped the instant `Machine_OnKO` is called — the machine tears itself down from there. On a
+player's Hypernova ending or a scene change, in-flight machine claims are simply **released** (a
+dropped machine just resumes sitting where it is; the pull only zeroed its velocity, which vanilla
+physics rebuilds).
+
+> `Machine_OnKO` is also fired automatically each frame by `Machine_CheckKO'd` (`0x801e5628`, from
+> the priority-10 `Machine_DmgApply` proc) whenever `MachineData.hp` (`+0xa18`) reaches 0 and
+> `Gm_IsDamageEnabled()`, so depleting a parked machine's HP would reach the same break — Hypernova
+> calls `Machine_OnKO` directly instead, which needs neither HP at 0 nor `Gm_IsDamageEnabled`.
+
 ## Activation / state model
 
 Hypernova is a **timed power-up state**, tracked **per player** (`stc_active[5]` /
@@ -428,6 +477,35 @@ one rider at a time or to everyone at once:
 - Per the project's mod conventions: a `HypernovaAPI` (header under `mods/hypernova/include/`) so
   other mods can trigger/extend it, and an `OptionDesc`-driven hoshi settings menu.
 
+### Copy abilities and power-ups end Hypernova
+
+Hypernova reuses the vanilla inhale action-states (`0x2f`/`0x30`/`0x31`) for presentation, and
+the inhale is the engine's **no-copy-ability default attack** (`Rider_CanStartInhale` requires
+`copy_kind == -1`). So Hypernova is made **mutually exclusive** with the rider's copy ability
+(`copy_kind` `+0x454`) and City Trial power-up (`powerup_kind` `+0x45c`: Firecracker/fireworks,
+Sensor Bomb, Gordo, Panic Spin) — exactly as those two are mutually exclusive with each other
+(`Rider_GivePowerUpByKind` `0x801a8304` calls `Rider_AbilityRemoveModel` before granting, and
+each grant removes the other). The "last pickup wins" rule the vanilla items follow (collect a
+copy ability while holding fireworks → fireworks is gone) is applied to Hypernova both ways:
+
+- **Activating** Hypernova strips whatever the rider was holding: `Hypernova_ActivatePlayer`
+  calls `Rider_AbilityRemoveModel` (`0x80191554`) — which clears **both** `copy_kind` and
+  `powerup_kind` by invoking the held kind's installed remove callback (the copy-ability
+  teardown clears `+0x454`; the power-up remove callback, e.g. the firecracker's `0x801b5dec`,
+  clears `+0x45c`) — then `Rider_LoseAbilityState_Enter` (`0x801b0adc`) for the spit-out to
+  neutral. Without this strip, the guard below would read the pre-existing state and cancel
+  Hypernova on its first frame.
+- **While active**, the frame the rider *gains* a copy ability or power-up (`PlayerHoldsAbility`:
+  `copy_kind != -1 || powerup_kind != -1`), `Hypernova_OnFrameEnd` ends Hypernova completely for
+  that player (`StopPlayer`). This runs in the timer loop, **before `DriveInhale`** — the grant
+  has already moved the rider into the ability/power-up action-state during the frame's game
+  procs, so ending here stops the inhale drive from stomping the new state the next frame. The
+  giant + rainbow + vacuum ease/tear down cleanly while the new ability takes over.
+
+This is why the vacuum can suck up copy-ability and power-up items freely: collecting one simply
+ends Hypernova and hands the rider that state, rather than the two fighting over the rider's
+action-state and animation.
+
 ### Inhale animation (reuse the vanilla visual)
 
 Tapping the trigger plays the full vanilla gulp; holding it sustains an open-mouth suck loop
@@ -439,39 +517,63 @@ The state machine doesn't chain the three inhale states by itself (see "Native i
 START (`0x2f`) is a one-shot gulp that returns to neutral, the LOOP (`0x30`) is entered only via
 `Rider_StartInhaleLoop` and animates itself, and the `+0x93C` countdown that would end the LOOP
 aliases `copy_wheel_result` and can't be trusted when driven. So `DriveInhale` owns the whole
-gesture with a tiny per-player phase machine (`IDLE → GULP → LOOP`):
+gesture with a tiny per-player phase machine (`IDLE → GULP → LOOP`).
+
+**It drives the inhale from whatever riding state the rider is in.** Kirby's neutral riding is
+**not a single action-state**: `state_idx` cycles through a wide cluster of lean/turn/idle riding
+states (e.g. `0x21`–`0x2a`, `0x6a`), and vanilla lets you inhale from all of them. So `DriveInhale`
+does **not** gate the start on any one state — it starts the gulp on the trigger and promotes
+GULP→LOOP by detecting that the gulp has simply **left its START state (`0x2f`)**, not by waiting
+for a return to a specific state. `Rider_CanStartInhale` is unusable as a start gate: its attack
+bit (`+0x820` bit 2) is **transient** — set only on the single frame the attack input registers —
+so it reads clear on almost every frame. Gaining a copy ability or power-up needs no handling
+here: `OnFrameEnd` ends that player's Hypernova (`StopPlayer` → phase IDLE, `stc_active` cleared)
+*before* `DriveInhale` runs, so the drive is never called for a rider mid-handoff and never fights
+the pickup animation (see "Copy abilities and power-ups end Hypernova" above).
 
 ```c
-// each frame, per human, while Hypernova active (hypernova.c DriveInhale):
+// each frame, per human, while Hypernova active (hypernova.c DriveInhale); returns "inhaling":
 if (!held) {
   // released: end an active suck with the engine's own END; let a mere tap finish its gulp
   if (phase[p] == LOOP && rd->state_idx == 0x30) Rider_EndInhale(rd);
-  phase[p] = IDLE;
-} else switch (phase[p]) {
-  case IDLE: Rider_StartInhale(rd);              phase[p] = GULP; break;   // gulp + VFX + SFX
-  case GULP: if (rd->state_idx != 0x2f) {        // gulp finished -> promote into the suck loop
-               Rider_StartInhaleLoop(rd);        phase[p] = LOOP;
-             } break;
-  case LOOP: if (rd->state_idx == 0x30)
-               *(s32 *)((char *)rd + 0x93C) = 8; // HYPERNOVA_INHALE_TIMER_HOLD: don't time out
-             else if (rd->state_idx != 0x31 && rd->state_idx != 0x2f)
-               Rider_StartInhaleLoop(rd);        // engine dropped the loop while held; re-enter
+  phase[p] = IDLE; return 0;
 }
-if (held) Hypernova_VacuumPlayer(rd);            // our cone suction (separate)
+switch (phase[p]) {
+  case IDLE: Rider_StartInhale(rd);               // gulp + VFX + SFX (from any riding state)
+             phase[p] = GULP; break;
+  case GULP: if (rd->state_idx != 0x2f) {         // gulp left START -> promote into the suck loop
+               Rider_StartInhaleLoop(rd); phase[p] = LOOP;
+             } break;                              // else: gulp still playing
+  case LOOP: if (rd->state_idx == 0x30)
+               *(s32 *)((char *)rd + 0x93C) = 8;  // HYPERNOVA_INHALE_TIMER_HOLD: don't time out
+             else if (rd->state_idx != 0x31 && rd->state_idx != 0x2f)
+               Rider_StartInhaleLoop(rd);          // engine dropped the loop while held -> re-enter
+             break;
+}
+return phase[p] != IDLE;                          // caller runs the cone vacuum only while true
 ```
 
 `DriveInhale` runs in `OnFrameEnd`, after the rider think. The **tap** path: `Rider_StartInhale`
 fires the gulp and the GULP phase deliberately leaves it alone, so the vanilla gulp plays its full
-duration and the engine returns to neutral on its own. The **hold** path: when the gulp ends (the
-engine has left `0x2f`) the GULP phase promotes into the suck LOOP *that same frame, before render*,
-so the open mouth carries through with no flicker back to neutral; the LOOP phase then tops `+0x93C`
-back up (the engine still animates the loop) and re-enters it if the engine ever drops out. The
-**release** path calls `Rider_EndInhale` for the engine's own close-mouth → puff → neutral, so it
-expires exactly like a vanilla inhale rather than cutting hard. `HOLD` is small (must be `≥ 2`, one
-decrement lands before the next write); it only matters if the unreliable countdown is honored at all.
+duration and the engine returns to neutral on its own. The **hold** path: once the gulp leaves its
+START state the GULP phase promotes into the suck LOOP *that same frame, before render*, so the open
+mouth carries through with no flicker back to neutral; the LOOP phase then tops `+0x93C` back up
+(the engine still animates the loop) and re-enters the loop if the engine ever drops it while held.
+The **release** path calls `Rider_EndInhale` for the engine's own close-mouth → puff → neutral, so
+it expires exactly like a vanilla inhale rather than cutting hard. `HOLD` is small (must be `≥ 2`,
+one decrement lands before the next write); it only matters if the unreliable countdown is honored
+at all.
 
-`Rider_StartInhale` ignores the no-ability gate and needs no target, so it works even when Kirby
-holds a copy ability; the native capture scan it installs harmlessly no-ops in CT.
+**The cone vacuum is coupled to the suck.** `Hypernova_OnFrameEnd` runs `Hypernova_VacuumPlayer`
+only on the frames `DriveInhale` returns non-zero (an inhale is actually being driven), so there is
+never suction without the matching open-mouth animation. Targets already **claimed** keep flying in
+(the claim-process passes are independent) regardless of the drive phase; only *new* claims require
+an active suck.
+
+`Rider_StartInhale` ignores the no-ability gate and needs no target — but Hypernova never drives
+it while a copy ability or power-up is held, because gaining one ends Hypernova (see "Copy
+abilities and power-ups end Hypernova" above). The native capture scan it installs harmlessly
+no-ops in CT.
 
 ## Rainbow recolor while inhaling
 
@@ -649,8 +751,8 @@ Named in `GKYE01.map` / Ghidra; `Rider_StartInhale` + the gate/probe/scan/predic
 | `Rider_InhaleLoopTick` | `0x801ad550` | per-LOOP-frame: pulls/swallows captured objects, else decrements the `+0x93C` countdown; returns 1 (→ `Rider_EndInhale`) when the gesture should end. |
 | `Rider_EndInhale` | `0x801adf98` | ends the gesture: `RiderStateChange(..., 0x31, ...)` (suck END → neutral). |
 | `Rider_InhaleCaptureCount` | `0x801adf5c` | counts the non-null capture slots (`+0x8f0/+0x8f4/+0x8f8`); 0 = mouth empty, so the tick runs the countdown. |
-| `Rider_CanStartInhale` | `0x801a617c` | gate: attack bit (`+0x820` bit2) + `copy_kind==-1` + mouth not full (`+0x918 < 3`, via `Rider_IsInhaleMouthFull` `0x801adf40`) |
-| `Rider_TryStartInhale` | `0x8019c5ac` | entry probe — only calls `Rider_StartInhale` if a target already overlaps |
+| `Rider_CanStartInhale` | `0x801a617c` | gate: attack bit (`+0x820` bit2) + `copy_kind==-1` + mouth not full (`+0x918 < 3`, via `Rider_IsInhaleMouthFull` `0x801adf40`). The attack bit is **transient** (set only the frame the attack input registers), so this reads false on nearly every frame — it is **not** usable as a "can I inhale now" gate for the mod's continuous drive. |
+| `Rider_TryStartInhale` | `0x8019c5ac` | entry probe — only calls `Rider_StartInhale` if a target already overlaps. Riding is a wide cluster of `state_idx` values (`0x21`–`0x2a`, `0x6a`, …), all inhale-capable, so the mod's `DriveInhale` starts from any riding state rather than gating on one. |
 | `Rider_InhaleCaptureScan` | `0x8019c63c` | per-frame multi-capture scan (EventActor bucket only) |
 | `EventActor_IsInhalable` | `0x802041c8` | candidate predicate (EventActor enemies only) |
 | `HurtVolume_OverlapTest` | `0x80189784` | sphere/capsule overlap; rider radius = `base×(+0x2c8)` |
@@ -762,6 +864,23 @@ trees**, 35 = **volcano + high-plains rocks**, 37 = **volcano-base holes**, 38 =
 houses**; 33 = candidate **coral**, 36 = candidate **volcano rock walls**. Exclude as targets:
 17/18 (passive zones), 46 (gondola, ×16), 61 (decorative ×2),
 68 (Lighthouse), 69 (WhispyWoods).
+
+### Machines
+
+| Symbol | Address | Role |
+|---|---|---|
+| `Machine_OnKO` | `0x801e568c` | destroy a machine: captures rider ply → `+0x1b48` (sentinel 5 = unridden), sets `is_dead`, disables hit-collision, enters BreakDown state (29). Rider-safe (destroy tail guards every rider deref on `+0x1b48 == 5`). Hypernova calls this on a claimed machine's arrival |
+| `Machine_CheckKO'd` | `0x801e5628` | per-frame KO detector (from prio-10 `Machine_DmgApply`): calls `Machine_OnKO` when `hp == 0.0` and `Gm_IsDamageEnabled()`. Runs for parked machines too — Hypernova bypasses it by calling `Machine_OnKO` directly |
+| `Machine_KOExplode` | `0x801e5838` | BreakDown-state destroy tail: spawns explosion VFX (`Effect_SpawnSync` 0x2799 + a debris effect) + break SFX, then `GObj_Destroy`s the machine. **Gated by `MachineData[0x78]` bit 0x40** (Hypernova ORs it in). Rider eject is skipped when `+0x1b48 == 5` |
+| `Machine_PhysicsThink` | `0x801c6368` | proc priority 4: integrates `pos += accel(+0x318) + velocity(+0x324) + …`. The pull zeroes accel/velocity each frame so the `pos` override sticks |
+| `Machine_ApplyModelMatrix` | `0x801c9074` | proc priority 6: rebuilds the machine JObj matrix from `pos(+0x3e8)` + rotation(+0x418) + `model_scale(+0x310) × model_scale_base(+0x468)` |
+
+MachineData (`gobj+0x2c`): machine gobj `0x0`, **rider_gobj `0x4`** (NULL = unridden), **kind
+`0x24`** (`MachineKind`), **model_scale `0x310`**, accel `0x318`, **velocity `0x324`**, **pos
+`0x3e8`**, forward `0x418`, hp `0xa18`, hp_max `0x4cc`, **KO-break gate byte `0x78` bit 0x40**,
+**is_dead `0xc35` bit 0x20**, **is_fall_dead `0xc35` bit 0x80**, rider-ply KO sentinel `0x1b48`.
+Machine list head `(*stc_gobj_lookup)[GAMEPLINK_MACHINE]` (bucket 9), `gobj->entity_class ==
+GAMEENTITY_MACHINE` (16), next `gobj->next`.
 
 ### Scale (Big Kirby reuse)
 

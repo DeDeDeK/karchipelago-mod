@@ -93,7 +93,7 @@ static void OnChangeDebugCone(int val)
 }
 
 static MenuDesc top_menu = {
-    .option_num = 5,
+    .option_num = 6,
     .options = {
         &(OptionDesc){
             .name = "Enabled",
@@ -117,6 +117,14 @@ static MenuDesc top_menu = {
             .description = "Also vacuum yakumonos",
             .kind = OPTKIND_VALUE,
             .val = &hypernova_suck_yaku,
+            .value_num = 2,
+            .value_names = stc_toggle_names,
+        },
+        &(OptionDesc){
+            .name = "Suck Machines",
+            .description = "Also vacuum unridden machines (they explode on arrival)",
+            .kind = OPTKIND_VALUE,
+            .val = &hypernova_suck_machines,
             .value_num = 2,
             .value_names = stc_toggle_names,
         },

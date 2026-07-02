@@ -14,15 +14,14 @@
 const int hypernova_duration_table[HYPERNOVA_DURATION_NUM] = { 300, 600, 1200 };
 
 // Menu-backed settings
-int hypernova_enabled      = 1;
-int hypernova_duration_sel = 1;   // Medium
-int hypernova_suck_yaku    = 1;
-int hypernova_selftest     = 0;
-int hypernova_debug_cone   = 0;
+int hypernova_enabled       = 1;
+int hypernova_duration_sel  = 1;   // Medium
+int hypernova_suck_yaku     = 1;
+int hypernova_suck_machines = 1;
+int hypernova_selftest      = 0;
+int hypernova_debug_cone    = 0;
 
-// Per-player power-up state, indexed by player slot (0..4). Hypernova is granted
-// to one player at a time (whoever picks up a Miracle Fruit); Hypernova_Activate
-// grants it to every human at once.
+// Per-player power-up state, indexed by player slot (0..4).
 static u8  stc_active[5];
 static int stc_timer[5];
 
@@ -30,9 +29,8 @@ static int stc_timer[5];
 enum { HYPERNOVA_PHASE_IDLE, HYPERNOVA_PHASE_GULP, HYPERNOVA_PHASE_LOOP };
 static u8 stc_inhale_phase[5];
 
-// Model-scale ease, per player: ease stc_scale_current toward the target. Init to
-// neutral/settled so an inactive player's model_scale is never written until it
-// activates (and so a cold first frame can't shrink anyone to zero).
+// Model-scale ease, per player. Init to neutral so an inactive player's model_scale is
+// never written until it activates.
 static float stc_scale_current[5] = { HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
                                       HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
                                       HYPERNOVA_SCALE_NEUTRAL };
@@ -60,7 +58,7 @@ static int InCityTrialGameplay(void)
     return 1;
 }
 
-// Begin a fresh scale ease for one player from the size currently on screen.
+// Begin a fresh scale ease from the current on-screen size.
 static void RetargetScale(int p)
 {
     stc_scale_start[p] = stc_scale_current[p];
@@ -117,6 +115,13 @@ static void ResetState(void)
     Hypernova_DebugConeReset(); // the overlay GObj is freed with the scene
 }
 
+// True if the rider holds a copy ability or City Trial power-up; Hypernova is mutually
+// exclusive with both.
+static int PlayerHoldsAbility(RiderData *rd)
+{
+    return rd->copy_kind != COPYKIND_NONE || rd->powerup_kind != POWERUPKIND_NONE;
+}
+
 int Hypernova_ActivatePlayer(int player, int duration_frames)
 {
     if (!hypernova_enabled)
@@ -139,6 +144,18 @@ int Hypernova_ActivatePlayer(int player, int duration_frames)
     stc_timer[player] = duration_frames;
     if (!stc_active[player])
     {
+        // Strip any held ability/power-up now, or OnFrameEnd's has-ability guard cancels
+        // Hypernova on its first frame.
+        GOBJ *rg = Ply_GetRiderGObj(player);
+        if (rg != NULL)
+        {
+            RiderData *rd = rg->userdata;
+            if (PlayerHoldsAbility(rd))
+            {
+                Rider_AbilityRemoveModel(rd);     // clears copy_kind/powerup_kind
+                Rider_LoseAbilityState_Enter(rd); // spit-out -> neutral
+            }
+        }
         stc_active[player] = 1;
         RetargetScale(player); // grow in
     }
@@ -198,11 +215,11 @@ static void SelfTestPoll(void)
         Hypernova_Activate(0);
 }
 
-// Drive one human's inhale this frame from the trigger button, owning the gesture across the
-// three vanilla action-states (which don't chain on their own). Tap: let the one-shot gulp
-// play and end itself. Hold: promote the finished gulp into the suck LOOP and keep it topped
-// up. Release: end the loop via the engine's own END. VFX + SFX come from Rider_StartInhale.
-static void DriveInhale(RiderData *rd, int player, int held)
+// Drive one human's inhale from the trigger button. The three vanilla inhale action-states don't
+// chain on their own, so this owns the IDLE -> GULP -> LOOP gesture across them: tap plays the
+// one-shot gulp, hold promotes it into the sustained suck LOOP, release ends via the engine's own
+// END. Returns 1 while a suck is being driven, so the caller runs the cone vacuum only then.
+static int DriveInhale(RiderData *rd, int player, int held)
 {
     int st = rd->state_idx;
 
@@ -212,7 +229,7 @@ static void DriveInhale(RiderData *rd, int player, int held)
         if (stc_inhale_phase[player] == HYPERNOVA_PHASE_LOOP && st == HYPERNOVA_INHALE_LOOP)
             Rider_EndInhale(rd);
         stc_inhale_phase[player] = HYPERNOVA_PHASE_IDLE;
-        return;
+        return 0;
     }
 
     switch (stc_inhale_phase[player])
@@ -223,8 +240,8 @@ static void DriveInhale(RiderData *rd, int player, int held)
             break;
 
         case HYPERNOVA_PHASE_GULP:
-            // Gulp finished (engine left START): promote into the suck loop this same frame so
-            // the open mouth continues with no flicker back to neutral.
+            // Gulp left START: promote into the loop this same frame so the open mouth doesn't
+            // flicker back to neutral.
             if (st != HYPERNOVA_INHALE_START)
             {
                 Rider_StartInhaleLoop(rd);
@@ -245,6 +262,8 @@ static void DriveInhale(RiderData *rd, int player, int held)
             }
             break;
     }
+
+    return stc_inhale_phase[player] != HYPERNOVA_PHASE_IDLE;
 }
 
 // Hue (0..1) -> full-saturation/value RGB (0..255).
@@ -272,16 +291,15 @@ static u8 TowardWhite(u8 v, float keep)
     return (u8)(255.0f - (255.0f - (float)v) * keep);
 }
 
-// Drive a smooth hue into the rider's body ColAnim color overlay. With the candy tick frozen
-// the mod owns every field each frame: the renderer's packed RGBA (+0x224), the selector copy
-// source (+0x2c), the live float color (+0x30), and the draw-flag bytes (+0x234/+0x235).
+// Drive a smooth hue into the rider's body ColAnim overlay. With the candy tick frozen the mod
+// owns every field each frame.
 static void DriveRainbow(RiderData *rd, float hue)
 {
     char *slot = (char *)rd + HYPERNOVA_COLANIM_BODY_OFF;
     int  *st   = (int *)slot;
 
-    // (Re)claim the slot if anything else owns it (first setup, or a pickup flash beat the pin).
-    // Floor the priority byte first so the priority-gated ColAnim_Apply can't reject the re-take.
+    // (Re)claim the slot if anything else owns it; floor priority first so the priority-gated
+    // ColAnim_Apply can't reject the re-take.
     if (st[HYPERNOVA_COLANIM_INDEX_W] != HYPERNOVA_OVERLAY_COLANIM)
     {
         slot[HYPERNOVA_COLANIM_PRI_OFF] = 0;
@@ -291,12 +309,12 @@ static void DriveRainbow(RiderData *rd, float hue)
     // Freeze the candy animation tick (or it re-stamps its green and fights us).
     *(u32 *)(slot + HYPERNOVA_COLANIM_DATA_OFF) = 0;
 
-    // Pin max priority so a pickup flash can't win the selector or overwrite via the apply-gate.
-    // Cleared on Hypernova end by StopRainbowPlayer, so normal hurt/invincibility flashes resume.
+    // Pin max priority so a pickup flash can't win the selector or the apply-gate. Cleared on
+    // Hypernova end (StopRainbowPlayer), so normal hurt/invincibility flashes resume.
     slot[HYPERNOVA_COLANIM_PRI_OFF] = (char)HYPERNOVA_COLANIM_PRI_MAX;
 
-    // Hold color-override active; with the tick frozen nothing else sets this and the selector
-    // would stop drawing the overlay after a frame.
+    // Hold color-override active; with the tick frozen nothing else sets it and the selector
+    // would stop drawing the overlay.
     slot[HYPERNOVA_COLANIM_STFLAG_OFF] |= 0x80;
 
     u8 r, g, b;
@@ -328,8 +346,8 @@ static void StopRainbowPlayer(int player)
     ColAnim_Reset((char *)rd + HYPERNOVA_COLANIM_BODY_OFF);
 }
 
-// Tint one TEV color register's RGB, leaving its alpha untouched (alpha = constant.a * TEXA
-// shapes the swirl, so not writing it keeps the whirlwind's vanilla opacity).
+// Tint one TEV color register's RGB, leaving alpha untouched (alpha shapes the swirl, so
+// keeping it preserves the whirlwind's vanilla opacity).
 static void TintTevColor(GXColor *c, u8 r, u8 g, u8 b)
 {
     c->r = r;
@@ -337,10 +355,8 @@ static void TintTevColor(GXColor *c, u8 r, u8 g, u8 b)
     c->b = b;
 }
 
-// Recolor every part of one model-effect JObj tree to (r,g,b): for each joint's DObj->MObj->TObj,
-// rewrite the TObj's _HSD_TObjTev (TObj+0xa8) constant/tev0/tev1 (value fields MObjSetupTev
-// re-reads each frame; the TExp node tree is never touched). Walked child-then-sibling to match
-// the render traversal.
+// Recolor every part of one model-effect JObj tree, rewriting each TObj's tev constant/tev0/tev1
+// RGB (value fields MObjSetupTev re-reads each frame; the TExp node tree is never touched).
 static void RecolorEffectTree(JOBJ *j, u8 r, u8 g, u8 b)
 {
     while (j != NULL)
@@ -365,8 +381,8 @@ static void RecolorEffectTree(JOBJ *j, u8 r, u8 g, u8 b)
     }
 }
 
-// Tint every live inhale-suction whirlwind to (r,g,b). The spawn discards the handle, so
-// instances are found by walking the model-effect bucket and matching the Effect kind.
+// Tint every live inhale-suction whirlwind. The spawn discards the handle, so instances are
+// found by walking the model-effect bucket and matching the Effect kind.
 static void RecolorWhirlwinds(u8 r, u8 g, u8 b)
 {
     for (GOBJ *g_eff = (*stc_gobj_lookup)[HYPERNOVA_EFFECT_PLINK]; g_eff != NULL; g_eff = g_eff->next)
@@ -408,21 +424,33 @@ void Hypernova_OnFrameEnd(void)
     }
 
     // Install the debug cone overlay (no-op when off). Before the pause early-out so it still
-    // renders the frozen riders' cones while paused.
+    // renders while paused.
     Hypernova_DebugConeEnsure();
 
-    // Freeze while paused: every game proc we cooperate with (model_scale, the ColAnim selector,
-    // effect models) is frozen by the pause whitelist, so ticking here would drain Hypernova and
-    // animate its effects behind the pause menu. Returning resumes seamlessly on unpause.
+    // Freeze while paused: the procs we cooperate with (model_scale, ColAnim selector, effect
+    // models) are frozen, so ticking here would drain Hypernova and animate its effects behind
+    // the menu.
     if (Gm_CheckPauseKind(PAUSEKIND_GAME))
         return;
 
     SelfTestPoll();
 
-    // Tick each active player's timer; expire individually.
+    // Tick each timer; end on expiry, or the instant a player gains an ability/power-up. The
+    // engine has already moved the rider into that state this frame, so ending here (before
+    // DriveInhale below) stops the inhale drive from fighting it.
     for (int i = 0; i < 5; i++)
-        if (stc_active[i] && --stc_timer[i] <= 0)
+    {
+        if (!stc_active[i])
+            continue;
+        if (--stc_timer[i] <= 0)
+        {
             StopPlayer(i);
+            continue;
+        }
+        GOBJ *rg = Ply_GetRiderGObj(i);
+        if (rg != NULL && PlayerHoldsAbility((RiderData *)rg->userdata))
+            StopPlayer(i);
+    }
 
     int any_active = 0;
     for (int i = 0; i < 5; i++)
@@ -459,24 +487,23 @@ void Hypernova_OnFrameEnd(void)
 
         DriveRainbow(rd, stc_hue);
 
-        // The inhale drives vanilla action-states whose per-frame procs dereference the rider's
-        // machine, so starting one while dismounted faults on the null machine_gobj. Gate the
-        // gesture on being mounted; off-machine reads as a release, so DriveInhale cleanly ends
-        // any suck that was already running, and the vacuum is skipped.
+        // Inhale action-state procs deref the rider's machine, so gate the gesture on being
+        // mounted; off-machine reads as a release, ending any running suck and skipping the vacuum.
         int held = Rider_IsOnMachine(rd) && (rd->input.held & HYPERNOVA_TRIGGER_BUTTON) != 0;
-        DriveInhale(rd, i, held);
-        if (held)
-            Hypernova_VacuumPlayer(i, rd); // claim in-cone items/props for this rider
+        if (DriveInhale(rd, i, held))
+            Hypernova_VacuumPlayer(i, rd); // claim in-cone items/props only while actually sucking
     }
 
     if (any_active)
     {
-        // Pull every claimed item and prop this frame, including ones the cone no longer covers.
+        // Pull every claimed item, prop, and machine this frame, including ones the cone no
+        // longer covers.
         Hypernova_VacuumProcessClaimedItems();
         Hypernova_VacuumProcessClaimed();
+        Hypernova_VacuumProcessClaimedMachines();
 
-        // Tint every live whirlwind, phase-shifting its hue off the bodies' and softening to a
-        // light wash so it keeps its vanilla opacity/shape. No-op when no whirlwind exists.
+        // Tint every live whirlwind, hue-shifted off the bodies' and softened to a light wash.
+        // No-op when none exist.
         float whue = stc_hue + HYPERNOVA_WHIRLWIND_HUE_OFFSET;
         if (whue >= 1.0f)
             whue -= 1.0f;

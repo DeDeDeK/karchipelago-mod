@@ -15,8 +15,7 @@
 #define HYPERNOVA_RANGE             175.0f
 #define HYPERNOVA_HALF_ANGLE_COS    0.8660254f
 
-// tan(half-angle), for the debug cone's base radius. Compile-time constant for the fixed
-// half-angle; keep in sync with the cosine: tan(acos(0.8660254)) = tan(30deg).
+// tan(half-angle), for the debug cone's base radius; keep in sync with the cosine (= tan(30deg)).
 #define HYPERNOVA_HALF_ANGLE_TAN    0.5773503f
 
 // Committed pull: a swept target closes on the rider by max(SPEED*dist, MIN) units/frame.
@@ -24,8 +23,8 @@
 #define HYPERNOVA_PULL_SPEED        0.030f
 #define HYPERNOVA_PULL_MIN          2.0f
 
-// Arc lift peak (world units): the pull aims above the rider by a parabolic hump of the
-// target's horizontal distance, so it rises up and over instead of scraping the ground.
+// Arc lift peak (world units): the pull aims above the rider by a hump of horizontal distance,
+// so targets rise up and over instead of scraping the ground.
 #define HYPERNOVA_ARC_HEIGHT        30.0f
 
 // In-flight tumble, radians/frame (spin direction is hashed per-target).
@@ -41,6 +40,16 @@
 // Frames a claim may live before it is force-released (collision re-armed) if it never breaks.
 #define HYPERNOVA_YAKU_CLAIM_TTL    300
 
+// Unridden machines: pulled in, then KO'd on arrival (Machine_OnKO runs its own vanilla
+// break/explosion). Wider break radius than yakumono - machines are large.
+#define HYPERNOVA_MACHINE_BREAK_RADIUS 45.0f
+
+// MachineData offsets. accel/velocity are integrated into pos each frame (zeroed so the pos
+// override sticks); the KO-gate bit enables the BreakDown explosion + GObj_Destroy in Machine_OnKO.
+#define HYPERNOVA_MACHINE_ACCEL_OFF    0x318
+#define HYPERNOVA_MACHINE_KO_GATE_OFF  0x78
+#define HYPERNOVA_MACHINE_KO_GATE_BIT  0x40
+
 // Held to run the vacuum (B, not A: A is the boost/charge button in Air Ride).
 #define HYPERNOVA_TRIGGER_BUTTON    PAD_BUTTON_B
 
@@ -50,9 +59,9 @@
 #define HYPERNOVA_INHALE_LOOP       0x30
 #define HYPERNOVA_INHALE_END        0x31
 
-// Inhale LOOP self-terminate countdown (RiderData+0x93C): topped up to HOLD each frame to
-// keep the suck alive. HOLD must be >= 2. Unreliable (aliases copy_wheel_result), so the
-// suck is ended explicitly via Rider_EndInhale rather than by letting this lapse.
+// Inhale LOOP self-terminate countdown (RiderData+0x93C): topped up each frame to keep the suck
+// alive. HOLD must be >= 2. Aliases copy_wheel_result (unreliable), so the suck is ended
+// explicitly via Rider_EndInhale rather than by letting this lapse.
 #define HYPERNOVA_INHALE_TIMER_OFF  0x93C
 #define HYPERNOVA_INHALE_TIMER_HOLD 8
 
@@ -78,8 +87,8 @@
 // Whirlwind hue offset from the bodies' (0..1 of the wheel); 0.5 = complementary.
 #define HYPERNOVA_WHIRLWIND_HUE_OFFSET 0.5f
 
-// Whirlwind rainbow strength (0..1): the hue is blended toward white before it is written, so
-// 1.0 = full rainbow, 0.0 = white. Opacity is left at vanilla.
+// Whirlwind rainbow strength (0..1): hue is blended toward white before writing (1.0 = full
+// rainbow, 0.0 = white). Opacity is left at vanilla.
 #define HYPERNOVA_WHIRLWIND_TINT       0.45f
 
 // Inhale whirlwind. RecolorWhirlwinds finds live instances on the
@@ -114,6 +123,7 @@ extern const int hypernova_duration_table[HYPERNOVA_DURATION_NUM];
 extern int hypernova_enabled;
 extern int hypernova_duration_sel;  // index into hypernova_duration_table
 extern int hypernova_suck_yaku;
+extern int hypernova_suck_machines; // also vacuum unridden machines (KO'd on arrival)
 extern int hypernova_selftest;      // hold D-Pad Up in CT
 extern int hypernova_debug_cone;
 
@@ -138,6 +148,10 @@ void Hypernova_VacuumProcessClaimedItems(void);
 
 // Pull every claimed prop one frame toward its owner; shrink when close, break on arrival.
 void Hypernova_VacuumProcessClaimed(void);
+
+// Pull every claimed unridden machine one frame toward its owner; KO it (its own vanilla
+// break/explosion) on arrival.
+void Hypernova_VacuumProcessClaimedMachines(void);
 
 // Break one player's claimed props and drop that player's item claims (call when a
 // single player's Hypernova ends, leaving other players' claims in flight).

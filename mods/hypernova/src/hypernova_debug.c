@@ -9,9 +9,8 @@
 // Cached only to avoid recreating it every frame; never dereferenced (the engine owns it).
 static GOBJ *stc_cone_gobj = NULL;
 
-// Base-circle rim as unit (cos, sin) pairs, evenly spaced over 360 / HYPERNOVA_DEBUG_CONE_SEGS.
-// Seeded once in Hypernova_DebugConeEnsure() so the per-frame draw does no trig - it just scales
-// and orients these into world space.
+// Base-circle rim as unit (cos, sin) pairs, seeded once in Hypernova_DebugConeEnsure() so the
+// per-frame draw does no trig - it just scales and orients these into world space.
 static Vec2 stc_cone_unit[HYPERNOVA_DEBUG_CONE_SEGS];
 
 // Build an orthonormal basis (u, v) spanning the plane perpendicular to unit `aim`.
@@ -64,8 +63,8 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
     GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
     GXSetNumTexGens(0);
     GXSetNumChans(1);
-    // Source both color and alpha of channel 0 from the vertex (no lighting), so the per-vertex
-    // alpha reaches the blender - the cone's translucency depends on it.
+    // Source channel 0 color+alpha from the vertex (no lighting) so per-vertex alpha reaches the
+    // blender - the cone's translucency depends on it.
     GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
     GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
     GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
