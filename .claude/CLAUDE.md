@@ -8,15 +8,17 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 
 ### Mods in this repo
 
-- **`mods/archipelago/`** - Main mod. Integrates Kirby Air Ride with the Archipelago multiworld randomizer: gating systems, checklist rewards, DeathLink/EnergyLink/TrapLink, etc. This is the primary focus of the project. Exposes an `ArchipelagoAPI` consumed by `archipelago_debug`.
-- **`mods/archipelago_debug/`** - Debug menu mod. Imports `ArchipelagoAPI` via `Hoshi_ImportMod` to manipulate AP state for testing (toggle gates, force grants, etc.). Kept separate so the debug surface can be excluded from non-dev builds.
-- **`mods/custom_events/`** - WIP. Custom City Trial event framework that registers new event kinds beyond vanilla `EVKIND_NUM` (Waddle Dee Swarm, Gravity Change, Scale Change, Gourmet Race; dormant Cannon scaffolding in `cannon_event.c`). Exposes a `CustomEventsAPI` (header in `mods/custom_events/include/custom_events_api.h`) consumed by the archipelago mod for event gating and triggering. See `docs/custom-events.md`.
-- **`mods/custom_weather/`** - WIP. Adds custom sky/lighting presets to City Trial (extends the stage's preset array at runtime with 9 new entries appended after the 17 vanilla presets - see `WeatherKind` in `custom_weather.h`). Exposes a hoshi settings menu to toggle which presets can appear.
-- **`mods/custom_ai/`** - WIP scaffold. Custom AI mod covering two domains, each with its own preset selector (and a "Random" entry) in the hoshi settings menu: **enemy AI** (`enemy_ai.c` - Air Ride enemies: Aggressive, Item Hoarder, Coward, Erratic + Default) and **CPU rider AI** (`cpu_ai.c` - the AI opponents, e.g. City Trial's CPU players: Aggressive, Hoarder, Cautious, Reckless + Default). Currently only the menus and the per-domain tuning tables exist; the enemy-spawn / CPU-rider hooks that apply the presets are still TODO. `custom_ai.c` is the shared boot + random-roll helper. See `docs/enemy-ai-system.md` for the enemy AI internals.
-- **`mods/custom_items/`** - Framework for adding new City Trial item kinds from drop-in HSD `.dat` archives. Scans the FST `items/` folder at boot (`FST_ForEachInFolder`), validates each archive's `customItem` public descriptor, and per round splices a new `ItemKind` into the engine's `itData[]` plus the box/sky and event-source spawn-weight tables (lifting the kind ceiling and clamping the instance's behavior kind to a vanilla `base_kind`). Models can be any item model carved from `Item.dat`, including the multi-texture/skinned legendary pieces. Exposes a `CustomItemsAPI` (header in `mods/custom_items/include/custom_items_api.h`) including a pickup handler other mods register to react to a custom item being collected. A build with no `.dat`s in `items/` installs no hooks and is inert. See `docs/custom-items.md`.
-- **`mods/custom_checklist/`** - Framework for adding mod-owned checklist tabs alongside the three vanilla ones (Air Ride / Top Ride / City Trial), folded into the existing L/R tab rotation. Each registered tab is a synthetic checklist mode (index `>= GMMODE_NUM`) backed by a mod-owned `GameClearData` served through the engine's `gmGetClearcheckerTypeP`, so the engine renders its grid, completion counter, and unlock animation for free. A registering mod supplies a static check table (`{ clear_kind, label, predicate }`), a target theme color (the framework retints City Trial's green tab tint onto it), and optional tab artwork (a banner/emblem `.dat`). Recorded state is framework-managed by default (the mod's own hoshi save, keyed by tab-name hash) - the `is_recorded`/`record_complete` callbacks are optional, supplied only when a mod must own the storage (the AP tab routes to its wire-mirrored `sent_checks_ap`). The framework owns all presentation (grid, animations, post-run popup, completion SFX, theme, art) + per-frame evaluation. Exposes a `CustomChecklistAPI` (header in `mods/custom_checklist/include/custom_checklist_api.h`) consumed by the archipelago mod for its AP checklist tab. A build with no registered tabs leaves the vanilla 3-tab checklist untouched. See `docs/custom-checklist.md`.
-- **`mods/hypernova/`** - WIP. City Trial super-inhale power-up: while active, a powered-up Kirby grows ~2× and a held trigger vacuums items (collected via the vanilla pickup) and breakable yakumono (pulled in, shrunk, then broken through the game's own break path via a synthesized collision) out of a cone in front of the rider, plus a rainbow body/whirlwind recolor. Activation is **per player** (`Activate` powers up all humans, `ActivatePlayer` one slot); the `custom_items` "Miracle Fruit" grants it to its collector via a pickup handler. Inert until triggered, so a default build leaves vanilla play untouched. Exposes a `HypernovaAPI` (header in `mods/hypernova/include/hypernova_api.h`). See `docs/hypernova.md`.
-- **`mods/textbox/`** - On-screen notification system. Queued, color-segmented messages with typewriter reveal, used by the archipelago mod for AP grants/losses, deathlink/traplink notifications, etc. Exposes a `TextBoxAPI` (header in `mods/textbox/include/textbox_api.h`) with `Enqueue`/`EnqueueSegments`/`EnqueueColoredNoun*` and a palette of color helpers (`PatchColor`, `MachineColor`, `ItemColor`, etc.).
+Each mod's public API header (if it has one) lives in `mods/<mod>/include/<mod>_api.h`, on the global include path so other mods import it via `Hoshi_ImportMod`.
+
+- **`mods/archipelago/`** - Main mod (primary focus). Integrates Kirby Air Ride with the Archipelago randomizer: gating, checklist rewards, DeathLink/EnergyLink/TrapLink. Exposes `ArchipelagoAPI`.
+- **`mods/archipelago_debug/`** - Debug menu. Imports `ArchipelagoAPI` to manipulate AP state for testing. Separate so it can be excluded from non-dev builds.
+- **`mods/custom_events/`** - WIP. Registers new City Trial event kinds beyond `EVKIND_NUM` (Waddle Dee Swarm, Gravity/Scale Change, Gourmet Race). Exposes `CustomEventsAPI`. See `docs/custom-events.md`.
+- **`mods/custom_weather/`** - WIP. Appends 9 custom sky/lighting presets to City Trial's preset array at runtime (`WeatherKind` in `custom_weather.h`). Hoshi menu toggles which appear.
+- **`mods/custom_ai/`** - WIP scaffold. Two domains, each with a preset selector: enemy AI (`enemy_ai.c`) and CPU rider AI (`cpu_ai.c`). Menus + tuning tables only; the apply hooks are TODO. See `docs/enemy-ai-system.md`.
+- **`mods/custom_items/`** - Adds City Trial item kinds from drop-in HSD `.dat` archives (FST `items/` scan, `customItem` descriptor, per-round `itData[]`/spawn-weight splice). Exposes `CustomItemsAPI` (incl. a pickup handler). Inert with no `.dat`s. See `docs/custom-items.md`.
+- **`mods/custom_checklist/`** - Adds mod-owned checklist tabs alongside the vanilla 3, as synthetic clear-checker modes the engine renders for free. Mod supplies a check table, theme color, optional art. Exposes `CustomChecklistAPI`. Untouched with no tabs. See `docs/custom-checklist.md`.
+- **`mods/hypernova/`** - WIP. City Trial super-inhale power-up: 2× Kirby + cone-vacuum of items/breakables + rainbow recolor. Per-player activation; granted by the `custom_items` "Miracle Fruit". Exposes `HypernovaAPI`. See `docs/hypernova.md`.
+- **`mods/textbox/`** - On-screen notifications: queued, color-segmented, typewriter reveal. Used for AP grants/losses, deathlink/traplink. Exposes `TextBoxAPI` (`Enqueue*` + color helpers). See `docs/textbox.md`.
 
 ## Build
 
@@ -24,15 +26,13 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 make deploy
 ```
 
-This runs `make package` (compile mod sources, link against hoshi, pack `.bin` files, copy assets, build the Riivolution payload under `out/Riivolution/`) and then copies `out/Riivolution/*` into Dolphin's `Load/Riivolution/` directory. Run `make clean` first only when needed (e.g. after modifying linker script, headers, or build configuration) - incremental rebuilds are the norm.
+`make deploy` runs `make package` (compile, link against hoshi, pack `.bin`s, copy assets, build `out/Riivolution/`) then copies it into Dolphin's `Load/Riivolution/`. It's the standard dev command; `make package` alone builds without touching Dolphin (use it to verify a compile). Run `make clean` first only when needed (linker script / header / build-config changes) - incremental rebuilds are the norm.
 
-`make package` builds everything but does not touch Dolphin; use it when you only want to verify the build compiles. `make deploy` is the standard development command.
-
-**Never run bare `make`** - always use `make deploy` (or `make package`). The default target does not produce the deployable Riivolution mod and will leave the build in an incomplete state.
+**Never run bare `make`** - always `make deploy` (or `make package`). The default target does not produce the deployable Riivolution mod and leaves the build incomplete.
 
 **A successful `make deploy` (or `make package`) is sufficient verification.** The build fails on any compile or link error, so if it completes you do **not** need to grep its output for "error" or "warning". Pre-existing warnings in hoshi/devkitPPC headers are noise - don't re-run the build to inspect them.
 
-**Source files are auto-discovered.** The Makefile globs every mod folder under `mods/` and recursively finds all `*.c` / `*.s` files in each mod's `src/` subdirectory. Adding a new `.c` file to `mods/<mod>/src/` (or anywhere beneath it) is enough - there is no manual file list to update. Same for adding a whole new mod: drop a folder with a `src/` subdir under `mods/` and it will be picked up. You do **not** need to grep the Makefile or check for explicit registration when adding source files. (The one exception: a new mod whose **public** header other mods `#include` needs its `include/` dir added to the Makefile's `INCLUDES` list - those are listed explicitly, not globbed.)
+**Source files are auto-discovered.** The Makefile globs all `*.c`/`*.s` under each `mods/*/src/`, so adding a source file (or a whole new mod folder with a `src/`) needs no manual registration - don't grep the Makefile for it. One exception: a new mod's **public** `include/` dir must be added to the Makefile's `INCLUDES` list (those are explicit, not globbed).
 
 ## Running Python Scripts
 
@@ -41,17 +41,9 @@ This runs `make package` (compile mod sources, link against hoshi, pack `.bin` f
 ## Project Structure
 
 - `externals/hoshi/` - Hoshi modding framework (submodule). Contains headers (`include/`), linker script (`packtool/link.ld`), symbol map (`GKYE01.map`), and framework source (`src/`).
-- `mods/archipelago/src/` - Archipelago mod C source code (the main mod). Public API header in `mods/archipelago/include/archipelago_api.h` (on the compiler include path).
-- `mods/archipelago_debug/src/` - Debug menu mod C source code. Consumes `archipelago_api.h` via `Hoshi_ImportMod`.
-- `mods/custom_events/src/` - Custom events mod C source code. Public API header in `mods/custom_events/include/custom_events_api.h` (added to compiler include path so other mods can `#include "custom_events_api.h"`).
-- `mods/custom_weather/src/` - Custom weather mod C source code.
-- `mods/custom_ai/src/` - Custom enemy AI mod C source code. Self-contained (no public API header); preset table and menu only so far.
-- `mods/custom_items/src/` - Custom items mod C source code. Public API header in `mods/custom_items/include/custom_items_api.h` (added to compiler include path so other mods can `#include "custom_items_api.h"`).
-- `mods/custom_checklist/src/` - Custom checklist framework mod C source code. Public API header in `mods/custom_checklist/include/custom_checklist_api.h` (added to compiler include path so other mods can `#include "custom_checklist_api.h"`).
-- `mods/hypernova/src/` - Hypernova mod C source code. Public API header in `mods/hypernova/include/hypernova_api.h` (on the compiler include path).
-- `mods/textbox/src/` - Textbox notification mod C source code. Public API header in `mods/textbox/include/textbox_api.h` (on the compiler include path).
+- `mods/<mod>/src/` - each mod's C/assembly sources (auto-discovered); public API headers in `mods/<mod>/include/`. See the Mods list above.
 - `docs/` - Documentation and reference data (checklist mappings, protocol docs). See "Documentation in `docs/`" below for the full index.
-- `scripts/` - Build helpers (`iso.py`, `dol.py`, `build-devkitpro.sh` + `DevKitPro.dockerfile` for the toolchain image), reverse-engineering tools (`disasm.sh`, `findptr.sh`, `mem1.raw` memory dump), and the HSD `.dat` toolchain under `scripts/hsd/` - the `explore.py` CLI (ls / tree / find), the `carve_backdrop.py` + `carve_all_backdrops.py` backdrop-asset extractors (which normalize each backdrop's size via `geom_bounds.py`), plus `probe_backdrops.py`, `verify_carved.py`, and `dump_lights.py`. See the `dat-explore` skill for the explorer and `docs/sky-backdrop-system.md` for the carving pipeline.
+- `scripts/` - Build helpers (`iso.py`, `dol.py`, toolchain image), RE tools (`disasm.sh`, `findptr.sh`, `mem1.raw`), the Ghidra type-import pipeline (`scripts/ghidra/` - `import_types.sh`/`apply_protos.py`/`import_globals.sh` push hoshi structs, prototypes, and globals into the project; see its `README.md`), and the HSD `.dat` toolchain (`scripts/hsd/` - `explore.py`, the backdrop carvers; see the `dat-explore` skill and `docs/sky-backdrop-system.md`).
 - `out/` - Build output directory. `out/files/` is the staged ISO files-overlay (mod `.bin`s + assets + hoshi outputs); `out/Riivolution/` is the deployable Riivolution package; `out/patch.xdelta` is produced by `make patch`. Do not hand-edit. Run `make deploy` to copy `out/Riivolution/*` into Dolphin's Load dir.
 - `iso/` - Extracted contents of `kar.iso` (game filesystem) - `files/` (game data, audio, textures) and `sys/` (`main.dol`, `boot.bin`). Use for inspecting original game assets.
 
@@ -60,70 +52,56 @@ This runs `make package` (compile mod sources, link against hoshi, pack `.bin` f
 Never attempt to read ISO files, memory dumps, or other large binary/text files directly. Always use appropriate tools or scripts.
 
 - **`externals/hoshi/GKYE01.map`** - Symbol map file (~20k lines). Never read the full file. Search for specific symbols with grep when needed.
-- **`scripts/mem1.raw`** - Dolphin memory dump (~24MB binary) captured at the **main menu**. It does not contain mod-specific memory locations or runtime state from gameplay. **Caveat: this snapshot appears to have been taken with hoshi loaded, not on a pure-vanilla game** - hoshi-rebuilt regions (e.g. the scene-desc table at `0x80495058` is all-`0xFF`, hoshi's `Scenes_CopyVanilla` memset-init) are modded in the dump. The bulk (vanilla code, static `.rodata` tables, vtables) is intact and verifies correctly, but when reverse-engineering a region hoshi patches/rebuilds, **verify against the source headers (`externals/hoshi/include/`), not this snapshot**. Never read this file directly. Use `scripts/disasm.sh` for targeted disassembly and `scripts/findptr.sh` for pointer searches.
+- **`scripts/mem1.raw`** - Dolphin memory dump (~24MB) captured at the **main menu** (no gameplay/mod runtime state). Taken with hoshi loaded, so hoshi-rebuilt regions (e.g. the scene-desc table at `0x80495058`) are modded, not vanilla - when RE'ing a region hoshi patches/rebuilds, **verify against the source headers (`externals/hoshi/include/`), not this snapshot**. Bulk vanilla code/rodata/vtables are intact. Never read directly; use `scripts/disasm.sh` (disassembly) and `scripts/findptr.sh` (pointer search).
 - **`*.iso`** - ISO files are large binaries. Never read directly; use the provided scripts in `scripts/` or appropriate tools.
 - **`iso/`** - Extracted ISO contents. Individual `.dat`, `.dol`, etc. files can be read or hex-dumped as needed, but avoid reading the directory wholesale.
 
 ## Documentation in `docs/`
 
-Current-state reference material - engine/mod facts and design rationale, not the RE process or verification steps (see the comments/docs convention under Code Conventions).
+Current-state reference material - engine/mod facts and design rationale, not the RE process or verification steps (see the comments/docs convention under Code Conventions). One file per system; read the relevant one before working on that system.
 
-- `checklist-grid-geometry.md` - The checklist's visible 12×10=120 cell layout: the procedural (not baked) grid built by instancing single-quad cell models, the `MainMenuData+0xf0c[120]` cell-GObj array, the grid builder (`Checklist_SetRewardFlagOnUnlocks`), `Pos`-joint spacing, and exactly which functions hardcode the column count / total for a resize. Sister doc to `clearchecker-system.md`.
-- `checklist-mappings.csv` - Combined checklist mappings for all three modes (Air Ride, City Trial, Top Ride). Contains memory addresses, checkbox descriptions, and rewards. Primary reference for checklist clear kind indices and item IDs.
-- `checklist-stat-tracking.md` - The `plclearcheckerlib` stat-measurement layer beneath the clear bits: the per-player stat struct (`Ply_GetItemCollectArray`), the verified item-collect subsystem (array at `+0x4c8`, increment/decrement, `Ply_GetItemCollectNum`/`Ply_GetItemCollectTotal`/`Ply_GetBoxCollectTotal`), and how `CityTrial_CheckForNewUnlocks` accumulates totals and fires the "pick up N items" / "break N boxes" / "get 10 of patch X" cells. Sister doc to `clearchecker-system.md`.
-- `city-trial-event-system.md` - Full documentation of the City Trial event system: state machine, event function table, param/BGM/sky tables, reserve queue, selection logic.
-- `clearchecker-system.md` - Documentation on the clear checker system.
-- `client-game-protocol.md` - Protocol between the AP client and the game.
-- `collision-system.md` - Map collision system (mpColl): CollData/mpCollInfo structs, item coll_kind dispatch, raycast/ground functions, Item_InitDesc parameters. (Entity-vs-entity HitColl is in `hurtdata-system.md`.)
-- `copy-ability-system.md` - Copy ability lifecycle (Rider): grant (`Rider_GiveAbility` + give table), per-frame tick (`copy_timer`, `cb_ability_tick`, `abilityTimerBranchToAbilityCountdown`), and teardown (`Rider_AbilityRemoveModel` → `revertKirbyModel_` → `Rider_TeardownCopyAbility`) + the `AS_LoseCopyAbility` spit-out state. The engine-mechanics counterpart to `gate-abilities.md`; covers how to force-drop an ability from mod code.
-- `cpu-ai-system.md` - CPU rider AI (the AI opponents in CT/AR/TR): the per-frame perceive→decide→process→emit pipeline, the virtual pad (`CpuData` at RiderData+0x778), the state-machine dispatch + command-stream, the `cAIPad`/`CommonDesireData`/`FormationPos` desire subsystem, and the tweak (`cpu_level`) vs replace (pad injection) strategies. The rider-opponent counterpart to `enemy-ai-system.md`.
-- `css-system.md` - Character select screen system (all 3 modes), icon rendering pipeline, CharacterKind/MachineKind mapping, availability logic.
-- `custom-checklist.md` - Custom checklist framework: the synthetic-mode plumbing (the six clear-checker/render REPLACEFUNCs), the registration API + descriptor contract, the borrow-CT-template tab build, SIS labels, the target-color theme recolor, and the banner/emblem texture swap. Sister doc to `ap-checklist.md` (its first consumer).
-- `custom-events.md` - Custom events framework: registration, state machine wrappers, SIS text, weighted selection.
-- `custom-hud.md` - Custom HUD element creation: GObj setup, JObj hierarchy, GX link rendering.
-- `custom-items.md` - Custom items framework: drop-in `.dat` discovery (FST scan), the `customItem` descriptor contract, the per-round `itData[]`/spawn-weight engine splice (TODO), and the exported `CustomItemsAPI`. Builds on the vanilla item system (`item.h`).
-- `deathlink.md` - DeathLink implementation details.
-- `effects-system.md` - Model-effect system (the GObj+JObj visual-effect layer): `Effect_SpawnSync`, the decimal effect-ID encoding (`group*10000+entry`), `EffectModel_CreateGObj`, the effect manager (`gEffectMgr` 0x8055D7A0) + bank registry (`efGlobal` 0x8058C208), `EfCommon`/`EfPtcl*` bank loading, and the HSD_TExp/TEV color path with the in-place recolor recipe (`_HSD_TObjTev.constant`). Sister doc to `particle-system.md`.
-- `enemy-ai-system.md` - Enemy AI: state machine, movement, targeting, per-type callbacks, EnemyData struct, custom AI integration.
-- `enemy-spawn-system.md` - Enemy spawn system: actor IDs, spawn manager, GOBJProc priorities, EventActorDesc.
-- `energylink.md` - EnergyLink: protocol fields, generation/spend flow, baseline gating, Auto-Charge, received-patch feedback handling, Top Ride tracking.
-- `event-gravity-change.md` - Gravity Change custom event implementation.
-- `event-scale-change.md` - Scale Change custom event implementation.
-- `event-source-drops.md` - `event_source_drop[]` table reference: struct, field-to-source mapping, drop pipeline (`City_SpawnMiscItems` → `CityItem_GetEventItem`), source enum, yaku-break object families, and enumerated City Trial drop weights.
-- `event-waddle-dee-swarm.md` - Waddle Dee Swarm custom event: standalone chase AI, the spline-snap workaround, func2/3/4 override, detection-range bypass, spawn/fade lifecycle.
-- `gate-abilities.md` - Copy ability gating implementation.
-- `gate-boxes.md` - Item box gating implementation.
-- `gate-colors.md` - Color gating implementation.
-- `gate-events.md` - Event gating implementation.
-- `gate-items.md` - Item gating implementation.
-- `gate-machines.md` - Machine/vehicle gating implementation.
-- `gate-patches.md` - Patch gating implementation.
-- `gate-stages.md` - Air Ride and Top Ride stage gating implementation.
-- `gate-stadiums.md` - Stadium gating implementation: unlock check, selection replacement, history buffer fix.
-- `gourmet-race-event.md` - Gourmet Race custom event: food spawning, scoring, HUD.
-- `hurtdata-system.md` - HurtData/HitColl damage system: structs, per-frame pipeline, damage/knockback calculation, vulnerability states, enemy damage mechanics, how to apply damage from custom code.
-- `hypernova.md` - Hypernova mod (City Trial power-up): reusing the vanilla inhale's presentation (animation/VFX/SFX) while the suction stays custom (the vanilla suction is EventActor-only), the custom cone-scan vacuum (items collected via the p_link-13 list; breakable yakumono pulled/shrunk/broken via a synthesized collision), the rainbow body + whirlwind recolor, and 2× scale via Big Kirby reuse.
-- `kirby-model-scale.md` - Big/Small Kirby cosmetic filler: the per-object `model_scale` fields (RiderData+0x348, TopRideKirby+0x524) the engine applies to the model every frame, and the all-mode scaling implementation.
-- `machine-charge-system.md` - Machine charge/boost system.
-- `memcard-save-system.md` - Memory card / save system: the vanilla game save (`GCP_MemCard`) and hoshi's separate mod-data save (`externals/hoshi/src/save.c`), plus the card-manager tile (banner/icon/comment) format via `CARDStat`.
+- `checklist-mappings.csv` - Clear-kind indices, checkbox descriptions, rewards for all 3 modes (primary checklist reference).
+- `checklist-grid-geometry.md` - Checklist 12×10 cell grid: procedural build, cell-GObj array, which functions hardcode the layout.
+- `checklist-stat-tracking.md` - Stat layer beneath the clear bits: item/box collect counts, unlock accumulation.
+- `clearchecker-system.md` - Clear checker system. (Sisters: the two checklist docs above + `custom-checklist.md`.)
+- `custom-checklist.md` - Mod-owned-tab framework: synthetic-mode plumbing, registration/descriptor contract, theme recolor, art swap.
+- `city-trial-event-system.md` - CT event system: state machine, function/param/BGM/sky tables, reserve queue, selection.
+- `custom-events.md` - Custom events framework: registration, state-machine wrappers, SIS text, weighted selection.
+- `event-gravity-change.md` / `event-scale-change.md` / `event-waddle-dee-swarm.md` / `gourmet-race-event.md` - Individual custom events.
+- `event-source-drops.md` - `event_source_drop[]` table: struct, drop pipeline, source enum, CT drop weights.
 - `meteor-actor.md` - Meteor event actor (0x4E): state machine, standalone spawn, patches.
-- `particle-system.md` - HSD point-particle pool (exhaust/sparkle layer): the 148-byte `Particle` struct, the 32 render-group bank array (0x8058cce8), `psRenderParticles`/`psDispParticles` render path, the 256-particle + generator free-lists, `ptclGen`/`PtclDesc` emission, and the per-particle color recolor lever. Sister doc to `effects-system.md`.
-- `patch-cap.md` - Progressive patch cap system: replacement hooks, consumer coverage, how to raise the ceiling.
-- `patch-drop-system.md` - Patch drop pipeline (`Rider_DropPatches` producer, `Rider_TickDropPatches` consumer): drop_mode 0/1/2 semantics, RiderData queue fields, stat→ItemKind table, used by `Patch_DropTrap`.
-- `permanent-patches.md` - Permanent patch system: round-start re-application, all-up consolidation.
-- `pluggable-mods-riivolution.md` - Design note (not yet implemented): making each hoshi mod an independently toggleable Riivolution option. The `/mods` FST scan as the on/off contract, target XML shape, separate-repos distribution model, and dependency/save caveats.
-- `projectile-system.md` - Projectile system documentation.
-- `scene-system.md` - Game scene/mode transition system.
-- `sis-text-system.md` - SIS text system: commands, lookup tables, custom event text extension.
-- `sky-backdrop-system.md` - Custom backdrop system for City Trial: ModelSection layout, the `3D_CreateStageModel` override hook, the carved donor asset toolchain (`scripts/hsd/carve_backdrop.py` + friends), and the gr_kind / stage filename table. Sister doc to sky-lighting-system.md.
-- `sky-lighting-system.md` - Sky preset and lighting transition system.
-- `spawn-rate.md` - Spawn Rate Up item: CT timer + cap scaling, TR probability scaling, scale cap rationale.
-- `textbox.md` - Textbox notification system: multi-segment colored-noun rendering, typewriter seeding, scene-change rebuild/persistence, pre-first-scene canvas guard, corner-anchored stacking, Top Ride re-render.
-- `topride-item-system.md` - Top Ride item system: item bitmask, ability-themed items, gating hooks.
-- `topride-kirby-states.md` - Top Ride Kirby state system: `state_handler` polymorphic slot at `+0x7C`, transition pipeline, and the full state set (Explode/Crush/Press/etc.) for invocation from mod code (deathlink, traplink, custom traps).
+- `enemy-ai-system.md` - Enemy AI: state machine, movement, targeting, per-type callbacks, custom AI integration.
+- `cpu-ai-system.md` - CPU rider opponents (CT/AR/TR): perceive→decide→emit, virtual pad, tweak vs replace. (Sister: `enemy-ai-system.md`.)
+- `enemy-spawn-system.md` - Enemy spawn: actor IDs, spawn manager, GOBJProc priorities, EventActorDesc.
+- `collision-system.md` - Map collision (mpColl): CollData structs, coll_kind dispatch, raycasts. (Entity damage: `hurtdata-system.md`.)
+- `hurtdata-system.md` - HurtData/HitColl damage: structs, pipeline, damage/knockback, applying damage from mod code.
+- `effects-system.md` - Model-effect layer (GObj+JObj): `Effect_SpawnSync`, effect-ID encoding, TEV recolor. (Sister: `particle-system.md`.)
+- `particle-system.md` - HSD point-particle pool: `Particle` struct, render path, free-lists, per-particle recolor.
+- `copy-ability-system.md` - Copy ability lifecycle: grant, per-frame tick, teardown, force-drop from mod code.
+- `custom-items.md` - Custom items framework: `.dat` FST discovery, `customItem` descriptor, `itData[]`/spawn-weight splice.
+- `custom-hud.md` - Custom HUD elements: GObj/JObj setup, GX link rendering.
+- `css-system.md` - Character select (all 3 modes): icon pipeline, Character/MachineKind mapping, availability.
+- `machine-charge-system.md` - Machine charge/boost system.
+- `projectile-system.md` - Projectile system.
+- `yakumono-system.md` - Yakumono (stage objects) system.
+- `scene-system.md` - Scene/mode transition system.
+- `sis-text-system.md` - SIS text: commands, lookup tables, custom-event text extension.
+- `sky-lighting-system.md` - Sky preset + lighting transition system.
+- `sky-backdrop-system.md` - Custom CT backdrops: ModelSection, `3D_CreateStageModel` hook, carve toolchain. (Sister: `sky-lighting-system.md`.)
+- `memcard-save-system.md` - Save system: vanilla `GCP_MemCard` + hoshi mod-data save + card tile format.
+- `kirby-model-scale.md` - Big/Small Kirby scaling: per-object `model_scale` fields, all-mode implementation.
+- `hypernova.md` - Hypernova power-up: vanilla-inhale presentation reuse, custom cone vacuum, recolor, 2× scale.
+- `textbox.md` - Textbox notifications: colored-noun rendering, typewriter, scene-change persistence.
+- `gate-*.md` - AP gating, one per resource: abilities, boxes, colors, events, items, machines, patches, stages, stadiums.
+- `patch-cap.md` - Progressive patch cap: replacement hooks, consumer coverage, raising the ceiling.
+- `patch-drop-system.md` - Patch drop pipeline: producer/consumer, drop_mode 0/1/2, stat→ItemKind table.
+- `permanent-patches.md` - Permanent patches: round-start re-application, all-up consolidation.
+- `spawn-rate.md` - Spawn Rate Up item: CT timer/cap scaling, TR probability scaling.
 - `topride-system.md` - Top Ride mode: KirbyMgr, charge component, cpu_level encoding.
-- `traplink-send.md` - TrapLink send/receive implementation.
-- `yakumono-system.md` - Yakumono (game stage objects) system documentation.
+- `topride-item-system.md` - Top Ride items: bitmask, ability-themed items, gating hooks.
+- `topride-kirby-states.md` - Top Ride Kirby states: `state_handler` slot, transitions, full state set for mod invocation.
+- `client-game-protocol.md` / `deathlink.md` / `energylink.md` / `traplink-send.md` - AP client protocol + link systems.
+- `pluggable-mods-riivolution.md` - Design note (not implemented): per-mod Riivolution toggles.
 
 ## Reverse Engineering Workflow
 
@@ -132,7 +110,7 @@ When reverse engineering game functions and discovering their purpose, **always*
 1. **`externals/hoshi/include/`** - Add/update function declarations and data structure definitions in the appropriate header files (typically `game.h`). Include the address in a comment.
 2. **`externals/hoshi/packtool/link.ld`** - Add symbol addresses for newly identified functions so they can be called from mod code. Data globals (r13-relative/SDA addresses) do not go here - declare them as `static` pointer casts in headers instead (see `event.h` or `game.h` for examples).
 3. **`externals/hoshi/GKYE01.map`** - Rename unnamed symbols (`zz_XXXXXXXX_`) at their addresses to the discovered names.
-4. **Ghidra:** Use the `ghidra-cli` skill to rename the corresponding functions in the Ghidra project to keep it in sync.
+4. **Ghidra:** Use the `ghidra-cli` skill to keep the Ghidra project in sync - rename the function to the discovered name, set its signature (`function set-signature`) using the hoshi types, and type any relevant local vars (`function set-var-type`). If you added or changed a **struct/enum** in the hoshi headers, re-import types with `scripts/ghidra/import_types.sh`; if you added or changed a documented prototype (a header decl with a `// 0xADDR` comment), re-run `scripts/ghidra/apply_protos.py` to push the new signatures; if you added or changed a **fixed-address global** (a `static TYPE *name = (TYPE*)0xADDR;` / cast-macro / r13-relative decl), re-run `scripts/ghidra/import_globals.sh` to type and label it. See `scripts/ghidra/README.md`. The bridge does not auto-save; persist edits to disk with `ghidra program close --program kar.dol` (then `ghidra program open --program kar.dol` to keep working). `ghidra analyze` does **not** reliably save freshly-created script data (e.g. the global `createData` definitions), so use `program close` (`import_globals.sh` does the close+open for you). Running `analyze` later is safe - it preserves already-saved globals.
 
 ### Tooling
 
@@ -161,7 +139,7 @@ When reverse engineering game functions and discovering their purpose, **always*
 - C99, targeting PowerPC 750 (GameCube CPU). The r13 register (SDA base) is `0x805DD0E0`; game globals in this range are accessed as r13-relative offsets. The r2 register (SDA2 base) is `0x805E6700`; read-only small data (float constants, etc.) are accessed as r2-relative offsets.
 - Compiled with `-O1`, no exceptions, no RTTI, freestanding environment.
 - **Brace style: Allman.** Opening brace on its own line for all function definitions, matching hoshi style. Apply this to all mods in this repo.
-- Hoshi framework headers (`externals/hoshi/include/`) use traditional `#ifndef`/`#define`/`#endif` include guards. Newer headers use a `KAR_H_<NAME>` guard macro; a number of older ones still use the legacy `MEX_H_<NAME>` prefix (carried over from the m-ex framework) - prefer `KAR_H_*` for new headers. Mod headers (anywhere under `mods/*/src/` or `mods/*/include/`) also use `#ifndef`/`#define`/`#endif` guards. The mod public API headers (`archipelago_api.h`, `custom_events_api.h`, `custom_items_api.h`, `custom_checklist_api.h`, `textbox_api.h`, `hypernova_api.h`) sit on the global include path and are consumed by other mods, but use the same plain name-based `#ifndef` guards.
+- All headers use `#ifndef`/`#define`/`#endif` include guards. For new hoshi headers prefer a `KAR_H_<NAME>` guard macro (many older ones still carry the legacy `MEX_H_<NAME>` prefix from the m-ex framework). Mod headers - including the public API headers on the global include path - use plain name-based guards.
 - Game memory addresses and structures are defined in hoshi headers under `externals/hoshi/include/`. Don't redeclare them in mod code - include the appropriate hoshi header instead.
 - **Never reference `docs/` files in code comments** (no `see docs/foo.md`, no doc section names, no `docs/*.csv`). Comments must stand on their own - state the relevant fact inline instead of pointing at a doc. The `docs/` tree is reference material that drifts independently of the code; a comment pointer becomes stale silently.
 - **Comments and docs are current-state, not a lab notebook.** Both code comments and `docs/*.md` describe what the code/engine does *now* and why it is shaped that way. Do **not** narrate the reverse-engineering process or how a conclusion was reached, and do **not** include dated or "verified live"/Dolphin-verification notes, past failed/"naive" attempts, or "old docs said X" corrections. State the fact and ground it in the code (function name + address). Forward-looking design notes for WIP/unimplemented features are fine - just drop the "RE gap / needs live confirm" framing. When you learn something by live verification, record the resulting *fact*, not the act of verifying it.
