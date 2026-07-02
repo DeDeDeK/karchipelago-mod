@@ -12,16 +12,11 @@ Usage:
 """
 
 import os
-import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hsd.archive import Archive, HSD_HEADER, u16, u32
-
-
-def f32(buf, off):
-    return struct.unpack(">f", buf[off : off + 4])[0]
+from hsd.archive import Archive, HSD_HEADER, f32, u16, u32
 
 
 def ptr(buf, off):
@@ -47,8 +42,6 @@ def dump_wobj_desc(buf, off, label):
 
 
 def dump_lobj_desc(buf, off, idx):
-    class_name_p = ptr(buf, off + 0x00)
-    next_p = ptr(buf, off + 0x04)
     flags = u16(buf, off + 0x08)
     attnflags = u16(buf, off + 0x0A)
     r, g, b, a = buf[off + 0x0C], buf[off + 0x0D], buf[off + 0x0E], buf[off + 0x0F]

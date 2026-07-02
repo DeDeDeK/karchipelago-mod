@@ -28,14 +28,22 @@ typedef struct ModelSection {
 } ModelSection;
 ```
 
-Each pointer is a *pointer-to-pointer* (HSD's "scene_data" array
-style) — `ms[N]` is a slot, and the slot contains a `JOBJDesc *`. A
-NULL slot is legal and just suppresses that subtree.
-
 `grModel<X>` (the public symbol exported by every `Gr<X>Model.dat`
-stage archive) **is** a `ModelSection`. So loading a foreign stage's
-archive and taking `donor_ms.backdrop` gives you a backdrop you can
-graft into any other stage that respects `ModelSection`.
+stage archive) **is** this struct — HSD's `KAR_grModel`. Its slots
+don't point straight at `JOBJDesc`s: `terrain` points at a
+`KAR_grMainModel` and `backdrop` at a `KAR_grSkyBoxModel`. Each of those
+*leads with* its root `JOBJDesc *` (the main model then carries
+jobj/dobj/pobj counts + a bounding record; the skybox carries a
+model-motion joint). Because the root pointer is the first field,
+dereferencing a slot as a `JOBJDesc **` yields the root joint — which is
+all `3D_CreateStageModel` ever reads, so the loader can treat the whole
+thing as a `ModelSection` of `JOBJDesc **`s. `unk_8`/`unk_c` are two
+further model slots left unidentified. A NULL slot is legal and just
+suppresses that subtree.
+
+So loading a foreign stage's archive and taking `donor_ms.backdrop`
+gives you a backdrop you can graft into any other stage that respects
+`ModelSection`.
 
 ### `3D_CreateStageModel` (0x800dcbf0) — the loader
 

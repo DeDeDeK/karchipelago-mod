@@ -18,7 +18,7 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hsd.archive import Archive, NotAnHSDArchive
+from hsd.archive import Archive
 from hsd.carve_backdrop import carve
 from hsd.geom_bounds import backdrop_root, measure_root
 
@@ -43,7 +43,7 @@ def main():
         name = os.path.basename(path)
         try:
             arc = Archive(path)
-        except (NotAnHSDArchive, Exception) as e:
+        except Exception as e:
             summary.append((name, None, f"open failed: {e}"))
             continue
 

@@ -41,18 +41,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hsd.archive import Archive, HSD_HEADER, u32, u16
-
-from hsd.walker import Walker, merge_intervals
+from hsd.archive import Archive, build_archive, u16, u32
+from hsd.walker import Walker, carve_ranges
+from hsd.gx import FORMAT_NAME, GX_TF_RGB5A3, align32, encode_rgb5a3
 
 # Must match include/custom_items_api.h.
 CUSTOM_ITEM_MAGIC = 0x4349544D  # 'CITM'
 CUSTOM_ITEM_DESC_VERSION = 3
 DESC_SIZE = 0x38
 ITDATA_STRIDE = 0x18
-GX_TF_RGB5A3 = 5
-GX_FORMATS = {0: "I4", 1: "I8", 2: "IA4", 3: "IA8", 4: "RGB565",
-              5: "RGB5A3", 6: "RGBA8", 8: "C4", 9: "C8", 10: "C14X2", 14: "CMPR"}
 
 
 def fit_image(im, tw, th, fit):
@@ -74,26 +71,6 @@ def fit_image(im, tw, th, fit):
     out = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
     out.paste(rs, ((tw - rs.width) // 2, (th - rs.height) // 2))
     return out
-
-
-def encode_rgb5a3(im):
-    """Encode an RGBA PIL image to GX_TF_RGB5A3 (16bpp, 4x4 tiles, big-endian).
-    Opaque pixels (alpha >= 0xe0) use RGB555 (top bit set); others use the
-    ARGB3444 form."""
-    w, h = im.size
-    px = im.load()
-    out = bytearray()
-    for ty in range(0, h, 4):
-        for tx in range(0, w, 4):
-            for y in range(ty, ty + 4):
-                for x in range(tx, tx + 4):
-                    r, g, b, a = px[x, y]
-                    if a >= 0xE0:
-                        val = 0x8000 | ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)
-                    else:
-                        val = ((a >> 5) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
-                    out += struct.pack(">H", val)
-    return bytes(out)
 
 
 def carve(item_dat, source_kind, out_path, name, base_kind, scale, weight_box,
@@ -123,7 +100,7 @@ def carve(item_dat, source_kind, out_path, name, base_kind, scale, weight_box,
     for idx, o in enumerate(img_descs):
         tw, th = u16(arc.data, o + 0x04), u16(arc.data, o + 0x06)
         fmt = u32(arc.data, o + 0x08)
-        print(f"  texture[{idx}]: {tw}x{th} {GX_FORMATS.get(fmt, fmt)}")
+        print(f"  texture[{idx}]: {tw}x{th} {FORMAT_NAME.get(fmt, fmt)}")
 
     # Optional custom texture: re-encode a PNG (RGB5A3) into the chosen ImageDesc.
     # The old texture data is dropped from the kept ranges; the new blob is
@@ -148,32 +125,22 @@ def carve(item_dat, source_kind, out_path, name, base_kind, scale, weight_box,
         print(f"  replacing texture[{texture_index}] -> {tw}x{th} RGB5A3 "
               f"({texture_fit}, {len(new_blob)} bytes)")
 
-    intervals = merge_intervals([(off, off + sz) for off, (_, sz) in visited.items()])
-    kept = sum(e - s for s, e in intervals)
-    print(f"  reached {len(visited)} objects, kept {len(intervals)} ranges, {kept / 1024:.1f} KB")
-
     # Layout: descriptor, then name string (4-aligned), then carved ranges.
     name_bytes = name.encode("ascii") + b"\0"
     name_off = DESC_SIZE
-    prefix = name_off + len(name_bytes)
-    prefix = (prefix + 3) & ~3  # 4-align before the model ranges
+    prefix_len = (name_off + len(name_bytes) + 3) & ~3  # 4-align before the ranges
+    prefix = bytearray(prefix_len)
+    prefix[name_off:name_off + len(name_bytes)] = name_bytes
 
-    remap = {}
-    cursor = prefix
-    new_data = bytearray(prefix)
-    new_data[name_off:name_off + len(name_bytes)] = name_bytes
-
-    for s, e in intervals:
-        # Preserve each byte's source-relative 32-byte alignment (GX needs
-        # textures / display lists / vertex arrays cache-line aligned).
-        pad = ((s & 31) - (cursor & 31)) & 31
-        if pad:
-            new_data.extend(b"\0" * pad)
-            cursor += pad
-        for o in range(s, e):
-            remap[o] = cursor + (o - s)
-        new_data.extend(arc.data[s:e])
-        cursor += e - s
+    # If a texture is being replaced, its ImageDesc image pointer is
+    # rewritten below - keep carve_ranges from translating it here.
+    skip = (img_desc_off,) if img_desc_off is not None else ()
+    res = carve_ranges(arc, visited, prefix, base_relocs=(0x08, 0x14), skip_relocs=skip)
+    new_data, remap = res.data, res.remap
+    print(f"  reached {len(visited)} objects, kept {len(res.intervals)} ranges, "
+          f"{len(remap) / 1024:.1f} KB")
+    if res.dropped:
+        print(f"  dropped {res.dropped} relocs to out-of-range targets (zeroed in slop)")
 
     # Fill in the descriptor (big-endian, matching CustomItemDesc).
     struct.pack_into(">I", new_data, 0x00, CUSTOM_ITEM_MAGIC)
@@ -190,26 +157,10 @@ def carve(item_dat, source_kind, out_path, name, base_kind, scale, weight_box,
     struct.pack_into(">I", new_data, 0x30, model_flag)          # model_flag (v2)
     struct.pack_into(">f", new_data, 0x34, scale)               # scale (v3)
 
-    new_relocs = [0x08, 0x14]  # name, model
-    dropped = 0
-    for src in arc.relocs:
-        if src not in remap:
-            continue
-        if src == img_desc_off:
-            continue  # ImageDesc image pointer - repointed to the appended blob below
-        tgt = u32(arc.data, src)
-        new_src = remap[src]
-        if tgt in remap:
-            struct.pack_into(">I", new_data, new_src, remap[tgt])
-            new_relocs.append(new_src)
-        else:
-            struct.pack_into(">I", new_data, new_src, 0)  # dangling pointer in slop
-            dropped += 1
-
+    new_relocs = res.relocs
     # Append the new texture and repoint/reformat the ImageDesc.
     if new_blob is not None:
-        pad = (-len(new_data)) & 31  # 32-align the texture for GX
-        new_data.extend(b"\0" * pad)
+        new_data.extend(b"\0" * align32(len(new_data)))  # 32-align the texture for GX
         blob_new_off = len(new_data)
         new_data.extend(new_blob)
         id_new = remap[img_desc_off]
@@ -217,20 +168,10 @@ def carve(item_dat, source_kind, out_path, name, base_kind, scale, weight_box,
         struct.pack_into(">I", new_data, id_new + 0x08, GX_TF_RGB5A3)   # format
         new_relocs.append(id_new + 0x00)
 
-    new_relocs.sort()
-    if dropped:
-        print(f"  dropped {dropped} relocs to out-of-range targets (zeroed in slop)")
-
-    data_bytes = bytes(new_data)
-    reloc_bytes = b"".join(struct.pack(">I", r) for r in new_relocs)
-    public_bytes = struct.pack(">II", 0, 0)  # one public at data_off 0, name_off 0
-    string_bytes = b"customItem\0"
-    file_size = HSD_HEADER + len(data_bytes) + len(reloc_bytes) + len(public_bytes) + len(string_bytes)
-    header = struct.pack(">IIIII4s8x", file_size, len(data_bytes), len(new_relocs), 1, 0, arc.version)
-
+    out = build_archive(new_data, new_relocs, [("customItem", 0)], arc.version)
     with open(out_path, "wb") as f:
-        f.write(header + data_bytes + reloc_bytes + public_bytes + string_bytes)
-    print(f"  wrote {out_path} ({file_size / 1024:.1f} KB, public 'customItem')")
+        f.write(out)
+    print(f"  wrote {out_path} ({len(out) / 1024:.1f} KB, public 'customItem')")
 
 
 def main(argv):

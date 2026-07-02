@@ -23,11 +23,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from hsd.archive import Archive, u16, u32
-
-
-def f32(b, o):
-    return struct.unpack(">f", b[o:o + 4])[0]
+from hsd.archive import Archive, f32, u16, u32
 
 
 CTYPE_SIZE = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4}  # U8 S8 U16 S16 F32
@@ -48,8 +44,6 @@ def read_comp(data, off, ctype, frac):
         return 0.0
     return v / (1 << frac)
 
-
-# --- 3x4 affine matrix helpers (row-major rows of length 4) -----------
 
 def mat_identity():
     return [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]
