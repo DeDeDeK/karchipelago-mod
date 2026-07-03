@@ -18,6 +18,7 @@ typedef struct APMenuSettings
     int ar_permanent_patches_enabled;
     int ct_random_start_machine; // start City Trial on a random unlocked machine
     int drop_ability_enabled;    // press Z to discard the current copy ability (CT/AR) or ability-power item (Top Ride)
+    int air_quick_spin_enabled;  // allow the L/R-flick quick spin while airborne (CT/AR)
 } APMenuSettings;
 
 extern APMenuSettings ap_menu_settings;

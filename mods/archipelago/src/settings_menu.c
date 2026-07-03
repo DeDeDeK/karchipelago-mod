@@ -39,6 +39,7 @@ static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Pe
 static void OnToggleARPermanent(int val)        { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Start Machine toggled %s\n", stc_off_on[val]); }
 static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
+static void OnToggleAirQuickSpin(int val)        { OSReport("[Main] Air Quick Spin toggled %s\n", stc_off_on[val]); }
 
 // Submenu: controls whether accumulated permanent stat patches are re-applied
 // at the start of each round/race. Receiving AP permanent-patch items still
@@ -93,7 +94,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 6,
+        .option_num = 7,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -201,6 +202,18 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleDropAbility,
+            },
+            &(OptionDesc){
+                .name = "Air Quick Spin",
+                .description = "Allow the L/R-flick quick spin while airborne (City Trial / Air Ride)",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.air_quick_spin_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleAirQuickSpin,
             },
         },
     },

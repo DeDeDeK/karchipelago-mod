@@ -26,6 +26,7 @@
 #include "gate_events.h"
 #include "gate_abilities.h"
 #include "gate_base_abilities.h"
+#include "air_quick_spin.h"
 #include "gate_boxes.h"
 #include "gate_items.h"
 #include "gate_machines.h"
@@ -119,6 +120,9 @@ void OnBoot()
 
     // Patches for base ability gating (inhale, quick spin, charge)
     GateBaseAbilities_OnBoot();
+
+    // Optional: allow the L/R-flick quick spin while airborne (menu toggle)
+    AirQuickSpin_OnBoot();
 
     // Item category gating (all-ups, food, stat items, legendary pieces, etc.)
     GateItems_OnBoot();
