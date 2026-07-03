@@ -326,6 +326,14 @@ typedef enum APItemId
     AP_ABILITY_UNLOCK_TORNADO,             // COPYKIND_TORNADO
     AP_ABILITY_UNLOCK_BIRD,                // COPYKIND_BIRD
 
+    // Base ability unlock items (771-773, aligned to BaseAbilityKind). Gate
+    // Kirby's fundamental moves - inhale, quick spin, and machine charge - each
+    // dead until its unlock is received. See gate_base_abilities.c.
+    AP_BASE_ABILITY_UNLOCK_BASE = 771,
+    AP_BASE_ABILITY_UNLOCK_INHALE = 771,   // BASEABILITY_INHALE
+    AP_BASE_ABILITY_UNLOCK_QUICKSPIN,      // BASEABILITY_QUICKSPIN
+    AP_BASE_ABILITY_UNLOCK_CHARGE,         // BASEABILITY_CHARGE
+
     // Patch type unlock items (780-788, aligned to PatchKind)
     AP_PATCH_UNLOCK_BASE = 780,
     AP_PATCH_UNLOCK_WEIGHT = 780,          // PATCHKIND_WEIGHT
@@ -544,6 +552,17 @@ typedef enum ItemUnlockKind
     ITUNLOCK_NUM,
 } ItemUnlockKind;
 
+// Archipelago-defined base-ability kinds - Kirby's fundamental moves gated
+// behind AP items. Not a vanilla game enum. Bit index N = bit N in
+// base_ability_unlocked_mask. See gate_base_abilities.c.
+typedef enum BaseAbilityKind
+{
+    BASEABILITY_INHALE,
+    BASEABILITY_QUICKSPIN,
+    BASEABILITY_CHARGE,
+    BASEABILITY_NUM,
+} BaseAbilityKind;
+
 // Categories for the unlock-mask getter/setter pair below. Each backs a
 // bitmask field on archipelago's per-mod save (machine_unlocked_mask,
 // ability_unlocked_mask, etc.). Masks narrower than 32 bits return
@@ -561,6 +580,7 @@ typedef enum APUnlockCategory
     AP_UNLOCK_TOPRIDE_ITEM,    // u32 - TRITEM_*
     AP_UNLOCK_COLOR,           // u8  - KIRBYCOLOR_*
     AP_UNLOCK_STADIUM,         // u32 - STKIND_*
+    AP_UNLOCK_BASE_ABILITY,    // u8  - BaseAbilityKind (inhale / quick spin / charge)
     AP_UNLOCK_NUM,
 } APUnlockCategory;
 

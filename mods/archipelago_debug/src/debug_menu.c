@@ -24,6 +24,7 @@ static int tr_stage_state[TOPRIDE_NUM];
 static int tr_item_state[TRITEM_NUM];
 static int color_state[KIRBYCOLOR_NUM];
 static int stadium_state[STKIND_NUM];
+static int base_ability_state[BASEABILITY_NUM];
 
 #define DEF_SYNC(name, cat, arr, count) \
     static void name(int v) { \
@@ -48,6 +49,7 @@ DEF_SYNC(SyncTRStages,  AP_UNLOCK_TOPRIDE_STAGE,   tr_stage_state, TOPRIDE_NUM)
 DEF_SYNC(SyncTRItems,   AP_UNLOCK_TOPRIDE_ITEM,    tr_item_state,  TRITEM_NUM)
 DEF_SYNC(SyncColors,    AP_UNLOCK_COLOR,           color_state,    KIRBYCOLOR_NUM)
 DEF_SYNC(SyncStadiums,  AP_UNLOCK_STADIUM,         stadium_state,  STKIND_NUM)
+DEF_SYNC(SyncBaseAbil,  AP_UNLOCK_BASE_ABILITY,    base_ability_state, BASEABILITY_NUM)
 
 #define DEF_REFRESH(name, cat, arr, count) \
     static void name(void) { \
@@ -67,6 +69,7 @@ DEF_REFRESH(RefreshTRStages,  AP_UNLOCK_TOPRIDE_STAGE,  tr_stage_state, TOPRIDE_
 DEF_REFRESH(RefreshTRItems,   AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_NUM)
 DEF_REFRESH(RefreshColors,    AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM)
 DEF_REFRESH(RefreshStadiums,  AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM)
+DEF_REFRESH(RefreshBaseAbil,  AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM)
 
 void DebugMenu_RefreshStateFromMasks(void)
 {
@@ -81,6 +84,7 @@ void DebugMenu_RefreshStateFromMasks(void)
     RefreshTRItems();
     RefreshColors();
     RefreshStadiums();
+    RefreshBaseAbil();
 }
 
 #define DEF_ALL(prefix, cat, arr, count, label) \
@@ -115,6 +119,7 @@ DEF_ALL(Trs, AP_UNLOCK_TOPRIDE_STAGE,  tr_stage_state, TOPRIDE_NUM,      "TR sta
 DEF_ALL(Tri, AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_NUM,       "TR items")
 DEF_ALL(Clr, AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM,   "colors")
 DEF_ALL(Std, AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM,       "stadiums")
+DEF_ALL(Bab, AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM, "base abilities")
 
 #define GIVE_FN(name, id) \
     static int name(OptionDesc *self) { \
@@ -163,6 +168,11 @@ GIVE_FN(GiveCopyTornado, AP_ITKIND_COPYTORNADO)
 GIVE_FN(GiveCopySword,   AP_ITKIND_COPYSWORD)
 GIVE_FN(GiveCopyNeedle,  AP_ITKIND_COPYSPIKE)
 GIVE_FN(GiveCopyMike,    AP_ITKIND_COPYMIC)
+
+// Base ability unlocks (exercise the item-receive path -> GateBaseAbilities_UnlockAbility)
+GIVE_FN(GiveUnlockInhale,    AP_BASE_ABILITY_UNLOCK_INHALE)
+GIVE_FN(GiveUnlockQuickSpin, AP_BASE_ABILITY_UNLOCK_QUICKSPIN)
+GIVE_FN(GiveUnlockCharge,    AP_BASE_ABILITY_UNLOCK_CHARGE)
 
 // Food
 GIVE_FN(GiveMaximTomato,  AP_ITKIND_FOODMAXIMTOMATO)
@@ -422,6 +432,17 @@ static MenuDesc abilities_menu = {
     },
 };
 
+static MenuDesc base_abilities_menu = {
+    .option_num = 5,
+    .options = {
+        A("Unlock All", "Unlock all base abilities", BabUnlockAll),
+        A("Lock All",   "Lock all base abilities",   BabLockAll),
+        G("Inhale",     base_ability_state, BASEABILITY_INHALE,    SyncBaseAbil),
+        G("Quick Spin", base_ability_state, BASEABILITY_QUICKSPIN, SyncBaseAbil),
+        G("Charge",     base_ability_state, BASEABILITY_CHARGE,    SyncBaseAbil),
+    },
+};
+
 static MenuDesc events_menu = {
     .option_num = 18,
     .options = {
@@ -666,6 +687,15 @@ static MenuDesc give_abilities_menu = {
     },
 };
 
+static MenuDesc give_base_abilities_menu = {
+    .option_num = 3,
+    .options = {
+        A("Unlock Inhale",     "Grant the Inhale unlock item",     GiveUnlockInhale),
+        A("Unlock Quick Spin", "Grant the Quick Spin unlock item", GiveUnlockQuickSpin),
+        A("Unlock Charge",     "Grant the Charge unlock item",     GiveUnlockCharge),
+    },
+};
+
 static MenuDesc give_food_menu = {
     .option_num = 12,
     .options = {
@@ -783,11 +813,12 @@ static MenuDesc give_topride_items_menu = {
 };
 
 static MenuDesc give_items_menu = {
-    .option_num = 10,
+    .option_num = 11,
     .options = {
         S("Stat Patches",      "Temporary stat patches",          give_stat_patches_menu),
         S("Permanent Patches", "Permanent stat boosts",           give_perm_patches_menu),
         S("Copy Abilities",    "Give Kirby a copy ability",       give_abilities_menu),
+        S("Base Ability Unlocks", "Grant a base-ability unlock",  give_base_abilities_menu),
         S("Food",              "Healing items",                   give_food_menu),
         S("Special Items",     "Powerful one-use items",          give_special_menu),
         S("Legendary Pieces",  "Dragoon and Hydra parts",        give_legendary_menu),
@@ -820,10 +851,11 @@ static MenuDesc checks_menu = {
 };
 
 static MenuDesc debug_menu = {
-    .option_num = 13,
+    .option_num = 14,
     .options = {
         S("Machines",        "Toggle machine unlock gates",     machines_menu),
         S("Copy Abilities",  "Toggle ability unlock gates",     abilities_menu),
+        S("Base Abilities",  "Toggle base ability gates",       base_abilities_menu),
         S("Events",          "Toggle event unlock gates",       events_menu),
         S("Patch Types",     "Toggle patch type unlock gates",  patches_menu),
         S("CT Items",        "Toggle CT item unlock gates",     items_menu),

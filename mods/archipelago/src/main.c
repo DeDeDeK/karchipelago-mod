@@ -25,6 +25,7 @@
 #include "patch_cap.h"
 #include "gate_events.h"
 #include "gate_abilities.h"
+#include "gate_base_abilities.h"
 #include "gate_boxes.h"
 #include "gate_items.h"
 #include "gate_machines.h"
@@ -115,6 +116,9 @@ void OnBoot()
 
     // Patches for copy ability gating
     GateAbilities_OnBoot();
+
+    // Patches for base ability gating (inhale, quick spin, charge)
+    GateBaseAbilities_OnBoot();
 
     // Item category gating (all-ups, food, stat items, legendary pieces, etc.)
     GateItems_OnBoot();
@@ -233,6 +237,7 @@ static void APOptions_ApplyUngatedCategories(void)
     if (!opts->topride_item_gating_enabled)  Unlock_SetMask(AP_UNLOCK_TOPRIDE_ITEM,  (1u << TRITEM_NUM) - 1);
     if (!opts->color_gating_enabled)         Unlock_SetMask(AP_UNLOCK_COLOR,         (1u << KIRBYCOLOR_NUM) - 1);
     if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       (1u << STKIND_NUM) - 1);
+    if (!opts->base_ability_gating_enabled)  Unlock_SetMask(AP_UNLOCK_BASE_ABILITY,  (1u << BASEABILITY_NUM) - 1);
 
     // The three Top Ride "New Item" types (Chickie/Who? Paint/Lantern, enabled-
     // mask bits 20/18/15) need a second nudge. Unlike every other category, the
@@ -264,6 +269,7 @@ static void APOptions_ApplyUngatedCategories(void)
              opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
              opts->topride_item_gating_enabled, opts->color_gating_enabled,
              opts->stadium_gating_enabled);
+    OSReport("[Main] Gating - base abilities:%d\n", opts->base_ability_gating_enabled);
 }
 
 // Check if the AP client has written slot options to APData.

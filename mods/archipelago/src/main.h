@@ -98,6 +98,7 @@ typedef struct APSlotOptions
     u32 topride_item_gating_enabled;
     u32 color_gating_enabled;
     u32 stadium_gating_enabled;
+    u32 base_ability_gating_enabled;
 
     // Non-progression checklist rewards (music, sound test, extra rules, endings, filler boxes, …).
     // 1 = gated (default: each reward is an AP item the player finds). 0 = ungated (the mod marks
@@ -122,6 +123,7 @@ typedef struct APSave
     u16 topride_stage_unlocked_mask;                    // Bitmask of AP-unlocked Top Ride courses (bit N = course N)
     u32 topride_item_unlocked_mask;                     // Bitmask of AP-unlocked Top Ride items (bit N = TopRideItemKind N)
     u8 color_unlocked_mask;                             // Bitmask of AP-unlocked Kirby colors (bit N = KirbyColor N)
+    u8 base_ability_unlocked_mask;                      // Bitmask of AP-unlocked base abilities (bit N = BaseAbilityKind N: inhale/quick spin/charge)
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
     u8 spawn_rate_level;                                // Number of Spawn Rate Up items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-PATCH_STAT_MAX)

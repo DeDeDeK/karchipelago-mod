@@ -13,6 +13,7 @@
 #include "patch_cap.h"
 #include "gate_events.h"
 #include "gate_abilities.h"
+#include "gate_base_abilities.h"
 #include "gate_boxes.h"
 #include "gate_patches.h"
 #include "gate_items.h"
@@ -221,6 +222,13 @@ int APItems_HandleItem(uint ap_item_id)
     {
         CopyKind kind = ap_item_id - AP_ABILITY_UNLOCK_BASE;
         return GateAbilities_UnlockAbility(kind);
+    }
+
+    // Base ability unlock items (AP_BASE_ABILITY_UNLOCK_BASE + BaseAbilityKind)
+    if (ap_item_id >= AP_BASE_ABILITY_UNLOCK_BASE && ap_item_id < AP_BASE_ABILITY_UNLOCK_BASE + BASEABILITY_NUM)
+    {
+        BaseAbilityKind kind = ap_item_id - AP_BASE_ABILITY_UNLOCK_BASE;
+        return GateBaseAbilities_UnlockAbility(kind);
     }
 
     // Patch type unlock items (AP_PATCH_UNLOCK_BASE + PatchKind)
