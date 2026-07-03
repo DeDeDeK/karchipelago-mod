@@ -11,6 +11,7 @@ extern MenuDesc rain_menu;
 extern MenuDesc wind_menu;
 extern MenuDesc lightning_menu;
 extern MenuDesc puddle_menu;
+extern MenuDesc tree_menu;
 extern OptionDesc event_sky_option;
 
 static void OnBoot(void)
@@ -22,7 +23,7 @@ static void OnBoot(void)
 }
 
 static MenuDesc top_menu = {
-    .option_num = 7,
+    .option_num = 8,
     .options = {
         &(OptionDesc){
             .name = "Weather Presets",
@@ -59,6 +60,12 @@ static MenuDesc top_menu = {
             .description = "Puddle slowdown strength, frequency, size, and disc visibility (Puddles preset)",
             .kind = OPTKIND_MENU,
             .menu_ptr = &puddle_menu,
+        },
+        &(OptionDesc){
+            .name = "Trees",
+            .description = "Let wind lean the City Trial forest trees",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &tree_menu,
         },
         &event_sky_option,
     },

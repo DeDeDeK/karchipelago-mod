@@ -265,6 +265,14 @@ void Wind_Tick(void);
 void Wind_GetVector(struct Vec3 *out);
 void Wind_Reset(void);
 
+// Wind bends the City Trial forest trees (yakumono desc_id 34). Driven from the
+// per-frame weather anim tick, after Wind_Tick so it reads the fresh vector.
+// Tree_Tick lazily enumerates the forest-tree joints on the first CT frame,
+// caches each one's authored rotation, and each frame leans the intact ones
+// downwind (calm wind = rigid). Tree_Reset drops the cache on CT teardown.
+void Tree_Tick(void);
+void Tree_Reset(void);
+
 // Driven from the per-frame weather anim tick. Puddle_SetActive latches the
 // active preset's puddle config (NULL or def->enabled == 0 = off) and arms a
 // fresh placement for the round; Puddle_Tick lazily scatters the pools on the

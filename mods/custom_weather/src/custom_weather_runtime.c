@@ -44,6 +44,7 @@ static void ResetPerStage(GrObj *grobj)
     Wind_Reset();
     Puddle_Reset();
     Hail_Reset();
+    Tree_Reset();
 }
 
 static void ApplyTerrainTint(const CustomPresetDef *def)
@@ -188,11 +189,12 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         fog->scale = CustomWeather_GetFogScale();
 
     Lightning_Tick(fog);
-    // Advance the wind first so rain and hail read the fresh vector this frame.
+    // Advance the wind first so rain, hail, and trees read the fresh vector.
     Wind_Tick();
     Rain_Tick();
     Hail_Tick();
     Puddle_Tick();
+    Tree_Tick();
 }
 
 // Hook at 0x800ce648 (immediately after `bl Sky_Update`). Prologue copies
