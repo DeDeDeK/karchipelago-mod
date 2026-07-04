@@ -1,10 +1,7 @@
-// Wind bends the City Trial forest trees. Each forest tree (yakumono desc_id 34,
-// ~53 instances) renders from its own JOBJ_SKELETON joint whose world matrix is
-// rebuilt from the joint SRT every frame by HSD_JObjSetupMatrixSub. So a small
-// tilt written into that joint's Euler rot each frame is honored automatically -
-// no user matrix, no dirty flag, no vertex work. The tilt follows the global
-// wind vector (wind.c), so calm presets leave the trees rigid and storms lean
-// them over. Collision is never touched; this is purely the visual model.
+// Wind bends the City Trial forest trees (yakumono desc_id 34): each frame a small
+// tilt following the global wind vector (wind.c) is written into each tree's skeleton
+// joint rotation, so calm presets leave them rigid and storms lean them over. Visual
+// only - collision is never touched.
 
 #include "os.h"
 #include "game.h"
@@ -161,9 +158,8 @@ void Tree_Tick(void)
         float gust = 1.0f + TREE_RUSTLE * sinf(stc_phase + (float)i * TREE_PHASE_STEP);
         float theta = bend * gust;
 
-        // Tip the trunk (+Y) toward the wind heading. Rotating about X leans the
-        // top toward +Z; about Z leans it toward -X. Signs may flip after a live
-        // check if the grove leans upwind.
+        // Tip the trunk (+Y) toward the wind heading: rotating about X leans the
+        // top toward +Z, about Z toward -X.
         t->jobj->rot.X = t->base_rot.X + theta * dirz;
         t->jobj->rot.Z = t->base_rot.Z - theta * dirx;
     }

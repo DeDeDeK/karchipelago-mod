@@ -44,15 +44,10 @@ typedef enum WeatherKind
     WEATHER_PUDDLES,
 } WeatherKind;
 
-// Per-preset world-space rain config (CustomPresetDef.rain). Drawn by rain.c as
-// a depth-tested field of GX line streaks that follows the camera, so the rain
-// lives in the stage rather than as a flat overlay. The appearance/motion
-// fields take 0 = "use the rain.c module default", so a preset can set just
-// { enabled, color } and inherit sensible motion. The horizontal slant is not
-// configured here - rain.c reads the global wind vector (wind.c) each frame, so
-// a preset's WindDef drives both the rain's slant and the rest of the weather.
-// The global "City Trial Sky > Rain" menu scales a master intensity over this
-// density across every preset (Off disables rain) and can gate the wind slant.
+// Per-preset world-space rain config (CustomPresetDef.rain), drawn by rain.c.
+// Numeric fields take 0 = rain.c module default. The horizontal slant is not set
+// here - rain.c reads the global wind vector each frame. The global Rain menu
+// scales a master intensity over the density (Off disables rain).
 typedef struct RainDef
 {
     int   enabled;     // 0 = no rain for this preset
@@ -63,10 +58,8 @@ typedef struct RainDef
     float streak;      // streak length = per-frame velocity * this. 0 = default
 } RainDef;
 
-// Visible-bolt mode for a lightning preset (LightningDef.bolt). The flash (fog/
-// EFB/global-light punch) lights terrain; the bolt is GX line geometry plus a
-// point light at its midpoint that lights nearby riders. Bolts are occluded by
-// stage geometry (depth-tested, like the rain).
+// Visible-bolt mode for a lightning preset (LightningDef.bolt). The flash lights
+// terrain; the bolt is GX geometry plus a midpoint point light for nearby riders.
 typedef enum LightningBoltMode
 {
     LTNG_BOLT_OFF = 0,   // no bolt geometry; the screen flash only (default)
@@ -74,17 +67,10 @@ typedef enum LightningBoltMode
     LTNG_BOLT_REPLACE,   // draw a bolt INSTEAD of the screen flash (terrain stays dim)
 } LightningBoltMode;
 
-// Per-preset lightning config (CustomPresetDef.lightning). Driven by
-// lightning.c as a strike loop: long random lulls punctuated by a brief flash
-// that punches the fog/EFB color (and a spare LOBJ) toward flash_color, lighting
-// the world. A per-preset layer that composes freely with any preset's
-// lighting/fog. The non-enabled fields take 0 = "use the lightning.c module
-// default", so a preset can set just { enabled } and inherit a storm cadence.
-//
-// `bolt` opts the preset into visible bolts (default off = flash only). When on,
-// each strike also draws a jagged GX bolt themed to flash_color and lights a
-// point LOBJ at its midpoint. The global "Lightning Bolts" menu setting can
-// force this on/off across every preset.
+// Per-preset lightning config (CustomPresetDef.lightning), driven by lightning.c
+// as a strike loop (random lulls punctuated by a flash toward flash_color).
+// Numeric fields take 0 = lightning.c module default. `bolt` opts into visible
+// GX bolts; the global Lightning Bolts menu can force it on/off across presets.
 typedef struct LightningDef
 {
     int enabled;       // 0 = no lightning for this preset
@@ -95,16 +81,10 @@ typedef struct LightningDef
     int bolt;          // LightningBoltMode: 0 = off (default), 1 = augment, 2 = replace
 } LightningDef;
 
-// Per-preset wind config (CustomPresetDef.wind). Wind is a single global
-// horizontal vector owned by wind.c that several systems read each frame: it
-// slants the rain (rain.c), blows airborne items sideways, and pushes gliding
-// machines. The non-enabled fields take 0 = "use the wind.c module default", so
-// a preset can set just { enabled } and inherit a default breeze.
-//
-// The vector evolves over time: its speed pulses (gustiness) and its heading
-// wanders (chaos), both as smoothed random walks around the configured base.
-// If the global "Randomize Direction" toggle is on, the base heading is rolled
-// at random when the preset activates instead of using `heading`.
+// Per-preset wind config (CustomPresetDef.wind): one global horizontal vector
+// (wind.c) that slants the rain/hail, blows airborne items, and pushes gliding
+// machines. Numeric fields take 0 = wind.c module default. The vector evolves -
+// speed pulses (gustiness) and heading wanders (chaos) as smoothed random walks.
 typedef struct WindDef
 {
     int   enabled;     // 0 = no wind for this preset
@@ -114,15 +94,11 @@ typedef struct WindDef
     float chaos;       // 0..1, how much the heading wanders over time (0 = fixed)
 } WindDef;
 
-// Per-preset ground-puddle config (CustomPresetDef.puddles). Driven by puddle.c:
-// the preset runs a field of up to `count` oval pools that fade in and out at
-// random spots over time (each placed by raycasting down to find flat ground),
-// drawn as depth-tested translucent discs on the world XLU pass; every frame the
-// horizontal velocity of any grounded machine inside one is damped by
-// slow_factor (scaled by that pool's current opacity) - a self-correcting drag,
-// so speed recovers on exit. The non-enabled fields take 0 = "use the puddle.c
-// module default", and the global "City Trial Sky > Puddles" menu scales the
-// slowdown/frequency/size, toggles roaming, and can hide the discs on top.
+// Per-preset ground-puddle config (CustomPresetDef.puddles), driven by puddle.c:
+// a field of roaming oval pools on flat ground that damp any grounded machine
+// driving through them. Numeric fields take 0 = puddle.c module default. The
+// global Puddles menu scales slowdown/frequency/size, toggles roaming, and can
+// hide the discs.
 typedef struct PuddleDef
 {
     int   enabled;      // 0 = no puddles for this preset
@@ -131,6 +107,23 @@ typedef struct PuddleDef
     float radius;       // base pool radius in world units (ovals vary around it). 0 = default
     float slow_factor;  // horizontal velocity multiplier/frame while inside (0,1). 0 = default
 } PuddleDef;
+
+// Per-preset high cloud-deck config (CustomPresetDef.clouds), driven by clouds.c:
+// a low deck of soft translucent spheroid clusters drifting with the wind over
+// the map (riders fly through; vision inside is obscured). Numeric fields take
+// 0 = clouds.c module default. The global Clouds menu scales coverage/opacity/
+// size/variance, offsets the deck height, and can override the tint.
+typedef struct CloudDef
+{
+    int   enabled;     // 0 = no clouds for this preset
+    u32   color;       // RGBA8888 cloud color; A = base opacity. 0 = default
+    int   count;       // number of clouds in the field (clamped to the cap). 0 = default
+    float height;      // absolute deck world Y. 0 = derive from the OOB box (a low deck)
+    float height_var;  // +/- world units of per-cloud height spread about the deck. 0 = default
+    float size;        // base puff radius in world units. 0 = default
+    float size_var;    // 0..1 fractional per-cloud size spread about `size`. 0 = default
+    float puff_var;    // 0..1 size variance among the puffs within a cluster. 0 = default
+} CloudDef;
 
 // Per-custom-preset config. Fields are grouped by what they affect on screen,
 // not by the underlying engine mechanism. Color fields are RGBA8888 packed u32
@@ -189,6 +182,10 @@ typedef struct CustomPresetDef
     //  Puddles. Per-preset field of ground pools that drag machines driving
     // over them. puddles.enabled = 0 means no puddles for this preset.
     PuddleDef puddles;
+
+    //  Clouds. Per-preset deck of soft clouds drifting at a low deck over the
+    // map. clouds.enabled = 0 means no clouds for this preset.
+    CloudDef clouds;
 } CustomPresetDef;
 
 // Per-preset fog density curve. Maps to a GXFogType value applied to
@@ -217,71 +214,62 @@ void CustomWeatherRuntime_OnBoot(void);
 void CustomBackdrop_OnBoot(void);
 void EventSky_OnBoot(void);
 
-// Driven from the per-frame weather anim tick. Rain_SetActive latches the
-// active preset's rain config (NULL or rain->enabled == 0 = off); Rain_Tick
-// advances the fall each frame and lazily creates the render GObj; Rain_Reset
-// drops the cached GObj handle on City Trial teardown (the engine frees the
-// GObj itself).
+// Driven from the per-frame weather tick: SetActive latches the preset's config
+// (NULL or enabled == 0 = off), Tick advances the fall and lazily creates the
+// render GObj, Reset drops the cached GObj handle on CT teardown.
 void Rain_SetActive(const RainDef *rain);
 void Rain_Tick(void);
 void Rain_Reset(void);
 
-// Whether rain is currently active for the live preset (preset rain enabled and
-// the master Rain Intensity not Off). hail.c reads this to gate the hail layer.
+// Whether rain is active for the live preset; hail.c gates on this.
 int Rain_IsActive(void);
 
-// A per-machine cloud of real world-space hailstones that ride above each
-// machine while rain is active and the "Hail" menu (under Rain) is on. Driven
-// from the per-frame weather tick: Hail_Tick reads the menu live, seeds/advances
-// each machine's stones, and deals 1 damage to a machine on honest stone-vs-body
-// contact - unless the machine is sheltered (stage geometry overhead, found by a
-// downward cover raycast), in which case its cloud is suppressed. Hail_Reset
-// clears the clouds and drops the cached render GObj on City Trial teardown (the
-// engine frees the GObj itself). There is no Hail_SetActive - hail holds no
-// per-preset state, only the global menu knob.
+// Per-machine clouds of world-space hailstones that ride over each machine while
+// rain is active and the Hail menu is on, dealing 1 damage on honest contact
+// (a sheltered machine's cloud is suppressed). Driven from the tick; there is no
+// Hail_SetActive - hail holds no per-preset state, only the global menu knob.
 void Hail_Tick(void);
 void Hail_Reset(void);
 
-// Driven from the per-frame weather anim tick. Lightning_SetActive latches the
-// active preset's lightning config (NULL or def->enabled == 0 = off);
-// Lightning_Tick advances the strike loop each frame, lerping the passed
-// HSD_Fog toward the flash color during a strike and lazily creating its LOBJ;
-// Lightning_Reset re-arms the timer and drops the cached LOBJ handle on City
-// Trial teardown (the engine frees the GObj itself).
+// Driven from the per-frame weather tick: SetActive latches the preset's config
+// (NULL or enabled == 0 = off), Tick advances the strike loop and lerps the
+// passed HSD_Fog toward the flash color during a strike, Reset re-arms the timer
+// on CT teardown.
 void Lightning_SetActive(const LightningDef *def);
 void Lightning_Tick(HSD_Fog *fog);
 void Lightning_Reset(void);
 
-// The single global wind vector other systems read. Driven from the per-frame
-// weather anim tick. Wind_SetActive latches the active preset's wind config
-// (NULL or def->enabled == 0 = calm) and seeds the gust/heading state, rolling
-// a random base heading if the global "Randomize Direction" toggle is on.
-// Wind_Tick advances the gust/heading random walks and applies wind to airborne
-// items and gliding machines each frame. Wind_GetVector returns the current
-// horizontal wind vector (Y = 0); rain.c reads it for slant. Wind_Reset clears
-// the wind on City Trial teardown.
+// The single global wind vector other systems read. Driven from the tick:
+// SetActive latches the preset's config (NULL or enabled == 0 = calm) and seeds
+// the gust/heading walks, Tick evolves them and applies wind to items and gliding
+// machines, Reset clears the wind. Wind_GetVector returns the current horizontal
+// vector (Y = 0) for the rain/hail slant.
 void Wind_SetActive(const WindDef *def);
 void Wind_Tick(void);
 void Wind_GetVector(struct Vec3 *out);
 void Wind_Reset(void);
 
-// Wind bends the City Trial forest trees (yakumono desc_id 34). Driven from the
-// per-frame weather anim tick, after Wind_Tick so it reads the fresh vector.
-// Tree_Tick lazily enumerates the forest-tree joints on the first CT frame,
-// caches each one's authored rotation, and each frame leans the intact ones
-// downwind (calm wind = rigid). Tree_Reset drops the cache on CT teardown.
+// Wind bends the CT forest trees (yakumono desc_id 34). Driven from the tick
+// after Wind_Tick: Tree_Tick lazily enumerates the tree joints, caches their
+// authored rotations, and leans the intact ones downwind (calm = rigid);
+// Tree_Reset drops the cache on CT teardown.
 void Tree_Tick(void);
 void Tree_Reset(void);
 
-// Driven from the per-frame weather anim tick. Puddle_SetActive latches the
-// active preset's puddle config (NULL or def->enabled == 0 = off) and arms a
-// fresh placement for the round; Puddle_Tick lazily scatters the pools on the
-// first active frame (raycasting down to flat ground), creates its render GObj,
-// and damps the horizontal velocity of every grounded machine inside a pool;
-// Puddle_Reset drops the cached GObj handle and the placement on City Trial
-// teardown (the engine frees the GObj itself).
+// Driven from the per-frame weather tick: SetActive latches the preset's config
+// (NULL or enabled == 0 = off) and arms a fresh round, Tick lazily scatters the
+// pools on flat ground, creates the render GObj, and damps machines inside a
+// pool, Reset drops the cached GObj handle on CT teardown.
 void Puddle_SetActive(const PuddleDef *def);
 void Puddle_Tick(void);
 void Puddle_Reset(void);
+
+// Driven from the per-frame weather tick after Wind_Tick: SetActive latches the
+// preset's config (NULL or enabled == 0 = off), Tick lazily scatters the deck
+// over the OOB box and drifts/wraps each cloud (the GX callback draws the
+// spheroid clusters), Reset drops the cached GObj handle on CT teardown.
+void Cloud_SetActive(const CloudDef *def);
+void Cloud_Tick(void);
+void Cloud_Reset(void);
 
 #endif // CUSTOM_WEATHER_H

@@ -10,54 +10,52 @@
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
 #define WIND_PI       3.14159265358979f
 #define WIND_DEG2RAD  (WIND_PI / 180.0f)
 
-// ---- Module defaults (applied when a WindDef field is left 0) ----
+// Module defaults, applied when a WindDef field is left 0.
 #define WIND_DEF_SPEED      6.0f    // base wind speed, world units/frame
 #define WIND_DEF_HEADING    90.0f   // base heading (degrees; 0 = +Z, 90 = +X)
 #define WIND_DEF_GUSTINESS  0.35f   // speed pulses +/-35% around the base
 #define WIND_DEF_CHAOS      0.25f   // heading wanders gently
 
-// ---- Gust / heading random-walk shape ----
-// A new target is rolled every *_PERIOD frames; the current value eases toward
-// it by *_LERP each frame, so the motion reads as smooth gusting rather than
-// per-frame jitter. WIND_HEAD_RANGE is the max heading deviation (degrees) at
-// chaos = 1.
+// Gust / heading random-walk shape: a fresh target is rolled every *_PERIOD
+// frames and eased toward by *_LERP each frame, so motion reads as smooth
+// gusting rather than jitter. WIND_HEAD_RANGE is the max heading deviation
+// (degrees) at chaos = 1.
 #define WIND_GUST_PERIOD    40
 #define WIND_GUST_LERP      0.04f
 #define WIND_HEAD_PERIOD    90
 #define WIND_HEAD_LERP      0.02f
 #define WIND_HEAD_RANGE     75.0f
 
-// ---- Per-consumer coupling. The wind vector is one shared magnitude; each
-// consumer scales it by its own susceptibility. Rain uses it directly (factor
-// 1, in rain.c). Items are light and blow easily; machines are heavy and only
-// the airborne/gliding ones are meaningfully shoved.
+// Per-consumer coupling. The wind vector is one shared magnitude; each consumer
+// scales it by its own susceptibility. Rain uses it directly (factor 1). Items
+// are light and blow easily; machines are heavy and only the airborne/gliding
+// ones are meaningfully shoved.
 #define WIND_ITEM_FACTOR        0.08f  // fraction of wind added to an airborne item's velocity/frame
 #define WIND_MACHINE_FACTOR     0.012f // fraction added to an airborne machine's velocity/frame at full glide
 #define WIND_MACHINE_GLIDE_BASE 0.40f  // floor of the glide-stat susceptibility scale
 #define WIND_STAT_GLIDE         5      // index of the glide stat in MachineData.stats
 
 #define WIND_ITEM_GOBJ_KIND     22     // gobj->entity_class for a City Trial item
-#define WIND_PLAYER_SLOTS       5
 
-// ---- Resolved per-preset config (WindDef + defaults + global strength) ----
+// Resolved per-preset config (WindDef + defaults + global strength).
 static int   stc_active = 0;
 static float stc_base_speed = 0.0f;     // already scaled by the global strength
 static float stc_base_heading = 0.0f;   // degrees
 static float stc_gustiness = 0.0f;
 static float stc_chaos = 0.0f;
 
-// ---- Evolving state ----
 static float stc_vx = 0.0f, stc_vz = 0.0f;   // current wind vector
 static float stc_gust_cur = 0.0f, stc_gust_target = 0.0f;
 static int   stc_gust_timer = 0;
 static float stc_head_cur = 0.0f, stc_head_target = 0.0f; // heading offset, degrees
 static int   stc_head_timer = 0;
 
-// ---- Settings (persisted by hoshi menu save) ----
+// Menu settings, persisted by hoshi menu save.
 static const float wind_strength_factors[] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *wind_strength_names[] = {"Off", "50%", "100%", "150%", "200%"};
 #define WIND_STRENGTH_NUM (sizeof(wind_strength_factors) / sizeof(wind_strength_factors[0]))
@@ -71,12 +69,6 @@ static int wind_affect_items = 1;
 static float WindStrength(void)
 {
     return wind_strength_factors[wind_strength_index];
-}
-
-// Symmetric random in [-1, 1).
-static float Randf2(void)
-{
-    return HSD_Randf() * 2.0f - 1.0f;
 }
 
 // Latch the active preset's wind config, resolving each 0 field to its module
@@ -107,10 +99,10 @@ void Wind_SetActive(const WindDef *def)
     stc_chaos = def->chaos > 0.0f ? def->chaos : WIND_DEF_CHAOS;
 
     stc_gust_cur = 0.0f;
-    stc_gust_target = Randf2();
+    stc_gust_target = Weather_Randf2();
     stc_gust_timer = WIND_GUST_PERIOD;
     stc_head_cur = 0.0f;
-    stc_head_target = Randf2() * WIND_HEAD_RANGE * stc_chaos;
+    stc_head_target = Weather_Randf2() * WIND_HEAD_RANGE * stc_chaos;
     stc_head_timer = WIND_HEAD_PERIOD;
 }
 
@@ -148,7 +140,7 @@ static void Wind_ApplyToItems(float wx, float wz)
 // than a Wheelie Bike. Dead/respawning machines are skipped.
 static void Wind_ApplyToMachines(float wx, float wz)
 {
-    for (int ply = 0; ply < WIND_PLAYER_SLOTS; ply++)
+    for (int ply = 0; ply < WEATHER_PLAYER_SLOTS; ply++)
     {
         GOBJ *mg = Ply_GetMachineGObj(ply);
         if (mg == NULL)
@@ -180,7 +172,7 @@ void Wind_Tick(void)
     // Gust: ease the speed multiplier toward a fresh random target periodically.
     if (--stc_gust_timer <= 0)
     {
-        stc_gust_target = Randf2();
+        stc_gust_target = Weather_Randf2();
         stc_gust_timer = WIND_GUST_PERIOD;
     }
     stc_gust_cur += (stc_gust_target - stc_gust_cur) * WIND_GUST_LERP;
@@ -189,7 +181,7 @@ void Wind_Tick(void)
     // chaos so calm presets stay near their base direction.
     if (--stc_head_timer <= 0)
     {
-        stc_head_target = Randf2() * WIND_HEAD_RANGE * stc_chaos;
+        stc_head_target = Weather_Randf2() * WIND_HEAD_RANGE * stc_chaos;
         stc_head_timer = WIND_HEAD_PERIOD;
     }
     stc_head_cur += (stc_head_target - stc_head_cur) * WIND_HEAD_LERP;

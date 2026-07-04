@@ -1255,12 +1255,15 @@ preset change it applies several optional layers from the active
 | Wind | per-frame global wind vector from `def->wind`; slants the rain/hail, nudges airborne items, pushes gliding machines | `Wind_Tick` (`wind.c`) |
 | Hail | damaging hailstone clouds over each machine, layered on the rain (global menu, gated on rain being active) | `Hail_Tick` (`hail.c`) |
 | Puddles | per-frame field of roaming ground pools from `def->puddles` that drag machines | `Puddle_Tick` (`puddle.c`) |
+| Trees | per-frame lean of the CT forest-tree joints toward the wind (global menu; no per-preset config) | `Tree_Tick` (`tree.c`) |
+| Clouds | per-frame deck of drifting translucent cloud clusters from `def->clouds` | `Cloud_Tick` (`clouds.c`) |
 
-The effect layers — **lightning**, **rain**, **wind**, **hail**, and **puddles** —
-are each a self-contained module driven from this tick, independent of one another
-and of the static sky/fog/light fields, so a preset can carry any combination.
-Wind is ticked before rain and hail so both read the current frame's wind vector
-for their slant. `event_sky.c` is a related sibling but installs its own boot hook
+The effect layers — **lightning**, **rain**, **wind**, **hail**, **puddles**,
+**trees**, and **clouds** — are each a self-contained module driven from this tick,
+independent of one another and of the static sky/fog/light fields, so a preset can
+carry any combination. Wind is ticked before rain, hail, trees, and clouds so they
+all read the current frame's wind vector for their slant/drift. `event_sky.c` is a
+related sibling but installs its own boot hook
 rather than running from this tick (see "Event sky suppression").
 
 ### Lightning (`lightning.c`)
@@ -1308,10 +1311,13 @@ by stage geometry exactly like the rain — with a POINT LOBJ at the bolt's midp
 to light riders near the strike. Bolt geometry is regenerated per strike in world
 space (so every split-screen camera draws the same bolt from its own pass), and the
 flash and bolt strobe together on one shared multi-flicker envelope. `augment` keeps
-the screen flash, `replace` draws only the bolt (terrain stays dim). The global
-**Lightning Bolts** menu (`Auto` / `Off` / `Force`) overrides the per-preset `bolt`
-across every preset: `Auto` honors each preset, `Off` suppresses all bolts, `Force`
-adds a bolt to every lightning preset.
+the screen flash, `replace` draws only the bolt (terrain stays dim). Storm and Blood
+Rain both set `augment`, so on the default `Auto` menu setting their strikes draw a
+bolt alongside the flash, with the bolt glow inheriting each preset's flash color
+(near-white for Storm, red for Blood Rain). The global **Lightning Bolts** menu
+(`Auto` / `Off` / `Force`) overrides the per-preset `bolt` across every preset:
+`Auto` honors each preset, `Off` suppresses all bolts, `Force` adds a bolt to every
+lightning preset.
 
 ### World-space rain (`rain.c`)
 
@@ -1443,6 +1449,80 @@ tick (`Puddle_SetActive` / `Puddle_Tick` / `Puddle_Reset`). The global **Puddles
 menu scales **Slowdown** / **Frequency** / **Size**, toggles **Roaming** (off = a
 fixed field), and can hide the discs (**Show Puddles**) while keeping the drag.
 
+### High cloud deck (`clouds.c`)
+
+A preset with `clouds.enabled` gets a low deck of soft clouds drifting over the
+map. Each cloud is a cluster of overlapping flattened translucent spheroids — real
+world-space geometry (coarse UV-sphere meshes), not billboards — so riders fly
+straight through a cloud and vision inside one is heavily obscured. A dense core
+puff anchors each cluster while the scattered puffs vary in size around it (`puff_var`,
+the puff-to-puff spread — distinct from `size_var`, which spreads whole cloud sizes),
+so a cloud reads as lumpy rather than a stack of equal blobs. The deck is
+scattered across the stage OOB box at a deck height that is either the preset's
+absolute `height` or `CLOUD_DECK_FRACTION` (0.35) of the way up the OOB box, plus
+the menu height offset, with a per-cloud height spread. A low deck kept below most
+presets' fog wall reads clearly; because the clouds inherit the world fog, a deck
+placed above a preset's `fog_end` fogs out — keep it under the wall.
+
+Clouds drift horizontally with the global wind vector (`wind.c`) at a damped,
+floored, and capped speed; a calm preset still drifts them slowly along a fixed
+heading. A cloud that reaches an OOB wall wraps to the opposite wall, where a
+horizontal-clearance edge fade (`CLOUD_EDGE_FADE`) holds it invisible so re-rolling
+its shape and height there is hidden, then it ghosts back in as it drifts inward.
+
+**Render path.** `Cloud_Ensure` creates a GObj (`GObj_Create(205, 29, 0)`) with a
+GX callback on **gx_link 0** (the world camera's link, like the rest of the weather
+layers), running only on the **XLU sub-pass** (`pass == 1`). Each spheroid is
+emitted as one `GX_TRIANGLESTRIP` per latitude band of flat-color, alpha-blended,
+depth-tested-but-not-depth-writing geometry (`GXSetZMode(GX_ENABLE, GX_LEQUAL,
+GX_DISABLE)`, so stage geometry occludes clouds behind it) with `GX_CULL_NONE` so a
+spheroid still fills the view from the inside. A per-vertex silhouette alpha
+(`|normal · camera-forward|`, floored at `CLOUD_RIM_MIN`) feathers each spheroid
+toward a soft edge and hides most of the unsorted-translucency noise. No texture
+asset. World coordinates come from loading the active camera's view matrix as the
+position matrix, so every split-screen viewport draws the deck from its own pass.
+
+Per preset via `CloudDef clouds` (`custom_weather.h`): `color` (A = base opacity),
+`count`, `height`, `height_var`, `size`, `size_var` (cloud-to-cloud size spread),
+`puff_var` (puff-to-puff size spread within a cluster, 0..1), each numeric field
+taking a `clouds.c` default when 0. Driven from the tick (`Cloud_SetActive` on preset
+change, `Cloud_Tick` each frame — after `Wind_Tick` so it reads the fresh vector —
+`Cloud_Reset` on teardown). The global **Clouds** menu scales **Coverage** (Off
+disables clouds for every preset), **Opacity**, **Size**, and per-cluster
+**Variance**, offsets the deck **Height**, and can override the tint (**Color**,
+`Preset` keeps each preset's own).
+
+### Wind-bent trees (`tree.c`)
+
+The global wind can lean the City Trial forest trees. Each forest tree (yakumono
+`desc_id` 34, ~53 instances) renders from its own `JOBJ_SKELETON` joint whose world
+matrix is rebuilt from the joint SRT every frame by `HSD_JObjSetupMatrixSub`, so a
+small tilt written into that joint's Euler rotation each frame is honored
+automatically — no user matrix, no dirty flag, no vertex work. Only the visual model
+is touched; collision is never moved.
+
+The tree joints are enumerated once per stage. `Tree_Enumerate` walks the ground
+scene-instance pool (`Yaku_GetInstancePool`) and keeps the records whose owner
+(`record+0x90`) is one of the tree-family yakumono GObjs — those are gathered by
+walking the `GAMEPLINK_YAKUMONO` GObj list for `desc_id` 34. The owner slot is
+matched **by pointer only and never dereferenced** (it is meaningless for non-break
+instances), and each kept joint's authored base rotation is cached so the lean is
+always applied relative to it.
+
+Each frame `Tree_Tick` reads the wind vector (`Wind_GetVector`), derives a lean angle
+that scales with wind speed up to `TREE_BEND_MAX` (~14°), and tips every intact trunk
+toward the downwind heading by writing its joint `rot.X` / `rot.Z`; a calm wind leaves
+the trees at their base rotation. A per-tree sinusoidal gust (`TREE_RUSTLE` /
+`TREE_PHASE_STEP`) breaks the grove out of lockstep so it reads as wind through
+foliage rather than one rigid block pivoting together. A tree that has been knocked
+down is skipped (the `grScene_IsInstanceCollAll(record, 1)` gate — its collision is
+retired and the break tail owns the joint from then on).
+
+Trees carry no per-preset config: they are a global menu effect gated on the wind,
+driven from the tick (`Tree_Tick` after `Wind_Tick`, `Tree_Reset` on teardown). The
+global **Trees** menu is **Bend in Wind** (Off / On) and **Sway Strength** (Subtle /
+Normal / Strong).
+
 ### Event sky suppression (`event_sky.c`)
 
 A standalone toggle (not a per-preset layer and not driven from the runtime tick)
@@ -1499,6 +1579,7 @@ Fields are grouped by on-screen effect, not engine mechanism. `0` means
 | `lightning` | LightningDef | per-preset lightning: `enabled`, `flash_color`, `flash_frames`, `min_lull`/`max_lull`, `bolt` (`LightningBoltMode`) (`enabled = 0` = none; 0 numeric fields take lightning.c defaults) — see "Lightning" above |
 | `wind` | WindDef | per-preset global wind: `enabled`, `speed`, `heading`, `gustiness`, `chaos` (`enabled = 0` = calm; 0 numeric fields take wind.c defaults) — see "Wind" below |
 | `puddles` | PuddleDef | per-preset ground pools: `enabled`, `color`, `count`, `radius`, `slow_factor` (`enabled = 0` = none; 0 numeric fields take puddle.c defaults) — see "Ground puddles" below |
+| `clouds` | CloudDef | per-preset high cloud deck: `enabled`, `color`, `count`, `height`, `height_var`, `size`, `size_var`, `puff_var` (`enabled = 0` = none; 0 numeric fields take clouds.c defaults) — see "High cloud deck" below |
 
 The global **Fog Distance** menu setting is separate from the per-preset
 fields: it scales `HSD_Fog.scale` for every CT preset (vanilla and custom) via
@@ -1507,7 +1588,7 @@ fields: it scales `HSD_Fog.scale` for every CT preset (vanilla and custom) via
 ### Settings menu
 
 `main.c` registers the `custom_weather` mod settings menu ("City Trial Sky") with
-seven entries:
+nine entries:
 
 - **Weather Presets** (`weather_menu`, `custom_weather.c`) — a **Fog Distance**
   value (50–200%, default 100%; the global `HSD_Fog.scale` multiplier), an
@@ -1526,6 +1607,13 @@ seven entries:
   / Force), overriding each preset's `bolt`.
 - **Puddles** (`puddle_menu`, `puddle.c`) — **Slowdown**, **Frequency**, **Size**,
   **Roaming**, **Show Puddles**.
+- **Trees** (`tree_menu`, `tree.c`) — **Bend in Wind** (Off / On) and **Sway
+  Strength**; lets the global wind lean the City Trial forest trees (visual only) —
+  see "Wind-bent trees" above.
+- **Clouds** (`clouds_menu`, `clouds.c`) — **Coverage** (Off disables clouds for
+  every preset), **Opacity**, **Size**, **Variance** (puff-size spread within a
+  cluster), **Height** offset, and **Color** tint override (`Preset` keeps each
+  preset's own).
 - **Event Sky Changes** (`event_sky_option`, `event_sky.c`) — On (vanilla) / Off
   (keep the weather through events).
 

@@ -30,7 +30,6 @@ static int s_ambient_cached = 0;
 static int s_last_seen_preset_idx = -1;
 static const CustomPresetDef *s_active_def = 0;
 
-
 static void ResetPerStage(GrObj *grobj)
 {
     s_last_grobj = grobj;
@@ -45,6 +44,7 @@ static void ResetPerStage(GrObj *grobj)
     Puddle_Reset();
     Hail_Reset();
     Tree_Reset();
+    Cloud_Reset();
 }
 
 static void ApplyTerrainTint(const CustomPresetDef *def)
@@ -153,6 +153,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         Lightning_SetActive(s_active_def ? &s_active_def->lightning : 0);
         Wind_SetActive(s_active_def ? &s_active_def->wind : 0);
         Puddle_SetActive(s_active_def ? &s_active_def->puddles : 0);
+        Cloud_SetActive(s_active_def ? &s_active_def->clouds : 0);
 
         // Drive the lbfade slot-3 overlay (the global "darken everything" path):
         // Sky_BeginFade lerps to the target tint over 30 frames and holds.
@@ -162,7 +163,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
             Sky_BeginFade(grobj, &tint, 30);
         }
 
-        OSReport("[WeatherRuntime] Preset %d (%s) active, terrain=%s, char_ambient=%s, tint=%s, fog_curve=%d, rain=%s, lightning=%s, wind=%s, puddles=%s\n",
+        OSReport("[WeatherRuntime] Preset %d (%s) active, terrain=%s, char_ambient=%s, tint=%s, fog_curve=%d, rain=%s, lightning=%s, wind=%s, puddles=%s, clouds=%s\n",
                  idx,
                  CustomWeather_GetPresetName(idx),
                  (s_active_def && s_active_def->terrain_diffuse) ? "tinted" : "vanilla",
@@ -172,7 +173,8 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
                  (s_active_def && s_active_def->rain.enabled) ? "on" : "off",
                  (s_active_def && s_active_def->lightning.enabled) ? "on" : "off",
                  (s_active_def && s_active_def->wind.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->puddles.enabled) ? "on" : "off");
+                 (s_active_def && s_active_def->puddles.enabled) ? "on" : "off",
+                 (s_active_def && s_active_def->clouds.enabled) ? "on" : "off");
     }
     else if (s_active_def && s_active_def->char_ambient && !s_ambient_lobj)
     {
@@ -195,6 +197,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     Hail_Tick();
     Puddle_Tick();
     Tree_Tick();
+    Cloud_Tick();
 }
 
 // Hook at 0x800ce648 (immediately after `bl Sky_Update`). Prologue copies

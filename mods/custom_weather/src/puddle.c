@@ -12,13 +12,12 @@
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
 #define PUDDLE_PI  3.14159265358979f
 
-// ---- Module constants ----
 #define PUDDLE_MAX            64      // pool capacity; resolved count clamps to this
 #define PUDDLE_SEGMENTS       22      // rim vertices per disc (triangle fan)
-#define PUDDLE_PLAYER_SLOTS   5
 #define PUDDLE_LIFT           2.0f    // raise the disc above the ground to beat z-fighting
 #define PUDDLE_PLAY_FRACTION  0.72f   // scatter within this fraction of the OoB box (keep off the rim)
 #define PUDDLE_MIN_NORMAL_Y   0.85f   // reject hits steeper than this (only near-flat ground)
@@ -28,10 +27,10 @@
 #define PUDDLE_PICK_ATTEMPTS  6       // ground-raycast tries per (re)spawn
 #define PUDDLE_ALPHA_EPS      0.01f   // below this opacity a pool neither draws nor drags
 
-// ---- Lifecycle timing (frames @ 60fps). Each pool slot waits dormant, wells up
-// over FADE_IN, holds for a random HOLD, dries out over FADE_OUT, then waits a
-// random GAP before re-rolling a new spot. INIT_STAGGER spreads the first
-// appearance across the round's opening so they don't all surface at once.
+// Lifecycle timing (frames @ 60fps): a slot waits dormant, wells up over
+// FADE_IN, holds a random HOLD, dries out over FADE_OUT, then waits a random GAP
+// before re-rolling a spot. INIT_STAGGER spreads the first appearances across
+// the round's opening so they don't all surface at once.
 #define PUDDLE_FADE_IN        24
 #define PUDDLE_FADE_OUT       36
 #define PUDDLE_HOLD_MIN       300
@@ -90,14 +89,13 @@ static Puddle stc_puddles[PUDDLE_MAX];
 static int    stc_count = 0;
 
 // Resolved per-preset config (PuddleDef + defaults), before the menu scalars.
-static GXColor stc_color = {30, 55, 85, 140};
+static GXColor stc_color = {150, 178, 205, 195};
 static int     stc_base_count = PUDDLE_DEF_COUNT;
 static float   stc_base_radius = PUDDLE_DEF_RADIUS;
 static float   stc_base_factor = PUDDLE_DEF_FACTOR;
 
-// ---- Settings (persisted by hoshi menu save) ----
-// Slowdown scales the per-preset drag *amount* (1 - factor): Off removes the
-// slow entirely (discs still show), 200% doubles it. Mirrors Wind Strength.
+// Menu settings, persisted by hoshi menu save. Slowdown scales the per-preset
+// drag amount (1 - factor): Off removes the slow (discs still show), 200% doubles it.
 static const float slow_strength_factors[] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *slow_strength_names[] = {"Off", "50%", "100%", "150%", "200%"};
 #define PUDDLE_SLOW_NUM (sizeof(slow_strength_factors) / sizeof(slow_strength_factors[0]))
@@ -153,8 +151,8 @@ static int PickSpot(Puddle *p)
 
     for (int a = 0; a < PUDDLE_PICK_ATTEMPTS; a++)
     {
-        float x = cx + (HSD_Randf() * 2.0f - 1.0f) * hx;
-        float z = cz + (HSD_Randf() * 2.0f - 1.0f) * hz;
+        float x = cx + Weather_Randf2() * hx;
+        float z = cz + Weather_Randf2() * hz;
 
         Vec3 start = {x, top_y, z};
         Vec3 end = {x, bot_y, z};
@@ -320,19 +318,7 @@ static void Puddle_GX(GOBJ *g, int pass)
     if (!cam)
         return;
 
-    HSD_StateInitDirect(GX_VTXFMT0, 2);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-    GXSetNumTexGens(0);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE);
-    GXSetCullMode(GX_CULL_NONE);
-    GXLoadPosMtxImm(&cam->view_mtx, GX_PNMTX0);
+    WeatherGX_BeginXlu(cam, 0, 0);
 
     for (int i = 0; i < stc_count; i++)
     {
@@ -369,12 +355,9 @@ static void Puddle_Ensure(void)
 {
     if (stc_puddle_gobj)
         return;
-    GOBJ *g = GObj_Create(PUDDLE_GOBJ_CLASS, PUDDLE_GOBJ_PLINK, 0);
-    if (!g)
-        return;
-    GObj_AddGXLink(g, Puddle_GX, PUDDLE_GX_LINK, PUDDLE_GX_PRI);
-    stc_puddle_gobj = g;
-    OSReport("[Puddle] Ground puddle layer installed\n");
+    stc_puddle_gobj = WeatherGX_EnsureLayer(PUDDLE_GOBJ_CLASS, PUDDLE_GOBJ_PLINK, Puddle_GX,
+                                            PUDDLE_GX_LINK, PUDDLE_GX_PRI,
+                                            "[Puddle] Ground puddle layer installed");
 }
 
 // Latch the active preset's puddle config, resolving each 0 field to its module
@@ -424,7 +407,7 @@ void Puddle_Tick(void)
     if (base_amt <= 0.0f)
         return;
 
-    for (int ply = 0; ply < PUDDLE_PLAYER_SLOTS; ply++)
+    for (int ply = 0; ply < WEATHER_PLAYER_SLOTS; ply++)
     {
         GOBJ *mg = Ply_GetMachineGObj(ply);
         if (mg == NULL)

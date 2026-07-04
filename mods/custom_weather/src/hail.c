@@ -9,13 +9,13 @@
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
 // The box is a tight volume centered on the machine: stones spawn HAIL_TOP above
 // it, fall through, and recycle once they pass HAIL_BELOW under it (or stray more
 // than HAIL_STRAY away horizontally, e.g. when the machine warps off). The hit
 // sphere is centered slightly above the machine origin so stones strike the body
 // rather than grazing its base.
-#define HAIL_PLAYER_SLOTS   5
 #define HAIL_MAX_STONES     32       // per-machine pool; resolved count clamps to this
 #define HAIL_BASE_STONES    20       // per-machine stones at "Normal"
 #define HAIL_BOX_HALF       120.0f   // XZ half-extent of the cloud around the machine
@@ -80,7 +80,7 @@ static GOBJ *stc_hail_gobj = NULL;
 static int stc_active = 0;
 static int stc_stone_count = HAIL_BASE_STONES;  // active stones per cloud (menu-scaled)
 
-static HailCloud stc_clouds[HAIL_PLAYER_SLOTS];
+static HailCloud stc_clouds[WEATHER_PLAYER_SLOTS];
 
 // Shared per-frame velocity (fall + wind slant). vel_y is negative (downward).
 static float stc_vel_x = 0.0f, stc_vel_y = -HAIL_FALL, stc_vel_z = 0.0f;
@@ -98,7 +98,7 @@ static int hail_index = 0; // default Off: hail chips machine HP, so it is opt-i
 // Symmetric random offset in [-half, half].
 static float RandSym(float half)
 {
-    return (HSD_Randf() * 2.0f - 1.0f) * half;
+    return Weather_Randf2() * half;
 }
 
 // Place a stone at the top of the box over the machine's current position, at a
@@ -184,22 +184,9 @@ static void Hail_GX(GOBJ *g, int pass)
     float sy = stc_vel_y * HAIL_STREAK;
     float sz = stc_vel_z * HAIL_STREAK;
 
-    HSD_StateInitDirect(GX_VTXFMT0, 2);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-    GXSetNumTexGens(0);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE);
-    GXSetCullMode(GX_CULL_NONE);
-    GXSetLineWidth(HAIL_LINE_WIDTH, 5);
-    GXLoadPosMtxImm(&cam->view_mtx, GX_PNMTX0);
+    WeatherGX_BeginXlu(cam, 0, HAIL_LINE_WIDTH);
 
-    for (int slot = 0; slot < HAIL_PLAYER_SLOTS; slot++)
+    for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
     {
         HailCloud *c = &stc_clouds[slot];
         if (!c->seeded)
@@ -225,12 +212,9 @@ static void Hail_Ensure(void)
 {
     if (stc_hail_gobj)
         return;
-    GOBJ *g = GObj_Create(HAIL_GOBJ_CLASS, HAIL_GOBJ_PLINK, 0);
-    if (!g)
-        return;
-    GObj_AddGXLink(g, Hail_GX, HAIL_GX_LINK, HAIL_GX_PRI);
-    stc_hail_gobj = g;
-    OSReport("[Hail] Damaging hail layer installed\n");
+    stc_hail_gobj = WeatherGX_EnsureLayer(HAIL_GOBJ_CLASS, HAIL_GOBJ_PLINK, Hail_GX,
+                                          HAIL_GX_LINK, HAIL_GX_PRI,
+                                          "[Hail] Damaging hail layer installed");
 }
 
 // Whether the machine has stage geometry overhead (a roof / overpass / bridge),
@@ -270,7 +254,7 @@ void Hail_Tick(void)
         // over the machines' current positions rather than resuming stale boxes.
         if (stc_active)
         {
-            for (int slot = 0; slot < HAIL_PLAYER_SLOTS; slot++)
+            for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
                 stc_clouds[slot].seeded = 0;
             stc_active = 0;
         }
@@ -295,7 +279,7 @@ void Hail_Tick(void)
     stc_vel_y = -HAIL_FALL;
     stc_vel_z = wind.Z;
 
-    for (int slot = 0; slot < HAIL_PLAYER_SLOTS; slot++)
+    for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
     {
         HailCloud *c = &stc_clouds[slot];
 
@@ -338,7 +322,7 @@ void Hail_Reset(void)
     // round re-seeds over fresh machine positions.
     stc_hail_gobj = NULL;
     stc_active = 0;
-    for (int slot = 0; slot < HAIL_PLAYER_SLOTS; slot++)
+    for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
     {
         stc_clouds[slot].seeded = 0;
         stc_clouds[slot].hit_cd = 0;

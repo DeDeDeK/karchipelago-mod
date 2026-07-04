@@ -9,12 +9,8 @@
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
-// ---- Module constants (world units; the CT inhale cone reaches 175 for scale)
-//
-// The per-preset appearance/motion lives in each preset's RainDef
-// (custom_weather.h); the values below are the pool capacity, the box geometry,
-// and the fallbacks used when a RainDef field is left 0.
 #define RAIN_MAX_DROPS   1600      // pool capacity; per-preset density clamps to this
 #define RAIN_BOX         1000.0f   // edge of the camera-following volume (cube)
 #define RAIN_BOX_HALF    (RAIN_BOX * 0.5f)
@@ -50,23 +46,15 @@ static float   stc_vel_x = 0.0f, stc_vel_y = -RAIN_DEF_FALL_SPEED, stc_vel_z = 0
 static int     stc_line_width = RAIN_DEF_LINE_WIDTH;
 static float   stc_streak = RAIN_DEF_STREAK;
 
-// ---- Settings (persisted by hoshi menu save) ----
-// The menu augments (scales/gates) the active preset's RainDef rather than
-// replacing it: each preset still authors its own rain character (color, base
-// density, fall speed, streak), and these knobs layer a master intensity
-// multiplier over the drop count and a wind-slant gate on top. Intensity scales
-// the per-preset density, so a light-drizzle preset and a downpour preset both
-// shift by the same factor; Off disables rain for every preset (the one place
-// the menu fully overrides). Mirrors Wind Strength / Puddle Slowdown.
+// Menu settings, persisted by hoshi menu save. Intensity scales the active
+// preset's drop count; Off disables rain for every preset.
 static const float rain_intensity_factors[] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *rain_intensity_names[] = {"Off", "Light", "Normal", "Heavy", "Downpour"};
 #define RAIN_INTENSITY_NUM (sizeof(rain_intensity_factors) / sizeof(rain_intensity_factors[0]))
 static int rain_intensity_index = 2; // default Normal (100%)
 
-// Fall Speed scales the per-preset downward velocity. Because the drawn streak
-// length tracks velocity (streak = velocity * stc_streak), faster rain also
-// streaks longer, so it reads as harder driving rain. Vertical only - the wind
-// slant (stc_vel_x/z) is unaffected.
+// Scales the per-preset fall velocity; streak length tracks velocity, so faster
+// rain also streaks longer. Vertical only (the wind slant is unaffected).
 static const float rain_fall_factors[] = {0.6f, 1.0f, 1.5f};
 static char *rain_fall_names[] = {"Slow", "Normal", "Fast"};
 #define RAIN_FALL_NUM (sizeof(rain_fall_factors) / sizeof(rain_fall_factors[0]))
@@ -167,23 +155,7 @@ static void Rain_GX(GOBJ *g, int pass)
     float sy = stc_vel_y * stc_streak;
     float sz = stc_vel_z * stc_streak;
 
-    // GX state: flat per-vertex color (no texture/lighting), alpha blend,
-    // depth-tested but not depth-writing so opaque geometry occludes the drops.
-    // Mirrors the inline GX_DrawLine / hypernova cone translucent-line setup.
-    HSD_StateInitDirect(GX_VTXFMT0, 2);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-    GXSetNumTexGens(0);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE);
-    GXSetCullMode(GX_CULL_NONE);
-    GXSetLineWidth(stc_line_width, 5);
-    GXLoadPosMtxImm(&cam->view_mtx, GX_PNMTX0);
+    WeatherGX_BeginXlu(cam, 0, stc_line_width);
 
     GXBegin(GX_LINES, GX_VTXFMT0, stc_density * 2);
     for (int i = 0; i < stc_density; i++)
@@ -217,12 +189,9 @@ static void Rain_Ensure(void)
 {
     if (stc_rain_gobj)
         return;
-    GOBJ *g = GObj_Create(RAIN_GOBJ_CLASS, RAIN_GOBJ_PLINK, 0);
-    if (!g)
-        return;
-    GObj_AddGXLink(g, Rain_GX, RAIN_GX_LINK, RAIN_GX_PRI);
-    stc_rain_gobj = g;
-    OSReport("[Rain] World-space rain layer installed\n");
+    stc_rain_gobj = WeatherGX_EnsureLayer(RAIN_GOBJ_CLASS, RAIN_GOBJ_PLINK, Rain_GX,
+                                          RAIN_GX_LINK, RAIN_GX_PRI,
+                                          "[Rain] World-space rain layer installed");
 }
 
 // Latch the active preset's rain config, resolving each 0 field to its module
@@ -293,6 +262,7 @@ void Rain_Reset(void)
     // The engine frees every world GObj on scene teardown; just drop our cached
     // handle so the next active frame recreates it.
     stc_rain_gobj = NULL;
+    stc_active = 0;
 }
 
 // Defined in hail.c; surfaced here because hail rides on the rain layer.

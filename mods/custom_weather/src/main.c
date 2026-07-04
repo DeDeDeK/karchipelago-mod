@@ -12,6 +12,7 @@ extern MenuDesc wind_menu;
 extern MenuDesc lightning_menu;
 extern MenuDesc puddle_menu;
 extern MenuDesc tree_menu;
+extern MenuDesc clouds_menu;
 extern OptionDesc event_sky_option;
 
 static void OnBoot(void)
@@ -23,7 +24,7 @@ static void OnBoot(void)
 }
 
 static MenuDesc top_menu = {
-    .option_num = 8,
+    .option_num = 9,
     .options = {
         &(OptionDesc){
             .name = "Weather Presets",
@@ -66,6 +67,12 @@ static MenuDesc top_menu = {
             .description = "Let wind lean the City Trial forest trees",
             .kind = OPTKIND_MENU,
             .menu_ptr = &tree_menu,
+        },
+        &(OptionDesc){
+            .name = "Clouds",
+            .description = "Cloud deck coverage, opacity, size, height, and tint for City Trial presets",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &clouds_menu,
         },
         &event_sky_option,
     },

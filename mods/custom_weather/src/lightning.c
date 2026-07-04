@@ -10,24 +10,29 @@
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
-// ---- Defaults applied when a preset leaves the matching LightningDef field 0.
+// Defaults applied when a preset leaves the matching LightningDef field 0.
 #define LTNG_DEF_FLASH_COLOR   RGBA(255, 250, 240, 255) // near-white strike
 #define LTNG_DEF_FLASH_FRAMES  18                       // flash envelope length
 #define LTNG_DEF_MIN_LULL      180                      // 3s at 60fps
 #define LTNG_DEF_MAX_LULL      420                      // 7s at 60fps
 #define LTNG_INITIAL_LULL      30                       // first strike after 0.5s
 
-// ---- Flicker shape. Inside the flash window the brightness strobes: full for
-// STROBE_ON frames, then dim (STROBE_FLOOR, not fully dark) for STROBE_GAP, all
-// scaled by an overall decay so the strike fades out. Drives the flash and the
-// bolt alike, so they pulse a few times together.
-#define LTNG_STROBE_ON     2
-#define LTNG_STROBE_GAP    2
-#define LTNG_STROBE_FLOOR  0.18f
+// Per-strike flicker ranges, rolled fresh each strike so no two flashes read
+// alike (peak brightness, envelope length, strobe cadence, dim depth).
+#define LTNG_INTENSITY_MIN    0.55f  // dimmest strike; 1.0 = full brilliant strike
+#define LTNG_LEN_MIN_SCALE    0.65f  // envelope length rolled around the preset len
+#define LTNG_LEN_MAX_SCALE    1.35f
+#define LTNG_STROBE_ON_MIN    1      // frames held full per strobe cycle
+#define LTNG_STROBE_ON_MAX    4
+#define LTNG_STROBE_GAP_MIN   1      // frames held at the dim floor per cycle
+#define LTNG_STROBE_GAP_MAX   4
+#define LTNG_STROBE_FLOOR_MIN 0.08f  // sharp near-dark flicker
+#define LTNG_STROBE_FLOOR_MAX 0.45f  // shallow shimmer
 
-// ---- Bolt geometry (world units). A jagged channel descending from sky to
-// ground with one offshoot fork, jittered horizontally as it falls.
+// Bolt geometry (world units). A jagged channel descending from sky to ground
+// with one offshoot fork, jittered horizontally as it falls.
 #define BOLT_TOP_Y        820.0f
 #define BOLT_GROUND_Y     -40.0f
 #define BOLT_SEGMENTS     13              // main channel segment count
@@ -41,8 +46,8 @@
 #define BOLT_CORE_WIDTH   14             // thin bright core pass
 #define BOLT_GLOW_ALPHA   0.5f           // glow alpha relative to the core
 
-// ---- Point light at the bolt midpoint. Computed attenuation (ref_br at
-// ref_dist) so the engine derives the GX coefficients; omnidirectional.
+// Point light at the bolt midpoint. Computed attenuation (ref_br at ref_dist)
+// so the engine derives the GX coefficients; omnidirectional.
 #define BOLT_LIGHT_REF_DIST  520.0f
 #define BOLT_LIGHT_REF_BR    0.5f
 #define GX_SPOT_OFF          0           // GXSpotFn GX_SP_OFF (omnidirectional)
@@ -56,10 +61,13 @@
 #define BOLT_GX_LINK      0
 #define BOLT_GX_PRI       0
 
-// ---- Descriptors for the overhead INFINITE flash LOBJ (the global rider flash).
-// INFINITE light (flags & 3 == 1): LObjLoad allocates a WObj from `position` and
-// ignores the union. The WObj's pos vector is the light direction (the light
-// shines toward the origin from that point).
+// Light-carrier GObjs (the overhead flash LOBJ and the bolt-midpoint point LOBJ).
+#define LTNG_LOBJ_GOBJ_CLASS  38
+#define LTNG_LOBJ_GOBJ_PLINK  32
+
+// Overhead INFINITE flash LOBJ (the global rider flash). INFINITE (flags & 3 ==
+// 1): LObjLoad allocates a WObj from `position` and ignores the union; the WObj
+// pos vector is the light direction (shining toward the origin from that point).
 static WOBJDesc s_flash_pos_desc = {
     .class_name = 0,
     .pos = { 0.0f, 1500.0f, 0.0f }, // overhead
@@ -77,9 +85,9 @@ static LObjDesc s_flash_lobj_desc = {
     .u = { .p = 0 },
 };
 
-// ---- Descriptors for the POINT LOBJ at the bolt midpoint. POINT light
-// (flags & 3 == 2): LObjLoad loads `position` as the world point; the computed
-// point desc (attnflags bit 0 clear) gives ref-brightness/ref-distance falloff.
+// POINT LOBJ at the bolt midpoint. POINT (flags & 3 == 2): LObjLoad loads
+// `position` as the world point; the computed point desc (attnflags bit 0
+// clear) gives ref-brightness/ref-distance falloff.
 static WOBJDesc s_bolt_pos_desc = {
     .class_name = 0,
     .pos = { 0.0f, 400.0f, 0.0f }, // repositioned to the bolt midpoint each strike
@@ -122,6 +130,13 @@ static int     stc_preset_bolt = LTNG_BOLT_OFF; // this preset's bolt mode
 static int s_lull_frames = LTNG_INITIAL_LULL;
 static int s_flash_frames = 0;
 
+// Per-strike appearance, rolled when a strike fires (see the LTNG_* ranges).
+static int   s_strike_len = LTNG_DEF_FLASH_FRAMES; // this strike's envelope length
+static float s_strike_intensity = 1.0f;            // this strike's peak brightness
+static int   s_strike_on = LTNG_STROBE_ON_MAX;     // frames at full per strobe cycle
+static int   s_strike_gap = LTNG_STROBE_GAP_MAX;   // frames at the dim floor per cycle
+static float s_strike_floor = LTNG_STROBE_FLOOR_MIN; // this strike's dim floor level
+
 // Bolt geometry (world space), generated per strike. Segments are point pairs so
 // the fork is just extra entries past the main channel.
 static Vec3 s_seg_a[BOLT_MAX_SEG];
@@ -129,15 +144,8 @@ static Vec3 s_seg_b[BOLT_MAX_SEG];
 static int  s_seg_count = 0;
 static Vec3 s_bolt_mid = {0.0f, 0.0f, 0.0f};
 
-// ---- Global "Lightning Bolts" override (settings menu) ----
 static char *bolt_override_names[] = {"Auto", "Off", "Force"};
 static int   bolt_override_index = 0; // 0=Auto (honor preset), 1=Off, 2=Force
-
-// Symmetric random in [-1, 1).
-static float Randf2(void)
-{
-    return HSD_Randf() * 2.0f - 1.0f;
-}
 
 // Resolve the effective bolt mode from the active preset's setting and the
 // global menu override. Force lifts an off/augment preset to at least augment,
@@ -156,13 +164,13 @@ static int EffectiveBoltMode(void)
 // a few sharp pulses decaying to nothing. Drives the flash and the bolt alike.
 static float FlashBrightness(void)
 {
-    if (s_flash_frames <= 0 || stc_flash_len <= 0)
+    if (s_flash_frames <= 0 || s_strike_len <= 0)
         return 0.0f;
-    int elapsed = stc_flash_len - s_flash_frames; // 0 .. len-1
-    float decay = (float)s_flash_frames / (float)stc_flash_len;
-    int phase = elapsed % (LTNG_STROBE_ON + LTNG_STROBE_GAP);
-    float strobe = (phase < LTNG_STROBE_ON) ? 1.0f : LTNG_STROBE_FLOOR;
-    return decay * strobe;
+    int elapsed = s_strike_len - s_flash_frames; // 0 .. len-1
+    float decay = (float)s_flash_frames / (float)s_strike_len;
+    int phase = elapsed % (s_strike_on + s_strike_gap);
+    float strobe = (phase < s_strike_on) ? 1.0f : s_strike_floor;
+    return decay * strobe * s_strike_intensity;
 }
 
 // Ground anchor for a strike. Primary: a uniform random XZ inside the stage's
@@ -180,9 +188,9 @@ static void StrikeAnchor(float *ax, float *az)
         return;
     }
 
-    GOBJ *riders[5];
+    GOBJ *riders[WEATHER_PLAYER_SLOTS];
     int count = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < WEATHER_PLAYER_SLOTS; i++)
     {
         GOBJ *rg = Ply_GetRiderGObj(i);
         if (rg)
@@ -200,8 +208,8 @@ static void StrikeAnchor(float *ax, float *az)
         }
     }
 
-    *ax = cx + Randf2() * BOLT_SPREAD;
-    *az = cz + Randf2() * BOLT_SPREAD;
+    *ax = cx + Weather_Randf2() * BOLT_SPREAD;
+    *az = cz + Weather_Randf2() * BOLT_SPREAD;
 }
 
 static void SetLightColor(LOBJ *l, u8 r, u8 g, u8 b)
@@ -224,7 +232,7 @@ static void EnsureFlashLight(void)
 {
     if (s_flash_lobj)
         return;
-    GOBJ *gobj = GObj_Create(38, 32, 0);
+    GOBJ *gobj = GObj_Create(LTNG_LOBJ_GOBJ_CLASS, LTNG_LOBJ_GOBJ_PLINK, 0);
     if (!gobj)
         return;
     s_flash_lobj = LObj_LoadDesc(&s_flash_lobj_desc);
@@ -236,7 +244,7 @@ static void EnsureBoltLight(void)
 {
     if (s_bolt_lobj)
         return;
-    GOBJ *gobj = GObj_Create(38, 32, 0);
+    GOBJ *gobj = GObj_Create(LTNG_LOBJ_GOBJ_CLASS, LTNG_LOBJ_GOBJ_PLINK, 0);
     if (!gobj)
         return;
     s_bolt_lobj = LObj_LoadDesc(&s_bolt_lobj_desc);
@@ -262,8 +270,8 @@ static void GenerateBolt(void)
     for (int i = 1; i <= BOLT_SEGMENTS; i++)
     {
         y -= dy;
-        x += Randf2() * BOLT_JITTER;
-        z += Randf2() * BOLT_JITTER;
+        x += Weather_Randf2() * BOLT_JITTER;
+        z += Weather_Randf2() * BOLT_JITTER;
         Vec3 cur = { x, y, z };
         s_seg_a[n] = prev;
         s_seg_b[n] = cur;
@@ -282,8 +290,8 @@ static void GenerateBolt(void)
     for (int i = 0; i < BOLT_FORK_SEGS && n < BOLT_MAX_SEG; i++)
     {
         fy -= fdy;
-        fx += Randf2() * BOLT_FORK_JITTER + 25.0f;
-        fz += Randf2() * BOLT_FORK_JITTER;
+        fx += Weather_Randf2() * BOLT_FORK_JITTER + 25.0f;
+        fz += Weather_Randf2() * BOLT_FORK_JITTER;
         Vec3 fcur = { fx, fy, fz };
         s_seg_a[n] = fprev;
         s_seg_b[n] = fcur;
@@ -292,7 +300,6 @@ static void GenerateBolt(void)
     }
     s_seg_count = n;
 
-    s_bolt_pos_desc.pos = s_bolt_mid;
     if (s_bolt_lobj && s_bolt_lobj->position)
         s_bolt_lobj->position->pos = s_bolt_mid;
 }
@@ -302,20 +309,7 @@ static void GenerateBolt(void)
 // the bolt (same occlusion rule as the rain). Mirrors rain.c's GX setup.
 static void DrawBoltPass(COBJ *cam, GXColor col, int width, u8 alpha)
 {
-    HSD_StateInitDirect(GX_VTXFMT0, 2);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-    GXSetNumTexGens(0);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR); // additive
-    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE);
-    GXSetCullMode(GX_CULL_NONE);
-    GXSetLineWidth((u8)width, 5);
-    GXLoadPosMtxImm(&cam->view_mtx, GX_PNMTX0);
+    WeatherGX_BeginXlu(cam, 1, width); // additive
 
     GXBegin(GX_LINES, GX_VTXFMT0, s_seg_count * 2);
     for (int i = 0; i < s_seg_count; i++)
@@ -358,12 +352,9 @@ static void EnsureBoltRender(void)
 {
     if (s_bolt_render)
         return;
-    GOBJ *g = GObj_Create(BOLT_GOBJ_CLASS, BOLT_GOBJ_PLINK, 0);
-    if (!g)
-        return;
-    GObj_AddGXLink(g, Bolt_GX, BOLT_GX_LINK, BOLT_GX_PRI);
-    s_bolt_render = g;
-    OSReport("[Lightning] Bolt render layer installed\n");
+    s_bolt_render = WeatherGX_EnsureLayer(BOLT_GOBJ_CLASS, BOLT_GOBJ_PLINK, Bolt_GX,
+                                          BOLT_GX_LINK, BOLT_GX_PRI,
+                                          "[Lightning] Bolt render layer installed");
 }
 
 // Latch the active preset's lightning config, resolving each 0 field to its
@@ -462,11 +453,23 @@ void Lightning_Tick(HSD_Fog *fog)
         s_lull_frames--;
         if (s_lull_frames <= 0)
         {
-            s_flash_frames = stc_flash_len;
+            // Roll this strike's shape (length, brightness, cadence, floor).
+            float lenscale = LTNG_LEN_MIN_SCALE + HSD_Randf() * (LTNG_LEN_MAX_SCALE - LTNG_LEN_MIN_SCALE);
+            s_strike_len = (int)(stc_flash_len * lenscale);
+            if (s_strike_len < 1)
+                s_strike_len = 1;
+            s_strike_intensity = LTNG_INTENSITY_MIN + HSD_Randf() * (1.0f - LTNG_INTENSITY_MIN);
+            s_strike_on = LTNG_STROBE_ON_MIN + HSD_Randi(LTNG_STROBE_ON_MAX - LTNG_STROBE_ON_MIN + 1);
+            s_strike_gap = LTNG_STROBE_GAP_MIN + HSD_Randi(LTNG_STROBE_GAP_MAX - LTNG_STROBE_GAP_MIN + 1);
+            s_strike_floor = LTNG_STROBE_FLOOR_MIN + HSD_Randf() * (LTNG_STROBE_FLOOR_MAX - LTNG_STROBE_FLOOR_MIN);
+            s_flash_frames = s_strike_len;
+
             int span = stc_max_lull - stc_min_lull;
             s_lull_frames = stc_min_lull + (span > 0 ? HSD_Randi(span) : 0);
             GenerateBolt();
-            OSReport("[Lightning] Strike (next in %d frames)\n", s_lull_frames);
+            OSReport("[Lightning] Strike (len %d, %d%% peak, %don/%doff, next in %d frames)\n",
+                     s_strike_len, (int)(s_strike_intensity * 100.0f),
+                     s_strike_on, s_strike_gap, s_lull_frames);
         }
     }
 }
@@ -481,6 +484,7 @@ void Lightning_Reset(void)
     s_seg_count = 0;
     s_lull_frames = LTNG_INITIAL_LULL;
     s_flash_frames = 0;
+    stc_active = 0;
 }
 
 MenuDesc lightning_menu = {
