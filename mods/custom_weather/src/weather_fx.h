@@ -9,6 +9,14 @@
 // Symmetric random in [-1, 1).
 float Weather_Randf2(void);
 
+// Resolve a {Preset, Off, On} menu index (0/1/2) to a boolean. Preset (0)
+// yields `preset_default` (the module's built-in behavior); Off (1) = 0;
+// On (2) = 1. Lets every toggle default to "Preset" yet still force Off/On.
+static inline int WeatherToggle(int idx, int preset_default)
+{
+    return (idx == 0) ? preset_default : (idx == 2);
+}
+
 // Shared GX setup for a weather layer's translucent world pass: flat per-vertex
 // color, alpha blend (additive when `additive`), depth-tested but not
 // depth-writing so opaque geometry occludes the layer, no cull, camera view

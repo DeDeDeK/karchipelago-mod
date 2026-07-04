@@ -231,7 +231,7 @@ next pass; the EFB clear color is a separate path (see below).
                               (each chain is a NULL-terminated array of
                                LightGroup* per obj.h:684; each LightGroup is
                                {LObjDesc *desc, LightAnim *anim})
-           +0x0C  ModelSection {terrain, backdrop, ...} - see sky-backdrop-system.md
+           +0x0C  ModelSection {terrain, backdrop, ...}
            +0x30  EventConfigData *event_config (CT only)
            +0x34  SkyBlock *sky_block (named in stage.h):
                     +0x00  HSD_FogDesc *fog_desc       - initial fog parameters
@@ -1252,17 +1252,21 @@ preset change it applies several optional layers from the active
 | Global fog distance | every frame: `HSD_Fog.scale = CustomWeather_GetFogScale()` — the menu-driven multiplier on the fog far wall (`end * scale`); covers vanilla presets too | `CustomWeatherRuntime_Tick` |
 | Lightning | per-frame strike loop from `def->lightning`; lerps fog/EFB/its own LOBJ toward the flash color | `Lightning_Tick` (`lightning.c`) |
 | Rain | per-frame world-space GX line field from `def->rain` | `Rain_Tick` (`rain.c`) |
-| Wind | per-frame global wind vector from `def->wind`; slants the rain/hail, nudges airborne items, pushes gliding machines | `Wind_Tick` (`wind.c`) |
-| Hail | damaging hailstone clouds over each machine, layered on the rain (global menu, gated on rain being active) | `Hail_Tick` (`hail.c`) |
+| Snow | per-frame world-space field of soft fluttering flakes from `def->snow` | `Snow_Tick` (`snow.c`) |
+| Wind | per-frame global wind vector from `def->wind`; slants the rain/snow/hail, nudges airborne items, pushes gliding machines | `Wind_Tick` (`wind.c`) |
+| Hail | damaging hailstone clouds over each machine, layered on the rain, from `def->hail` (gated on rain being active) | `Hail_Tick` (`hail.c`) |
 | Puddles | per-frame field of roaming ground pools from `def->puddles` that drag machines | `Puddle_Tick` (`puddle.c`) |
 | Trees | per-frame lean of the CT forest-tree joints toward the wind (global menu; no per-preset config) | `Tree_Tick` (`tree.c`) |
 | Clouds | per-frame deck of drifting translucent cloud clusters from `def->clouds` | `Cloud_Tick` (`clouds.c`) |
+| Moon | camera-anchored phased lunar disc from `def->moon`; optional directional moonlight that suppresses the stage's secondary INFINITE light | `Moon_Tick` (`moon.c`) |
+| Stars | camera-anchored twinkling starfield plus shooting stars from `def->stars` | `Star_Tick` (`stars.c`) |
 
-The effect layers — **lightning**, **rain**, **wind**, **hail**, **puddles**,
-**trees**, and **clouds** — are each a self-contained module driven from this tick,
-independent of one another and of the static sky/fog/light fields, so a preset can
-carry any combination. Wind is ticked before rain, hail, trees, and clouds so they
-all read the current frame's wind vector for their slant/drift. `event_sky.c` is a
+The effect and celestial layers — **lightning**, **rain**, **snow**, **wind**,
+**hail**, **puddles**, **trees**, **clouds**, **moon**, and **stars** — are each a
+self-contained module driven from this tick, independent of one another and of the
+static sky/fog/light fields, so a preset can carry any combination. Wind is ticked
+before rain, snow, hail, trees, and clouds so they all read the current frame's wind
+vector for their slant/drift. `event_sky.c` is a
 related sibling but installs its own boot hook
 rather than running from this tick (see "Event sky suppression").
 
@@ -1331,10 +1335,11 @@ The look/motion is per preset via the `RainDef rain` field (`custom_weather.h`):
 taking a `rain.c` module default when left 0. The horizontal slant is **not** a
 RainDef field — `rain.c` reads the global wind vector (`wind.c`) every frame, so a
 preset's `WindDef` drives both the rain's slant and the rest of the weather. Any
-preset can carry rain — `WEATHER_RAIN` (a steady shower), `WEATHER_STORM` (a
-heavier, wind-blown downpour that composes with its lightning), `WEATHER_BLOOD_RAIN`
-(a deep-red downpour with lightning, no wind), and `WEATHER_PUDDLES` (a light
-drizzle over its ground pools) all set it.
+preset can carry rain — `WEATHER_RAIN` (a steady blue shower over light puddles),
+`WEATHER_HAILSTORM` (a heavier wind-blown downpour with damaging hail),
+`WEATHER_STORM` (a heavier, wind-blown downpour that composes with its lightning),
+`WEATHER_BLOOD_RAIN` (a deep-red downpour with lightning, no wind), and
+`WEATHER_TOXIC` (a barely-there green drizzle over green pools) all set it.
 
 Driven from the same per-frame tick as the animation runtime:
 
@@ -1375,7 +1380,7 @@ rain stays correctly depth-sorted while the field tracks the player.
 dominant cost lever; the batch is re-emitted once per camera, so 3–4P
 split-screen multiplies it. If this
 immediate-mode path proves too expensive, the **HSD point-particle pool**
-(`particle-system.md`) is the natural fallback: its render driver
+is the natural fallback: its render driver
 `psRenderParticles` (0x80433f00) already draws velocity-stretched `GX_LINES`
 streaks (`Ptcl_EmitStreak`, 0x80436460) and `GX_POINTS` in world space from its
 own decoupled tick/render walks, so rain could be emitted as particles and let
@@ -1385,6 +1390,56 @@ the engine batch them. The trade-off is that the pool copies a static
 descriptor registration — so it is less flexible to tune from mod code than
 this self-contained module. Worth doing only if the GX-line approach measures
 poorly.
+
+### Snow (`snow.c`)
+
+A preset with `snow.enabled` set gets a camera-following field of soft round flakes
+that fall slowly, flutter sideways on their own phase, and drift with the global
+wind. Riders pass through it. The model mirrors `rain.c`'s camera-following box, but
+each flake draws as a small camera-facing glow (like a star) instead of a line streak.
+
+**Camera-following box.** A fixed pool of `SNOW_MAX` (1000) per-flake offsets is
+seeded once (`SeedField`), each a random point in `[0, SNOW_BOX)³` (`SNOW_BOX` =
+1000). A single shared drift `stc_drift` advances every frame by the resolved velocity
+(fall + wind) and wraps into `[0, SNOW_BOX)` per axis (`WrapStep`). In the GX callback
+each flake's world position is `eye + fold(offset + drift) − SNOW_BOX_HALF` — the box is
+centered on the camera eye (recovered from the view matrix as `−Rᵀt`) and the `offset +
+drift` sum is folded back into one box with a single subtract. The field looks infinite
+and never depletes; only the first `stc_density` flakes are drawn. Fall is slow
+(`SNOW_DEF_FALL_SPEED` = 3 world units/frame, far under rain's 26). The wind slant
+(`stc_vel_x/z`) tracks the global wind vector (`Wind_GetVector`) when the Snow Wind-Slant
+gate is on, read fresh each frame; off, snow falls straight down.
+
+**Flutter.** On top of the shared fall+wind drift each flake sways sideways independently
+so the field shimmers instead of moving in lockstep. Each flake owns a phase, an angular
+speed (`SNOW_TW_SPEED_MIN`..`MAX`, 0.04–0.11 rad/frame), and a unit horizontal sway
+direction, all seeded once. A shared clock `stc_time` advances by 1 each `Snow_Tick`; the
+per-frame sideways offset is `flutter · sin(stc_time · freq + phase)` along the flake's
+sway direction, added to its X/Z in the GX callback. `flutter` is the resolved amplitude
+(preset `flutter` × the Flutter menu factor); Flutter = None freezes the sway to a
+straight fall.
+
+**Render path.** A flake is a small soft round dot: a `GX_TRIANGLEFAN` with an opaque
+center vertex and `SNOW_SEGS` (6) transparent rim vertices, camera-facing (billboard
+basis = rows 0/1 of the world→view rotation, the camera's world right/up). Per-flake size
+varies about the resolved base by `SNOW_SIZE_VAR` (±0.5), seeded once. The GX callback
+runs on the world camera link (gx_link 0) on the XLU pass (pass 1) after
+`WeatherGX_BeginXlu(cam, additive=0, 0)` — straight alpha blend (`GX_BL_SRCALPHA` /
+`GX_BL_INVSRCALPHA`, so flakes read white over the world rather than glowing), `GX_LEQUAL`
+depth test, no depth write (opaque geometry occludes flakes behind it), no cull. Fog is
+left on, so distant flakes tint toward the world fog. The layer's GObj is entity class 209
+/ p_link 34 — past the celestial sky layers (stars 208/32, moon 207/31, clouds 205/29) —
+so as near-field precipitation it draws in front of them.
+
+Per preset via `SnowDef snow` (`custom_weather.h`): `enabled`, `color` (RGBA; A =
+opacity), `density` (flake count, clamped to `SNOW_MAX`), `fall_speed`, `flutter`, `size`,
+each numeric field taking a `snow.c` default when 0. Driven from the tick (`Snow_SetActive`
+on preset change — resolves the Intensity / Fall Speed menu, applied on the next preset
+change / CT re-entry — `Snow_Tick` after `Rain_Tick` and `Wind_Tick`, `Snow_Reset` on
+teardown). Snow is authored on **Snowstorm**: a dense, slow, fluttering white field under
+soft flat white lighting, carried by a gusty wind. The global **Snow** menu layers
+Intensity / Fall Speed / Flutter / Wind Slant over every preset (Flutter and Wind Slant
+read live).
 
 ### Wind (`wind.c`)
 
@@ -1408,9 +1463,10 @@ toggle (rolls the base heading per round), and per-consumer **Affect Machines** 
 
 ### Hail (`hail.c`)
 
-A damaging layer that rides on the rain. While a rain preset is active and the
-**Hail** menu (under Rain) is on, each machine carries a tight box of real
-world-space hailstones that fall under gravity plus the global wind slant. Unlike
+A damaging layer that rides on the rain. While a rain preset is active and hail is
+on (the preset's `hail`, or a forced **Hail** menu amount), each machine carries a
+tight box of real world-space hailstones that fall under gravity plus the global
+wind slant. Unlike
 the rain — a camera-relative field with no persistent per-drop position — a
 hailstone is a true world point, so the hit is honest: when one enters a machine's
 body sphere it deals **1 damage** (`Machine_GiveDamage(md, 1, mg)`) and respawns at
@@ -1426,9 +1482,13 @@ above the machine — a down-cast detects a roof by its walkable top face, so it
 regardless of triangle sidedness; any hit means something is overhead. The probe is
 throttled (every few frames) and cached per machine. Stones draw as short, thick,
 icy GX lines on the world XLU pass (`GObj_Create(204, 28, 0)`), depth-tested like
-the rain. Hail holds no per-preset config — it is a single global menu knob (Off /
-Light / Normal / Heavy) gated on `Rain_IsActive()`, scaling stones per machine, and
-is driven from the tick via `Hail_Tick` / `Hail_Reset` (no `Hail_SetActive`).
+the rain. Hail is per-preset via the `HailDef hail` field (`enabled`, `amount` — a
+density multiplier where 1.0 = Normal), latched by `Hail_SetActive` on each preset
+change. The **Hail** menu (under Rain) resolves its **Preset** index to that latched
+amount (`Hailstorm` sets `amount = 1.0`; the other rain presets leave it off); the
+forced Off / Light / Normal / Heavy values override every preset. Either way the
+stone count is gated on `Rain_IsActive()`, and the layer is driven from the tick via
+`Hail_Tick` / `Hail_Reset`.
 
 ### Ground puddles (`puddle.c`)
 
@@ -1492,6 +1552,202 @@ disables clouds for every preset), **Opacity**, **Size**, and per-cluster
 **Variance**, offsets the deck **Height**, and can override the tint (**Color**,
 `Preset` keeps each preset's own).
 
+### Moon (`moon.c`)
+
+A preset with `moon.enabled` (or the Moon menu forcing it on) gets a distant fog-free
+disc fixed on the City Trial sky dome that crosses the sky over the round, shows craters
+and one of the eight canonical lunar phases, and can cast a directional moonlight that
+makes it the scene's dominant light.
+
+**Placement — camera-anchored, dome-clamped.** Each frame the moon sits at `P = eye +
+skydir · dist`, where `eye` is the camera position (recovered from the view matrix as
+`−Rᵀt`) and `skydir` is the world sky direction (below). Anchoring to the eye gives a
+consistent apparent elevation and no parallax swim. `dist` is the **minimum** of three
+limits: `MOON_MAX_DIST` (1800, the desired anchor distance); `MOON_DOME_FRAC` (0.82) × the
+distance from the eye to the backdrop dome along `skydir`; and `MOON_FAR_FRAC` (0.85) × the
+camera far plane (so it is never frustum-clipped). The City Trial backdrop is a
+depth-writing sphere at the world origin of radius ~`MOON_DOME_R` (2500 = geometry ~2856 ×
+stage scale ~0.875); a moon beyond it would be occluded and pop out as the camera nears
+the edge, so the ray-march `t_dome = −e·d + sqrt((e·d)² + R² − |e|²)` (with `e = eye`, `d =
+skydir`) and the 0.82 fraction keep it reliably inside from every camera position. The disc
+radius scales with the final `dist` about `MOON_REF_DIST`, so the **apparent** size is
+constant (`stc_size / MOON_REF_DIST`) even when clamped. Terrain nearer than `dist`
+occludes the moon through the normal depth test; the fog-free far sky and the dome (always
+farther) do not. The disc is a camera-facing billboard (basis = rows 0/1 of the world→view
+rotation, `COBJ.view_mtx`).
+
+**Motion — synced to the match clock.** The moon crosses the sky once over the round, tied
+to the City Trial match timer rather than a private counter. `grBoxGeneInfo`
+(`*stc_grBoxGeneInfo`, i.e. `*(r13+0x610)`) exposes a pre-normalized `float match_progress`
+at +0x2a4 that the game advances 0.0 → 1.0 over the round (frozen during pause / match
+end); bit 0x40 of `flags_x2a8` marks the pre-round intro. `MoonProgress()` returns 0 during
+the intro or when the info pointer is null (menus / non-city), holding the moon at its rise
+point. From progress `p`:
+
+```
+el = arc_height_deg * sin(p * PI)          // 0 at the ends, peak at mid-round
+az = rise_bearing_deg + 180 * p            // rises at rise_bearing, sets opposite
+dir = (cos el * sin az, sin el, cos el * cos az)
+```
+
+`arc_height` (the "declination" knob) is the peak elevation in degrees (default
+`MOON_DEF_ARC` = 26, a low horizon-hugging arc). When `dir.Y <= 0` (rise/set) the moon and
+its light are skipped.
+
+**Phase geometry.** The lit region is drawn as `MOON_BANDS` (28) horizontal scanline
+bands. For a band at billboard height `v` the disc half-width is `w = sqrt(r² − v²)`; the
+terminator is a per-scanline ellipse of horizontal half-width `|k|·r`, `k ∈ [−1, 1]`: lit
+on camera-right `u ∈ [−k·w, +w]`, lit on camera-left `u ∈ [−w, +k·w]`. The far edge is
+always the disc rim, the near edge the terminator. `PhaseParams` maps `MoonPhase` to `(k,
+side)`:
+
+| Phase | k | Lit side |
+|-------|-----|----------|
+| Full | +1.0 | (whole disc) |
+| Waxing Crescent | -0.5 | right |
+| First Quarter | 0.0 | right |
+| Waxing Gibbous | +0.5 | right |
+| Waning Gibbous | +0.5 | left |
+| Last Quarter | 0.0 | left |
+| Waning Crescent | -0.5 | left |
+| New | -1.0 | (not drawn) |
+
+The lit side is camera-relative (screen right/left), matching a player-selected phase
+rather than tracking a sun position. Each band is split into `MOON_COLS` (6) columns and
+emitted as a `GX_TRIANGLESTRIP`; empty scanlines (deep crescents) collapse to zero width
+and are skipped.
+
+**Soft rim and craters.** The outer silhouette is feathered: each disc vertex's alpha is
+scaled by `MoonRimFade` — full inside a radial fraction `MOON_RIM_FADE` (0.85) of the disc,
+then falling linearly to 0 at the rim. Splitting each band into columns keeps the fade
+localized to the rim (and crescent tips) instead of gradient-washing the lit face; the
+terminator stays crisp because its interior vertices sit well inside `MOON_RIM_FADE`.
+Craters are `MOON_CRATERS` (13) darker translucent patches (RGB = disc × 0.58), seeded once
+(`SeedCraters`) over the inner disc (`rad = sqrt(rand) × 0.62`, radius 0.08–0.18 of the
+disc) so they stay off the soft rim, each a `GX_TRIANGLEFAN` drawn only when `CraterFits`
+confirms the whole circle is contained — fully inside the opaque interior (`dist + radius ≤
+MOON_RIM_FADE·r`) **and** on the lit side of the terminator — so a crater never overhangs
+into the dark or off the disc edge; on narrow phases straddling craters are dropped.
+
+**Fog-free draw.** At ~1800 units the disc is far past the fog wall (`fog_end` ≈ 420–665).
+The GX callback runs on the world camera link (gx_link 0) on the XLU pass (pass 1), after
+`WeatherGX_BeginXlu` (alpha blend, `GX_LEQUAL` depth test, no depth write, no cull), and
+brackets the draw with `HSD_FogSet(NULL)` … `HSD_FogSet(live_fog)` — disabling GX fog for
+the moon and restoring the live `HSD_Fog` (from `(*stc_grobj)->sky_gobj->hsd_object`) so
+later geometry stays fogged. Depth is kept (not forced to `GX_ALWAYS`) so terrain occludes
+the moon; visibility against the sky comes from the dome-distance clamp, not from disabling
+depth.
+
+**Moonlight and distant-light suppression.** When a preset sets `moon.light` (or the Moon >
+Moonlight menu forces it on), the module casts a directional moonlight and removes the
+leftover distant stage light so the moon becomes the dominant source. An `LOBJ_INFINITE |
+LOBJ_DIFFUSE | LOBJ_SPECULAR` light is created once (`GObj_Create` + `LObj_LoadDesc` +
+`GObj_AddObject(HSD_OBJKIND_LOBJ)` + `GObj_AddGXLink(LObj_GX, 0, 0)`) and, each frame the
+moon is above the horizon, pointed along the moon's sky direction with `LObj_SetPosition`
+and colored from `light_color × Brightness`; it lights riders, machines, items, and the few
+DIFFUSE terrain materials (the bulk of the stage is unlit, so the scene's darkness comes
+from the preset's fog / ambient / screen-tint). City Trial has two distant INFINITE stage
+lights: the primary (`*stc_main_light`) is already owned by the runtime's terrain tint (a
+moonlit preset darkens it via `terrain_diffuse`), so the moon module owns only the
+**secondary** — it walks `stc_lobj_hw_slot_table[0..7]` for the INFINITE light that is
+neither the primary nor its own LOBJ, caches its color, and zeroes it. Zeroing is durable
+because `HSD_LObjSetCurrentAll` rebuilds the slot assignment each frame but never rewrites
+`LOBJ.color`. Splitting ownership (runtime = primary, moon = secondary) keeps one owner per
+light. The suppressed light is restored to its cached color when moonlight turns off or the
+preset changes (`RestoreSecondary`); on teardown `Moon_Reset` only drops the cached
+`GObj`/`LOBJ` handles (the engine frees those objects and reloads fresh stage lights on the
+next entry, so nothing is written through a stale pointer). The slot table lags the think
+hook by a frame, so the secondary resolves lazily with retry.
+
+Per preset via `MoonDef moon` (`custom_weather.h`): `enabled`, `color` (RGBA; A = opacity),
+`size`, `phase` (`MoonPhase`; 0 = Full), `arc_height` (peak elevation degrees),
+`rise_bearing` (compass degrees), `light` (cast moonlight + suppress the secondary sun),
+`light_color`, each numeric field taking a `moon.c` default when 0. Driven from the tick
+(`Moon_SetActive` on preset change, `Moon_Tick` each frame, `Moon_Reset` on teardown). The
+moon is authored on **Moonlight** (`WEATHER_MOONLIGHT`): a clear, dark midnight sky with a
+waxing-gibbous moon, moonlight enabled, and a dense, frequently-streaking starfield. The
+global **Moon** menu layers Moon on/off, Size, Brightness, Phase, Arc Height, Color, and
+Moonlight over the preset.
+
+### Stars (`stars.c`)
+
+A preset with `stars.enabled` (or the Stars menu forcing it on) gets a field of faint
+camera-anchored dots over the City Trial sky dome, drawn additively as soft glows with
+per-star size and brightness variance, each shimmering on its own phase to fake atmospheric
+twinkling. Like the moon, a star is a celestial billboard fixed on a world sky direction
+and clamped inside the backdrop dome.
+
+**Placement — camera-anchored, dome-clamped.** Each star owns a fixed unit sky direction
+`dir`, seeded once uniformly over the upper sky cap (above `STAR_MIN_ELEV_DEG` = 10°). The
+GX callback places it at `P = eye + dir · dist` (`eye` = camera position, `−Rᵀt`), so the
+field is celestial — no parallax swim; panning sweeps across the world-fixed starfield.
+`dist` is the minimum of `STAR_MAX_DIST` (6000, always clamped smaller), `STAR_DOME_FRAC`
+(0.9) × the eye-to-dome distance along `dir`, and `STAR_FAR_FRAC` (0.9) × the camera far
+plane. The dome is the same depth-writing sphere at the origin of radius ~`STAR_DOME_R`
+(2500), with `t_dome = −e·d + sqrt((e·d)² + R² − |e|²)` (falling back to `STAR_DOME_R` when
+the eye is outside). Each dot's world radius scales with its final `dist` about
+`STAR_REF_DIST` (1800), so apparent size is constant (`star.size / STAR_REF_DIST`). Terrain
+nearer than `dist` occludes a star through the depth test; the fog-free far sky and the dome
+do not. Each dot is a camera-facing billboard (basis = rows 0/1 of the world→view rotation,
+`COBJ.view_mtx`).
+
+**Additive fog-free draw.** A star is a small soft glow: a `GX_TRIANGLEFAN` with a bright
+center vertex and `STAR_SEGS` (6) transparent rim vertices. The GX callback runs on the
+world camera link (gx_link 0) on the XLU pass (pass 1) after `WeatherGX_BeginXlu(cam,
+additive=1, 0)` — additive blend (`GX_BL_SRCALPHA` / `GX_BL_ONE`), `GX_LEQUAL` depth test,
+no depth write, no cull — so dots glow, never darken the sky, and draw order against the
+other translucent layers is irrelevant. The draw is bracketed with `HSD_FogSet(NULL)` …
+`HSD_FogSet(live_fog)` (from `(*stc_grobj)->sky_gobj->hsd_object`) so distant dots aren't
+washed to the fog color while later geometry stays fogged. The star layer's GObj is entity
+class 208 / p_link 32 — past the moon (207/31) and clouds (205/29) — so the starfield draws
+farthest back and the moon and cloud deck blend over it.
+
+**Twinkle.** `Star_Tick` advances a shared clock `stc_time` by 1 each frame. Each star has
+a random phase and angular speed (`STAR_TW_SPEED_MIN`..`MAX`, 0.05–0.14 rad/frame ≈ 0.75–2
+s per cycle), so the field shimmers out of sync. Per frame a star's brightness is multiplied
+by `1 + tw·STAR_TW_DEPTH·sin(stc_time·speed + phase)` (`STAR_TW_DEPTH` = 0.7); the additive
+blend clamps the bright overshoot. `tw` is the resolved twinkle depth (preset × menu,
+clamped 0..1), so Twinkle = None freezes the field.
+
+**Field composition.** The field is scattered once per preset activation by `Star_Arm`
+(`stc_inited`), with no stage dependency. The star count is `density × Density-menu factor`
+clamped to `STAR_MAX` (220). Per star `SeedStar` rolls a sky-cap direction (uniform via `z
+∈ [sin(min_elev), 1]`), a size = `base_size × (1 + rand[−1,1) × var)` (floored, `var` =
+preset `size_var` × the Size Variance menu factor), a base brightness in `[STAR_BRIGHT_MIN,
+1]` (0.35..1) so some dots are dim, and a random twinkle phase/speed. Each frame a dot's
+additive alpha is `color.a × luminosity × star.bright × twinkle`, clamped to 255 and
+skipped below 1. Because the field is armed once per preset, Density and Size Variance apply
+on the next preset change / CT re-entry; Twinkle, Luminosity, and Color are read live.
+
+**Shooting stars.** Meteors ride along with the starfield (same GX callback, same additive
+fog-free draw), gated on the star feature being active and on the effective cadence not
+being Off. A pool (`SHOOT_MAX` = 4) holds concurrent meteors; `Shoot_Tick` (called from
+`Star_Tick`) ages live ones and, once a random lull timer reaches 0, launches a new one and
+re-seeds the timer from the effective cadence (`shoot_lull_min/max` frame ranges). Aging in
+the think tick keeps meteors advancing once per frame even across split-screen viewports.
+The cadence is per-preset: `StarDef.shoot` (a `ShootFreq`: Default/Off/Rare/Occasional/
+Frequent, Default = Occasional) is latched into `stc_shoot_level` by `Star_SetActive`; the
+effective level `ShootLevel()` is that latched preset level when the Frequency menu is
+**Preset**, or the forced menu level otherwise, mapping 1:1 onto the `shoot_lull_*` ranges
+(level 1 = Off). A meteor is a great-circle arc: a start direction `d0` high in the sky
+(25–75° elevation) and a unit tangent `t` biased downward, `head(p) = d0·cos(arc·p) +
+t·sin(arc·p)` for progress `p = age/life`; `arc` (`SHOOT_ARC_MIN`..`MAX`, 0.4–1.0 rad) is
+how far it crosses and `life` (`SHOOT_LIFE_MIN`..`MAX`, 26–46 frames) × the Speed menu
+factor sets the pace. Each meteor draws as a `GX_LINESTRIP` trail (from `SHOOT_TRAIL_SPAN` =
+0.15 of the arc behind the head, per-vertex alpha fading to transparent at the tail) plus a
+`GX_TRIANGLEFAN` head glow, both additive, with a `SHOOT_FADE_IN` / `SHOOT_FADE_OUT`
+brightness envelope. The pool is cleared and the timer re-seeded on every preset change and
+CT teardown (`Shoot_Reset`).
+
+Per preset via `StarDef stars` (`custom_weather.h`): `enabled`, `color` (RGBA; A = base
+brightness), `density`, `twinkle` (0..1 shimmer depth), `luminosity`, `size`, `size_var`
+(0..1 spread), `shoot` (`ShootFreq` meteor cadence; 0 = Default/Occasional), each numeric
+field taking a `stars.c` default when 0. Driven from the tick (`Star_SetActive` on preset
+change, `Star_Tick` each frame, `Star_Reset` on teardown). Stars are authored on
+**Moonlight** with `shoot = Frequent`. The global **Stars** menu layers Stars on/off,
+Density, Twinkle, Luminosity, Size Variance, Color, and a Shooting Stars submenu (Frequency
+/ Size / Speed / Brightness / Color) over the preset.
+
 ### Wind-bent trees (`tree.c`)
 
 The global wind can lean the City Trial forest trees. Each forest tree (yakumono
@@ -1520,8 +1776,8 @@ retired and the break tail owns the joint from then on).
 
 Trees carry no per-preset config: they are a global menu effect gated on the wind,
 driven from the tick (`Tree_Tick` after `Wind_Tick`, `Tree_Reset` on teardown). The
-global **Trees** menu is **Bend in Wind** (Off / On) and **Sway Strength** (Subtle /
-Normal / Strong).
+global **Trees** menu is **Bend in Wind** (Preset / Off / On, Preset = on) and
+**Sway Strength** (Preset / Subtle / Normal / Strong).
 
 ### Event sky suppression (`event_sky.c`)
 
@@ -1541,24 +1797,20 @@ from `EventSky_OnBoot` (called in `main.c`'s `OnBoot`); the only other caller of
 
 ### WeatherKind enum (`custom_weather.h`)
 
-`WEATHER_VANILLA_NUM = 17`, `WEATHER_CUSTOM_NUM = 13`, `WEATHER_TOTAL = 30`.
-Custom presets occupy indices **17–29** (9 themed + 4 effect-layer presets):
+`WEATHER_VANILLA_NUM = 17`, `WEATHER_CUSTOM_NUM = 9`, `WEATHER_TOTAL = 26`.
+Custom presets occupy indices **17–25**, each a curated weather event:
 
 | Idx | WeatherKind | Name | base_preset | Effect layers |
 |-----|-------------|------|-------------|---------------|
-| 17 | `WEATHER_DEEP_BLUE`    | Deep Blue    | Night (12)         | — |
-| 18 | `WEATHER_GOLDEN_HOUR`  | Golden Hour  | Dusk (11)          | — |
-| 19 | `WEATHER_BLOOD_RED`    | Blood Red    | Red Vignette (15)  | — |
-| 20 | `WEATHER_WHITEOUT`     | Whiteout     | Dense Fog (9)      | — |
-| 21 | `WEATHER_TOXIC_GREEN`  | Toxic Green  | Dark Vignette (5)  | — |
-| 22 | `WEATHER_NEON`         | Neon         | Dark Purple (14)   | — |
-| 23 | `WEATHER_COTTON_CANDY` | Cotton Candy | Pink Sky (8)       | — |
-| 24 | `WEATHER_FROZEN_DAWN`  | Frozen Dawn  | Blue Sky (7)       | — |
-| 25 | `WEATHER_VOID`         | Void         | Night (12)         | — |
-| 26 | `WEATHER_STORM`        | Storm        | Dark Vignette (5)  | `lightning` + `rain` (+`screen_tint`) |
-| 27 | `WEATHER_RAIN`         | Rain         | Gray Sky (13)      | `rain` (+`screen_tint`) |
-| 28 | `WEATHER_BLOOD_RAIN`   | Blood Rain   | Red Vignette (15)  | `rain` + `lightning` |
-| 29 | `WEATHER_PUDDLES`      | Puddles      | Gray Sky (13)      | `rain` + `wind` + `puddles` |
+| 17 | `WEATHER_BLOOD_RAIN`   | Blood Rain   | Red Vignette (15)  | `rain` + `lightning` |
+| 18 | `WEATHER_STORM`        | Storm        | Dark Vignette (5)  | `lightning` + `rain` + `wind` + `clouds` (+`screen_tint`) |
+| 19 | `WEATHER_RAIN`         | Rain         | Gray Sky (13)      | `rain` + `wind` + `puddles` |
+| 20 | `WEATHER_HAILSTORM`    | Hailstorm    | Gray Sky (13)      | `rain` + `hail` + `wind` + `clouds` (+`screen_tint`) |
+| 21 | `WEATHER_SNOWSTORM`    | Snowstorm    | Dense Fog (9)      | `snow` + `wind` + `clouds` |
+| 22 | `WEATHER_MOONLIGHT`    | Moonlight    | Midnight (1)       | `moon` + `stars` (frequent meteors) |
+| 23 | `WEATHER_COTTON_CANDY` | Cotton Candy | Pink Sky (8)       | `clouds` |
+| 24 | `WEATHER_TOXIC`        | Toxic        | Dark Vignette (5)  | `rain` (light) + `wind` + `puddles` |
+| 25 | `WEATHER_BUBBLEGUM`    | Bubblegum    | Pink Sky (8)       | `clouds` |
 
 ### CustomPresetDef fields (`custom_weather.h`)
 
@@ -1576,10 +1828,14 @@ Fields are grouped by on-screen effect, not engine mechanism. `0` means
 | `fog_curve` | u32 (`WeatherFogCurve`) | fog density falloff via `HSD_Fog.type` (0=inherit linear) |
 | `screen_tint` | u32 (RGBA, A=strength) | lbfade slot-3 overlay (0=none) |
 | `rain` | RainDef | per-preset world-space rain: `enabled`, `color`, `density`, `fall_speed`, `line_width`, `streak` (`enabled = 0` = none; 0 numeric fields take rain.c defaults; slant comes from the global wind) — see "World-space rain" below |
+| `hail` | HailDef | per-preset hail on the rain layer: `enabled`, `amount` (density multiplier, 1.0 = Normal) (`enabled = 0` = none; needs `rain.enabled`; the Hail menu's Preset index resolves to this) — see "World-space rain" below |
+| `snow` | SnowDef | per-preset world-space snow: `enabled`, `color`, `density`, `fall_speed`, `flutter`, `size` (`enabled = 0` = none; 0 numeric fields take snow.c defaults) — see "Snow" below |
 | `lightning` | LightningDef | per-preset lightning: `enabled`, `flash_color`, `flash_frames`, `min_lull`/`max_lull`, `bolt` (`LightningBoltMode`) (`enabled = 0` = none; 0 numeric fields take lightning.c defaults) — see "Lightning" above |
 | `wind` | WindDef | per-preset global wind: `enabled`, `speed`, `heading`, `gustiness`, `chaos` (`enabled = 0` = calm; 0 numeric fields take wind.c defaults) — see "Wind" below |
 | `puddles` | PuddleDef | per-preset ground pools: `enabled`, `color`, `count`, `radius`, `slow_factor` (`enabled = 0` = none; 0 numeric fields take puddle.c defaults) — see "Ground puddles" below |
 | `clouds` | CloudDef | per-preset high cloud deck: `enabled`, `color`, `count`, `height`, `height_var`, `size`, `size_var`, `puff_var` (`enabled = 0` = none; 0 numeric fields take clouds.c defaults) — see "High cloud deck" below |
+| `moon` | MoonDef | per-preset moon: `enabled`, `color`, `size`, `phase` (`MoonPhase`), `arc_height`, `rise_bearing`, `light` (cast moonlight + suppress the secondary sun), `light_color` (`enabled = 0` = none; 0 numeric fields take moon.c defaults) — see "Moon" below |
+| `stars` | StarDef | per-preset starfield: `enabled`, `color`, `density`, `twinkle`, `luminosity`, `size`, `size_var`, `shoot` (`ShootFreq` meteor cadence) (`enabled = 0` = none; 0 numeric fields take stars.c defaults) — see "Stars" below |
 
 The global **Fog Distance** menu setting is separate from the per-preset
 fields: it scales `HSD_Fog.scale` for every CT preset (vanilla and custom) via
@@ -1588,39 +1844,69 @@ fields: it scales `HSD_Fog.scale` for every CT preset (vanilla and custom) via
 ### Settings menu
 
 `main.c` registers the `custom_weather` mod settings menu ("City Trial Sky") with
-nine entries:
+twelve entries.
+
+Every layer setting defaults to **Preset** (index 0), the pass-through value: a
+scaling knob resolves it to 1.0× (the preset's authored value shows through
+unchanged), and a categorical knob (Phase, Color, Arc, bolt mode) honors the
+preset's own field. The remaining options are explicit overrides that apply to
+whichever preset the round rolls — a multiplier scales that preset's value, an
+"Off" floor disables the layer everywhere, and the "On" / "Force" values on Moon /
+Stars / Lightning force the layer onto every preset. **Hail** and the Shooting Stars
+**Frequency** now have per-preset fields (`hail`, `stars.shoot`), so their **Preset**
+index resolves to the active preset's authored value. The remaining global-only knobs
+that have no matching per-preset field (Wind Slant, Snow Wind Slant, Affect Machines /
+Items, Roaming, Show Puddles, Bend in Wind, and the other Shooting Stars knobs) resolve
+**Preset** to the module's built-in default behavior instead, with Off / On as hard
+overrides.
 
 - **Weather Presets** (`weather_menu`, `custom_weather.c`) — a **Fog Distance**
-  value (50–200%, default 100%; the global `HSD_Fog.scale` multiplier), an
-  Enable-All / Disable-All pair, then one Enabled/Disabled toggle per preset (all
-  30), backing the `weather_enabled[WEATHER_TOTAL]` array that
-  `CustomWeather_OverrideSky` filters its random pick against.
+  value (**Preset** = 1.0×, then 50–200% overrides of the global `HSD_Fog.scale`
+  multiplier), an Enable-All / Disable-All pair, then one Enabled/Disabled toggle
+  per preset (all 26), backing the `weather_enabled[WEATHER_TOTAL]` array that
+  `CustomWeather_OverrideSky` filters its random pick against. The per-preset pool
+  toggles are the user's pool selection, not layer overrides, so they stay plain
+  Enabled/Disabled.
 - **Backdrops** (`backdrop_menu`, `custom_backdrops.c`) — the parallel **Backdrop
   Distance** scale plus a per-backdrop enable set.
-- **Rain** (`rain_menu`, `rain.c`) — **Rain Intensity** (master multiplier over
-  every preset's drop count; Off disables rain), **Fall Speed**, **Wind Slant**
-  (let the global wind bend the rain), and **Hail** (Off / Light / Normal / Heavy;
-  defined in `hail.c`).
+- **Rain** (`rain_menu`, `rain.c`) — **Rain Intensity** (**Preset** then a master
+  multiplier over every preset's drop count; Off disables rain), **Fall Speed**,
+  **Wind Slant** (Preset / Off / On — Preset follows the global wind), and **Hail**
+  (Preset / Off / Light / Normal / Heavy; **Preset** = the active preset's `hail`,
+  the rest force a global amount; defined in `hail.c`, gated on rain being active).
+- **Snow** (`snow_menu`, `snow.c`) — **Snow Intensity** (**Preset** then a master
+  multiplier over every preset's flake count; Off disables snow), **Fall Speed**,
+  **Flutter** (Preset / None / Gentle / Lively), and **Wind Slant** (Preset / Off /
+  On — Preset follows the global wind).
 - **Wind** (`wind_menu`, `wind.c`) — **Wind Strength**, **Randomize Direction**,
-  **Affect Machines**, **Affect Items**.
+  **Affect Machines**, **Affect Items** (each Preset / Off / On, Preset = honor the
+  preset heading and let wind affect machines/items).
 - **Lightning** (`lightning_menu`, `lightning.c`) — **Lightning Bolts** (Auto / Off
-  / Force), overriding each preset's `bolt`.
+  / Force; Auto is the pass-through, honoring each preset's `bolt`).
 - **Puddles** (`puddle_menu`, `puddle.c`) — **Slowdown**, **Frequency**, **Size**,
   **Roaming**, **Show Puddles**.
-- **Trees** (`tree_menu`, `tree.c`) — **Bend in Wind** (Off / On) and **Sway
-  Strength**; lets the global wind lean the City Trial forest trees (visual only) —
-  see "Wind-bent trees" above.
-- **Clouds** (`clouds_menu`, `clouds.c`) — **Coverage** (Off disables clouds for
-  every preset), **Opacity**, **Size**, **Variance** (puff-size spread within a
-  cluster), **Height** offset, and **Color** tint override (`Preset` keeps each
-  preset's own).
+- **Trees** (`tree_menu`, `tree.c`) — **Bend in Wind** (Preset / Off / On) and
+  **Sway Strength**; lets the global wind lean the City Trial forest trees (visual
+  only) — see "Wind-bent trees" above.
+- **Clouds** (`clouds_menu`, `clouds.c`) — **Coverage** (Preset then a scalar; Off
+  disables clouds for every preset), **Opacity**, **Size**, **Variance** (puff-size
+  spread within a cluster), **Height** offset, and **Color** tint override (`Preset`
+  keeps each preset's own).
+- **Moon** (`moon_menu`, `moon.c`) — **Moon** (Preset / Off / On), **Size**,
+  **Brightness**, **Phase** (Preset + the 8 phases), **Arc Height**, **Color**, and
+  **Moonlight** (Preset / Off / On).
+- **Stars** (`stars_menu`, `stars.c`) — **Stars** (Preset / Off / On), **Density**,
+  **Twinkle**, **Luminosity**, **Size Variance**, **Color**, and a **Shooting
+  Stars** submenu (**Frequency** — Preset / Off / Rare / Occasional / Frequent, where
+  **Preset** resolves to the active preset's `stars.shoot` cadence — plus Size /
+  Speed / Brightness / Color).
 - **Event Sky Changes** (`event_sky_option`, `event_sky.c`) — On (vanilla) / Off
   (keep the weather through events).
 
 These menus **augment** the per-preset configs rather than replacing them: each
 preset authors its own character and the menus layer master multipliers, gates, and
-toggles on top (an "Off" / 0 floor disables). All settings persist via hoshi's
-keyed menu-save.
+toggles on top, each defaulting to a pass-through **Preset** value. All settings
+persist via hoshi's keyed menu-save.
 
 ## Debug Sky Selector
 
@@ -1630,8 +1916,8 @@ Function 0x800a9cb4 contains a debug controller handler:
 - Mode 2: cycle events (0-15), trigger via eventInit on A
 
 `preset_count` is read from the stage sub-header, which `custom_weather`'s
-`ExtendPresetArray` repoints to `WEATHER_TOTAL` (28) — so with the mod loaded,
-this selector also cycles the custom presets (17–27).
+`ExtendPresetArray` repoints to `WEATHER_TOTAL` (26) — so with the mod loaded,
+this selector also cycles the custom presets (17–25).
 
 ## Runtime Addresses
 
@@ -1673,9 +1959,8 @@ the global fog color into HSD_SetEraseColor.
 ## Cross-references
 
 - `mods/custom_weather/src/custom_weather.c` — the C-side preset extender
-  (`ExtendPresetArray` + custom presets 17–27; selection hooks at 0x8010f1a4
-  and 0x8010f224) and the Weather Presets settings menu. See "Custom Weather
-  Mod" above.
+  (`ExtendPresetArray` + custom presets 17–25; selection hooks at 0x8010f1a4
+  and 0x8010f224) and the Weather Presets settings menu.
 - `mods/custom_weather/src/custom_weather_runtime.c` — per-frame customization
   runtime (hook at 0x800ce648, after `bl Sky_Update`): terrain/ambient re-tint,
   fog curve/scale, and the lbfade overlay. Drives `lightning.c`
@@ -1689,15 +1974,10 @@ the global fog color into HSD_SetEraseColor.
 - `mods/custom_weather/src/main.c` — mod registration + "City Trial Sky"
   settings menu wiring.
 - `mods/custom_weather/src/custom_backdrops.c` — companion 3D backdrop
-  swap system (see `docs/sky-backdrop-system.md`).
+  swap system.
 - `externals/hoshi/include/obj.h:613-791` — HSD light/fog struct
   definitions (LightPoint/Spot/Attn, LObjDesc, LOBJ, HSD_Fog incl. the
   `scale` field at +0x20, AreaLightData, AreaLight, HSD_FogDesc).
 - `externals/hoshi/include/stage.h:179-194` — Sky_* function declarations.
 - `externals/hoshi/include/yakumono.h:97-128, 352-353` — Lighthouse yaku.
-- `externals/hoshi/packtool/link.ld:790-799` — sky symbols. The newly
-  identified LObj/AreaLight/ScreenFade/Sky helpers above are not yet
-  added to link.ld; they will need entries before mod code can call them.
-- `docs/sky-backdrop-system.md` — sister doc on the 3D skybox geometry
-  pipeline (`ModelSection[1]`, `3D_CreateStageModel`).
-- `docs/yakumono-system.md` — yaku framework, including Lighthouse.
+- `externals/hoshi/packtool/link.ld:790-799` — sky symbols.

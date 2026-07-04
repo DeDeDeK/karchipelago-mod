@@ -5,7 +5,7 @@
 #include "structs.h"
 
 #define WEATHER_VANILLA_NUM  17
-#define WEATHER_CUSTOM_NUM   13
+#define WEATHER_CUSTOM_NUM   9
 #define WEATHER_TOTAL        (WEATHER_VANILLA_NUM + WEATHER_CUSTOM_NUM)
 
 // Preset indices: 0-16 = vanilla (from stage file), 17+ = custom (appended at runtime)
@@ -29,19 +29,16 @@ typedef enum WeatherKind
     WEATHER_DARK_PURPLE,
     WEATHER_RED_VIGNETTE,
     WEATHER_DARK_LOW_VIS,
-    WEATHER_DEEP_BLUE,
-    WEATHER_GOLDEN_HOUR,
-    WEATHER_BLOOD_RED,
-    WEATHER_WHITEOUT,
-    WEATHER_TOXIC_GREEN,
-    WEATHER_NEON,
-    WEATHER_COTTON_CANDY,
-    WEATHER_FROZEN_DAWN,
-    WEATHER_VOID,
+    // Custom presets (appended at runtime)
+    WEATHER_BLOOD_RAIN,
     WEATHER_STORM,
     WEATHER_RAIN,
-    WEATHER_BLOOD_RAIN,
-    WEATHER_PUDDLES,
+    WEATHER_HAILSTORM,
+    WEATHER_SNOWSTORM,
+    WEATHER_MOONLIGHT,
+    WEATHER_COTTON_CANDY,
+    WEATHER_TOXIC,
+    WEATHER_BUBBLEGUM,
 } WeatherKind;
 
 // Per-preset world-space rain config (CustomPresetDef.rain), drawn by rain.c.
@@ -57,6 +54,32 @@ typedef struct RainDef
     int   line_width;  // GX line width in 1/6-pixel units. 0 = default
     float streak;      // streak length = per-frame velocity * this. 0 = default
 } RainDef;
+
+// Per-preset hail config (CustomPresetDef.hail), driven by hail.c: a per-machine
+// cloud of icy stones that ride over each machine while the preset's rain is
+// active, chipping 1 HP on honest contact with an exposed machine. Hail rides on
+// the rain layer, so a hail preset must also enable rain. The global Hail menu's
+// "Preset" index resolves to this; the other indices force a global amount.
+typedef struct HailDef
+{
+    int   enabled;   // 0 = no hail for this preset
+    float amount;    // density multiplier over the base stone count (1.0 = Normal). 0 = default
+} HailDef;
+
+// Per-preset snow config (CustomPresetDef.snow), driven by snow.c: a camera-
+// following field of soft round flakes that fall slowly, flutter sideways, and
+// drift with the wind (riders pass through). Numeric fields take 0 = snow.c module
+// default. The global Snow menu scales a master intensity over the density (Off
+// disables snow).
+typedef struct SnowDef
+{
+    int   enabled;     // 0 = no snow for this preset
+    u32   color;       // RGBA8888 flake color; A = opacity. 0 = default
+    int   density;     // flakes drawn per camera (clamped to the pool cap). 0 = default
+    float fall_speed;  // downward speed in world units/frame. 0 = default
+    float flutter;     // sideways sway amplitude in world units/frame. 0 = default
+    float size;        // flake radius in world units. 0 = default
+} SnowDef;
 
 // Visible-bolt mode for a lightning preset (LightningDef.bolt). The flash lights
 // terrain; the bolt is GX geometry plus a midpoint point light for nearby riders.
@@ -125,6 +148,70 @@ typedef struct CloudDef
     float puff_var;    // 0..1 size variance among the puffs within a cluster. 0 = default
 } CloudDef;
 
+// Per-preset starfield config (CustomPresetDef.stars), driven by stars.c: faint
+// camera-anchored dots scattered over the sky dome (celestial, like the moon), drawn
+// additively as soft glows with per-star size/brightness variance and independent
+// twinkling. Numeric fields take 0 = stars.c module default. The global Stars menu
+// can force it on/off and override density/twinkle/luminosity/variance/color.
+// Shooting-star cadence for a preset (StarDef.shoot). The values map 1:1 onto the
+// Shooting Stars menu's forced levels (Off/Rare/Occasional/Frequent); DEFAULT
+// leaves a preset with stars but no cadence at the built-in Occasional rate. The
+// menu's "Preset" index resolves to whichever level the active preset sets here.
+typedef enum ShootFreq
+{
+    SHOOT_FREQ_DEFAULT = 0,  // Occasional (the built-in cadence)
+    SHOOT_FREQ_OFF,
+    SHOOT_FREQ_RARE,
+    SHOOT_FREQ_OCCASIONAL,
+    SHOOT_FREQ_FREQUENT,
+} ShootFreq;
+
+typedef struct StarDef
+{
+    int   enabled;      // 0 = no stars for this preset
+    u32   color;        // RGBA8888 star color; A = base brightness. 0 = default
+    int   density;      // number of stars scattered on the dome. 0 = default
+    float twinkle;      // 0..1 twinkle depth (brightness shimmer). 0 = default
+    float luminosity;   // overall brightness scalar. 0 = default
+    float size;         // base star radius in world units at the reference distance. 0 = default
+    float size_var;     // 0..1 fractional per-star size spread. 0 = default
+    int   shoot;        // ShootFreq cadence. 0 = Default (Occasional)
+} StarDef;
+
+// Moon phase, selecting how much of the disc is lit and on which side. The
+// terminator is a half-ellipse; k = +1 (full) .. 0 (half) .. -1 (new). Full = 0
+// so a preset that leaves MoonDef.phase 0 gets a full moon.
+typedef enum MoonPhase
+{
+    MOON_FULL = 0,
+    MOON_WAXING_CRESCENT,   // thin sliver, lit on the right
+    MOON_FIRST_QUARTER,     // right half lit
+    MOON_WAXING_GIBBOUS,    // most lit, dark crescent on the left
+    MOON_WANING_GIBBOUS,    // most lit, dark crescent on the right
+    MOON_LAST_QUARTER,      // left half lit
+    MOON_WANING_CRESCENT,   // thin sliver, lit on the left
+    MOON_NEW,               // fully dark (not drawn)
+} MoonPhase;
+
+// Per-preset moon config (CustomPresetDef.moon), driven by moon.c: a distant
+// fog-free disc on the sky dome that crosses the sky over the round (synced to
+// the City Trial match timer), showing craters and the selected phase. When
+// `light` is set it also casts a moonlight LOBJ and suppresses the leftover
+// distant stage light so the moon is the dominant directional light. Numeric
+// fields take 0 = moon.c module default. The global Moon menu can force it
+// on/off and override size/brightness/phase/arc/color.
+typedef struct MoonDef
+{
+    int   enabled;      // 0 = no moon for this preset
+    u32   color;        // RGBA8888 disc color; A = opacity. 0 = default
+    float size;         // disc radius in world units on the dome. 0 = default
+    int   phase;        // MoonPhase. 0 = Full (the default)
+    float arc_height;   // peak elevation in degrees as it crosses the sky. 0 = default
+    float rise_bearing; // compass bearing (deg) of the rise point. 0 = default
+    int   light;        // 1 = cast moonlight LOBJ + suppress the distant sun. 0 = off
+    u32   light_color;  // RGBA8888 moonlight color. 0 = default
+} MoonDef;
+
 // Per-custom-preset config. Fields are grouped by what they affect on screen,
 // not by the underlying engine mechanism. Color fields are RGBA8888 packed u32
 // (high byte=R).
@@ -170,6 +257,14 @@ typedef struct CustomPresetDef
     // rain.enabled = 0 means no rain for this preset.
     RainDef rain;
 
+    //  Hail. Per-preset icy stones that ride on the rain layer and chip HP.
+    // hail.enabled = 0 means no hail for this preset (rain must be enabled too).
+    HailDef hail;
+
+    //  World-space snow. Per-preset field of soft flakes that fall slowly and
+    // flutter. snow.enabled = 0 means no snow for this preset.
+    SnowDef snow;
+
     //  Lightning. Per-preset strike loop (flash color + cadence).
     // lightning.enabled = 0 means no lightning for this preset.
     LightningDef lightning;
@@ -186,6 +281,14 @@ typedef struct CustomPresetDef
     //  Clouds. Per-preset deck of soft clouds drifting at a low deck over the
     // map. clouds.enabled = 0 means no clouds for this preset.
     CloudDef clouds;
+
+    //  Moon. Per-preset distant disc that crosses the sky over the round and
+    // (optionally) lights the scene. moon.enabled = 0 means no moon.
+    MoonDef moon;
+
+    //  Stars. Per-preset field of faint twinkling dots on the sky dome.
+    // stars.enabled = 0 means no stars.
+    StarDef stars;
 } CustomPresetDef;
 
 // Per-preset fog density curve. Maps to a GXFogType value applied to
@@ -224,10 +327,19 @@ void Rain_Reset(void);
 // Whether rain is active for the live preset; hail.c gates on this.
 int Rain_IsActive(void);
 
+// Driven from the per-frame weather tick: SetActive latches the preset's config
+// (NULL or enabled == 0 = off), Tick advances the fall/flutter and lazily creates
+// the render GObj, Reset drops the cached GObj handle on CT teardown.
+void Snow_SetActive(const SnowDef *snow);
+void Snow_Tick(void);
+void Snow_Reset(void);
+
 // Per-machine clouds of world-space hailstones that ride over each machine while
-// rain is active and the Hail menu is on, dealing 1 damage on honest contact
-// (a sheltered machine's cloud is suppressed). Driven from the tick; there is no
-// Hail_SetActive - hail holds no per-preset state, only the global menu knob.
+// rain is active and hail is on, dealing 1 damage on honest contact (a sheltered
+// machine's cloud is suppressed). SetActive latches the preset's hail config that
+// the Hail menu's "Preset" index resolves to; Tick advances every cloud, Reset
+// clears them on CT teardown.
+void Hail_SetActive(const HailDef *def);
 void Hail_Tick(void);
 void Hail_Reset(void);
 
@@ -271,5 +383,24 @@ void Puddle_Reset(void);
 void Cloud_SetActive(const CloudDef *def);
 void Cloud_Tick(void);
 void Cloud_Reset(void);
+
+// Driven from the per-frame weather tick: SetActive latches the preset's config
+// (NULL or enabled == 0 = off) and resolves the menu overrides, Tick creates the
+// disc render GObj and drives the moonlight LOBJ (position from the timer-synced
+// sky arc; suppresses the leftover distant sun when the moonlight is on), Reset
+// drops the cached GObj/LOBJ handles on CT teardown. The GX callback draws the
+// fog-free phase disc + craters.
+void Moon_SetActive(const MoonDef *def);
+void Moon_Tick(void);
+void Moon_Reset(void);
+
+// Driven from the per-frame weather tick: SetActive latches the preset's config
+// (NULL or enabled == 0 = off) and resolves the menu overrides, Tick lazily scatters
+// the field over the sky cap and creates the render GObj (the GX callback draws the
+// fog-free additive twinkling dots), Reset drops the cached GObj handle on CT
+// teardown.
+void Star_SetActive(const StarDef *def);
+void Star_Tick(void);
+void Star_Reset(void);
 
 #endif // CUSTOM_WEATHER_H

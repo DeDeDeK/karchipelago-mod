@@ -10,6 +10,7 @@
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
 #define TREE_DESC_ID     34  // forest trees (weak break family, hitWeakObject)
 #define TREE_MAX         96  // CT ships 53; headroom for the enumeration cache
@@ -36,14 +37,16 @@ static int   stc_tree_count = 0;
 static int   stc_enumerated = 0;
 static float stc_phase = 0.0f;
 
-// Settings (persisted by hoshi menu save).
-static char *tree_toggle_names[] = {"Off", "On"};
-static int   tree_enabled = 1;
+// Settings (persisted by hoshi menu save). {Preset, Off, On}: Preset = the
+// built-in default (trees bend in wind).
+static char *tree_toggle_names[] = {"Preset", "Off", "On"};
+static int   tree_enabled = 0; // default Preset (bend in wind)
 
-static const float tree_strength_factors[] = {0.6f, 1.0f, 1.6f};
-static char *tree_strength_names[] = {"Subtle", "Normal", "Strong"};
+// Index 0 = Preset (1.0, the module's baseline sway).
+static const float tree_strength_factors[] = {1.0f, 0.6f, 1.0f, 1.6f};
+static char *tree_strength_names[] = {"Preset", "Subtle", "Normal", "Strong"};
 #define TREE_STRENGTH_NUM ((int)(sizeof(tree_strength_factors) / sizeof(tree_strength_factors[0])))
-static int tree_strength_index = 1; // default Normal
+static int tree_strength_index = 0; // default Preset (1.0)
 
 // Collect the forest-tree yakumono GObjs (desc_id 34) into `out`, returning the
 // count. Walking the yakumono GObj list is the safe way to reach tree parents:
@@ -120,7 +123,7 @@ static void Tree_Enumerate(void)
 
 void Tree_Tick(void)
 {
-    if (!tree_enabled)
+    if (!WeatherToggle(tree_enabled, 1))
         return;
 
     if (!stc_enumerated)
@@ -177,10 +180,10 @@ MenuDesc tree_menu = {
     .options = {
         &(OptionDesc){
             .name = "Bend in Wind",
-            .description = "Let wind lean the City Trial forest trees (visual only; calm = rigid)",
+            .description = "Let wind lean the City Trial forest trees (visual only; Preset = on, calm = rigid)",
             .kind = OPTKIND_VALUE,
             .val = &tree_enabled,
-            .value_num = 2,
+            .value_num = 3,
             .value_names = tree_toggle_names,
         },
         &(OptionDesc){

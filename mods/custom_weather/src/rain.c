@@ -47,21 +47,24 @@ static int     stc_line_width = RAIN_DEF_LINE_WIDTH;
 static float   stc_streak = RAIN_DEF_STREAK;
 
 // Menu settings, persisted by hoshi menu save. Intensity scales the active
-// preset's drop count; Off disables rain for every preset.
-static const float rain_intensity_factors[] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
-static char *rain_intensity_names[] = {"Off", "Light", "Normal", "Heavy", "Downpour"};
+// preset's drop count; Off disables rain for every preset. Index 0 = Preset
+// (1.0, the preset's authored density).
+static const float rain_intensity_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
+static char *rain_intensity_names[] = {"Preset", "Off", "Light", "Normal", "Heavy", "Downpour"};
 #define RAIN_INTENSITY_NUM (sizeof(rain_intensity_factors) / sizeof(rain_intensity_factors[0]))
-static int rain_intensity_index = 2; // default Normal (100%)
+static int rain_intensity_index = 0; // default Preset (1.0)
 
 // Scales the per-preset fall velocity; streak length tracks velocity, so faster
 // rain also streaks longer. Vertical only (the wind slant is unaffected).
-static const float rain_fall_factors[] = {0.6f, 1.0f, 1.5f};
-static char *rain_fall_names[] = {"Slow", "Normal", "Fast"};
+// Index 0 = Preset (1.0, the preset's authored fall speed).
+static const float rain_fall_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
+static char *rain_fall_names[] = {"Preset", "Slow", "Normal", "Fast"};
 #define RAIN_FALL_NUM (sizeof(rain_fall_factors) / sizeof(rain_fall_factors[0]))
-static int rain_fall_index = 1; // default Normal
+static int rain_fall_index = 0; // default Preset (1.0)
 
-static char *rain_toggle_names[] = {"Off", "On"};
-static int rain_wind_slant = 1; // default on: rain follows the global wind vector
+// {Preset, Off, On}: Preset follows the global wind vector (the built-in default).
+static char *rain_toggle_names[] = {"Preset", "Off", "On"};
+static int rain_wind_slant = 0; // default Preset (follow wind)
 
 static float RainIntensity(void)
 {
@@ -236,7 +239,7 @@ void Rain_Tick(void)
     // gate is on, read fresh each frame so gusts visibly bend the rain; off, the
     // rain falls straight down regardless of wind. ClampSpeed keeps the per-frame
     // drift within the single-subtract wrap bound WrapStep / Rain_GX rely on.
-    if (rain_wind_slant)
+    if (WeatherToggle(rain_wind_slant, 1))
     {
         Vec3 wind;
         Wind_GetVector(&wind);
@@ -289,10 +292,10 @@ MenuDesc rain_menu = {
         },
         &(OptionDesc){
             .name = "Wind Slant",
-            .description = "Let the global wind bend the rain (Off = rain falls straight down)",
+            .description = "Let the global wind bend the rain (Preset = follow wind, Off = rain falls straight down)",
             .kind = OPTKIND_VALUE,
             .val = &rain_wind_slant,
-            .value_num = 2,
+            .value_num = 3,
             .value_names = rain_toggle_names,
         },
         &hail_option,

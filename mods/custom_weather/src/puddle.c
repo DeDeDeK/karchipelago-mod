@@ -96,27 +96,31 @@ static float   stc_base_factor = PUDDLE_DEF_FACTOR;
 
 // Menu settings, persisted by hoshi menu save. Slowdown scales the per-preset
 // drag amount (1 - factor): Off removes the slow (discs still show), 200% doubles it.
-static const float slow_strength_factors[] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
-static char *slow_strength_names[] = {"Off", "50%", "100%", "150%", "200%"};
+// Index 0 = Preset (1.0, the preset's authored slow factor); the rest scale it.
+static const float slow_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
+static char *slow_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
 #define PUDDLE_SLOW_NUM (sizeof(slow_strength_factors) / sizeof(slow_strength_factors[0]))
-static int slow_strength_index = 2; // default 100%
+static int slow_strength_index = 0; // default Preset (1.0)
 
 // Frequency scales the slot count; applied at the next round's arm. Size scales
 // the radius and is read at each (re)spawn, so it affects pools that surface
 // after the change too.
-static const float freq_factors[] = {0.5f, 1.0f, 1.75f};
-static char *freq_names[] = {"Few", "Normal", "Many"};
+// Index 0 = Preset (1.0, the preset's authored count).
+static const float freq_factors[] = {1.0f, 0.5f, 1.0f, 1.75f};
+static char *freq_names[] = {"Preset", "Few", "Normal", "Many"};
 #define PUDDLE_FREQ_NUM (sizeof(freq_factors) / sizeof(freq_factors[0]))
-static int freq_index = 1; // default Normal
+static int freq_index = 0; // default Preset (1.0)
 
-static const float size_factors[] = {0.7f, 1.0f, 1.4f};
-static char *size_names[] = {"Small", "Normal", "Large"};
+// Index 0 = Preset (1.0, the preset's authored radius).
+static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
+static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
 #define PUDDLE_SIZE_NUM (sizeof(size_factors) / sizeof(size_factors[0]))
-static int size_index = 1; // default Normal
+static int size_index = 0; // default Preset (1.0)
 
-static char *puddle_toggle_names[] = {"Off", "On"};
-static int puddle_roaming = 1; // default On: pools pop in/out and move over time
-static int show_puddles = 1;   // default On: draw the discs
+// {Preset, Off, On}: Preset = the built-in default (pools roam and draw).
+static char *puddle_toggle_names[] = {"Preset", "Off", "On"};
+static int puddle_roaming = 0; // default Preset (pools pop in/out and move over time)
+static int show_puddles = 0;   // default Preset (draw the discs)
 
 // Inclusive random integer in [lo, hi].
 static int RandRange(int lo, int hi)
@@ -311,7 +315,7 @@ static void Puddle_GX(GOBJ *g, int pass)
     (void)g;
     if (pass != 1)
         return;
-    if (!stc_active || !show_puddles || stc_count <= 0)
+    if (!stc_active || !WeatherToggle(show_puddles, 1) || stc_count <= 0)
         return;
 
     COBJ *cam = COBJ_GetCurrent();
@@ -397,7 +401,7 @@ void Puddle_Tick(void)
         Puddle_Arm();
     Puddle_Ensure();
 
-    int roaming = puddle_roaming;
+    int roaming = WeatherToggle(puddle_roaming, 1);
     for (int i = 0; i < stc_count; i++)
         StepPuddle(&stc_puddles[i], roaming);
 
@@ -481,10 +485,10 @@ MenuDesc puddle_menu = {
         },
         &(OptionDesc){
             .name = "Roaming",
-            .description = "Puddles fade in and out at new spots over time (Off = a fixed field)",
+            .description = "Puddles fade in and out at new spots over time (Preset = on, Off = a fixed field)",
             .kind = OPTKIND_VALUE,
             .val = &puddle_roaming,
-            .value_num = 2,
+            .value_num = 3,
             .value_names = puddle_toggle_names,
         },
         &(OptionDesc){
@@ -492,7 +496,7 @@ MenuDesc puddle_menu = {
             .description = "Draw the puddle discs (the slowdown still applies when off)",
             .kind = OPTKIND_VALUE,
             .val = &show_puddles,
-            .value_num = 2,
+            .value_num = 3,
             .value_names = puddle_toggle_names,
         },
     },

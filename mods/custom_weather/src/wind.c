@@ -55,16 +55,19 @@ static int   stc_gust_timer = 0;
 static float stc_head_cur = 0.0f, stc_head_target = 0.0f; // heading offset, degrees
 static int   stc_head_timer = 0;
 
-// Menu settings, persisted by hoshi menu save.
-static const float wind_strength_factors[] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
-static char *wind_strength_names[] = {"Off", "50%", "100%", "150%", "200%"};
+// Menu settings, persisted by hoshi menu save. Index 0 = Preset (1.0, the
+// preset's authored wind speed).
+static const float wind_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
+static char *wind_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
 #define WIND_STRENGTH_NUM (sizeof(wind_strength_factors) / sizeof(wind_strength_factors[0]))
-static int wind_strength_index = 2; // default 100%
+static int wind_strength_index = 0; // default Preset (1.0)
 
-static char *wind_toggle_names[] = {"Off", "On"};
-static int wind_randomize_dir = 0;  // default off: honor each preset's heading
-static int wind_affect_machines = 1;
-static int wind_affect_items = 1;
+// {Preset, Off, On} toggles. Preset = the built-in default: honor each preset's
+// heading (no randomize), and let wind affect machines and items.
+static char *wind_toggle_names[] = {"Preset", "Off", "On"};
+static int wind_randomize_dir = 0;    // default Preset (honor preset heading)
+static int wind_affect_machines = 0;  // default Preset (affect machines)
+static int wind_affect_items = 0;     // default Preset (affect items)
 
 static float WindStrength(void)
 {
@@ -90,7 +93,7 @@ void Wind_SetActive(const WindDef *def)
 
     // Randomize Direction rolls a fresh base heading per activation; otherwise
     // the preset's authored heading is used (default 0 -> module default).
-    if (wind_randomize_dir)
+    if (WeatherToggle(wind_randomize_dir, 0))
         stc_base_heading = HSD_Randf() * 360.0f;
     else
         stc_base_heading = (def->heading != 0.0f) ? def->heading : WIND_DEF_HEADING;
@@ -194,9 +197,9 @@ void Wind_Tick(void)
     stc_vx = speed * sinf(rad);
     stc_vz = speed * cosf(rad);
 
-    if (wind_affect_items)
+    if (WeatherToggle(wind_affect_items, 1))
         Wind_ApplyToItems(stc_vx, stc_vz);
-    if (wind_affect_machines)
+    if (WeatherToggle(wind_affect_machines, 1))
         Wind_ApplyToMachines(stc_vx, stc_vz);
 }
 
@@ -219,10 +222,10 @@ MenuDesc wind_menu = {
         },
         &(OptionDesc){
             .name = "Randomize Direction",
-            .description = "Roll a random wind heading each round instead of the preset's authored direction",
+            .description = "Roll a random wind heading each round instead of the preset's authored direction (Preset = honor it)",
             .kind = OPTKIND_VALUE,
             .val = &wind_randomize_dir,
-            .value_num = 2,
+            .value_num = 3,
             .value_names = wind_toggle_names,
         },
         &(OptionDesc){
@@ -230,7 +233,7 @@ MenuDesc wind_menu = {
             .description = "Let wind push gliding/airborne machines (scaled by their glide stat)",
             .kind = OPTKIND_VALUE,
             .val = &wind_affect_machines,
-            .value_num = 2,
+            .value_num = 3,
             .value_names = wind_toggle_names,
         },
         &(OptionDesc){
@@ -238,7 +241,7 @@ MenuDesc wind_menu = {
             .description = "Let wind blow falling items sideways",
             .kind = OPTKIND_VALUE,
             .val = &wind_affect_items,
-            .value_num = 2,
+            .value_num = 3,
             .value_names = wind_toggle_names,
         },
     },

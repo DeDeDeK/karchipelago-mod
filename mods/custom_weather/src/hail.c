@@ -90,10 +90,16 @@ static float stc_vel_x = 0.0f, stc_vel_y = -HAIL_FALL, stc_vel_z = 0.0f;
 // per-machine cooldown caps the worst case). Off disables hail entirely. The
 // option lives under the Rain submenu (rain.c references hail_option) since hail
 // only falls when the active preset's rain is on.
-static const float hail_factors[] = {0.0f, 0.5f, 1.0f, 1.5f};
-static char *hail_names[] = {"Off", "Light", "Normal", "Heavy"};
+// Index 0 = Preset resolves to the active preset's HailDef (stc_preset_amount,
+// latched by Hail_SetActive); the rest force a global amount over every preset.
+static const float hail_factors[] = {0.0f, 0.0f, 0.5f, 1.0f, 1.5f};
+static char *hail_names[] = {"Preset", "Off", "Light", "Normal", "Heavy"};
 #define HAIL_AMOUNT_NUM (sizeof(hail_factors) / sizeof(hail_factors[0]))
-static int hail_index = 0; // default Off: hail chips machine HP, so it is opt-in
+static int hail_index = 0; // default Preset (the per-preset amount)
+
+// The active preset's hail amount (0 = off), latched by Hail_SetActive and used
+// when hail_index is Preset.
+static float stc_preset_amount = 0.0f;
 
 // Symmetric random offset in [-half, half].
 static float RandSym(float half)
@@ -242,12 +248,22 @@ static int MachineSheltered(const MachineData *md)
     return EnvColl_Raycast(&start, &end, &hit) >= 0;
 }
 
+// Latch the active preset's hail amount, which the Hail menu's "Preset" index
+// resolves to. NULL or enabled == 0 = no preset hail (still overridable by the
+// menu's forced Light/Normal/Heavy).
+void Hail_SetActive(const HailDef *def)
+{
+    stc_preset_amount = (def && def->enabled) ? (def->amount > 0.0f ? def->amount : 1.0f)
+                                              : 0.0f;
+}
+
 void Hail_Tick(void)
 {
     // Hail only falls when the current preset's rain is active (rain.c owns that
-    // decision, including the master Rain Intensity = Off floor) and the Hail
-    // menu is on. Both are read live so the knob takes effect immediately.
-    float f = hail_factors[hail_index];
+    // decision, including the master Rain Intensity = Off floor) and hail is on.
+    // Both are read live so the knob takes effect immediately. hail_index 0 =
+    // Preset uses the active preset's amount; the rest force a global amount.
+    float f = (hail_index == 0) ? stc_preset_amount : hail_factors[hail_index];
     if (!Rain_IsActive() || f <= 0.0f)
     {
         // Going inactive drops every cloud so re-enabling re-seeds fresh ones
@@ -322,6 +338,7 @@ void Hail_Reset(void)
     // round re-seeds over fresh machine positions.
     stc_hail_gobj = NULL;
     stc_active = 0;
+    stc_preset_amount = 0.0f;
     for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
     {
         stc_clouds[slot].seeded = 0;
@@ -335,7 +352,7 @@ void Hail_Reset(void)
 // rides on the rain layer.
 OptionDesc hail_option = {
     .name = "Hail",
-    .description = "Mix thicker icy hail into the rain; a stone striking an exposed machine does 1 damage - duck under a roof to take cover (Off = rain only)",
+    .description = "Mix thicker icy hail into the rain; a stone striking an exposed machine does 1 damage - duck under a roof to take cover (Preset = each preset's own hail, Off = rain only)",
     .kind = OPTKIND_VALUE,
     .val = &hail_index,
     .value_num = HAIL_AMOUNT_NUM,

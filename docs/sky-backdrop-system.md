@@ -11,7 +11,7 @@ NULL and just fog out.
 
 This is **not** the lighting system: fog colour, ambient sky tint,
 fade overlay, and area light parameters all live in `SkyPresetEntry`
-and are blended per-frame by `Sky_Update`. See `sky-lighting-system.md`.
+and are blended per-frame by `Sky_Update`.
 
 ## Mechanism
 
@@ -276,6 +276,3 @@ The other 4 archives skipped during batch carving (`GrSimple2`,
   asset extraction toolchain. All four share the `scripts/hsd/` HSD
   archive library (`Archive` / `Walker`); see
   `.claude/skills/dat-explore/SKILL.md` for the broader explorer.
-- `docs/sky-lighting-system.md` — sky/fog/light preset system.
-- `docs/scene-system.md` — scene/mode transitions; relevant to the
-  per-scene heap behaviour.

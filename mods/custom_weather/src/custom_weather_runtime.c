@@ -39,12 +39,15 @@ static void ResetPerStage(GrObj *grobj)
     s_last_seen_preset_idx = -1;
     s_active_def = 0;
     Rain_Reset();
+    Snow_Reset();
     Lightning_Reset();
     Wind_Reset();
     Puddle_Reset();
     Hail_Reset();
     Tree_Reset();
     Cloud_Reset();
+    Moon_Reset();
+    Star_Reset();
 }
 
 static void ApplyTerrainTint(const CustomPresetDef *def)
@@ -150,10 +153,14 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         ApplyAmbientTint(s_active_def);
         ApplyFogCurve(fog, s_active_def);
         Rain_SetActive(s_active_def ? &s_active_def->rain : 0);
+        Snow_SetActive(s_active_def ? &s_active_def->snow : 0);
+        Hail_SetActive(s_active_def ? &s_active_def->hail : 0);
         Lightning_SetActive(s_active_def ? &s_active_def->lightning : 0);
         Wind_SetActive(s_active_def ? &s_active_def->wind : 0);
         Puddle_SetActive(s_active_def ? &s_active_def->puddles : 0);
         Cloud_SetActive(s_active_def ? &s_active_def->clouds : 0);
+        Moon_SetActive(s_active_def ? &s_active_def->moon : 0);
+        Star_SetActive(s_active_def ? &s_active_def->stars : 0);
 
         // Drive the lbfade slot-3 overlay (the global "darken everything" path):
         // Sky_BeginFade lerps to the target tint over 30 frames and holds.
@@ -163,7 +170,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
             Sky_BeginFade(grobj, &tint, 30);
         }
 
-        OSReport("[WeatherRuntime] Preset %d (%s) active, terrain=%s, char_ambient=%s, tint=%s, fog_curve=%d, rain=%s, lightning=%s, wind=%s, puddles=%s, clouds=%s\n",
+        OSReport("[WeatherRuntime] Preset %d (%s) active, terrain=%s, char_ambient=%s, tint=%s, fog_curve=%d, rain=%s, snow=%s, hail=%s, lightning=%s, wind=%s, puddles=%s, clouds=%s, moon=%s, stars=%s\n",
                  idx,
                  CustomWeather_GetPresetName(idx),
                  (s_active_def && s_active_def->terrain_diffuse) ? "tinted" : "vanilla",
@@ -171,10 +178,14 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
                  (s_active_def && s_active_def->screen_tint) ? "on" : "off",
                  s_active_def ? (int)s_active_def->fog_curve : 0,
                  (s_active_def && s_active_def->rain.enabled) ? "on" : "off",
+                 (s_active_def && s_active_def->snow.enabled) ? "on" : "off",
+                 (s_active_def && s_active_def->hail.enabled) ? "on" : "off",
                  (s_active_def && s_active_def->lightning.enabled) ? "on" : "off",
                  (s_active_def && s_active_def->wind.enabled) ? "on" : "off",
                  (s_active_def && s_active_def->puddles.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->clouds.enabled) ? "on" : "off");
+                 (s_active_def && s_active_def->clouds.enabled) ? "on" : "off",
+                 (s_active_def && s_active_def->moon.enabled) ? "on" : "off",
+                 (s_active_def && s_active_def->stars.enabled) ? "on" : "off");
     }
     else if (s_active_def && s_active_def->char_ambient && !s_ambient_lobj)
     {
@@ -191,13 +202,16 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         fog->scale = CustomWeather_GetFogScale();
 
     Lightning_Tick(fog);
-    // Advance the wind first so rain, hail, and trees read the fresh vector.
+    // Advance the wind first so rain, snow, hail, and trees read the fresh vector.
     Wind_Tick();
     Rain_Tick();
+    Snow_Tick();
     Hail_Tick();
     Puddle_Tick();
     Tree_Tick();
     Cloud_Tick();
+    Moon_Tick();
+    Star_Tick();
 }
 
 // Hook at 0x800ce648 (immediately after `bl Sky_Update`). Prologue copies

@@ -106,32 +106,37 @@ static float   stc_height_var = CLOUD_DEF_HEIGHT_VAR;
 // Menu knobs layered over the active preset's CloudDef: master coverage/opacity/
 // size scalars, a height offset, and an optional tint override. Coverage Off
 // disables clouds for every preset. Persisted by hoshi menu save.
-static const float cover_factors[] = {0.0f, 0.55f, 1.0f, 1.6f};
-static char *cover_names[] = {"Off", "Sparse", "Normal", "Dense"};
+// Index 0 = Preset (1.0, the preset's authored cloud count); Off disables clouds.
+static const float cover_factors[] = {1.0f, 0.0f, 0.55f, 1.0f, 1.6f};
+static char *cover_names[] = {"Preset", "Off", "Sparse", "Normal", "Dense"};
 #define CLOUD_COVER_NUM ((int)(sizeof(cover_factors) / sizeof(cover_factors[0])))
-static int cover_index = 2; // default Normal
+static int cover_index = 0; // default Preset (1.0)
 
-static const float opacity_factors[] = {0.6f, 1.0f, 1.35f};
-static char *opacity_names[] = {"Thin", "Normal", "Thick"};
+// Index 0 = Preset (1.0, the preset's authored opacity).
+static const float opacity_factors[] = {1.0f, 0.6f, 1.0f, 1.35f};
+static char *opacity_names[] = {"Preset", "Thin", "Normal", "Thick"};
 #define CLOUD_OPACITY_NUM ((int)(sizeof(opacity_factors) / sizeof(opacity_factors[0])))
-static int opacity_index = 1; // default Normal
+static int opacity_index = 0; // default Preset (1.0)
 
-static const float size_factors[] = {0.7f, 1.0f, 1.4f};
-static char *size_names[] = {"Small", "Normal", "Large"};
+// Index 0 = Preset (1.0, the preset's authored puff radius).
+static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
+static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
 #define CLOUD_SIZE_NUM ((int)(sizeof(size_factors) / sizeof(size_factors[0])))
-static int size_index = 1; // default Normal
+static int size_index = 0; // default Preset (1.0)
 
 // Master scalar over the preset's per-puff variance (resolved var clamped 0..1).
-static const float variance_factors[] = {0.2f, 1.0f, 1.7f};
-static char *variance_names[] = {"Uniform", "Normal", "Varied"};
+// Index 0 = Preset (1.0, the preset's authored variance).
+static const float variance_factors[] = {1.0f, 0.2f, 1.0f, 1.7f};
+static char *variance_names[] = {"Preset", "Uniform", "Normal", "Varied"};
 #define CLOUD_VARIANCE_NUM ((int)(sizeof(variance_factors) / sizeof(variance_factors[0])))
-static int variance_index = 1; // default Normal
+static int variance_index = 0; // default Preset (1.0)
 
 // Additive world-unit offset applied to the resolved deck height.
-static const float height_offsets[] = {-220.0f, 0.0f, 220.0f};
-static char *height_names[] = {"Low", "Normal", "High"};
+// Index 0 = Preset (0, the preset's authored deck height).
+static const float height_offsets[] = {0.0f, -220.0f, 0.0f, 220.0f};
+static char *height_names[] = {"Preset", "Low", "Normal", "High"};
 #define CLOUD_HEIGHT_NUM ((int)(sizeof(height_offsets) / sizeof(height_offsets[0])))
-static int height_index = 1; // default Normal
+static int height_index = 0; // default Preset (0 offset)
 
 // Tint override. Index 0 keeps the per-preset RGB; the rest force an RGB (the
 // alpha still comes from the preset opacity * the Opacity scalar).
