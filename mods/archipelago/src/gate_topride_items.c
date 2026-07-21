@@ -79,11 +79,10 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
 {
     if (!mgr)
         return 0;
-    // TopRideItem_PartyBallUpdate (frame 0xFF: Party Ball open) sums per-item
-    // weights then picks via weighted random. When every TR item is locked,
-    // sum == 0 and the pick loop falls out with its loop counter at
-    // TRITEM_NUM. Letting that through makes TopRideItem_Create read past the
-    // descriptor table at 0x804ea2fc and crash on a garbage model-name pointer.
+    // TopRideItem_PartyBallUpdate (frame 0xFF) picks via weighted random. With
+    // every TR item locked, sum == 0 and the pick loop falls out at TRITEM_NUM;
+    // letting that through makes TopRideItem_Create read past the descriptor
+    // table at 0x804ea2fc and crash on a garbage model-name pointer.
     if (item_kind < 0 || item_kind >= TRITEM_NUM)
     {
         OSReport("[TopRideItems] Blocked spawn of out-of-range kind %d\n", item_kind);
@@ -96,18 +95,14 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
     return 1;
 }
 
-// Save r3-r8 (the original args to TopRideItem_SpawnAtPosition) across the
-// bl into our C filter, since the filter's return value clobbers r3 and the
-// function's first instructions deref r3 (lwz r3, 4(r3) at 0x8034bf68 - DSI
-// crash if r3 is left at 0 from a "proceed" return).
-//
-// Proceed path: restore args + LR + frame, then `b 0x1c` to skip past the
-// block-path tail (4 instr) plus the macro's cmpwi+bne (8 bytes), landing
-// directly on the clobbered instruction. Bypassing the macro's cmpwi is
-// necessary because we need r3 = mgr (non-zero) here, not the filter result.
-//
-// Block path: restore LR + frame, set r3 = 1 so the macro's cmpwi/bne sends
-// us to the alt addr 0x8034c12c (the function's blr) using our saved LR.
+// Save r3-r8 (the original SpawnAtPosition args) across the bl into our filter,
+// since the return value clobbers r3 and the function immediately derefs it
+// (lwz r3, 4(r3) at 0x8034bf68).
+// Proceed path: restore args + LR + frame, `b 0x1c` past the block-path tail and
+// the macro's cmpwi/bne, landing on the clobbered instruction (we need r3 = mgr,
+// not the filter result).
+// Block path: restore LR + frame, set r3 = 1 so the macro branches to the alt
+// addr 0x8034c12c (the function's blr) via our saved LR.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     "stwu 1, -48(1)\n\t"
     "mflr 0\n\t"
@@ -139,12 +134,11 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     0,
     0x8034c12c)
 
-// Party Ball burst (TopRideItem_PartyBallUpdate, 0x80356dac, at frame 0xFF)
-// runs a weighted-random picker across all 22 items with no enabled_mask
-// check. Both loops read the per-item weight through
-// `bl TopRideItem_GetDataByIndex` then `lfs f0, 16(r3)`. Redirecting those
-// two bl's to this wrapper yields a stub with weight=0 for locked kinds, so
-// the total excludes them and the picker can never land on one.
+// Party Ball burst (TopRideItem_PartyBallUpdate, 0x80356dac, frame 0xFF) runs a
+// weighted-random picker over all 22 items with no enabled_mask check, reading
+// each weight via `bl TopRideItem_GetDataByIndex` then `lfs f0, 16(r3)`.
+// Redirecting those two bl's here returns a weight-0 stub for locked kinds, so
+// the picker can never land on one.
 static const float locked_item_stub[8] = {0}; // offset +0x10 (index 4) = 0.0
 
 const void *GateTopRideItems_GetDataGated(int kind)

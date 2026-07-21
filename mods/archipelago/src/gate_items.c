@@ -87,11 +87,8 @@ static int ItemKindToUnlockBit(u8 it_kind)
     }
 }
 
-// Per-source weights for the All-Up entry injected into spawn pools when
-// All-Up is unlocked. Tuned so All-Up appears alongside existing +1 patches in
-// each pool (rather than dominating them) - Max Stats Insanity's weight bias
-// runs on top of this and amplifies further. These values were chosen to match
-// the mid-range of vanilla +1 patch weights in each pool family.
+// Per-source weights for All-Up when injected into spawn pools. Sized to sit
+// alongside vanilla +1 patch weights, not dominate them (Max Stats bias scales further).
 #define ALLUP_BOX_POOL_CHANCE      8
 #define ALLUP_CHANCE_DESTRUCTIBLE  16
 #define ALLUP_CHANCE_DYNA          4
@@ -113,19 +110,11 @@ static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
     *num += 1;
 }
 
-// Make sure All-Up is reachable from every patch spawn source when the Max
-// Stats Insanity goal is active and All-Up is unlocked: the three box pools
-// (also used for sky and ground drops), the "Same Item" event pool, the
-// blue-box subsequent pool, the chance_destructible column (star pole, event
-// pillar, volcano walls), and Dyna Blade. Vanilla already places All-Up in
-// the UFO / Tac / Meteor / Chamber columns; we leave those alone.
-//
-// Restricted to the Max Stats goal because in other modes, broadcasting All-Up
-// across every source would make individual-patch unlocks pointless and skew
-// the drop economy. Max Stats genuinely needs the saturation: 127 on every
-// stat in ~7 minutes is only feasible if All-Up is plentiful.
-//
-// Called from FilterAllSpawnTables before the gate filters run.
+// When the Max Stats Insanity goal is active and All-Up is unlocked, make All-Up
+// reachable from every patch source the vanilla tables miss: the three box pools,
+// the Same Item and subsequent pools, and the destructible + Dyna Blade columns
+// (vanilla already covers UFO/Tac/Meteor/Chamber). Off in other goals - broadcasting
+// All-Up everywhere would make individual-patch unlocks pointless.
 void GateItems_EnsureAllUpInSpawnPools()
 {
     if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
@@ -274,13 +263,10 @@ CODEPATCH_HOOKCREATE(0x800ec284,
     0
 )
 
-// Wrapper for LegendaryPiece_MarkAsSpawned. Patched in via REPLACECALL at the
-// two `bl` sites inside CityItemSpawn_SpawnLegendaryPiece (Dragoon at
-// 0x800ed41c, Hydra at 0x800ed49c). If the piece's ITKIND is locked, we skip
-// the call and the spawner box keeps its default forced_item (-1 = random
-// pool roll). The legendary spawn slot is "consumed" (next_piece_index still
-// advances in the caller), so the player won't be able to collect that piece
-// until the AP unlock arrives in a later round.
+// Wrapper for LegendaryPiece_MarkAsSpawned (REPLACECALL'd at the two bl sites in
+// CityItemSpawn_SpawnLegendaryPiece). For a locked piece we skip the call so the box
+// keeps its default forced_item (-1 = random roll). The slot is still consumed (the
+// caller advances next_piece_index), so the piece waits for its AP unlock.
 static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
 {
     int bit = ItemKindToUnlockBit(item_kind);

@@ -58,10 +58,8 @@ int Patch_GiveItem(PatchKind kind, int num)
         {
             MachineData *md = mg->userdata;
             Machine_GivePatch(md, kind, num);
-            // Stats just changed; mask from EnergyLink so the receive doesn't
-            // refund energy back into the pool. The CT spawn-pickup branch
-            // also applies same-frame (SpawnItemPlayer drives
-            // Machine_OnTouchItem for non-fake kinds) but doesn't rebase yet.
+            // Stats just changed; rebase EnergyLink so the receive doesn't refund
+            // energy back into the pool.
             EnergyLink_RebaseStats(i);
         }
         OSReport("[PatchItem] Giving %d patches of kind %d to player %d (%s)...\n",

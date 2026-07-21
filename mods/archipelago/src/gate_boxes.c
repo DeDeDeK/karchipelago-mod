@@ -23,11 +23,9 @@ static int BoxHasItems(grBoxGeneObj *obj, int box)
     return 0;
 }
 
-// Replacement for GrBoxGeneratorDetermine (0x800ebc04).
-// Skips locked box colors AND box colors with no remaining items
-// by zeroing their chance entries before doing weighted random selection.
-// Returns box_color (or -1 if no data) - the original returns this in r3 and the
-// caller at CityItemSpawn_Think (0x800eb210) saves it for later use.
+// Replacement for GrBoxGeneratorDetermine (0x800ebc04). Zeroes the chance entries
+// for locked box colors and colors with no remaining items, then does the weighted
+// random pick. Returns box_color (-1 if no data).
 int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;

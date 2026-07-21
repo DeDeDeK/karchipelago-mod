@@ -6,9 +6,8 @@
 #include "inline.h"
 #include "textbox_api.h"
 
-// Note: this file has no OnBoot. GatePatches_FilterSpawnTables and
-// GatePatches_FilterEventDropTables are invoked externally by item_spawn_filter.c
-// alongside the other gate filter functions (abilities, items).
+// No OnBoot here: the filter functions are invoked by the central spawn-table
+// filter alongside the other gate filters (abilities, items).
 
 // Map ITKIND stat patch items (up, down, fake) to their PatchKind.
 // Returns -1 for non-patch items.

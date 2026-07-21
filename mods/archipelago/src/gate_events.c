@@ -7,14 +7,9 @@
 #include "textbox_api.h"
 #include "inline.h"
 
-// Called from the hook at 0x800ede24 in CityEvent_Decide.
-// At this point, the local chance array on the stack has been populated from the
-// weights table but history adjustments have not yet been applied.
-// Zeroing out locked events before history adjustment is correct - if an event
-// is locked, we don't care about its history weight.
-//
-// chance_arr: pointer to the 16-entry int array of event chances (sp+0x08).
-// ev_chk: pointer to EventCheckData (r26).
+// Hook body at 0x800ede24 in CityEvent_Decide: chance_arr is the 16-entry stack
+// chance array (sp+0x08), already filled from the weights table but before history
+// adjustment; ev_chk is EventCheckData (r26). Zero locked events before that runs.
 void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
 {
     u32 mask = ap_save->event_unlocked_mask;
@@ -28,10 +23,9 @@ void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
             enabled_count++;
     }
 
-    // Adjust event history buffer to prevent deadlock when few events are enabled.
-    // The game won't pick an event that's in the recent history. If the history is
-    // larger than the number of enabled events, no event can ever trigger.
-    // Cap history at ~62.5% of enabled events (matches KAR Deluxe formula).
+    // Cap the recent-event history so it can't exceed the enabled-event count, which
+    // would deadlock selection (the game never repeats a recent event). ~62.5% of
+    // enabled events, matching the KAR Deluxe formula.
     int max_history = (enabled_count * 5) / 8;
     int old_history = ev_chk->prev_kind_num;
     if (ev_chk->prev_kind_num > max_history)
@@ -46,11 +40,9 @@ void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
     }
 }
 
-// Hook at 0x800ede24 in CityEvent_Decide.
-// Clobbered instruction: lwz r0, 64(r26)  (loads prev_kind_num into r0).
-// At hook point: r1+0x08 = chance array on original function's stack, r26 = EventCheckData*.
-// After our function returns, the clobbered instruction reloads prev_kind_num (which we
-// may have modified) into r0 for the subsequent history adjustment loop.
+// Hook at 0x800ede24 in CityEvent_Decide. Clobbered: lwz r0, 64(r26) (prev_kind_num),
+// re-executed after so our modified value feeds the history-adjustment loop. Passes
+// r1+0x08 (chance array) and r26 (EventCheckData*) to the body.
 CODEPATCH_HOOKCREATE(0x800ede24,
     "addi 3, 1, 8\n\t"
     "mr 4, 26\n\t",

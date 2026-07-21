@@ -8,24 +8,12 @@
 #include "drop_ability.h"
 #include "settings_menu.h"
 
-// Optional control (off by default): pressing Z while holding a copy ability
-// discards it. We reproduce the engine's natural ability-loss sequence directly:
-//   1. Rider_AbilityRemoveModel - the engine's universal ability teardown (the one
-//      it runs to strip the old ability when a new inhale replaces it). It resets
-//      copy_kind to COPYKIND_NONE, spawns the "ability lost" poof VFX/SFX, and
-//      removes the ability model/hat, invoking whichever per-ability teardown
-//      callback that copy_kind installed - so it covers every ability, and
-//   2. Rider_LoseAbilityState_Enter - the AS_LoseCopyAbility action-state, for the
-//      spit-out animation.
-// This mirrors what each ability's timeout handler does (revert, then spit).
-// Entering AS_LoseCopyAbility on its own only plays the spit animation - the
-// teardown that actually clears copy_kind never runs - which is why the ability
-// must be removed via Rider_AbilityRemoveModel first.
-//
-// Top Ride is a separate object system (TopRideKirby, no RiderData / copy_kind):
-// its copy-ability analogs are the four timed ability-power items, dropped by
-// reverting the kirby to its neutral state. That path is registered separately
-// (DropAbility_OnTopRideLoadEnd) and lives at the bottom of this file.
+// Optional control (off by default): pressing Z discards the held copy ability.
+// Reproduces the engine's expiry sequence - Rider_AbilityRemoveModel (the universal
+// teardown: clears copy_kind, poof VFX/SFX, removes model/hat, runs the per-ability
+// teardown callback), then Rider_LoseAbilityState_Enter for the spit-out animation.
+// The remove must come first; the state enter alone only animates, never clearing
+// copy_kind.
 
 static void DropAbility_PerFrame(GOBJ *g)
 {
@@ -45,10 +33,8 @@ static void DropAbility_PerFrame(GOBJ *g)
         if (rd->copy_kind == COPYKIND_NONE)
             continue;
 
-        // input.down = buttons newly pressed this frame (edge), so each press
-        // drops once rather than re-triggering every frame Z is held. The teardown
-        // clears copy_kind to COPYKIND_NONE, so the copy_kind guard above also
-        // prevents any re-fire.
+        // input.down = newly-pressed this frame (edge), so each press drops once.
+        // The teardown clears copy_kind, so the guard above also blocks a re-fire.
         if (rd->input.down & PAD_TRIGGER_Z)
         {
             OSReport("[DropAbility] Player %d dropped %s\n", i + 1, CopyKind_Names[rd->copy_kind]);
@@ -63,12 +49,10 @@ void DropAbility_On3DLoadEnd(void)
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DropAbility_PerFrame, 0, 0, 0, 0);
 }
 
-// --- Top Ride ---
-// The TR copy-ability analogs are the four ability-power items (Fire, Freeze
-// Fan, Bomb, Walky). Each is a timed Kirby state; while active the kirby's
-// state_handler carries that item's vtable, which is how we detect a held power.
-// Dropping it means reverting to KirbyNormal (TopRide_KirbyNormal), the same
-// revert the engine runs when the power expires or is replaced by another.
+// Top Ride's copy-ability analogs are the four timed ability-power items (Fire,
+// Freeze Fan, Bomb, Walky). While one is active the kirby's state_handler carries
+// that item's vtable (how we detect it); dropping reverts to TopRide_KirbyNormal,
+// the same revert the engine runs when the power expires or is replaced.
 
 static const char *DropAbility_TopRidePowerName(void *state_vt)
 {

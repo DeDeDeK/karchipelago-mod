@@ -51,23 +51,12 @@ static void AdjustCursorToUnlocked(void)
 // Grid has 8 positions: 0-6 = courses, 7 = random button.
 // Grid-to-course table at 0x805d51a8: identity for 0-6, position 7 = value 8.
 
-// Hook 1: A-button launch (0x8003ca78: andi. r0, r7, 0x1160).
-// Returns 0 = allow (run the vanilla launch test), 1 = block (locked + pressed).
-//
-// IMPORTANT: this hook sits on the per-frame input-dispatch instruction, so it
-// runs EVERY frame - not only when A is pressed. The cursor can only ever rest
-// on a locked course when ALL courses are locked (the skip-cursor in Hook 2 has
-// nowhere selectable to move to, so it leaves the cursor put). In that state we
-// still want the player to be able to hover the locked course; pressing A just
-// shouldn't launch - and should explain why.
-//
-// `launch_buttons` (passed in from r7 by the prologue) is the combined launch
-// button word; 0x1160 is the same A/Start rising-edge mask the clobbered
-// `andi. r0, r7, 0x1160` tests. Gating on it is essential: it both ties the
-// feedback to an actual press (the buzzer/textbox would otherwise retrigger
-// every frame the cursor sits on a locked course, never producing a clean
-// notification) and lets every non-launch frame fall through to the vanilla
-// andi → D-pad handler unchanged.
+// Hook 1: A-button launch (0x8003ca78: andi. r0, r7, 0x1160). Returns 0 = allow
+// (run the vanilla launch test), 1 = block (locked + pressed). Runs every frame,
+// so it gates feedback on an actual launch press (launch_buttons & 0x1160 = the
+// A/Start rising-edge mask); otherwise the buzzer/textbox would retrigger every
+// frame the cursor sits on a locked course. The cursor can only rest on a locked
+// course when ALL courses are locked (Hook 2 has nowhere selectable to move it).
 //   no launch press        -> return 0 (re-run andi; falls to D-pad)
 //   press, course unlocked  -> return 0 (re-run andi; vanilla launch)
 //   press, course locked    -> buzzer + textbox, return 1 (skip launch)
@@ -91,14 +80,10 @@ static int GateTopRideStages_CourseSelectCanLaunch(u32 launch_buttons)
     return 1;
 }
 
-// Register preservation: the block path (r3 != 0) branches to 0x8003cc18, the
-// D-pad movement handler, which reads `r5 & 0x3000C` at 0x8003cc24 - r5 holds
-// the combined controller direction bits and is caller-saved. The allow path
-// re-executes the clobbered `andi. r0, r7, 0x1160`, so r7 must survive too.
-// The hoshi codepatch trampoline saves no registers around its `bl`, so both
-// volatiles are stashed on a scratch frame here. The final `mr 3, 7` forwards
-// r7 to the C function as `launch_buttons` (r3 = first arg) without disturbing
-// the saved copy.
+// The block path (r3 != 0) branches to the D-pad handler at 0x8003cc18, which
+// reads caller-saved r5 (direction bits); the allow path re-runs the clobbered
+// `andi. r0, r7, 0x1160`, so r7 must survive too. The trampoline saves neither,
+// so both are stashed on a scratch frame here.
 CODEPATCH_HOOKCONDITIONALCREATE(
     0x8003ca78,                         // dol_addr: andi. r0, r7, 0x1160 (A-button test)
     "stwu 1, -16(1)\n\t"               // prologue: create mini stack frame
@@ -130,13 +115,12 @@ CODEPATCH_HOOKCREATE(
     0                                   // exit_addr: normal exit (run clobbered lbz)
 );
 
-// Replaces the HSD_Randi(7) call at 0x8003c798 in TopRide_CourseSelectRandomInit.
-// The vanilla random loop picks from all 7 courses and only checks a "used" history
-// bitmask (topride_course_select.used_history_mask), with no unlock check. Our replacement picks only from
-// courses that are both unlocked AND not in the used history. If all unlocked courses
-// are used, it resets the used bits for unlocked courses so the cycle can restart.
-// The vanilla loop at 0x8003c7a0 re-checks the used mask after we return - since we
-// already ensured the pick isn't used, it won't re-roll.
+// Replaces the HSD_Randi(7) at 0x8003c798 in TopRide_CourseSelectRandomInit.
+// Vanilla picks from all 7 courses checking only the used-history bitmask
+// (topride_course_select.used_history_mask), no unlock check; we pick from
+// courses that are unlocked AND not used, resetting the used bits for unlocked
+// courses if all are used. The vanilla re-check after we return won't re-roll
+// since our pick isn't used.
 static int GateTopRideStages_RandomPick(int unused)
 {
     (void)unused;
@@ -183,13 +167,10 @@ void GateTopRideStages_OnBoot()
     // Course select screen: skip locked courses during cursor movement.
     CODEPATCH_HOOKAPPLY(0x8003cd18);
 
-    // Random selection: replace HSD_Randi(7) calls with our function that
-    // only picks from unlocked courses and handles used-history properly.
-    // There are two call sites:
-    // 1) TopRide_CourseSelectRandomInit (0x8003c798): called on scene init
-    //    when random was previously selected.
-    // 2) TopRide_CourseSelectThink (0x8003cac0): called inline when A is
-    //    pressed on the random button - this is the main random path.
+    // Random selection: replace HSD_Randi(7) at both call sites with our
+    // unlocked-only, used-history-aware picker - scene-init when random was
+    // previously selected (TopRide_CourseSelectRandomInit 0x8003c798) and the
+    // A-on-random-button path (TopRide_CourseSelectThink 0x8003cac0).
     CODEPATCH_REPLACECALL(0x8003c798, GateTopRideStages_RandomPick);
     CODEPATCH_REPLACECALL(0x8003cac0, GateTopRideStages_RandomPick);
 

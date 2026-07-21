@@ -8,15 +8,11 @@
 #include "ap_item_handler.h"
 #include "textbox_api.h"
 
-// Big Kirby / Small Kirby are all-mode cosmetic filler. On receipt they scale
-// every human player's Kirby model. Both City Trial / Air Ride (RiderData) and
-// Top Ride (TopRideKirby) expose a per-object `model_scale` float that the
-// engine multiplies into the model JObj's scale every frame, so writing the
-// field is enough - the change sticks until the object is recreated on the next
-// scene change. We mirror that lifetime: the multiplier resets to 1.0 on every
-// scene change, and a per-frame applier re-writes it so the scale survives
-// mid-scene model recreation (respawns). Rather than snap, the per-frame applier
-// eases the model from its current size to the new target over ~1 second.
+// Big Kirby / Small Kirby cosmetic filler scales every human Kirby model. Both
+// 3D (RiderData) and Top Ride (TopRideKirby) expose a model_scale float the
+// engine multiplies into the model JObj each frame. A per-frame applier re-writes
+// it (surviving respawns) and eases toward the target over ~1s; it resets to 1.0
+// on scene change, so the effect lasts only until the next scene.
 
 // Multiplicative, clamped. Big x1.5, Small x0.5, kept inside [0.5, 2.0] so the
 // model never grows large enough to break the camera / collision feel. The
@@ -31,13 +27,10 @@
 // target. The game runs at 60 fps, so this is ~1 second.
 #define KIRBY_SCALE_ANIM_FRAMES 60
 
-// Target multiplier set on receipt, and the displayed multiplier the appliers
-// actually write each frame as it eases toward the target. `start` is the size
-// on screen when the current ease began; `anim` counts frames elapsed in that
-// ease (== KIRBY_SCALE_ANIM_FRAMES once settled). All shared across human
-// players, matching the rest of the receive path. Reset to neutral on each scene
-// change by KirbyScale_OnSceneChange; target == neutral is the "no item received
-// this scene" signal the per-frame appliers use to leave vanilla scaling alone.
+// Ease state, shared across human players: target set on receipt, current written
+// each frame as it eases toward target, start = size when the ease began, anim =
+// frames elapsed. target == neutral means "no item this scene" - the appliers
+// leave vanilla scaling alone.
 static float kirby_scale_target  = KIRBY_SCALE_NEUTRAL;
 static float kirby_scale_current = KIRBY_SCALE_NEUTRAL;
 static float kirby_scale_start   = KIRBY_SCALE_NEUTRAL;
@@ -52,15 +45,9 @@ static float ClampScale(float s)
     return s;
 }
 
-// True when the current scene has Kirby models we can scale AND the round is
-// actually underway: a 3D City Trial / Air Ride gameplay scene (riders exist in
-// Trial, Free Run, and stadiums alike - unlike item spawns, model scaling needs
-// no sub-mode gate; the post-countdown wait is the GMINTRO_END check in
-// KirbyScale_HandleItem), or a Top Ride scene with the race active. Top Ride has
-// no intro so GMINTRO_END is always satisfied there; gate on round_state == 2
-// (post-countdown) instead - applying during the countdown would burn the ~1 s
-// ease off-screen before "GO", reading as an instant snap. round_state is the
-// master per-frame physics gate and reaches 2 in solo modes too.
+// True in a 3D (CT/AR) gameplay scene, or a Top Ride scene with the race active.
+// TR has no intro (GMINTRO_END always true), so gate on round_state == 2 instead -
+// applying during the countdown would burn the ~1s ease off-screen before "GO".
 static int InScalableScene(void)
 {
     MajorKind major = Scene_GetCurrentMajor();
@@ -83,11 +70,8 @@ int KirbyScale_HandleItem(uint ap_item_id)
     if (!InScalableScene())
         return AP_ITEM_RETRY;
 
-    // Wait for "game ready" - the intro flyover / countdown to finish - so the
-    // model grows in during play rather than over the intro, matching every
-    // other received item (see the GMINTRO_END gate in APItems_HandleItem). Top
-    // Ride has no intro and Gm_GetIntroState defaults to GMINTRO_END, so this is
-    // a no-op there; InScalableScene already gates the Top Ride case.
+    // Wait for the intro/countdown to finish so the model grows in during play.
+    // No-op in TR (Gm_GetIntroState defaults to GMINTRO_END; round_state gates it).
     if (Gm_GetIntroState() != GMINTRO_END)
         return AP_ITEM_RETRY;
 
@@ -112,11 +96,9 @@ int KirbyScale_HandleItem(uint ap_item_id)
     return AP_ITEM_APPLIED;
 }
 
-// Advance the displayed multiplier one frame toward the target with a smooth
-// ease-in/out and return it. Called once per frame from whichever per-frame
-// applier is live (only one mode runs at a time). Once the ease completes the
-// value sits exactly on the target, so re-writing it each frame keeps the scale
-// through respawns / mid-scene model recreation.
+// Advance the displayed multiplier one frame toward the target (smoothstep) and
+// return it. Once settled it sits exactly on target, so re-writing each frame
+// keeps the scale through respawns.
 static float KirbyScale_Tick(void)
 {
     if (kirby_scale_anim < KIRBY_SCALE_ANIM_FRAMES)
@@ -129,13 +111,9 @@ static float KirbyScale_Tick(void)
     return kirby_scale_current;
 }
 
-// Per-frame applier for City Trial / Air Ride. Eases the displayed multiplier
-// toward the target and writes it into every human rider's model_scale; the
-// engine applies it to the model the same frame. Idempotent - re-writing each
-// frame keeps the scale through respawns / mid-scene model recreation. No-op
-// until a Big / Small Kirby is received this scene (target stays neutral), so
-// vanilla scaling (and any other system that might touch model_scale) is left
-// untouched.
+// Per-frame applier for CT / AR: ease the multiplier and write it into every
+// human rider's model_scale. No-op until a Big/Small Kirby is received this scene
+// (target stays neutral), leaving vanilla scaling untouched.
 static void KirbyScale_3DPerFrame(GOBJ *g)
 {
     if (kirby_scale_target == KIRBY_SCALE_NEUTRAL)
@@ -189,9 +167,8 @@ void KirbyScale_OnTopRideLoadEnd(void)
 
 void KirbyScale_OnSceneChange(void)
 {
-    // Each scene recreates the Kirby objects with model_scale = 1.0, so snap
-    // back to neutral to match (no ease - the old models are gone). This is what
-    // makes the effect last only until the next scene change.
+    // Scenes recreate Kirby objects at model_scale 1.0, so snap to neutral (no
+    // ease - old models are gone). This bounds the effect to the current scene.
     kirby_scale_target  = KIRBY_SCALE_NEUTRAL;
     kirby_scale_current = KIRBY_SCALE_NEUTRAL;
     kirby_scale_start   = KIRBY_SCALE_NEUTRAL;

@@ -14,14 +14,10 @@
 #include "inline.h"
 
 // Machines that don't naturally spawn in CT: Top Ride stars, transformation
-// forms, and the Dedede / Meta Knight character forms. Force these to 0 chance
-// regardless of mask.
-//
-// VCKIND_WINGMETAKNIGHT and VCKIND_WHEELDEDEDE are the machine forms behind the
-// Meta Knight and King Dedede character unlocks: unlocking either sets its bit
-// in machine_unlocked_mask. Both have a 0 base spawn chance in vanilla, so
-// without exclusion the unlocked-but-zero-chance fallback (weight 10) below
-// would leak these debug character machines onto the City Trial field.
+// forms, and the Meta Knight / Dedede character forms (VCKIND_WINGMETAKNIGHT /
+// VCKIND_WHEELDEDEDE, whose bits are set by those character unlocks). All have a
+// 0 base spawn chance, so without exclusion the unlocked-but-zero-chance fallback
+// (weight 10) below would leak them onto the City Trial field.
 #define CT_SPAWN_EXCLUDED_MASK     \
     ((1u << VCKIND_FREE)         | \
      (1u << VCKIND_STEER)        | \
@@ -41,11 +37,9 @@ static int IsCKindUnlocked(CharacterKind ckind)
     return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
-// Get the first unlocked City-Trial-spawnable MachineKind, or VCKIND_COMPACT as
-// absolute fallback. Skips CT_SPAWN_EXCLUDED_MASK machines (Free/Steer Star,
-// transformation forms, debug wheelie kinds) so a sparse unlock state - e.g.
-// only the Top Ride Free/Steer Star unlocked - never falls back to spawning a
-// TR-only or transform machine on the City Trial field.
+// First unlocked City-Trial-spawnable MachineKind, or VCKIND_COMPACT as absolute
+// fallback. Skips CT_SPAWN_EXCLUDED_MASK so a sparse unlock (e.g. only the Top
+// Ride Free/Steer Star) never falls back to a TR-only or transform machine.
 static MachineKind GetFirstUnlockedCTMachine()
 {
     u32 mask = ap_save->machine_unlocked_mask;
@@ -60,15 +54,10 @@ static MachineKind GetFirstUnlockedCTMachine()
 }
 
 // Pick a random unlocked Kirby-rider CharacterKind for a City Trial starting
-// machine, excluding CKIND_DEDEDE / CKIND_METAKNIGHT.
-//
-// Those two are excluded because their riders rely on rider-specific HUD assets
-// (`ScInfSpeedd*`, `ScInfHpd*`, etc.) that vanilla's 3D HUD loader explicitly
-// skips in Base CT (`zz_8011878c_` and friends short-circuit when major==CITY &&
-// cityMode==TRIAL). Picking those riders for the free-roam Trial start would
-// NULL-deref `3DHud_CreateSpeedometerInner` during scene init. Vanilla only uses
-// Dedede / Meta Knight in stadium contexts where the conversion happens
-// stadium-side. Compact is always a safe fallback when nothing else is unlocked.
+// machine, excluding CKIND_DEDEDE / CKIND_METAKNIGHT: their riders need
+// rider-specific 3D HUD assets that vanilla's HUD loader skips in Base CT, so
+// picking them for the free-roam Trial start NULL-derefs
+// 3DHud_CreateSpeedometerInner during scene init. Compact is a safe fallback.
 static CharacterKind RandomUnlockedKirbyCKind(void)
 {
     int unlocked_count = 0;
@@ -94,14 +83,10 @@ static CharacterKind RandomUnlockedKirbyCKind(void)
     return CKIND_COMPACT;
 }
 
-// ===== Top Ride machine gating =====
-//
-// TR's lobby panel exposes two machines on its middle ("Control Type") row:
-// Free Star (TR_MACHINE_FREE = 0) and Steer Star (TR_MACHINE_STEER = 1). The
-// committed value lives at GameData.topride_config.slots[slot].machine_kind; the
-// pre-confirmation lobby value lives at GameData.topride_select_ply.panel_machine[slot].
-// Both map 1:1 to MachineKind via TOPRIDE_MACHINE_TO_VCKIND, so a single
-// machine_unlocked_mask covers Air Ride, City Trial, and Top Ride.
+// TR's lobby "Control Type" row exposes Free Star (TR_MACHINE_FREE = 0) and Steer
+// Star (TR_MACHINE_STEER = 1). Both map 1:1 to MachineKind via
+// TOPRIDE_MACHINE_TO_VCKIND, so a single machine_unlocked_mask covers Air Ride,
+// City Trial, and Top Ride.
 static int IsTRMachineUnlocked(TopRideMachineKind tr)
 {
     MachineKind vckind = TOPRIDE_MACHINE_TO_VCKIND(tr);
@@ -135,24 +120,18 @@ static TopRideMachineKind GetRandomUnlockedTRMachine()
     return unlocked[HSD_Randi(count)];
 }
 
-// Post-init fixup for TopRide_InitSelectData (0x8002cfd8). Vanilla's per-slot
-// init loop unconditionally writes panel_machine[slot] = 0 (Free Star). Walk
-// the 4 panels and set each one's default: CPU panels get a random unlocked
-// control type so the CPUs don't all share Free Star, while human panels get
-// the first unlocked machine (a human's own L/R pick is gated separately). This
-// keeps the lobby from ever starting on a locked option.
-//
-// Panel kind lives at lobby_base[0x1b + slot] (GameData+0x1b2 panel_pkind:
-// 0=open, 1=HMN, 2=CPU, 3=OFF). Only the RaceInit hook site (0x8002d748) runs
-// after that field is filled, so the CPU branch only meaningfully fires there;
-// the InitSelectData / SoloInit sites see non-CPU kinds and fall through to
-// first-unlocked, unchanged from before. RaceInit also runs after the TR color
-// validator (0x8002d704), so the CPU color set below is the final value.
+// Post-init fixup for TopRide_InitSelectData (0x8002cfd8), whose per-slot loop
+// unconditionally writes panel_machine[slot] = 0 (Free Star). CPU panels get a
+// random unlocked control type (so CPUs don't all share Free Star) plus a random
+// unlocked color; human panels get the first unlocked machine (a human's L/R pick
+// is gated separately). Panel kind is at lobby_base[0x1b + slot] (2 = CPU); only
+// the RaceInit site (0x8002d748) runs after that field is filled, so the other
+// sites see non-CPU and fall through to first-unlocked.
 void GateMachines_FixupTRInit(u8 *lobby_base)
 {
     TopRideMachineKind first = GetFirstUnlockedTRMachine();
-    // 0x2f = offsetof(topride_select_ply, panel_machine) - 0x37 (lobby base
-    // is GameData+0x197, not GameData+0x160). color[] is at +0x23 (0x1ba). See game.h.
+    // Relative to lobby base (GameData+0x197): 0x2f = panel_machine[slot],
+    // 0x23 = color[slot].
     for (int i = 0; i < 4; i++)
     {
         if (lobby_base[0x1b + i] == 2) // CPU panel
@@ -165,16 +144,10 @@ void GateMachines_FixupTRInit(u8 *lobby_base)
     }
 }
 
-// Hook at 0x8002d070 in TopRide_InitSelectData, immediately after the per-slot
-// init loop finishes. (0x8002d06c, the first post-loop instruction, is already
-// claimed by gate_colors.c.) At entry: r31 = lobby base (GameData + 0x197,
-// callee-saved). Vanilla post-loop relies on r3 = 0 (set by `li r3, 0` at
-// 0x8002d06c) for the three `stb r3, {6,2,3}(r31)` lobby-flag clears that
-// follow our hook site. r3 is caller-saved so the C call wipes it - the
-// epilogue must restore r3 = 0 before those stores execute, otherwise the
-// lobby's active_pad_mask / x199 / x19a get written with garbage and the
-// panel UI fails to render until the next scene entry. The clobbered
-// `li r0, 1` is re-executed automatically by the hook framework.
+// Hook at 0x8002d070 in TopRide_InitSelectData, just after the per-slot init loop
+// (0x8002d06c is claimed by gate_colors.c). r31 = lobby base. The three following
+// `stb r3, {6,2,3}(r31)` lobby-flag clears rely on r3 = 0, which the C call
+// wipes, so the epilogue restores `li 3, 0`.
 CODEPATCH_HOOKCREATE(0x8002d070,
     "mr 3, 31\n\t",
     GateMachines_FixupTRInit,
@@ -182,27 +155,15 @@ CODEPATCH_HOOKCREATE(0x8002d070,
     0x8002d074
 )
 
-// Race-init counterpart to GateMachines_FixupTRInit. TopRide_RaceInit (the
-// lobby init dispatched from TopRide_LobbyInit when TopRide_GetMode() == 0,
-// i.e. TR Main Game / multiplayer race) has its own panel_machine reset
-// block at 0x8002d6c4..0x8002d700 that overwrites all four slots with 0
-// (Free Star), after InitSelectData's earlier fixup. Without a parallel
-// hook here, entering TR Main Game with Free locked leaves the lobby panel
-// pointing at a locked Free Star icon as its current selection until the
-// player L/R-cycles off it. The reset block is conditional (a `beq` at
-// 0x8002d6a4 can skip it when the slot's player_kind matches the iterator),
-// so the bug only manifests on slots that hit the reset path - but the
-// SoloInit fixup at 0x8002db90 already covers the same logic, so closing
-// the asymmetry here restores parity with TR Main Game.
+// Race-init counterpart (TR Main Game / multiplayer race). TopRide_RaceInit has
+// its own panel_machine reset block (0x8002d6c4) that re-zeros all four slots
+// after InitSelectData's fixup, so without a parallel fixup the lobby panel
+// starts on a possibly-locked Free Star.
 //
-// Hook at 0x8002d748 (`bl 0x80006c14` = `bl gmGetGlobalP`), the first
-// instruction after the panel_pkind CPU-fill loop at 0x8002d710..0x8002d744
-// ends. We can't land any earlier inside that loop because the iterator
-// r7 is caller-saved and our C call would clobber it. By landing on the
-// post-loop bl that re-fetches GameData, the framework's auto-re-execution
-// of the bl naturally restores r3 = GameData* for the addi at 0x8002d74c -
-// no epilogue needed. Nothing between 0x8002d6c4 (the panel_machine reset)
-// and our hook reads panel_machine, so the fixup window is intact.
+// Hook at 0x8002d748 (`bl gmGetGlobalP`), just past the panel_pkind CPU-fill loop
+// (whose caller-saved iterator r7 rules out landing earlier). The framework's
+// re-execution of that bl restores r3 = GameData* for the following addi, so no
+// epilogue is needed.
 CODEPATCH_HOOKCREATE(0x8002d748,
     "mr 3, 31\n\t",
     GateMachines_FixupTRInit,
@@ -211,22 +172,13 @@ CODEPATCH_HOOKCREATE(0x8002d748,
 )
 
 // L/R cycler gate for the lobby "Control Type" row. Vanilla cycles
-// panel_machine[panel] between 0 (Free) and 1 (Steer) unconditionally when the
-// sub-cursor is on the middle row and an L/R bit is present. Our replacement
-// applies the same 0..1 clamp, but also skips writes that would land on a
-// locked machine.
-//
-// Generic over both lobby flavors - the race lobby (TopRide_CSS_PanelThink,
-// 0x8002b8a8) and the solo Free Run / Time Attack lobby (TopRide_SoloPanelThink,
-// 0x8002ca80) each carry their own copy of this cycler with identical RIGHT
-// (0x80002) / LEFT (0x40001) edge bits and the same panel_machine offset (0x2f),
-// so a single gate function serves both hook sites.
-//
-// Inputs (set by each hook's asm prologue from the regs live at that site):
-//   panel_base = lobby base + panel - panel_base[0x2f] = panel_machine[panel]
-//   input_bits = controller direction-edge bits (0x80002 = RIGHT, 0x40001 = LEFT)
-// Return: 1 if the value changed (caller plays SFX + updates the icon UI),
-//         0 if the value did not change (caller skips straight to function end).
+// panel_machine[panel] between 0 (Free) and 1 (Steer) unconditionally; we apply
+// the same 0..1 clamp but skip writes onto a locked machine. Both lobby flavors
+// (race TopRide_CSS_PanelThink 0x8002b8a8 and solo TopRide_SoloPanelThink
+// 0x8002ca80) carry identical cyclers, so one gate serves both hook sites.
+//   panel_base[0x2f] = panel_machine[panel]; input_bits = direction-edge bits
+//   (0x80002 = RIGHT, 0x40001 = LEFT). Returns 1 if changed (caller plays SFX +
+//   updates the icon), 0 if not (caller skips to function end).
 int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
 {
     u8 current = panel_base[0x2f];
@@ -250,13 +202,11 @@ int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
     return 1;
 }
 
-// Race-lobby cycler hook at 0x8002be44 in TopRide_CSS_PanelThink, the start of
-// the "Control Type" L/R cycler block. By this point the outer guard at
-// 0x8002be2c has already filtered out frames with no L/R bits set, and
-// r26 = panel base (lobby + slot), r29 = direction-edge bits. The hook
-// replaces the entire cycler+compare block (0x8002be44..0x8002be94):
-//   r3 == 0 → no change, skip to 0x8002c054 (function end)
-//   r3 != 0 → change, fall through to 0x8002be98 (SFX + UI update)
+// Race-lobby cycler hook at 0x8002be44 in TopRide_CSS_PanelThink, replacing the
+// "Control Type" cycler+compare block (..0x8002be94). The outer guard already
+// filtered no-L/R frames; r26 = panel base, r29 = direction-edge bits.
+//   r3 == 0 -> skip to 0x8002c054 (function end)
+//   r3 != 0 -> fall through to 0x8002be98 (SFX + UI update)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002be44,
     "mr 3, 26\n\t"
     "mr 4, 29\n\t",
@@ -267,24 +217,15 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002be44,
 )
 
 // Solo-lobby cycler hook for Free Run / Time Attack. TopRide_SoloPanelThink
-// (0x8002ca80, dispatched from TopRide_OnCourseSelect for ply_state != 1) is
-// the solo counterpart to TopRide_CSS_PanelThink and carries its OWN ungated
-// "Control Type" cycler at 0x8002cb88..0x8002cbec. Solo never routes through
-// TopRide_CSS_PanelThink, so the race cycler hook above does not cover it -
-// without this hook, Free Run / Time Attack lets the player L/R straight onto
-// a locked machine (and then launch it, since the start gate only checks that
-// *some* TR machine is unlocked).
-//
-// Hook at 0x8002cb98 (`and. r0, r26, r0`, the RIGHT-bit test). This lands
-// AFTER the outer 0xC0003 L/R guard at 0x8002cb80 and AFTER the cycler sets up
-// r29 = panel index and r30 = lobby + panel (0x8002cb8c / 0x8002cb94), so the
-// downstream SFX + UI block at 0x8002cbf0 finds those callee-saved regs intact
-// across our C call - no epilogue needed. The replaced span runs through the
-// post-write compare `beq 0x8002cc18` at 0x8002cbec:
-//   r3 == 0 → no change, exit to 0x8002cc18 (function end)
-//   r3 != 0 → change, fall through to 0x8002cbf0 (SFX + UI update)
-// At entry r30 = lobby + panel (panel base, panel_machine at +0x2f) and
-// r26 = direction-edge bits, matching GateMachines_CycleTRMachine's contract.
+// (0x8002ca80) carries its own ungated "Control Type" cycler that the race hook
+// above doesn't cover; without this, solo lets the player L/R onto a locked
+// machine and launch it (the start gate only checks that *some* TR machine is
+// unlocked). Hook at 0x8002cb98, replacing the cycler+compare through the
+// `beq 0x8002cc18` at 0x8002cbec; r30 = panel base (panel_machine at +0x2f),
+// r26 = direction-edge bits (both callee-saved, so the downstream SFX/UI block
+// finds them intact).
+//   r3 == 0 -> exit to 0x8002cc18 (function end)
+//   r3 != 0 -> fall through to 0x8002cbf0 (SFX + UI update)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002cb98,
     "mr 3, 30\n\t"
     "mr 4, 26\n\t",
@@ -294,23 +235,12 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002cb98,
     0x8002cbf0
 )
 
-// Solo-mode counterpart to GateMachines_FixupTRInit. TopRide_SoloInit (the
-// init for Free Run / Time Attack, dispatched from TopRide_LobbyInit when
-// TopRide_GetMode() != 0) hardcodes all four panel_machine slots to 0 (Free
-// Star) at 0x8002db70..0x8002db88 - bypassing TopRide_InitSelectData and our
-// InitSelectData hook entirely. Without a parallel fixup, the player's panel
-// starts on Free regardless of unlock state, and pressing Start launches
-// straight into a Free Star race even when Free is locked. The cycler gate
-// in TopRide_CSS_PanelThink would let them L/R off to an unlocked machine
-// if they manually entered editing, but the default is wrong.
-//
-// Hook at 0x8002db90 (`add r30, r31, r28`, the first instruction of the
-// per-slot init loop). The immediately-prior `li r28, 0` at 0x8002db8c is
-// already claimed by gate_colors's TR Solo color fixup - landing one
-// instruction later means our hook fires *after* the colors fixup and the
-// `li r28, 0` re-execution, so r28 = 0 and r31 = lobby base on entry. The
-// hook framework re-executes the clobbered `add r30, r31, r28` after the
-// epilogue, so the per-slot loop's r30 base register is intact.
+// Solo-mode counterpart to GateMachines_FixupTRInit. TopRide_SoloInit (Free Run
+// / Time Attack) hardcodes all four panel_machine slots to 0 (Free Star) at
+// 0x8002db70, bypassing InitSelectData, so without a fixup the panel starts on
+// Free even when locked. Hook at 0x8002db90 (`add r30, r31, r28`), one
+// instruction after the `li r28, 0` claimed by gate_colors's TR Solo color
+// fixup, so it fires after that fixup with r28 = 0 and r31 = lobby base.
 CODEPATCH_HOOKCREATE(0x8002db90,
     "mr 3, 31\n\t",
     GateMachines_FixupTRInit,
@@ -318,20 +248,12 @@ CODEPATCH_HOOKCREATE(0x8002db90,
     0
 )
 
-// Start-match gate for the TR lobby. The L/R cyclers already prevent the
-// player from moving onto a locked machine, but with both Free and Steer
-// locked the panel still defaults to Free (the GetFirstUnlockedTRMachine
-// fallback) and the player can press Start to launch into a TR session with
-// a machine they don't own. This gate refuses the launch entirely.
-//
-// On the block path it also gives feedback: the menu "denied" buzzer plus a
-// textbox explaining why. Both start-gate hook sites reach this only on the
-// Start-press rising edge (the pad `down` word at HSD_Pad+0x8 is tested for
-// bit 0x1000 before the hook), so the buzzer + notification fire once per
-// press rather than every frame Start is held - no debounce needed.
-//
-// Returns 0 = allow start, 1 = block start (no TR machine in the unlock mask).
-// Convention matches GateTopRideStages_CourseSelectCanLaunch.
+// Start-match gate for the TR lobby. The L/R cyclers stop the player moving onto
+// a locked machine, but with both Free and Steer locked the panel still defaults
+// to Free and Start would launch a machine the player doesn't own. This refuses
+// the launch and, on the block path, plays the "denied" buzzer + a textbox. Both
+// start-gate hook sites reach this only on the Start rising edge, so feedback
+// fires once per press. Returns 0 = allow start, 1 = block start.
 int GateMachines_TRLobbyCanStart(void)
 {
     u32 tr_mask = (1u << VCKIND_FREE) | (1u << VCKIND_STEER);
@@ -343,21 +265,15 @@ int GateMachines_TRLobbyCanStart(void)
     return 1;
 }
 
-// Hook at 0x8002c52c in TopRide_PreGameThink, the first instruction of the
-// "start match" body (multiplayer race). The vanilla bytes are
-// `bl 0x80061658` (menu confirm sound). The preceding `andi. r0, pad_bits,
-// 0x1000` (test Start) and `cmpwi ply_state, 1` / `bne next-slot` already
-// gate this site to "a player with a Ready panel just pressed Start" - we
-// just need to additionally require that some TR machine is unlocked. The
-// clobbered `bl` is re-emitted by the hook framework on the allow path.
-//   r3 == 0 → run clobbered bl (play sound), fall through to commit+launch
-//   r3 != 0 → jump to 0x8002c878 (next-slot iterator, skip start)
-//
-// Register preservation: this hook lives INSIDE the function's 4-slot scan
-// loop, whose continuation at 0x8002c878 recomputes the slot base from r4/r5.
-// Once the gate calls the SFX/textbox helpers it's no longer a leaf and
-// clobbers those caller-saved volatiles, so the prologue stashes r4/r5 on a
-// scratch frame and the epilogue restores them, keeping the loop register-clean.
+// Hook at 0x8002c52c in TopRide_PreGameThink, first instruction of the
+// multiplayer-race "start match" body (vanilla `bl` menu-confirm sound). The
+// preceding Start-bit and Ready-panel tests already gate the site; we just add
+// the "some TR machine is unlocked" requirement.
+//   r3 == 0 -> run clobbered bl (play sound), fall through to commit+launch
+//   r3 != 0 -> jump to 0x8002c878 (next-slot iterator, skip start)
+// The gate calls SFX/textbox helpers (non-leaf), clobbering the caller-saved
+// r4/r5 the loop continuation at 0x8002c878 needs, so the prologue stashes them
+// and the epilogue restores them.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002c52c,
     "stwu 1, -16(1)\n\t"
     "stw 4, 8(1)\n\t"
@@ -370,13 +286,11 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002c52c,
     0x8002c878
 )
 
-// Hook at 0x8002cc80 in TopRide_OnCourseSelect, the first instruction of the
-// solo-mode "start match" body (Free Run / Time Attack). Same shape as the
-// PreGameThink gate above: the preceding `is_all_ready != 0` and pad bit
-// 0x1000 (Start) tests already gate the site. The clobbered instruction is
-// the same `bl 0x80061658` menu-confirm SFX.
-//   r3 == 0 → run clobbered bl (play sound), fall through to commit+launch
-//   r3 != 0 → jump to 0x8002cddc (function epilogue, skip start)
+// Hook at 0x8002cc80 in TopRide_OnCourseSelect, the solo-mode (Free Run / Time
+// Attack) "start match" body. Preceding is_all_ready and Start-bit tests gate
+// the site; the clobbered instruction is the same `bl` menu-confirm SFX.
+//   r3 == 0 -> run clobbered bl (play sound), fall through to commit+launch
+//   r3 != 0 -> jump to 0x8002cddc (epilogue, skip start)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002cc80,
     "",
     GateMachines_TRLobbyCanStart,
@@ -385,11 +299,9 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002cc80,
     0x8002cddc
 )
 
-// Replace the vanilla spawn selection logic entirely.
-// Adapted from KAR Deluxe (UnclePunch/KAR-Deluxe, machines.c).
-// Reads the spawn chance table, zeros out locked machines, gives unlocked
-// machines with 0 base chance a minimum weight, reduces history size for
-// low unlock counts, and does a weighted random selection.
+// Replace the vanilla spawn selection entirely: zero locked machines, give
+// unlocked-but-zero-chance machines a minimum weight, shrink history for low
+// unlock counts, then weighted-random.
 int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
 {
     u32 unlocked_mask = ap_save->machine_unlocked_mask;
@@ -454,17 +366,15 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
         }
     }
 
-    // History writes are handled by the vanilla code after our skip target
-    // (0x801df220 / 0x801df630), which writes r31 to the history buffer.
+    // The vanilla code after our skip target (0x801df220 / 0x801df630) writes
+    // r31 to the history buffer.
     return machine_kind;
 }
 
 // Replace the spawn selection in CityMachineSpawn_DecideAndSpawn (0x801defac).
-// At 0x801df00c: r30 = MachineSpawnData*, f1 = match_progress.
-// Prologue: pass r30 as r3 (first arg); f1 passes through as float arg.
-// Epilogue: result (machine_kind) in r3 → r31 for subsequent code.
-// Skip to 0x801df220: past vanilla selection, where r31 is used for history
-// write and CityMachineSpawn_Create.
+// At 0x801df00c: r30 = MachineSpawnData* (-> r3), f1 = match_progress (float arg).
+// Result -> r31; skip to 0x801df220, past vanilla selection where r31 feeds the
+// history write and CityMachineSpawn_Create.
 CODEPATCH_HOOKCREATE(0x801df00c,
     "mr 3, 30\n\t",
     GateMachines_SelectSpawn,
@@ -495,14 +405,10 @@ int GateMachines_CountCTSelectAvailable()
     return count;
 }
 
-// Build the filtered character array for City Trial select screens.
-// Replaces the mode 1 (Stadium) and mode 2 (Free Run) array-building passes
-// in CitySelect_CreateMachineIcons.
-// Iterates the 2x10 icon grid and writes only unlocked characters into the
-// two-row local arrays used by the subsequent reordering code.
-// Parameters are pointers to the function's stack locals:
-//   char_arr  = local_41 (r29, 20-byte array: row0[0..9] at +0, row1[0..9] at +10)
-//   row_counts = local_48 (r28, row_counts[0] and row_counts[1])
+// Build the filtered character array for City Trial select screens (mode 1
+// Stadium / mode 2 Free Run) in CitySelect_CreateMachineIcons. Iterates the 2x10
+// icon grid, writing only unlocked characters into the two-row locals:
+//   char_arr = 20-byte array (row0 at +0, row1 at +10); row_counts = per-row count.
 void GateMachines_BuildCTSelectArray(u8 *char_arr, u8 *row_counts)
 {
     row_counts[0] = 0;
@@ -523,10 +429,8 @@ void GateMachines_BuildCTSelectArray(u8 *char_arr, u8 *row_counts)
 }
 
 // Hook at 0x8002e4d0: mode 1 (Stadium) counting pass in CitySelect_CreateMachineIcons.
-// At entry: r3 = 0 (loop iterator init), r27 = 0 (count init).
-// We replace the entire counting loop. Result goes to r27 (total count).
-// Exit to 0x8002e670: past the counting loop, where mode is rechecked before
-// the array-building pass.
+// Replaces the counting loop; result -> r27 (total count). Exit to 0x8002e670,
+// past the loop where mode is rechecked before the array-building pass.
 CODEPATCH_HOOKCREATE(0x8002e4d0,
     "",
     GateMachines_CountCTSelectAvailable,
@@ -534,14 +438,11 @@ CODEPATCH_HOOKCREATE(0x8002e4d0,
     0x8002e670
 )
 
-// Hook at 0x8002e67c: mode 1 (Stadium) array-building pass.
-// At entry: r29 = local_41 (char array), r28 = local_48 (row counts).
-// r26 and r31 are set from r29/r28 inside the loop, but we skip the loop entirely.
-// Exit to 0x8002f0b8: past the vanilla reorder/balance block. The reorder is
-// designed around vanilla's grid iteration (special chars at fixed col 0/9
-// positions) - our packed arrays violate that assumption and trigger a
-// duplicate-icon bug when only DEDEDE/METAKNIGHT are unlocked. The flat-copy
-// at 0x8002f0b8 reads our row_counts + char_arr directly, no reorder needed.
+// Hook at 0x8002e67c: mode 1 (Stadium) array-building pass. r29 = char array,
+// r28 = row counts. Exit to 0x8002f0b8, past the vanilla reorder/balance block:
+// the reorder assumes vanilla's grid iteration (special chars at fixed col 0/9),
+// and our packed arrays trigger a duplicate-icon bug when only DEDEDE/METAKNIGHT
+// are unlocked. The flat-copy at 0x8002f0b8 reads our arrays directly.
 CODEPATCH_HOOKCREATE(0x8002e67c,
     "mr 3, 29\n\t"
     "mr 4, 28\n\t",
@@ -551,11 +452,9 @@ CODEPATCH_HOOKCREATE(0x8002e67c,
 )
 
 // Hook at 0x8002e5c0: mode 2 (Free Run) counting pass in CitySelect_CreateMachineIcons.
-// At entry: r24 = loop iterator (about to be initialized to 0).
-// We replace the entire counting loop. Result goes to r27 (total count).
-// Clobbered: li r24, 0 (harmless, r24 is not needed after we skip the loop).
-// Exit to 0x8002e670: past the counting loop, where mode is rechecked before
-// the array-building pass.
+// Replaces the counting loop; result -> r27 (total count). Clobbered `li r24, 0`
+// is harmless (r24 unused after the skipped loop). Exit to 0x8002e670, past the
+// loop where mode is rechecked before the array-building pass.
 CODEPATCH_HOOKCREATE(0x8002e5c0,
     "",
     GateMachines_CountCTSelectAvailable,
@@ -563,12 +462,9 @@ CODEPATCH_HOOKCREATE(0x8002e5c0,
     0x8002e670
 )
 
-// Hook at 0x8002e738: mode 2 (Free Run) array-building pass.
-// At entry: r29 = local_41 (char array), r28 = local_48 (row counts).
-// We replace the entire array-building loop with our filtered version.
-// Clobbered: or r26, r29, r29 (mr r26, r29 - harmless for the reordering code
-// which reads from stack, not r26).
-// Exit to 0x8002f0b8: see the mode-1 hook above for the reorder-bypass rationale.
+// Hook at 0x8002e738: mode 2 (Free Run) array-building pass. r29 = char array,
+// r28 = row counts. Clobbered `mr r26, r29` is harmless (the reorder reads from
+// stack). Exit to 0x8002f0b8, bypassing the reorder as in the mode-1 hook.
 CODEPATCH_HOOKCREATE(0x8002e738,
     "mr 3, 29\n\t"
     "mr 4, 28\n\t",
@@ -600,17 +496,16 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     }
 }
 
-// Per-slot bitmask of CT machine-select slots the player explicitly picked a
-// machine for on the grid this session (bit = slot). Set by the icon[slot]
-// write in CitySelect_Cursor1InputThink, consumed (and cleared) per slot when
-// GateMachines_FinalizeCTMachine commits the starting machine. A manual pick on
-// a CPU slot suppresses the random-start-machine re-roll for that slot.
+// Per-slot bitmask of CT machine-select slots the player explicitly picked on
+// the grid this session (bit = slot). Set by the icon[slot] write in
+// CitySelect_Cursor1InputThink, consumed and cleared per slot in
+// GateMachines_FinalizeCTMachine (a manual CPU pick suppresses that slot's
+// random-start-machine re-roll).
 static u8 ct_machine_manual_pick_mask = 0;
 
 // Record that the player explicitly chose a machine for a CT select slot via the
 // grid. Called from the icon[slot] write in CitySelect_Cursor1InputThink, the
-// sole player-driven machine-grid pick (the auto / random-seed and cancel-restore
-// writes live in other functions, so they never reach this hook).
+// sole player-driven machine-grid pick.
 void GateMachines_NoteManualMachinePick(int slot)
 {
     if (slot >= 0 && slot < 4)
@@ -618,23 +513,15 @@ void GateMachines_NoteManualMachinePick(int slot)
 }
 
 // Finalize the City Trial starting machine at the convergence point of
-// CitySelect_InitPlayerMachines (0x8002dea0), where the Trial branch (wrote
-// Compact) and the Stadium / Free Run branch (wrote c_kind_arr[icon]) merge to
-// look up the CharacterDesc. Fires once per slot.
-//
-// The "Random Start Machine" toggle is the single master and applies identically
-// to humans and CPUs wherever neither makes an explicit grid pick:
-//   - x215[slot]: 0 = human, 2 = CPU, else inactive (leave vanilla, return).
-//   - Trial (x1d0 == 0): the free-roam start has no grid, so the toggle drives
-//     every active slot the same way. ON -> random unlocked Kirby machine;
-//     OFF -> Compact when unlocked, else a random unlocked Kirby machine.
-//   - Stadium / Free Run (x1d0 != 0): humans actively pick on the grid, so a
-//     human's selection is always kept; auto-assigned CPU machines follow the
-//     toggle (ON -> random entry from the gated c_kind_arr; OFF -> leave the
-//     vanilla seed). But a CPU the player explicitly picked a machine for (flagged
-//     in ct_machine_manual_pick_mask) keeps that pick - the re-roll is skipped.
-//     Dedede / Meta Knight are valid here, so the CPU pick draws straight from
-//     the gated grid.
+// CitySelect_InitPlayerMachines (0x8002dea0), where the Trial and Stadium / Free
+// Run branches merge. Fires once per slot. The "Random Start Machine" toggle
+// applies to humans and CPUs wherever neither makes an explicit grid pick:
+//   x215[slot]: 0 = human, 2 = CPU, else inactive.
+//   Trial (x1d0 == 0): no grid, so the toggle drives every active slot -
+//     ON = random unlocked Kirby machine; OFF = Compact if unlocked, else random.
+//   Stadium / Free Run (x1d0 != 0): humans keep their grid pick; CPU machines
+//     follow the toggle (ON = random from the gated c_kind_arr; OFF = vanilla
+//     seed), except a CPU flagged in ct_machine_manual_pick_mask keeps its pick.
 void GateMachines_FinalizeCTMachine(int slot)
 {
     GameData *gd = Gm_GetGameData();
@@ -676,10 +563,9 @@ void GateMachines_FinalizeCTMachine(int slot)
 }
 
 // Hook at the convergence point 0x8002dea0 (`lbz r3, 97(r28)`) in
-// CitySelect_InitPlayerMachines. r26 = slot index, r28 = city_select_ply + slot
-// (both callee-saved). The prologue passes the slot; with skip target 0 the
-// framework re-executes the clobbered `lbz r3, 97(r28)`, reloading the ckind we
-// just wrote before the Character_GetDesc lookup that follows.
+// CitySelect_InitPlayerMachines. r26 = slot index (passed in), r28 = city_select_ply
+// + slot. Skip target 0 re-executes the clobbered `lbz r3, 97(r28)`, reloading the
+// ckind we just wrote before the following Character_GetDesc lookup.
 CODEPATCH_HOOKCREATE(0x8002dea0,
     "mr 3, 26\n\t",
     GateMachines_FinalizeCTMachine,
@@ -688,10 +574,9 @@ CODEPATCH_HOOKCREATE(0x8002dea0,
 )
 
 // Hook the icon[slot] store in CitySelect_Cursor1InputThink (0x800315ac,
-// `stb r27, 45(r30)`) - the sole player-driven machine-grid pick (it runs only
-// when the chosen grid index actually changes). r29 = slot, callee-saved, so it
-// survives the C call. Flags the slot as a manual pick, then skip target 0
-// re-executes the clobbered store so the engine still commits icon[slot].
+// `stb r27, 45(r30)`) - the sole player-driven machine-grid pick (runs only when
+// the chosen grid index changes). r29 = slot (passed in). Flags the slot as a
+// manual pick; skip target 0 re-executes the clobbered store to commit icon[slot].
 CODEPATCH_HOOKCREATE(0x800315ac,
     "mr 3, 29\n\t",
     GateMachines_NoteManualMachinePick,
@@ -699,13 +584,9 @@ CODEPATCH_HOOKCREATE(0x800315ac,
     0
 )
 
-// Hook at 0x801952c8 in Rider_ResetStartingMachine.
-// At entry: r31 = RiderData*. Replaces the two Ply_Set calls (is_bike=0,
-// machine_kind=COMPACT) with our validated selection.
-// Vanilla signature is Rider_ResetStartingMachine(RiderData *rd, int unk_arg2);
-// our replacement only consumes rd - the prologue gating (which uses arg2)
-// runs unmodified before this hook point, so we don't need it.
-// Skip to 0x801952e0: the function epilogue.
+// Hook at 0x801952c8 in Rider_ResetStartingMachine. r31 = RiderData*, replacing
+// the two Ply_Set calls (is_bike=0, machine_kind=COMPACT) with our validated
+// selection. Skip to 0x801952e0 (epilogue).
 CODEPATCH_HOOKCREATE(0x801952c8,
     "mr 3, 31\n\t",
     GateMachines_ResetStartingMachine,
@@ -753,18 +634,13 @@ int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
     return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
-// Zero the Air Ride CSS available-machine list (airride_select_ply +0x66, the
-// 2x10 = 20-entry icon grid). AirRide_PopulateSelectIcons runs every CSS frame
-// but only (re)writes the first `count` entries; it never clears the tail. When
-// machine_unlocked_mask is narrowed mid-session (e.g. a debug-menu lock) the
-// count drops, yet stale entries from an earlier fill linger past the new count.
-// Every slot's icon index defaults to 0 and the CSS resolves the displayed/
-// committed machine as list[icon], so a stale list[0] makes both the icon and
-// the in-game machine a vehicle that is no longer unlocked (the symptom was the
-// whole lobby defaulting to Winged Star after locking everything). Zeroing the
-// list before each rebuild guarantees any entry past the live count reads
-// CKIND_COMPACT (0); since populate runs per-frame the lobby self-heals the next
-// frame instead of needing a full CSS re-entry. base = airride_select_ply.
+// Zero the Air Ride CSS available-machine list (airride_select_ply +0x66, a
+// 2x10 = 20-entry icon grid). AirRide_PopulateSelectIcons rewrites only the first
+// `count` entries each frame and never clears the tail, so when
+// machine_unlocked_mask narrows mid-session (e.g. a debug lock) stale entries
+// linger past the new count and the CSS resolves them (icon index defaults to 0)
+// to a now-locked machine. Zeroing first makes any entry past the live count read
+// CKIND_COMPACT (0); the per-frame rebuild then self-heals. base = airride_select_ply.
 void GateMachines_ClearAirRideList(u8 *base)
 {
     for (int i = 0; i < 20; i++)
@@ -791,21 +667,18 @@ void GateMachines_OnBoot()
     // Air Ride select screen: replace character availability check
     CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
 
-    // Title-screen attract demo: gate the random machine picker's unlock check
-    // so the idle demo never shows a locked machine. (Real Air Ride CPU machine
-    // selection is gated upstream via the character list; see loadCPU.)
+    // Title-screen attract demo: gate the random machine picker so the idle demo
+    // never shows a locked machine. (Real Air Ride CPU selection is gated upstream
+    // via the character list in loadCPU.)
     CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
 
-    // Air Ride CSS: clear the cached available-machine list each frame in
-    // AirRide_PopulateSelectIcons so a narrowed unlock mask (e.g. a mid-session
-    // debug lock) can't leave stale entries that the per-slot icon index then
-    // resolves to a now-locked machine.
+    // Air Ride CSS: clear the cached available-machine list each frame so a
+    // narrowed unlock mask can't leave stale, now-locked entries.
     CODEPATCH_HOOKAPPLY(0x80020a88);
 
-    // City Trial Stadium select screen: replace both the counting pass and
-    // array-building pass in CitySelect_CreateMachineIcons (0x8002e3c4) for
-    // mode 1. Vanilla mode 1 only checks ckind ranges (0-14 available,
-    // 15/16/18/19 special characters unavailable) - no unlock mask check.
+    // City Trial Stadium select screen: replace mode 1's counting and
+    // array-building passes in CitySelect_CreateMachineIcons (0x8002e3c4).
+    // Vanilla mode 1 only checks ckind ranges, no unlock mask.
     CODEPATCH_HOOKAPPLY(0x8002e4d0);  // mode 1 counting pass
     CODEPATCH_HOOKAPPLY(0x8002e67c);  // mode 1 array-building pass
 
@@ -814,18 +687,11 @@ void GateMachines_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8002e738);  // mode 2 array-building pass
 
     // City Trial machine-select navigation off-by-one (Free Run + Stadium).
-    // CitySelect_Cursor1InputThink (0x800312fc) gates two-row (up/down) cursor
-    // movement on machine_select.num with `cmpwi r3, 9; ble` at 0x80031350 ->
-    // num<=9 single-row, num>=10 two-row (split at ceil(num/2)). But the icon
-    // grid is a 2x10 layout whose box animation (keyed on the count) keeps up
-    // to 10 icons on a SINGLE line and only wraps to two rows at 11. So at
-    // exactly num==10 the renderer draws one line of 10 while the cursor splits
-    // it 5+5 and up/down jumps between the halves. Vanilla CT only ever
-    // produces counts 15-20 on these screens, so the off-by-one was never
-    // exercised; AP machine gating can land on exactly 10 unlocked machines.
-    // Verified live: at num==10 every icon slot shares one Y (single row).
-    // Patch the threshold to `cmpwi r3, 10` (num<=10 single-row) so navigation
-    // matches the renderer's single-line layout at 10.
+    // CitySelect_Cursor1InputThink (0x800312fc) splits cursor rows at num>=10
+    // (`cmpwi r3, 9; ble` at 0x80031350), but the 2x10 grid renderer keeps up to
+    // 10 icons on a single line and only wraps at 11 - so at num==10 the cursor
+    // splits 5+5 while one row is drawn. Vanilla CT only makes counts 15-20, so
+    // this was never hit; AP gating can land on exactly 10. Patch to `cmpwi r3, 10`.
     CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a);  // cmpwi r3, 10
 
     // City Trial starting machine: finalize each active slot's machine at the
@@ -838,12 +704,8 @@ void GateMachines_OnBoot()
 
     // Top Ride lobby: gate the L/R "Control Type" cycler and override the
     // panel_machine init default so locked Free/Steer is never shown. The race
-    // lobby and the solo Free Run / Time Attack lobby are separate code paths
-    // with separate cyclers, inits, and start-match handlers - each needs its
-    // own hook. Three init paths (general InitSelectData, multiplayer RaceInit,
-    // solo SoloInit), two cyclers (CSS_PanelThink for race, SoloPanelThink for
-    // solo) and two start-match paths (PreGameThink for race, OnCourseSelect
-    // for solo).
+    // and solo (Free Run / Time Attack) lobbies are separate code paths, each
+    // with its own init, cycler, and start-match handler - hence the per-site hooks.
     CODEPATCH_HOOKAPPLY(0x8002d070);  // TopRide_InitSelectData post-loop fixup (main-menu reset)
     CODEPATCH_HOOKAPPLY(0x8002d748);  // TopRide_RaceInit post-reset fixup (TR Main Game)
     CODEPATCH_HOOKAPPLY(0x8002db90);  // TopRide_SoloInit post-zero fixup (Free Run / Time Attack)
@@ -866,10 +728,8 @@ int GateMachines_UnlockMachine(MachineKind kind, int announce)
     if (announce)
     {
         // VCKIND_WHEELDEDEDE / VCKIND_WINGMETAKNIGHT are the player-facing King
-        // Dedede / Meta Knight unlocks - to the player these are characters, not
-        // just a machine, so they announce as "Unlocked Character: <name>" to
-        // read identically to the REWARD_KING_DEDEDE / REWARD_META_KNIGHT
-        // checklist path (which also uses MachineColor).
+        // Dedede / Meta Knight unlocks - announce them as "Unlocked Character:"
+        // to match the REWARD_KING_DEDEDE / REWARD_META_KNIGHT checklist path.
         const char *prefix = "Unlocked Machine: ";
         const char *name   = MachineKind_Names[kind];
         if (kind == VCKIND_WHEELDEDEDE)
@@ -889,11 +749,9 @@ int GateMachines_UnlockMachine(MachineKind kind, int announce)
 
 // Set when a legendary machine has been assembled in the current City Trial
 // scene: bit 0 = Dragoon, bit 1 = Hydra. The piece archives (VsDragoon.dat /
-// VsHydra.dat) are a one-shot preloaded resource - the assembly cinematic frees
-// the archive when it finishes, so a second cinematic in the same scene loads a
-// dangling joint and crashes in HSD_JObjLoadJoint. Vanilla only ever assembles
-// each legendary once per round; we mirror that. Reset on each 3D scene load
-// (where the archives are preloaded fresh) via GateMachines_On3DLoadEnd.
+// VsHydra.dat) are freed when the assembly cinematic finishes, so a second
+// cinematic in the same scene loads a dangling joint and crashes in
+// HSD_JObjLoadJoint. Reset per 3D scene load via GateMachines_On3DLoadEnd.
 static u8 legendary_assembled_mask;
 
 void GateMachines_On3DLoadEnd(void)
@@ -902,35 +760,28 @@ void GateMachines_On3DLoadEnd(void)
 }
 
 // Give a player the assembled legendary machine via the cinematic.
-// machine_index: 0 = Dragoon, 1 = Hydra.
-// Returns 1 if started (consume the item), 0 if it can't run yet (keep the item
-// queued and retry).
+// machine_index: 0 = Dragoon, 1 = Hydra. Returns 1 if started (consume the item),
+// 0 if it can't run yet (keep queued and retry).
 //
-// The assembly cinematic loads the legendary machine's piece models and drives
-// the City Trial sky/area-light setup, all of which only exist on the open City
-// Trial map. Running it anywhere else - any stadium (which shares the City
-// major), the trial-ending stadium, or Air/Top Ride - makes the cinematic
-// dereference a null jobj / hit the area-light assert and crash. Gm_IsInCity()
-// is stage-based (true only on the open CT map, stage_kind 9/52), so it excludes
-// every stadium as well as AR/TR. Returning 0 keeps the item queued so it
-// assembles once the player is back on the open map.
+// The cinematic loads legendary piece models and drives the CT sky/area-light
+// setup, which only exist on the open City Trial map - running it in any stadium
+// or AR/TR dereferences a null jobj / hits the area-light assert and crashes.
+// Gm_IsInCity() (stage_kind 9/52) excludes those, so returning 0 keeps the item
+// queued until the player is back on the open map.
 int GateMachines_GiveLegendaryMachine(int machine_index)
 {
     if (!Gm_IsInCity())
         return 0;
 
-    // This legendary was already assembled in this scene. Its piece archive has
-    // been freed, so re-running the cinematic would crash. Keep the item queued
-    // (return 0) rather than consuming it - it assembles on the next scene load,
-    // where the archives are preloaded fresh and the one-shot guard is reset.
+    // Already assembled this scene: the piece archive is freed, so re-running the
+    // cinematic would crash. Keep the item queued until the next scene load.
     u8 bit = (u8)(1 << machine_index);
     if (legendary_assembled_mask & bit)
         return 0;
 
-    // A legendary assembly cinematic is already running (its GObj lives at
-    // GameData+0xA8C for the cinematic's lifetime). Starting a second one tears
-    // down the in-flight cinematic's piece GObjs and leaves a dangling jobj that
-    // crashes on the next update. Wait for it to finish, then re-evaluate.
+    // A legendary assembly cinematic is already running (GObj at GameData+0xA8C).
+    // Starting a second tears down its piece GObjs and leaves a dangling jobj that
+    // crashes on the next update. Wait for it to finish.
     if (Gm_IsLegendaryAssembling())
         return 0;
 

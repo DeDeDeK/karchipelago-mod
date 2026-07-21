@@ -14,19 +14,11 @@
 #include "ap_item_handler.h"
 #include "gate_topride_items.h"
 
-// Reentrancy guard. The TrapLink protocol requires that received traps do not
-// bounce back as outgoing traps ("permanent recursion of Traps"). Our CT and
-// TR receive paths re-fire the same hooks that ordinarily detect organic trap
-// pickups (bad-patch in CT, SpeedDown in TR), so without a guard we'd ping-pong
-// the same trap kind back and forth at the rate of one debounced send per
-// round-trip. AR is bypassed by design (ApplyAirRideTrap calls Rider_GiveAbility
-// directly, skipping the GateAbilities replacement that owns the send hook).
-//
-// After TrapLink_PerFrame applies a receive, we set this to a generous window
-// (120f = 2s at 60Hz) covering the worst-case latency between the apply call
-// and the resulting natural-pickup hook firing. While positive, TrapLink_Send
-// no-ops. The counter ticks down in TrapLink_PerFrame itself and is reset on
-// scene-load so it can't carry stale state across sessions.
+// Receive→send recursion guard. Received traps must not bounce back as outgoing
+// traps. The CT/TR receive paths re-fire the same hooks that detect organic trap
+// pickups, so after a receive we suppress sends for a generous window (120f = 2s)
+// covering the apply→pickup-hook latency. TrapLink_Send no-ops while positive;
+// TrapLink_PerFrame ticks it down and scene-load resets it.
 #define TRAPLINK_RECV_GUARD_FRAMES 120
 static int recv_suppress_frames = 0;
 
@@ -93,12 +85,9 @@ static int IsTrapItemLocked(uint item_id)
 }
 
 // City Trial receive: try every eligible trap in shuffled order until one
-// applies. APItems_HandleItem returns 0 for items that can't apply in the
-// current scene/mode (e.g. ITKIND spawns outside actual City Trial, AP_EVENTs
-// in stadium-style city modes), so iterating in one tick avoids the per-frame
-// dispatcher loop where a single random pick fails and the receive flag stays
-// set until many frames later when chance lands on an applicable item.
-// Returns 1 if any trap applied, 0 otherwise.
+// applies. APItems_HandleItem returns 0 for items that can't apply in the current
+// scene/mode, so iterating in one tick avoids waiting frames for a random pick to
+// land on an applicable item. Returns 1 if any trap applied.
 static int ApplyCityTrialTrap(void)
 {
     // Build filtered list excluding locked events
@@ -140,7 +129,7 @@ static int ApplyCityTrialTrap(void)
 // Most City Trial trap items are CT-only (ITKIND / EVENT dispatch requires
 // Gm_IsInCity), so we bypass APItems_HandleItem and call Rider_GiveAbility
 // directly. Uses the raw rider API (not Rider_CheckAndGiveAbility) so the
-// ability gate and sleep-send hook in gate_abilities.c do not re-trigger.
+// ability gate and sleep-send hook do not re-trigger.
 static int ApplyAirRideTrap(void)
 {
     int applied = 0;
@@ -165,20 +154,10 @@ static int ApplyAirRideTrap(void)
     return applied;
 }
 
-// Top Ride bad items that penalize the picker-up via TopRide_KirbyApplyItem
-// (which installs a self-affecting state on the kirby that "used" the item).
-// Most TR items either buff the user or arm them with an attack against
-// other players; only items whose dispatcher installs a self-debuff state
-// belong here.
-//
-//   TRITEM_SPEED_DOWN - installs KirbySpeedDown (state ID 18, AC_RUN_LOOP
-//                       with reduced speed_factor). Reliable trap.
-//
-// TRITEM_PARTY_BALL was tried but its 0x802d9188 dispatcher only resets to
-// KirbyNormal and swaps in the KirbyUshiroyurerun vtable; the velocity-flip
-// portion of the vanilla effect is set up by the absorber-pickup path that
-// TopRide_KirbyApplyItem skips, so applied via this path it produces only
-// the smoke-trail visual without slowing the picker. Excluded.
+// Top Ride bad items that penalize the picker via TopRide_KirbyApplyItem. Only
+// items whose dispatcher installs a self-debuff state belong here; most TR items
+// buff the user or arm an attack instead. TRITEM_SPEED_DOWN installs KirbySpeedDown
+// (state ID 18) and is the only reliable one.
 static const TopRideItemKind tr_trap_items[] = {
     TRITEM_SPEED_DOWN,
 };
@@ -197,9 +176,8 @@ static int ApplyTopRideTrap(void)
 // CITY/AIR/TOP here.
 static void TrapLink_PerFrame(GOBJ *g)
 {
-    // Tick the recv→send recursion guard down every frame the GObj is alive.
-    // Decrement happens before the receive check so even idle frames advance
-    // the timer; otherwise the guard could overstay if no receive is pending.
+    // Tick the recursion guard down every frame, before the receive check, so
+    // idle frames advance it too.
     if (recv_suppress_frames > 0)
         recv_suppress_frames--;
 
@@ -245,9 +223,7 @@ static void TrapLink_PerFrame(GOBJ *g)
     {
         tb_api->EnqueueColoredNoun(NULL, "Trap", tb_api->TrapColor, " received!");
         ap_data->traplink_receive = 0;
-        // Arm the recursion guard: the apply path is about to spawn an item /
-        // grant an ability that will trigger our send hooks on the next frame
-        // or two. Suppress outgoing sends until well past that window.
+        // Arm the recursion guard: the apply is about to trigger our send hooks.
         recv_suppress_frames = TRAPLINK_RECV_GUARD_FRAMES;
     }
 }
@@ -268,9 +244,8 @@ void TrapLink_OnTopRideLoadEnd()
 }
 
 // Hook in Machine_OnTouchItem after CityItem_IsGoodPatch returns 0 (bad patch).
-// Catches SPEEDMIN, CHARGENONE, and fake patches.
-// At this point r20 = MachineData*.
-// Clobbered instruction: lwz r0, 0xA10(r20)
+// Catches SPEEDMIN, CHARGENONE, and fake patches. r20 = MachineData*;
+// clobbered: lwz r0, 0xA10(r20).
 static void TrapLink_OnBadPatch(MachineData *md)
 {
     int ply = Machine_GetRiderPly(md);
@@ -284,17 +259,9 @@ CODEPATCH_HOOKCREATE(0x801DB504,
     "",
     0)
 
-// Hook inside TopRideItem_Update (0x8034c130) at the moment the collision
-// check has just succeeded and the item is about to be marked "absorbed".
-// At 0x8034c7dc:
-//   r31 = item list node (item at +8, kind byte at node+0x68)
-//   r29 = absorber (kirby's item receiver)
-//   r26 = absorber position Vec3* (loaded earlier at 0x8034c6e4 from
-//         absorber.f18 vtable[2])
-//   Clobbered instruction: lbz r4, 104(r31)
-//
-// We load the item kind and absorber position into r3/r4 for the C handler,
-// then the framework re-executes the clobbered lbz to restore r4.
+// Hook inside TopRideItem_Update at the moment an item is marked absorbed
+// (0x8034c7dc). r31 = item list node (kind byte at +0x68), r26 = absorber
+// position Vec3*. The prologue loads item kind + absorber pos into r3/r4.
 static int IsTopRideBadItem(u8 kind)
 {
     for (int i = 0; i < (int)TR_TRAP_ITEM_COUNT; i++)

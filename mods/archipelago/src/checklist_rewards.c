@@ -25,11 +25,9 @@ static const int reward_counts[GMMODE_NUM] = {
 };
 
 // ap_to_game_ri[mode][ap_reward_index] = game reward-table index. The apworld
-// numbers rewards in clear_kind-sorted order; the game's internal table is in a
-// different ROM-defined order that all mod machinery is keyed on. We keep game
-// order internally and translate only at the AP-client wire boundaries (incoming
-// item IDs in ap_item_handler.c, the locations[] array in ApplyLocations). Built
-// at boot by ranking each reward's native clear_kind.
+// numbers rewards in clear_kind-sorted order; the game's table is in a different
+// ROM-defined order that all mod machinery keys on. Internals stay in game order;
+// translation happens only at the AP-client wire boundaries.
 static u8 ap_to_game_ri[GMMODE_NUM][REWARD_COUNT_MAX];
 
 // Build ap_to_game_ri from the original reward tables' native clear_kinds.
@@ -100,13 +98,10 @@ int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind)
     return 1;
 }
 
-// Resolve the reward placed at (mode, clear_kind). On success writes the
-// source mode + reward_index to the out params and returns 1. Returns 0 if no
-// reward is placed here (remote, or no placement yet).
-//
-// Order: cross_mode_slots first, then scan this mode's save_shuffled for a
-// (mode << 8) | clear_kind match. Matching the full u16 encoding avoids the
-// clear_kind=0 sentinel aliasing that a RewardEntry.clear_kind scan would hit.
+// Resolve the reward placed at (mode, clear_kind). On success writes the source
+// mode + reward_index and returns 1; returns 0 if none is placed here (remote or
+// unplaced). Checks cross_mode_slots first, then matches the full u16 shuffled
+// encoding (avoids the clear_kind=0 sentinel aliasing a clear_kind scan would hit).
 int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
                                  u8 *out_source_mode, u8 *out_source_reward_index)
 {
@@ -169,14 +164,10 @@ int ChecklistRewards_CheckUnlocked(GameMode mode, u8 reward_index)
     return (ap_save->received_checklist_rewards[mode] & (1ULL << reward_index)) != 0;
 }
 
-// Replacement for ClearChecker_GetRewardFromClearKind (0x80049EC4). Sole caller
-// is the audio/ending preview path in Checklist_Think (0x801804dc). A vanilla scan
-// of RewardEntry.clear_kind would alias the cross-mode/remote clear_kind=0 sentinel
-// and return the wrong row; we resolve via shuffled_rewards instead and return the
-// source row's reward_index + reward_param. Cross-mode music previews are redirected
-// to the source mode's audio table by the AudioPreview hook (via hover.source_mode);
-// cross-mode ending previews need no special handling (vanilla's ending "preview"
-// only sets a UI state byte and plays a menu click).
+// Replacement for ClearChecker_GetRewardFromClearKind (0x80049EC4), the audio/ending
+// preview path in Checklist_Think (0x801804dc). Resolves via shuffled_rewards instead
+// of a RewardEntry.clear_kind scan, which would alias the cross-mode/remote
+// clear_kind=0 sentinel and return the wrong row.
 void ChecklistRewards_GetRewardFromClearKind(GameMode mode, u8 clear_kind,
                                              u8 *out_reward_index,
                                              u8 *out_reward_param)
@@ -487,7 +478,7 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
 
     // shuffled u16 = (target_mode << 8) | target_clear_kind, 0xFFFF = remote. We
     // write has_reward only (display badge); is_unlocked is reserved for "player
-    // completed this in gameplay" and owned by check_detection.c.
+    // completed this in gameplay" and set on the check-detection path.
     u16 loc = ap_save->shuffled_rewards[mode][reward_index];
     if (loc != 0xFFFF)
     {
@@ -568,11 +559,10 @@ CODEPATCH_HOOKCONDITIONALCREATE(
     0x8017e064
 )
 
-// Checklist audio preview (Checklist_Think, 0x80180508). Replaces the vanilla scan
-// of audio_table_ptrs[current_mode]. Under shuffle a cross-mode music reward's source
-// reward_index lives in another mode's table, so we select the table via
-// hover.source_mode (set by the FindRewardForCell hook) before looking up the song,
-// playing it, and persisting to MainMenuData.soundtest_bgm_kind (GameData+0x4E).
+// Checklist audio preview (Checklist_Think, 0x80180508), replacing the vanilla scan
+// of audio_table_ptrs[current_mode]. Selects the table via hover.source_mode so a
+// cross-mode music reward reads its source mode's table, then plays the song and
+// persists it to MainMenuData.soundtest_bgm_kind (GameData+0x4E).
 static int ChecklistRewards_AudioPreview(u8 reward_index)
 {
     if (!hover.valid || hover.source_mode >= GMMODE_NUM)
@@ -676,11 +666,9 @@ static int ChecklistRewards_FindRewardForCell(u8 current_mode, u8 clear_kind)
     if (ap_save->received_checklist_rewards[src_mode] & (1ULL << src_ri))
         return (int)src_ri + 1;
 
-    // Not received yet. Fall back to local cell state.
-    //   same-mode:  show if has_reward is set (normal flow)
-    //   cross-mode: show if unlocked OR has_reward (unlocked handles the
-    //               newly-completed-this-session case before the post-loop
-    //               hook has had a chance to mirror has_reward).
+    // Not received yet - fall back to local cell state. Same-mode shows on
+    // has_reward; cross-mode also shows on is_unlocked, which covers a cell
+    // completed this session before the post-loop hook mirrors has_reward.
     GameClearData *cd = gmGetClearcheckerTypeP(current_mode);
     int visible = (src_mode == current_mode)
         ? cd->clear[clear_kind].has_reward
@@ -807,12 +795,10 @@ CODEPATCH_HOOKCREATE(
 )
 
 // Legendary-machine part assembly (Checklist_ProcessUnlock, 0x8017e490, City Trial
-// branch only - mode guard cmplwi r3,2 at 0x8017f00c). Vanilla decides "all 3 parts
-// collected" (mark cell 0x6D Dragoon / 0x6E Hydra) by ANDing the has_reward bits of
-// the part reward cells, which breaks under shuffle (cross-mode/remote parts resolve
-// to the clear_kind=0 sentinel). These hooks key the decision off
-// received_checklist_rewards instead; on "all received" they fall into vanilla's own
-// set-cell logic. reward_index here is the game reward-table index.
+// only). Vanilla decides "all 3 parts collected" (mark cell 0x6D Dragoon / 0x6E
+// Hydra) by ANDing the part cells' has_reward bits, which breaks under shuffle
+// (cross-mode/remote parts hit the clear_kind=0 sentinel). These hooks key off
+// received_checklist_rewards instead, then fall into vanilla's set-cell logic.
 #define CT_RI_DRAGOON_PART_A 27
 #define CT_RI_DRAGOON_PART_B 28
 #define CT_RI_DRAGOON_PART_C 29

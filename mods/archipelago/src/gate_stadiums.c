@@ -148,26 +148,19 @@ void GateStadiums_OnBoot()
     // can leave zero candidates, causing HSD_Randi(0).
     CODEPATCH_REPLACEFUNC(CityTrial_DecideStadium, GateStadiums_DecideStadium);
 
-    // CityTrial_BuildStadiumList has two vanilla side-channels that bypass
-    // our unlock-check replacement:
+    // CityTrial_BuildStadiumList has two vanilla side-channels that bypass our
+    // unlock-check replacement:
     //
-    // 1) Phase 1 auto-unlock loop (0x80046e34): when CT progress hits a late
-    //    threshold, the loop iterates over every locked stadium and calls
-    //    Gm_StadiumWriteUnlocked + Gm_StadiumWriteNewLabel. The unlock write
-    //    is harmless (we ignore that bitfield), but the new-label write
-    //    causes "NEW" badges to appear on locked stadiums in the UI.
-    //    Skip the loop entirely by turning the entry blt into an
-    //    unconditional branch to its fallthrough target.
-    //    Original: blt 0x80046e6c   (skip loop if progress < 3)
-    //    Replace:  b   0x80046e6c
+    // 1) Phase 1 auto-unlock loop (0x80046e34): past a late CT-progress threshold
+    //    it calls Gm_StadiumWriteNewLabel on every locked stadium, badging them
+    //    "NEW" in the UI. Turn the entry blt into an unconditional branch to skip
+    //    the loop (blt 0x80046e6c -> b 0x80046e6c).
     CODEPATCH_REPLACEINSTRUCTION(0x80046e1c, 0x48000050);
 
-    // 2) Phase 2 checklist fallback (0x80046ef8): when our mask says locked,
-    //    vanilla falls through to Checklist_CheckCachedUnlock_CityTrial /
-    //    ClearChecker_CheckUnlocked, which can re-add the stadium to the
-    //    list. Redirect the "locked" case straight to the next iteration.
-    //    Original: beq 0x80046f44   (locked -> checklist fallback)
-    //    Replace:  beq 0x80046fc4   (locked -> next iteration)
+    // 2) Phase 2 checklist fallback (0x80046ef8): on a "locked" result vanilla
+    //    falls through to Checklist_CheckCachedUnlock_CityTrial /
+    //    ClearChecker_CheckUnlocked, which can re-add the stadium. Redirect the
+    //    locked case to the next iteration (beq 0x80046f44 -> beq 0x80046fc4).
     CODEPATCH_REPLACEINSTRUCTION(0x80046ef8, 0x418200CC);
 
     OSReport("[GateStadiums] Hooks installed\n");

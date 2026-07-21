@@ -40,13 +40,12 @@
 #include "main_menu.h"
 #include "goal_max_stats_ct.h"
 
-// Define global variables.
 APData *ap_data;
 APSave *ap_save;
 const TextBoxAPI *tb_api = 0;
 
 // The checklist mode the custom_checklist framework assigned to the AP tab.
-// GMMODE_NUM until APChecklist_Register lands; see main.h.
+// GMMODE_NUM until APChecklist_Register lands.
 int ap_checklist_mode = GMMODE_NUM;
 
 ModDesc mod_desc = {
@@ -244,26 +243,15 @@ static void APOptions_ApplyUngatedCategories(void)
     if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       (1u << STKIND_NUM) - 1);
     if (!opts->base_ability_gating_enabled)  Unlock_SetMask(AP_UNLOCK_BASE_ABILITY,  (1u << BASEABILITY_NUM) - 1);
 
-    // The three Top Ride "New Item" types (Chickie/Who? Paint/Lantern, enabled-
-    // mask bits 20/18/15) need a second nudge. Unlike every other category, the
-    // mask-all above can't enable them: TopRideItem_MgrInit only enables those
-    // slots when GameData.topride_extra_unlocks is set, and that is fed by
-    // TopRide_OnCourseSelect / TopRide_PreGameThink calling ClearChecker_CheckUnlocked
-    // (mod-replaced to read received_checklist_rewards) for TR reward indices
-    // 8/9/10 - and GateTopRideItems_ApplyMask only ANDs (clears, never sets).
-    // So mark those three rewards received here, exactly as
-    // ChecklistRewards_GrantAllCosmetic does for ungated cosmetics, so
-    // CheckUnlocked returns true and the engine enables the types at course init.
-    // Setting only the received bit drives the enable without touching is_unlocked
-    // (no spurious outbound check) and without any clear[] write (the old code set
-    // has_reward via GetClearKindFromRewardIndex, which for these unplaced rewards
-    // resolves to the clear_kind=0 sentinel and wrongly badged that cell).
+    // The three TR "New Item" types (Chickie/Who? Paint/Lantern) aren't reachable
+    // via the mask - the engine enables them only when their checklist reward is
+    // received. Mark TR reward indices 8-10 received so an ungated world gets them.
     if (!opts->topride_item_gating_enabled)
         for (u8 ri = 8; ri <= 10; ri++)
             ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= (1ULL << ri);
 
-    // Non-progression checklist rewards: unlock the whole cosmetic set at connect when ungated. Not a
-    // mask category - these unlock via the received_checklist_rewards bitfield (see checklist_rewards.c).
+    // Non-progression checklist rewards unlock the whole cosmetic set at connect
+    // when ungated, via the received_checklist_rewards bitfield (not a mask category).
     if (!opts->checklist_rewards_gating_enabled)
         ChecklistRewards_GrantAllCosmetic();
 

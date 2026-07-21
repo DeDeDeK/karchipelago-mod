@@ -26,10 +26,8 @@
 #include "spawn_rate.h"
 #include "main.h"
 
-// Check the mailbox for an incoming item from the AP client.
-// Bump the received counter, add to unprocessed list,
-// and immediately acknowledge receipt.
-// Returns 1 if an item was received, 0 otherwise.
+// Check the mailbox for an incoming item from the AP client: bump the received
+// counter, append to the unprocessed list, and acknowledge. Returns 1 if received.
 int APItems_CheckMailbox()
 {
     static int warned_full = 0;
@@ -245,18 +243,10 @@ int APItems_HandleItem(uint ap_item_id)
         return GateItems_UnlockItem(kind);
     }
 
-    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854).
-    // The AP world generates an unlock for every in-range VCKIND (0-24); only
-    // VCKIND_WHEELVSDEDEDE (25) is excluded.
-    // VCKIND_FREE and VCKIND_STEER are Top Ride machines whose bits ARE read by
-    // the Top Ride lobby gating (GateMachines_TRLobbyCanStart / IsTRMachineUnlocked),
-    // so granting them is NOT a no-op. A few bits (WINGKIRBY, WHEELNORMAL,
-    // WHEELKIRBY) are set here but read by no game code, so flipping them is
-    // harmless. VCKIND_WHEELDEDEDE (24) is the player-facing Dedede machine and
-    // the canonical Dedede unlock. VCKIND_WHEELVSDEDEDE (25) is the Vs. King
-    // Dedede stadium's CPU-only machine and is *not* part of this range - the
-    // upper bound stops at it so an erroneous ID 855 falls through to the
-    // unknown-item path instead of flipping a dead bit.
+    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854), one
+    // per in-range VCKIND (0-24); WHEELDEDEDE (24) is the player-facing Dedede unlock.
+    // The bound stops before WHEELVSDEDEDE (25), the stadium CPU-only Dedede machine
+    // (no unlock), so a stray ID 855 falls through to the unknown-item path.
     if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
     {
         MachineKind kind = ap_item_id - AP_MACHINE_UNLOCK_BASE;
@@ -318,14 +308,10 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
-    // Copy ability ITKIND items in Top Ride. Top Ride has no RiderData kirbys
-    // to receive a real copy ability, and the ITKIND branch further down sits
-    // behind the MNRKIND_3D scene gate that Top Ride (MNRKIND_19) never
-    // satisfies - so handle it here, above that gate. Map the ability to its
-    // Top Ride item analog (Freeze->Freeze Fan, Fire->Fire, Bomb->Bomb,
-    // Mic->Walky) and give that instead. Abilities with no analog (Wheel,
-    // Sleep, Sword, Plasma, Needle, Tornado, Wing) fall through to retry once
-    // the player leaves Top Ride for a copy-ability mode (City Trial / Air Ride).
+    // Copy ability ITKIND items in Top Ride, handled above the MNRKIND_3D gate that
+    // TR (MNRKIND_19) never satisfies. TR has no RiderData kirbys, so map the ability
+    // to its Top Ride item analog (Freeze->Freeze Fan, Fire, Bomb, Mic->Walky) and give
+    // that; abilities with no analog fall through to retry in City Trial / Air Ride.
     if (Scene_GetCurrentMajor() == MJRKIND_TOP &&
         ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
@@ -364,11 +350,9 @@ int APItems_HandleItem(uint ap_item_id)
     if (ap_item_id == AP_ITEM_PERM_PATCH_ALL_UP)
         return PermanentPatch_GiveAllUp();
 
-    // All remaining items require being in an actual 3D game scene
-    // with the intro/countdown finished.
-    // Check minor == MNRKIND_3D (not just major) because the CSS and other
-    // non-gameplay minors run under the same major, and intro_state defaults
-    // to 0 (GMINTRO_END) when not in 3D, bypassing that check.
+    // All remaining items require an actual 3D game scene with the intro finished.
+    // Check minor == MNRKIND_3D (not just major): the CSS and other non-gameplay
+    // minors share the major, and intro_state defaults to GMINTRO_END outside 3D.
     MajorKind major = Scene_GetCurrentMajor();
     if (major != MJRKIND_CITY && major != MJRKIND_AIR && major != MJRKIND_TOP)
         return 0;
@@ -376,11 +360,9 @@ int APItems_HandleItem(uint ap_item_id)
         return 0;
     if (Gm_GetIntroState() != GMINTRO_END)
         return 0;
-    // CT Free Run and stadiums don't load item data tables. Any handler
-    // below that touches the item spawn pipeline would crash
-    // Item_GetItDataPtr; the remaining non-spawn handlers (HP damage,
-    // projectile/enemy traps) aren't interesting there either. Queue for
-    // a real game mode.
+    // CT Free Run and stadiums don't load item data tables, so any spawn-pipeline
+    // handler below would crash Item_GetItDataPtr (and the non-spawn traps aren't
+    // interesting there either). Queue for a real game mode.
     if (major == MJRKIND_CITY &&
         (Gm_GetCityMode() == CITYMODE_FREERUN || CityTrial_IsInStadium()))
         return 0;
@@ -395,14 +377,10 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
-    // Direct ITKIND items (AP_ITKIND_BASE + ItemKind)
-    // ITKIND_COPY* always go through Ability_GiveItem so they bypass the
-    // ability gate - an AP-granted copy item is meant to apply regardless of
-    // unlock state, matching the Air Ride path. The nine "+1" stat patches go
-    // through Patch_GiveItem, which applies in both City Trial (item pickup) and
-    // Air Ride (direct stat change). Other ITKIND items spawn a real pickup in
-    // City Trial only (so the visual plays); outside City Trial the item data
-    // tables aren't loaded and we can't service them.
+    // Direct ITKIND items (AP_ITKIND_BASE + ItemKind). Copy items bypass the ability
+    // gate (AP grants apply regardless of unlock state); "+1" stat patches apply in
+    // City Trial and Air Ride; everything else spawns a real pickup in City Trial only,
+    // where the item data tables are loaded.
     if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
         ItemKind it_kind = ap_item_id - AP_ITKIND_BASE;

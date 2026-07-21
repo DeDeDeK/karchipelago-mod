@@ -41,11 +41,9 @@ static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Sta
 static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
 static void OnToggleAirQuickSpin(int val)        { OSReport("[Main] Air Quick Spin toggled %s\n", stc_off_on[val]); }
 
-// Submenu: controls whether accumulated permanent stat patches are re-applied
-// at the start of each round/race. Receiving AP permanent-patch items still
-// increments save counters unconditionally - the toggles only gate round-start
-// application. Default: all On, matching the historical behavior before the
-// toggles existed.
+// Submenu: gates whether accumulated permanent patches are re-applied at round
+// start. Receiving AP permanent-patch items still increments save counters
+// regardless; only round-start application is toggled. Default all On.
 static MenuDesc permanent_patches_menu = {
     .option_num = 3,
     .options = {
@@ -88,7 +86,7 @@ static MenuDesc permanent_patches_menu = {
     },
 };
 
-// Top-level Archipelago Settings menu. Wired into mod_desc.option_desc in main.c.
+// Top-level Archipelago Settings menu. Wired into mod_desc.option_desc.
 OptionDesc ModSettings = {
     .name = "Archipelago Settings",
     .description = "Interface with mod settings here",

@@ -214,8 +214,8 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
             && ((ap_save->sent_checks[mode][1] & gc[1]) == gc[1]);
     }
     case GOAL_MAX_STATS_CT:
-        // Set by goal_max_stats_ct.c when a human player's CT stats all hit
-        // the per-slot patch-cap target in one trial round. Mode-independent.
+        // Set by the CT max-stats goal path when a human player's CT stats all
+        // hit the per-slot patch-cap target in one trial round. Mode-independent.
         return ap_save->max_stats_ct_achieved;
     }
     return 0;

@@ -45,9 +45,7 @@ static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_n
     *pool_num = write;
 }
 
-// Removes locked copy abilities from the event-source drop table.
-// Zeroes all drop chances (misc/tac/meteor/pilar/chamber/ufo) for any entry
-// whose item kind maps to a locked ability. Sole caller: item_spawn_filter.c.
+// Zeroes every drop chance for event-source entries whose item maps to a locked ability.
 void GateAbilities_FilterEventDropTables()
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
@@ -69,7 +67,6 @@ void GateAbilities_FilterEventDropTables()
 }
 
 // Removes locked copy abilities from all box spawn pools.
-// Sole caller: item_spawn_filter.c.
 void GateAbilities_FilterSpawnTables()
 {
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
@@ -136,13 +133,10 @@ static int RandomUnlockedAbility()
     return unlocked[HSD_Randi(count)];
 }
 
-// Replacement for randomAbility_giveAbility (0x801a61d4).
-// Gates copy abilities from the copy chance wheel. If the wheel lands on a
-// locked ability, picks a random unlocked one instead.
-// The callers (randomAbility_aPress/autoSelect) originally called
-// Rider_MarkCopyAbilityObtained after this function with the original wheel
-// kind. We NOP those calls and do it ourselves with the (possibly substituted)
-// kind so the obtained-abilities bitmask tracks correctly.
+// Replacement for randomAbility_giveAbility (0x801a61d4). Gates the copy chance
+// wheel: a locked result is swapped for a random unlocked ability. We call
+// Rider_MarkCopyAbilityObtained ourselves with the substituted kind - the callers'
+// own calls are NOPed in OnBoot so the obtained-abilities bitmask tracks correctly.
 int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 {
     if (kind < 0 || kind >= COPYKIND_NUM)
@@ -162,12 +156,9 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
     return 1;
 }
 
-// Per-slot copy ability theme. T0/T1/T2 share the same 24-slot mapping because
-// the copy ability is tied to the archive (data_index), not the tier flags -
-// e.g., T1 Heat Phan-Phan is visually distinct but shares Phan-Phan's Fire
-// archive. Used to zero spawn weights for ability-themed enemies when their
-// ability is locked. The copy chance wheel is random regardless; this table is
-// about visual theming.
+// Copy-ability theme per enemy slot, used to zero spawn weights for ability-themed
+// enemies when their ability is locked. T0/T1/T2 share this 24-slot mapping - the
+// theme follows the archive (data_index), not the tier flags.
 static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
     COPYKIND_NONE,    // 0  Broom Hatter
     COPYKIND_NONE,    // 1  Broom Hatter (dup)
@@ -280,12 +271,10 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
     }
 }
 
-// Mode 2 (STKIND_MELEE1):
-// Two-stage selection: first picks a meta-enemy category from secondary_table[0],
-// then picks an individual enemy from that category's weight column in the entries.
-// Per-entry: enemy_id at +0x06, weight columns at +0x08 (one per category).
-// Zero all weight columns for entries whose enemy has a locked ability.
-// Also filter secondary_table[0] to remove categories where all enemies are locked.
+// Mode 2 (STKIND_MELEE1): two-stage selection - a meta-enemy category from
+// secondary_table[0], then an enemy from that category's weight column (entry
+// +0x06 enemy_id, +0x08 weight columns). Zero all columns for locked-ability
+// enemies, then drop any category whose enemies are all locked.
 static void FilterMode2(EnemySpawnData *data)
 {
     if (!data->spawn_entries || data->spawn_count <= 0 || !data->secondary_table)
@@ -376,9 +365,8 @@ void GateAbilities_OnBoot()
 {
     CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility);
     CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility);
-    // NOP the Rider_MarkCopyAbilityObtained calls in randomAbility_aPress and
-    // randomAbility_autoSelect - our replacement calls it with the correct
-    // (possibly substituted) kind instead of the original wheel kind.
+    // NOP the original Rider_MarkCopyAbilityObtained calls in randomAbility_aPress
+    // and randomAbility_autoSelect - our replacement marks the substituted kind instead.
     CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
     CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained
     OSReport("[GateAbilities] Copy ability gating hooks installed\n");

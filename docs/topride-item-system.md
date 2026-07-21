@@ -120,6 +120,8 @@ So a held ability power is detected by comparing `*(void**)kirby->state_handler`
 
 The three extra-unlock flags flow through `TopRide_SetExtraUnlocks` (0x8000b5dc), invoked from `TopRide_OnCourseSelect` (0x8002cc30) and `TopRide_PreGameThink` (0x8002c06c). That call reads `ClearChecker_CheckUnlocked(mode=TR, reward_index=8|9|10)` for Chickie / Who? Paint / Lantern respectively and stores the booleans at `GameData+0x37e/+0x37f/+0x380`. Those bytes later land at offsets `+0x4a/+0x4b/+0x4c` on the TR config struct that `TopRideItem_MgrInit` inspects; a zero byte clears the corresponding bit of the enabled mask.
 
+Because `MgrInit` gates these three on the received-reward path (not the enabled mask, which `GateTopRideItems_ApplyMask` only ANDs), an ungated TR-item world can't unlock them via the all-1s mask. Instead `APOptions_ApplyUngatedCategories` marks TR reward indices 8–10 received in `ap_save->received_checklist_rewards[GMMODE_TOPRIDE]`, so `CheckUnlocked` returns true and the engine enables the types at course init. Setting only the received bit (not `is_unlocked`) avoids a spurious outbound check and any `clear[]` write that would badge the cell.
+
 ### Per-Item Widget Handlers
 
 22 functions at `0x802b0b88`–`0x802b357c` (each 0x1fc bytes). These are C++ virtual method overrides in a widget class tree. Each:

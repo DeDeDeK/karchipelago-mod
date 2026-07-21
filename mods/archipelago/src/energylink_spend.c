@@ -19,10 +19,8 @@ static int Buy(OptionDesc *self)
 {
     SpendEntry *entry = self->user_data;
 
-    // Event-trigger items are gated by the player's event-unlock mask: an event
-    // the player hasn't unlocked from AP can't be bought, so energy can't fire an
-    // event out of logic. (item_id - AP_EVENT_BASE is the EventKind, matching the
-    // give path in ap_item_handler.) Other categories have no such gate.
+    // Event-trigger items are gated by the event-unlock mask so energy can't fire
+    // an event out of logic. (item_id - AP_EVENT_BASE is the EventKind.)
     if (entry->item_id >= AP_EVENT_BASE && entry->item_id < AP_EVENT_BASE + EVKIND_NUM)
     {
         int kind = entry->item_id - AP_EVENT_BASE;
@@ -55,13 +53,9 @@ static int Buy(OptionDesc *self)
     }
     ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
 
-    // Withdraw the cost. Subtract from both the cumulative send counter (exact
-    // integer - lands immediately, so the client diffs it on its next poll in
-    // ANY scene with no flush; this is what makes menu purchases actually reach
-    // the pool) and the local balance (instant UI feedback + keeps the gate
-    // above honest). The next client set_notify push overwrites energy_balance
-    // with the authoritative server view. Both are s64 -= s64, inline on PPC32
-    // (no float, no libgcc).
+    // Withdraw the cost from both the send counter (exact integer, lands
+    // immediately so the client diffs it on its next poll in any scene - this is
+    // what makes menu purchases reach the pool) and the local balance (UI + gate).
     ap_data->energy_sent_total -= entry->cost;
     ap_data->energy_balance    -= entry->cost;
 

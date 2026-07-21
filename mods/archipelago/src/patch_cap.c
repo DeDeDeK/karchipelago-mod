@@ -8,12 +8,9 @@
 #include "os.h"
 #include "textbox_api.h"
 
-// Returns the per-slot patch cap ceiling chosen via the YAML option. This is
-// both the ceiling that PatchCap_GetCap clamps to and the threshold the Max
-// Stats goal compares stats against. Clamped to PATCH_STAT_MAX so a malformed
-// option value can never exceed the PowerPC hardware ceiling. A stored 0 means
-// options have not been received yet (memset save default), so it maps to the
-// hardware ceiling - an uncapped vanilla baseline until the real value arrives.
+// Per-slot patch cap ceiling from the YAML option: the ceiling PatchCap_GetCap
+// clamps to and the Max Stats goal threshold. Clamped to PATCH_STAT_MAX. A stored
+// 0 means options not yet received, so it maps to the ceiling (uncapped vanilla).
 static int PatchCap_GetMax()
 {
     int t = (int)ap_save->options.city_trial_patch_cap_max;
@@ -106,11 +103,9 @@ void PatchCap_GiveAllUp(MachineData *md, int num)
         Machine_AdjustAttributes(md);
 }
 
-// Replacement for Patch_GetMaxValue.
-// Returns the per-slot ceiling so HUD attribute normalization scales to the
-// full reachable range. Internal stat-up clamping is handled separately by
-// PatchCap_ClampDelta against PatchCap_GetCap (the current effective cap),
-// so returning the ceiling here doesn't let stats grow past current cap.
+// Replacement for Patch_GetMaxValue. Returns the per-slot ceiling so HUD
+// normalization scales to the full range; actual stat growth is still clamped to
+// the current cap by PatchCap_ClampDelta, so this doesn't uncap stats.
 int PatchCap_GetMaxValue()
 {
     return PatchCap_GetMax();

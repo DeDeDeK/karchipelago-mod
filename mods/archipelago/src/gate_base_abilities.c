@@ -101,9 +101,9 @@ void GateBaseAbilities_AddChargeEx(double rate, MachineData *md)
 }
 
 // Conditional-hook body for the inline charge store at 0x802e01b4 (stfs f0,52(r3))
-// in TopRide_ChargeUpdate: r3 = charge component, f1 = post-add value. Stores for
-// CPUs / unlocked humans, skips for a locked human. Returns 1 so the hook takes its
-// alt exit (0x802e01b8) and the original store never re-runs.
+// in TopRide_ChargeUpdate: r3 = charge component, f1 = post-add value. Skips the
+// store for a locked human; returns 1 so the hook's alt exit (0x802e01b8) is taken
+// and the original store never re-runs.
 int GateBaseAbilities_TopRideChargeStore(TopRideChargeComponent *comp, float new_value)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && TRKirbyIsHuman((TopRideKirby *)comp->kirby_ptr))

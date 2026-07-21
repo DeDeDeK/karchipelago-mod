@@ -7,12 +7,10 @@
 #include "textbox_api.h"
 #include "inline.h"
 
-// Replacement for AirRide_CheckCourseUnlocked (0x8000c0e0).
-// The vanilla function only checks stage_kind 8 (Nebula Belt) against the
-// checklist. Our replacement checks ALL stages against the AP unlock mask.
-// Returns 1 if the stage is unlocked, 0 if locked.
-// Stage kind 9 (random button) is only available if at least one stage is unlocked,
-// to prevent a soft-lock in AirRide_RandomStageSelect when no candidates exist.
+// Replacement for AirRide_CheckCourseUnlocked (0x8000c0e0). Vanilla only checks
+// stage_kind 8 (Nebula Belt) against the checklist; we check every stage against
+// the AP mask. Stage kind 9 (random button) is available only if at least one
+// stage is unlocked, to prevent a soft-lock in AirRide_RandomStageSelect.
 static int GateAirRideStages_CheckCourseUnlocked(s8 stage_kind)
 {
     if (!ap_save || stage_kind < 0)
