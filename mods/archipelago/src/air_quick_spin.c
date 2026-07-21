@@ -5,20 +5,15 @@
 #include "settings_menu.h"
 #include "air_quick_spin.h"
 
-// The airborne machine-riding state (airControl, 0x801ac128) runs the same
-// interrupt checks as the grounded state (groundLogic) except the L/R-flick
-// quick spin: grounded calls Rider_IASACheck_QuickSpin after the Tornado spin
-// check returns 0, airborne stops at the Tornado check. That is why only the
-// Tornado copy ability spins mid-air in vanilla. With the menu toggle on this
-// restores the missing call so the normal quick spin works airborne too, in Air
-// Ride and City Trial (airControl is the 3D machine-riding state; Top Ride is a
-// separate system). The call funnels through the base-ability quick-spin gate at
-// 0x801b7ec0, so an AP-locked quick spin stays locked in the air as well.
+// Vanilla runs the L/R-flick quick spin check only in the grounded machine-riding
+// state; the airborne state (airControl, 0x801ac128) stops at the Tornado spin
+// check. With the menu toggle on, this reinstates the quick spin check airborne
+// (Air Ride / City Trial). The reinstated call funnels through the base-ability
+// quick-spin gate at 0x801b7ec0, so an AP-locked spin stays locked in the air too.
 
-// Hook body at 0x801ac170 - the dead `cmpwi r3,0` airControl left where
-// groundLogic would call the quick spin check. r31 holds the RiderData across
-// airControl; r3 holds the Tornado-spin (groundSpin2_) result. Skip when Tornado
-// already fired, mirroring groundLogic's `if (tornado_spin() == 0)` guard.
+// Hook body at 0x801ac170 - the dead `cmpwi r3,0` airControl left where groundLogic
+// calls the quick spin check. r31 = RiderData, r3 = Tornado-spin result. Skip when
+// Tornado already fired, mirroring groundLogic's `if (tornado_spin() == 0)` guard.
 void AirQuickSpin_TryAerialSpin(RiderData *rd, int tornado_fired)
 {
     if (ap_menu_settings.air_quick_spin_enabled && !tornado_fired)

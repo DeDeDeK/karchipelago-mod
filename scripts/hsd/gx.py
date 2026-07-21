@@ -36,6 +36,7 @@ FORMAT_NAME = {
 
 GX_TF_I4 = 0
 GX_TF_RGB5A3 = 5
+GX_TF_RGBA8 = 6
 
 # Alpha >= this encodes as opaque (RGB555 with the top bit set); below it,
 # the ARGB3444 form is used.
@@ -75,6 +76,28 @@ def encode_rgb5a3(im):
             for y in range(ty, ty + 4):
                 for x in range(tx, tx + 4):
                     out += struct.pack(">H", rgb5a3(*px[x, y]))
+    return bytes(out)
+
+
+def encode_rgba8(im):
+    """Encode an RGBA PIL image to GX_TF_RGBA8 (32bpp, full 8-bit color).
+    Each 4x4 tile is 64 bytes: the 16 texels' AR pairs (row-major) followed by
+    their GB pairs."""
+    w, h = im.size
+    px = im.load()
+    out = bytearray()
+    for ty in range(0, h, 4):
+        for tx in range(0, w, 4):
+            for y in range(ty, ty + 4):
+                for x in range(tx, tx + 4):
+                    r, g, b, a = px[x, y]
+                    out.append(a)
+                    out.append(r)
+            for y in range(ty, ty + 4):
+                for x in range(tx, tx + 4):
+                    r, g, b, a = px[x, y]
+                    out.append(g)
+                    out.append(b)
     return bytes(out)
 
 

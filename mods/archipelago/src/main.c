@@ -157,7 +157,8 @@ void OnBoot()
     // Item spawn table filtering hooks (covers all gate categories)
     ItemSpawnFilter_OnBoot();
 
-    // Replace main-menu demo rider/machine (Kirby on Warp Star -> Dedede on Wheelie)
+    // Title screen: swap the demo rider/machine (Kirby on Warp Star -> Dedede on
+    // Wagon) and replace the "AIR RIDE" subtitle with the KARchipelago logo pieces
     MainMenu_OnBoot();
 
     // Publish the public API so external mods can import it.
