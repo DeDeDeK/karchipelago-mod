@@ -27,8 +27,8 @@ for free once the synthetic mode is plumbed through.
 - The checklist is **minor-scene kinds `0x20`/`0x21`/`0x22`** (AR/TR/CT), all
   sharing one set of load/think/leave callbacks. `Checklist_MinorLoad`
   (`0x8004a768`) derives `mode = Scene_GetCurrentMinor() − 0x20` and calls
-  `Checklist_Init(mode)` (`0x801822F4`), which writes `mode` into the checklist UI
-  struct at `+0x14`.
+  `Checklist_Init(mode)` (`0x801822F4`), which writes `mode` into `ClearCheckerUI`
+  (`+0x14`).
 - `gmGetClearcheckerTypeP(mode)` (`0x800076a0`) is a 3-way `switch` returning the
   per-mode `GameClearData` embedded in `GameData`. For `mode >= 3` it asserts and
   returns NULL — **this is the master lever**.
@@ -118,15 +118,16 @@ shared `cb_Load` resolves which tab it is from `Scene_GetCurrentMinor()`, then:
   counter, and cell layout from the tab's data. `fresh` is driven from the tab's
   own pending-unlock state (a check `is_new && !is_unlocked`), so the tab enters the
   new-unlock presentation exactly when one of its checks is freshly completed.
-- Flips the UI mode byte (`chk+0x14`) to the tab's synthetic mode, so the per-frame
+- Flips the UI mode (`ClearCheckerUI.mode`) to the tab's synthetic mode, so the per-frame
   think/update path also reads the tab's block.
 - Repoints SIS slot 0 and loads the tab art (below).
 
-The tab's `GameClearData` lays out a **full identity `grid_mapping`** over all 120
-cells (`grid_mapping[k] = k`) with `is_visible` set only for defined checks.
-`Checklist_Update` reverse-scans `grid_mapping` to map a cursor position back to a
-clear_kind; an unmapped position trips the "Clearchecker Number 120" assert, so the
-full permutation is required even though most cells are invisible.
+The tab's `GameClearData` carries a **full `grid_mapping` permutation** over all 120
+cells, with `is_visible` set only for defined checks. `Checklist_Update` reverse-scans
+`grid_mapping` to map a cursor position back to a clear_kind; an unmapped position trips
+the "Clearchecker Number 120" assert, so the full bijection is required even though most
+cells are invisible. `Register` seeds it as identity; the saved shuffle (below) replaces
+it on the first evaluated frame after the save is available.
 
 ## Cell labels (SIS text)
 
@@ -141,8 +142,8 @@ archive on its own `cb_Load`, so its labels stay intact.
 ## Theme (target-color recolor)
 
 Each checklist tab is tinted with a per-mode color carried in the **background
-scene's** material **diffuse** values (`MainMenuData+0xED0` and the marker/counter
-models in the `+0x1100` range). City Trial's diffuses are green-dominant and
+scene's** material **diffuse** values (`ScMenuCommon.clearchecker.bg_gobj` and the
+`cross`/`prize1`/`prize2` marker GObjs). City Trial's diffuses are green-dominant and
 **material-animated** — the menu's per-frame anim pass re-applies the green every
 frame — so the recolor runs each frame from `OnFrameEnd` (after that pass), not once
 at load. It is a no-op unless a custom tab is the current scene.
@@ -164,7 +165,7 @@ A descriptor's `tex_file` names a loadable HSD archive staged to the FST root th
 exports two `_HSD_ImageDesc` publics:
 
 - the **banner** — RGB5A3 248×128 panel that backs the checkbox grid (the scrolling
-  quad at `MainMenuData+0xEE4`, found by its unique 248 width); and
+  quad on `ScMenuCommon.clearchecker.frame_gobj`, found by its unique 248 width); and
 - the **emblem** — I4 40×40 tab indicator silhouette (a quad inside the background
   scene, found by its unique 40×40/I4 signature). It rides the recolor walk and
   takes the theme tint.
@@ -219,14 +220,38 @@ textbox and goal re-eval) because that field sits at a fixed wire offset its Pyt
 client reads, which the framework's generic save can't provide. That is the one split
 that remains mod-specific; everything else is identical for every tab.
 
+### Grid layout: seeded shuffle
+
+Vanilla scatters a tab's cells with `Checklist_InitGridMapping` and persists the
+resulting `grid_mapping` inside `GameClearData`. A custom tab's clear storage is BSS, so
+`CCSave` instead holds a single 4-byte `layout_seed` (minted from `OSGetTime` and
+avalanched, once per save file) and each tab regenerates its own permutation from it:
+`seed ^ name_hash` drives a private xorshift32 Fisher-Yates over `0..119`. Per-tab
+streams mean tabs don't share a layout and adding or removing one doesn't reshuffle the
+others; the private PRNG — rather than `HSD_Randi`, whose one global state every other
+caller advances by an unknowable amount — is what makes a layout reproducible from the
+seed alone. Four bytes of seed are persisted instead of 120 bytes of layout.
+
+The shuffle is applied **once per tab per session**, lazily: a consumer registers from
+its own `OnSaveLoaded`, which can run before the framework's (mods boot in alphabetical
+order), so until the seed is readable the tab keeps the identity mapping — itself a valid
+bijection that renders fine. It runs ahead of the descriptor's `is_ready` gate, since
+deferring it would show the identity layout and then visibly reshuffle the moment the tab
+became ready. It writes `grid_mapping` only; the `clear[]` flags are live by then. There
+is no meta-cell pre-placement (vanilla reserves positions for its "fill in 100" cell
+before shuffling, but `Fill100ClearKind` returns `0xFF` for custom tabs), so a tab that
+ever gains a meta cell needs that handling added.
+
 ## Tab cycle + post-run presentation (`CC_MinorThink`)
 
 The tab ring is `AR → TR → CT → tab0 → tab1 → … → AR`. `Checklist_MinorThink`
 phases:
 
 - **12/13 (next/prev):** step the ring with wrap.
-- **14 (records screen):** custom tabs have no records → no-op; real tabs route to
-  their records minor (28/29/30) as vanilla.
+- **14 (ending reward):** raised when A is pressed on a cell whose reward has
+  `REWARDPARAM_ENDING`; real tabs route to their mode's ending minor
+  (`MNRKIND_AIRRIDEENDING`/`TOPRIDEENDING`/`CITYENDING` = 28/29/30) as vanilla. A custom
+  tab reports no rewards, so it can never raise this phase.
 - **11 (exit):** post-run only, if a custom tab still has an unviewed unlock, detour
   to it so it animates before leaving (it raises `is_unlocked` once shown, so the
   next exit press falls through). Lets the played mode animate on its own tab first.
@@ -239,8 +264,8 @@ OR-s in "any custom tab pending", and `Scene_SetNextMinor` (the chokepoint where
 each `*_MinorExit` requests the played mode's tab) retargets straight to a pending
 custom tab when the played mode has nothing of its own to animate. The post-run
 session is flagged (`g_postrun`) so the exit chokepoint can chain through any
-remaining pending custom tabs, and is cleared on exit and on leaving to the records
-screen — confining the chain to runs.
+remaining pending custom tabs, and is cleared on exit and on leaving for an ending
+movie — confining the chain to runs.
 
 ## Files
 

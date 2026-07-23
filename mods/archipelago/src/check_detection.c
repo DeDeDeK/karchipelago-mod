@@ -8,15 +8,16 @@
 #include "main.h"
 #include "check_detection.h"
 #include "checklist_rewards.h"
+#include "ap_checklist.h"
 #include "textbox_api.h"
 
 // SFX cue played by the vanilla ClearChecker_SetNewUnlock on a first-this-frame
 // transition. Guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
 #define CHECKLIST_UNLOCK_SFX 0x10008
 
-// Bit accessor for sent_checks[mode][2] u64 packing. Mode m, clear_kind k in
+// Bit accessor for sent_checks[row][2] u64 packing. Row r, clear_kind k in
 // [0..CLEAR_KIND_NUM-1]: word index = k / 64, bit index = k % 64.
-#define SENT_CHECK_BIT(m, k)  ((ap_save->sent_checks[(m)][(k) >> 6] >> ((k) & 63)) & 1ULL)
+#define SENT_CHECK_BIT(r, k)  ((ap_save->sent_checks[(r)][(k) >> 6] >> ((k) & 63)) & 1ULL)
 
 // Beat King Dedede goal: CT clear_kind 0x2F
 #define KD_CLEAR_KIND 0x2F
@@ -28,65 +29,43 @@
 // Forward declaration: defined mid-file, called from earlier helpers.
 void CheckDetection_EvaluateGoal(void);
 
-// A checklist mode this mod records: the 3 real game modes plus the AP checklist
-// tab's framework-assigned mode (ap_checklist_mode, >= GMMODE_NUM). Other custom
-// checklist tabs (if any) own their own recording and never reach this mod's
-// SetNewUnlock path, so they are not accepted here.
-static inline int IsRecordedChecklistMode(int mode)
-{
-    return mode < GMMODE_NUM || mode == ap_checklist_mode;
-}
-
-// sent_checks storage for a checklist mode. The 3 real game modes use the wire
-// array; the AP-checklist mode uses the appended sent_checks_ap slot - kept
-// separate so the 3-mode wire offsets the Python client reads stay fixed.
-static inline u64 *SaveSentChecks(u8 mode)
-{
-    return mode < GMMODE_NUM ? ap_save->sent_checks[mode] : ap_save->sent_checks_ap;
-}
-static inline u64 *DataSentChecks(u8 mode)
-{
-    return mode < GMMODE_NUM ? ap_data->sent_checks[mode] : ap_data->sent_checks_ap;
-}
-
 // Set the sent_checks bit in both save and the shared-memory mirror. No-op if
 // already set. Returns 1 if newly set, 0 if already set (for callers that
-// want to detect transitions).
-static inline int SetSentCheck(u8 mode, u8 clear_kind)
+// want to detect transitions). `row` is a ChecklistModeRow() result.
+static inline int SetSentCheck(int row, u8 clear_kind)
 {
     u64 bit = 1ULL << (clear_kind & 63);
     int word = clear_kind >> 6;
-    u64 *save_slot = SaveSentChecks(mode);
-    if (save_slot[word] & bit)
+    if (ap_save->sent_checks[row][word] & bit)
         return 0;
-    save_slot[word] |= bit;
-    DataSentChecks(mode)[word] |= bit;
+    ap_save->sent_checks[row][word] |= bit;
+    ap_data->sent_checks[row][word] |= bit;
     return 1;
 }
 
-// Clear sent_checks for a single mode in both save and mirror.
-static inline void ClearSentChecksForMode(u8 mode)
+// Clear sent_checks for a single row in both save and mirror.
+static inline void ClearSentChecksForRow(int row)
 {
-    ap_save->sent_checks[mode][0] = 0;
-    ap_save->sent_checks[mode][1] = 0;
-    ap_data->sent_checks[mode][0] = 0;
-    ap_data->sent_checks[mode][1] = 0;
+    ap_save->sent_checks[row][0] = 0;
+    ap_save->sent_checks[row][1] = 0;
+    ap_data->sent_checks[row][0] = 0;
+    ap_data->sent_checks[row][1] = 0;
 }
 
 // popcount the two u64 words covering the 0..CLEAR_KIND_NUM-1 range.
-static inline int PopcountMode(u8 mode)
+static inline int PopcountRow(int row)
 {
-    return Popcount64(ap_save->sent_checks[mode][0])
-         + Popcount64(ap_save->sent_checks[mode][1]);
+    return Popcount64(ap_save->sent_checks[row][0]) + Popcount64(ap_save->sent_checks[row][1]);
 }
 
 // Record a check: set the save bit, mirror to shared memory, re-evaluate goal.
 // No-op if the bit was already set. Caller is responsible for bounds checking.
-static void RecordCheck(u8 mode, u8 clear_kind)
+static void RecordCheck(int mode, int clear_kind)
 {
-    if (!IsRecordedChecklistMode(mode) || clear_kind >= CLEAR_KIND_NUM)
+    int row = ChecklistModeRow(mode);
+    if (row < 0 || (unsigned)clear_kind >= CLEAR_KIND_NUM)
         return;
-    if (!SetSentCheck(mode, clear_kind))
+    if (!SetSentCheck(row, (u8)clear_kind))
         return;
 
     u8 src_mode, src_ri;
@@ -116,7 +95,7 @@ static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
     // Accept the AP-checklist mode too, not just the 3 real modes: the AP-checklist
     // evaluator drives completions through here via
     // ClearChecker_SetNewUnlock(ap_checklist_mode, ..).
-    if (!IsRecordedChecklistMode(mode) || (unsigned)clear_kind >= CLEAR_KIND_NUM)
+    if (ChecklistModeRow(mode) < 0 || (unsigned)clear_kind >= CLEAR_KIND_NUM)
         return;
     GameClearData *cd = gmGetClearcheckerTypeP(mode);
     if (!cd)
@@ -126,7 +105,7 @@ static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
 
     // Transition detection runs regardless of cache state so AP never misses a check.
     if (fresh)
-        RecordCheck((u8)mode, (u8)clear_kind);
+        RecordCheck(mode, clear_kind);
 
     // Vanilla short-circuit: when the unlock cache is valid the rest is a no-op.
     if (Checklist_IsCacheValid() != 0)
@@ -162,7 +141,7 @@ static void CheckDetection_SetNewUnlockSilentReplacement(int mode, int clear_kin
 
     // Transition detection runs regardless of cache state so AP never misses a check.
     if (fresh)
-        RecordCheck((u8)mode, (u8)clear_kind);
+        RecordCheck(mode, clear_kind);
 
     // Vanilla short-circuit: when the unlock cache is valid the store is skipped.
     if (Checklist_IsCacheValid() != 0)
@@ -171,12 +150,13 @@ static void CheckDetection_SetNewUnlockSilentReplacement(int mode, int clear_kin
     cd->clear[clear_kind].is_new = 1;
 }
 
-// Per-mode clear_kind of the vanilla "Fill in over 100 Checklist blocks!" cell that
+// Per-row clear_kind of the vanilla "Fill in over 100 Checklist blocks!" cell that
 // GOAL_100_CHECKLIST keys off (distinct from the synthetic popcount GOAL_N_CHECKLIST).
-// Returns 0xFF for an unknown mode (callers must range-check before indexing).
-static u8 Fill100ClearKind(u8 mode)
+// Returns 0xFF for the AP checklist row, which has no such cell (callers must
+// range-check before indexing).
+static u8 Fill100ClearKind(int row)
 {
-    switch (mode)
+    switch (row)
     {
     case GMMODE_AIRRIDE:   return AR_CLEAR_FILL_100_BLOCKS;
     case GMMODE_TOPRIDE:   return TR_CLEAR_FILL_100_BLOCKS;
@@ -186,9 +166,9 @@ static u8 Fill100ClearKind(u8 mode)
 }
 
 // Evaluate a single mode's goal condition. Returns 1 if satisfied (or NONE).
-// `mode` is the GameMode index, `count` is the popcount, `n` is the threshold
+// `row` is the checklist-mode row, `count` is the popcount, `n` is the threshold
 // for GOAL_N_CHECKLIST.
-static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
+static int goal_satisfied(APGoalKind goal, int row, int count, int n)
 {
     switch (goal)
     {
@@ -198,8 +178,8 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
     {
         // The "Fill in over 100 Checklist blocks!" cell, not a popcount (count is
         // unused here); GOAL_N_CHECKLIST below is the synthetic count goal.
-        u8 k = Fill100ClearKind(mode);
-        return (k < CLEAR_KIND_NUM) && SENT_CHECK_BIT(mode, k);
+        u8 k = Fill100ClearKind(row);
+        return (k < CLEAR_KIND_NUM) && SENT_CHECK_BIT(row, k);
     }
     case GOAL_N_CHECKLIST:
         return count >= n;
@@ -209,9 +189,9 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
         return SENT_CHECK_BIT(GMMODE_CITYTRIAL, KD_CLEAR_KIND);
     case GOAL_CHECKLIST_LIST:
     {
-        u64 *gc = ap_save->options.goal_checks[mode];
-        return ((ap_save->sent_checks[mode][0] & gc[0]) == gc[0])
-            && ((ap_save->sent_checks[mode][1] & gc[1]) == gc[1]);
+        u64 *gc = ap_save->options.goal_checks[row];
+        u64 *sc = ap_save->sent_checks[row];
+        return ((sc[0] & gc[0]) == gc[0]) && ((sc[1] & gc[1]) == gc[1]);
     }
     case GOAL_MAX_STATS_CT:
         // Set by the CT max-stats goal path when a human player's CT stats all
@@ -224,21 +204,34 @@ static int goal_satisfied(APGoalKind goal, u8 mode, int count, int n)
 // Announce a single mode's goal completion: "<Mode> goal complete!" with the
 // mode name in its mode color and the rest in GoalColor (gold). Distinct from
 // the aggregate "All Goals complete!" - this fires per mode as each is finished.
-static void AnnounceModeGoal(u8 mode)
+static void AnnounceModeGoal(int row)
 {
     static const char *const mode_names[GMMODE_NUM] = {
         [GMMODE_AIRRIDE]   = "Air Ride",
         [GMMODE_TOPRIDE]   = "Top Ride",
         [GMMODE_CITYTRIAL] = "City Trial",
     };
-    if (mode >= GMMODE_NUM)
-        return;
+    const char *name;
+    GXColor color;
+    // The AP row has no ModeColors[] slot - that array is sized GMMODE_NUM - so it
+    // carries its own name and theme color instead.
+    if (row == AP_CHECKLIST_ROW)
+    {
+        static const GXColor ap_theme = {AP_THEME_R, AP_THEME_G, AP_THEME_B, 255};
+        name = AP_CHECKLIST_NAME;
+        color = ap_theme;
+    }
+    else
+    {
+        name = mode_names[row];
+        color = tb_api->ModeColors[row];
+    }
     TextSegment segs[2] = {
-        { mode_names[mode],   tb_api->ModeColors[mode] },
+        { name,               color },
         { " goal complete!",  tb_api->GoalColor },
     };
     tb_api->EnqueueSegments(segs, 2);
-    OSReport("[Check] %s goal satisfied\n", mode_names[mode]);
+    OSReport("[Check] %s goal satisfied\n", name);
 }
 
 void CheckDetection_EvaluateGoal(void)
@@ -252,13 +245,13 @@ void CheckDetection_EvaluateGoal(void)
     // must be satisfied. If every mode is GOAL_NONE, victory never fires.
     int any_real_goal = 0;
     int all_ok = 1;
-    int newly_satisfied[GMMODE_NUM];
-    for (int m = 0; m < GMMODE_NUM; m++)
+    int newly_satisfied[CHECKLIST_MODE_NUM];
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        APGoalKind goal = (APGoalKind)opt->goal[m];
-        int sat = goal_satisfied(goal, (u8)m, PopcountMode((u8)m), opt->checklist_amount[m]);
+        APGoalKind goal = (APGoalKind)opt->goal[r];
+        int sat = goal_satisfied(goal, r, PopcountRow(r), opt->checklist_amount[r]);
         // A real goal that just flipped to satisfied and hasn't been announced.
-        newly_satisfied[m] = (goal != GOAL_NONE) && sat && !ap_save->goal_announced[m];
+        newly_satisfied[r] = (goal != GOAL_NONE) && sat && !ap_save->goal_announced[r];
         if (goal != GOAL_NONE)
             any_real_goal = 1;
         if (!sat)
@@ -271,9 +264,9 @@ void CheckDetection_EvaluateGoal(void)
         ap_data->goal_complete = 1;
         // Mark every real goal announced so the aggregate "All Goals complete!"
         // isn't doubled by a per-mode message for the final mode.
-        for (int m = 0; m < GMMODE_NUM; m++)
-            if (opt->goal[m] != GOAL_NONE)
-                ap_save->goal_announced[m] = 1;
+        for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+            if (opt->goal[r] != GOAL_NONE)
+                ap_save->goal_announced[r] = 1;
         OSReport("[Check] GOALS COMPLETE\n");
         tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
         Hoshi_WriteSave();
@@ -283,12 +276,12 @@ void CheckDetection_EvaluateGoal(void)
     // Overall victory not reached yet: announce each mode goal that just became
     // satisfied (once each) so the player gets feedback as they finish modes.
     int announced = 0;
-    for (int m = 0; m < GMMODE_NUM; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        if (!newly_satisfied[m])
+        if (!newly_satisfied[r])
             continue;
-        ap_save->goal_announced[m] = 1;
-        AnnounceModeGoal((u8)m);
+        ap_save->goal_announced[r] = 1;
+        AnnounceModeGoal(r);
         announced = 1;
     }
     if (announced)
@@ -302,26 +295,27 @@ static void ProcessBackfill(void)
 {
     // Quick check: any nonzero word?
     int has_data = 0;
-    for (int m = 0; m < GMMODE_NUM && !has_data; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM && !has_data; r++)
     {
-        if (ap_data->client_backfill[m][0] | ap_data->client_backfill[m][1])
+        if (ap_data->client_backfill[r][0] | ap_data->client_backfill[r][1])
             has_data = 1;
     }
     if (!has_data)
         return;
 
     int processed_any = 0;
-    for (int m = 0; m < GMMODE_NUM; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         for (int word = 0; word < 2; word++)
         {
-            u64 incoming = ap_data->client_backfill[m][word];
-            u64 already  = ap_save->sent_checks[m][word];
+            u64 incoming = ap_data->client_backfill[r][word];
+            u64 already  = ap_save->sent_checks[r][word];
             u64 new_bits = incoming & ~already;
             if (!new_bits)
                 continue;
 
-            GameClearData *cd = gmGetClearcheckerTypeP((GameMode)m);
+            int mode = ChecklistRowMode(r);
+            GameClearData *cd = gmGetClearcheckerTypeP((GameMode)mode);
 
             while (new_bits)
             {
@@ -331,7 +325,7 @@ static void ProcessBackfill(void)
                 if (clear_kind >= CLEAR_KIND_NUM)
                     continue;
 
-                SetSentCheck((u8)m, clear_kind);
+                SetSentCheck(r, clear_kind);
 
                 // is_visible is what the grid renders as revealed; set has_reward
                 // if a local placement exists and its source item was received.
@@ -339,7 +333,7 @@ static void ProcessBackfill(void)
                 {
                     cd->clear[clear_kind].is_unlocked = 1;
                     cd->clear[clear_kind].is_visible = 1;
-                    if (ChecklistRewards_CellHasReceivedReward((u8)m, clear_kind))
+                    if (ChecklistRewards_CellHasReceivedReward(mode, clear_kind))
                         cd->clear[clear_kind].has_reward = 1;
                 }
 
@@ -349,10 +343,10 @@ static void ProcessBackfill(void)
     }
 
     // Clear the backfill field (single-writer protocol - mod consumes, then zero).
-    for (int m = 0; m < GMMODE_NUM; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        ap_data->client_backfill[m][0] = 0;
-        ap_data->client_backfill[m][1] = 0;
+        ap_data->client_backfill[r][0] = 0;
+        ap_data->client_backfill[r][1] = 0;
     }
 
     if (processed_any)
@@ -417,35 +411,38 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8017f120, "", MetaUnlock_CityTrialHydra,   "li
 // their physical slot via grid_mapping[].
 static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
 {
-    if (mode >= GMMODE_NUM)
+    // Any custom tab other than the AP one has no AP goal to protect.
+    int row = ChecklistModeRow(mode);
+    if (row < 0)
         return 0;
 
     GameClearData *cd = gmGetClearcheckerTypeP((GameMode)mode);
     if (!cd)
         return 0;
 
-    APGoalKind goal = (APGoalKind)ap_save->options.goal[mode];
-    switch (goal)
+    switch ((APGoalKind)ap_save->options.goal[row])
     {
     case GOAL_100_CHECKLIST:
     {
         // Protect this mode's "Fill in over 100 Checklist blocks!" cell - it is the
         // goal cell, so a filler on it would satisfy the goal without filling 100 boxes.
-        u8 k = Fill100ClearKind(mode);
+        // Fill100ClearKind returns 0xFF for the AP row (no fill-100 cell), so nothing
+        // is protected there (AP 100-block goals are rejected at generation instead).
+        u8 k = Fill100ClearKind(row);
         return (k < CLEAR_KIND_NUM) && cd->grid_mapping[k] == phys_slot;
     }
     case GOAL_HYDRA_AND_DRAGOON:
-        if (mode != GMMODE_CITYTRIAL)
+        if (row != GMMODE_CITYTRIAL)
             return 0;
         return cd->grid_mapping[HYDRA_DRAGOON_CLEAR_KIND] == phys_slot;
     case GOAL_BEAT_KING_DEDEDE:
-        if (mode != GMMODE_CITYTRIAL)
+        if (row != GMMODE_CITYTRIAL)
             return 0;
         return cd->grid_mapping[KD_CLEAR_KIND] == phys_slot;
     case GOAL_CHECKLIST_LIST:
     {
-        // Protect every clear_kind whose bit is set in goal_checks[mode].
-        u64 *gc = ap_save->options.goal_checks[mode];
+        // Protect every clear_kind whose bit is set in the mode's goal_checks.
+        u64 *gc = ap_save->options.goal_checks[row];
         for (int w = 0; w < 2; w++)
         {
             u64 bits = gc[w];
@@ -470,9 +467,9 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
 // r31 = UI state (mode at +0x14) and r18 = clear_kind (both non-volatile here).
 static void CheckDetection_OnFillerApplied(int mode, int clear_kind)
 {
-    if ((unsigned)mode >= GMMODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
-        return;
-    RecordCheck((u8)mode, (u8)clear_kind);
+    // RecordCheck maps the mode to its row and range-checks, so a filler spent on the
+    // Archipelago tab is recorded like any other check.
+    RecordCheck(mode, clear_kind);
 }
 
 // Hook site: 0x80180dc4. Clobbered instruction is `lbz r3, 2(r29)` (start of
@@ -518,10 +515,10 @@ void CheckDetection_OnFrameStart(void)
 void CheckDetection_OnSaveLoaded(void)
 {
     // Mirror save state into shared memory for the client to read.
-    for (int m = 0; m < GMMODE_NUM; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        ap_data->sent_checks[m][0] = ap_save->sent_checks[m][0];
-        ap_data->sent_checks[m][1] = ap_save->sent_checks[m][1];
+        ap_data->sent_checks[r][0] = ap_save->sent_checks[r][0];
+        ap_data->sent_checks[r][1] = ap_save->sent_checks[r][1];
     }
     ap_data->goal_complete = ap_save->goal_complete;
 
@@ -529,10 +526,11 @@ void CheckDetection_OnSaveLoaded(void)
     // saved checks already satisfy the active goal.
     CheckDetection_EvaluateGoal();
 
-    OSReport("[Check] Loaded sent_checks AR=%d TR=%d CT=%d goal=%d\n",
-             PopcountMode(GMMODE_AIRRIDE),
-             PopcountMode(GMMODE_TOPRIDE),
-             PopcountMode(GMMODE_CITYTRIAL),
+    OSReport("[Check] Loaded sent_checks AR=%d TR=%d CT=%d AP=%d goal=%d\n",
+             PopcountRow(GMMODE_AIRRIDE),
+             PopcountRow(GMMODE_TOPRIDE),
+             PopcountRow(GMMODE_CITYTRIAL),
+             PopcountRow(AP_CHECKLIST_ROW),
              ap_save->goal_complete);
 }
 
@@ -562,10 +560,10 @@ void CheckDetection_OnBoot(void)
 
 void CheckDetection_ResetAll(void)
 {
-    for (int m = 0; m < GMMODE_NUM; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        ClearSentChecksForMode((u8)m);
-        ap_save->goal_announced[m] = 0;
+        ClearSentChecksForRow(r);
+        ap_save->goal_announced[r] = 0;
     }
     ap_save->goal_complete = 0;
     ap_data->goal_complete = 0;
@@ -588,13 +586,13 @@ void CheckDetection_DebugForceMarkAll(void)
     const u64 lo_mask = ~0ULL;
     const u64 hi_mask = (CLEAR_KIND_NUM == 128) ? ~0ULL
                                                  : ((1ULL << (CLEAR_KIND_NUM - 64)) - 1);
-    for (int m = 0; m < GMMODE_NUM; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        ap_save->sent_checks[m][0] = lo_mask;
-        ap_save->sent_checks[m][1] = hi_mask;
-        ap_data->sent_checks[m][0] = lo_mask;
-        ap_data->sent_checks[m][1] = hi_mask;
-        ap_save->goal_announced[m] = 1;
+        ap_save->sent_checks[r][0] = lo_mask;
+        ap_save->sent_checks[r][1] = hi_mask;
+        ap_data->sent_checks[r][0] = lo_mask;
+        ap_data->sent_checks[r][1] = hi_mask;
+        ap_save->goal_announced[r] = 1;
     }
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;

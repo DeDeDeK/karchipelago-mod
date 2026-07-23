@@ -4,7 +4,7 @@
 #include "game.h"  // GameMode, datatypes (u8/u16/u32)
 
 // API version: bump major on breaking changes, minor on additions.
-#define ARCHIPELAGO_API_MAJOR 2
+#define ARCHIPELAGO_API_MAJOR 3
 #define ARCHIPELAGO_API_MINOR 0
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
@@ -14,10 +14,12 @@
 // ID 0 is reserved as the "empty" sentinel for the mailbox.
 typedef enum APItemId
 {
-    // Standalone items (1-99)
+    // Standalone items (1-99). The 4 checkbox fillers lead, one per checklist mode, in
+    // checklist-mode row order - the Archipelago one fills a box on the synthetic AP tab.
     AP_ITEM_CHECKBOX_FILLER_AIRRIDE = 1,
     AP_ITEM_CHECKBOX_FILLER_TOPRIDE,
     AP_ITEM_CHECKBOX_FILLER_CITYTRIAL,
+    AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO,
     AP_ITEM_PATCH_CAP_INCREASE,
     AP_ITEM_1_HP_TRAP,
     AP_ITEM_ALL_UP,
@@ -604,8 +606,9 @@ typedef struct ArchipelagoAPI
     // may be in a different mode for cross-mode placements).
     void (*GrantReward)(GameMode mode, u8 reward_index);
 
-    // Identify the checklist cell the player is currently hovering. Returns
-    // 1 if a cell is hovered (writes mode/clear_kind), 0 otherwise.
+    // Identify the checklist cell under the cursor. Returns 1 if the cursor is on
+    // a grid cell (writes mode/clear_kind), 0 if no checklist screen is up or the
+    // cursor is off the grid.
     int  (*GetHoveredCell)(u8 *out_mode, u8 *out_clear_kind);
 
     // Resolve which (source_mode, reward_index) is placed at this checklist

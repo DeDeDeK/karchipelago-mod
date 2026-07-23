@@ -11,42 +11,47 @@
 
 #include "custom_checklist_api.h"
 
-// Defined at the bottom; forward-declared for the save lifecycle callbacks.
+// Defined at the bottom; forward-declared for the save callbacks.
 extern ModDesc mod_desc;
 
-// Custom Checklist framework: mod-owned checklist tabs alongside the three vanilla
-// ones (Air Ride / Top Ride / City Trial), folded into the L/R tab rotation. Each
-// tab is a synthetic checklist mode (>= GMMODE_NUM) backed by a mod-owned
+// Mod-owned checklist tabs alongside the three vanilla ones, folded into the L/R tab
+// rotation. Each tab is a synthetic checklist mode (>= GMMODE_NUM) backed by a mod-owned
 // GameClearData served through gmGetClearcheckerTypeP. With nothing registered the
-// installed REPLACEFUNCs reproduce vanilla, so a build with no consumer is inert.
+// installed REPLACEFUNCs reproduce vanilla.
 
-// Bounds the fixed-size registry (g_lists), the persisted save (CCSave.slots), and
-// the tab-cycle ring - there is no dynamic allocation, so this is a hard ceiling on
-// registered tabs. Generous headroom; each slot costs ~0x140 BSS + 20 save bytes.
+// Hard ceiling on registered tabs: bounds the registry, the save slots, and the tab ring.
 #define CC_MAX_CHECKLISTS 16
 
-// Per-tab state. clear_storage is oversized past the 0xF4 GameClearData struct so a
-// read into the per-mode "records tail" the real modes carry stays in-bounds. BSS-
-// zeroed, persists for the session (one tab's flags must survive while another is up).
+// Per-tab state, BSS-zeroed and live for the session. clear_storage is a union with the real
+// modes' blocks so a read into the "records tail" they carry past GameClearData stays
+// in-bounds - a custom tab has no records, but engine code doesn't know that.
+typedef union CCClearStorage
+{
+    GameClearData clear;
+    AirRideClearData airride;
+    TopRideClearData topride;
+    CityTrialClearData city;
+} CCClearStorage;
+
 typedef struct CCList
 {
     CustomChecklistDesc desc;   // copied at Register (pointers must stay valid)
-    u8  clear_storage[0x140];   // GameClearData for this tab
+    CCClearStorage clear_storage;
     int minor_id;               // installed minor-scene id (-1 if install failed)
     int mode;                   // GMMODE_NUM + registry index
     int fw_persist;             // 1 if the framework owns this tab's recorded state
-    u32 name_hash;              // stable key into the save (fw_persist tabs)
+    u32 name_hash;              // stable tab identity: save key (fw_persist) and grid-layout key (all tabs)
     int save_slot;              // resolved CCSave slot, -1 until first access
+    int layout_done;            // 1 once the saved grid layout has been applied this session
 } CCList;
 
 static CCList g_lists[CC_MAX_CHECKLISTS];
 static int g_count = 0;
 
-#define CC_CLEAR(i) ((GameClearData *)g_lists[i].clear_storage)
+#define CC_CLEAR(i) (&g_lists[i].clear_storage.clear)
 
-// Framework-managed persistence for tabs that leave is_recorded/record_complete NULL:
-// a completed-clear_kind bitmask in the mod's own hoshi save, keyed by a hash of the
-// tab name (not registry index) so bits survive tabs being added/removed/reordered.
+// Framework persistence for tabs that leave is_recorded/record_complete NULL, keyed by
+// tab-name hash so bits survive tabs being added, removed, or reordered.
 typedef struct CCSave
 {
     struct
@@ -54,6 +59,10 @@ typedef struct CCSave
         u32 name_hash;     // 0 = empty slot
         u64 recorded[2];   // completed clear_kinds (2 u64 words cover 0..119)
     } slots[CC_MAX_CHECKLISTS];
+
+    // Grid layout seed; each tab mixes it with its name hash for its own permutation, so
+    // tabs that claim no slot get a layout too. 0 = not yet generated.
+    u32 layout_seed;
 } CCSave;
 
 static CCSave *g_save = NULL;
@@ -70,9 +79,8 @@ static u32 CC_HashName(const char *s)
     return h ? h : 1u;
 }
 
-// Index of the tab being built by CC_MinorLoad (-1 otherwise). While set, the
-// clear-data accessor redirects the CITYTRIAL slot to that tab's block so
-// Checklist_Init populates from the tab instead of City Trial.
+// Index of the tab being built by CC_MinorLoad (-1 otherwise). While set, the clear-data
+// accessor redirects CITYTRIAL to that tab's block so Checklist_Init populates from it.
 static int g_build_active = -1;
 
 // Raised while the checklist session was entered from a run (not menu navigation).
@@ -118,10 +126,8 @@ static int CC_FirstPending(void)
     return CC_FirstPendingExcluding(-1);
 }
 
-// REPLACEFUNC for gmGetClearcheckerTypeP (0x800076a0). Modes 0/1/2 return the
-// GameData blocks (CITYTRIAL redirected to the tab under construction while
-// g_build_active is set); modes >= GMMODE_NUM return the registered tab's block;
-// unknown modes return NULL (matching vanilla's out-of-range, without the assert).
+// REPLACEFUNC for gmGetClearcheckerTypeP (0x800076a0). Modes >= GMMODE_NUM return the
+// registered tab's block; unknown modes return NULL, without vanilla's assert.
 static GameClearData *CC_GetClearcheckerTypeP(GameMode mode)
 {
     GameData *gd = Gm_GetGameData();
@@ -156,9 +162,8 @@ static u8 CC_GetRewardNum(GameMode mode)
     return mode < GMMODE_NUM ? counts[mode] : 0;
 }
 
-// REPLACEFUNC for Checklist_GetClearKindFromRewardIndex (0x80049c84): 0 for custom
-// tabs (no rewards) keeps Checklist_ProcessUnlock's new-unlock scan inert so the cell
-// animation can run, and dodges the mode>=3 assert. Real modes reproduce vanilla.
+// REPLACEFUNC for Checklist_GetClearKindFromRewardIndex (0x80049c84): 0 for custom tabs
+// keeps Checklist_ProcessUnlock's new-unlock scan inert so the cell animation can run.
 static u8 CC_GetClearKindFromRewardIndex(GameMode mode, u8 reward_index)
 {
     if ((unsigned)mode >= GMMODE_NUM)
@@ -166,22 +171,17 @@ static u8 CC_GetClearKindFromRewardIndex(GameMode mode, u8 reward_index)
     return stc_reward_table_ptrs[mode][reward_index].clear_kind;
 }
 
-// MainMenu_GetData()[0xed0] -> root GObj -> user_data (+0x2c), mirroring
-// Gm_GetClearChecker (0x8017cf14). NULL before the grid GObj exists.
-static u8 *CC_GetUI(void)
+// The checklist screen's UI state, mirroring Gm_GetClearChecker (0x8017cf14). NULL before
+// the grid GObj exists.
+static ClearCheckerUI *CC_GetUI(void)
 {
-    u8 *mgr = (u8 *)MainMenu_GetData();
-    u8 *root = *(u8 **)(mgr + 0xed0);
-    if (!root)
-        return NULL;
-    return *(u8 **)(root + 0x2c);
+    GOBJ *root = Gm_GetMenuData()->clearchecker.bg_gobj;
+    return root ? (ClearCheckerUI *)root->userdata : NULL;
 }
 
-// Cell objective text comes from stc_sis_data[0][clear_kind + 4]. Checklist_Init
-// loads City Trial's SisClrChkCT into slot 0; after the build we repoint slot 0 at our
-// own pointer array (CT header entries 0..3 kept, rest blank, each label slotted at
-// clear_kind + 4). Only one custom tab is on screen at a time, so a single shared
-// buffer set is recomposed per tab build.
+// Cell objective text comes from stc_sis_data[0][clear_kind + 4]. After the build, slot 0
+// is repointed at this array: CT's header entries 0..3, the rest blank, each check's label
+// at clear_kind + 4. Only one custom tab is on screen, so the buffers are shared.
 
 #define CC_SIS_HEADER_NUM 4                       // entries 0..3 are CT's title/legend
 #define CC_SIS_PTR_NUM (CC_CLEAR_KIND_NUM + 4)    // covers index clear_kind + 4
@@ -191,29 +191,32 @@ static void *g_sis_ptrs[CC_SIS_PTR_NUM];
 static u8 g_sis_blank[24];
 static u8 g_sis_label[CC_CLEAR_KIND_NUM][CC_SIS_LABEL_MAX];
 
+#define CC_SIS_GRAY  0xbb  // label color, matching the vanilla objective text
+#define CC_SIS_SCALE 0x00b3 // q8 scale (~0.70) on both axes
+
 // Compose a SIS-format text entry from a C string (vanilla UI-text formatting).
 static void CC_ComposeSis(u8 *buf, const char *str)
 {
     u8 *p = buf;
 
-    *p++ = 0x12; // ALIGN_LEFT
-    *p++ = 0x18; // FIT_ON
-    *p++ = 0x16; // KERNING_ON
-    *p++ = 0x0c;
-    *p++ = 0xbb;
-    *p++ = 0xbb;
-    *p++ = 0xbb; // COLOR gray
-    *p++ = 0x0e;
-    *p++ = 0x00;
-    *p++ = 0xb3;
-    *p++ = 0x00;
-    *p++ = 0xb3; // SCALE ~0.70
+    *p++ = TEXTCMD_ALIGNLEFT;
+    *p++ = TEXTCMD_FIT;
+    *p++ = TEXTCMD_KERNING;
+    *p++ = TEXTCMD_COLOR;
+    *p++ = CC_SIS_GRAY;
+    *p++ = CC_SIS_GRAY;
+    *p++ = CC_SIS_GRAY;
+    *p++ = TEXTCMD_SCALE;
+    *p++ = (u8)(CC_SIS_SCALE >> 8);
+    *p++ = (u8)CC_SIS_SCALE;
+    *p++ = (u8)(CC_SIS_SCALE >> 8);
+    *p++ = (u8)CC_SIS_SCALE;
 
     for (; *str; str++)
     {
         if (*str == ' ')
         {
-            *p++ = 0x1a; // SIS space command
+            *p++ = TEXTCMD_SPACE;
         }
         else
         {
@@ -226,13 +229,14 @@ static void CC_ComposeSis(u8 *buf, const char *str)
         }
     }
 
-    *p++ = 0x03;
-    *p++ = 0x0f;
-    *p++ = 0x0d;
-    *p++ = 0x17;
-    *p++ = 0x19;
-    *p++ = 0x13;
-    *p++ = 0x00; // TERMINATE
+    // Close every pushed state in reverse order, then end the stream.
+    *p++ = TEXTCMD_LINEBREAK;
+    *p++ = TEXTCMD_SCALEEND;
+    *p++ = TEXTCMD_COLOREND;
+    *p++ = TEXTCMD_KERNINGEND;
+    *p++ = TEXTCMD_FITEND;
+    *p++ = TEXTCMD_ALIGNLEFTEND;
+    *p++ = TEXTCMD_TERMINATE;
 }
 
 // Redirect SIS slot 0 to this tab's entries. Run after Checklist_Init loads
@@ -266,9 +270,8 @@ static void CC_InitSisForList(int idx)
     stc_sis_data[0] = (SISData *)g_sis_ptrs;
 }
 
-// The tab's banner/emblem image descriptors, loaded into the reclaimable per-scene
-// heap. Valid only for the current tab's scene; NULL'd on failure (swaps skip on NULL,
-// keeping the borrowed CT art).
+// Tab banner/emblem image descriptors, loaded into the reclaimable per-scene heap: valid
+// only for the current tab's scene, NULL'd on failure (the swaps skip on NULL).
 static _HSD_ImageDesc *g_logo_imagedesc;   // banner watermark (RGB5A3 248x128)
 static _HSD_ImageDesc *g_emblem_imagedesc; // tab emblem (I4 40x40)
 
@@ -297,10 +300,9 @@ static void CC_LoadTexturesForList(int idx)
                  d->tex_file, g_logo_imagedesc != NULL, g_emblem_imagedesc != NULL);
 }
 
-// REPLACEFUNC for ClearChecker_CheckForNewUnlocks (0x8004a1a4), the per-mode gate
-// each mode's *_MinorExit consults to route into the checklist after a run. Vanilla
-// result OR any custom-tab pending, so a run that completes only a custom check (with
-// no coinciding vanilla cell) still brings up the post-run checklist.
+// REPLACEFUNC for ClearChecker_CheckForNewUnlocks (0x8004a1a4), the gate each mode's
+// *_MinorExit consults to route into the checklist after a run. Vanilla result OR any
+// custom-tab pending, so a run completing only a custom check still routes there.
 static int CC_CheckForNewUnlocks(GameMode mode)
 {
     GameClearData *cd = gmGetClearcheckerTypeP(mode);
@@ -308,12 +310,10 @@ static int CC_CheckForNewUnlocks(GameMode mode)
     return vanilla || (CC_FirstPending() >= 0);
 }
 
-// REPLACEFUNC for Scene_SetNextMinor (0x800088c8), vanilla a one-line store of the
-// minor id to GameData+0x7d8. On a post-run transition (from a gameplay major) into
-// the played mode's checklist tab (AR/TR/CT = 32/33/34), if that mode has no vanilla
-// pending unlock but a custom tab does, retarget straight to the custom tab so its
-// unlock animates without a detour through an empty tab. g_postrun is flagged either
-// way so the exit path can still chain to a custom tab after the played mode animates.
+// REPLACEFUNC for Scene_SetNextMinor (0x800088c8), vanilla a store of the minor id to
+// GameData.minor_next. On a post-run transition into a checklist tab, retarget to a pending
+// custom tab when the played mode has nothing of its own to animate; g_postrun is flagged
+// either way so the exit path can chain to custom tabs afterwards.
 static void CC_SetNextMinor(int minor)
 {
     if (g_count > 0 &&
@@ -331,13 +331,12 @@ static void CC_SetNextMinor(int minor)
                 minor = g_lists[idx].minor_id;
         }
     }
-    ((u8 *)Gm_GetGameData())[0x7d8] = (u8)minor;
+    Gm_GetGameData()->minor_next = (MinorKind)minor;
 }
 
-// Shared cb_Load for every custom tab. Builds the tab by running Checklist_Init under
-// City Trial's visual template (a valid mode: no mode>=3 assert, no archetype-slot
-// collision) while g_build_active redirects the clear-data accessor to this tab's
-// block, then flips the UI mode byte (chk+0x14) to the tab's synthetic mode.
+// Shared cb_Load for every custom tab: runs Checklist_Init under City Trial's visual
+// template (a valid mode, so no assert and no archetype-slot collision) with g_build_active
+// redirecting the clear data to this tab, then flips the UI mode to the synthetic one.
 static void CC_MinorLoad(void)
 {
     int idx = CC_FindListByMinor(Scene_GetCurrentMinor());
@@ -352,10 +351,8 @@ static void CC_MinorLoad(void)
 
     Checklist_PrepMenuData();
 
-    // fresh selects Checklist_Init's entry state: 1 starts the new-unlock presentation
-    // (flip-and-sparkle), 0 jumps straight to browsing. A custom tab is never itself a
-    // post-run scene, so drive it from this tab's own pending-unlock state - presenting
-    // "as if after a run" exactly when one of its checks is freshly completed.
+    // 1 starts the new-unlock presentation (flip-and-sparkle), 0 jumps straight to browsing.
+    // A custom tab is never itself a post-run scene, so drive it from its own pending state.
     int fresh = CC_ListHasPendingUnlock(idx) ? 1 : 0;
 
     g_build_active = idx;
@@ -364,13 +361,12 @@ static void CC_MinorLoad(void)
 
     CC_InitSisForList(idx);
 
-    // After the build (so its setup can't reset the per-scene heap under the load),
-    // pull the tab's banner/emblem art into that heap.
+    // After the build, so its setup can't reset the per-scene heap under the load.
     CC_LoadTexturesForList(idx);
 
-    u8 *chk = CC_GetUI();
+    ClearCheckerUI *chk = CC_GetUI();
     if (chk)
-        chk[0x14] = (u8)g_lists[idx].mode;
+        chk->mode = (GameMode)g_lists[idx].mode;
 
     if (Scene_GetCurrentMajor() == MJRKIND_MENU)
         loadMainMenuMusic();
@@ -402,20 +398,22 @@ static int CC_RingStep(int minor, int dir)
     return -1;
 }
 
+// Vanilla checklist tab-switch cue.
+#define CC_TAB_SFX 0x1000A
+
 // REPLACEFUNC for Checklist_MinorThink (0x8004a648), shared by every checklist tab.
 // Reimplements the vanilla tab cycle with the custom tabs folded in; with no tabs
 // registered the ring is just AR/TR/CT and this matches vanilla.
 static void CC_MinorThink(void)
 {
-    int phase = Gm_GetClearChecker(); // chk+0x15
+    ClearCheckerPhase phase = (ClearCheckerPhase)Gm_GetClearChecker();
     int minor = Scene_GetCurrentMinor();
 
     switch (phase)
     {
-    case 11: // exit to main menu
-        // Post-run only: if a custom unlock is still unviewed, detour to that tab so it
-        // animates before leaving (it raises is_unlocked once shown, so the next exit
-        // press falls through). Lets the played mode animate first.
+    case CLEARCHECKER_PHASE_EXIT:
+        // Post-run only: detour to a tab with an unviewed unlock so it animates before
+        // leaving; it raises is_unlocked once shown, so the next exit press falls through.
         if (g_postrun)
         {
             int idx = CC_FirstPendingExcluding(minor);
@@ -431,9 +429,9 @@ static void CC_MinorThink(void)
         Scene_ExitMinor();
         break;
 
-    case 12: // next tab
+    case CLEARCHECKER_PHASE_NEXTTAB:
     {
-        SFX_PlayFullVolume(0x1000A);
+        SFX_PlayFullVolume(CC_TAB_SFX);
         int next = CC_RingStep(minor, +1);
         if (next < 0)
             next = MNRKIND_AIRRIDECHECKLIST;
@@ -442,9 +440,9 @@ static void CC_MinorThink(void)
         break;
     }
 
-    case 13: // previous tab
+    case CLEARCHECKER_PHASE_PREVTAB:
     {
-        SFX_PlayFullVolume(0x1000A);
+        SFX_PlayFullVolume(CC_TAB_SFX);
         int prev = CC_RingStep(minor, -1);
         if (prev < 0)
             prev = MNRKIND_CITYCHECKLIST;
@@ -453,17 +451,18 @@ static void CC_MinorThink(void)
         break;
     }
 
-    case 14: // switch to the records screen (custom tabs have none: no-op)
+    case CLEARCHECKER_PHASE_ENDING:
+        // A custom tab reports no rewards, so it can never raise this phase.
         if (CC_FindListByMinor(minor) >= 0)
             break;
         g_postrun = 0; // leaving the checklist; don't carry the post-run chain
         MainMenu_ClearSoundTestSongThunk();
         if (minor == MNRKIND_AIRRIDECHECKLIST)
-            Scene_SetNextMinor(28);
+            Scene_SetNextMinor(MNRKIND_AIRRIDEENDING);
         else if (minor == MNRKIND_TOPRIDECHECKLIST)
-            Scene_SetNextMinor(29);
+            Scene_SetNextMinor(MNRKIND_TOPRIDEENDING);
         else
-            Scene_SetNextMinor(30); // CT
+            Scene_SetNextMinor(MNRKIND_CITYENDING);
         Scene_ExitMinor();
         break;
 
@@ -472,38 +471,24 @@ static void CC_MinorThink(void)
     }
 }
 
-// MainMenu_GetData() (0x801311e0) return value. The built scene GObjs whose materials
-// carry the per-mode tint hang off fixed offsets from it.
-#define MMD_BASE 0x80558788
-
-// The background scene (+0xED0) and the marker/counter models (+0x1100 range) carry the
-// per-mode tint in their material diffuses. The frame border (+0xEE4) is texture-colored
-// (white material), not in this set.
-static const int g_recolor_slots[] = { 0xED0, 0x1104, 0x110C, 0x1114 };
-#define CC_RECOLOR_SLOT_NUM ((int)(sizeof(g_recolor_slots) / sizeof(g_recolor_slots[0])))
-
-// The per-mode banner is a single 248x128 quad at MainMenuData + 0xEE4, retargeted to
-// the tab watermark. Its 248 width is unique in the scene, which is how the walk finds it.
-#define MMD_FRAME_SLOT 0xEE4
+// The per-mode banner is a single 248x128 quad on the frame GObj; its 248 width is unique
+// in the scene, which is how the walk finds it.
 #define CC_BANNER_TEX_W 248
 
-// The tab emblem (top-right, between the L/R arrows) is a single 40x40 I4 quad, unique
-// in the background scene (distinct from the 72x72 circle layers), retargeted to the
-// tab emblem.
+// The tab emblem (top-right, between the L/R arrows) is a single 40x40 I4 quad, unique in
+// the background scene (the circle layers are 72x72).
 #define CC_EMBLEM_TEX_W 40
 #define CC_EMBLEM_TEX_FMT 0  // I4
 
 // Theme color for the tab on screen, set per frame in CC_RecolorScene.
 static u8 g_cur_theme_r, g_cur_theme_g, g_cur_theme_b;
 
-// Retint one diffuse (GXColor RGBA at HSD_Material + 0x4) onto the tab's theme color.
-// Gated on green-dominance: the borrowed CT tint materials are green-dominant, so this
-// selects only them (not the purple cell tiles or other UI) and is idempotent (the
-// result is no longer green-dominant). The brightness range [min, green] is preserved
-// and redistributed onto the theme hue; a zero theme leaves the green.
-static void CC_RemapDiffuse(u8 *mat)
+// Retint one material diffuse onto the tab's theme color, preserving the material's
+// [min, green] brightness range. The green-dominance gate selects only the borrowed CT tint
+// materials and makes the pass idempotent.
+static void CC_RemapDiffuse(HSD_Material *mat)
 {
-    u8 r = mat[4], g = mat[5], b = mat[6];
+    u8 r = mat->diffuse.r, g = mat->diffuse.g, b = mat->diffuse.b;
     if (!(g > r && g >= b)) // green-dominant per-mode tint only
         return;
 
@@ -516,117 +501,110 @@ static void CC_RemapDiffuse(u8 *mat)
     int d = g;                     // dominant (green is the max under the gate)
     int m = r < b ? r : b;         // min of the three channels
     int span = d - m;
-    mat[4] = (u8)(m + span * g_cur_theme_r / tmax);
-    mat[5] = (u8)(m + span * g_cur_theme_g / tmax);
-    mat[6] = (u8)(m + span * g_cur_theme_b / tmax);
+    mat->diffuse.r = (u8)(m + span * g_cur_theme_r / tmax);
+    mat->diffuse.g = (u8)(m + span * g_cur_theme_g / tmax);
+    mat->diffuse.b = (u8)(m + span * g_cur_theme_b / tmax);
 }
 
-// Retint one JOBJ's dobjs and, in the same pass, swap the mode emblem's quad (the
-// unique 40x40 I4 texture) to the tab emblem. The emblem lives in the recolored
-// background scene, so this rides the recolor walk; the 40x40/I4 signature is unique
-// there, so nothing else is touched.
-static void CC_ProcessJObj(u8 *j)
+// Retint one JOBJ's dobjs and, in the same pass, swap the mode emblem's quad to the tab
+// emblem - it lives in the recolored background scene, so it rides the recolor walk.
+static void CC_ProcessJObj(JOBJ *j)
 {
-    for (u8 *dj = *(u8 **)(j + 0x18); dj; dj = *(u8 **)(dj + 0x04)) // JOBJ.dobj, DOBJ.next
+    for (DOBJ *dj = j->dobj; dj; dj = dj->next)
     {
-        u8 *mo = *(u8 **)(dj + 0x08); // DOBJ.mobj
+        MOBJ *mo = dj->mobj;
         if (!mo)
             continue;
-        u8 *mat = *(u8 **)(mo + 0x0C); // MOBJ.mat
-        if (mat)
-            CC_RemapDiffuse(mat);
+        if (mo->mat)
+            CC_RemapDiffuse(mo->mat);
         if (!g_emblem_imagedesc)
             continue; // textures not loaded; recolor only, leave the vanilla emblem
-        for (u8 *t = *(u8 **)(mo + 0x08); t; t = *(u8 **)(t + 0x08)) // MOBJ.tobj, TOBJ.next
+        for (TOBJ *t = mo->tobj; t; t = t->next)
         {
-            u8 *img = *(u8 **)(t + 0x58); // TOBJ.imagedesc
-            if (!img || img == (u8 *)g_emblem_imagedesc)
+            _HSD_ImageDesc *img = t->imagedesc;
+            if (!img || img == g_emblem_imagedesc)
                 continue;
-            if (*(u16 *)(img + 0x04) != CC_EMBLEM_TEX_W ||
-                *(u32 *)(img + 0x08) != CC_EMBLEM_TEX_FMT)
+            if (img->width != CC_EMBLEM_TEX_W || img->format != CC_EMBLEM_TEX_FMT)
                 continue;
-            // The vanilla emblem is a texture flipbook (TObj.aobj + imagetbl) whose anim
-            // pass rewrites imagedesc every tick; clear both so our descriptor is the only
-            // binding. The material tint still animates.
-            *(void **)(t + 0x58) = g_emblem_imagedesc;
-            *(void **)(t + 0x64) = 0; // TOBJ.aobj
-            *(void **)(t + 0x68) = 0; // TOBJ.imagetbl
+            // The vanilla emblem is a texture flipbook whose anim pass rewrites imagedesc
+            // every tick; clear both so this descriptor is the only binding.
+            t->imagedesc = g_emblem_imagedesc;
+            t->aobj = NULL;
+            t->imagetbl = NULL;
         }
     }
 }
 
-// Walk a JOBJ subtree (child + sibling). JOBJ.child=+0x10, sibling=+0x08.
-static void CC_RecolorJObj(u8 *j, int depth)
+// Walk a JOBJ subtree (child + sibling).
+static void CC_RecolorJObj(JOBJ *j, int depth)
 {
     if (!j || depth > 32)
         return;
     CC_ProcessJObj(j);
-    CC_RecolorJObj(*(u8 **)(j + 0x10), depth + 1);
-    CC_RecolorJObj(*(u8 **)(j + 0x08), depth + 1);
+    CC_RecolorJObj(j->child, depth + 1);
+    CC_RecolorJObj(j->sibling, depth + 1);
 }
 
 // Recolor one built scene GObj: its root's own dobjs plus its child subtree, but not the
 // root's sibling (which would leave this scene).
-static void CC_RecolorGObj(u8 *gobj)
+static void CC_RecolorGObj(GOBJ *gobj)
 {
     if (!gobj)
         return;
-    u8 *jroot = *(u8 **)(gobj + 0x28); // GObj hsd_object -> scene JOBJ root
+    JOBJ *jroot = (JOBJ *)gobj->hsd_object;
     if (!jroot)
         return;
     CC_ProcessJObj(jroot);
-    CC_RecolorJObj(*(u8 **)(jroot + 0x10), 0);
+    CC_RecolorJObj(jroot->child, 0);
 }
 
-// Retarget the banner quad on one JOBJ: a TObj pointing at the 248-wide banner texture
-// (or our descriptor, once swapped) is repointed at the tab watermark, and its material
-// diffuse forced white so the texture samples neutrally. JOBJ scale and quad scroll are
-// untouched.
-static void CC_RetargetBannerJObj(u8 *j)
+// Retarget the banner quad on one JOBJ: a TObj on the 248-wide texture is repointed at the
+// tab watermark and its diffuse forced white so the texture samples neutrally. JOBJ scale
+// and quad scroll are untouched.
+static void CC_RetargetBannerJObj(JOBJ *j)
 {
     if (!g_logo_imagedesc)
         return; // textures not loaded; leave the vanilla banner art in place
 
-    for (u8 *dj = *(u8 **)(j + 0x18); dj; dj = *(u8 **)(dj + 0x04))
+    for (DOBJ *dj = j->dobj; dj; dj = dj->next)
     {
-        u8 *mo = *(u8 **)(dj + 0x08);
+        MOBJ *mo = dj->mobj;
         if (!mo)
             continue;
-        u8 *mat = *(u8 **)(mo + 0x0C);
-        for (u8 *t = *(u8 **)(mo + 0x08); t; t = *(u8 **)(t + 0x08))
+        for (TOBJ *t = mo->tobj; t; t = t->next)
         {
-            u8 *img = *(u8 **)(t + 0x58);
+            _HSD_ImageDesc *img = t->imagedesc;
             if (!img)
                 continue;
-            int already = (img == (u8 *)g_logo_imagedesc);
-            if (!already && *(u16 *)(img + 0x04) != CC_BANNER_TEX_W)
+            int already = (img == g_logo_imagedesc);
+            if (!already && img->width != CC_BANNER_TEX_W)
                 continue;
             if (!already)
-                *(void **)(t + 0x58) = g_logo_imagedesc;
-            if (mat)
+                t->imagedesc = g_logo_imagedesc;
+            if (mo->mat)
             {
-                mat[4] = 0xFF; // diffuse R
-                mat[5] = 0xFF; // diffuse G
-                mat[6] = 0xFF; // diffuse B (alpha untouched, keeps the quad's blend)
+                // Alpha untouched, keeping the quad's blend.
+                mo->mat->diffuse.r = 0xFF;
+                mo->mat->diffuse.g = 0xFF;
+                mo->mat->diffuse.b = 0xFF;
             }
         }
     }
 }
 
 // Walk the banner GObj's JOBJ tree, retargeting its scrolling quad to the tab logo.
-static void CC_RetargetBanner(u8 *gobj)
+static void CC_RetargetBanner(GOBJ *gobj)
 {
     if (!gobj)
         return;
-    u8 *jroot = *(u8 **)(gobj + 0x28);
-    for (u8 *stack[40], **sp = stack, *j = jroot; ; )
+    for (JOBJ *stack[40], **sp = stack, *j = (JOBJ *)gobj->hsd_object; ; )
     {
         while (j)
         {
             CC_RetargetBannerJObj(j);
             if (sp < stack + 40)
-                *sp++ = *(u8 **)(j + 0x08); // defer sibling
-            j = *(u8 **)(j + 0x10);          // descend child
+                *sp++ = j->sibling; // defer sibling
+            j = j->child;           // descend child
         }
         if (sp == stack)
             break;
@@ -635,8 +613,7 @@ static void CC_RetargetBanner(u8 *gobj)
 }
 
 // Recolor the current custom tab's scene to its theme and retarget its scrolling banner.
-// No-op unless a custom tab is the current minor scene. Idempotent per frame (the menu's
-// anim pass re-applies the green tint each frame).
+// No-op unless a custom tab is the current minor scene.
 static void CC_RecolorScene(void)
 {
     int idx = CC_FindListByMinor(Scene_GetCurrentMinor());
@@ -647,20 +624,101 @@ static void CC_RecolorScene(void)
     g_cur_theme_g = g_lists[idx].desc.theme_g;
     g_cur_theme_b = g_lists[idx].desc.theme_b;
 
-    for (int i = 0; i < CC_RECOLOR_SLOT_NUM; i++)
-        CC_RecolorGObj(*(u8 **)(MMD_BASE + g_recolor_slots[i]));
+    // The background scene and the marker/counter GObjs carry the per-mode tint in their
+    // material diffuses; the frame GObj is texture-colored, so it only takes the banner swap.
+    ScMenuCommon *mm = Gm_GetMenuData();
+    CC_RecolorGObj(mm->clearchecker.bg_gobj);
+    CC_RecolorGObj(mm->clearchecker.cross_gobj);
+    CC_RecolorGObj(mm->clearchecker.prize1_gobj);
+    CC_RecolorGObj(mm->clearchecker.prize2_gobj);
 
-    CC_RetargetBanner(*(u8 **)(MMD_BASE + MMD_FRAME_SLOT));
+    CC_RetargetBanner(mm->clearchecker.frame_gobj);
 
-    // GX caches texels in TMEM, so the swapped banner/emblem need a per-frame invalidate
-    // to render from fresh data while the tab is up.
+    // TMEM caches texels, so the swapped banner/emblem need a per-frame invalidate.
     GXInvalidateTexAll();
 }
 
-// Lay out a tab's clear data. grid_mapping must be a full identity bijection over all
-// 120 clear_kinds: Checklist_Update reverse-scans it to map a cursor position back to a
-// clear_kind, and an unmapped position trips the "Clearchecker Number 120" assert.
-// is_visible gates which cells draw, so only defined checks appear.
+// Private xorshift32 for the grid layout: regenerating a layout from a saved seed needs a
+// stream depending on nothing but that seed, which the shared HSD_Randi state can't give.
+// State must be nonzero.
+static u32 CC_Rand32(u32 *state)
+{
+    u32 x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
+}
+
+// Ensure the save carries a grid-layout seed; returns 0 while the save is unavailable.
+// Generated once per save file and persisted, so layouts are stable across boots (the clear
+// storage itself is BSS, so 4 bytes of seed are saved instead of 120 of layout).
+static int CC_EnsureLayoutSeed(void)
+{
+    if (!g_save)
+        return 0;
+    if (g_save->layout_seed)
+        return 1;
+
+    // OSGetTime is the console RTC, so it differs between save files; avalanche it, since
+    // xorshift32 seeded with near-identical states produces visibly similar first draws.
+    u64 t = OSGetTime();
+    u32 s = (u32)t ^ (u32)(t >> 32);
+    s ^= s >> 16;
+    s *= 2246822519u;
+    s ^= s >> 13;
+    s *= 3266489917u;
+    s ^= s >> 16;
+
+    g_save->layout_seed = s ? s : 1u;
+    Hoshi_WriteSave();
+    OSReport("[CustomChecklist] Grid layout seed initialized (0x%08x)\n", g_save->layout_seed);
+    return 1;
+}
+
+// Shuffle a tab's grid_mapping into a random-but-stable permutation, from the save seed
+// mixed with the tab's name hash so tabs neither share a layout nor reshuffle each other.
+// Writes grid_mapping only - clear[] state is live by the time this runs. Fisher-Yates keeps
+// the result a full bijection over 0..119, which Checklist_Update's reverse scan needs.
+// No meta-cell pre-placement: Fill100ClearKind returns 0xFF for custom tabs.
+static void CC_ApplyLayout(int idx)
+{
+    GameClearData *cd = CC_CLEAR(idx);
+
+    u32 st = (g_save->layout_seed ^ g_lists[idx].name_hash) * 2654435761u;
+    st ^= st >> 15;
+    if (!st)
+        st = 1u;
+
+    for (int k = 0; k < CC_CLEAR_KIND_NUM; k++)
+        cd->grid_mapping[k] = (u8)k;
+
+    for (int k = CC_CLEAR_KIND_NUM - 1; k > 0; k--)
+    {
+        u32 j = CC_Rand32(&st) % (u32)(k + 1);
+        u8 tmp = cd->grid_mapping[k];
+        cd->grid_mapping[k] = cd->grid_mapping[j];
+        cd->grid_mapping[j] = tmp;
+    }
+}
+
+// Apply the saved layout once per tab per session. Lazy because a consumer registers from
+// its own OnSaveLoaded, which can run before this mod's has set g_save; until then the tab
+// keeps CC_InitClearData's identity mapping, itself a valid bijection.
+static void CC_EnsureLayout(int idx)
+{
+    if (g_lists[idx].layout_done)
+        return;
+    if (!CC_EnsureLayoutSeed())
+        return;
+    CC_ApplyLayout(idx);
+    g_lists[idx].layout_done = 1;
+}
+
+// Lay out a tab's clear data. grid_mapping must be a full bijection over all 120 clear_kinds
+// or Checklist_Update's reverse scan trips the "Clearchecker Number 120" assert; identity is
+// the fallback until CC_EnsureLayout can shuffle. is_visible gates which cells draw.
 static void CC_InitClearData(int idx)
 {
     GameClearData *cd = CC_CLEAR(idx);
@@ -668,7 +726,7 @@ static void CC_InitClearData(int idx)
     for (int k = 0; k < CC_CLEAR_KIND_NUM; k++)
     {
         cd->grid_mapping[k] = (u8)k;
-        *((u8 *)&cd->clear[k]) = 0;
+        memset(&cd->clear[k], 0, sizeof(cd->clear[k]));
     }
     for (int c = 0; c < d->check_num; c++)
     {
@@ -689,15 +747,13 @@ static int CC_InstallMinor(void)
     return (int)(s8)Hoshi_InstallMinorScene(&d);
 }
 
-// Vanilla checklist "objective completed" cue (ClearChecker_SetNewUnlock plays it on a
-// fresh in-run completion).
+// Vanilla checklist "objective completed" cue.
 #define CC_UNLOCK_SFX 0x10008
 
-// Play the completion cue for a freshly-completed check, so every tab gets vanilla's
-// mid-run "ding". Suppressed when the unlock cache is valid (in menus, where the flip-
-// and-sparkle animates on tab entry instead). Shares the engine's one-frame SFX cooldown
-// (stc_clearchecker_sfx_last_frame), so a tab whose record_complete also routes through
-// ClearChecker_SetNewUnlock never double-plays.
+// Play the completion cue for a freshly-completed check. Suppressed when the unlock cache is
+// valid (in menus the flip-and-sparkle animates on tab entry instead), and gated on the
+// engine's one-frame cooldown so a record path through ClearChecker_SetNewUnlock can't
+// double-play.
 static void CC_PlayUnlockSfx(void)
 {
     if (Checklist_IsCacheValid())
@@ -710,12 +766,16 @@ static void CC_PlayUnlockSfx(void)
     }
 }
 
-// Resolve (and lazily claim) the save slot for a framework-persisted tab: match an
-// existing slot by name hash, else claim an empty one. Returns -1 if the save is not
-// loaded yet (there is always room: slots == max tabs).
+// Resolve (and lazily claim) the save slot for a framework-persisted tab: match by name
+// hash, else claim an empty one. Returns -1 until the save loads (slots == max tabs, so
+// there is always room).
 static int CC_ResolveSaveSlot(int i)
 {
     if (!g_save)
+        return -1;
+    // name_hash is set for every tab (it doubles as the layout key), so this guard is what
+    // keeps a mod-persisted tab from claiming a slot it never reads.
+    if (!g_lists[i].fw_persist)
         return -1;
     if (g_lists[i].save_slot >= 0)
         return g_lists[i].save_slot;
@@ -760,15 +820,18 @@ static void CC_DefaultRecord(int i, int clear_kind)
     Hoshi_WriteSave();
 }
 
-// For each registered tab: complete any not-yet-recorded check whose predicate now holds
-// (record it, seed the cell's is_new/is_visible so the animation runs on next tab entry,
-// play the cue), and re-assert is_visible / raise is_unlocked for already-recorded checks
-// so a prior-boot completion shows complete with no replay.
+// Per-frame pass over every tab: complete any check whose predicate now holds, and keep
+// already-recorded cells rendered.
 static void CC_Evaluate(void)
 {
     for (int i = 0; i < g_count; i++)
     {
         CCList *L = &g_lists[i];
+
+        // Before the is_ready gate: deferring it would show the identity fallback and then
+        // visibly reshuffle the moment the tab became ready.
+        CC_EnsureLayout(i);
+
         if (L->desc.is_ready && !L->desc.is_ready())
             continue;
 
@@ -791,8 +854,7 @@ static void CC_Evaluate(void)
                     CC_DefaultRecord(i, ck);
                 else
                     L->desc.record_complete(ck);
-                // Optional mod cue, fired once on first completion. Works for framework-
-                // persisted tabs too, which have no record_complete to notify from.
+                // Optional mod cue, fired once on first completion whichever side persists.
                 if (L->desc.on_complete)
                     L->desc.on_complete(ck);
                 // A check satisfied outside any gamemode (e.g. "Boot the game") never gets
@@ -803,10 +865,9 @@ static void CC_Evaluate(void)
             }
             else
             {
-                // Already recorded: keep it rendered. A still-pending is_new (completed
-                // this session, not yet viewed) is left for Checklist_ProcessUnlock to
-                // animate; only force is_unlocked when none is pending, so a prior-boot
-                // completion (block is BSS-zeroed) shows complete with no replay.
+                // Keep it rendered. A pending is_new is left for Checklist_ProcessUnlock to
+                // animate; forcing is_unlocked only when none is pending makes a prior-boot
+                // completion show complete with no replay.
                 cd->clear[ck].is_visible = 1;
                 if (!cd->clear[ck].is_new)
                     cd->clear[ck].is_unlocked = 1;
@@ -848,8 +909,11 @@ static int CC_Register(const CustomChecklistDesc *desc)
     L->desc = *desc; // copy the descriptor (pointers it holds must stay valid)
     L->mode = GMMODE_NUM + idx;
     L->fw_persist = fw_persist;
-    L->name_hash = fw_persist ? CC_HashName(desc->name) : 0;
+    // Hashed for every tab: mod-persisted tabs still need a stable per-tab layout key. A NULL
+    // name hashes to a fixed constant, so unnamed tabs share a layout stream.
+    L->name_hash = CC_HashName(desc->name);
     L->save_slot = -1;
+    L->layout_done = 0;
 
     CC_InitClearData(idx);
 
@@ -874,9 +938,7 @@ static const CustomChecklistAPI g_api = {
 
 static void OnBoot(void)
 {
-    // Install the REPLACEFUNCs unconditionally; with no tabs registered they reproduce
-    // vanilla, so the mod is inert until a consumer registers a tab (via the exported
-    // API, typically in OnSaveLoaded).
+    // Installed unconditionally; with no tabs registered they reproduce vanilla.
     CODEPATCH_REPLACEFUNC(gmGetClearcheckerTypeP, CC_GetClearcheckerTypeP);
     CODEPATCH_REPLACEFUNC(Checklist_GetRewardNum, CC_GetRewardNum);
     CODEPATCH_REPLACEFUNC(Checklist_GetClearKindFromRewardIndex, CC_GetClearKindFromRewardIndex);
@@ -890,19 +952,33 @@ static void OnBoot(void)
              CUSTOM_CHECKLIST_API_MAJOR, CUSTOM_CHECKLIST_API_MINOR);
 }
 
-// Framework save (per-tab recorded bitmask for framework-persisted tabs). Tabs that
-// supply their own persistence callbacks never touch it.
+// Drop cached per-save state so it re-resolves against whatever save is now current: a
+// different file has a different layout seed and different slot assignments.
+static void CC_InvalidateSaveBindings(void)
+{
+    for (int i = 0; i < g_count; i++)
+    {
+        g_lists[i].save_slot = -1;
+        g_lists[i].layout_done = 0;
+    }
+}
+
+// Framework save: the per-tab recorded bitmask (framework-persisted tabs only) plus the
+// grid-layout seed, which every tab uses.
 static void OnSaveInit(void)
 {
     g_save = (CCSave *)mod_desc.save_ptr;
     memset(g_save, 0, sizeof(*g_save));
+    // Zeroed layout_seed means the next CC_EnsureLayout mints a fresh one.
+    CC_InvalidateSaveBindings();
 }
 
 static void OnSaveLoaded(void)
 {
     g_save = (CCSave *)mod_desc.save_ptr;
-    // save_slot is resolved lazily on first access, so saved bits bind by tab name
-    // regardless of registration order.
+    // save_slot and the grid layout are resolved lazily on first access, so saved bits and
+    // layouts bind by tab name regardless of registration order.
+    CC_InvalidateSaveBindings();
 }
 
 static void OnFrameStart(void)
@@ -912,8 +988,7 @@ static void OnFrameStart(void)
 
 static void OnFrameEnd(void)
 {
-    // Re-apply the current tab's tint after the menu's per-frame material animation sets
-    // the green; no-op unless a custom tab is on screen.
+    // Re-apply the tab tint after the menu's per-frame material animation sets the green.
     CC_RecolorScene();
 }
 

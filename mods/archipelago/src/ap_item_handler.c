@@ -170,6 +170,16 @@ int APItems_HandleItem(uint ap_item_id)
             Checklist_GrantFiller(GMMODE_CITYTRIAL);
             Checklist_AnnounceFiller(GMMODE_CITYTRIAL);
             return 1;
+        case AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO:
+            // The AP checklist is a custom tab at the framework-assigned mode
+            // (ap_checklist_mode). Guard on its GameClearData existing: if the
+            // custom_checklist framework never registered the tab, drop the item
+            // instead of dereferencing a NULL clear-data pointer in GrantFiller.
+            if (!gmGetClearcheckerTypeP((GameMode)ap_checklist_mode))
+                return AP_ITEM_DROP;
+            Checklist_GrantFiller((GameMode)ap_checklist_mode);
+            Checklist_AnnounceFiller((GameMode)ap_checklist_mode);
+            return AP_ITEM_APPLIED;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
             return 1;

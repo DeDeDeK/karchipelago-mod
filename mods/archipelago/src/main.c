@@ -44,6 +44,28 @@ APData *ap_data;
 APSave *ap_save;
 const TextBoxAPI *tb_api = 0;
 
+// APData is the wire contract with the AP client: KARData.MemoryAddress hardcodes an
+// offset for every field below and dolphin-memory-engine reads them by address, so a
+// silent layout shift desyncs the client with no error anywhere. Nothing else checks
+// this - the compiler picks the offsets and Python restates them by hand. Pin the
+// block boundaries and both edges of every per-checklist-mode array. Update these and
+// KARData.MemoryAddress together, never one alone.
+_Static_assert(offsetof(APData, options) == 0x030, "APSlotOptions block moved");
+_Static_assert(offsetof(APData, options.goal) == 0x040, "OPTION_GOAL_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal[AP_CHECKLIST_ROW]) == 0x04C, "OPTION_GOAL_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.checklist_amount) == 0x050, "OPTION_CHECKLIST_AMOUNT_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal_checks) == 0x070, "OPTION_GOAL_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal_checks[AP_CHECKLIST_ROW]) == 0x0A0, "OPTION_GOAL_CHECKS_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B0, "gating block moved");
+_Static_assert(offsetof(APData, location_data_valid) == 0x0E8, "LOCATION_DATA_VALID");
+_Static_assert(offsetof(APData, locations) == 0x0EC, "LOCATIONS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks) == 0x200, "SENT_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x230, "SENT_CHECKS_ARCHIPELAGO");
+_Static_assert(offsetof(APData, client_backfill) == 0x240, "CLIENT_BACKFILL_AIRRIDE");
+_Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x270, "CLIENT_BACKFILL_ARCHIPELAGO");
+_Static_assert(offsetof(APData, goal_complete) == 0x280, "GOAL_COMPLETE");
+_Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x284, "DEATHLINK_MENU_ENABLED");
+
 // The checklist mode the custom_checklist framework assigned to the AP tab.
 // GMMODE_NUM until APChecklist_Register lands.
 int ap_checklist_mode = GMMODE_NUM;
@@ -289,10 +311,11 @@ static void APOptions_TransferToSave()
     SyncLinkMenuStateToAPData();
     OSReport("[Main] Menu toggles set - DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
              ap_save->options.death_link_enabled, ap_save->options.energy_link_enabled, ap_save->options.trap_link_enabled);
-    OSReport("[Main] Goals - AirRide: %d, TopRide: %d, CityTrial: %d\n",
+    OSReport("[Main] Goals - AirRide: %d, TopRide: %d, CityTrial: %d, Archipelago: %d\n",
              ap_save->options.goal[GMMODE_AIRRIDE],
              ap_save->options.goal[GMMODE_TOPRIDE],
-             ap_save->options.goal[GMMODE_CITYTRIAL]);
+             ap_save->options.goal[GMMODE_CITYTRIAL],
+             ap_save->options.goal[AP_CHECKLIST_ROW]);
     OSReport("[Main] CityTrial - PatchCap min: %d, max: %d\n",
              ap_save->options.city_trial_patch_cap_min,
              ap_save->options.city_trial_patch_cap_max);

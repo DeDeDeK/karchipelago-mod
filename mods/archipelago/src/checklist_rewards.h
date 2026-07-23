@@ -45,10 +45,9 @@ void ChecklistRewards_DebugSimulateLocationData(void);
 // the mod's reward tables and cross-mode slots to the empty state.
 void ChecklistRewards_DebugClearAll(void);
 
-// Debug helper: returns the currently-hovered cell in the checklist menu
-// (captured by the UpdateCellInfo hook whenever the cursor moves). Returns 1
-// on success with `*out_mode` and `*out_clear_kind` populated, 0 if no cell
-// has been hovered yet this scene.
+// Returns the cell under the checklist cursor, read live from the UI element.
+// Returns 1 on success with `*out_mode` and `*out_clear_kind` populated, 0 when no
+// checklist screen is up or the cursor is off the grid (in the checkbox-filler list).
 int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind);
 
 // Resolve which reward is placed at (mode, clear_kind). On hit, writes the

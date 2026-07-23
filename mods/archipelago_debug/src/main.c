@@ -228,7 +228,7 @@ static void OnFrameStart(void)
         u8 mode, k;
         if (!ap_api->GetHoveredCell(&mode, &k))
         {
-            OSReport("[ApDebug] Z pressed but no cell hovered yet (move cursor first)\n");
+            OSReport("[ApDebug] Z pressed but the cursor is not on a checklist cell\n");
             return;
         }
 

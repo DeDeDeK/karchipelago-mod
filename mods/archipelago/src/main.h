@@ -25,19 +25,24 @@ extern const TextBoxAPI *tb_api;
 
 // The AP checklist is a synthetic extra checklist mode, rendered by the same
 // vanilla code as the 3 real game modes but driven entirely by mod-defined custom
-// checks. It is a tab registered with the custom_checklist framework, which
-// appends each registered tab to the next free mode index in registration order -
-// so the AP tab's mode is assigned at runtime (ap_checklist_mode), not fixed. The
-// mod adapts to whatever slot it lands on, so registration order across mods does
-// not matter. GMMODE_NUM stays 3 (it means "the three real game modes" in many
-// places); only the structures that store per-checklist-mode state (sent_checks_ap)
-// extend past it, and they key on "mode >= GMMODE_NUM", not a specific index.
+// checks. It is a tab registered with the custom_checklist framework, which appends
+// each registered tab to the next free mode index in registration order - so the AP
+// tab's runtime mode is assigned dynamically (ap_checklist_mode), not fixed, and the
+// mod adapts to whatever slot it lands on.
+//
+// GMMODE_NUM stays 3: it means "the three real game modes", which is what indexes the
+// reward tables (the AP tab awards no native rewards of its own). Per-checklist-mode
+// *recorded* state is one row wider - CHECKLIST_MODE_NUM - with the AP tab always at
+// the fixed row AP_CHECKLIST_ROW. ChecklistModeRow() maps a runtime mode to its row.
+#define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
+#define AP_CHECKLIST_ROW   GMMODE_NUM
 
 // The checklist mode the custom_checklist framework assigned to the AP tab. The AP
-// record path passes it to ClearChecker_SetNewUnlock, and check_detection routes it
-// to sent_checks_ap. Initialized to GMMODE_NUM (the value before registration / if
-// the framework is absent); set by APChecklist_Register to the returned mode.
-// Always >= GMMODE_NUM.
+// record path passes it to ClearChecker_SetNewUnlock, and check_detection maps it to
+// AP_CHECKLIST_ROW. Initialized to GMMODE_NUM (the value before registration / if the
+// framework is absent); set by APChecklist_Register to the returned mode. Always
+// >= GMMODE_NUM, and not necessarily equal to AP_CHECKLIST_ROW - another custom tab
+// registering first pushes it higher.
 extern int ap_checklist_mode;
 
 // Hard ceiling on per-stat patch totals. PowerPC `extsb` in the original
@@ -67,9 +72,10 @@ typedef struct APSlotOptions
     u32 trap_link_enabled;                 // 0 or 1 - sets initial traplink menu toggle
     u32 reveal_checklists;                 // 0 or 1 - reveal all checklist squares
 
-    // Per-mode goal settings
-    u32 goal[GMMODE_NUM];                  // APGoalKind - completion condition per mode
-    u32 checklist_amount[GMMODE_NUM];      // 1-120 - threshold for GOAL_N_CHECKLIST per mode
+    // Per-mode goal settings. Indexed by checklist-mode row, so the AP checklist tab
+    // sits at AP_CHECKLIST_ROW alongside the 3 real modes.
+    u32 goal[CHECKLIST_MODE_NUM];             // APGoalKind - completion condition per mode
+    u32 checklist_amount[CHECKLIST_MODE_NUM]; // 1-120 - threshold for GOAL_N_CHECKLIST per mode
 
     // City Trial-specific
     u32 city_trial_patch_cap_min;          // 1-127 - per-stat cap the player starts at; Patch Cap Increase items grow it toward max
@@ -80,7 +86,7 @@ typedef struct APSlotOptions
     u32 spawn_rate_min;
 
     // Required checkboxes per mode for GOAL_CHECKLIST_LIST.
-    u64 goal_checks[GMMODE_NUM][2];
+    u64 goal_checks[CHECKLIST_MODE_NUM][2];
 
     // Per-category access gating. 1 = gated (default - players unlock via AP
     // items). 0 = ungated (mod pre-fills the corresponding unlock mask with
@@ -130,13 +136,12 @@ typedef struct APSave
     u8 options_received;                                // Nonzero if AP slot options have been saved
     u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX]; // Saved location assignment per mode: (target_mode << 8) | clear_kind, 0xFFFF = remote
     u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received for that mode
-    u64 sent_checks[3][2];                              // Authoritative completed-checkbox bitmask per mode.
+    u64 sent_checks[CHECKLIST_MODE_NUM][2];             // Authoritative completed-checkbox bitmask per checklist-mode row.
     u8 goal_complete;                                   // Sticky once set; persisted across boots
-    u8 goal_announced[GMMODE_NUM];                       // Sticky per mode: 1 once that mode's goal first satisfied (drives the per-mode "X goal complete!" textbox, fired once each)
+    u8 goal_announced[CHECKLIST_MODE_NUM];              // Sticky per row: 1 once that mode's goal first satisfied (drives the per-mode "X goal complete!" textbox, fired once each)
     u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit the runtime patch cap target on all 9 stats during a CT trial round
     APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
-    u64 sent_checks_ap[2];                              // AP-checklist completed-checkbox bitmask; the extra-mode parallel of sent_checks[] (used for any mode >= GMMODE_NUM). Appended at the struct tail so existing saves migrate cleanly.
 } APSave;
 
 // Shared data struct stored at a static location in memory.
@@ -192,14 +197,14 @@ typedef struct APData
 
     // Check detection: mod-side authoritative record of completed checkboxes.
     // sent_checks mirrors ap_save->sent_checks; bit (k%64) of word (k/64)
-    // is set when the player completes checkbox clear_kind k in mode m.
+    // is set when the player completes checkbox clear_kind k in the mode at row m.
     // The Python client polls this and forwards new bits as AP location checks.
-    u64 sent_checks[3][2];
+    u64 sent_checks[CHECKLIST_MODE_NUM][2];
 
     // Client backfill: AP client writes bits here to back-fill checks the
     // server already knows about (e.g., fresh-save / slot-takeover). Mod ORs
     // them into sent_checks each frame and clears this field. Additive only.
-    u64 client_backfill[3][2];
+    u64 client_backfill[CHECKLIST_MODE_NUM][2];
 
     // Goal completion: mod sets to 1 when the player satisfies the active
     // goal. Sticky and persisted to save. Client reads and forwards victory.
@@ -213,13 +218,6 @@ typedef struct APData
     u32 deathlink_menu_enabled;
     u32 energylink_menu_enabled;
     u32 traplink_menu_enabled;
-
-    // AP-checklist completed-checkbox mirror, the extra-mode parallel of
-    // sent_checks[]. Appended at the struct tail (rather than
-    // widening sent_checks[3] to [4]) so the existing field offsets the Python
-    // client reads for the 3 real modes are preserved; the client reads this
-    // trailing field for the AP checklist.
-    u64 sent_checks_ap[2];
 } APData;
 
 extern APData *ap_data;

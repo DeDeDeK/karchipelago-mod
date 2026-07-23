@@ -10,6 +10,7 @@
 #include "main.h"
 #include "checklist_rewards.h"
 #include "check_detection.h"
+#include "ap_checklist.h"
 #include "gate_machines.h"
 #include "gate_colors.h"
 #include "gate_airride_stages.h"
@@ -75,27 +76,46 @@ typedef struct CrossModeSlot
     u8 source_reward_index;
 } CrossModeSlot;
 
-// Populated by ApplyLocations, rebuilt on save load.
-static CrossModeSlot cross_mode_slots[GMMODE_NUM][CLEAR_KIND_NUM];
+// Populated by ApplyLocations, rebuilt on save load. Row AP_CHECKLIST_ROW is the AP
+// checklist tab: it awards no native rewards, so every reward it hosts is a
+// cross-mode placement from one of the 3 real modes and lives only here.
+static CrossModeSlot cross_mode_slots[CHECKLIST_MODE_NUM][CLEAR_KIND_NUM];
 
-// Snapshot of the cell currently under the cursor in the checklist UI,
-// updated by the FindRewardForCell hook. `source_mode` is the mode whose
-// reward table the text/icon hooks should read (differs from `mode` for
-// cross-mode placements). `valid` is 0 before any cell has been hovered.
+// The mode whose reward table the text/icon/audio hooks should read for the hovered
+// cell - it differs from the displayed mode for a cross-mode placement, so it can only
+// come from a resolve. Snapshotted by the FindRewardForCell hook; 0xFF = unresolved.
 static struct {
-    u8 mode;
-    u8 clear_kind;
     u8 source_mode;
-    u8 valid;
-} hover;
+} hover = { 0xFF };
 
+// The cell under the checklist cursor, read live from the UI element: the cursor's
+// column/row give the grid position, which grid_mapping reverse-maps to a clear_kind.
+// Returns 0 when no checklist screen is up or the cursor is off the grid (unplaced, or
+// in the checkbox-filler list).
 int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind)
 {
-    if (!hover.valid)
+    GOBJ *gobj = Gm_GetMenuData()->clearchecker.bg_gobj;
+    if (!gobj)
         return 0;
-    *out_mode = hover.mode;
-    *out_clear_kind = hover.clear_kind;
-    return 1;
+    ClearCheckerUI *ui = (ClearCheckerUI *)gobj->userdata;
+    if (!ui || ui->cursor_col < 0 || ui->cursor_col >= CHECKLIST_GRID_COLS ||
+        ui->cursor_row < 0 || ui->cursor_row >= CHECKLIST_GRID_ROWS)
+        return 0;
+
+    GameClearData *cd = gmGetClearcheckerTypeP(ui->mode);
+    if (!cd)
+        return 0;
+
+    u8 phys_slot = (u8)(ui->cursor_col + ui->cursor_row * CHECKLIST_GRID_COLS);
+    for (int k = 0; k < CLEAR_KIND_NUM; k++)
+    {
+        if (cd->grid_mapping[k] != phys_slot)
+            continue;
+        *out_mode = (u8)ui->mode;
+        *out_clear_kind = (u8)k;
+        return 1;
+    }
+    return 0;
 }
 
 // Resolve the reward placed at (mode, clear_kind). On success writes the source
@@ -105,10 +125,11 @@ int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind)
 int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
                                  u8 *out_source_mode, u8 *out_source_reward_index)
 {
-    if (mode >= GMMODE_NUM || clear_kind >= CLEAR_KIND_NUM)
+    int row = ChecklistModeRow(mode);
+    if (row < 0 || clear_kind >= CLEAR_KIND_NUM)
         return 0;
 
-    CrossModeSlot *slot = &cross_mode_slots[mode][clear_kind];
+    CrossModeSlot *slot = &cross_mode_slots[row][clear_kind];
     if (slot->source_mode != 0xFF)
     {
         *out_source_mode = slot->source_mode;
@@ -116,13 +137,19 @@ int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
         return 1;
     }
 
-    u16 target = ((u16)mode << 8) | clear_kind;
-    int count = reward_counts[mode];
+    // Below is the same-mode scan, which reads the mode's own reward table. The AP
+    // tab has none (it awards no native rewards), so any reward it hosts is
+    // cross-mode and was already resolved above.
+    if (row >= GMMODE_NUM)
+        return 0;
+
+    u16 target = ((u16)row << 8) | clear_kind;
+    int count = reward_counts[row];
     for (int ri = 0; ri < count; ri++)
     {
-        if (ap_save->shuffled_rewards[mode][ri] != target)
+        if (ap_save->shuffled_rewards[row][ri] != target)
             continue;
-        *out_source_mode = mode;
+        *out_source_mode = (u8)row;
         *out_source_reward_index = (u8)ri;
         return 1;
     }
@@ -139,9 +166,9 @@ int ChecklistRewards_CellHasReceivedReward(u8 mode, u8 clear_kind)
 
 static void ClearCrossModeSlots(void)
 {
-    for (int m = 0; m < GMMODE_NUM; m++)
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
         for (int k = 0; k < CLEAR_KIND_NUM; k++)
-            cross_mode_slots[m][k].source_mode = 0xFF;
+            cross_mode_slots[r][k].source_mode = 0xFF;
 }
 
 // Returns 1 iff reward_index in mode's table has a local placement in THAT
@@ -292,12 +319,24 @@ void Checklist_AnnounceFiller(GameMode mode)
 {
     const char *mode_name;
     GXColor mode_color;
-    switch (mode)
+    // The AP checklist tab's framework-assigned mode (ap_checklist_mode, >= GMMODE_NUM)
+    // has no ModeColors[] slot - that array is sized GMMODE_NUM - so it carries its own
+    // name and theme color instead.
+    if ((int)mode == ap_checklist_mode)
     {
-        case GMMODE_AIRRIDE:   mode_name = "Air Ride";   mode_color = tb_api->ModeColors[GMMODE_AIRRIDE];   break;
-        case GMMODE_TOPRIDE:   mode_name = "Top Ride";   mode_color = tb_api->ModeColors[GMMODE_TOPRIDE];   break;
-        case GMMODE_CITYTRIAL: mode_name = "City Trial"; mode_color = tb_api->ModeColors[GMMODE_CITYTRIAL]; break;
-        default:               mode_name = "Checklist";  mode_color = tb_api->DefaultColor;                 break;
+        static const GXColor ap_theme = {AP_THEME_R, AP_THEME_G, AP_THEME_B, 255};
+        mode_name = AP_CHECKLIST_NAME;
+        mode_color = ap_theme;
+    }
+    else
+    {
+        switch (mode)
+        {
+            case GMMODE_AIRRIDE:   mode_name = "Air Ride";   mode_color = tb_api->ModeColors[GMMODE_AIRRIDE];   break;
+            case GMMODE_TOPRIDE:   mode_name = "Top Ride";   mode_color = tb_api->ModeColors[GMMODE_TOPRIDE];   break;
+            case GMMODE_CITYTRIAL: mode_name = "City Trial"; mode_color = tb_api->ModeColors[GMMODE_CITYTRIAL]; break;
+            default:               mode_name = "Checklist";  mode_color = tb_api->DefaultColor;                 break;
+        }
     }
 
     TextSegment segs[5] = {
@@ -565,7 +604,7 @@ CODEPATCH_HOOKCONDITIONALCREATE(
 // persists it to MainMenuData.soundtest_bgm_kind (GameData+0x4E).
 static int ChecklistRewards_AudioPreview(u8 reward_index)
 {
-    if (!hover.valid || hover.source_mode >= GMMODE_NUM)
+    if (hover.source_mode >= GMMODE_NUM)
         return 1;  // alt-exit (skip)
 
     u8 *table = stc_audio_preview_tables[hover.source_mode];
@@ -648,12 +687,6 @@ CODEPATCH_HOOKCREATE(
 // reward_index + 1 if a reward is visible, -1 otherwise.
 static int ChecklistRewards_FindRewardForCell(u8 current_mode, u8 clear_kind)
 {
-    // Snapshot the hovered cell for any outside consumer (e.g. debug X-unlock).
-    // This hook fires when the cursor lands on a new cell in UpdateCellInfo.
-    hover.mode = current_mode;
-    hover.clear_kind = clear_kind;
-    hover.valid = 1;
-
     u8 src_mode, src_ri;
     if (!ChecklistRewards_ResolveCell(current_mode, clear_kind, &src_mode, &src_ri))
     {
@@ -761,16 +794,18 @@ CODEPATCH_HOOKCREATE(
 // has_reward only; the filler token is granted at AP receipt in ChecklistRewards_Grant.
 static void ChecklistRewards_ApplyCrossModeHasReward(u8 current_mode)
 {
-    // The AP checklist (mode 3) has no cross-mode slots and cross_mode_slots is sized
-    // [GMMODE_NUM]; without this guard the AP tab would read cross_mode_slots[3] OOB
-    // and badge any unlocked AP cell with a spurious has_reward.
-    if (current_mode >= GMMODE_NUM)
+    // Includes the AP tab, which hosts cross-mode rewards like any other mode. Any
+    // other custom tab has no row and is skipped.
+    int row = ChecklistModeRow(current_mode);
+    if (row < 0)
         return;
 
     GameClearData *cd = gmGetClearcheckerTypeP(current_mode);
+    if (!cd)
+        return;
     for (int ck = 0; ck < CLEAR_KIND_NUM; ck++)
     {
-        CrossModeSlot *slot = &cross_mode_slots[current_mode][ck];
+        CrossModeSlot *slot = &cross_mode_slots[row][ck];
         if (slot->source_mode == 0xFF)
             continue;
         if (cd->clear[ck].has_reward)
@@ -904,20 +939,32 @@ static void RebuildRewardTablesFromShuffle(void)
                 continue;
             }
 
-            u8 target_mode = (u8)(loc >> 8);
+            // The wire encodes the target as a checklist-mode ROW, not a runtime mode:
+            // the client writes KARData.GameMode, whose ARCHIPELAGO member is
+            // AP_CHECKLIST_ROW by definition. So this needs no ChecklistModeRow() -
+            // it needs a bounds check, since the value comes off the wire.
+            u8 target_row = (u8)(loc >> 8);
             u8 clear_kind = (u8)(loc & 0xFF);
 
-            if (target_mode == (u8)source_mode)
+            if (target_row >= CHECKLIST_MODE_NUM || clear_kind >= CLEAR_KIND_NUM)
+            {
+                // Malformed wire value; treat as remote rather than indexing OOB.
+                stc_reward_table_ptrs[source_mode][i].clear_kind = 0;
+                continue;
+            }
+
+            if (target_row == (u8)source_mode)
             {
                 stc_reward_table_ptrs[source_mode][i].clear_kind = clear_kind;
             }
             else
             {
-                // Cross-mode: sentinel in source table, real placement tracked
-                // in cross_mode_slots.
+                // Cross-mode: sentinel in source table, real placement tracked in
+                // cross_mode_slots. The target may be the AP tab - the AP world
+                // shuffles rewards onto AP boxes like any other mode.
                 stc_reward_table_ptrs[source_mode][i].clear_kind = 0;
-                cross_mode_slots[target_mode][clear_kind].source_mode = (u8)source_mode;
-                cross_mode_slots[target_mode][clear_kind].source_reward_index = (u8)i;
+                cross_mode_slots[target_row][clear_kind].source_mode = (u8)source_mode;
+                cross_mode_slots[target_row][clear_kind].source_reward_index = (u8)i;
             }
         }
     }
@@ -1021,7 +1068,7 @@ void ChecklistRewards_DebugClearAll(void)
         for (int i = 0; i < reward_counts[mode]; i++)
             stc_reward_table_ptrs[mode][i].clear_kind = 0;
     ClearCrossModeSlots();
-    hover.source_mode = 0;
+    hover.source_mode = 0xFF;
 
     // 2. Save-side checklist state (sent_checks + goal delegated to check_detection).
     for (int m = 0; m < GMMODE_NUM; m++)

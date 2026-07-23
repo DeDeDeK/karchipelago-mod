@@ -234,6 +234,7 @@ GIVE_FN(GiveSpawnRateUp, AP_ITEM_SPAWN_RATE_UP)
 GIVE_FN(GiveFillerAR,    AP_ITEM_CHECKBOX_FILLER_AIRRIDE)
 GIVE_FN(GiveFillerTR,    AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
 GIVE_FN(GiveFillerCT,    AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
+GIVE_FN(GiveFillerAP,    AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO)
 
 // Cosmetic filler (scale every human Kirby model, all modes)
 GIVE_FN(GiveBigKirby,    AP_ITEM_BIG_KIRBY)
@@ -771,7 +772,7 @@ static MenuDesc give_traps_menu = {
 };
 
 static MenuDesc give_upgrades_menu = {
-    .option_num = 8,
+    .option_num = 9,
     .options = {
         A("Patch Cap Increase",  "Increase patch cap",       GivePatchCap),
         A("Spawn Rate Up",       "Increase item spawn rate", GiveSpawnRateUp),
@@ -779,6 +780,7 @@ static MenuDesc give_upgrades_menu = {
         A("AR Checkbox Filler",  "Fill AR checklist square", GiveFillerAR),
         A("TR Checkbox Filler",  "Fill TR checklist square", GiveFillerTR),
         A("CT Checkbox Filler",  "Fill CT checklist square", GiveFillerCT),
+        A("AP Checkbox Filler",  "Fill AP checklist square", GiveFillerAP),
         A("Big Kirby",           "Scale Kirby model up (x1.5)",   GiveBigKirby),
         A("Small Kirby",         "Scale Kirby model down (x0.5)", GiveSmallKirby),
     },

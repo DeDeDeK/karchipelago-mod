@@ -84,7 +84,7 @@ Per-frame function that handles the hover tooltip for the currently selected che
 
 **Register assignments (stable throughout function):**
 - `r29` = cell info struct (+0x0C: text object, +0x10: previous reward_index, +0x11: previous clear_kind, +0x12: display state counter)
-- `r30` = checklist UI struct (+0x14: current mode)
+- `r30` = `ClearCheckerUI` (+0x14: current mode, +0x15: phase)
 - `r31` = main menu instance
 - `r28` = icon display object
 - `r26` = clear_kind of hovered cell (after grid_mapping lookup)
@@ -161,8 +161,8 @@ Because `ClearChecker_CheckUnlocked` is `REPLACEFUNC`'d to `ChecklistRewards_Che
 - Resolves via `ChecklistRewards_ResolveCell(mode, clear_kind)` (cross_mode_slots → save_shuffled u16 scan). Returns the **source** mode's reward_index plus that row's `reward_param`. Honors vanilla's early-exit: only resolves when `is_unlocked || is_filler` on the target cell.
 
 **Audio preview hook** (HOOKCONDITIONALCREATE at `0x80180508`):
-- `ChecklistRewards_AudioPreview(reward_index)`: Replaces the vanilla per-entry scan that walks `stc_audio_preview_tables[current_mode]`. Reads `hover.source_mode` (set by the FindRewardForCell hook in `Checklist_UpdateCellInfo` on the prior frame for the hovered cell), looks up `reward_index` in the **source** mode's audio table, calls `BGM_Play(song_id)`, and persists the song_id to `MainMenuData.soundtest_bgm_kind` (`GameData+0x4E`).
-- Reached only when `reward_param == REWARDPARAM_AUDIO`. Always alt-exits to `0x80180560` past the vanilla scan + `BGM_Play` + persist sequence. For same-mode placements `hover.source_mode == current_mode`, so behavior matches vanilla. If `hover.valid == 0` (no cell ever hovered) the hook alt-exits without playing anything — the audio-preview button is unreachable in practice on a never-hovered cell. Cross-mode ending previews (`REWARDPARAM_ENDING`) are safe to route through the unhooked vanilla path at `0x80180554` — vanilla's "ending preview" only sets a UI state byte and plays a menu click; no actual ending movie plays.
+- `ChecklistRewards_AudioPreview(reward_index)`: Replaces the vanilla per-entry scan that walks `stc_audio_preview_tables[current_mode]`. Reads `hover.source_mode` (set by the FindRewardForCell hook in `Checklist_UpdateCellInfo` on the prior frame for the hovered cell; `0xFF` until one resolves), looks up `reward_index` in the **source** mode's audio table, calls `BGM_Play(song_id)`, and persists the song_id to `MainMenuData.soundtest_bgm_kind` (`GameData+0x4E`).
+- Reached only when `reward_param == REWARDPARAM_AUDIO`. Always alt-exits to `0x80180560` past the vanilla scan + `BGM_Play` + persist sequence. For same-mode placements `hover.source_mode == current_mode`, so behavior matches vanilla. If `hover.source_mode` is still `0xFF` (no cell has resolved yet) the hook alt-exits without playing anything. Cross-mode ending previews (`REWARDPARAM_ENDING`) are safe to route through the unhooked vanilla path at `0x80180554` — vanilla's "ending preview" only sets a UI state byte and plays a menu click; no actual ending movie plays.
 
 **Grant path:**
 - `ChecklistRewards_Grant(mode, reward_index)`: Sets AP bitfield, decodes the placement cell directly from `shuffled_rewards[mode][reward_index]` (high byte = target mode, low byte = target clear_kind, `0xFFFF` = remote), writes `has_reward` to the correct mode's `GameClearData.clear[]`, updates the per-mode unlock bitfield cache (Air Ride / City Trial only — Top Ride has no cache slot). **Does not set `is_unlocked`** — that bit is reserved as the source of truth for "the player completed this checkbox in gameplay" and is owned by the check-detection system (`check_detection.c`). The reward icon still appears because it is driven by `has_reward`, not `is_unlocked`.
@@ -233,7 +233,7 @@ Because `ClearChecker_CheckUnlocked` is `REPLACEFUNC`'d to `ChecklistRewards_Che
 - `ChecklistRewards_FindRewardForCell(current_mode, clear_kind)`: Replaces vanilla's reward-table scan entirely — always alt-exits to 0x80181F5C, vanilla's scan never runs. This is required because a raw scan of `RewardEntry.clear_kind` would alias cross-mode source rows (sentinel 0) against a real same-mode placement at `clear_kind=0`.
 - Resolves via `ChecklistRewards_ResolveCell` (cross_mode_slots first, then full-u16 match against `save_shuffled[current_mode]`). Comparing against the full u16 avoids the sentinel aliasing.
 - AP `received_checklist_rewards` bit → return reward_index unconditionally. Otherwise: same-mode cells require `has_reward` set; cross-mode cells require `is_unlocked || has_reward` (the `is_unlocked` term covers the newly-completed-this-session window before the post-loop hook has mirrored has_reward).
-- Snapshots `(mode, clear_kind, source_mode, valid=1)` into the static `hover` struct (also exposed to other modules via `ChecklistRewards_GetHoveredCell`). Downstream text/icon hooks read `hover.source_mode` to pick the correct SIS slot and reward table.
+- Snapshots `source_mode` into the static `hover` struct; downstream text/icon/audio hooks read it to pick the correct SIS slot and reward table. It is the one piece that cannot be recomputed on demand, since it comes from a placement resolve rather than the UI. The hovered cell itself is *not* snapshotted — `ChecklistRewards_GetHoveredCell` reads `ClearCheckerUI.cursor_col`/`cursor_row` live and reverse-maps through `grid_mapping`.
 - Returns `reward_index + 1` for a visible reward, `-1` for empty/locked. Epilogue decrements r3 by 1 (or sets -1 on negative), stores to r0 so vanilla's post-alt-exit `mr r27, r0` lands the right value.
 
 **Reward text display** (HOOKCREATE at 0x8018201C):

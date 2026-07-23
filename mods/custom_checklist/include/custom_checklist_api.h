@@ -3,11 +3,9 @@
 
 #include "datatypes.h"
 
-// Custom Checklist - framework for adding mod-owned checklist tabs alongside the
-// three vanilla ones (Air Ride / Top Ride / City Trial), folded into the L/R tab
-// rotation. A mod supplies the objectives, theme, and art; the framework owns the
-// presentation and per-frame evaluation. Import via Hoshi_ImportMod and call
-// Register from OnSaveLoaded (the framework boots after most mods).
+// Custom Checklist - mod-owned checklist tabs alongside the three vanilla ones, folded
+// into the L/R tab rotation. A mod supplies the objectives, theme, and art. Import via
+// Hoshi_ImportMod and call Register from OnSaveLoaded (the framework boots after most mods).
 
 #define CUSTOM_CHECKLIST_MOD_NAME  "custom_checklist"
 #define CUSTOM_CHECKLIST_API_MAJOR 1
@@ -17,9 +15,8 @@
 // subset of cells; undefined cells render blank.
 #define CC_CLEAR_KIND_NUM 120
 
-// One checklist cell: an objective at grid cell `clear_kind`, with `label` shown
-// when the cell is selected and `is_complete` polled every frame until it first
-// returns nonzero (then the cell is recorded and animated).
+// One checklist cell. is_complete is polled every frame until it first returns nonzero,
+// then the cell is recorded and animated.
 typedef struct CustomCheck
 {
     int clear_kind;           // grid cell index, [0, CC_CLEAR_KIND_NUM)
@@ -51,19 +48,16 @@ typedef struct CustomChecklistDesc
     const CustomCheck *checks;
     int check_num;
 
-    // Persistence (OPTIONAL - leave both NULL for the common case, where the
-    // framework persists the tab in its own save keyed by `name`). Provide both
-    // only when the mod must own where a completion is stored. A half-provided
-    // pair falls back to framework persistence.
+    // Persistence (OPTIONAL - leave both NULL and the framework persists the tab in its
+    // own save, keyed by `name`). Provide both only when the mod must own where a
+    // completion is stored; a half-provided pair falls back to framework persistence.
     //   is_recorded(clear_kind)     -> nonzero if already completed (out-of-range: 1).
-    //   record_complete(clear_kind) -> mark recorded; called once, the first frame
-    //                                  the predicate holds.
+    //   record_complete(clear_kind) -> mark recorded; called on first completion.
     int  (*is_recorded)(int clear_kind);
     void (*record_complete)(int clear_kind);
 
-    // Optional completion cue, called once the first frame a check completes
-    // (whichever side persists) - the seam to raise a mod-specific notification
-    // without owning storage. NULL => none.
+    // Optional completion cue, called once on first completion whichever side persists -
+    // the seam to raise a mod-specific notification without owning storage. NULL => none.
     void (*on_complete)(int clear_kind);
 
     // Optional readiness gate: evaluation no-ops until this returns nonzero (e.g.
