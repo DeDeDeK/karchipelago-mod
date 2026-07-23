@@ -49,8 +49,8 @@ typedef enum APCheckKind
 // in any scene.
 int APCheckDetect_IsSet(int ck);
 
-// Attaches the per-frame sampler to every human rider (City Trial Trial rounds
-// only) and rebaselines the per-run counters.
+// Attaches the per-frame sampler to every human rider (City Trial rounds only)
+// and rebaselines the per-run counters.
 void APCheckDetect_On3DLoadEnd(void);
 
 // Samples the stadium results block, which Stadium_ExitMinor finishes latching

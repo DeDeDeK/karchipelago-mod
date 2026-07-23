@@ -13,8 +13,8 @@
 static const CustomChecklistAPI *cc_api = NULL;
 
 // One zero-argument predicate per cell, as the framework's CustomCheck wants.
-// Each is a pure read of latched state - all sampling is in ap_check_detect.c,
-// because the framework polls these every frame in every scene.
+// Each is a pure read of latched state - all sampling happens in the detection
+// hooks, because the framework polls these every frame in every scene.
 #define AP_CHECK_PREDICATE(name) \
     static int Check_##name(void) { return APCheckDetect_IsSet(APCK_##name); }
 

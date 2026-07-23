@@ -123,11 +123,12 @@ shared `cb_Load` resolves which tab it is from `Scene_GetCurrentMinor()`, then:
 - Repoints SIS slot 0 and loads the tab art (below).
 
 The tab's `GameClearData` carries a **full `grid_mapping` permutation** over all 120
-cells, with `is_visible` set only for defined checks. `Checklist_Update` reverse-scans
-`grid_mapping` to map a cursor position back to a clear_kind; an unmapped position trips
-the "Clearchecker Number 120" assert, so the full bijection is required even though most
-cells are invisible. `Register` seeds it as identity; the saved shuffle (below) replaces
-it on the first evaluated frame after the save is available.
+cells, and every cell starts hidden — the board reveals outward from completions
+(below). `Checklist_Update` reverse-scans `grid_mapping` to map a cursor position back
+to a clear_kind; an unmapped position trips the "Clearchecker Number 120" assert, so the
+full bijection is required even though most cells are invisible. `Register` seeds it as
+identity; the saved shuffle (below) replaces it on the first evaluated frame after the
+save is available.
 
 ## Cell labels (SIS text)
 
@@ -187,14 +188,14 @@ descriptor's `is_ready`):
 
 - **Not yet recorded** (`is_recorded(ck)` is false) and the predicate now holds:
   record it (the mod's `record_complete`, or the framework's own save), fire the
-  optional `on_complete(ck)` cue, then seed `clear[ck].is_new`/`is_visible` and play the
+  optional `on_complete(ck)` cue, then seed `clear[ck].is_new` and play the
   completion SFX. A check satisfied outside any gamemode (e.g. "Boot the game") never
   gets `is_new` from the engine, so the framework sets it; the flip-and-sparkle runs on
   the next tab entry.
-- **Already recorded**: re-assert `is_visible`, and raise `is_unlocked` only when no
-  `is_new` is pending — so a completion from a prior boot (the block is BSS-zeroed at
-  boot) shows complete with no replay, while a this-session completion still animates
-  once.
+- **Already recorded, with no `is_new` pending**: raise `is_unlocked` and reveal the
+  cell's neighbours (below) — so a completion from a prior boot (the block is BSS-zeroed
+  at boot) shows complete with no replay. A pending `is_new` is left alone, so a
+  this-session completion still animates once.
 
 The framework owns the **entire presentation** — the cell flags, the on-tab-entry
 flip-and-sparkle animation, the post-run popup (below), and the mid-run completion
@@ -202,6 +203,29 @@ cue (`CC_PlayUnlockSfx`, the same `0x10008` SFX vanilla plays for a checkbox,
 suppressed in menus and sharing the engine's one-frame cooldown so a tab whose
 `record_complete` also routes through `ClearChecker_SetNewUnlock` never
 double-plays). Every tab — AP or not — gets identical animations and sound.
+
+### Cell visibility: revealed, never listed
+
+A custom tab hides its cells exactly the way the vanilla board does. The grid builder
+draws a cell only for the bits it finds — `is_filler` → filler tile, `has_reward` →
+reward tile, `is_unlocked` → checked box, `is_visible` → empty box, none of them → no
+cell at all — so a fresh tab is a blank board and grows outward from its completions.
+The framework never marks a cell `is_visible` because it has an objective; only a
+completed neighbour does that.
+
+`Checklist_ProcessUnlock` supplies the reveal for cells it animates: it maps the
+unlocked cell through `grid_mapping` to a physical slot and sets `is_visible` on the
+four orthogonal neighbours of that slot (edge-gated on col/row), then rebuilds the grid.
+It is the only engine path that grants the bit, so a cell that is **already complete
+when it arrives** — restored from a prior boot into BSS-zeroed clear data, or back-filled
+by a consumer — would never reveal anything around it. When the evaluator raises
+`is_unlocked` on such a cell it therefore performs the same four-neighbour reveal itself,
+once per clear_kind, tracked in a per-tab bitmask that resets whenever the layout changes
+(reveals are positional, so a reshuffle invalidates them).
+
+The reveal is purely positional and ignores whether the neighbour has a check, matching
+the engine. On a tab defining fewer than 120 cells that means some revealed boxes can
+never be filled — they read as objectives the player has yet to reach.
 
 ### Recorded state: framework-managed by default
 
@@ -247,10 +271,12 @@ its own `OnSaveLoaded`, which can run before the framework's (mods boot in alpha
 order), so until the seed is readable the tab keeps the identity mapping — itself a valid
 bijection that renders fine. It runs ahead of the descriptor's `is_ready` gate, since
 deferring it would show the identity layout and then visibly reshuffle the moment the tab
-became ready. It writes `grid_mapping` only; the `clear[]` flags are live by then. There
-is no meta-cell pre-placement (vanilla reserves positions for its "fill in 100" cell
-before shuffling, but `Fill100ClearKind` returns `0xFF` for custom tabs), so a tab that
-ever gains a meta cell needs that handling added.
+became ready. It writes `grid_mapping` only — the `clear[]` completion flags are live by
+then — except that it drops every `is_visible` bit and the reveal bookkeeping, which are
+positional and so stale the moment cells move. There is no meta-cell pre-placement
+(vanilla reserves positions for its "fill in 100" cell before shuffling, but
+`Fill100ClearKind` returns `0xFF` for custom tabs), so a tab that ever gains a meta cell
+needs that handling added.
 
 ## Tab cycle + post-run presentation (`CC_MinorThink`)
 
@@ -283,7 +309,8 @@ movie — confining the chain to runs.
   `CustomChecklistDesc` / `CustomCheck` authoring contract and the
   `CustomChecklistAPI` (`Register`).
 - `mods/custom_checklist/src/custom_checklist.c` — the registry, the minor-scene
-  install + shared `cb_Load`, the six REPLACEFUNCs, the per-frame evaluator, the SIS
-  slot-0 override, the target-color recolor, and the banner/emblem texture swap.
+  install + shared `cb_Load`, the six REPLACEFUNCs, the per-frame evaluator, the grid
+  shuffle and neighbour reveal, the SIS slot-0 override, the target-color recolor, and
+  the banner/emblem texture swap.
 - `Makefile` — `mods/custom_checklist/include` added to `INCLUDES` (public header
   consumed by the archipelago mod).

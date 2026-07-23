@@ -76,7 +76,29 @@ documented in the sister doc **`docs/checklist-stat-tracking.md`**.
 | `0x80181D70` | `Checklist_UpdateCellInfo()` | Per-frame hover display: looks up reward for hovered cell, displays text/icon |
 | `0x801822F4` | Checklist init function | Loads SIS, creates grid cells, calls `SetRewardFlagOnUnlocks` |
 | `0x80007AF0` | `Checklist_BuildUnlockBitfields()` | Caches unlock status into `GameData` + 0xD50 bitfields |
-| `0x8017E490` | `Checklist_ProcessUnlock()` | Called from `Checklist_Think` case 1 on checklist entry. Scans clear[] to count completions, then writes the 5 meta auto-unlock bytes (100-checklist per mode, Dragoon, Hydra) via direct `stb` instructions that bypass `SetNewUnlock`. |
+| `0x8017E490` | `Checklist_ProcessUnlock()` | Called from `Checklist_Think` case 1 on checklist entry. Animates one pending unlock and reveals its neighbours (below), then writes the 5 meta auto-unlock bytes (100-checklist per mode, Dragoon, Hydra) via direct `stb` instructions that bypass `SetNewUnlock`. Returns 1 while an unlock was processed, 0 once none remain (and then requests a card save). |
+
+### Cell visibility — the board expands outward
+
+The grid builder draws a cell only for the bits it finds, in this priority:
+`is_filler` → filler tile, `has_reward` → reward tile, `is_unlocked` → checked box,
+`is_visible` → empty box, **none of them → no cell at all**. So a checklist starts as
+an almost-blank board and grows: `is_visible` is the "you can see this objective
+exists" bit, and nothing sets it up front.
+
+`Checklist_ProcessUnlock` is the sole source of it. Per call it finds the first
+`is_new && !is_unlocked` cell, overwrites its clear byte with `0x04` (`is_unlocked`
+alone), then maps it through `grid_mapping` to a physical slot and ORs `0x10`
+(`is_visible`) into the **four orthogonal neighbours** of that slot — left/right gated
+on `col != 0` / `col < 11`, up/down on `row != 0` / `row < 9` — each resolved back to a
+`clear_kind` by a reverse scan of `grid_mapping`. It then re-runs
+`Checklist_SetRewardFlagOnUnlocks` so the newly revealed tiles appear, moves the cursor
+onto the unlocked cell, and returns 1. `Checklist_Think` case 1 re-enters it every 45
+frames until it returns 0, so a run's whole batch of unlocks animates in sequence.
+
+Neither `ClearChecker_SetNewUnlock` nor the filler path touches `is_visible`; a
+completion that is never animated (recorded outside the checklist screen, or restored
+from a save into freshly zeroed clear data) therefore reveals nothing around itself.
 
 ### Checklist_UpdateCellInfo Display Flow (0x80181D70)
 

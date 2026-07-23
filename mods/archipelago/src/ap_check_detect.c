@@ -9,18 +9,10 @@
 #include "main.h"
 #include "ap_check_detect.h"
 
-// Detection for the Archipelago checklist's objectives. ap_checklist.c stays a
-// table of labels whose predicates are one APCheckDetect_IsSet call each; all
-// sampling lives here, in two hooks:
-//
-//   On3DLoadEnd - attaches a per-frame proc to each human rider for the City
-//                 Trial objectives, and rebaselines the per-run counters.
-//   On3DExit    - reads GameData.stadium_results, which Stadium_ExitMinor
-//                 finishes latching a few instructions before the hook site.
-//
-// Predicates themselves must never sample: the framework polls them every frame
-// in every scene, including menus and loads, and the results block survives the
-// scene exit and stays populated until the next stadium overwrites it.
+// Detection for the Archipelago checklist's objectives. All sampling lives
+// here, in the two hooks below, because the checklist framework polls every
+// predicate each frame in every scene - a predicate is only ever a read of
+// state latched here.
 
 // Objectives observed this boot, one bit per APCheckKind. Transient - the
 // permanent record is ap_save->sent_checks, written by the framework the frame
@@ -61,8 +53,7 @@ int APCheckDetect_IsSet(int ck)
 // Standing on the flower means standing on one of the tallest structures in the
 // city, on foot. Without the flower's own coordinates this approximates it as
 // "on foot, this high, and staying there" - the dwell requirement is what keeps
-// a dismount-and-fall through the same altitude from counting. Both numbers are
-// first-pass and want tuning against the real spot.
+// a dismount-and-fall through the same altitude from counting.
 #define AP_FLOWER_MIN_Y      400.0f
 #define AP_FLOWER_DWELL_FRAMES 30
 
@@ -137,8 +128,7 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     int allup = st->item_collect[ITKIND_ALLUP];
     if (allup > prev_allup[ply] && ap_save->allup_collect_total < AP_ALLUP_TOTAL_NEED)
     {
-        int total = ap_save->allup_collect_total + (allup - prev_allup[ply]);
-        ap_save->allup_collect_total = (u16)(total > 0xFFFF ? 0xFFFF : total);
+        ap_save->allup_collect_total += (u16)(allup - prev_allup[ply]);
         OSReport("[APCheckDetect] All Ups collected: %d/%d\n",
                  ap_save->allup_collect_total, AP_ALLUP_TOTAL_NEED);
     }
@@ -240,11 +230,12 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
         if (Ply_GetPKind(p) != PKIND_HMN || !SlotRecorded(r, p))
             continue;
 
-        float feet = r->ply_dist[p] * AP_FEET_PER_METRE;
-
         if (st >= STKIND_SINGLERACE1 && st <= STKIND_SINGLERACE9)
         {
-            if (r->ply_placement[p] != 0)
+            // Stadium_ComputeRankByTime ranks players who never crossed the
+            // line too, ordering them by distance - so placement alone would
+            // hand 1st to whoever was leading when the round was abandoned.
+            if (!r->ply_finished[p] || r->ply_placement[p] != 0)
                 continue;
             Observe(APCK_SR1_FIRST + (st - STKIND_SINGLERACE1));
             if (st != STKIND_SINGLERACE1)
@@ -263,13 +254,15 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
                          ap_save->purple_sr1_wins, AP_PURPLE_SR1_NEED);
             }
         }
-        else if (st == STKIND_HIGHJUMP && feet > 1500.0f)
+        else if (st == STKIND_HIGHJUMP)
         {
-            Observe(APCK_HIGHJUMP_1500);
+            if (r->ply_dist[p] * AP_FEET_PER_METRE > 1500.0f)
+                Observe(APCK_HIGHJUMP_1500);
         }
-        else if (st == STKIND_AIRGLIDER && feet > 2000.0f)
+        else if (st == STKIND_AIRGLIDER)
         {
-            Observe(APCK_AIRGLIDER_2000);
+            if (r->ply_dist[p] * AP_FEET_PER_METRE > 2000.0f)
+                Observe(APCK_AIRGLIDER_2000);
         }
         else if (st == STKIND_MELEE1 && r->ply_points[p] > 100)
         {

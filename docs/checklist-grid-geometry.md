@@ -79,8 +79,8 @@ Key facts:
 - **A non-visible cell (`clear[]` has none of `is_visible`/`has_reward`/
   `is_unlocked`/`is_filler`) gets no GObj** — it is truly absent, not an empty
   box. So the number of boxes already equals the number of cells the data marks
-  visible. A custom tab that sets `is_visible` on only N cells already draws only
-  N boxes.
+  visible — and since `is_visible` is only ever granted to the neighbours of a
+  completed cell, a fresh board draws nothing at all.
 - The **column count 12** appears here as `phys_slot % 12` / `phys_slot / 12`.
 - Cell **size/spacing** comes from the `Pos` element's joint-derived `xstep` /
   `ystep` (`Checklist_Init` reads them); it is independent of the column count.
@@ -97,7 +97,7 @@ scans search all 120 entries and are **column-count-agnostic**; only the
 | `Checklist_Think` | `0x8017f3bc` | cursor movement: `phys_slot = col + row*12`; column bound `col < 12`; last-column test `col % 12 < 11`; skip-empty navigation; reverse-scan loops |
 | `Checklist_Update` | `0x8018161c` | cursor-highlight position `X = col*xstep, Y = row*ystep`; reverse-scan; the "Clearchecker Number 120" assert when a cursor slot is unmapped |
 | `Checklist_UpdateCellInfo` | `0x80181d70` | hover tooltip: unrolled 12×10 reverse-scan cursor→clear_kind |
-| `Checklist_InitGridMapping` | `0x8004a2bc` | fills `grid_mapping[120]`, pre-places the meta cells, randomizes the remainder (per-mode). Custom tabs bypass it — the framework writes an identity `grid_mapping`. |
+| `Checklist_InitGridMapping` | `0x8004a2bc` | fills `grid_mapping[120]`, pre-places the meta cells, randomizes the remainder (per-mode). Custom tabs bypass it — the framework writes its own permutation. |
 | `Checklist_Init` (counter) | `0x801822f4` | completion counter scans 12×10 cells counting `clear[k] & 0x06` and prints the number. Order-independent: counts completed cells regardless of layout, so the count is unaffected by a column-count change. |
 
 ## Resizing the visible grid — what would change
@@ -139,46 +139,23 @@ fill/colour *on top of* that panel.
 So shrinking the cell count alone leaves the full-board panel behind it, and the
 board still looks 12×10. A visible resize needs **both** halves.
 
-## The shipped resize (custom_checklist `grid_cols`)
+## What `custom_checklist` does today: nothing geometric
 
-The framework takes a lighter path than the `REPLACEFUNC` reimplementations above,
-and it is mode-scoped for free (it only ever touches a custom tab's own data):
+No resize ships. A custom tab uses the full 12×10 board with every engine function
+above unpatched; the only thing the framework writes is its own `grid_mapping`
+permutation (a plain shuffle over `0..119`, seeded from the save), which reorders
+which clear_kind sits in which slot but not the shape of anything.
 
-1. **Cells — reshape via `grid_mapping`.** `CC_InitClearData` keeps the engine's
-   native `% 12` / `/ 12` placement but re-points the tab's `grid_mapping` so the
-   visible cells occupy a `cols`-wide top-left block (packed row-major), and the
-   hidden cells take the remaining slots. `grid_mapping` stays a full bijection of
-   `0..119`, so `Checklist_Update`'s reverse scan never trips the
-   "Clearchecker Number 120" assert. No engine function is replaced; the builder
-   and cursor stay self-consistent through the permutation.
-2. **Banner panel — scale it.** `CC_RetargetBannerJObj` finds the 248-wide quad
-   and, when `grid_cols` is `1..11`, scales it `x *= cols/12`, `y *= rows/10`
-   (trans untouched; the top-left anchor keeps the block aligned).
-   `rows = ceil(check_num / cols)`. The natural scale is captured per banner
-   instance for an idempotent per-frame re-apply (recaptured across rebuilds).
-3. **Cursor — clamp it into the block.** `Checklist_Think`'s cursor movement
-   (cases 4 and 8) is plain `col±1` / `row±1` with hardcoded `11` / `9` wrap and
-   **no skip-empty step** — left to itself the cursor roams (and can select) all
-   120 board positions regardless of which cells exist. `CC_ClampChecklistCursor`,
-   hooked at `0x80181678` in `Checklist_Update` (right after the grid element's
-   user data `chk` is resolved and before the cursor col/row at `chk+0x17`/`+0x18`
-   are first read to position the highlight), clamps `col` to `[0, cols-1]` and
-   `row` to `[0, rows-1]` and writes them back. Because the highlight is positioned
-   from the clamped value the cursor never draws outside the block, and the
-   write-back means the next `Checklist_Think` resumes in-block (so a press into the
-   edge stalls there rather than wrapping into the empty region). The `0x81`
-   filler-browse sentinel is left untouched. No-op for the native layout.
+So a tab with fewer than 120 checks reads as a sparse full-size board rather than a
+small dense one, and two consequences follow from the untouched geometry:
 
-This shrinks the *fill block* and the *banner panel* and confines the *cursor*
-without reimplementing `Checklist_Think`/`Update`. The cursor still moves in
-12-wide logical space; the clamp keeps it inside the block. The cell **size** is
-unchanged — a narrower grid is left-aligned, not centred.
-
-What is **not** reshaped: the City Trial board's decorative chrome — the rounded
-frame (beaded corner/edge arcs in the `Bg` scene at `MMD+0xed0`, I8 grayscale
-pieces sized for the 12×10 board), the L/R tab arrows, the tab emblem, and the
-completion counter — is laid out for the full board and still spans it, so a
-narrowed tab reads as a small block inside a full-size frame.
+- The **banner panel** (`MMD+0xee4`, the 248×128 quad) spans the whole 12×10 board,
+  as does the City Trial chrome — the rounded frame in the `Bg` scene at
+  `MMD+0xed0`, the L/R tab arrows, the tab emblem, and the completion counter.
+- The **cursor** roams all 120 positions. `Checklist_Think`'s movement (cases 4 and
+  8) is plain `col±1` / `row±1` against the hardcoded `11` / `9` wrap with no
+  skip-empty step, so it can sit on — and spend a checkbox filler on — any slot,
+  occupied or not.
 
 Note: live-poking these JObjs from an external memory tool (e.g. dolphin-memory)
 to derive the scale is unreliable — the async write races the per-frame

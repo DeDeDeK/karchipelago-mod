@@ -37,6 +37,7 @@ typedef struct CCList
 {
     CustomChecklistDesc desc;   // copied at Register (pointers must stay valid)
     CCClearStorage clear_storage;
+    u64 revealed[2];            // clear_kinds whose neighbours have already been revealed
     int minor_id;               // installed minor-scene id (-1 if install failed)
     int mode;                   // GMMODE_NUM + registry index
     int fw_persist;             // 1 if the framework owns this tab's recorded state
@@ -44,6 +45,9 @@ typedef struct CCList
     int save_slot;              // resolved CCSave slot, -1 until first access
     int layout_done;            // 1 once the saved grid layout has been applied this session
 } CCList;
+
+#define CC_BIT_TEST(w, k) (((w)[(k) >> 6] >> ((k) & 63)) & 1ULL)
+#define CC_BIT_SET(w, k)  ((w)[(k) >> 6] |= 1ULL << ((k) & 63))
 
 static CCList g_lists[CC_MAX_CHECKLISTS];
 static int g_count = 0;
@@ -681,9 +685,10 @@ static int CC_EnsureLayoutSeed(void)
 
 // Shuffle a tab's grid_mapping into a random-but-stable permutation, from the save seed
 // mixed with the tab's name hash so tabs neither share a layout nor reshuffle each other.
-// Writes grid_mapping only - clear[] state is live by the time this runs. Fisher-Yates keeps
-// the result a full bijection over 0..119, which Checklist_Update's reverse scan needs.
-// No meta-cell pre-placement: Fill100ClearKind returns 0xFF for custom tabs.
+// Writes grid_mapping only - clear[] completion state is live by the time this runs - but
+// drops the reveals, which are positional and so stale under a new layout. Fisher-Yates
+// keeps the result a full bijection over 0..119, which Checklist_Update's reverse scan
+// needs. No meta-cell pre-placement: Fill100ClearKind returns 0xFF for custom tabs.
 static void CC_ApplyLayout(int idx)
 {
     GameClearData *cd = CC_CLEAR(idx);
@@ -703,6 +708,11 @@ static void CC_ApplyLayout(int idx)
         cd->grid_mapping[k] = cd->grid_mapping[j];
         cd->grid_mapping[j] = tmp;
     }
+
+    for (int k = 0; k < CC_CLEAR_KIND_NUM; k++)
+        cd->clear[k].is_visible = 0;
+    g_lists[idx].revealed[0] = 0;
+    g_lists[idx].revealed[1] = 0;
 }
 
 // Apply the saved layout once per tab per session. Lazy because a consumer registers from
@@ -718,25 +728,54 @@ static void CC_EnsureLayout(int idx)
     g_lists[idx].layout_done = 1;
 }
 
-// Lay out a tab's clear data. grid_mapping must be a full bijection over all 120 clear_kinds
-// or Checklist_Update's reverse scan trips the "Clearchecker Number 120" assert; identity is
-// the fallback until CC_EnsureLayout can shuffle. is_visible gates which cells draw.
+// Lay out a tab's clear data. Every cell starts hidden - the board reveals outward from
+// completions - and grid_mapping must be a full bijection over all 120 clear_kinds or
+// Checklist_Update's reverse scan trips the "Clearchecker Number 120" assert; identity is
+// the fallback until CC_EnsureLayout can shuffle.
 static void CC_InitClearData(int idx)
 {
     GameClearData *cd = CC_CLEAR(idx);
-    const CustomChecklistDesc *d = &g_lists[idx].desc;
     for (int k = 0; k < CC_CLEAR_KIND_NUM; k++)
     {
         cd->grid_mapping[k] = (u8)k;
         memset(&cd->clear[k], 0, sizeof(cd->clear[k]));
     }
-    for (int c = 0; c < d->check_num; c++)
+    g_lists[idx].revealed[0] = 0;
+    g_lists[idx].revealed[1] = 0;
+}
+
+// Show the cell occupying a physical grid slot, resolved back through the tab's
+// grid_mapping permutation.
+static void CC_RevealSlot(GameClearData *cd, int slot)
+{
+    for (int k = 0; k < CC_CLEAR_KIND_NUM; k++)
     {
-        int ck = d->checks[c].clear_kind;
-        if (ck < 0 || ck >= CC_CLEAR_KIND_NUM)
-            continue;
-        cd->clear[ck].is_visible = 1;
+        if (cd->grid_mapping[k] == (u8)slot)
+        {
+            cd->clear[k].is_visible = 1;
+            return;
+        }
     }
+}
+
+// Reveal a completed cell's four orthogonal neighbours - the expansion
+// Checklist_ProcessUnlock performs as it animates an unlock. The framework repeats it for
+// cells that come back already complete (a prior boot, or a consumer back-filling its own
+// recorded state), which the engine never animates and so never reveals around.
+static void CC_RevealNeighbors(GameClearData *cd, int clear_kind)
+{
+    int slot = cd->grid_mapping[clear_kind];
+    int col = slot % CHECKLIST_GRID_COLS;
+    int row = slot / CHECKLIST_GRID_COLS;
+
+    if (col > 0)
+        CC_RevealSlot(cd, slot - 1);
+    if (col < CHECKLIST_GRID_COLS - 1)
+        CC_RevealSlot(cd, slot + 1);
+    if (row > 0)
+        CC_RevealSlot(cd, slot - CHECKLIST_GRID_COLS);
+    if (row < CHECKLIST_GRID_ROWS - 1)
+        CC_RevealSlot(cd, slot + CHECKLIST_GRID_COLS);
 }
 
 // Register a tab as a new minor scene by cloning the City Trial checklist descriptor and
@@ -823,8 +862,8 @@ static void CC_DefaultRecord(int i, int clear_kind)
     g_save->slots[s].recorded[clear_kind >> 6] |= (1ULL << (clear_kind & 63));
 }
 
-// Per-frame pass over every tab: complete any check whose predicate now holds, and keep
-// already-recorded cells rendered.
+// Per-frame pass over every tab: complete any check whose predicate now holds, and restore
+// the board state of the ones already recorded.
 static void CC_Evaluate(void)
 {
     for (int i = 0; i < g_count; i++)
@@ -863,17 +902,20 @@ static void CC_Evaluate(void)
                 // A check satisfied outside any gamemode (e.g. "Boot the game") never gets
                 // is_new from the engine, so seed it; the flip-and-sparkle runs on next entry.
                 cd->clear[ck].is_new = 1;
-                cd->clear[ck].is_visible = 1;
                 CC_PlayUnlockSfx();
             }
-            else
+            else if (!cd->clear[ck].is_new)
             {
-                // Keep it rendered. A pending is_new is left for Checklist_ProcessUnlock to
-                // animate; forcing is_unlocked only when none is pending makes a prior-boot
-                // completion show complete with no replay.
-                cd->clear[ck].is_visible = 1;
-                if (!cd->clear[ck].is_new)
-                    cd->clear[ck].is_unlocked = 1;
+                // Settled complete. A pending is_new is left alone for
+                // Checklist_ProcessUnlock to animate (it raises is_unlocked and reveals the
+                // neighbours itself), so forcing is_unlocked only once none is pending makes
+                // a prior-boot completion show complete with no replay.
+                cd->clear[ck].is_unlocked = 1;
+                if (!CC_BIT_TEST(L->revealed, ck))
+                {
+                    CC_BIT_SET(L->revealed, ck);
+                    CC_RevealNeighbors(cd, ck);
+                }
             }
         }
     }

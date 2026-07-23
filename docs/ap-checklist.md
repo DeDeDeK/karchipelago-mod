@@ -77,8 +77,12 @@ The framework only adds the cell flags and animation around it.
 `GameClearData` block — so the AP record path and the framework presentation operate on
 the same block.
 
-The framework only marks `is_visible` on cells backed by a check-table entry, so
-clear_kinds with no `ap_checks[]` entry do not draw.
+The tab's board starts blank and reveals outward, exactly as the vanilla checklists do:
+a cell draws only once it is completed, or once a completed orthogonal neighbour has
+revealed it. The reveal is positional, so with only 36 of the 120 clear_kinds carrying a
+check it will surface boxes that have no objective behind them and cells whose only
+neighbours are undefined stay dark until their own check fires. That resolves itself as
+the tab fills out toward 120.
 
 ## Wire layout
 
@@ -160,14 +164,21 @@ placement and time are stale.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 16–24 | SINGLE RACE 1–9 finish 1st | `ply_placement[p] == 0` |
-| 25 | HIGH JUMP over 1,500 ft | `ply_dist[p] / 0.3048 >= 1500` (`ply_dist` is metres) |
-| 26 | AIR GLIDER over 2,000 ft | `ply_dist[p] / 0.3048 >= 2000` |
+| 16–24 | SINGLE RACE 1–9 finish 1st | `ply_finished[p] && ply_placement[p] == 0` |
+| 25 | HIGH JUMP over 1,500 ft | `ply_dist[p] / 0.3048 > 1500` (`ply_dist` is metres) |
+| 26 | AIR GLIDER over 2,000 ft | `ply_dist[p] / 0.3048 > 2000` |
 | 27 / 28 | KIRBY MELEE 1 / 2 KOs | `ply_points[p] > 100` / `> 60` (the field is a polymorphic score; for Melee it is the KO count) |
 | 29 | SINGLE RACE 1 1st on Bulk Star | placement + `Ply_GetMachineKind(p) == VCKIND_BULK` |
 | 30 | SINGLE RACE 1 1st 3× as Purple | placement + `Ply_GetColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.purple_sr1_wins` |
 | 31–34 | DRAG RACE 1–4 photo finish | two finishers' `ply_race_time` within 6 frames (0.10 s at 60 fps) |
 | 35 | Air Ride photo finish | same, gated on `MJRKIND_AIR` + `AIRRIDEMODE_RACE` |
+
+Placement alone does not mean a win: `Stadium_ComputeRankByTime` (`0x800108b0`) ranks
+slots that never crossed the line as well, falling through to a
+`GameData.player_race_distance` comparison when neither slot has its finished flag set. So
+a Single Race abandoned while the human led on distance latches `ply_placement == 0`. The
+1st-place boxes therefore require `ply_finished[p]` too — which matters most for
+`purple_sr1_wins`, a persistent counter with no way back down.
 
 `ply_race_time == 0` is a DNF and is excluded before pairing, or two non-finishers read as
 a perfect photo finish. In the time-metric modes `Stadium_ExitMinor` *projects* a finish
