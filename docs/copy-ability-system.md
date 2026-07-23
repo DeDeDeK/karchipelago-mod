@@ -2,12 +2,12 @@
 
 The engine's copy-ability lifecycle for a rider: how an ability is granted, held
 and ticked each frame, and torn down. This is the mechanics layer beneath the AP
-gating (which decides *whether* an ability may be obtained — see
-`gate-abilities.md`). The `copy_kind` system described here is a `RiderData`
-field and exists only in the 3D modes (City Trial / Air Ride). Top Ride is a
-separate object system (`TopRideKirby`, no `copy_kind`); its copy-ability analogs
-are the four ability-power *items* (Fire, Freeze Fan, Bomb, Walky), each a timed
-Kirby state — see `topride-item-system.md`.
+gating, which decides *whether* an ability may be obtained. The `copy_kind`
+system described here is a `RiderData` field and exists only in the 3D modes
+(City Trial / Air Ride). Top Ride is a separate object system (`TopRideKirby`,
+no `copy_kind`) that creates no `RiderData` at all, so no copy ability can be
+obtained there; its analogs are the four ability-power *items* (Fire, Freeze Fan,
+Bomb, Walky), each a timed Kirby state.
 
 There are 11 `CopyKind`s (`rider.h`): FIRE(0), WHEEL(1), SLEEP(2), SWORD(3),
 BOMB(4), PLASMA(5), NEEDLE(6), MIC(7), FREEZE(8), TORNADO(9), BIRD(10), plus

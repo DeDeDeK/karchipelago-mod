@@ -4,11 +4,11 @@
 
 11 CopyKinds (FIRE, WHEEL, SLEEP, SWORD, BOMB, PLASMA, NEEDLE, MIC, FREEZE, TORNADO, BIRD) can be individually locked. When locked, the ability cannot be obtained from *any* source — copy panels, copy chance wheels, or enemy inhale. The ability item panels are also filtered from spawn tables, and ability-themed enemies are filtered from enemy spawn tables across all modes (Air Ride, City Trial stadiums).
 
-This doc covers only the *gating* (whether an ability may be obtained). For the engine's copy-ability mechanics — grant, per-frame tick, and teardown — see `copy-ability-system.md`.
+This doc covers only the *gating* (whether an ability may be obtained). The engine's copy-ability mechanics — grant, per-frame tick, and teardown — are the `RiderData.copy_kind` lifecycle, documented separately.
 
-## Game Systems — Three Acquisition Paths
+## Game Systems — Acquisition Paths
 
-Copy abilities can be obtained three ways, all of which need gating:
+Copy abilities can be obtained four ways, all of which need gating:
 
 ### 1. Copy Panels from Boxes/Event Drops
 
@@ -25,7 +25,7 @@ Box spawn pools (`grBoxGeneObj` at `*(0x805dd0e0 + 0x608)`):
 - `subsequent_it_kind/chance/num` — blue box multi-item pool.
 
 Event drop table (`grBoxGeneInfo->item_desc->event_source_drop`):
-- Per-item entries with one chance field per drop source: `chance_dyna`, `chance_tac`, `chance_meteor`, `chance_destructible`, `chance_chamber`, `chance_ufo`. `GateAbilities_FilterEventDropTables()` zeroes all six for any entry whose `it_kind` maps to a locked ability. (See `docs/event-source-drops.md` for the field-to-source map.)
+- Per-item entries with one chance field per drop source: `chance_dyna`, `chance_tac`, `chance_meteor`, `chance_destructible`, `chance_chamber`, `chance_ufo`. `GateAbilities_FilterEventDropTables()` zeroes all six for any entry whose `it_kind` maps to a locked ability.
 
 ### 2. Copy Chance Wheel (Inhale Enemy)
 
@@ -53,6 +53,25 @@ Tracking functions (must be called by any replacement):
 When a machine touches a copy panel item: `Machine_OnTouchItem` (0x801db34c, case `0x1a`) → `Rider_CheckAndGiveAbility` (0x80192650) → `Rider_GiveAbility` (0x801a81a4).
 
 `Rider_CheckAndGiveAbility` checks `rd->kind == RDKIND_KIRBY` then calls `Rider_GiveAbility`. This is the single entry point for all non-wheel copy ability grants (items and enemies).
+
+### 4. Ground Copy Panels (attribute 0xF)
+
+Floor polygons tagged with ground collision attribute 0xF spin the copy wheel when a machine drives over them:
+
+```
+Machine_ProcessEnvColl (0x801e5108)
+  └─ detects attribute 0xF via zz_80246f40_ (0x80246f40)
+  └─ checks it's a new panel (different from last frame's stored ID)
+  └─ calls Rider_GiveRandomAbility (0x80191fb8)
+       └─ calls Rider_StartRandomCopyWheel (0x801ae4ec)
+            └─ HSD_Randi(0xB) picks ability index 0–10
+            └─ looks up ability from the table at 0x804af690
+            └─ calls Rider_StartCopyWheel (0x801ae550), which lands in randomAbility_giveAbility
+```
+
+The table at `0x804af690` is 11 ints, `{0 … 10}` — an identity mapping to CopyKind. A weighted 29-entry alternative for melee mode sits at `0x804af6bc`.
+
+`zz_80246f40_` resolves the attribute out of the 3D stage collision data hanging off `stc_grobj` (0x805dd6cc), which only `grLoadStage` (0x800ce318) populates, so this path exists in City Trial and Air Ride only.
 
 ## Implementation
 
@@ -145,8 +164,9 @@ The ability acquisition hooks are NOT mode-specific — they gate acquisition ev
 
 ### Top Ride
 
-- **Copy ability roulette** (ground attr 0xF panels): gated by `GateAbilities_RandomGiveAbility`, same as other modes.
-- **Ability-themed items** (Freeze, Fire, Needle, Bomb, Mike): gated by `ability_unlocked_mask` in `GateTopRideItems_ApplyMask`. These bypass the TR item unlock mask — no separate AP items. See `gate_topride_items.c` and `topride-item-system.md`.
+Top Ride has no copy abilities. Its scene creates neither `MachineData` nor `RiderData`, so `Rider_GiveAbility`, `Rider_GiveRandomAbility` and `randomAbility_giveAbility` are all unreachable there, and it loads no 3D stage collision, so the attribute 0xF copy panels do not exist either. Every acquisition hook above is a no-op in Top Ride.
+
+The one place `ability_unlocked_mask` still matters in Top Ride is the four ability-themed Top Ride **items** — Freeze Fan (TRITEM 9), Fire (11), Bomb (13), Walky (16). `GateTopRideItems_ApplyMask` in `gate_topride_items.c` treats the matching copy ability unlock (`COPYKIND_FREEZE`/`_FIRE`/`_BOMB`/`_MIC`) as an alternative key to the item's own bit in `topride_item_unlocked_mask`: either one enables it. The ability key only counts while ability gating is enabled — otherwise the all-1s ungated mask would free all four items and strand their own AP unlocks.
 
 ## Save Data
 

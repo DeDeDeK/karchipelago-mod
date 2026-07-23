@@ -8,8 +8,8 @@
 #include "textbox_api.h"
 #include "inline.h"
 
-// Top Ride items that correspond to copy abilities.
-// These are additionally gated by ability_unlocked_mask.
+// Top Ride items that correspond to copy abilities. Either the item's own TR
+// unlock or its copy ability unlock enables it.
 static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
     { TRITEM_FREEZE_FAN, COPYKIND_FREEZE },
     { TRITEM_FIRE,       COPYKIND_FIRE },
@@ -17,13 +17,7 @@ static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] 
     { TRITEM_WALKY,      COPYKIND_MIC },
 };
 
-// Bitmask of ability-themed TR items - these are not gated by topride_item_unlocked_mask.
-#define ABILITY_ITEM_BITS ( \
-    (1 << TRITEM_FREEZE_FAN) | (1 << TRITEM_FIRE) | \
-    (1 << TRITEM_BOMB) | (1 << TRITEM_WALKY))
-
 // Apply the unlock mask to the ItemMgr's enabled bitmask.
-// Ability-themed items bypass the TR item mask and are gated only by ability_unlocked_mask.
 // Called via hook right after TopRideItem_MgrInit returns.
 void GateTopRideItems_ApplyMask()
 {
@@ -33,8 +27,23 @@ void GateTopRideItems_ApplyMask()
 
     u32 before = mgr->enabled_mask;
 
-    // Gate non-ability items by TR item unlock mask
-    mgr->enabled_mask &= ap_save->topride_item_unlocked_mask | ABILITY_ITEM_BITS;
+    // The four ability-themed items have two keys: their own TR item unlock or
+    // the matching copy ability unlock. Fold the ability-derived bits into the
+    // allowed mask so either one enables the item. Only when ability gating is
+    // on - an ungated world holds an all-1s ability mask, which would free the
+    // four items outright and leave their TR item unlocks with nothing to do.
+    u32 allowed = ap_save->topride_item_unlocked_mask;
+    u16 ability_mask = ap_save->ability_unlocked_mask;
+    if (ap_save->options.ability_gating_enabled)
+    {
+        for (int i = 0; i < (int)(sizeof(ability_items) / sizeof(ability_items[0])); i++)
+        {
+            if (ability_mask & (1 << ability_items[i].ability))
+                allowed |= (1 << ability_items[i].item);
+        }
+    }
+
+    mgr->enabled_mask &= allowed;
 
     // Slot 12 (TRITEM_PARTY_BALL_ALT, KirbyKusdama) is the engine's twin
     // Party Ball variant. AP exposes only one Party Ball (slot 21,
@@ -45,14 +54,6 @@ void GateTopRideItems_ApplyMask()
         mgr->enabled_mask |= (1 << TRITEM_PARTY_BALL_ALT);
     else
         mgr->enabled_mask &= ~(1 << TRITEM_PARTY_BALL_ALT);
-
-    // Gate ability-themed items by ability unlock mask only
-    u16 ability_mask = ap_save->ability_unlocked_mask;
-    for (int i = 0; i < (int)(sizeof(ability_items) / sizeof(ability_items[0])); i++)
-    {
-        if (!(ability_mask & (1 << ability_items[i].ability)))
-            mgr->enabled_mask &= ~(1 << ability_items[i].item);
-    }
 
     OSReport("[TopRideItems] TopRide items: enabled mask %s -> %s (item mask %s, ability mask %s)\n",
              MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM), MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM), MaskBits(ability_mask, 16));

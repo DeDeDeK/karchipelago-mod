@@ -2,12 +2,11 @@
 
 ## Overview
 
-Top Ride has **two completely separate item systems**, distinct from City Trial's box/spawn table system:
+Top Ride has a single item system, distinct from City Trial's box/spawn table system: 22 unique 2D power-up items managed by an ItemMgr singleton (`TRITEM_NUM = 22`), plus the always-available Mystery item (`a2dIT21`), which randomizes among the other Top Ride items. Players collect these during races to gain temporary attack/defense powers. It does not use `CityItem_Create`, `grBoxGeneObj` spawn tables, or `Machine_OnTouchItem`.
 
-1. **Top Ride Items** — 22 unique 2D power-up items managed by an ItemMgr singleton (`TRITEM_NUM = 22`). Players collect these during races to gain temporary attack/defense abilities.
-2. **Copy Ability Roulette** — Ground collision panels that trigger a spinning roulette wheel, granting one of 11 copy abilities. Uses the same `randomAbility_giveAbility` system as Air Ride/City Trial.
+Top Ride has **no copy abilities**. The Top Ride scene loads through `TopRide_SceneLoad` (0x80008df8) rather than `SceneLoad_3D` (0x8001442c) and creates neither `MachineData` nor `RiderData`, so the `copy_kind` system and every path that grants an ability (`Rider_GiveAbility`, `Rider_GiveRandomAbility`, `randomAbility_giveAbility`) are unreachable. Top Ride kirbys are `TopRideKirby` objects with a state-handler vtable at `+0x7c`. The closest analogs to copy abilities are the four ability-themed items below (Fire, Freeze Fan, Bomb, Walky), each a timed kirby state.
 
-Neither system uses `CityItem_Create`, `grBoxGeneObj` spawn tables, or `Machine_OnTouchItem`.
+Top Ride also loads no 3D stage collision: `stc_grobj` (0x805dd6cc) is written only by `grLoadStage` (0x800ce318) and its two helpers, none of which Top Ride reaches. Ground collision attributes — including the attribute 0xF copy panels used in City Trial and Air Ride — do not exist here; Top Ride collision is the tile/grid system (`TopRide_ApexGridScan`, 0x802cf83c), and its courses are 2D tilemap archives (`A2a2dBG_*.dat`), not `Gr*.dat` HSD stages.
 
 ## Top Ride Items
 
@@ -130,46 +129,17 @@ Because `MgrInit` gates these three on the received-reward path (not the enabled
 3. Computes spawn position via matrix transforms
 4. Calls `TopRideItem_SpawnAtPosition` (0x8034bf50)
 
-## Copy Ability Roulette
-
-### Ground Collision Attribute 0xF
-
-Specific floor polygons on Top Ride tracks are tagged with ground collision attribute 0xF. When a machine drives over such a polygon:
-
-```
-Machine_ProcessEnvColl (0x801e5108)
-  └─ detects attribute 0xF via zz_80246f40_ (0x80246f40)
-  └─ checks it's a new panel (different from last frame's stored ID)
-  └─ calls Rider_GiveRandomAbility (0x80191fb8)
-       └─ calls Rider_StartRandomCopyWheel (0x801ae4ec)
-            └─ HSD_Randi(0xB) picks ability index 0–10
-            └─ looks up ability from table at 0x804af690
-            └─ calls Rider_StartCopyWheel (0x801ae550)
-                 └─ sets up spinning wheel UI
-                 └─ eventually calls randomAbility_giveAbility (0x801a61d4)
-```
-
-### Ability Table
-
-11 entries at `0x804af690` (int array): `{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}` — identity mapping to CopyKind (FIRE, WHEEL, SLEEP, SWORD, BOMB, PLASMA, NEEDLE, MIC, FREEZE, TORNADO, BIRD).
-
-Alternative table at `0x804af6bc` for melee mode (29 entries, weighted distribution).
-
-### Existing Hooks
-
-`randomAbility_giveAbility` is already replaced by `GateAbilities_RandomGiveAbility` via `CODEPATCH_REPLACEFUNC` in `gate_abilities.c`. This hook applies to ALL modes including Top Ride — if the wheel lands on a locked ability, it picks a random unlocked one instead. No additional hooks needed for copy ability gating in Top Ride.
-
 ## Gating Approach
 
 Implemented in `mods/archipelago/src/gate_topride_items.c` (+ `.h`). Installed at boot by `GateTopRideItems_OnBoot`, which logs `[TopRideItems] Top Ride item gating hooks installed`.
 
 ### Top Ride Items
 
-The enabled bitmask at `ItemMgr + 0x24` (`TopRideItemMgr.enabled_mask`) is the primary hook point — the timed spawn path already respects it. But the Party Ball burst (`TopRideItem_PartyBallUpdate`) and a residual out-of-range case need two extra hooks. The unlock state lives in `u32 topride_item_unlocked_mask` in `APSave` (global `ap_save`, `main.h`); AP exposes 17 non-ability item unlocks. The three installed hooks:
+The enabled bitmask at `ItemMgr + 0x24` (`TopRideItemMgr.enabled_mask`) is the primary hook point — the timed spawn path already respects it. But the Party Ball burst (`TopRideItem_PartyBallUpdate`) and a residual out-of-range case need two extra hooks. The unlock state lives in `u32 topride_item_unlocked_mask` in `APSave` (global `ap_save`, `main.h`); AP exposes 21 item unlocks, one per item kind except the Party Ball twin at slot 12. The three installed hooks:
 
 | Site | Mechanism | Function | Purpose |
 |------|-----------|----------|---------|
-| 0x802db05c | `CODEPATCH_HOOKCREATE` | `GateTopRideItems_ApplyMask` | Runs right after `TopRideItem_MgrInit` (0x8034b5f4) returns inside `TopRide_FielderInit` (0x802dafb4). ANDs `mgr->enabled_mask` with `ap_save->topride_item_unlocked_mask \| ABILITY_ITEM_BITS`, mirrors the Party Ball bit, then clears ability-themed bits whose ability is locked. Clobbered instr: `lwz r6, 4(r30)`. |
+| 0x802db05c | `CODEPATCH_HOOKCREATE` | `GateTopRideItems_ApplyMask` | Runs right after `TopRideItem_MgrInit` (0x8034b5f4) returns inside `TopRide_FielderInit` (0x802dafb4). ANDs `mgr->enabled_mask` with `ap_save->topride_item_unlocked_mask` widened by the ability-derived bits, then mirrors the Party Ball bit. Clobbered instr: `lwz r6, 4(r30)`. |
 | 0x8034bf50 | `CODEPATCH_HOOKCONDITIONALCREATE` | `GateTopRideItems_FilterSpawn` | Entry of `TopRideItem_SpawnAtPosition`. Returns 1 to block (kind out of range, or its `enabled_mask` bit clear), 0 to proceed. Block path branches to the function's epilogue blr at 0x8034c12c. Guards against the Party Ball burst picking a locked/garbage kind (which would make `TopRideItem_Create` read past the descriptor table and crash). |
 | 0x803574a4, 0x803574d0 | `CODEPATCH_REPLACECALL` ×2 | `GateTopRideItems_GetDataGated` | The two `bl TopRideItem_GetDataByIndex` calls inside `TopRideItem_PartyBallUpdate`'s weight sum loop and pick loop. The wrapper returns a zeroed `locked_item_stub` (weight 0 at +0x10) for locked kinds so the burst's weighted random never lands on one. |
 
@@ -177,7 +147,7 @@ The enabled bitmask at `ItemMgr + 0x24` (`TopRideItemMgr.enabled_mask`) is the p
 
 ### Ability-Themed Items
 
-Four items are ability-themed and gated by `ability_unlocked_mask` instead of `topride_item_unlocked_mask`, matching how copy ability panels work in City Trial:
+Four items are ability-themed and accept **either** of two keys — their own bit in `topride_item_unlocked_mask`, or the matching copy ability bit in `ability_unlocked_mask`:
 
 | TRITEM | Index | CopyKind |
 |--------|-------|----------|
@@ -186,7 +156,9 @@ Four items are ability-themed and gated by `ability_unlocked_mask` instead of `t
 | TRITEM_BOMB | 13 | COPYKIND_BOMB |
 | TRITEM_WALKY | 16 | COPYKIND_MIC |
 
-These bits are force-set past the TR item mask (`| ABILITY_ITEM_BITS`) in `GateTopRideItems_ApplyMask`, then cleared if their ability is locked. No separate AP items exist for these — unlocking the copy ability (e.g., AP_ABILITY_UNLOCK_FREEZE) enables the corresponding TR item.
+`GateTopRideItems_ApplyMask` walks `ability_items[]` and ORs each unlocked ability's item bit into the allowed mask before the AND. The ability key counts only while `ap_save->options.ability_gating_enabled` is set: an ability-ungated world carries an all-1s `ability_unlocked_mask`, which would free all four items outright and leave their AP item unlocks (`AP_TOPRIDE_ITEM_UNLOCK_FREEZE_FAN`, `_FIRE`, `_BOMB`, `_WALKY`) with nothing to do. With ability gating off, those four items are gated purely by their own TR item unlock, exactly like the other 17.
+
+Copy abilities do not exist in Top Ride, so the ability unlock's only effect there is enabling its Top Ride item.
 
 `TRITEM_PARTY_BALL_ALT` (slot 12) is **not** ability-gated — it's a Party Ball variant (KirbyKusdama). `GateTopRideItems_ApplyMask` instead mirrors bit 21's (`TRITEM_PARTY_BALL`) unlock state onto bit 12 so both Party Ball variants spawn together; AP never sends a separate slot-12 unlock.
 
@@ -197,7 +169,3 @@ These bits are force-set past the TR item mask (`| ABILITY_ITEM_BITS`) in `GateT
 | `GateTopRideItems_UnlockItem(kind, announce)` | Sets bit `kind` in `ap_save->topride_item_unlocked_mask`; optionally enqueues an "Unlocked Item: …" textbox (`TopRideItemColor`, mode color for Top Ride). Returns 0 for out-of-range kind. |
 | `GateTopRideItems_GiveItem(kind)` | Direct apply (no flying pickup). Requires the TR `KirbyMgr` (`*stc_topride_kirbymgr`) and `round_state == 2`; iterates the 4 slots, and for each human (`TopRide_GetPlayerKind(slot) == TR_PKIND_HMN`) calls `TopRide_KirbyApplyItem(k, kind)`. Returns 1 if applied to ≥1 kirby, else 0 (caller retries). Used by the AP TR-item-give path and TrapLink-TR receive. Deliberately does **not** gate on `kirby->is_active` (stays 0 in Time Attack / Free Run). |
 | `GateTopRideItems_AbilityToItem(ability)` | Maps a `CopyKind` to its TR-item analog via `ability_items[]` (Freeze→Freeze Fan, Fire→Fire, Bomb→Bomb, Mic→Walky); returns -1 if none. |
-
-### Copy Ability Roulette
-
-Already gated by `GateAbilities_RandomGiveAbility` REPLACEFUNC hook. No additional work needed for Top Ride.
