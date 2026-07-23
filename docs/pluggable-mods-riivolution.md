@@ -17,7 +17,7 @@ Each `.bin` found is read (`Mods_LoadFile` → `DVDFastOpen` / `File_LoadOffsetS
 
 Riivolution file-replacement patches add files to the in-memory FST that the game reads. So gating a mod's `.bin` behind a Riivolution `<option>/<choice>` *is* the on/off switch: enabling the option adds the `.bin` to the FST, the boot scan finds it, and the mod loads. No changes to the loader are required.
 
-This also means the existing build-time `EXCLUDE_MODS` knob (which mod `.bin`s get built) has a natural runtime counterpart: ship all the `.bin`s and let the player choose per mod in Dolphin's Riivolution menu.
+This also means the existing build-time `INCLUDE_MODS` knob (which mod `.bin`s get built) has a natural runtime counterpart: ship all the `.bin`s and let the player choose per mod in Dolphin's Riivolution menu.
 
 ## How the current package is structured
 

@@ -174,9 +174,9 @@ per-callback camera code, no teardown.
 ### Triggering for test
 
 `archipelago_debug` fires Scale Change on **D-Pad Up** (plain, no modifier) in
-City Trial (`ce_api->Do(CUSTOM_EVKIND_SCALE_CHANGE)` in `main.c`). Build with
-`make deploy EXCLUDE_MODS=custom_weather` so `custom_events` + `archipelago_debug`
-are included (both are in the default `EXCLUDE_MODS`).
+City Trial (`ce_api->Do(CUSTOM_EVKIND_SCALE_CHANGE)` in `main.c`). Nothing is
+built by default, so name the mods this test needs, e.g.
+`make deploy INCLUDE_MODS=archipelago,custom_events,archipelago_debug`.
 
 ## Open Questions / caveats
 

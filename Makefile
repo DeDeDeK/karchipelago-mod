@@ -38,7 +38,7 @@ CFLAGS = -O1 -mcpu=750 -meabi -msdata=none -mhard-float -ffreestanding \
 
 LDFLAGS  ?= -r -T$(PACKTOOL_DIR)/link.ld
 
-# Helpers for the EXCLUDE_MODS comma-to-space substitution below.
+# Helpers for the INCLUDE_MODS comma-to-space substitution below.
 comma := ,
 empty :=
 space := $(empty) $(empty)
@@ -59,13 +59,12 @@ INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) \
 LIB_SOURCES := $(shell find $(LIB_ROOT_DIR) -name "*.c")
 
 # 2. Mods: Find all mods in the mod folder
-# EXCLUDE_MODS lists mod folders to drop from the build (comma- or
-# space-separated). Override on the command line: `make package EXCLUDE_MODS=`
-# to include everything, or `EXCLUDE_MODS=foo,bar` to drop additional mods.
-# custom_events and custom_weather are excluded by default while they remain
-# WIP and not wired up to the archipelago mod.
-EXCLUDE_MODS ?= custom_events,custom_weather,archipelago_debug
-MOD_NAMES ?= $(filter-out $(subst $(comma),$(space),$(EXCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
+# INCLUDE_MODS lists the mod folders to build (comma- or space-separated).
+# Nothing is built by default; pass the mods you want on the command line,
+# e.g. `make package INCLUDE_MODS=archipelago,textbox`. Names not present under
+# mods/ are ignored.
+INCLUDE_MODS ?=
+MOD_NAMES ?= $(filter $(subst $(comma),$(space),$(INCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
 
 # 3. Mods Source: For each mod, find its specific source files within its 'src' subdirectory.
 MOD_C_SOURCES := $(foreach mod,$(MOD_NAMES),\
