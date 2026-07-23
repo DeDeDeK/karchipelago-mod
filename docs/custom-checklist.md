@@ -210,9 +210,19 @@ to the framework. `custom_checklist` carries its own hoshi save (`CCSave`): a
 per-tab completed-`clear_kind` bitmask, in slots **keyed by a hash of the tab's
 `name`** (not its registry index, so saved bits survive mods being added/removed or
 reordered — the same stable-id approach `custom_items` uses). On completion the
-framework sets the bit and `Hoshi_WriteSave`s; on query it reads it back; the slot is
-resolved (and lazily claimed) on first access, after the save loads. So a typical tab
-is fully persistent with **zero persistence code**.
+framework sets the bit; on query it reads it back; the slot is resolved (and lazily
+claimed) on first access, after the save loads. So a typical tab is fully persistent
+with **zero persistence code**.
+
+The framework never calls `Hoshi_WriteSave` itself. That call mounts the card and
+rewrites the whole `"hoshi"` file synchronously, stalling the frame, and checks
+complete mid-run — so `CCSave` (recorded bits and `layout_seed`) is only mutated in
+RAM. hoshi flushes it at every point the game saves its own file (it hooks the call
+sites of `Memcard_ReqSave`, `0x80078990`: result screens, stage selects, checklist
+unlocks, main-menu entry), hash-gated so an unchanged save costs nothing. A tab that owns its
+persistence should do the same — and writing at the game's save points, rather than
+on completion, is also what keeps a tab's recorded bits from drifting out of step
+with the `GameClearData.clear[]` flags that ride the vanilla save.
 
 A mod provides both callbacks only when it must own the storage — the AP tab records
 through its `sent_checks_ap` / `check_detection` path (with its own "Check sent"

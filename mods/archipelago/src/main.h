@@ -53,6 +53,12 @@ extern int ap_checklist_mode;
 // is only the absolute clamp ceiling for guards and storage widths.
 #define PATCH_STAT_MAX 127
 
+// Targets of the two Archipelago checklist objectives that count across boots,
+// backed by APSave.allup_collect_total / APSave.purple_sr1_wins. Shared so the
+// counter that stops incrementing and the predicate that reads it use one value.
+#define AP_ALLUP_TOTAL_NEED 10
+#define AP_PURPLE_SR1_NEED  3
+
 typedef enum APGoalKind
 {
     GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
@@ -140,6 +146,8 @@ typedef struct APSave
     u8 goal_complete;                                   // Sticky once set; persisted across boots
     u8 goal_announced[CHECKLIST_MODE_NUM];              // Sticky per row: 1 once that mode's goal first satisfied (drives the per-mode "X goal complete!" textbox, fired once each)
     u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit the runtime patch cap target on all 9 stats during a CT trial round
+    u16 allup_collect_total;                            // Lifetime All Ups picked up by a human in City Trial (AP checklist "collect 10 All Ups in total")
+    u8 purple_sr1_wins;                                 // SINGLE RACE 1 first places taken by a Purple Kirby (AP checklist "finish 1st 3 times as Purple Kirby")
     APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
 } APSave;

@@ -4,33 +4,119 @@
 
 #include "main.h"
 #include "ap_checklist.h"
+#include "ap_check_detect.h"
 #include "custom_checklist_api.h"
-
-// The AP checklist is a custom checklist tab (the synthetic 4th checklist mode)
-// built on the custom_checklist framework: the framework owns the tab's
-// presentation (minor scene, grid build, theme recolor, banner/emblem swap) and
-// per-frame check evaluation, while this file supplies the AP-specific pieces -
-// the objective set, the blue theme, the tab art, and where a completion is
-// recorded (the AP row of sent_checks, routed through check_detection).
 
 // Imported custom_checklist API. Resolved in APChecklist_Register (called from
 // OnSaveLoaded) via Hoshi_ImportMod, deferred past OnBoot since the framework mod
 // boots after us (alphabetical order).
 static const CustomChecklistAPI *cc_api = NULL;
 
-// Phase 1 stubs: observable, deterministic placeholders that exercise the pipeline
-// end to end. Replaced by the real custom objectives later.
-static int Check_Booted(void)            { return ap_save->boot_num >= 1; }
-static int Check_ReceivedAnyItem(void)   { return ap_save->item_received_count >= 1; }
-static int Check_ReceivedFiveItems(void) { return ap_save->item_received_count >= 5; }
+// One zero-argument predicate per cell, as the framework's CustomCheck wants.
+// Each is a pure read of latched state - all sampling is in ap_check_detect.c,
+// because the framework polls these every frame in every scene.
+#define AP_CHECK_PREDICATE(name) \
+    static int Check_##name(void) { return APCheckDetect_IsSet(APCK_##name); }
 
+AP_CHECK_PREDICATE(BOOT)
+AP_CHECK_PREDICATE(RECEIVE_ITEM)
+AP_CHECK_PREDICATE(RECEIVE_5_ITEMS)
+AP_CHECK_PREDICATE(CASTLE_FLOWER)
+AP_CHECK_PREDICATE(BREAK_ALL_CORAL)
+AP_CHECK_PREDICATE(OUT_OF_BOUNDS)
+AP_CHECK_PREDICATE(HP_PATCHES_10)
+AP_CHECK_PREDICATE(ALLUPS_10)
+AP_CHECK_PREDICATE(FOOD_ICECREAM)
+AP_CHECK_PREDICATE(FOOD_RICEBALL)
+AP_CHECK_PREDICATE(FOOD_CHICKEN)
+AP_CHECK_PREDICATE(FOOD_CURRY)
+AP_CHECK_PREDICATE(FOOD_RAMEN)
+AP_CHECK_PREDICATE(FOOD_OMELET)
+AP_CHECK_PREDICATE(FOOD_HAMBURGER)
+AP_CHECK_PREDICATE(FOOD_APPLE)
+AP_CHECK_PREDICATE(HIGHJUMP_1500)
+AP_CHECK_PREDICATE(AIRGLIDER_2000)
+AP_CHECK_PREDICATE(MELEE1_100)
+AP_CHECK_PREDICATE(MELEE2_60)
+AP_CHECK_PREDICATE(SR1_BULK)
+AP_CHECK_PREDICATE(SR1_PURPLE_3X)
+AP_CHECK_PREDICATE(AIRRIDE_PHOTO)
+
+// The nine Single Race placements and four Drag Race photo finishes are one
+// objective repeated per stadium, so their predicates are generated from the
+// base clear_kind plus an offset rather than named individually.
+#define AP_CHECK_PREDICATE_N(base, n) \
+    static int Check_##base##_##n(void) { return APCheckDetect_IsSet(APCK_##base + (n)); }
+
+AP_CHECK_PREDICATE_N(SR1_FIRST, 0)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 1)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 2)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 3)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 4)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 5)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 6)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 7)
+AP_CHECK_PREDICATE_N(SR1_FIRST, 8)
+AP_CHECK_PREDICATE_N(DRAG1_PHOTO, 0)
+AP_CHECK_PREDICATE_N(DRAG1_PHOTO, 1)
+AP_CHECK_PREDICATE_N(DRAG1_PHOTO, 2)
+AP_CHECK_PREDICATE_N(DRAG1_PHOTO, 3)
+
+// clear_kind order is the wire contract with APLocation in the apworld (the AP
+// location code is 361 + clear_kind). Labels are the cell text and are
+// independent of the apworld's location names - they are kept short because
+// the framework composes them into a fixed 128-byte SIS entry.
 static const CustomCheck ap_checks[] = {
-    { 0, "Boot the game",   Check_Booted },
-    { 1, "Receive an item", Check_ReceivedAnyItem },
-    { 2, "Receive 5 items", Check_ReceivedFiveItems },
+    { APCK_BOOT,            "Boot the game",                    Check_BOOT },
+    { APCK_RECEIVE_ITEM,    "Receive an item",                  Check_RECEIVE_ITEM },
+    { APCK_RECEIVE_5_ITEMS, "Receive 5 items",                  Check_RECEIVE_5_ITEMS },
+
+    { APCK_CASTLE_FLOWER,   "Visit the castle flower on foot",  Check_CASTLE_FLOWER },
+    { APCK_BREAK_ALL_CORAL, "Break all the coral in one game",  Check_BREAK_ALL_CORAL },
+    { APCK_OUT_OF_BOUNDS,   "Go out of bounds in City Trial",   Check_OUT_OF_BOUNDS },
+
+    { APCK_HP_PATCHES_10,   "Get 10 HP Patches in one game",    Check_HP_PATCHES_10 },
+    { APCK_ALLUPS_10,       "Collect 10 All Ups in total",      Check_ALLUPS_10 },
+
+    { APCK_FOOD_ICECREAM,   "Eat 3 Ice Creams in one game",     Check_FOOD_ICECREAM },
+    { APCK_FOOD_RICEBALL,   "Eat 3 Rice Balls in one game",     Check_FOOD_RICEBALL },
+    { APCK_FOOD_CHICKEN,    "Eat 3 Chickens in one game",       Check_FOOD_CHICKEN },
+    { APCK_FOOD_CURRY,      "Eat 3 Curries in one game",        Check_FOOD_CURRY },
+    { APCK_FOOD_RAMEN,      "Eat 3 Ramens in one game",         Check_FOOD_RAMEN },
+    { APCK_FOOD_OMELET,     "Eat 3 Omelets in one game",        Check_FOOD_OMELET },
+    { APCK_FOOD_HAMBURGER,  "Eat 3 Hamburgers in one game",     Check_FOOD_HAMBURGER },
+    { APCK_FOOD_APPLE,      "Eat 3 Apples in one game",         Check_FOOD_APPLE },
+
+    { APCK_SR1_FIRST + 0,   "SINGLE RACE 1 Finish in 1st",      Check_SR1_FIRST_0 },
+    { APCK_SR1_FIRST + 1,   "SINGLE RACE 2 Finish in 1st",      Check_SR1_FIRST_1 },
+    { APCK_SR1_FIRST + 2,   "SINGLE RACE 3 Finish in 1st",      Check_SR1_FIRST_2 },
+    { APCK_SR1_FIRST + 3,   "SINGLE RACE 4 Finish in 1st",      Check_SR1_FIRST_3 },
+    { APCK_SR1_FIRST + 4,   "SINGLE RACE 5 Finish in 1st",      Check_SR1_FIRST_4 },
+    { APCK_SR1_FIRST + 5,   "SINGLE RACE 6 Finish in 1st",      Check_SR1_FIRST_5 },
+    { APCK_SR1_FIRST + 6,   "SINGLE RACE 7 Finish in 1st",      Check_SR1_FIRST_6 },
+    { APCK_SR1_FIRST + 7,   "SINGLE RACE 8 Finish in 1st",      Check_SR1_FIRST_7 },
+    { APCK_SR1_FIRST + 8,   "SINGLE RACE 9 Finish in 1st",      Check_SR1_FIRST_8 },
+
+    { APCK_HIGHJUMP_1500,   "HIGH JUMP Jump over 1,500 feet",   Check_HIGHJUMP_1500 },
+    { APCK_AIRGLIDER_2000,  "AIR GLIDER Fly over 2,000 feet",   Check_AIRGLIDER_2000 },
+    { APCK_MELEE1_100,      "KIRBY MELEE 1 KO over 100 alone",  Check_MELEE1_100 },
+    { APCK_MELEE2_60,       "KIRBY MELEE 2 KO over 60 alone",   Check_MELEE2_60 },
+
+    { APCK_SR1_BULK,        "SINGLE RACE 1 1st on Bulk Star",   Check_SR1_BULK },
+    { APCK_SR1_PURPLE_3X,   "SINGLE RACE 1 1st 3x as Purple",   Check_SR1_PURPLE_3X },
+
+    { APCK_DRAG1_PHOTO + 0, "DRAG RACE 1 Photo finish",         Check_DRAG1_PHOTO_0 },
+    { APCK_DRAG1_PHOTO + 1, "DRAG RACE 2 Photo finish",         Check_DRAG1_PHOTO_1 },
+    { APCK_DRAG1_PHOTO + 2, "DRAG RACE 3 Photo finish",         Check_DRAG1_PHOTO_2 },
+    { APCK_DRAG1_PHOTO + 3, "DRAG RACE 4 Photo finish",         Check_DRAG1_PHOTO_3 },
+    { APCK_AIRRIDE_PHOTO,   "Air Ride Photo finish",            Check_AIRRIDE_PHOTO },
 };
 
 #define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))
+
+// Every APCheckKind has a cell. A missing entry would leave an AP location with
+// no way to complete it, which strands any progression item fill places on it.
+_Static_assert(AP_CHECK_NUM == APCK_NUM, "ap_checks[] must cover every APCheckKind");
 
 // Already recorded as sent this save? Out-of-range cells report "done". The AP
 // checklist's recorded state is row AP_CHECKLIST_ROW of sent_checks[].

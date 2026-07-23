@@ -9,6 +9,7 @@
 #include "check_detection.h"
 #include "checklist_rewards.h"
 #include "ap_checklist.h"
+#include "ap_check_detect.h"
 #include "textbox_api.h"
 
 // SFX cue played by the vanilla ClearChecker_SetNewUnlock on a first-this-frame
@@ -60,10 +61,20 @@ static inline int PopcountRow(int row)
 
 // Record a check: set the save bit, mirror to shared memory, re-evaluate goal.
 // No-op if the bit was already set. Caller is responsible for bounds checking.
+//
+// Deliberately does not write the card. Hoshi_WriteSave mounts and rewrites the
+// whole file synchronously, which stalls the frame - and checks are recorded
+// mid-run. The bits live in ap_save until the game's own save point (main menu
+// entry) flushes them, and ap_data carries them to the client immediately.
 static void RecordCheck(int mode, int clear_kind)
 {
     int row = ChecklistModeRow(mode);
     if (row < 0 || (unsigned)clear_kind >= CLEAR_KIND_NUM)
+        return;
+    // The AP tab's grid is 120 cells wide but only the first APCK_NUM back an AP
+    // location, and the filler cursor can reach the blank ones. Recording those
+    // would send a location code the multiworld has never heard of.
+    if (row == AP_CHECKLIST_ROW && clear_kind >= APCK_NUM)
         return;
     if (!SetSentCheck(row, (u8)clear_kind))
         return;
@@ -84,7 +95,6 @@ static void RecordCheck(int mode, int clear_kind)
     tb_api->EnqueueColoredNoun(NULL, "Check", tb_api->CheckColor, " sent");
 
     CheckDetection_EvaluateGoal();
-    Hoshi_WriteSave();
 }
 
 // Replacement for ClearChecker_SetNewUnlock (0x8004A054), the funnel most gameplay
@@ -269,23 +279,18 @@ void CheckDetection_EvaluateGoal(void)
                 ap_save->goal_announced[r] = 1;
         OSReport("[Check] GOALS COMPLETE\n");
         tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
-        Hoshi_WriteSave();
         return;
     }
 
     // Overall victory not reached yet: announce each mode goal that just became
     // satisfied (once each) so the player gets feedback as they finish modes.
-    int announced = 0;
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         if (!newly_satisfied[r])
             continue;
         ap_save->goal_announced[r] = 1;
         AnnounceModeGoal(r);
-        announced = 1;
     }
-    if (announced)
-        Hoshi_WriteSave();
 }
 
 // Process bits the client wrote into ap_data->client_backfill: each newly set bit is
@@ -353,7 +358,6 @@ static void ProcessBackfill(void)
     {
         OSReport("[Check] Backfill processed\n");
         CheckDetection_EvaluateGoal();
-        Hoshi_WriteSave();
     }
 }
 

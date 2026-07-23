@@ -341,8 +341,8 @@ this hook covers.)
    `ap_data->sent_checks` mirror, logs the placement (resolves the
    cell via `ChecklistRewards_ResolveCell` to print `[Check] mode=… clear_kind=…
    type=… recorded` with the source reward type — or a "no local reward
-   placement" line for remote/empty cells), calls `EvaluateGoal()`, and persists
-   via `Hoshi_WriteSave()`.
+   placement" line for remote/empty cells) and calls `EvaluateGoal()`. It does
+   **not** write the memory card — see "When the card is written" below.
 3. Reimplements the vanilla SetNewUnlock logic: bail if cache valid, OOB
    clamp, play the unlock SFX (`SFX_PlayFullVolume(0x10008)`) guarded by the
    one-frame cooldown at `*stc_clearchecker_sfx_last_frame`, then set the
@@ -408,7 +408,6 @@ checks the AP server already knows about (e.g., fresh save or slot takeover).
      `clear[mode][k].has_reward = 1`.
 3. Calls `EvaluateGoal()` once at the end if any bit was actually processed.
 4. Zeros `client_backfill` (single-writer protocol — mod consumes, then zeros).
-5. Saves to memory card via `Hoshi_WriteSave()`.
 
 ### Goal evaluation
 
@@ -451,9 +450,9 @@ predicate is `goal_satisfied(goal, mode, count, n)`:
   `goal_max_stats_ct.c` calls `CheckDetection_EvaluateGoal()` after flipping the bit.
 
 Victory fires only if at least one mode has a non-NONE goal AND every mode's
-goal is satisfied. When victory fires, `ap_save->goal_complete = 1` is set,
-mirrored to `ap_data->goal_complete`, and persisted to the memory
-card. `CheckDetection_ResetAll()` clears `max_stats_ct_achieved` along with
+goal is satisfied. When victory fires, `ap_save->goal_complete = 1` is set and
+mirrored to `ap_data->goal_complete`.
+`CheckDetection_ResetAll()` clears `max_stats_ct_achieved` along with
 `sent_checks` and `goal_complete`; `CheckDetection_DebugForceMarkAll()` sets
 all three.
 
@@ -507,15 +506,42 @@ On gameplay-driven SetNewUnlock(mode, kind):
             SetSentCheck(mode, kind)              — save + ap_data mirror
             log [Check] line with reward type
             EvaluateGoal()
-            Hoshi_WriteSave()
     if cache valid: return
     if fresh: SFX (one-frame cooldown)
     cd->clear[kind].is_new = 1
 
 External save-bit goal triggers (e.g. goal_max_stats_ct.c):
   CheckDetection_EvaluateGoal()       — public re-eval entry point
-  Hoshi_WriteSave()                   — persist whatever save bit was set
 ```
+
+### When the card is written
+
+`Hoshi_WriteSave()` mounts the card and rewrites the whole `"hoshi"` file
+**synchronously**, stalling the frame for as long as the card I/O takes. Checks
+are recorded during gameplay — including from per-frame GOBJ procs — so no
+detection path writes the card. Instead:
+
+- `ap_save` is mutated in place; the completion is durable in RAM immediately.
+- `ap_data` is mirrored in the same breath, so the AP client sees and forwards
+  the location right away regardless of when the card is written.
+- hoshi writes the card at every point the game requests its own save — it hooks
+  each call site of `Memcard_ReqSave` (`0x80078990`), so a result screen, a stage
+  select, a checklist unlock or main-menu entry all flush it, hash-gated so an
+  unchanged save costs nothing.
+
+Writing at the *same* instants as the vanilla save is what keeps the two files
+consistent, and it matters here specifically. A check's completion is recorded in
+two places: `sent_checks` in `APSave`, and `is_new`/`is_unlocked` on the cell in
+`GameClearData`, which rides the vanilla save. `SetNewUnlockReplacement` detects a
+check by the `!is_new && !is_unlocked` transition, so if the vanilla file were to
+persist the unlock while `APSave` rewound, the cell would read as already
+complete and the check could never re-fire from gameplay — recoverable only by
+client backfill, and not at all if the check was earned with no client attached.
+
+The paths that still write immediately are one-shot and outside gameplay: the
+slot-options copy at save load, `ApplyLocations` (once per client connection),
+the EnergyLink purchase (the pool withdrawal reaches the server immediately, so
+the queued goods must not be able to rewind), and the debug menu commands.
 
 ## Notes
 

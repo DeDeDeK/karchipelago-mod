@@ -212,7 +212,10 @@ static void CC_ComposeSis(u8 *buf, const char *str)
     *p++ = (u8)(CC_SIS_SCALE >> 8);
     *p++ = (u8)CC_SIS_SCALE;
 
-    for (; *str; str++)
+    // 7 trailer bytes follow, and a glyph costs 2 - stop early rather than run
+    // off the fixed-size entry when a consumer supplies a long label.
+    u8 *limit = buf + CC_SIS_LABEL_MAX - 9;
+    for (; *str && p < limit; str++)
     {
         if (*str == ' ')
         {
@@ -672,7 +675,6 @@ static int CC_EnsureLayoutSeed(void)
     s ^= s >> 16;
 
     g_save->layout_seed = s ? s : 1u;
-    Hoshi_WriteSave();
     OSReport("[CustomChecklist] Grid layout seed initialized (0x%08x)\n", g_save->layout_seed);
     return 1;
 }
@@ -809,15 +811,16 @@ static int CC_DefaultIsRecorded(int i, int clear_kind)
     return (g_save->slots[s].recorded[clear_kind >> 6] >> (clear_kind & 63)) & 1ULL;
 }
 
-// Framework-default record_complete: set the saved bit and persist. No-op if the slot
-// can't be resolved (the check stays pending rather than being lost).
+// Framework-default record_complete: set the saved bit. No-op if the slot can't be
+// resolved (the check stays pending rather than being lost). The card is not written
+// here - checks complete mid-run and Hoshi_WriteSave is a synchronous whole-file
+// rewrite; the bit rides along with the game's own main-menu-entry save.
 static void CC_DefaultRecord(int i, int clear_kind)
 {
     int s = CC_ResolveSaveSlot(i);
     if (s < 0)
         return;
     g_save->slots[s].recorded[clear_kind >> 6] |= (1ULL << (clear_kind & 63));
-    Hoshi_WriteSave();
 }
 
 // Per-frame pass over every tab: complete any check whose predicate now holds, and keep

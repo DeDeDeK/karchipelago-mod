@@ -1,6 +1,5 @@
 #include "game.h"
 #include "os.h"
-#include "hoshi/func.h"
 
 #include "main.h"
 #include "check_detection.h"
@@ -32,7 +31,6 @@ static void GoalMaxStatsCT_PerFrame(GOBJ *rg)
     OSReport("[GoalMaxStatsCT] Player %d reached patch target %d on all %d stats - goal latched\n",
              rd->ply + 1, (int)threshold, PATCHKIND_NUM);
     CheckDetection_EvaluateGoal();
-    Hoshi_WriteSave();
 }
 
 void GoalMaxStatsCT_On3DLoadEnd(void)

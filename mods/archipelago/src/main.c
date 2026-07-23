@@ -21,6 +21,7 @@
 #include "checklist_rewards.h"
 #include "check_detection.h"
 #include "ap_checklist.h"
+#include "ap_check_detect.h"
 #include "gate_stadiums.h"
 #include "patch_cap.h"
 #include "gate_events.h"
@@ -430,6 +431,9 @@ void On3DLoadEnd()
 
     GoalMaxStatsCT_On3DLoadEnd();
 
+    // Archipelago checklist objectives sampled from gameplay.
+    APCheckDetect_On3DLoadEnd();
+
     // Big / Small Kirby model scaling (always available - not an optional link).
     KirbyScale_On3DLoadEnd();
 
@@ -478,6 +482,10 @@ void On3DUnpause(int pause_ply)
 void On3DExit()
 {
     OSReport("[Main] Exiting 3D.\n");
+
+    // Stadium_ExitMinor has finished latching GameData.stadium_results by this
+    // point, so the round's placements and times are final and readable here.
+    APCheckDetect_On3DExit();
 }
 
 // Runs every scene change.

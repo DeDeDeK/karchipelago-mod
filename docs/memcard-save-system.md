@@ -54,8 +54,45 @@ tile is icon-only despite the banner asset being present. The comment is
 hoshi keeps mod data in its **own** card file named `"hoshi"`, sized up to a whole number of
 `CARD_BLOCK_SIZE` (8 KB) blocks (`SAVE_SIZE`). `KARPlusSave_CreateOrLoad` mounts the card,
 `CARDOpen`s `"hoshi"`, and `CARDCreate` + `CARDWrite`s it if missing; `KARPlusSave_Write`
-rewrites it (hash-gated) on main-menu entry. Both hooks piggyback on the vanilla memcard
-init so the prompt/no-card flow is shared.
+rewrites it (hash-gated). Both hooks piggyback on the vanilla memcard init so the
+prompt/no-card flow is shared.
+
+### When the hoshi file is written
+
+`KARPlusSave_OnReqSave` is hooked at each **call site** of `Memcard_ReqSave`
+(`0x80078990`), the vanilla save request, so the hoshi file is written at exactly the
+points the game saves its own — `MainMenu_MajorEnter`/`MainMenu_MinorEnter`,
+`ResultScreen_LoadMinor`, the stage and course selects, `Checklist_ProcessUnlock` /
+`Checklist_Think`, and the rumble / sound-test toggles — and at no other time. (The
+card-prompt, LAN and debug sites are left alone.) Two properties follow:
+
+- **The two files stay in step.** Mod state that mirrors the vanilla save (checkbox
+  filler counts, `GameClearData.clear[]` flags) can never end up a boot behind the
+  vanilla file, which would let an item be re-granted or a completed checkbox become
+  unreachable.
+- **Card I/O stays out of gameplay.** `KARPlusSave_Write` is synchronous — it mounts,
+  rewrites the whole file, and unmounts on the game thread — so a mod that wrote on a
+  gameplay event would stall the frame. Mods mutate their save region in RAM and let this
+  hook flush it. (Vanilla's own save is async: `Memcard_ReqSave` only enqueues onto the
+  `GCP_MemCard` worker.)
+
+`stc_hoshi_save_ready` gates the hook: a save can be requested before our own
+create/load has run, and writing the default-filled struct then would overwrite a good
+on-card file.
+
+The hooks go on the call sites, not on `Memcard_ReqSave`'s entry. `_CodePatch_HookApply`
+injects a bare `bl` to the hook function with no register or LR save (that is what the
+macro's `_prologue`/`_epilogue` are for), so the injection is only safe where the
+clobbered volatiles are already dead. Immediately before a `bl` they are: the site's own
+call overwrites LR and the callee takes no arguments. At the function head the prologue
+would spill the clobbered LR and `blr` back into the injection, re-entering the function
+forever — a hang, not a crash.
+
+A mod may still call `Hoshi_WriteSave` directly, but the synchronous card write is long
+enough to be felt, so it is reserved for one-shot events like applying slot data on connect
+or a debug reset — never a repeatable player action. An EnergyLink purchase, for instance,
+accepts that a power-off between the withdrawal and the next vanilla save loses the goods
+while the pool withdrawal still reaches the server.
 
 `KARPlusSave` (`save.h`) is a small version header, then the card tile, then a 50-entry
 `metadata[]`, then a flat `data[]`. The tile sits up front (ahead of `metadata[]`) on purpose -

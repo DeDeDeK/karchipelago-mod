@@ -35,9 +35,9 @@ nothing depends on the tab being exactly mode 3.
 `APChecklist_Register` (called from `OnSaveLoaded`, after the framework mod has exported
 its API) imports `CustomChecklistAPI` and hands it a descriptor with:
 
-- **Checks** — a static `{ clear_kind, label, predicate }` table whose predicates read AP
-  state (`ap_save` / `ap_data`). The current set is three stubs: boot the game, receive an
-  item, receive 5 items.
+- **Checks** — a static `{ clear_kind, label, predicate }` table covering all 36
+  objectives. Every predicate is a single `APCheckDetect_IsSet(ck)` call; the detection
+  itself lives in `ap_check_detect.c` (see Objectives and detection below).
 - **Theme** — blue (`AP_CHECKLIST_NAME` / `AP_THEME_*` in `ap_checklist.h`, shared with
   every textbox that names the tab so the wording and tint stay one value; the tab's
   runtime mode is `>= GMMODE_NUM` and so has no `ModeColors[]` slot of its own).
@@ -94,6 +94,17 @@ boundaries and both edges of every per-mode array. Nothing else checks the layou
 compiler picks the offsets and the client restates them by hand — so extend that block
 when adding fields, and move both sides together.
 
+`APSave` is not part of that contract — the client never reads it — so it grows freely.
+Two objectives that count across boots keep their progress there:
+`allup_collect_total` (clear_kind 7) and `purple_sr1_wins` (clear_kind 30), with their
+targets as `AP_ALLUP_TOTAL_NEED` / `AP_PURPLE_SR1_NEED` in `main.h` so the counter that
+stops incrementing and the predicate that reads it share one value.
+
+Only clear_kinds 0–35 back an AP location, but the tab's grid is 120 cells and the
+checkbox-filler cursor can reach the blank ones. `RecordCheck` rejects `clear_kind >=
+APCK_NUM` on the AP row so a spent filler can't send a location code the multiworld has
+never heard of.
+
 ## Cross-mode rewards
 
 `ChecklistRewards_ApplyCrossModeHasReward` (the post-reward-loop hook at `0x8017e07c`)
@@ -122,23 +133,83 @@ the FST root) exporting two `_HSD_ImageDesc` publics:
 loads it by name (`tex_file = "ApChecklistTex"`) per tab build and swaps the
 checklist's banner/emblem TObjs onto these descriptors.
 
-## Goal
+## Objectives and detection
 
-Replace the three stub checks with the real custom objective set and their tracking hooks.
-The apworld side is done — 36 AP locations are defined, and the location code is
-`361 + clear_kind`, so each `clear_kind` must match `ap_checks[]` order. That pairing is a
-cross-repo wire contract with nothing mechanically catching a desync.
+There are 36 objectives, `clear_kind` 0–35, enumerated as `APCheckKind` in
+`ap_check_detect.h`. The numbering is a cross-repo wire contract — the AP location code is
+`361 + clear_kind`, and `APLocation` in the apworld's `KARLocations.py` restates the same
+order by hand, with nothing mechanically catching a desync. An AP box whose check never
+fires is worse than one that doesn't exist: the location still exists in the multiworld and
+logic still treats it as reachable, so fill can strand progression on it. A
+`_Static_assert` pins `ap_checks[]` to `APCK_NUM` so a cell can't go missing on this side.
 
-An AP box whose check never fires is worse than one that doesn't exist: the location still
-exists in the multiworld and logic still treats it as reachable, so fill can strand
-progression on it. Reusing the reward pipeline means items placed on AP cells display for
-free.
+Predicates never sample. The framework polls all 36 every frame, in every scene, including
+menus and loads — so each one is a single read of state latched elsewhere, and the sampling
+lives in two hooks in `ap_check_detect.c`.
+
+**`On3DExit` — stadium and Air Ride results.** hoshi installs the hook at `0x80015274`,
+which is the epilogue of `Stadium_ExitMinor` (`0x80014d5c`), the very function whose copy
+loop at `0x80015164` latches `GameData.stadium_results` from the live result arrays. So the
+block is final and complete when the hook runs. The loop runs `p = 0..3` unconditionally
+and `Stadium_ComputeRankByTime` / `ByPoints` / `ByDistance` rank CPU racers alongside
+humans, which is what makes the photo-finish boxes solo-achievable. The latch is skipped
+entirely for a replay (`GameData.is_replay`) and for the title-screen demo, leaving the
+previous round's values in place, so `is_replay` is checked before reading. Per-slot,
+`StadiumResults.xc00[p]` must be `0` — the same gate the rankers use — or that slot's
+placement and time are stale.
+
+| clear_kind | Objective | Detection |
+|---|---|---|
+| 16–24 | SINGLE RACE 1–9 finish 1st | `ply_placement[p] == 0` |
+| 25 | HIGH JUMP over 1,500 ft | `ply_dist[p] / 0.3048 >= 1500` (`ply_dist` is metres) |
+| 26 | AIR GLIDER over 2,000 ft | `ply_dist[p] / 0.3048 >= 2000` |
+| 27 / 28 | KIRBY MELEE 1 / 2 KOs | `ply_points[p] > 100` / `> 60` (the field is a polymorphic score; for Melee it is the KO count) |
+| 29 | SINGLE RACE 1 1st on Bulk Star | placement + `Ply_GetMachineKind(p) == VCKIND_BULK` |
+| 30 | SINGLE RACE 1 1st 3× as Purple | placement + `Ply_GetColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.purple_sr1_wins` |
+| 31–34 | DRAG RACE 1–4 photo finish | two finishers' `ply_race_time` within 6 frames (0.10 s at 60 fps) |
+| 35 | Air Ride photo finish | same, gated on `MJRKIND_AIR` + `AIRRIDEMODE_RACE` |
+
+`ply_race_time == 0` is a DNF and is excluded before pairing, or two non-finishers read as
+a perfect photo finish. In the time-metric modes `Stadium_ExitMinor` *projects* a finish
+time for a CPU that didn't cross the line, so such a CPU appears as a finisher with an
+extrapolated time — consistent with what the game's own results screen shows.
+
+**A per-frame proc on each human rider — the City Trial objectives.** Attached from
+`On3DLoadEnd`, and only for `Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL`, since
+"in one game" means one CT Trial run. Counters baseline on the first frame where
+`Gm_GetIntroState() == GMINTRO_END`, so patches applied at round start — including
+permanent ones an Archipelago item grants — are not read as a collection.
+
+"One game" here is one city segment: `SceneLoad_3D` calls `Player_InitAll` on every 3D
+scene load, which memsets all five `PlayerData` slots and so zeroes `item_collect` and
+`yakumono_break`. A stadium trip mid-trial therefore restarts these counters. That is the
+same scope the vanilla City Trial cells use.
+
+| clear_kind | Objective | Detection |
+|---|---|---|
+| 3 | Visit the castle flower on foot | **proxy**: `!Rider_IsOnMachine(rd)` and `rd->pos.Y >= 400` held for 30 frames. The flower's real coordinates are not yet known; the dwell requirement is what keeps a dismount-and-fall through the same altitude from counting. Both numbers want tuning against the real spot, ideally into an XZ box around the castle. |
+| 4 | Break all the coral in one game | `PlayerStats.yakumono_break[33] >= Gr_GetYakumonoSpawnTotal(33)`. Coral is yakumono descriptor 33 and GrCity1 places 10; the total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does. `yakumono_break` is zeroed per game, so no baseline is needed. |
+| 5 | Go out of bounds | `calcDistanceFromOOB(&rd->pos) < 0` — the engine's own definition, the condition that makes `Machine_CheckFallDeath` respawn the player. |
+| 6 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
+| 7 | Collect 10 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.allup_collect_total` |
+| 8–15 | Eat 3+ of each of 8 foods | per-run delta of `item_collect[ITKIND_FOOD*]` |
+
+`item_collect` is bumped by `Ply_IncrementItemCollectNum`, which `Machine_OnTouchItem`
+calls for every item application. That includes patches an Archipelago item spawns —
+`SpawnItemPlayer` calls `Machine_OnTouchItem` directly to force a same-frame pickup — so an
+All Up or HP Patch **received from another world counts**. That is deliberate: the player
+sees the pickup happen, and a box that fires too readily is the safe failure direction.
+
+Objectives 0–2 ("boot the game", "receive an item", "receive 5 items") read `ap_save`
+directly and need no sampling.
 
 ## Files (mod side)
 
 - `mods/archipelago/src/ap_checklist.c` / `.h` — the AP descriptor (checks + labels,
   blue theme, tab art, `is_recorded` / `record_complete` / `is_ready` callbacks) and
   `APChecklist_Register`.
+- `mods/archipelago/src/ap_check_detect.c` / `.h` — `APCheckKind`, the sampling hooks,
+  and `APCheckDetect_IsSet`.
 - `mods/archipelago/assets/ApChecklistTex.dat` — the AP banner/emblem archive.
 - `scripts/hsd/make_checklist_textures.py` — authors `ApChecklistTex.dat`.
 - `mods/archipelago/src/main.h` / `main.c` — the wire structs, `CHECKLIST_MODE_NUM` /
