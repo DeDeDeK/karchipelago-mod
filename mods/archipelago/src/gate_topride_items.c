@@ -162,12 +162,35 @@ void GateTopRideItems_OnBoot()
     OSReport("[TopRideItems] Top Ride item gating hooks installed\n");
 }
 
+// Chickie / Who? Paint / Lantern are the three "New Item" types, and the unlock mask alone cannot
+// reach them: TopRideItem_MgrInit (0x8034b5f4) clears enabled-mask bits 20/18/15 unless
+// GameData.topride_extra_unlocks[0..2] are set, and TopRide_SetExtraUnlocks (0x8000b5dc) derives those
+// from ClearChecker_CheckUnlocked(GMMODE_TOPRIDE, reward 8/9/10). GateTopRideItems_ApplyMask only ANDs,
+// so it can never restore a cleared bit. Marking the reward received makes CheckUnlocked return true and
+// the engine enable the type at course init. Received bit only - an is_unlocked / clear[] write would
+// badge the cell and send a spurious check. Mode base masks still apply, so this cannot make a type
+// spawn where vanilla never does.
+static void MarkNewItemRewardReceived(TopRideItemKind kind)
+{
+    u8 reward_index;
+    switch (kind)
+    {
+        case TRITEM_CHICKIE:   reward_index = 8;  break;
+        case TRITEM_WHO_PAINT: reward_index = 9;  break;
+        case TRITEM_LANTERN:   reward_index = 10; break;
+        default: return;
+    }
+
+    ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= (1ULL << reward_index);
+}
+
 int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce)
 {
     if ((unsigned)kind >= TRITEM_NUM)
         return 0;
 
     ap_save->topride_item_unlocked_mask |= (1 << kind);
+    MarkNewItemRewardReceived(kind);
     OSReport("[TopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
              kind, TopRideItemKind_Names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
     if (announce)

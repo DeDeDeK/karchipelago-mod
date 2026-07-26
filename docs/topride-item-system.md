@@ -119,7 +119,12 @@ So a held ability power is detected by comparing `*(void**)kirby->state_handler`
 
 The three extra-unlock flags flow through `TopRide_SetExtraUnlocks` (0x8000b5dc), invoked from `TopRide_OnCourseSelect` (0x8002cc30) and `TopRide_PreGameThink` (0x8002c06c). That call reads `ClearChecker_CheckUnlocked(mode=TR, reward_index=8|9|10)` for Chickie / Who? Paint / Lantern respectively and stores the booleans at `GameData+0x37e/+0x37f/+0x380`. Those bytes later land at offsets `+0x4a/+0x4b/+0x4c` on the TR config struct that `TopRideItem_MgrInit` inspects; a zero byte clears the corresponding bit of the enabled mask.
 
-Because `MgrInit` gates these three on the received-reward path (not the enabled mask, which `GateTopRideItems_ApplyMask` only ANDs), an ungated TR-item world can't unlock them via the all-1s mask. Instead `APOptions_ApplyUngatedCategories` marks TR reward indices 8–10 received in `ap_save->received_checklist_rewards[GMMODE_TOPRIDE]`, so `CheckUnlocked` returns true and the engine enables the types at course init. Setting only the received bit (not `is_unlocked`) avoids a spurious outbound check and any `clear[]` write that would badge the cell.
+Because `MgrInit` gates these three on the received-reward path (not the enabled mask, which `GateTopRideItems_ApplyMask` only ANDs), no value of `topride_item_unlocked_mask` reaches them — the AND can clear a bit the engine set, never set one the engine cleared. Both gate states therefore mark the reward received in `ap_save->received_checklist_rewards[GMMODE_TOPRIDE]`, so `CheckUnlocked` returns true and the engine enables the type at course init:
+
+- **Gating off**: `APOptions_ApplyUngatedCategories` marks TR reward indices 8–10 received at connect, alongside the all-1s mask.
+- **Gating on**: `GateTopRideItems_UnlockItem` marks the matching index when that item's own unlock arrives (Chickie → 8, Who? Paint → 9, Lantern → 10), so the unlock item delivers its type like the other 18. Without it the three unlocks are inert, and since the AP world drops their checklist rewards from the pool as overlapping, nothing else could enable them.
+
+Either path sets only the received bit, never `is_unlocked` or a `clear[]` write — those would badge the cell and send a spurious outbound check. The mode base masks still apply on top, so Chickie and Who? Paint stay absent from Time Attack and the special modes exactly as in vanilla.
 
 ### Per-Item Widget Handlers
 
@@ -166,6 +171,6 @@ Copy abilities do not exist in Top Ride, so the ability unlock's only effect the
 
 | Function | Role |
 |----------|------|
-| `GateTopRideItems_UnlockItem(kind, announce)` | Sets bit `kind` in `ap_save->topride_item_unlocked_mask`; optionally enqueues an "Unlocked Item: …" textbox (`TopRideItemColor`, mode color for Top Ride). Returns 0 for out-of-range kind. |
+| `GateTopRideItems_UnlockItem(kind, announce)` | Sets bit `kind` in `ap_save->topride_item_unlocked_mask`, and for Chickie / Who? Paint / Lantern also marks TR reward index 8 / 9 / 10 received, the only route to those three; optionally enqueues an "Unlocked Item: …" textbox (`TopRideItemColor`, mode color for Top Ride). Returns 0 for out-of-range kind. |
 | `GateTopRideItems_GiveItem(kind)` | Direct apply (no flying pickup). Requires the TR `KirbyMgr` (`*stc_topride_kirbymgr`) and `round_state == 2`; iterates the 4 slots, and for each human (`TopRide_GetPlayerKind(slot) == TR_PKIND_HMN`) calls `TopRide_KirbyApplyItem(k, kind)`. Returns 1 if applied to ≥1 kirby, else 0 (caller retries). Used by the AP TR-item-give path and TrapLink-TR receive. Deliberately does **not** gate on `kirby->is_active` (stays 0 in Time Attack / Free Run). |
 | `GateTopRideItems_AbilityToItem(ability)` | Maps a `CopyKind` to its TR-item analog via `ability_items[]` (Freeze→Freeze Fan, Fire→Fire, Bomb→Bomb, Mic→Walky); returns -1 if none. |
