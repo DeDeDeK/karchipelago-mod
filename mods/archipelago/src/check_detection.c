@@ -366,12 +366,22 @@ static void ProcessBackfill(void)
 // handler records its compile-time (mode, clear_kind), then returns 0 to let the
 // `stb` run (clear[k]=1) or 1 to skip it - skip iff the cell is already is_filler,
 // since the store would wipe the filler byte no other path re-sets.
+//
+// The skip must still set is_unlocked itself. Each vanilla store site is guarded by
+// `!clear[k].is_unlocked` and returns 1 ("an unlock was processed") without arming the
+// phase timer, so Checklist_Think re-enters ProcessUnlock every frame until the guard
+// goes false. Skipping the store alone leaves the guard true forever: the checklist
+// phase never advances and the screen stops taking input. is_filler outranks
+// is_unlocked in the grid builder, so the cell still draws as a filler tile.
 #define META_UNLOCK_HANDLER(name, mode, kind)                            \
     static int name(void)                                                \
     {                                                                    \
         RecordCheck((mode), (kind));                                     \
         GameClearData *cd = gmGetClearcheckerTypeP((mode));              \
-        return (cd && cd->clear[(kind)].is_filler) ? 1 : 0;              \
+        if (!cd || !cd->clear[(kind)].is_filler)                          \
+            return 0;                                                    \
+        cd->clear[(kind)].is_unlocked = 1;                               \
+        return 1;                                                        \
     }
 
 META_UNLOCK_HANDLER(MetaUnlock_AirRide100,       GMMODE_AIRRIDE,   0x18)

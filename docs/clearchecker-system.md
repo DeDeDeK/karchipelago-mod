@@ -401,15 +401,29 @@ on subsequent `Checklist_ProcessUnlock` invocations are harmless.
   and control continues to the vanilla display_state update sequence and then
   the function tail.
 - **Return 1 (skip)** — taken iff `clear[k].is_filler` is already set at hook
-  entry. Control branches directly to `0x8017f394` (the function tail),
-  bypassing both the `stb` and the subsequent display_state update. This
-  preserves the filler byte: the vanilla store would overwrite `is_filler`,
-  `has_reward`, and `is_visible` with a bare `0x01`, and `is_filler` in
-  particular has no other code path to restore it. The filler code path
-  already drove the cell to a completed state through `SetNewUnlock`, so the
-  display_state increment is also redundant. The result: a cell that was
-  filler'd before its auto-unlock condition became true retains its filler
-  visual marker instead of flipping to an "auto-unlocked" appearance.
+  entry. The handler sets `clear[k].is_unlocked` itself, then control branches
+  directly to `0x8017f394` (the function tail), bypassing both the `stb` and the
+  subsequent display_state update. This preserves the filler byte: the vanilla
+  store would overwrite `is_filler`, `has_reward`, and `is_visible` with a bare
+  `0x01`, and `is_filler` in particular has no other code path to restore it. The
+  filler code path already drove the cell to a completed state through
+  `SetNewUnlock`, so the display_state increment is also redundant. The result: a
+  cell that was filler'd before its auto-unlock condition became true retains its
+  filler visual marker instead of flipping to an "auto-unlocked" appearance
+  (`is_filler` outranks `is_unlocked` in the grid builder's cell-model priority).
+
+**Why the skip must set `is_unlocked`.** Each of the five store sites is guarded by
+`!clear[k].is_unlocked`, and the branch to `0x8017f394` returns 1 — "an unlock was
+processed" — *without* arming the phase timer at `ClearCheckerUI+0x1C`. `Checklist_Think`
+therefore calls `Checklist_ProcessUnlock` again on the very next frame (both call sites,
+`0x8017f4c8` and `0x801815b4`, only advance the phase when it returns 0). In vanilla the
+`stb` itself falsifies the guard on the following pass, so the loop terminates. A skip
+that changed nothing would leave the guard true forever: `ProcessUnlock` returns 1 every
+frame, the checklist phase never advances, and the screen accepts no input — a softlock
+reachable by spending a checkbox filler on any of the five meta cells (vanilla's hardcoded
+filler rejects at `0x80180a84`–`0x80180a98`, which the AP filler gate replaces, existed to
+prevent exactly that). Setting `is_unlocked` in the handler falsifies the guard the same
+way the vanilla store would, and the sequence completes after one extra frame.
 
 ### Backfill (client → mod)
 
