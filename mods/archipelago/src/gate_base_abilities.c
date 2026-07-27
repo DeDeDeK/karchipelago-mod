@@ -10,11 +10,6 @@
 #include "gate_base_abilities.h"
 #include "textbox_api.h"
 
-// Gates Kirby's inhale, quick spin, and machine charge behind AP unlock items.
-// Human-only - CPUs keep every ability, since gating the universal machine charge
-// would leave every CPU racer unable to boost. Each gate reads the mask every time it
-// runs, so the patch stays installed and defers to the engine once unlocked.
-
 static const char *const BaseAbility_Names[BASEABILITY_NUM] = {
     "Inhale",
     "Quick Spin",

@@ -8,10 +8,6 @@
 #include "ap_item_handler.h"
 #include "textbox_api.h"
 
-// Both 3D (RiderData) and Top Ride (TopRideKirby) expose a model_scale float the
-// engine multiplies into the model JObj each frame. A per-frame applier rewrites
-// it so the scale survives respawns.
-
 // Effects are multiplicative, kept inside [0.5, 2.0] so the model never grows
 // large enough to break the camera / collision feel. Neutral matches the vanilla
 // model_scale initializer.
