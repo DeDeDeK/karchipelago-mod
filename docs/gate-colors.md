@@ -27,9 +27,8 @@ All three modes respect the mask: Air Ride (Race, Free Run, Time Attack), City T
 
 | Symbol | Kind | Where | Role |
 |--------|------|-------|------|
-| `GateColors_OnBoot()` | mod | gate_colors.c | Applies the ten hooks at boot (called from `main.c`). |
+| `GateColors_OnBoot()` | mod | gate_colors.c | Applies the nine hooks at boot (called from `main.c`). |
 | `GateColors_FilterResult(int color_idx)` | mod (static) | gate_colors.c | Availability predicate at each L/R colorChanger convergence point. |
-| `GateColors_ValidateColor(int color_idx)` | mod (static) | gate_colors.c | Returns the color if unlocked, else the first unlocked one. |
 | `GateColors_ValidateAirRideColors(void)` | mod (static) | gate_colors.c | Rewrites `airride_select_ply.color[0..3]` after an AR CSS init block. |
 | `GateColors_ValidateTopRideColors(void)` | mod (static) | gate_colors.c | Rewrites `topride_select_ply.color[0..3]` after a TR init block. |
 | `GateColors_ValidateCityTrialColors(void)` | mod | gate_colors.c | Rewrites `city_select_ply.ply_color[0..3]`; called from `main.c::OnPlayerSelectLoad`. |
@@ -50,14 +49,14 @@ All three modes respect the mask: Air Ride (Race, Free Run, Time Attack), City T
 
 ### `icon[]` vs `color[]`
 
-The Air Ride select struct (`airride_select_ply` at `GameData + 0x108`, see `game.h`) carries two distinct color fields per slot. The AR CSS code addresses this struct through a base register holding `GameData + 0x10a`, so the in-code store offsets are smaller than the GameData-relative ones:
+The Air Ride select struct (`airride_select_ply` at `GameData + 0x108`, see `game.h`) carries two per-slot byte arrays that are easy to confuse. The AR CSS code addresses this struct through a base register holding `GameData + 0x10a`, so the in-code store offsets are smaller than the GameData-relative ones:
 
 | Field | Offset from GameData | Offset from CSS base (`GameData + 0x10a`) | Purpose |
 |-------|----------------------|-------------------------------------------|---------|
-| `icon[4]`  | `0x137` | `+0x2d` (e.g. `stb r3,45(r28)` at `0x8002978c`) | CSS machine icon display color (cosmetic) |
+| `icon[4]`  | `0x137` | `+0x2d` (e.g. `stb r3,45(r28)` at `0x8002978c`) | Index into the available-machine list at `GameData + 0x170` (count at `+0x16f`) |
 | `color[4]` | `0x15b` | `+0x51` (e.g. `stb r22,81(r25)`) | Actual in-game Kirby color, L/R cycling target |
 
-`color[]` is what determines the in-game color and what L/R cycles. `icon[]` is purely the CSS icon rendering color and is never copied to `color[]`.
+Only `color[]` holds a `KirbyColor`. Despite the name, `icon[]` is **not** a color: `CSS_airRide_RaceUpdate` derives it by scanning the available-machine list for the slot's `machine_kind` (`+0x61`) and storing the matching **list position**, falling back to the entry whose value is 1 (Warp Star) and then to 0. Color gating must therefore never touch `icon[]` — a color-mask test applied to a list index is a type confusion that corrupts the CSS icon. Machine availability is gated separately by `gate_machines.c`.
 
 ### Air Ride init paths
 
@@ -82,14 +81,13 @@ City Trial has no equivalent init block. Its `city_select_ply.ply_color[4]` (`Ga
 
 ### Hooks
 
-Ten `CODEPATCH_HOOKCREATE`s, all applied in `GateColors_OnBoot`.
+Nine `CODEPATCH_HOOKCREATE`s, all applied in `GateColors_OnBoot`.
 
 | Address | Hook body | Purpose |
 |---------|-----------|---------|
 | `0x8002176c` | `GateColors_FilterResult` | Air Ride L/R color cycling (`CSS_airRide_colorChanger`); clobbered `extsb. r0, r3`, r23 = candidate color |
 | `0x8002a510` | `GateColors_FilterResult` | Top Ride L/R color cycling (`CSS_topRide_colorChanger`); clobbered `extsb. r0, r0`, r23 = candidate, result returned in r0 |
 | `0x8002f350` | `GateColors_FilterResult` | City Trial L/R color cycling (`CitySelect_ChangeColor`); clobbered `extsb. r0, r3`, r30 = candidate |
-| `0x8002978c` | `GateColors_ValidateColor` | Machine-to-color icon lookup (`stb r3, 45(r28)`), cosmetic |
 | `0x800295e8` | `GateColors_ValidateAirRideColors` | AR Race CSS `color[]` init convergence |
 | `0x80029e34` | `GateColors_ValidateAirRideColors` | AR Free Run / Time Attack CSS `color[]` init convergence |
 | `0x8002d06c` | `GateColors_ValidateTopRideColors` | TR general data reset convergence |
@@ -97,7 +95,7 @@ Ten `CODEPATCH_HOOKCREATE`s, all applied in `GateColors_OnBoot`.
 | `0x8002db8c` | `GateColors_ValidateTopRideColors` | TR Solo (Free Run + Time Attack) re-assignment convergence |
 | `0x800236a8` | `GateColors_SetCpuAirRideColor` | AR CPU-slot color (`stb r0, 69(r29)`, the CPU-slot kind write in `loadCPU`'s per-slot loop); epilogue restores `li r0, 2` for the re-executed store |
 
-The three L/R hooks sit at each cycler's convergence point, where all vanilla paths (colors 0–3 hardcoded, 4–7 checklist) merge, so the mask overrides outright. The icon hook at `0x8002978c` is purely cosmetic — it keeps the CSS icon visually consistent with the unlock state; without it the CSS would briefly render a locked-color machine icon for slots picked up from the machine-to-color lookup table. Both per-mode TR hooks fire before the visual loop reads `color[]`, so corrected values are used for display.
+The three L/R hooks sit at each cycler's convergence point, where all vanilla paths (colors 0–3 hardcoded, 4–7 checklist) merge, so the mask overrides outright. Both per-mode TR hooks fire before the visual loop reads `color[]`, so corrected values are used for display.
 
 ### CPU random color
 

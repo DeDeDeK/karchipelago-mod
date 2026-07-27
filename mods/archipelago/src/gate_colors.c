@@ -35,15 +35,6 @@ static void validate_color_array(u8 *colors)
     }
 }
 
-static int GateColors_ValidateColor(int color_idx)
-{
-    if (GateColors_IsColorUnlocked(color_idx))
-        return color_idx;
-    int fallback = first_unlocked_color();
-    OSReport("[GateColors] ValidateColor: %d locked, using %d\n", color_idx, fallback);
-    return fallback;
-}
-
 // The AR CSS init block sets color[0..3] = {0,1,2,3}, which may contain locked colors.
 static void GateColors_ValidateAirRideColors(void)
 {
@@ -127,15 +118,6 @@ CODEPATCH_HOOKCREATE(0x8002f350,
     0
 )
 
-// Hook at 0x8002978c (stb r3, 45(r28)) in zz_80028888_: validates the machine-to-color
-// lookup result before the re-executed stb commits it as the icon color.
-CODEPATCH_HOOKCREATE(0x8002978c,
-    "",
-    GateColors_ValidateColor,
-    "",
-    0
-)
-
 // Hook at 0x800295e8 (li r8, 0) in zz_80028888_ (Race mode): convergence after the
 // color[0..3] init block. r3/r4 are reloaded just below, so clobbers are safe.
 CODEPATCH_HOOKCREATE(0x800295e8,
@@ -188,7 +170,6 @@ void GateColors_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8002a510);  // CSS_topRide_colorChanger
     CODEPATCH_HOOKAPPLY(0x8002f350);  // CitySelect_ChangeColor
     CODEPATCH_HOOKAPPLY(0x800236a8);  // loadCPU CPU-slot color
-    CODEPATCH_HOOKAPPLY(0x8002978c);  // AR machine-lookup color
     CODEPATCH_HOOKAPPLY(0x800295e8);  // AR CSS init (Race)
     CODEPATCH_HOOKAPPLY(0x80029e34);  // AR CSS init (Free Run / Time Attack)
     CODEPATCH_HOOKAPPLY(0x8002d06c);  // TR data reset
