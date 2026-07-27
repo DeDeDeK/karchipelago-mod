@@ -35,8 +35,21 @@ nothing depends on the tab being exactly mode 3.
 `APChecklist_Register` (called from `OnSaveLoaded`, after the framework mod has exported
 its API) imports `CustomChecklistAPI` and hands it a descriptor with:
 
-- **Checks** — a static `{ clear_kind, label, predicate }` table covering all 36
-  objectives. Every predicate is a single `APCheckDetect_IsSet(ck)` call; the detection
+- **Checks** — a static `{ clear_kind, label, predicate }` table covering all 33
+  objectives. Labels are the in-game cell text and are independent of the apworld's
+  location names; they follow the vanilla checklist's wording — a title-case category
+  prefix (`City Trial: `, `Stadium: `, `Air Ride: `), the stadium name in caps carrying
+  no colon of its own, and a trailing `!`. The framework composes each into a fixed
+  128-byte SIS entry with a 125-byte glyph budget (2 bytes per character, 1 per space)
+  and truncates silently past it; the longest label spends 82. Each label places its own
+  line break as a `\n`, after the category and stadium designation the way vanilla breaks
+  its entries — the framework's fallback split balances on width alone and would part a
+  stadium name from its number (`SINGLE RACE / 8 Finish in 1st!`). Every line comes out
+  at 23 characters or fewer, inside the ~25 that renders at full size. Every printable
+  ASCII character in the labels maps
+  through `Text_CharToCommand`, including `!` and `:` — an unmapped one would be dropped
+  without warning.
+  Every predicate is a single `APCheckDetect_IsSet(ck)` call; the detection
   itself lives in `ap_check_detect.c` (see Objectives and detection below).
 - **Theme** — blue (`AP_CHECKLIST_NAME` / `AP_THEME_*` in `ap_checklist.h`, shared with
   every textbox that names the tab so the wording and tint stay one value; the tab's
@@ -65,8 +78,8 @@ record:
   the `sent_checks` bit, fires the "Check sent" textbox and re-evaluates goals — and,
   mid-run (unlock cache invalid), sets `clear[].is_new` and plays the unlock SFX. The
   framework seeds the cell's `is_new`/`is_visible` afterward so the flip-and-sparkle runs
-  even for a check satisfied outside any gamemode (e.g. "Boot the game", which hits the
-  cache-valid short-circuit).
+  even for a check that lands outside a gamemode — a stadium objective latched at
+  `On3DExit`, say — which hits the cache-valid short-circuit.
 
 So the AP tab's completion path is unchanged from a plain checklist objective:
 predicate → `ClearChecker_SetNewUnlock` → `check_detection` → `sent_checks` row → AP.
@@ -79,10 +92,19 @@ the same block.
 
 The tab's board starts blank and reveals outward, exactly as the vanilla checklists do:
 a cell draws only once it is completed, or once a completed orthogonal neighbour has
-revealed it. The reveal is positional, so with only 36 of the 120 clear_kinds carrying a
+revealed it. The reveal is positional, so with only 33 of the 120 clear_kinds carrying a
 check it will surface boxes that have no objective behind them and cells whose only
 neighbours are undefined stay dark until their own check fires. That resolves itself as
 the tab fills out toward 120.
+
+`APChecklist_RevealAll` is the exception: the `reveal_checklists` slot option (applied when
+the client hands over its options) and the debug menu's "Reveal All Checklists" both route
+through `RevealAllChecklists`, which reveals all 120 cells of each vanilla mode and then
+calls into the AP tab. The AP tab reveals only the cells in `ap_checks[]` — the other 87
+have no objective behind them, so revealing them would show boxes that can never be
+checked. It sets `is_visible` only, leaving `is_unlocked` to the normal completion path,
+and no-ops when the framework never registered the tab. The framework clears `is_visible`
+only in `CC_ApplyLayout`, which runs once per session at boot, long before either caller.
 
 ## Wire layout
 
@@ -99,12 +121,16 @@ compiler picks the offsets and the client restates them by hand — so extend th
 when adding fields, and move both sides together.
 
 `APSave` is not part of that contract — the client never reads it — so it grows freely.
-Two objectives that count across boots keep their progress there:
-`allup_collect_total` (clear_kind 7) and `purple_sr1_wins` (clear_kind 30), with their
+Objectives whose predicate counts across boots keep their progress in `APSave.checks`, an
+`APCheckProgress` struct sitting at the end of `APSave`, away from the unlock masks: today
+`allup_collect_total` (clear_kind 4) and `purple_sr1_wins` (clear_kind 27), with their
 targets as `AP_ALLUP_TOTAL_NEED` / `AP_PURPLE_SR1_NEED` in `main.h` so the counter that
-stops incrementing and the predicate that reads it share one value.
+stops incrementing and the predicate that reads it share one value. Grouping them means a
+new counting objective adds a field to that struct rather than another loose scalar in
+`APSave`. An objective satisfiable within one run needs nothing here — it latches in
+`ap_check_detect.c`'s transient `ap_observed` and records through `sent_checks`.
 
-Only clear_kinds 0–35 back an AP location, but the tab's grid is 120 cells and the
+Only clear_kinds 0–32 back an AP location, but the tab's grid is 120 cells and the
 checkbox-filler cursor can reach the blank ones. `RecordCheck` rejects `clear_kind >=
 APCK_NUM` on the AP row so a spent filler can't send a location code the multiworld has
 never heard of.
@@ -139,7 +165,7 @@ checklist's banner/emblem TObjs onto these descriptors.
 
 ## Objectives and detection
 
-There are 36 objectives, `clear_kind` 0–35, enumerated as `APCheckKind` in
+There are 33 objectives, `clear_kind` 0–32, enumerated as `APCheckKind` in
 `ap_check_detect.h`. The numbering is a cross-repo wire contract — the AP location code is
 `361 + clear_kind`, and `APLocation` in the apworld's `KARLocations.py` restates the same
 order by hand, with nothing mechanically catching a desync. An AP box whose check never
@@ -147,7 +173,11 @@ fires is worse than one that doesn't exist: the location still exists in the mul
 logic still treats it as reachable, so fill can strand progression on it. A
 `_Static_assert` pins `ap_checks[]` to `APCK_NUM` so a cell can't go missing on this side.
 
-Predicates never sample. The framework polls all 36 every frame, in every scene, including
+Every objective is an in-game achievement. There is no box for booting the game or for
+receiving a multiworld item — those complete without playing, so as AP locations they were
+free checks the fill could hide progression behind.
+
+Predicates never sample. The framework polls all 33 every frame, in every scene, including
 menus and loads — so each one is a single read of state latched elsewhere, and the sampling
 lives in two hooks in `ap_check_detect.c`.
 
@@ -164,21 +194,21 @@ placement and time are stale.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 16–24 | SINGLE RACE 1–9 finish 1st | `ply_finished[p] && ply_placement[p] == 0` |
-| 25 | HIGH JUMP over 1,500 ft | `ply_dist[p] / 0.3048 > 1500` (`ply_dist` is metres) |
-| 26 | AIR GLIDER over 2,000 ft | `ply_dist[p] / 0.3048 > 2000` |
-| 27 / 28 | KIRBY MELEE 1 / 2 KOs | `ply_points[p] > 100` / `> 60` (the field is a polymorphic score; for Melee it is the KO count) |
-| 29 | SINGLE RACE 1 1st on Bulk Star | placement + `Ply_GetMachineKind(p) == VCKIND_BULK` |
-| 30 | SINGLE RACE 1 1st 3× as Purple | placement + `Ply_GetColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.purple_sr1_wins` |
-| 31–34 | DRAG RACE 1–4 photo finish | two finishers' `ply_race_time` within 6 frames (0.10 s at 60 fps) |
-| 35 | Air Ride photo finish | same, gated on `MJRKIND_AIR` + `AIRRIDEMODE_RACE` |
+| 13–21 | SINGLE RACE 1–9 finish 1st | `ply_finished[p] && ply_placement[p] == 0` |
+| 22 | HIGH JUMP over 1,500 ft | `ply_dist[p] / 0.3048 > 1500` (`ply_dist` is metres) |
+| 23 | AIR GLIDER over 2,000 ft | `ply_dist[p] / 0.3048 > 2000` |
+| 24 / 25 | KIRBY MELEE 1 / 2 KOs | `ply_points[p] > 100` / `> 60` (the field is a polymorphic score; for Melee it is the KO count) |
+| 26 | SINGLE RACE 1 1st on Bulk Star | placement + `Ply_GetMachineKind(p) == VCKIND_BULK` |
+| 27 | SINGLE RACE 1 1st 3× as Purple | placement + `Ply_GetColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.checks.purple_sr1_wins` |
+| 28–31 | DRAG RACE 1–4 photo finish | two finishers' `ply_race_time` within 6 frames (0.10 s at 60 fps) |
+| 32 | Air Ride photo finish | same, gated on `MJRKIND_AIR` + `AIRRIDEMODE_RACE` |
 
 Placement alone does not mean a win: `Stadium_ComputeRankByTime` (`0x800108b0`) ranks
 slots that never crossed the line as well, falling through to a
 `GameData.player_race_distance` comparison when neither slot has its finished flag set. So
 a Single Race abandoned while the human led on distance latches `ply_placement == 0`. The
 1st-place boxes therefore require `ply_finished[p]` too — which matters most for
-`purple_sr1_wins`, a persistent counter with no way back down.
+`checks.purple_sr1_wins`, a persistent counter with no way back down.
 
 `ply_race_time == 0` is a DNF and is excluded before pairing, or two non-finishers read as
 a perfect photo finish. In the time-metric modes `Stadium_ExitMinor` *projects* a finish
@@ -198,21 +228,18 @@ same scope the vanilla City Trial cells use.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 3 | Visit the castle flower on foot | **proxy**: `!Rider_IsOnMachine(rd)` and `rd->pos.Y >= 400` held for 30 frames. The flower's real coordinates are not yet known; the dwell requirement is what keeps a dismount-and-fall through the same altitude from counting. Both numbers want tuning against the real spot, ideally into an XZ box around the castle. |
-| 4 | Break all the coral in one game | `PlayerStats.yakumono_break[33] >= Gr_GetYakumonoSpawnTotal(33)`. Coral is yakumono descriptor 33 and GrCity1 places 10; the total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does. `yakumono_break` is zeroed per game, so no baseline is needed. |
-| 5 | Go out of bounds | `calcDistanceFromOOB(&rd->pos) < 0` — the engine's own definition, the condition that makes `Machine_CheckFallDeath` respawn the player. |
-| 6 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
-| 7 | Collect 10 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.allup_collect_total` |
-| 8–15 | Eat 3+ of each of 8 foods | per-run delta of `item_collect[ITKIND_FOOD*]` |
+| 0 | Visit the castle flower on foot | **proxy**: `!Rider_IsOnMachine(rd)` and `rd->pos.Y >= 400` held for 30 frames. The flower's real coordinates are not yet known; the dwell requirement is what keeps a dismount-and-fall through the same altitude from counting. Both numbers want tuning against the real spot, ideally into an XZ box around the castle. |
+| 1 | Break all the coral in one game | `PlayerStats.yakumono_break[33] >= Gr_GetYakumonoSpawnTotal(33)`. Coral is yakumono descriptor 33 and GrCity1 places 10; the total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does. `yakumono_break` is zeroed per game, so no baseline is needed. |
+| 2 | Go out of bounds | `calcDistanceFromOOB(&rd->pos) < 0` — the engine's own definition, the condition that makes `Machine_CheckFallDeath` respawn the player. |
+| 3 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
+| 4 | Collect 10 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.checks.allup_collect_total` |
+| 5–12 | Eat 3+ of each of 8 foods | per-run delta of `item_collect[ITKIND_FOOD*]` |
 
 `item_collect` is bumped by `Ply_IncrementItemCollectNum`, which `Machine_OnTouchItem`
 calls for every item application. That includes patches an Archipelago item spawns —
 `SpawnItemPlayer` calls `Machine_OnTouchItem` directly to force a same-frame pickup — so an
 All Up or HP Patch **received from another world counts**. That is deliberate: the player
 sees the pickup happen, and a box that fires too readily is the safe failure direction.
-
-Objectives 0–2 ("boot the game", "receive an item", "receive 5 items") read `ap_save`
-directly and need no sampling.
 
 ## Files (mod side)
 

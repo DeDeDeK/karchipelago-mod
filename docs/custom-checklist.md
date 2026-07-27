@@ -140,6 +140,33 @@ slotted at `clear_kind + 4`). Only one custom tab is on screen at a time, so a
 single shared buffer set is recomposed per build. The CT tab reloads slot 0 from the
 archive on its own `cb_Load`, so its labels stay intact.
 
+A composed entry holds only glyphs, `TEXTCMD_SPACE` word separators, an optional
+`TEXTCMD_LINEBREAK` at the wrap point, and `TEXTCMD_TERMINATE` — the exact shape of the
+vanilla objective entries in `SisClrChk2D`/`3D`/`CT`, which carry no align, fit, kerning,
+color or scale opcodes and no trailing break. The checklist UI's `Text` object supplies
+all of that, so a label that pushes its own renders unlike the three vanilla tabs; a
+`TEXTCMD_SCALE` in particular shrinks the cell text against its neighbours. That leaves
+125 of the 128-byte entry for content, at 2 bytes per character and 1 per space or break,
+and a longer label is truncated silently. Any character `Text_CharToCommand` does not map
+is dropped, also silently — it covers `0-9`, `A-Z`, `a-z`, and the common punctuation
+including `!` and `:`.
+
+**Wrapping is authored, not automatic.** The cell's box holds exactly two lines, and the
+engine squeezes an over-wide line narrower instead of breaking it — which is why all 360
+vanilla entries carry their break as an explicit `TEXTCMD_LINEBREAK` byte (349 are two
+lines, 11 are one; none are three). Vanilla keeps single lines up to 37 characters, but
+writes the overwhelming majority as two lines of ~25, which is the width its glyphs render
+at full size.
+
+`CC_ComposeSis` takes the break from the label when it holds a `\n`, and otherwise splits
+a label over `CC_SIS_WRAP` (30) characters at the space nearest its midpoint. The
+automatic split balances on width alone, so it will part a name from a trailing number —
+`Stadium: SINGLE RACE / 8 Finish in 1st!` — where vanilla breaks after the whole
+designation. A label whose break matters should therefore place its own; the automatic one
+is the fallback for tabs that don't care. Either way a label must come out at two lines or
+fewer, which the framework does not enforce: a second `\n` produces a third line the box
+cannot show.
+
 ## Theme (target-color recolor)
 
 Each checklist tab is tinted with a per-mode color carried in the **background
@@ -189,9 +216,8 @@ descriptor's `is_ready`):
 - **Not yet recorded** (`is_recorded(ck)` is false) and the predicate now holds:
   record it (the mod's `record_complete`, or the framework's own save), fire the
   optional `on_complete(ck)` cue, then seed `clear[ck].is_new` and play the
-  completion SFX. A check satisfied outside any gamemode (e.g. "Boot the game") never
-  gets `is_new` from the engine, so the framework sets it; the flip-and-sparkle runs on
-  the next tab entry.
+  completion SFX. A check satisfied outside any gamemode never gets `is_new` from the
+  engine, so the framework sets it; the flip-and-sparkle runs on the next tab entry.
 - **Already recorded, with no `is_new` pending**: raise `is_unlocked` and reveal the
   cell's neighbours (below) — so a completion from a prior boot (the block is BSS-zeroed
   at boot) shows complete with no replay. A pending `is_new` is left alone, so a

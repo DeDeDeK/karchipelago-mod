@@ -54,8 +54,8 @@ extern int ap_checklist_mode;
 #define PATCH_STAT_MAX 127
 
 // Targets of the two Archipelago checklist objectives that count across boots,
-// backed by APSave.allup_collect_total / APSave.purple_sr1_wins. Shared so the
-// counter that stops incrementing and the predicate that reads it use one value.
+// backed by the matching APSave.checks counters. Shared so the counter that stops
+// incrementing and the predicate that reads it use one value.
 #define AP_ALLUP_TOTAL_NEED 10
 #define AP_PURPLE_SR1_NEED  3
 
@@ -119,6 +119,18 @@ typedef struct APSlotOptions
     u32 checklist_rewards_gating_enabled;
 } APSlotOptions;
 
+// Cross-boot progress for AP checklist objectives whose predicate counts over more than one
+// session. Grouped in one struct, and kept at the end of APSave away from the unlock masks,
+// so adding an objective that needs a counter is a field here rather than another loose
+// scalar threaded through APSave. An objective satisfiable within a single run needs nothing
+// here - it latches in ap_check_detect.c's transient ap_observed and is recorded through
+// sent_checks like every other check.
+typedef struct APCheckProgress
+{
+    u16 allup_collect_total; // APCK_ALLUPS_10: lifetime All Ups picked up by a human in City Trial
+    u8 purple_sr1_wins;      // APCK_SR1_PURPLE_3X: SINGLE RACE 1 first places taken by a Purple Kirby
+} APCheckProgress;
+
 typedef struct APSave
 {
     uint boot_num;
@@ -146,10 +158,9 @@ typedef struct APSave
     u8 goal_complete;                                   // Sticky once set; persisted across boots
     u8 goal_announced[CHECKLIST_MODE_NUM];              // Sticky per row: 1 once that mode's goal first satisfied (drives the per-mode "X goal complete!" textbox, fired once each)
     u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit the runtime patch cap target on all 9 stats during a CT trial round
-    u16 allup_collect_total;                            // Lifetime All Ups picked up by a human in City Trial (AP checklist "collect 10 All Ups in total")
-    u8 purple_sr1_wins;                                 // SINGLE RACE 1 first places taken by a Purple Kirby (AP checklist "finish 1st 3 times as Purple Kirby")
     APSlotOptions options;                              // AP slot options (copied from APData on first connect)
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
+    APCheckProgress checks;                             // AP checklist objective progress (see APCheckProgress)
 } APSave;
 
 // Shared data struct stored at a static location in memory.

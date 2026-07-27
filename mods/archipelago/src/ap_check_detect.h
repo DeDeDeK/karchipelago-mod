@@ -6,40 +6,36 @@
 // entry may only be renumbered together with APLocation in the apworld.
 typedef enum APCheckKind
 {
-    APCK_BOOT,              // 0
-    APCK_RECEIVE_ITEM,      // 1
-    APCK_RECEIVE_5_ITEMS,   // 2
+    APCK_CASTLE_FLOWER,     // 0
+    APCK_BREAK_ALL_CORAL,   // 1
+    APCK_OUT_OF_BOUNDS,     // 2
 
-    APCK_CASTLE_FLOWER,     // 3
-    APCK_BREAK_ALL_CORAL,   // 4
-    APCK_OUT_OF_BOUNDS,     // 5
+    APCK_HP_PATCHES_10,     // 3
+    APCK_ALLUPS_10,         // 4
 
-    APCK_HP_PATCHES_10,     // 6
-    APCK_ALLUPS_10,         // 7
+    APCK_FOOD_ICECREAM,     // 5
+    APCK_FOOD_RICEBALL,     // 6
+    APCK_FOOD_CHICKEN,      // 7
+    APCK_FOOD_CURRY,        // 8
+    APCK_FOOD_RAMEN,        // 9
+    APCK_FOOD_OMELET,       // 10
+    APCK_FOOD_HAMBURGER,    // 11
+    APCK_FOOD_APPLE,        // 12
 
-    APCK_FOOD_ICECREAM,     // 8
-    APCK_FOOD_RICEBALL,     // 9
-    APCK_FOOD_CHICKEN,      // 10
-    APCK_FOOD_CURRY,        // 11
-    APCK_FOOD_RAMEN,        // 12
-    APCK_FOOD_OMELET,       // 13
-    APCK_FOOD_HAMBURGER,    // 14
-    APCK_FOOD_APPLE,        // 15
+    APCK_SR1_FIRST,         // 13, SR2..SR9 follow in StadiumKind order
+    APCK_SR9_FIRST = APCK_SR1_FIRST + 8, // 21
 
-    APCK_SR1_FIRST,         // 16, SR2..SR9 follow in StadiumKind order
-    APCK_SR9_FIRST = APCK_SR1_FIRST + 8, // 24
+    APCK_HIGHJUMP_1500,     // 22
+    APCK_AIRGLIDER_2000,    // 23
+    APCK_MELEE1_100,        // 24
+    APCK_MELEE2_60,         // 25
 
-    APCK_HIGHJUMP_1500,     // 25
-    APCK_AIRGLIDER_2000,    // 26
-    APCK_MELEE1_100,        // 27
-    APCK_MELEE2_60,         // 28
+    APCK_SR1_BULK,          // 26
+    APCK_SR1_PURPLE_3X,     // 27
 
-    APCK_SR1_BULK,          // 29
-    APCK_SR1_PURPLE_3X,     // 30
-
-    APCK_DRAG1_PHOTO,       // 31, DRAG2..DRAG4 follow in StadiumKind order
-    APCK_DRAG4_PHOTO = APCK_DRAG1_PHOTO + 3, // 34
-    APCK_AIRRIDE_PHOTO,     // 35
+    APCK_DRAG1_PHOTO,       // 28, DRAG2..DRAG4 follow in StadiumKind order
+    APCK_DRAG4_PHOTO = APCK_DRAG1_PHOTO + 3, // 31
+    APCK_AIRRIDE_PHOTO,     // 32
 
     APCK_NUM,
 } APCheckKind;

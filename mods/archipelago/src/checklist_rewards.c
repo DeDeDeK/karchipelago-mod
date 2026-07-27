@@ -1105,7 +1105,8 @@ void ChecklistRewards_DebugClearAll(void)
 }
 
 // Reveal every checkbox across all modes (sets is_visible only - unlock state
-// is left alone so the AP flow still drives actual completion).
+// is left alone so the AP flow still drives actual completion). The AP tab is a
+// custom checklist whose grid is mostly empty, so it reveals only its own cells.
 void RevealAllChecklists(void)
 {
     for (int mode = 0; mode < GMMODE_NUM; mode++)
@@ -1116,6 +1117,8 @@ void RevealAllChecklists(void)
     }
     OSReport("[Checklist] All checklist squares revealed (%d modes x %d squares)\n",
              GMMODE_NUM, CLEAR_KIND_NUM);
+
+    APChecklist_RevealAll();
 }
 
 // Install all checklist hooks. Call from OnBoot.

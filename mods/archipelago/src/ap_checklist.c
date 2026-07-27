@@ -18,9 +18,6 @@ static const CustomChecklistAPI *cc_api = NULL;
 #define AP_CHECK_PREDICATE(name) \
     static int Check_##name(void) { return APCheckDetect_IsSet(APCK_##name); }
 
-AP_CHECK_PREDICATE(BOOT)
-AP_CHECK_PREDICATE(RECEIVE_ITEM)
-AP_CHECK_PREDICATE(RECEIVE_5_ITEMS)
 AP_CHECK_PREDICATE(CASTLE_FLOWER)
 AP_CHECK_PREDICATE(BREAK_ALL_CORAL)
 AP_CHECK_PREDICATE(OUT_OF_BOUNDS)
@@ -64,52 +61,58 @@ AP_CHECK_PREDICATE_N(DRAG1_PHOTO, 3)
 
 // clear_kind order is the wire contract with APLocation in the apworld (the AP
 // location code is 361 + clear_kind). Labels are the cell text and are
-// independent of the apworld's location names - they are kept short because
-// the framework composes them into a fixed 128-byte SIS entry.
+// independent of the apworld's location names.
+//
+// They follow the vanilla checklist's wording: a title-case category prefix
+// ("City Trial: ", "Stadium: ", "Air Ride: "), the stadium name in caps with no
+// colon of its own, and a trailing "!". Length is bounded - the framework composes
+// each into a fixed 128-byte SIS entry whose glyph budget is 124 bytes, 2 per
+// character and 1 per space, and silently truncates past it.
+//
+// The "\n" is the line break, placed rather than left to the framework's automatic
+// midpoint split: vanilla breaks after the whole stadium designation, which a
+// width-only rule parts from its trailing number ("SINGLE RACE / 8 Finish in 1st!").
+// A label short enough for one line carries none.
 static const CustomCheck ap_checks[] = {
-    { APCK_BOOT,            "Boot the game",                    Check_BOOT },
-    { APCK_RECEIVE_ITEM,    "Receive an item",                  Check_RECEIVE_ITEM },
-    { APCK_RECEIVE_5_ITEMS, "Receive 5 items",                  Check_RECEIVE_5_ITEMS },
+    { APCK_CASTLE_FLOWER,   "City Trial: Visit the\ncastle flower on foot!", Check_CASTLE_FLOWER },
+    { APCK_BREAK_ALL_CORAL, "City Trial: Break all\nthe coral in one game!", Check_BREAK_ALL_CORAL },
+    { APCK_OUT_OF_BOUNDS,   "City Trial: Go out of bounds!",                Check_OUT_OF_BOUNDS },
 
-    { APCK_CASTLE_FLOWER,   "Visit the castle flower on foot",  Check_CASTLE_FLOWER },
-    { APCK_BREAK_ALL_CORAL, "Break all the coral in one game",  Check_BREAK_ALL_CORAL },
-    { APCK_OUT_OF_BOUNDS,   "Go out of bounds in City Trial",   Check_OUT_OF_BOUNDS },
+    { APCK_HP_PATCHES_10,   "City Trial: Get 10\nHP Patches in one game!",  Check_HP_PATCHES_10 },
+    { APCK_ALLUPS_10,       "City Trial: Collect\n10 All Ups in total!",    Check_ALLUPS_10 },
 
-    { APCK_HP_PATCHES_10,   "Get 10 HP Patches in one game",    Check_HP_PATCHES_10 },
-    { APCK_ALLUPS_10,       "Collect 10 All Ups in total",      Check_ALLUPS_10 },
+    { APCK_FOOD_ICECREAM,   "City Trial: Eat 3\nIce Creams in one game!",   Check_FOOD_ICECREAM },
+    { APCK_FOOD_RICEBALL,   "City Trial: Eat 3\nRice Balls in one game!",   Check_FOOD_RICEBALL },
+    { APCK_FOOD_CHICKEN,    "City Trial: Eat 3\nChickens in one game!",     Check_FOOD_CHICKEN },
+    { APCK_FOOD_CURRY,      "City Trial: Eat 3\nCurries in one game!",      Check_FOOD_CURRY },
+    { APCK_FOOD_RAMEN,      "City Trial: Eat 3\nRamens in one game!",       Check_FOOD_RAMEN },
+    { APCK_FOOD_OMELET,     "City Trial: Eat 3\nOmelets in one game!",      Check_FOOD_OMELET },
+    { APCK_FOOD_HAMBURGER,  "City Trial: Eat 3\nHamburgers in one game!",   Check_FOOD_HAMBURGER },
+    { APCK_FOOD_APPLE,      "City Trial: Eat 3\nApples in one game!",       Check_FOOD_APPLE },
 
-    { APCK_FOOD_ICECREAM,   "Eat 3 Ice Creams in one game",     Check_FOOD_ICECREAM },
-    { APCK_FOOD_RICEBALL,   "Eat 3 Rice Balls in one game",     Check_FOOD_RICEBALL },
-    { APCK_FOOD_CHICKEN,    "Eat 3 Chickens in one game",       Check_FOOD_CHICKEN },
-    { APCK_FOOD_CURRY,      "Eat 3 Curries in one game",        Check_FOOD_CURRY },
-    { APCK_FOOD_RAMEN,      "Eat 3 Ramens in one game",         Check_FOOD_RAMEN },
-    { APCK_FOOD_OMELET,     "Eat 3 Omelets in one game",        Check_FOOD_OMELET },
-    { APCK_FOOD_HAMBURGER,  "Eat 3 Hamburgers in one game",     Check_FOOD_HAMBURGER },
-    { APCK_FOOD_APPLE,      "Eat 3 Apples in one game",         Check_FOOD_APPLE },
+    { APCK_SR1_FIRST + 0,   "Stadium: SINGLE RACE 1\nFinish in 1st!",       Check_SR1_FIRST_0 },
+    { APCK_SR1_FIRST + 1,   "Stadium: SINGLE RACE 2\nFinish in 1st!",       Check_SR1_FIRST_1 },
+    { APCK_SR1_FIRST + 2,   "Stadium: SINGLE RACE 3\nFinish in 1st!",       Check_SR1_FIRST_2 },
+    { APCK_SR1_FIRST + 3,   "Stadium: SINGLE RACE 4\nFinish in 1st!",       Check_SR1_FIRST_3 },
+    { APCK_SR1_FIRST + 4,   "Stadium: SINGLE RACE 5\nFinish in 1st!",       Check_SR1_FIRST_4 },
+    { APCK_SR1_FIRST + 5,   "Stadium: SINGLE RACE 6\nFinish in 1st!",       Check_SR1_FIRST_5 },
+    { APCK_SR1_FIRST + 6,   "Stadium: SINGLE RACE 7\nFinish in 1st!",       Check_SR1_FIRST_6 },
+    { APCK_SR1_FIRST + 7,   "Stadium: SINGLE RACE 8\nFinish in 1st!",       Check_SR1_FIRST_7 },
+    { APCK_SR1_FIRST + 8,   "Stadium: SINGLE RACE 9\nFinish in 1st!",       Check_SR1_FIRST_8 },
 
-    { APCK_SR1_FIRST + 0,   "SINGLE RACE 1 Finish in 1st",      Check_SR1_FIRST_0 },
-    { APCK_SR1_FIRST + 1,   "SINGLE RACE 2 Finish in 1st",      Check_SR1_FIRST_1 },
-    { APCK_SR1_FIRST + 2,   "SINGLE RACE 3 Finish in 1st",      Check_SR1_FIRST_2 },
-    { APCK_SR1_FIRST + 3,   "SINGLE RACE 4 Finish in 1st",      Check_SR1_FIRST_3 },
-    { APCK_SR1_FIRST + 4,   "SINGLE RACE 5 Finish in 1st",      Check_SR1_FIRST_4 },
-    { APCK_SR1_FIRST + 5,   "SINGLE RACE 6 Finish in 1st",      Check_SR1_FIRST_5 },
-    { APCK_SR1_FIRST + 6,   "SINGLE RACE 7 Finish in 1st",      Check_SR1_FIRST_6 },
-    { APCK_SR1_FIRST + 7,   "SINGLE RACE 8 Finish in 1st",      Check_SR1_FIRST_7 },
-    { APCK_SR1_FIRST + 8,   "SINGLE RACE 9 Finish in 1st",      Check_SR1_FIRST_8 },
+    { APCK_HIGHJUMP_1500,   "Stadium: HIGH JUMP\nJump over 1,500 feet!",    Check_HIGHJUMP_1500 },
+    { APCK_AIRGLIDER_2000,  "Stadium: AIR GLIDER\nFly over 2,000 feet!",    Check_AIRGLIDER_2000 },
+    { APCK_MELEE1_100,      "Stadium: KIRBY MELEE 1\nKO over 100 alone!",   Check_MELEE1_100 },
+    { APCK_MELEE2_60,       "Stadium: KIRBY MELEE 2\nKO over 60 alone!",    Check_MELEE2_60 },
 
-    { APCK_HIGHJUMP_1500,   "HIGH JUMP Jump over 1,500 feet",   Check_HIGHJUMP_1500 },
-    { APCK_AIRGLIDER_2000,  "AIR GLIDER Fly over 2,000 feet",   Check_AIRGLIDER_2000 },
-    { APCK_MELEE1_100,      "KIRBY MELEE 1 KO over 100 alone",  Check_MELEE1_100 },
-    { APCK_MELEE2_60,       "KIRBY MELEE 2 KO over 60 alone",   Check_MELEE2_60 },
+    { APCK_SR1_BULK,        "Stadium: SINGLE RACE 1\n1st on Bulk Star!",    Check_SR1_BULK },
+    { APCK_SR1_PURPLE_3X,   "Stadium: SINGLE RACE 1\n1st 3x as Purple!",    Check_SR1_PURPLE_3X },
 
-    { APCK_SR1_BULK,        "SINGLE RACE 1 1st on Bulk Star",   Check_SR1_BULK },
-    { APCK_SR1_PURPLE_3X,   "SINGLE RACE 1 1st 3x as Purple",   Check_SR1_PURPLE_3X },
-
-    { APCK_DRAG1_PHOTO + 0, "DRAG RACE 1 Photo finish",         Check_DRAG1_PHOTO_0 },
-    { APCK_DRAG1_PHOTO + 1, "DRAG RACE 2 Photo finish",         Check_DRAG1_PHOTO_1 },
-    { APCK_DRAG1_PHOTO + 2, "DRAG RACE 3 Photo finish",         Check_DRAG1_PHOTO_2 },
-    { APCK_DRAG1_PHOTO + 3, "DRAG RACE 4 Photo finish",         Check_DRAG1_PHOTO_3 },
-    { APCK_AIRRIDE_PHOTO,   "Air Ride Photo finish",            Check_AIRRIDE_PHOTO },
+    { APCK_DRAG1_PHOTO + 0, "Stadium: DRAG RACE 1\nPhoto finish!",          Check_DRAG1_PHOTO_0 },
+    { APCK_DRAG1_PHOTO + 1, "Stadium: DRAG RACE 2\nPhoto finish!",          Check_DRAG1_PHOTO_1 },
+    { APCK_DRAG1_PHOTO + 2, "Stadium: DRAG RACE 3\nPhoto finish!",          Check_DRAG1_PHOTO_2 },
+    { APCK_DRAG1_PHOTO + 3, "Stadium: DRAG RACE 4\nPhoto finish!",          Check_DRAG1_PHOTO_3 },
+    { APCK_AIRRIDE_PHOTO,   "Air Ride: Photo finish!",                      Check_AIRRIDE_PHOTO },
 };
 
 #define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))
@@ -166,6 +169,18 @@ static const CustomChecklistDesc ap_desc = {
     .record_complete = APChecklist_RecordComplete,
     .is_ready = APChecklist_IsReady,
 };
+
+void APChecklist_RevealAll(void)
+{
+    GameClearData *cd = gmGetClearcheckerTypeP((GameMode)ap_checklist_mode);
+    if (!cd)
+        return;
+
+    for (int i = 0; i < AP_CHECK_NUM; i++)
+        cd->clear[ap_checks[i].clear_kind].is_visible = 1;
+
+    OSReport("[APChecklist] Revealed %d cells\n", AP_CHECK_NUM);
+}
 
 void APChecklist_Register(void)
 {

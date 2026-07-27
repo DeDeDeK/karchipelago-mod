@@ -17,7 +17,7 @@
 // Objectives observed this boot, one bit per APCheckKind. Transient - the
 // permanent record is ap_save->sent_checks, written by the framework the frame
 // after a predicate first returns true. The two objectives that count across
-// boots ("in total" / "3 times") carry their own APSave counters instead.
+// boots ("in total" / "3 times") read ap_save->checks instead.
 static u64 ap_observed;
 
 static void Observe(int ck)
@@ -33,11 +33,8 @@ int APCheckDetect_IsSet(int ck)
 {
     switch (ck)
     {
-    case APCK_BOOT:            return ap_save->boot_num >= 1;
-    case APCK_RECEIVE_ITEM:    return ap_save->item_received_count >= 1;
-    case APCK_RECEIVE_5_ITEMS: return ap_save->item_received_count >= 5;
-    case APCK_ALLUPS_10:       return ap_save->allup_collect_total >= AP_ALLUP_TOTAL_NEED;
-    case APCK_SR1_PURPLE_3X:   return ap_save->purple_sr1_wins >= AP_PURPLE_SR1_NEED;
+    case APCK_ALLUPS_10:       return ap_save->checks.allup_collect_total >= AP_ALLUP_TOTAL_NEED;
+    case APCK_SR1_PURPLE_3X:   return ap_save->checks.purple_sr1_wins >= AP_PURPLE_SR1_NEED;
     default:
         if (ck < 0 || ck >= APCK_NUM)
             return 0;
@@ -126,11 +123,11 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     // persistent counter. Every pickup path bumps item_collect, including a
     // patch spawned by an Archipelago item - a received All Up counts.
     int allup = st->item_collect[ITKIND_ALLUP];
-    if (allup > prev_allup[ply] && ap_save->allup_collect_total < AP_ALLUP_TOTAL_NEED)
+    if (allup > prev_allup[ply] && ap_save->checks.allup_collect_total < AP_ALLUP_TOTAL_NEED)
     {
-        ap_save->allup_collect_total += (u16)(allup - prev_allup[ply]);
+        ap_save->checks.allup_collect_total += (u16)(allup - prev_allup[ply]);
         OSReport("[APCheckDetect] All Ups collected: %d/%d\n",
-                 ap_save->allup_collect_total, AP_ALLUP_TOTAL_NEED);
+                 ap_save->checks.allup_collect_total, AP_ALLUP_TOTAL_NEED);
     }
     prev_allup[ply] = allup;
 
@@ -247,11 +244,11 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
             // are reachable from a Dedede match too.
             if (Gm_GetGameData()->ply_desc[p].rider_kind == RDKIND_KIRBY &&
                 Ply_GetColor(p) == KIRBYCOLOR_PURPLE &&
-                ap_save->purple_sr1_wins < AP_PURPLE_SR1_NEED)
+                ap_save->checks.purple_sr1_wins < AP_PURPLE_SR1_NEED)
             {
-                ap_save->purple_sr1_wins++;
+                ap_save->checks.purple_sr1_wins++;
                 OSReport("[APCheckDetect] Purple Kirby SINGLE RACE 1 wins: %d/%d\n",
-                         ap_save->purple_sr1_wins, AP_PURPLE_SR1_NEED);
+                         ap_save->checks.purple_sr1_wins, AP_PURPLE_SR1_NEED);
             }
         }
         else if (st == STKIND_HIGHJUMP)

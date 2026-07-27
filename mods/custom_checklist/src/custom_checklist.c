@@ -195,39 +195,72 @@ static void *g_sis_ptrs[CC_SIS_PTR_NUM];
 static u8 g_sis_blank[24];
 static u8 g_sis_label[CC_CLEAR_KIND_NUM][CC_SIS_LABEL_MAX];
 
-#define CC_SIS_GRAY  0xbb  // label color, matching the vanilla objective text
-#define CC_SIS_SCALE 0x00b3 // q8 scale (~0.70) on both axes
+// A label longer than this wraps onto a second line. The cell's text box holds exactly two
+// lines, and a line the engine considers too wide for the box is squeezed narrower rather
+// than wrapped, so the break has to be authored. Vanilla keeps single lines up to 37
+// characters but writes the overwhelming majority of its entries as two lines of ~25; this
+// wraps sooner so every line stays in that range, where the glyphs render at full size.
+#define CC_SIS_WRAP 30
 
-// Compose a SIS-format text entry from a C string (vanilla UI-text formatting).
+// Index of the space to turn into the line break, or -1 for none - either because the label
+// fits on one line or because it carries its own '\n', which always wins. Otherwise the space
+// nearest the middle, so the two lines come out balanced.
+//
+// A label whose break matters should place it: the midpoint rule splits on width alone and
+// will part a name from a trailing number ("SINGLE RACE / 8 Finish in 1st!"), where vanilla
+// breaks after the whole designation.
+static int CC_WrapIndex(const char *str)
+{
+    int len = 0;
+    while (str[len])
+    {
+        if (str[len] == '\n')
+            return -1;
+        len++;
+    }
+    if (len <= CC_SIS_WRAP)
+        return -1;
+
+    int mid = len / 2;
+    int best = -1;
+    for (int i = 0; i < len; i++)
+    {
+        if (str[i] != ' ')
+            continue;
+        if (best < 0 || (i < mid ? mid - i : i - mid) < (best < mid ? mid - best : best - mid))
+            best = i;
+    }
+    return best;
+}
+
+// Compose a SIS-format text entry from a C string, matching the shape of the vanilla
+// checklist's objective entries: glyphs, word separators, an optional line break where the
+// text wraps ('\n' in the label, else the automatic one), and the terminator - no trailing
+// break. Those entries carry no
+// align/fit/kerning/color/scale opcodes of their own (the checklist UI's Text object
+// supplies all of it), so pushing any here renders the cell text differently from the three
+// vanilla tabs - a scale opcode shrinks it outright.
 static void CC_ComposeSis(u8 *buf, const char *str)
 {
     u8 *p = buf;
+    int wrap = CC_WrapIndex(str);
 
-    *p++ = TEXTCMD_ALIGNLEFT;
-    *p++ = TEXTCMD_FIT;
-    *p++ = TEXTCMD_KERNING;
-    *p++ = TEXTCMD_COLOR;
-    *p++ = CC_SIS_GRAY;
-    *p++ = CC_SIS_GRAY;
-    *p++ = CC_SIS_GRAY;
-    *p++ = TEXTCMD_SCALE;
-    *p++ = (u8)(CC_SIS_SCALE >> 8);
-    *p++ = (u8)CC_SIS_SCALE;
-    *p++ = (u8)(CC_SIS_SCALE >> 8);
-    *p++ = (u8)CC_SIS_SCALE;
-
-    // 7 trailer bytes follow, and a glyph costs 2 - stop early rather than run
-    // off the fixed-size entry when a consumer supplies a long label.
-    u8 *limit = buf + CC_SIS_LABEL_MAX - 9;
-    for (; *str && p < limit; str++)
+    // 1 trailer byte follows and a glyph costs 2, so stop 3 short rather than run off the
+    // fixed-size entry when a consumer supplies a long label.
+    u8 *limit = buf + CC_SIS_LABEL_MAX - 3;
+    for (int i = 0; str[i] && p < limit; i++)
     {
-        if (*str == ' ')
+        if (i == wrap || str[i] == '\n')
+        {
+            *p++ = TEXTCMD_LINEBREAK;
+        }
+        else if (str[i] == ' ')
         {
             *p++ = TEXTCMD_SPACE;
         }
         else
         {
-            int cmd = Text_CharToCommand(*str);
+            int cmd = Text_CharToCommand(str[i]);
             if (cmd != -1)
             {
                 *p++ = (u8)((cmd >> 8) & 0xFF);
@@ -236,13 +269,6 @@ static void CC_ComposeSis(u8 *buf, const char *str)
         }
     }
 
-    // Close every pushed state in reverse order, then end the stream.
-    *p++ = TEXTCMD_LINEBREAK;
-    *p++ = TEXTCMD_SCALEEND;
-    *p++ = TEXTCMD_COLOREND;
-    *p++ = TEXTCMD_KERNINGEND;
-    *p++ = TEXTCMD_FITEND;
-    *p++ = TEXTCMD_ALIGNLEFTEND;
     *p++ = TEXTCMD_TERMINATE;
 }
 
@@ -899,8 +925,8 @@ static void CC_Evaluate(void)
                 // Optional mod cue, fired once on first completion whichever side persists.
                 if (L->desc.on_complete)
                     L->desc.on_complete(ck);
-                // A check satisfied outside any gamemode (e.g. "Boot the game") never gets
-                // is_new from the engine, so seed it; the flip-and-sparkle runs on next entry.
+                // A check satisfied outside any gamemode never gets is_new from the engine,
+                // so seed it; the flip-and-sparkle runs on next entry.
                 cd->clear[ck].is_new = 1;
                 CC_PlayUnlockSfx();
             }
