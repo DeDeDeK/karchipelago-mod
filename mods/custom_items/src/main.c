@@ -14,11 +14,8 @@ static void OnChangeEnabled(int val)
     OSReport("[CustomItems] Custom item spawning %s\n", val ? "enabled" : "disabled");
 }
 
-// Top settings menu, built at boot: a master toggle followed by one enable
-// toggle per discovered custom item. The item set is discovered at runtime, so
-// the options can't be a static initializer. MenuDesc's own options[] is a
-// flexible array member (settings.h), so it can't be statically sized either -
-// this mirrors its header layout with a fixed-size array we cast to MenuDesc*.
+// MenuDesc's options[] is a flexible array member, so the runtime-sized menu is
+// held in this fixed-size mirror of its layout, cast to MenuDesc*.
 typedef struct
 {
     MenuDesc *prev;
@@ -39,7 +36,7 @@ static OptionDesc stc_master_option = {
     .on_change = OnChangeEnabled,
 };
 
-// Per-item toggle descriptors, filled from the registry in BuildSettingsMenu.
+// Per-item toggle descriptors, filled from the registry.
 static OptionDesc stc_item_options[CUSTOM_ITEM_MAX];
 
 OptionDesc ModSettings = {
@@ -49,11 +46,9 @@ OptionDesc ModSettings = {
     .menu_ptr = (MenuDesc *)&stc_top_menu,
 };
 
-// Build the top menu once the registry has been populated by discovery. Each
-// per-item toggle binds directly to its registry entry's `enabled` flag and is
-// labeled with the stable menu_label, so its saved state (hashed on the option
-// name) survives reboots. Runs in OnBoot - before hoshi reads the menu for
-// save-sizing/restore (Settings_Init and later) - so the option count is seen.
+// Per-item toggles are labeled with the stable menu_label, so their saved state
+// (hashed on the option name) survives reboots. Must run in OnBoot, before
+// hoshi reads the menu for save-sizing and restore.
 static void BuildSettingsMenu(void)
 {
     MenuDesc *menu = (MenuDesc *)&stc_top_menu;
@@ -80,8 +75,8 @@ static void BuildSettingsMenu(void)
 
 static void OnBoot(void)
 {
-    CustomItems_OnBoot();   // discovery populates the registry
-    BuildSettingsMenu();    // build per-item toggles from the discovered set
+    CustomItems_OnBoot();
+    BuildSettingsMenu();
 }
 
 ModDesc mod_desc = {

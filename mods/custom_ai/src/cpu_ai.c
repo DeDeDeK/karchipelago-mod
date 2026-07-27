@@ -1,15 +1,11 @@
 #include "custom_ai.h"
 #include "cpu_ai.h"
 
-// Per-mode menu selections, bound to the settings menu (see main.c). Each may
-// hold CPU_AI_RANDOM; resolve to a concrete preset with CpuAI_Resolve.
+// May hold CPU_AI_RANDOM; resolve with CpuAI_Resolve.
 int cpu_ai_preset_ct = CPU_AI_DEFAULT;
 int cpu_ai_preset_ar = CPU_AI_DEFAULT;
 int cpu_ai_preset_tr = CPU_AI_DEFAULT;
 
-// Preset tuning table. Behavioral weights are 0.0-1.0; cpu_level is the vanilla
-// 0..4 difficulty (-1 = inherit the match setting). First-pass numbers - expect
-// to retune once the CPU-rider hook that applies them exists.
 static const CpuAIPresetDef cpu_presets[CPU_AI_PRESET_NUM] = {
     [CPU_AI_DEFAULT] = {
         .name = "Default",

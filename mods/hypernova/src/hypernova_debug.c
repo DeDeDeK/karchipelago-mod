@@ -9,11 +9,10 @@
 // Cached only to avoid recreating it every frame; never dereferenced (the engine owns it).
 static GOBJ *stc_cone_gobj = NULL;
 
-// Base-circle rim as unit (cos, sin) pairs, seeded once in Hypernova_DebugConeEnsure() so the
-// per-frame draw does no trig - it just scales and orients these into world space.
+// Base-circle rim as unit (cos, sin) pairs, seeded once so the per-frame draw does no trig.
 static Vec2 stc_cone_unit[HYPERNOVA_DEBUG_CONE_SEGS];
 
-// Build an orthonormal basis (u, v) spanning the plane perpendicular to unit `aim`.
+// Orthonormal basis (u, v) spanning the plane perpendicular to unit `aim`.
 static void ConeBasis(Vec3 *aim, Vec3 *u, Vec3 *v)
 {
     // Reference axis not parallel to aim: world up, unless aim is near-vertical (then world X).
@@ -25,16 +24,15 @@ static void ConeBasis(Vec3 *aim, Vec3 *u, Vec3 *v)
         ref.Y = 0.0f;
         ref.Z = 0.0f;
     }
-    VEC_CrossNormalizeSnap(&ref, aim, u); // u = normalize(ref x aim); ref is never parallel to aim
+    VEC_CrossNormalizeSnap(&ref, aim, u); // u = normalize(ref x aim)
     VECCrossProduct(aim, u, v);           // already unit (aim and u are orthonormal)
 }
 
-// Emit one translucent cone: apex at `apex`, axis along unit `aim`, flat base at the forward
-// reach (axial distance == HYPERNOVA_RANGE), base radius = reach * tan(half-angle). Cull-none +
-// alpha-blend draws both faces so it reads as a see-through volume.
+// One translucent cone: apex at `apex`, axis along unit `aim`, flat base at the forward reach
+// (axial distance == HYPERNOVA_RANGE).
 static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
 {
-    float radius = HYPERNOVA_RANGE * HYPERNOVA_HALF_ANGLE_TAN; // reach * tan(half-angle)
+    float radius = HYPERNOVA_RANGE * HYPERNOVA_HALF_ANGLE_TAN;
 
     Vec3 u, v;
     ConeBasis(aim, &u, &v);
@@ -44,8 +42,6 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
     VECScale(aim, &axis, HYPERNOVA_RANGE);
     VECAdd(apex, &axis, &center);
 
-    // Rim points around the base circle: scale each precomputed unit pair by the radius and
-    // project onto the (u, v) basis.
     Vec3 rim[HYPERNOVA_DEBUG_CONE_SEGS];
     for (int i = 0; i < HYPERNOVA_DEBUG_CONE_SEGS; i++)
     {
@@ -55,15 +51,15 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
         rim[i].Z = center.Z + radius * (cx * u.Z + cy * v.Z);
     }
 
-    // GX state: flat per-vertex color (no texture/lighting), alpha blend, depth-tested but not
-    // depth-writing (translucent), both faces drawn. Mirrors the inline GX_DrawRect setup.
+    // Flat per-vertex color, alpha blend, depth-tested but not depth-writing, both faces drawn,
+    // so the cone reads as a see-through volume.
     HSD_StateInitDirect(GX_VTXFMT0, 4);
     GXSetNumTevStages(1);
     GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
     GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
     GXSetNumTexGens(0);
     GXSetNumChans(1);
-    // Source channel 0 color+alpha from the vertex (no lighting) so per-vertex alpha reaches the
+    // Channel 0 color+alpha from the vertex (no lighting), so per-vertex alpha reaches the
     // blender - the cone's translucency depends on it.
     GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
     GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
@@ -80,7 +76,7 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
         Vec3 *a = &rim[i];
         Vec3 *b = &rim[(i + 1) % segs];
 
-        // Lateral face: apex -> rim[i] -> rim[i+1].
+        // Lateral face.
         GXPosition3f32(apex->X, apex->Y, apex->Z);
         GXColor4u8(col->r, col->g, col->b, col->a);
         GXPosition3f32(a->X, a->Y, a->Z);
@@ -88,7 +84,7 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
         GXPosition3f32(b->X, b->Y, b->Z);
         GXColor4u8(col->r, col->g, col->b, col->a);
 
-        // Base cap: center -> rim[i+1] -> rim[i] (winding is moot under cull-none).
+        // Base cap; winding is moot under cull-none.
         GXPosition3f32(center.X, center.Y, center.Z);
         GXColor4u8(col->r, col->g, col->b, col->a);
         GXPosition3f32(b->X, b->Y, b->Z);
@@ -99,8 +95,7 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
     HSD_StateInvalidate(-1);
 }
 
-// GX callback on the world camera link. Draws each human rider's suction cone on the XLU pass
-// (pass 1) so it blends over opaque world geometry; a no-op otherwise.
+// Drawn on the XLU pass (1) so the cone blends over already-rendered opaque world geometry.
 static void Hypernova_DebugConeGX(GOBJ *g, int pass)
 {
     if (pass != 1)
@@ -122,7 +117,7 @@ static void Hypernova_DebugConeGX(GOBJ *g, int pass)
         Vec3 fwd = rd->forward;
         Vec3 aim;
         if (VEC_NormalizeAndSnap(&fwd, &aim) < 0.01f)
-            continue; // no usable facing this frame (matches the vacuum's guard)
+            continue; // no usable facing this frame, matching the vacuum's guard
         DrawConeGX(&rd->pos, &aim, &col);
     }
 }
@@ -140,7 +135,6 @@ void Hypernova_DebugConeEnsure(void)
     GObj_AddGXLink(g, Hypernova_DebugConeGX, HYPERNOVA_DEBUG_GX_LINK, HYPERNOVA_DEBUG_GX_PRI);
     stc_cone_gobj = g;
 
-    // Seed the base-circle rim once (cos/sin per subdivision), so the per-frame draw is trig-free.
     for (int i = 0; i < HYPERNOVA_DEBUG_CONE_SEGS; i++)
     {
         float a = (6.28318531f * i) / HYPERNOVA_DEBUG_CONE_SEGS; // i * (2*pi / segs)
@@ -153,6 +147,6 @@ void Hypernova_DebugConeEnsure(void)
 
 void Hypernova_DebugConeReset(void)
 {
-    // The engine frees every world GObj on scene teardown; just drop our cached handle.
+    // The engine frees every world GObj on scene teardown; destroying it here would double-free.
     stc_cone_gobj = NULL;
 }

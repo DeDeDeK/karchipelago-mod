@@ -16,14 +16,12 @@ static int IsAbilityUnlocked(CopyKind kind)
     return (ap_save->ability_unlocked_mask & (1 << kind)) != 0;
 }
 
-// Returns 1 if the item kind maps to a locked copy ability.
 static int IsCopyItemLocked(u8 it_kind)
 {
     CopyKind ck = Ability_ItKindToCopyKind(it_kind);
     return ck != COPYKIND_NONE && !IsAbilityUnlocked(ck);
 }
 
-// Remove locked copy items from a spawn pool in-place.
 static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_num)
 {
     u8 num = *pool_num;
@@ -45,7 +43,6 @@ static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_n
     *pool_num = write;
 }
 
-// Zeroes every drop chance for event-source entries whose item maps to a locked ability.
 void GateAbilities_FilterEventDropTables()
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
@@ -66,7 +63,6 @@ void GateAbilities_FilterEventDropTables()
     }
 }
 
-// Removes locked copy abilities from all box spawn pools.
 void GateAbilities_FilterSpawnTables()
 {
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
@@ -92,9 +88,9 @@ void GateAbilities_FilterSpawnTables()
         &obj->subsequent_num);
 }
 
-// Replacement for Rider_CheckAndGiveAbility (0x80192650).
-// Gates copy abilities from item pickups and enemy interactions.
-// Our mod's Ability_GiveItem calls Rider_GiveAbility directly, bypassing this gate.
+// Replaces Rider_CheckAndGiveAbility (0x80192650), the single entry point for copy
+// abilities from item pickups and enemy interactions. Ability_GiveItem calls
+// Rider_GiveAbility directly, so AP grants bypass this gate.
 int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
 {
     RiderData *rd = gobj->userdata;
@@ -106,9 +102,8 @@ int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
 
     int result = Rider_GiveAbility(rd, kind);
 
-    // Traplink send: getting sleep from an enemy/item is a natural trap.
-    // Only send on a successful grant - Rider_GiveAbility can return 0 if the
-    // rider is in an unable state, and we don't want to send phantom traps.
+    // Rider_GiveAbility returns 0 when the rider is in an unable state; gating the
+    // send on a successful grant avoids phantom traps.
     if (result && kind == COPYKIND_SLEEP && !Ply_CheckIfCPU(rd->ply))
         TrapLink_Send(TRAPLINK_KIND_SLEEP);
 
@@ -133,10 +128,9 @@ static int RandomUnlockedAbility()
     return unlocked[HSD_Randi(count)];
 }
 
-// Replacement for randomAbility_giveAbility (0x801a61d4). Gates the copy chance
-// wheel: a locked result is swapped for a random unlocked ability. We call
-// Rider_MarkCopyAbilityObtained ourselves with the substituted kind - the callers'
-// own calls are NOPed in OnBoot so the obtained-abilities bitmask tracks correctly.
+// Replaces randomAbility_giveAbility (0x801a61d4): a locked wheel result is swapped
+// for a random unlocked ability. Rider_MarkCopyAbilityObtained is called here with the
+// substituted kind, so the callers' own calls are NOPed in OnBoot.
 int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 {
     if (kind < 0 || kind >= COPYKIND_NUM)
@@ -156,9 +150,8 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
     return 1;
 }
 
-// Copy-ability theme per enemy slot, used to zero spawn weights for ability-themed
-// enemies when their ability is locked. T0/T1/T2 share this 24-slot mapping - the
-// theme follows the archive (data_index), not the tier flags.
+// Copy-ability theme per enemy slot. T0/T1/T2 share this 24-slot mapping - the theme
+// follows the archive (data_index), not the tier flags.
 static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
     COPYKIND_NONE,    // 0  Broom Hatter
     COPYKIND_NONE,    // 1  Broom Hatter (dup)
@@ -186,8 +179,7 @@ static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
     COPYKIND_NONE,    // 23 Waddle Dee
 };
 
-// Map an enemy_id to its CopyKind theme. T0/T1/T2 fold to the same slot;
-// specials are all NONE except SP Sword Knight (0x49).
+// T0/T1/T2 fold to the same slot; specials are all NONE except SP Sword Knight (0x49).
 static CopyKind EnemyIDToCopyKind(int enemy_id)
 {
     if (enemy_id >= ACTORID_TIER0_START && enemy_id < ACTORID_SPECIAL_START)
@@ -197,15 +189,13 @@ static CopyKind EnemyIDToCopyKind(int enemy_id)
     return COPYKIND_NONE;
 }
 
-// Check if enemy_id is themed around a locked ability. Returns 1 if locked, 0 if allowed.
 static int IsEnemyAbilityLocked(int enemy_id)
 {
     CopyKind ck = EnemyIDToCopyKind(enemy_id);
     return ck != COPYKIND_NONE && !IsAbilityUnlocked(ck);
 }
 
-// Filter a secondary sub-table: zero weights for locked-ability enemies.
-// Returns 1 if any entry with positive weight remains, 0 if all zeroed.
+// Returns 1 if any positive-weight entry remains after zeroing locked-ability enemies.
 static int FilterSecondarySubTable(short *sub_table)
 {
     int has_valid = 0;
@@ -219,15 +209,14 @@ static int FilterSecondarySubTable(short *sub_table)
     return has_valid;
 }
 
-// Mode 1 (Air Ride courses) / Mode 3 (STKIND_MELEE2):
-// Per-entry has ids[max_slots] and weights[max_slots] at known offsets.
-// Zero weights for locked-ability enemies, filter meta-enemy sub-tables.
+// Mode 1 (Air Ride courses) / Mode 3 (STKIND_MELEE2): each entry carries
+// ids[max_slots] and weights[max_slots] at the given offsets.
 static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_offset, int max_slots)
 {
     if (!data->spawn_entries || data->spawn_count <= 0)
         return;
 
-    // Per-meta-enemy filter results: 1 = has valid enemies, 0 = all zeroed, -1 = not yet processed
+    // 1 = has valid enemies, 0 = all zeroed, -1 = not yet processed
     s8 meta_valid[15];
     for (int m = 0; m < 15; m++)
         meta_valid[m] = -1;
@@ -247,8 +236,7 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
             if (enemy_id < 0)
                 continue;
 
-            // Meta-enemy IDs (0x50-0x5E): filter secondary sub-table, then zero
-            // primary weight if no valid enemies remain in the sub-table.
+            // Meta-enemy IDs select from a secondary sub-table.
             if (enemy_id >= 0x50 && enemy_id <= 0x5E)
             {
                 int meta = enemy_id - 0x50;
@@ -264,7 +252,6 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
                 continue;
             }
 
-            // Normal enemy IDs: check ability directly.
             if (IsEnemyAbilityLocked(enemy_id))
                 weights[slot] = 0;
         }
@@ -272,9 +259,8 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
 }
 
 // Mode 2 (STKIND_MELEE1): two-stage selection - a meta-enemy category from
-// secondary_table[0], then an enemy from that category's weight column (entry
-// +0x06 enemy_id, +0x08 weight columns). Zero all columns for locked-ability
-// enemies, then drop any category whose enemies are all locked.
+// secondary_table[0], then an enemy from that category's weight column (entry +0x06
+// enemy_id, +0x08 weight columns).
 static void FilterMode2(EnemySpawnData *data)
 {
     if (!data->spawn_entries || data->spawn_count <= 0 || !data->secondary_table)
@@ -284,7 +270,6 @@ static void FilterMode2(EnemySpawnData *data)
     if (!sub_table)
         return;
 
-    // Count meta-enemy categories in secondary[0]
     int num_categories = 0;
     while (sub_table[num_categories * 2] != -1)
         num_categories++;
@@ -292,7 +277,6 @@ static void FilterMode2(EnemySpawnData *data)
     if (num_categories == 0)
         return;
 
-    // Zero all weight columns for entries with locked-ability enemies
     int zeroed_entries = 0;
     for (int i = 0; i < data->spawn_count; i++)
     {
@@ -310,8 +294,7 @@ static void FilterMode2(EnemySpawnData *data)
         }
     }
 
-    // Filter secondary[0] sub-table: zero category weight if ALL entries in that
-    // category's column have been zeroed (no valid enemies remain).
+    // Drop a category once every entry in its column has been zeroed.
     int zeroed_categories = 0;
     for (int cat = 0; cat < num_categories; cat++)
     {
@@ -334,10 +317,9 @@ static void FilterMode2(EnemySpawnData *data)
              zeroed_entries, data->spawn_count, zeroed_categories, num_categories);
 }
 
-// Zero spawn weights for enemies whose copy ability is locked.
-// Modifies the .dat data in-place; it is reloaded from disc each stage load.
-// Early-exits when spawn_data is NULL (CT Free Run, Top Ride, any mode where
-// the per-stage "enemies enabled" flag is off).
+// Zero spawn weights for enemies whose copy ability is locked. Modifies the .dat data
+// in place; it is reloaded from disc each stage load. spawn_data is NULL in CT Free
+// Run, Top Ride, and any mode with the per-stage "enemies enabled" flag off.
 void GateAbilities_On3DLoadEnd()
 {
     EnemySpawnData *data = *stc_enemy_spawn_data;
@@ -350,8 +332,7 @@ void GateAbilities_On3DLoadEnd()
 
     switch (mode)
     {
-        // Offsets match EnemySpawnEntry.mode1 (ids 0x1e, weights 0x26) and
-        // EnemySpawnEntry.mode3 (ids 0x06, weights 0x10).
+        // Offsets are EnemySpawnEntry.mode1 / .mode3 ids and weights.
         case 1: FilterMode1Or3(data, 0x1e, 0x26, 4); break;
         case 2: FilterMode2(data); break;
         case 3: FilterMode1Or3(data, 0x06, 0x10, 5); break;
@@ -365,8 +346,7 @@ void GateAbilities_OnBoot()
 {
     CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility);
     CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility);
-    // NOP the original Rider_MarkCopyAbilityObtained calls in randomAbility_aPress
-    // and randomAbility_autoSelect - our replacement marks the substituted kind instead.
+    // GateAbilities_RandomGiveAbility marks the substituted kind instead.
     CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
     CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained
     OSReport("[GateAbilities] Copy ability gating hooks installed\n");

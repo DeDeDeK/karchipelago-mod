@@ -6,10 +6,11 @@ comment) are produced:
 1. **The vanilla game save** — created and managed by the game's `GCP_MemCard` worker.
 2. **The `hoshi` save** — a separate file hoshi creates for mod data (`externals/hoshi/src/save.c`).
 
-## Card-manager tile format (applies to any file)
+## Card-Manager Tile Format
 
-A GameCube card file's tile is described by the read/write fields of `CARDStat`
-(`externals/hoshi/include/os.h`), which are byte offsets into the file's own payload:
+Applies to any card file. A GameCube file's tile is described by the read/write fields of
+`CARDStat` (`externals/hoshi/include/os.h`), which hold byte offsets into the file's own
+payload:
 
 | Field | Off | Meaning |
 |-------|-----|---------|
@@ -25,7 +26,7 @@ The image bytes and comment text must live **inside the file** (the bytes writte
 `CARDSetStatus` (sync, `0x803e84e0` — wraps `CARDSetStatusAsync` + `__CARDSync`) are both
 linked; `CARDSetStatusAsync` is also available.
 
-## Vanilla game save
+## Vanilla Game Save
 
 The boot-time **CardPrompt scene** (`CardPrompt_*`, `0x80047xxx`–`0x80048xxx`) checks for /
 prompts to create the game save. Actual card I/O runs on a **threaded `GCP_MemCard`
@@ -49,13 +50,21 @@ In the create path the game writes `commentAddr = 0` (64-byte comment at file st
 tile is icon-only despite the banner asset being present. The comment is
 "カービィのエアライド" (title) / "セーブデータ" (description), each padded to 32 bytes.
 
-## hoshi save (`save.c`)
+## hoshi Save
 
-hoshi keeps mod data in its **own** card file named `"hoshi"`, sized up to a whole number of
+hoshi keeps mod data in its **own** card file named `"hoshi"` (`externals/hoshi/src/save.c`
+and `save.h`), sized up to a whole number of
 `CARD_BLOCK_SIZE` (8 KB) blocks (`SAVE_SIZE`). `KARPlusSave_CreateOrLoad` mounts the card,
 `CARDOpen`s `"hoshi"`, and `CARDCreate` + `CARDWrite`s it if missing; `KARPlusSave_Write`
 rewrites it (hash-gated). Both hooks piggyback on the vanilla memcard init so the
 prompt/no-card flow is shared.
+
+`KARPlusSave` is a four-byte version header (`VERSION_MAJOR` / `VERSION_MINOR` / `mod_num`),
+then the card tile, then a 50-entry `metadata[]` (20 bytes each, 1000 total), then a flat
+`data[]`. Each mod is handed a sub-region of `data[]` by `KARPlusSave_Alloc` (keyed by a hash
+of the mod name), with `KARPlusSave_VerifySize` resizing in place across versions. **All mods
+share this single file**, so the file has exactly one tile. The tile's placement ahead of
+`metadata[]` is a hard requirement, not a style choice - see the tile rules below.
 
 ### When the hoshi file is written
 
@@ -94,12 +103,6 @@ or a debug reset — never a repeatable player action. An EnergyLink purchase, f
 accepts that a power-off between the withdrawal and the next vanilla save loses the goods
 while the pool withdrawal still reaches the server.
 
-`KARPlusSave` (`save.h`) is a small version header, then the card tile, then a 50-entry
-`metadata[]`, then a flat `data[]`. The tile sits up front (ahead of `metadata[]`) on purpose -
-see the tile section below. Each mod is handed a sub-region of `data[]` by `KARPlusSave_Alloc`
-(keyed by a hash of the mod name), with `KARPlusSave_VerifySize` resizing in place across
-versions. **All mods share this single file**, so the file has exactly one tile.
-
 ### Why a separate file (not the game's save)
 
 - The vanilla save is a fixed-size, checksummed struct the game **rewrites whole** on its own
@@ -110,8 +113,9 @@ versions. **All mods share this single file**, so the file has exactly one tile.
 
 ### The tile (icon + banner API)
 
-By default the `"hoshi"` file has a blank card-manager tile: `KARPlusSave_CreateOrLoad` only
-`CARDCreate`s/`CARDWrite`s, so `bannerFormat`/`iconFormat` stay `NONE`. A mod populates it via:
+A freshly created `"hoshi"` file has a blank card-manager tile - `KARPlusSave_Init` leaves
+`tile.is_set = 0`, so `KARPlusSave_CreateOrLoad` never touches `CARDSetStatus` and
+`bannerFormat`/`iconFormat` stay `NONE`. A mod populates it via:
 
 ```c
 void Hoshi_SetSaveIconFile(const char *title, const char *description,
@@ -129,9 +133,10 @@ void Hoshi_SetSaveBannerFile(const char *banner_file); // 96×32 RGB5A3; call AF
   frame's offset as `iconAddr + banner size`, so `iconAddr` points at the banner when one is present
   (and the banner must physically precede the icon in the struct). With no banner `iconAddr` points
   straight at the icon.
-- Size: `HOSHI_SAVE_ICON_FRAMES` (default 1) keeps the save at one 8 KB block, and each extra frame
-  (≤ `CARD_ICON_MAX`) adds 2 KB. `HOSHI_SAVE_BANNER` (off unless a mod ships a banner) reserves
-  `CARD_BANNER_SIZE_RGB5A3` (6 KB), which pushes the save to two blocks.
+- Size: `HOSHI_SAVE_ICON_FRAMES` (currently 1) costs `CARD_ICON_SIZE_RGB5A3` (2 KB) per frame, up to
+  `CARD_ICON_MAX` (8). `HOSHI_SAVE_BANNER` (currently 1, since the AP tab ships a banner) reserves a
+  further `CARD_BANNER_SIZE_RGB5A3` (6 KB). One icon frame alone fits the save in a single 8 KB block;
+  with the banner enabled it takes two.
 - **The art is loaded from disc, not baked into the mod.** `Hoshi_SetSaveIconFile`/`SetSaveBannerFile`
   (→ `KARPlusSave_SetIconFile`/`SetBannerFile`) only record the comment, animation params, and the
   RGB5A3 blob filenames (`<name>.dat`, raw `frame_num*2 KB` / 6 KB pixel files at the disc root). The

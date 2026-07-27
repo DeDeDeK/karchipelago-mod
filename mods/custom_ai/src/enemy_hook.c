@@ -6,9 +6,8 @@
 
 #include "enemy_ai.h"
 
-// Field offsets into the global enemy param table (stc_enemy_param_table, the
-// Enemy.dat emDataAll block). The per-tier arrays are float[4] indexed by damage
-// tier; a preset scales all four tiers uniformly.
+// Offsets into the global enemy param table (the Enemy.dat emDataAll block).
+// Per-tier arrays are float[4] indexed by damage tier.
 #define EPT_KB_MAG     0x30  // float[4] per-tier knockback magnitude
 #define EPT_KB_SCALE   0x40  // float[4] per-tier knockback scale
 #define EPT_KB_LAUNCH  0x50  // float[4] per-tier launch speed
@@ -18,11 +17,9 @@
 #define EPT_RETARGET0  0x94  // int      retarget cooldown lo bound (HSD_Randi arg)
 #define EPT_RETARGET1  0x98  // int      retarget cooldown hi bound
 
-// Vanilla baseline, snapshotted the first time we see the table - which is always
-// before we have modified it, so the snapshot is genuine vanilla. We then always
-// write base * mult, making re-application idempotent whether the underlying
-// table buffer is reloaded fresh or returned cached, and letting "Default"
-// restore the stock values exactly.
+// Vanilla baseline, snapshotted the first time we see the table. Always writing
+// base * mult keeps re-application idempotent whether the table is reloaded
+// fresh or returned cached, and lets "Default" restore the stock values exactly.
 typedef struct EnemyParamBase
 {
     float kb_mag[4];
@@ -65,18 +62,15 @@ static void EnemyAI_CaptureBase(void *t)
     stc_base_captured = 1;
 }
 
-// Scale an integer cooldown bound, keeping it >= 1 (HSD_Randi needs a positive
-// range).
+// HSD_Randi needs a positive range, so the bound stays >= 1.
 static int EnemyAI_ScaleCooldown(int base, float mult)
 {
     int v = (int)(base * mult + 0.5f);
     return v < 1 ? 1 : v;
 }
 
-// Apply the active per-mode enemy preset to the global param table. Runs from the
-// Enemy_LoadCommonParams epilogue, after the table pointer has been populated.
-// Changing the menu mid-session takes effect the next time the enemy system loads
-// (the next Air Ride course / City Trial entry), mirroring the CPU re-profile hook.
+// Runs from the Enemy_LoadCommonParams epilogue, so a menu change takes effect
+// on the next enemy-system load (next Air Ride course / City Trial entry).
 void EnemyAI_ApplyParams(void)
 {
     void *t = stc_enemy_param_table;
@@ -120,10 +114,9 @@ void EnemyAI_ApplyParams(void)
              def->name, major == MJRKIND_AIR ? "Air Ride" : "City Trial");
 }
 
-// Land on the first epilogue instruction of Enemy_LoadCommonParams (0x801fd664,
-// `lwz r0,20(r1)`): by here the param-table pointer is stored to 0x805dd878.
-// EnemyAI_ApplyParams reads the table from that global, so the hook needs no
-// register setup. The clobbered load is re-executed by the hook framework.
+// First epilogue instruction of Enemy_LoadCommonParams (`lwz r0,20(r1)`), by
+// which point the param-table pointer is stored to 0x805dd878. The callback
+// reads it from that global, so no register setup is needed.
 CODEPATCH_HOOKCREATE(0x801fd664,
     "",
     EnemyAI_ApplyParams,

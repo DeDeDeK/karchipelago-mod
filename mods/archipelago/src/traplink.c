@@ -14,17 +14,12 @@
 #include "ap_item_handler.h"
 #include "gate_topride_items.h"
 
-// Receive→send recursion guard. Received traps must not bounce back as outgoing
-// traps. The CT/TR receive paths re-fire the same hooks that detect organic trap
-// pickups, so after a receive we suppress sends for a generous window (120f = 2s)
-// covering the apply→pickup-hook latency. TrapLink_Send no-ops while positive;
-// TrapLink_PerFrame ticks it down and scene-load resets it.
+// Receive -> send recursion guard: a received trap must not bounce back out. The
+// CT receive path re-fires the same hooks that detect organic trap pickups, so
+// sends are suppressed for a window covering the apply -> pickup-hook latency.
 #define TRAPLINK_RECV_GUARD_FRAMES 120
 static int recv_suppress_frames = 0;
 
-// Send a traplink if enabled. `kind` is the TrapLinkKind value; the client
-// reads ap_data->traplink_send as a kind enum (0 = none, >0 = pending) and
-// maps it to a trap_name string in the outgoing Bounce.
 void TrapLink_Send(TrapLinkKind kind)
 {
     if (!ap_menu_settings.traplink_enabled)
@@ -72,8 +67,8 @@ static uint trap_items[] = {
 };
 #define TRAP_ITEM_COUNT (sizeof(trap_items) / sizeof(trap_items[0]))
 
-// Check if a trap item is an event that requires the event unlock mask.
-// Returns 1 if the item is a locked event (should be excluded), 0 otherwise.
+// Returns 1 if the item is an event whose unlock bit is unset, so it must be
+// excluded from the trap pool.
 static int IsTrapItemLocked(uint item_id)
 {
     if (item_id >= AP_EVENT_BASE && item_id < AP_EVENT_BASE + EVKIND_NUM)
@@ -90,7 +85,6 @@ static int IsTrapItemLocked(uint item_id)
 // land on an applicable item. Returns 1 if any trap applied.
 static int ApplyCityTrialTrap(void)
 {
-    // Build filtered list excluding locked events
     uint candidates[TRAP_ITEM_COUNT];
     int count = 0;
     for (int i = 0; i < TRAP_ITEM_COUNT; i++)
@@ -105,7 +99,7 @@ static int ApplyCityTrialTrap(void)
         return 1; // treat as handled so we clear the flag
     }
 
-    // Fisher–Yates shuffle so the attempt order is randomized across frames.
+    // Fisher-Yates shuffle so the attempt order is randomized across frames.
     for (int i = count - 1; i > 0; i--)
     {
         int j = HSD_Randi(i + 1);
@@ -125,11 +119,10 @@ static int ApplyCityTrialTrap(void)
     return 0;
 }
 
-// Air Ride receive: give sleep copy ability to every human rider.
-// Most City Trial trap items are CT-only (ITKIND / EVENT dispatch requires
-// Gm_IsInCity), so we bypass APItems_HandleItem and call Rider_GiveAbility
-// directly. Uses the raw rider API (not Rider_CheckAndGiveAbility) so the
-// ability gate and sleep-send hook do not re-trigger.
+// Air Ride receive: give the sleep copy ability to every human rider. Most City
+// Trial trap items need Gm_IsInCity, so this bypasses APItems_HandleItem. Calls
+// the raw rider API rather than Rider_CheckAndGiveAbility so the ability gate and
+// the sleep-send hook do not re-trigger.
 static int ApplyAirRideTrap(void)
 {
     int applied = 0;
@@ -156,36 +149,31 @@ static int ApplyAirRideTrap(void)
 
 // Top Ride bad items that penalize the picker via TopRide_KirbyApplyItem. Only
 // items whose dispatcher installs a self-debuff state belong here; most TR items
-// buff the user or arm an attack instead. TRITEM_SPEED_DOWN installs KirbySpeedDown
-// (state ID 18) and is the only reliable one.
+// buff the user or arm an attack instead.
 static const TopRideItemKind tr_trap_items[] = {
     TRITEM_SPEED_DOWN,
 };
 #define TR_TRAP_ITEM_COUNT (sizeof(tr_trap_items) / sizeof(tr_trap_items[0]))
 
-// Top Ride receive: pick a random bad item and apply it to every human Kirby
-// via the shared item-give path (TopRide_KirbyApplyItem under the hood).
 static int ApplyTopRideTrap(void)
 {
     TopRideItemKind kind = tr_trap_items[HSD_Randi(TR_TRAP_ITEM_COUNT)];
     return GateTopRideItems_GiveItem(kind);
 }
 
-// Read from the traplink_receive location and dispatch a mode-appropriate trap.
-// The GObj is only installed in 3D / Top Ride scenes, so the major is always
-// CITY/AIR/TOP here.
+// Dispatch a mode-appropriate trap on receive. The GObj is only installed in 3D /
+// Top Ride scenes, so the major is always CITY/AIR/TOP here.
 static void TrapLink_PerFrame(GOBJ *g)
 {
-    // Tick the recursion guard down every frame, before the receive check, so
-    // idle frames advance it too.
+    // Before the receive check, so idle frames advance the guard too.
     if (recv_suppress_frames > 0)
         recv_suppress_frames--;
 
     if (!ap_data->traplink_receive)
         return;
 
-    // Intro state gate only applies to 3D (Air Ride / City Trial). Top Ride
-    // has no intro sequence and Gm_GetIntroState defaults to GMINTRO_END.
+    // Only bites in 3D: Top Ride has no intro sequence and Gm_GetIntroState
+    // defaults to GMINTRO_END there.
     if (Gm_GetIntroState() != GMINTRO_END)
         return;
 
@@ -194,10 +182,9 @@ static void TrapLink_PerFrame(GOBJ *g)
     switch (major)
     {
         case MJRKIND_CITY:
-            // Free Run and stadiums don't load item data; most CT traps
-            // would crash inside SpawnItem / enemy / fake-patch spawn.
-            // Drop Free Run; fall back to the AR sleep trap for stadiums
-            // since stadiums still have rider GOBJs to apply it to.
+            // Free Run and stadiums don't load item data, so most CT traps would
+            // crash inside SpawnItem / enemy / fake-patch spawn. Stadiums still
+            // have rider GOBJs, so they fall back to the AR sleep trap.
             if (Gm_GetCityMode() == CITYMODE_FREERUN)
             {
                 OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded).\n");
@@ -223,7 +210,7 @@ static void TrapLink_PerFrame(GOBJ *g)
     {
         tb_api->EnqueueColoredNoun(NULL, "Trap", tb_api->TrapColor, " received!");
         ap_data->traplink_receive = 0;
-        // Arm the recursion guard: the apply is about to trigger our send hooks.
+        // The apply is about to trigger our own send hooks.
         recv_suppress_frames = TRAPLINK_RECV_GUARD_FRAMES;
     }
 }
@@ -243,8 +230,8 @@ void TrapLink_OnTopRideLoadEnd()
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TrapLink_PerFrame, 0, 0, 0, 0);
 }
 
-// Hook in Machine_OnTouchItem after CityItem_IsGoodPatch returns 0 (bad patch).
-// Catches SPEEDMIN, CHARGENONE, and fake patches. r20 = MachineData*;
+// Hook in Machine_OnTouchItem on the branch where CityItem_IsGoodPatch returned 0,
+// catching SPEEDMIN, CHARGENONE, and fake patches. r20 = MachineData*;
 // clobbered: lwz r0, 0xA10(r20).
 static void TrapLink_OnBadPatch(MachineData *md)
 {
@@ -259,9 +246,6 @@ CODEPATCH_HOOKCREATE(0x801DB504,
     "",
     0)
 
-// Hook inside TopRideItem_Update at the moment an item is marked absorbed
-// (0x8034c7dc). r31 = item list node (kind byte at +0x68), r26 = absorber
-// position Vec3*. The prologue loads item kind + absorber pos into r3/r4.
 static int IsTopRideBadItem(u8 kind)
 {
     for (int i = 0; i < (int)TR_TRAP_ITEM_COUNT; i++)
@@ -272,6 +256,8 @@ static int IsTopRideBadItem(u8 kind)
     return 0;
 }
 
+// Hook inside TopRideItem_Update (0x8034c7dc) where an item is marked absorbed.
+// r31 = item list node with the kind byte at +0x68, r26 = absorber position.
 static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
 {
     if (!IsTopRideBadItem(item_kind))
@@ -281,10 +267,9 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
     if (!mgr || !absorber_pos)
         return;
 
-    // The absorber's position and the TopRideKirby's charge-component
-    // position should coincide while the kirby is in pickup range of an
-    // item. Find the kirby whose charge position is closest to the
-    // absorber position that just absorbed - that's the one that picked up.
+    // The absorber's position coincides with the TopRideKirby's charge-component
+    // position while the kirby is in pickup range, so the nearest kirby is the
+    // one that picked up.
     int closest = -1;
     float closest_dist = 1.0e30f;
     for (int i = 0; i < 4; i++)

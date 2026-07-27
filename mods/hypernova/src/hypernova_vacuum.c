@@ -13,27 +13,26 @@
 
 #define ITEM_GOBJ_KIND 22  // gobj->entity_class for a City Trial item
 
-// True if `target` lies within the suction cone (inside RANGE and within the half-angle of unit
-// `aim_unit`). Sqrt-free: compares squared distances and tests dot(d,aim) >= cos*|d| squared.
+// True if `target` is inside RANGE and within the half-angle of unit `aim_unit`.
 static int Hypernova_InCone(Vec3 *origin, Vec3 *aim_unit, Vec3 *target)
 {
     Vec3 d;
-    VECSubtract(target, origin, &d); // d = target - origin
+    VECSubtract(target, origin, &d);
     float dist2 = VECSquareMag(&d);
     if (dist2 > HYPERNOVA_RANGE * HYPERNOVA_RANGE)
         return 0;
     if (dist2 < 0.0001f)
         return 1; // essentially on top of the rider
 
-    float proj = VECDotProduct(&d, aim_unit); // = |d| * cos(angle)
+    float proj = VECDotProduct(&d, aim_unit); // |d| * cos(angle)
     if (proj < 0.0f)
-        return 0; // target is behind the rider
+        return 0; // behind the rider
     return proj * proj >= (HYPERNOVA_HALF_ANGLE_COS * HYPERNOVA_HALF_ANGLE_COS) * dist2;
 }
 
-// Shared pull step (items, props, machines): advance `p` toward a point lifted above the rider
-// by a parabolic hump of horizontal distance (so the target arcs up and over, the lift vanishing
-// at the rider) by max(SPEED*dist, MIN) units/frame. Sqrt-free except the final-approach floor.
+// Shared pull step for items, props and machines: advance `p` by max(SPEED*dist, MIN) toward a
+// point lifted above the rider by a parabolic hump of horizontal distance, so the target arcs up
+// and over with the lift vanishing at the rider.
 static void Hypernova_StepToward(Vec3 *p, Vec3 *rider)
 {
     Vec3 to = *rider;
@@ -46,11 +45,11 @@ static void Hypernova_StepToward(Vec3 *p, Vec3 *rider)
     to.Y += HYPERNOVA_ARC_HEIGHT * 4.0f * u * (1.0f - u);
 
     Vec3 gap;
-    VECSubtract(&to, p, &gap); // gap = lifted target - p
+    VECSubtract(&to, p, &gap);
     float dist2 = VECSquareMag(&gap);
     if (dist2 < 1.0e-6f)
     {
-        *p = to; // essentially arrived; snap to avoid a divide-by-zero normalize
+        *p = to; // arrived; snap to avoid a divide-by-zero normalize
         return;
     }
 
@@ -71,8 +70,8 @@ static void Hypernova_StepToward(Vec3 *p, Vec3 *rider)
     p->Z += step.Z;
 }
 
-// Pseudo-random spin direction, hashed from the target pointer: stable per-target, mixed across
-// (xor-folds high bits down so heap alignment can't bias it).
+// Spin direction hashed from the target pointer: stable per-target, and xor-folded so heap
+// alignment can't bias it.
 static float Hypernova_SpinSign(void *key)
 {
     u32 h = (u32)key;
@@ -81,9 +80,8 @@ static float Hypernova_SpinSign(void *key)
     return (h & 1) ? 1.0f : -1.0f;
 }
 
-// Unit spin axis: perpendicular to travel (rider - pos) and horizontal, so the target pitches
-// end-over-end. Falls back to world X if travel is near-vertical; returns 0 if none usable.
-// Must be unit (Vec3_RotateAboutUnitAxis assumes it).
+// Spin axis perpendicular to travel (rider - pos) and horizontal, so the target pitches
+// end-over-end. Must be unit - Vec3_RotateAboutUnitAxis assumes it. Returns 0 if none usable.
 static int Hypernova_SpinAxis(Vec3 *pos, Vec3 *rider, Vec3 *out)
 {
     Vec3 dir;
@@ -94,7 +92,7 @@ static int Hypernova_SpinAxis(Vec3 *pos, Vec3 *rider, Vec3 *out)
     Vec3 up;
     up.X = 0.0f; up.Y = 1.0f; up.Z = 0.0f;
     Vec3 cross;
-    VECCrossProduct(&dir, &up, &cross); // perpendicular to travel, horizontal
+    VECCrossProduct(&dir, &up, &cross);
     if (VECSquareMag(&cross) < 1.0e-6f)
     {
         cross.X = 1.0f; cross.Y = 0.0f; cross.Z = 0.0f; // travel near-vertical
@@ -103,8 +101,8 @@ static int Hypernova_SpinAxis(Vec3 *pos, Vec3 *rider, Vec3 *out)
     return 1;
 }
 
-// Spin an item: rotate its forward/up vectors (CityItem_UpdatePosition rebuilds the render
-// matrix from them). Rotating both by the same rotation keeps them orthonormal.
+// CityItem_UpdatePosition rebuilds the render matrix from forward/up, so rotate both by the
+// same rotation to keep them orthonormal.
 static void Hypernova_SpinItem(ItemData *id, Vec3 *rider)
 {
     Vec3 axis;
@@ -115,8 +113,8 @@ static void Hypernova_SpinItem(ItemData *id, Vec3 *rider)
     Vec3_RotateAboutUnitAxis(&id->up, &axis, ang);
 }
 
-// Spin a prop: rotate the three basis columns of its 3x4 row-major world matrix, leaving the
-// translation column untouched. Length-preserving, so it doesn't perturb the shrink.
+// Rotates the three basis columns of a 3x4 row-major world matrix, leaving translation alone.
+// Length-preserving, so it doesn't perturb the shrink.
 static void Hypernova_SpinMtx3x3(float *mtx, Vec3 *axis, float ang)
 {
     Vec3 c;
@@ -146,9 +144,8 @@ static void Hypernova_PullItem(RiderData *rd, ItemData *id)
     id->x35a &= ~0x10;    // clear grounded flag (bit 4)
 }
 
-// Hypernova targets only the breakable City Trial props. desc_id (YakumonoData+0x04) is also
-// the break-count stat-index: 29 star pole, 32 forest pitfall, 33 coral, 34 trees, 35 rocks,
-// 36 volcano rock walls, 37 volcano-base holes, 38 dilapidated houses.
+// Breakable City Trial props by desc_id (YakumonoData+0x04): 29 star pole, 32 forest pitfall,
+// 33 coral, 34 trees, 35 rocks, 36 volcano rock walls, 37 volcano-base holes, 38 houses.
 static int Hypernova_IsBreakableYaku(int desc)
 {
     switch (desc)
@@ -177,16 +174,14 @@ static void Hypernova_ScaleMtx3x3(float *mtx, float s)
     mtx[8] *= s; mtx[9] *= s; mtx[10] *= s;
 }
 
-// Squared magnitude of row 0 - a sqrt-free proxy for the matrix's uniform scale. Comparing two
-// row-0 magnitudes gives the shrink ratio squared.
+// Squared magnitude of row 0 - a sqrt-free proxy for the matrix's uniform scale.
 static float Hypernova_Mtx3x3Row0Mag2(float *mtx)
 {
     return mtx[0] * mtx[0] + mtx[1] * mtx[1] + mtx[2] * mtx[2];
 }
 
-// Global index of a record's first region within Yaku_GetRegionArray() - the value
-// collideWithObject takes as regionIdx. Returns -1 if the regions aren't a clean
-// YAKU_REGION_SIZE-strided slice (defensive; always holds for break-family props).
+// Global index of a record's first region within Yaku_GetRegionArray() - what
+// collideWithObject takes as regionIdx. -1 if the regions aren't a clean strided slice.
 static int Hypernova_RecordRegionIndex(void *record)
 {
     YakuCollRegion *base    = Yaku_GetRegionArray();
@@ -199,8 +194,8 @@ static int Hypernova_RecordRegionIndex(void *record)
     return (int)(off / YAKU_REGION_SIZE);
 }
 
-// True if this prop's family breaks through hitWeakObject (coral 33 / trees 34 / rocks 35). The
-// weak break doesn't hide the dragged intact mesh, so it needs special handling at the rider.
+// True if this prop's family breaks through hitWeakObject (coral 33 / trees 34 / rocks 35),
+// which neither hides the dragged intact mesh nor moves its debris off the prop's baked spot.
 static int Hypernova_IsWeakBreakFamily(GOBJ *yaku_gobj)
 {
     YakumonoData *yd = Yaku_GetData(yaku_gobj);
@@ -209,10 +204,9 @@ static int Hypernova_IsWeakBreakFamily(GOBJ *yaku_gobj)
     return Yaku_GetDescCollFunc(yd->desc_id) == (void *)hitWeakObject;
 }
 
-// Resolve the weak break's debris-anchor JObj (pinned at the prop's baked spot) so the break can
-// relocate the rubble onto the rider. Mirrors hitWeakObject's own lookup: family break data
-// (yd->data_ptr) -> per-instance entry table (stride 0x10) -> node id at entry+0x08 -> grobj node
-// registry. NULL if any link can't be resolved.
+// Resolve the weak break's debris-anchor JObj, mirroring hitWeakObject's own lookup: family
+// break data (yd->data_ptr) -> per-instance entry table (stride 0x10) -> node id at entry+0x08
+// -> grobj node registry. NULL if any link can't be resolved.
 static void *Hypernova_WeakDebrisNode(GOBJ *yaku_gobj, void *record)
 {
     YakumonoData *yd = Yaku_GetData(yaku_gobj);
@@ -247,18 +241,16 @@ static void *Hypernova_WeakDebrisNode(GOBJ *yaku_gobj, void *record)
     if (node == NULL)
         return NULL;
 
-    // We WRITE this node's matrix, so guard against a garbage entry: require a 4-aligned MEM1 ptr.
+    // The node's matrix gets written, so reject a garbage entry: require a 4-aligned MEM1 ptr.
     u32 a = (u32)node;
     if (a < 0x80000000u || a >= 0x81800000u || (a & 3) != 0)
         return NULL;
     return node;
 }
 
-// Break a drawn-in prop by synthesizing the collision its family breaks on: hands
-// collideWithObject a fabricated high-force collider so the prop breaks in one hit through the
-// genuine family path (retire, hide/debris, item drops, SFX, break-count credit). Collision is
-// re-armed here (retired for the flight) so the break tail's guard passes; the tail retires it
-// again. Returns 1 if the break fired (collision no longer all-on after the call).
+// Break a drawn-in prop by handing collideWithObject a fabricated high-force collider, so it
+// breaks in one hit through the genuine family path (retire, hide/debris, item drops, SFX,
+// break-count credit). Returns 1 if the break fired.
 static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
 {
     void *holder = Yaku_GetCollHolder();
@@ -278,8 +270,8 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
     if (region_count <= 0)
         region_count = 1;
 
-    // The impact-speed calc projects our delta onto the region's outward normal, so we need a
-    // real normal to aim the delta against.
+    // The impact-speed calc projects the delta onto the region's outward normal, so a real
+    // normal is needed to aim the delta against.
     int region_idx = -1;
     Vec3 n_unit;
     n_unit.X = 0.0f; n_unit.Y = 0.0f; n_unit.Z = 0.0f;
@@ -296,38 +288,37 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
     if (region_idx < 0)
         return 0; // degenerate prop (no usable normal)
 
-    // Re-arm collision so the family coll_func's "still collidable?" guard passes; the tail
-    // retires it (and every region) on a successful break.
+    // Re-arm the collision retired for the flight so the family coll_func's "still collidable?"
+    // guard passes; the tail retires it (and every region) again on a successful break.
     grScene_SetInstanceColl(record, 1);
 
-    // Synthetic collider, zeroed. mpCollInfo+0x1d0 = -1 marks "no BigStar region" so
-    // destroyBigStar returns 0 and the break proceeds. radius is the force lever.
+    // mpCollInfo+0x1d0 = -1 marks "no BigStar region", so destroyBigStar returns 0 and the
+    // break proceeds.
     u8 coll_info[0x200];
     CollData coll;
     memset(coll_info, 0, sizeof(coll_info));
     memset(&coll, 0, sizeof(coll));
     *(int *)(coll_info + 0x1d0) = -1;
-    coll.g         = rider_gobj;               // attribution: human rider GObj
-    coll.coll_info = (mpCollInfo *)coll_info;   // empty mpCollInfo (no live hits)
+    coll.g         = rider_gobj;               // break credited to this rider
+    coll.coll_info = (mpCollInfo *)coll_info;
     coll.radius    = HYPERNOVA_BREAK_FORCE_RADIUS;
 
-    // Delta points INTO the surface (against the outward normal): the engine negates the
-    // normalized delta before projecting it, so this reads as a positive impact speed.
+    // The delta must point INTO the surface: the engine negates the normalized delta before
+    // projecting it onto the outward normal, and clamps a non-positive result to zero impact.
     VECScale(&n_unit, &coll.pos_delta, -HYPERNOVA_BREAK_FORCE_DELTA);
 
-    // Skip the geometry-refined impact path (it can rewrite our delta from the prop's matrices).
+    // Skip the geometry-refined impact path; it can rewrite the delta from the prop's matrices.
     YakuCollRegion *region = &regions[region_idx];
     u32 saved = region->refine_flags;
     region->refine_flags = saved & ~(u32)YAKU_REGION_REFINE;
 
-    // Contact point: the prop's current (pulled-in) world position.
+    // The prop's current (pulled-in) world position.
     Vec3 contact;
     Yaku_InstanceCachedPos(record, &contact);
 
-    // Weak families pin their break debris to a separate grobj node at the prop's baked spot;
-    // relocate it onto the contact point for the break instant (USER_DEF_MTX makes
-    // Gr_GetNodeWorldPos read our matrix), then restore. The effects spawn synchronously inside
-    // collideWithObject, so they capture the relocated position and outlive the restore.
+    // Weak families pin break debris to a separate grobj node at the prop's baked spot, so it is
+    // relocated onto the contact point (USER_DEF_MTX makes Gr_GetNodeWorldPos read the written
+    // matrix). The effects spawn synchronously, so they capture it before the restore below.
     int   weak = Hypernova_IsWeakBreakFamily(yaku_gobj);
     void *jobj = Yaku_InstanceJObj(record);
     void *dnode = weak ? Hypernova_WeakDebrisNode(yaku_gobj, record) : NULL;
@@ -357,11 +348,11 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
         *(u32 *)((char *)dnode + 0x14) = dflags;
     }
 
-    // The break tail retires collision on success; if it did, we're done.
+    // The break tail retires collision on success.
     if (!grScene_IsInstanceCollAll(record, 1))
     {
-        // Collapse the dragged intact mesh (the weak break never hides it); clearing USER_DEF_MTX
-        // drops the joint to its degenerate SRT.
+        // The weak break never hides the dragged intact mesh; clearing USER_DEF_MTX collapses
+        // the joint to its degenerate SRT.
         if (weak && jobj != NULL)
             JObj_ClearFlags((JOBJ *)jobj, JOBJ_USER_DEFINED_MTX);
         return 1;
@@ -372,20 +363,20 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
     return 0;
 }
 
-// Advance one claimed prop a frame: retire its baked collision (no stranded wall), pull it
-// toward the rider, shrink it once close, and break it on arrival or once shrunk enough.
-// Returns 1 once it is destroyed.
+// Advance one claimed prop a frame: pull it toward the rider, shrink it once close, and break it
+// on arrival or once shrunk enough. Returns 1 once it is destroyed.
 static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, void *record)
 {
     void *jobj = Yaku_InstanceJObj(record);
     if (jobj == NULL)
         return 1; // nothing to drive; drop the claim
 
-    // Retire the baked collision for the whole flight so the moved prop leaves no invisible wall.
+    // Retire the baked collision for the whole flight; it can't follow the model, and would
+    // otherwise leave an invisible wall at the origin.
     grScene_SetInstanceColl(record, 0);
 
-    // Take over the joint's world matrix. USER_DEF_MTX makes the per-frame SRT rebuild honor our
-    // write (weak families are JOBJ_SKELETON joints; idempotent for the static ones).
+    // USER_DEF_MTX makes the per-frame SRT rebuild honor the matrix written below (weak families
+    // are JOBJ_SKELETON joints; idempotent for the static ones).
     JObj_SetFlags((JOBJ *)jobj, JOBJ_USER_DEFINED_MTX);
 
     float *jmtx = (float *)((char *)jobj + 0x44);                 // 3x4 row-major world matrix
@@ -397,7 +388,7 @@ static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, void *record)
 
     float dist2 = VECSquareDistance(&rd->pos, &pos);
 
-    // Arrived: snap onto the rider and break now.
+    // Arrived: snap onto the rider and break.
     if (dist2 <= HYPERNOVA_YAKU_BREAK_RADIUS * HYPERNOVA_YAKU_BREAK_RADIUS)
     {
         Hypernova_SetMtxTranslation(jmtx, &rd->pos);
@@ -405,23 +396,20 @@ static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, void *record)
         return Hypernova_BreakInstanceNative(rider_gobj, record);
     }
 
-    // Close on the rider via the shared pull step, then write the stepped position into both
-    // the live and cached matrices.
     Hypernova_StepToward(&pos, &rd->pos);
     Hypernova_SetMtxTranslation(jmtx, &pos);
     Hypernova_SetMtxTranslation(cached, &pos);
 
-    // Tumble while flying in (live matrix only; the cached copy keeps the load-time scale as the
-    // shrink baseline). Rotation preserves row magnitude, so it doesn't perturb the shrink.
+    // Tumble the live matrix only; the cached copy keeps the load-time scale as the shrink
+    // baseline.
     Vec3 spin_axis;
     if (Hypernova_SpinAxis(&pos, &rd->pos, &spin_axis))
         Hypernova_SpinMtx3x3(jmtx, &spin_axis, HYPERNOVA_SPIN_RATE * Hypernova_SpinSign(record));
 
-    // Shrink only once much closer than the cone reach.
     if (dist2 <= HYPERNOVA_YAKU_SHRINK_RADIUS * HYPERNOVA_YAKU_SHRINK_RADIUS)
     {
         Hypernova_ScaleMtx3x3(jmtx, HYPERNOVA_YAKU_SHRINK);
-        float orig2 = Hypernova_Mtx3x3Row0Mag2(cached); // cached 3x3 keeps the load-time scale
+        float orig2 = Hypernova_Mtx3x3Row0Mag2(cached); // load-time scale
         float cur2  = Hypernova_Mtx3x3Row0Mag2(jmtx);
         if (cur2 < (HYPERNOVA_YAKU_BREAK_SCALE * HYPERNOVA_YAKU_BREAK_SCALE) * orig2)
             return Hypernova_BreakInstanceNative(rider_gobj, record);
@@ -430,14 +418,14 @@ static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, void *record)
     return 0; // still in flight
 }
 
-// Item claims: a swept powerup is recorded here and pulled every frame regardless of cone
-// membership, so nothing is left behind. Collection stays with the vanilla pickup trigger; a
-// claim is dropped the frame its item leaves the bucket, so a reused pointer self-heals.
+// A swept powerup is claimed here and pulled every frame regardless of cone membership.
+// Collection stays with the vanilla pickup trigger; a claim is dropped the frame its item leaves
+// the bucket, so a reused pointer self-heals.
 #define HYPERNOVA_MAX_ITEM_CLAIMS 128
 
 typedef struct
 {
-    void *item;  // claimed ItemData pointer (pull target)
+    void *item;  // claimed ItemData
     int   owner; // player slot that claimed it
 } HnItemClaim;
 
@@ -457,21 +445,21 @@ static void Hypernova_AddItemClaim(void *item, int owner)
     if (hn_item_claim_count >= HYPERNOVA_MAX_ITEM_CLAIMS)
         return;
     if (Hypernova_FindItemClaim(item) >= 0)
-        return; // already in flight (re-swept by the cone)
+        return; // already in flight
     hn_item_claims[hn_item_claim_count].item  = item;
     hn_item_claims[hn_item_claim_count].owner = owner;
     hn_item_claim_count++;
 }
 
-// Swap-remove (callers iterate the array backward so this is index-safe).
+// Swap-remove; callers iterate backward so this stays index-safe.
 static void Hypernova_RemoveItemClaimAt(int k)
 {
     hn_item_claim_count--;
     hn_item_claims[k] = hn_item_claims[hn_item_claim_count];
 }
 
-// True iff `id` is still a live powerup in the item bucket. Walks the bucket so we never deref a
-// dangling claim, and reads item_category only after confirming the pointer is still present.
+// Walks the bucket so a dangling claim is never dereferenced: item_category is read only after
+// the pointer is confirmed present.
 static int Hypernova_ItemIsLivePowerup(ItemData *id)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_ITEM]; g != NULL; g = g->next)
@@ -479,12 +467,11 @@ static int Hypernova_ItemIsLivePowerup(ItemData *id)
         if (g->entity_class != ITEM_GOBJ_KIND)
             continue;
         if ((ItemData *)g->userdata == id)
-            return id->item_category != 0; // present; reject if the slot is now a box
+            return id->item_category != 0; // reject if the slot is now a box
     }
     return 0; // collected or despawned
 }
 
-// Claim every in-cone powerup item for `player` (moves nothing).
 static void Hypernova_ClaimItems(int player, RiderData *rd, Vec3 *aim)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_ITEM]; g != NULL; g = g->next)
@@ -504,7 +491,6 @@ static void Hypernova_ClaimItems(int player, RiderData *rd, Vec3 *aim)
 
 void Hypernova_VacuumProcessClaimedItems(void)
 {
-    // Backward walk so swap-removal stays index-safe.
     for (int k = hn_item_claim_count - 1; k >= 0; k--)
     {
         ItemData *id = (ItemData *)hn_item_claims[k].item;
@@ -525,8 +511,8 @@ void Hypernova_VacuumProcessClaimedItems(void)
 
 #define HYPERNOVA_MAX_BREAK_PARENTS 32
 
-// Gather the breakable-yakumono parent GObjs on the yakumono p_link list. Used only as owner
-// keys (pointer match) when scanning the instance pool below. Returns the count.
+// Gathers the breakable-yakumono parent GObjs, used only as owner keys (pointer match) when
+// scanning the instance pool.
 static int Hypernova_CollectBreakParents(GOBJ **out)
 {
     int n = 0;
@@ -542,16 +528,16 @@ static int Hypernova_CollectBreakParents(GOBJ **out)
     return n;
 }
 
-// Prop claims: a swept breakable is recorded here and pulled to destruction every frame
-// regardless of cone membership, so nothing is stranded half-shrunk. Keyed by the scene-instance
-// record pointer. Sized above CT's ~130 breakables so a wide cone can't starve later props.
+// A swept breakable is claimed here and pulled to destruction every frame regardless of cone
+// membership, keyed by scene-instance record. Sized above CT's ~130 breakables so a wide cone
+// can't starve later props.
 #define HYPERNOVA_MAX_CLAIMS 200
 
 typedef struct
 {
     void *record; // scene-instance record being drawn in
     int   owner;  // player slot that claimed it (pull target / break attribution)
-    int   age;    // frames since claimed (safety TTL)
+    int   age;    // frames since claimed
 } HnClaim;
 
 static HnClaim hn_claims[HYPERNOVA_MAX_CLAIMS];
@@ -565,8 +551,7 @@ static int Hypernova_IsClaimed(void *record)
     return 0;
 }
 
-// Returns 1 if the record was newly claimed (so the caller can retire its collision), 0 if it
-// was already claimed or the claim set is full.
+// 1 if newly claimed, 0 if already claimed or the claim set is full.
 static int Hypernova_AddClaim(void *record, int owner)
 {
     if (hn_claim_count >= HYPERNOVA_MAX_CLAIMS || Hypernova_IsClaimed(record))
@@ -578,14 +563,13 @@ static int Hypernova_AddClaim(void *record, int owner)
     return 1;
 }
 
-// Swap-remove (callers iterate the array backward so this is index-safe).
+// Swap-remove; callers iterate backward so this stays index-safe.
 static void Hypernova_RemoveClaimAt(int k)
 {
     hn_claim_count--;
     hn_claims[k] = hn_claims[hn_claim_count];
 }
 
-// Claim every in-cone breakable prop for `player` (moves nothing).
 static void Hypernova_ClaimYakumono(int player, RiderData *rd, Vec3 *aim)
 {
     int count;
@@ -605,7 +589,7 @@ static void Hypernova_ClaimYakumono(int player, RiderData *rd, Vec3 *aim)
         if (owner == NULL)
             continue;
 
-        // Pointer match only - never deref the stored owner (meaningless for non-break records).
+        // Pointer match only - the stored owner is meaningless for non-break records.
         int breakable = 0;
         for (int p = 0; p < nparents; p++)
         {
@@ -633,8 +617,8 @@ static void Hypernova_ClaimYakumono(int player, RiderData *rd, Vec3 *aim)
         if (!Hypernova_InCone(&rd->pos, aim, &ppos))
             continue;
 
-        // Retire collision the instant the cone claims it, so the player can't run into a
-        // swept-up prop in flight. The break re-arms it only for the dispatch instant.
+        // Retire collision at claim time so the player can't run into a swept-up prop in
+        // flight; the break re-arms it only for the dispatch instant.
         if (Hypernova_AddClaim(record, player))
             grScene_SetInstanceColl(record, 0);
     }
@@ -642,7 +626,6 @@ static void Hypernova_ClaimYakumono(int player, RiderData *rd, Vec3 *aim)
 
 void Hypernova_VacuumProcessClaimed(void)
 {
-    // Backward walk so swap-removal stays index-safe.
     for (int k = hn_claim_count - 1; k >= 0; k--)
     {
         void *record = hn_claims[k].record;
@@ -655,7 +638,7 @@ void Hypernova_VacuumProcessClaimed(void)
         GOBJ *rg = Ply_GetRiderGObj(hn_claims[k].owner);
         if (rg == NULL)
         {
-            grScene_SetInstanceColl(record, 1); // owner gone - restore the collision we retired
+            grScene_SetInstanceColl(record, 1); // owner gone - restore the retired collision
             Hypernova_RemoveClaimAt(k);
             continue;
         }
@@ -667,7 +650,7 @@ void Hypernova_VacuumProcessClaimed(void)
             continue;
         }
 
-        // Safety net: a prop that somehow never breaks is released instead of gluing to the rider.
+        // A prop that never breaks is released instead of gluing to the rider.
         if (++hn_claims[k].age >= HYPERNOVA_YAKU_CLAIM_TTL)
         {
             grScene_SetInstanceColl(record, 1);
@@ -676,16 +659,14 @@ void Hypernova_VacuumProcessClaimed(void)
     }
 }
 
-// Machine claims: the cone claims loose unridden machines (rider_gobj == NULL, which also excludes
-// CPU riders), pulls them in like items/props, then KOs each on arrival for its own vanilla
-// break/explosion. Keyed by MachineData pointer, re-validated against the live bucket each frame,
-// so a machine that despawns, gets mounted, or dies self-heals out of the set.
+// Claimed unridden machines, keyed by MachineData and re-validated against the live bucket each
+// frame, so one that despawns, gets mounted, or dies self-heals out of the set.
 #define MACHINE_GOBJ_KIND         GAMEENTITY_MACHINE  // gobj->entity_class for a machine (16)
 #define HYPERNOVA_MAX_MACHINE_CLAIMS 32
 
 typedef struct
 {
-    void *machine; // claimed MachineData pointer (pull target)
+    void *machine; // claimed MachineData
     int   owner;   // player slot that claimed it
 } HnMachineClaim;
 
@@ -705,21 +686,21 @@ static void Hypernova_AddMachineClaim(void *machine, int owner)
     if (hn_machine_claim_count >= HYPERNOVA_MAX_MACHINE_CLAIMS)
         return;
     if (Hypernova_FindMachineClaim(machine) >= 0)
-        return; // already in flight (re-swept by the cone)
+        return; // already in flight
     hn_machine_claims[hn_machine_claim_count].machine = machine;
     hn_machine_claims[hn_machine_claim_count].owner   = owner;
     hn_machine_claim_count++;
 }
 
-// Swap-remove (callers iterate the array backward so this is index-safe).
+// Swap-remove; callers iterate backward so this stays index-safe.
 static void Hypernova_RemoveMachineClaimAt(int k)
 {
     hn_machine_claim_count--;
     hn_machine_claims[k] = hn_machine_claims[hn_machine_claim_count];
 }
 
-// A machine is a valid vacuum target only while it is present in the bucket, unridden, and not
-// already dying. Walk the bucket so a dangling claim is never dereferenced.
+// A target only while present in the bucket, unridden, and not already dying. Walks the bucket
+// so a dangling claim is never dereferenced.
 static int Hypernova_MachineIsLiveTarget(MachineData *md)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_MACHINE]; g != NULL; g = g->next)
@@ -732,7 +713,6 @@ static int Hypernova_MachineIsLiveTarget(MachineData *md)
     return 0; // despawned
 }
 
-// Claim every in-cone unridden machine for `player` (moves nothing).
 static void Hypernova_ClaimMachines(int player, RiderData *rd, Vec3 *aim)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_MACHINE]; g != NULL; g = g->next)
@@ -752,8 +732,8 @@ static void Hypernova_ClaimMachines(int player, RiderData *rd, Vec3 *aim)
     }
 }
 
-// Pull one claimed machine a frame toward the rider. Machine_PhysicsThink integrates accel and
-// velocity into pos every frame, so zero both to keep the pos override from being fought.
+// Machine_PhysicsThink integrates accel and velocity into pos every frame, so both are zeroed
+// to keep the pos override from being fought.
 static void Hypernova_PullMachine(RiderData *rd, MachineData *md)
 {
     Hypernova_StepToward(&md->pos, &rd->pos);
@@ -767,8 +747,8 @@ static void Hypernova_PullMachine(RiderData *rd, MachineData *md)
     md->velocity.Z = 0.0f;
 }
 
-// Destroy an arrived machine through its own vanilla path. The BreakDown explosion + GObj_Destroy
-// in Machine_OnKO's tail are gated by md[0x78] bit 0x40, so arm that first.
+// The BreakDown explosion + GObj_Destroy in Machine_OnKO's tail are gated by md[0x78] bit 0x40,
+// so arm that first.
 static void Hypernova_KOMachine(MachineData *md)
 {
     ((u8 *)md)[HYPERNOVA_MACHINE_KO_GATE_OFF] |= HYPERNOVA_MACHINE_KO_GATE_BIT;
@@ -777,7 +757,6 @@ static void Hypernova_KOMachine(MachineData *md)
 
 void Hypernova_VacuumProcessClaimedMachines(void)
 {
-    // Backward walk so swap-removal stays index-safe.
     for (int k = hn_machine_claim_count - 1; k >= 0; k--)
     {
         MachineData *md = (MachineData *)hn_machine_claims[k].machine;
@@ -810,7 +789,7 @@ void Hypernova_VacuumFinishClaimedPlayer(int player)
 {
     GOBJ *rg = Ply_GetRiderGObj(player);
 
-    // Break this player's in-flight props (or restore collision if unbreakable).
+    // Break this player's in-flight props, or restore collision if unbreakable.
     for (int k = hn_claim_count - 1; k >= 0; k--)
     {
         if (hn_claims[k].owner != player)
@@ -819,18 +798,18 @@ void Hypernova_VacuumFinishClaimedPlayer(int player)
         if (record != NULL)
         {
             if (rg == NULL || !Hypernova_BreakInstanceNative(rg, record))
-                grScene_SetInstanceColl(record, 1); // restore the collision we retired
+                grScene_SetInstanceColl(record, 1); // restore the retired collision
         }
         Hypernova_RemoveClaimAt(k);
     }
 
-    // Release this player's in-flight items back to vanilla physics (no forced finish).
+    // Release this player's in-flight items back to vanilla physics.
     for (int k = hn_item_claim_count - 1; k >= 0; k--)
         if (hn_item_claims[k].owner == player)
             Hypernova_RemoveItemClaimAt(k);
 
-    // Release this player's in-flight machines; a dropped machine just resumes sitting where it
-    // is (nothing to restore - the pull only zeroed its velocity, which vanilla physics rebuilds).
+    // Machines need nothing restored - the pull only zeroed velocity, which vanilla physics
+    // rebuilds, so a dropped machine resumes sitting where it is.
     for (int k = hn_machine_claim_count - 1; k >= 0; k--)
         if (hn_machine_claims[k].owner == player)
             Hypernova_RemoveMachineClaimAt(k);
@@ -847,8 +826,8 @@ void Hypernova_VacuumPlayer(int player, RiderData *rd)
 {
     Vec3 fwd = rd->forward;
     Vec3 aim;
-    if (VEC_NormalizeAndSnap(&fwd, &aim) < 0.01f) // unit forward; returns |fwd|
-        return; // no usable facing direction this frame
+    if (VEC_NormalizeAndSnap(&fwd, &aim) < 0.01f) // returns |fwd|
+        return; // no usable facing this frame
 
     Hypernova_ClaimItems(player, rd, &aim);
     if (hypernova_suck_yaku)

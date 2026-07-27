@@ -8,14 +8,11 @@ void GateTopRideItems_OnBoot();
 void GateTopRideItems_ApplyMask();
 int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce);
 
-// Spawn a Top Ride item at each human Kirby's position so it is collected on
-// the next collision tick. Only valid in a Top Ride scene with the item
-// manager initialized. Returns 1 if spawned at least once, 0 otherwise.
+// Applies the item to every human Kirby directly. Only valid in a Top Ride scene with
+// the item manager initialized; returns 1 if applied at least once.
 int GateTopRideItems_GiveItem(TopRideItemKind kind);
 
-// Map a copy ability to its Top Ride item analog (Freeze->Freeze Fan,
-// Fire->Fire, Bomb->Bomb, Mic->Walky). Returns -1 if the ability has no
-// Top Ride equivalent.
+// Maps a copy ability to its Top Ride item analog, or -1 if it has none.
 int GateTopRideItems_AbilityToItem(CopyKind ability);
 
 #endif

@@ -132,7 +132,6 @@ DEF_ALL(Bab, AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM, "bas
         return 1; \
     }
 
-// Stat patches
 GIVE_FN(GiveHP,       AP_ITKIND_HP)
 GIVE_FN(GiveBoost,    AP_ITKIND_BOOST)
 GIVE_FN(GiveTopSpd,   AP_ITKIND_TOPSPEED)
@@ -144,7 +143,6 @@ GIVE_FN(GiveDefense,  AP_ITKIND_DEFENSE)
 GIVE_FN(GiveWeight,   AP_ITKIND_WEIGHT)
 GIVE_FN(GiveAllUp,    AP_ITKIND_ALLUP)
 
-// Permanent patches
 GIVE_FN(GivePermHP,      AP_PERM_PATCH_HP)
 GIVE_FN(GivePermBoost,   AP_PERM_PATCH_BOOST)
 GIVE_FN(GivePermTopSpd,  AP_PERM_PATCH_TOPSPEED)
@@ -156,7 +154,6 @@ GIVE_FN(GivePermDef,     AP_PERM_PATCH_DEFENSE)
 GIVE_FN(GivePermWeight,  AP_PERM_PATCH_WEIGHT)
 GIVE_FN(GivePermAllUp,   AP_ITEM_PERM_PATCH_ALL_UP)
 
-// Copy abilities
 GIVE_FN(GiveCopyBomb,    AP_ITKIND_COPYBOMB)
 GIVE_FN(GiveCopyFire,    AP_ITKIND_COPYFIRE)
 GIVE_FN(GiveCopyFreeze,  AP_ITKIND_COPYFREEZE)
@@ -169,12 +166,10 @@ GIVE_FN(GiveCopySword,   AP_ITKIND_COPYSWORD)
 GIVE_FN(GiveCopyNeedle,  AP_ITKIND_COPYSPIKE)
 GIVE_FN(GiveCopyMike,    AP_ITKIND_COPYMIC)
 
-// Base ability unlocks (exercise the item-receive path -> GateBaseAbilities_UnlockAbility)
 GIVE_FN(GiveUnlockInhale,    AP_BASE_ABILITY_UNLOCK_INHALE)
 GIVE_FN(GiveUnlockQuickSpin, AP_BASE_ABILITY_UNLOCK_QUICKSPIN)
 GIVE_FN(GiveUnlockCharge,    AP_BASE_ABILITY_UNLOCK_CHARGE)
 
-// Food
 GIVE_FN(GiveMaximTomato,  AP_ITKIND_FOODMAXIMTOMATO)
 GIVE_FN(GiveEnergyDrink,  AP_ITKIND_FOODENERGYDRINK)
 GIVE_FN(GiveIceCream,     AP_ITKIND_FOODICECREAM)
@@ -188,14 +183,12 @@ GIVE_FN(GiveSushi,        AP_ITKIND_FOODSUSHI)
 GIVE_FN(GiveHotDog,       AP_ITKIND_FOODHOTDOG)
 GIVE_FN(GiveApple,        AP_ITKIND_FOODAPPLE)
 
-// Special items
 GIVE_FN(GiveCandy,       AP_ITKIND_CANDY)
 GIVE_FN(GiveSpeedMax,    AP_ITKIND_SPEEDMAX)
 GIVE_FN(GiveOffenseMax,  AP_ITKIND_OFFENSEMAX)
 GIVE_FN(GiveDefenseMax,  AP_ITKIND_DEFENSEMAX)
 GIVE_FN(GiveChargeMax,   AP_ITKIND_CHARGEMAX)
 
-// Legendary pieces
 GIVE_FN(GiveDragoonA,  AP_ITKIND_DRAGOON1)
 GIVE_FN(GiveDragoonB,  AP_ITKIND_DRAGOON2)
 GIVE_FN(GiveDragoonC,  AP_ITKIND_DRAGOON3)
@@ -203,7 +196,7 @@ GIVE_FN(GiveHydraX,    AP_ITKIND_HYDRA1)
 GIVE_FN(GiveHydraY,    AP_ITKIND_HYDRA2)
 GIVE_FN(GiveHydraZ,    AP_ITKIND_HYDRA3)
 
-// City Trial events (trigger as if event tile rolled)
+// Trigger the event as if its event tile had rolled.
 GIVE_FN(GiveEvtDynaBlade,        AP_EVENT_DYNABLADE)
 GIVE_FN(GiveEvtTac,              AP_EVENT_TAC)
 GIVE_FN(GiveEvtMeteor,           AP_EVENT_METEOR)
@@ -221,14 +214,12 @@ GIVE_FN(GiveEvtBounce,           AP_EVENT_BOUNCE)
 GIVE_FN(GiveEvtFog,              AP_EVENT_FOG)
 GIVE_FN(GiveEvtFakePowerups,     AP_EVENT_FAKEPOWERUPS)
 
-// Traps & events
 GIVE_FN(Give1HPTrap,        AP_ITEM_1_HP_TRAP)
 GIVE_FN(GiveAllDown,        AP_ITEM_ALL_DOWN)
 GIVE_FN(GiveDragoon,        AP_ITEM_GIVE_DRAGOON)
 GIVE_FN(GiveHydra,          AP_ITEM_GIVE_HYDRA)
 GIVE_FN(GiveDropPatchesTrap,AP_ITEM_DROP_PATCHES_TRAP)
 
-// Upgrades
 GIVE_FN(GivePatchCap,    AP_ITEM_PATCH_CAP_INCREASE)
 GIVE_FN(GiveSpawnRateUp, AP_ITEM_SPAWN_RATE_UP)
 GIVE_FN(GiveFillerAR,    AP_ITEM_CHECKBOX_FILLER_AIRRIDE)
@@ -236,11 +227,11 @@ GIVE_FN(GiveFillerTR,    AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
 GIVE_FN(GiveFillerCT,    AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
 GIVE_FN(GiveFillerAP,    AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO)
 
-// Cosmetic filler (scale every human Kirby model, all modes)
+// Scales every human Kirby model, in all modes.
 GIVE_FN(GiveBigKirby,    AP_ITEM_BIG_KIRBY)
 GIVE_FN(GiveSmallKirby,  AP_ITEM_SMALL_KIRBY)
 
-// Top Ride items (spawn at each human Kirby's position for pickup)
+// Applied directly to each human Kirby.
 GIVE_FN(GiveTRHammer,          AP_TOPRIDE_ITEM_GIVE_HAMMER)
 GIVE_FN(GiveTRBigCake,         AP_TOPRIDE_ITEM_GIVE_BIG_CAKE)
 GIVE_FN(GiveTRSpeedUp,         AP_TOPRIDE_ITEM_GIVE_SPEED_UP)
@@ -264,7 +255,6 @@ GIVE_FN(GiveTRSmokescreen,     AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN)
 GIVE_FN(GiveTRChickie,         AP_TOPRIDE_ITEM_GIVE_CHICKIE)
 GIVE_FN(GiveTRPartyBall,       AP_TOPRIDE_ITEM_GIVE_PARTY_BALL)
 
-// Energy Link debug
 static int GiveEnergy1000(OptionDesc *self)
 {
     (void)self;
@@ -275,7 +265,7 @@ static int GiveEnergy1000(OptionDesc *self)
     return 1;
 }
 
-// Toggle option (gate enable/disable)
+// Gate enable/disable toggle.
 #define G(label, arr, idx, cb) \
     &(OptionDesc){ \
         .name = label, \
@@ -295,7 +285,6 @@ static int GiveEnergy1000(OptionDesc *self)
         .on_action = fn, \
     }
 
-// Check detection debug actions
 static int CheckDbgClearAll(OptionDesc *self)
 {
     (void)self;
@@ -350,12 +339,9 @@ static int CheckDbgClearAllChecklistData(OptionDesc *self)
     return 1;
 }
 
-// When enabled, the Z-button debug checklist unlock also calls GrantReward on
-// the reward placed at the unlocked cell, simulating AP item receipt for
-// standalone testing with no client connected. Disabled by default: with a
-// client connected the auto-grant duplicates the client's own delivery, so the
-// reward is granted (and announced) twice. Only enable when testing the mod
-// without an AP client to deliver items.
+// Makes the Z-button checklist unlock also grant the cell's reward, simulating AP
+// delivery when no client is connected. Off by default: a connected client delivers
+// the reward itself, so it would be granted and announced twice.
 static int auto_grant_on_debug_unlock = 0;
 
 int DebugMenu_ShouldAutoGrantOnUnlock(void)
@@ -380,10 +366,9 @@ static void OnAutoGrantChange(int v)
     }
 
 // 22 player-rideable machines. Free / Steer Star are the two Top Ride lobby
-// "Control Type" choices and are gated by the TR machine-select hooks in
-// gate_machines.c. The 4 omitted VCKINDs (WINGKIRBY, WHEELNORMAL, WHEELKIRBY,
-// WHEELVSDEDEDE) are transformation forms or stadium CPU-only machines and
-// have no player-facing unlock surface.
+// "Control Type" choices. The 4 omitted VCKINDs (WINGKIRBY, WHEELNORMAL,
+// WHEELKIRBY, WHEELVSDEDEDE) are transformation forms or stadium CPU-only
+// machines with no player-facing unlock surface.
 static MenuDesc machines_menu = {
     .option_num = 24,
     .options = {

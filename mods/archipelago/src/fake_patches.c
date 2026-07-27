@@ -7,10 +7,10 @@
 
 // Replacement for CityItem_ProcessFakeItem (0x802542dc). Vanilla no-ops the fake
 // patch unless the Fake Powerups event is active, but AP traps spawn ITKIND_*FAKE
-// items outside the event, so we read the fake-data table from the loaded event
-// archive directly. Source it from GrData.event_config, not *stc_eventcheck_gobj,
-// because the event GOBJ is absent when CT events are disabled while the archive
-// (loaded every CT load) still has the table.
+// items outside the event, so read the fake-data table from the loaded event
+// archive directly. It comes from GrData.event_config rather than
+// *stc_eventcheck_gobj because the event GOBJ is absent when CT events are
+// disabled while the archive, loaded every CT load, still has the table.
 static int ProcessFakeItem(GOBJ *item_gobj, void *hurt_params)
 {
     GrObj *gr = stc_grobj ? *stc_grobj : 0;

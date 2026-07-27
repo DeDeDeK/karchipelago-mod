@@ -7,7 +7,6 @@
 #include "inline.h"
 #include "textbox_api.h"
 
-// Check if a color is unlocked via the AP bitmask.
 static int GateColors_IsColorUnlocked(int color_idx)
 {
     if (color_idx < 0 || color_idx >= KIRBYCOLOR_NUM)
@@ -15,8 +14,7 @@ static int GateColors_IsColorUnlocked(int color_idx)
     return (ap_save->color_unlocked_mask & (1 << color_idx)) != 0;
 }
 
-// Find the first unlocked color. The AP world guarantees Pink (color 0)
-// is always granted, so 0 is a safe fallback if the mask is somehow empty.
+// The AP world always grants Pink (color 0), so 0 is a safe fallback on an empty mask.
 static int first_unlocked_color()
 {
     for (int i = 0; i < KIRBYCOLOR_NUM; i++)
@@ -27,8 +25,6 @@ static int first_unlocked_color()
     return 0;
 }
 
-// Replace any locked entries in a 4-element color array with the first
-// unlocked color. Shared by the AR / TR HOOKCREATE post-init validators.
 static void validate_color_array(u8 *colors)
 {
     int fallback = first_unlocked_color();
@@ -39,8 +35,6 @@ static void validate_color_array(u8 *colors)
     }
 }
 
-// Validate a single color index - if locked, return the first unlocked color.
-// Used to intercept machine-lookup color assignments.
 static int GateColors_ValidateColor(int color_idx)
 {
     if (GateColors_IsColorUnlocked(color_idx))
@@ -50,8 +44,7 @@ static int GateColors_ValidateColor(int color_idx)
     return fallback;
 }
 
-// Validate the 4 Air Ride color[] entries in GameData; the CSS init block sets
-// color[0..3] = {0,1,2,3}, which may contain locked colors.
+// The AR CSS init block sets color[0..3] = {0,1,2,3}, which may contain locked colors.
 static void GateColors_ValidateAirRideColors(void)
 {
     GameData *gd = Gm_GetGameData();
@@ -60,8 +53,7 @@ static void GateColors_ValidateAirRideColors(void)
     validate_color_array(gd->airride_select_ply.color);
 }
 
-// Validate the 4 Top Ride color[] entries in GameData; the TR lobby init sets
-// color[0..3] = {0,1,2,3}, which may contain locked colors.
+// The TR lobby init sets color[0..3] = {0,1,2,3}, which may contain locked colors.
 static void GateColors_ValidateTopRideColors(void)
 {
     GameData *gd = Gm_GetGameData();
@@ -70,8 +62,6 @@ static void GateColors_ValidateTopRideColors(void)
     validate_color_array(gd->topride_select_ply.color);
 }
 
-// Pick a random unlocked Kirby color. The AP world guarantees Pink (color 0)
-// is always granted, so 0 is a safe fallback if the mask is somehow empty.
 int GateColors_RandomUnlockedColor(void)
 {
     int unlocked[KIRBYCOLOR_NUM];
@@ -86,18 +76,16 @@ int GateColors_RandomUnlockedColor(void)
     return unlocked[HSD_Randi(count)];
 }
 
-// Give an Air Ride CPU slot a random unlocked color instead of the shared per-slot
-// default. Fires only on the CPU-slot branch, so humans keep their CSS pick.
-// slot_base = airride_select_ply base + slot; color[] is at +0x51.
+// Replaces the shared per-slot default on the CPU-slot branch only, so humans keep
+// their CSS pick. slot_base = airride_select_ply base + slot; color[] is at +0x51.
 void GateColors_SetCpuAirRideColor(u8 *slot_base)
 {
     slot_base[0x51] = (u8)GateColors_RandomUnlockedColor();
 }
 
 // Hook at 0x800236a8 in loadCPU (`stb r0, 69(r29)`, the CPU-slot ply_kind write).
-// r29 = airride_select_ply base + slot; this branch is CPU-only. The clobbered store
-// needs r0 = 2, which our C call wipes, so the epilogue restores it before the
-// framework re-executes the store.
+// r29 = airride_select_ply base + slot. The clobbered store needs r0 = 2, which the
+// C call wipes.
 CODEPATCH_HOOKCREATE(0x800236a8,
     "mr 3, 29\n\t",
     GateColors_SetCpuAirRideColor,
@@ -105,9 +93,8 @@ CODEPATCH_HOOKCREATE(0x800236a8,
     0
 )
 
-// Filter the availability result at each CSS color changer's convergence point.
-// All paths (colors 0-3 hardcoded, 4-7 checklist) merge here, so we override
-// entirely with the unlock mask rather than combining with the vanilla result.
+// Availability filter at each CSS color changer's convergence point. All vanilla paths
+// (colors 0-3 hardcoded, 4-7 checklist) merge here, so the mask overrides outright.
 static int GateColors_FilterResult(int color_idx)
 {
     return GateColors_IsColorUnlocked(color_idx) ? 1 : 0;
@@ -140,9 +127,8 @@ CODEPATCH_HOOKCREATE(0x8002f350,
     0
 )
 
-// Hook at 0x8002978c (stb r3, 45(r28)) in zz_80028888_: validates the
-// machine-to-color lookup result (r3) before it's stored as the icon color.
-// The stb re-executes after, storing the validated r3.
+// Hook at 0x8002978c (stb r3, 45(r28)) in zz_80028888_: validates the machine-to-color
+// lookup result before the re-executed stb commits it as the icon color.
 CODEPATCH_HOOKCREATE(0x8002978c,
     "",
     GateColors_ValidateColor,
@@ -151,8 +137,7 @@ CODEPATCH_HOOKCREATE(0x8002978c,
 )
 
 // Hook at 0x800295e8 (li r8, 0) in zz_80028888_ (Race mode): convergence after the
-// color[0..3] = {0,1,2,3} init block. Validates the entries against the mask.
-// li r8, 0 re-executes after; r3/r4 are reloaded just below, so clobbers are safe.
+// color[0..3] init block. r3/r4 are reloaded just below, so clobbers are safe.
 CODEPATCH_HOOKCREATE(0x800295e8,
     "",
     GateColors_ValidateAirRideColors,
@@ -161,7 +146,7 @@ CODEPATCH_HOOKCREATE(0x800295e8,
 )
 
 // Hook at 0x8002d06c (li r3, 0) in zz_8002cfd8_ (Top Ride data reset): convergence
-// after the color[0..3] = {0,1,2,3} loop. li r3, 0 re-executes after.
+// after the color[0..3] loop.
 CODEPATCH_HOOKCREATE(0x8002d06c,
     "",
     GateColors_ValidateTopRideColors,
@@ -170,8 +155,7 @@ CODEPATCH_HOOKCREATE(0x8002d06c,
 )
 
 // Hook at 0x8002d704 (li r7, 0) in TopRide_RaceInit (zz_8002d0ec_, multiplayer):
-// convergence after the color reset. Fires before the visual loop reads the colors,
-// so corrected values are displayed.
+// convergence after the color reset, before the visual loop reads the colors.
 CODEPATCH_HOOKCREATE(0x8002d704,
     "",
     GateColors_ValidateTopRideColors,
@@ -179,8 +163,8 @@ CODEPATCH_HOOKCREATE(0x8002d704,
     0
 )
 
-// Hook at 0x8002db8c (li r28, 0) in TopRide_SoloInit (zz_8002d9e8_): covers Free Run
-// and Time Attack. Right after the color assignment, before the visual loop.
+// Hook at 0x8002db8c (li r28, 0) in TopRide_SoloInit (zz_8002d9e8_), covering Free Run
+// and Time Attack: after the color assignment, before the visual loop.
 CODEPATCH_HOOKCREATE(0x8002db8c,
     "",
     GateColors_ValidateTopRideColors,
@@ -188,10 +172,9 @@ CODEPATCH_HOOKCREATE(0x8002db8c,
     0
 )
 
-// Hook at 0x80029e34 (li r5, 0) in zz_80029bd8_ (Air Ride Free Run / Time Attack):
-// the non-Race CSS with its own color[0..3] = {0,1,2,3} init block. Validates the
-// entries against the mask. li r5, 0 re-executes after; r4 is reloaded just below,
-// so clobbers are safe.
+// Hook at 0x80029e34 (li r5, 0) in zz_80029bd8_ (Air Ride Free Run / Time Attack), the
+// non-Race CSS with its own color[0..3] init block. r4 is reloaded just below, so
+// clobbers are safe.
 CODEPATCH_HOOKCREATE(0x80029e34,
     "",
     GateColors_ValidateAirRideColors,
@@ -229,9 +212,8 @@ int GateColors_UnlockColor(int color_idx, int announce)
     return 1;
 }
 
-// Validate the 4 City Trial ply_color[] entries. CT has no init block to hook
-// (unlike AR/TR), so persisted selections from prior sessions can reference
-// colors that are now locked.
+// CT has no init block to hook (unlike AR/TR), so persisted selections from prior
+// sessions can reference colors that are now locked.
 void GateColors_ValidateCityTrialColors(void)
 {
     GameData *gd = Gm_GetGameData();

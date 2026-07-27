@@ -1,9 +1,5 @@
-// Registration / engine splice: turn discovered custom-item .dats into spawnable
-// ItemKinds for the current City Trial round - grow itData[], lift the kind
-// ceiling, clamp custom instances to a vanilla base kind for behavior, and inject
-// box/sky + event-source spawn weights. Re-run every round because the engine's
-// item tables live in per-scene memory (loaded archives, and thus the descriptor
-// model/effect pointers, are reloaded each round too).
+// The splice re-runs every City Trial round because the engine's item tables and
+// the loaded descriptor archives all live in per-scene memory.
 
 #include "os.h"
 #include "game.h"
@@ -20,15 +16,13 @@
 // Custom kinds occupy indices [ITKIND_NUM, ITKIND_NUM + CUSTOM_ITEM_MAX).
 #define CUSTOM_KIND_CEILING (ITKIND_NUM + CUSTOM_ITEM_MAX)
 
-// Persistent extended itData array: the ITKIND_NUM vanilla entries (re-snapshotted each
-// round) plus up to CUSTOM_ITEM_MAX appended custom entries. Static so it
-// outlives the per-scene heap; the engine is repointed here each round.
+// Vanilla entries (re-snapshotted each round) plus the appended custom ones.
+// Static so it outlives the per-scene heap; the engine is repointed here.
 static itData stc_ext_itdata[CUSTOM_KIND_CEILING];
 
-// Per-custom-item synthesized model descriptors, refilled each round. itData.model
-// must point at a full-width, zero-filled descriptor (not a bare j/flag pair):
-// CityItem_Create's part setup reads part-counts at +0x8/+0xc/+0x10 and asserts
-// each <= 11, so the trailing fields must stay zero. Only j and flag are written.
+// itData.model must point at a full-width, zero-filled descriptor rather than a
+// bare j/flag pair: CityItem_Create's part setup reads part counts at
+// +0x8/+0xc/+0x10 and asserts each <= 11, so rest[] has to stay zero.
 static struct ItemModelDesc { void *j; int flag; int rest[14]; } stc_model_pair[CUSTOM_ITEM_MAX];
 static ItemCommonAttr stc_custom_attr[CUSTOM_ITEM_MAX];
 
@@ -36,22 +30,18 @@ static ItemCommonAttr stc_custom_attr[CUSTOM_ITEM_MAX];
 static int stc_base_kind[CUSTOM_ITEM_MAX];
 static int stc_active_count;
 
-// Box/sky weights remembered per active custom item, so the per-event re-bias
-// hook can re-append them without reloading the archives.
+// Remembered so the per-event re-bias hook can re-append without reloading archives.
 static u16 stc_box_weight[CUSTOM_ITEM_MAX][BOXKIND_NUM];
 
-// One event_source_drop[] row: the it_kind followed by the six per-source
-// u16 chance columns (dyna, tac, meteor, destructible, chamber, ufo). Mirrors
-// the anonymous struct in grBoxGeneInfo->item_desc (stride 0x10).
+// Mirrors one row of the anonymous struct in grBoxGeneInfo->item_desc (stride 0x10).
 typedef struct EventSourceDropRow
 {
     int it_kind;
     u16 chance[CUSTOM_ITEM_EVSRC_NUM];
 } EventSourceDropRow;
 
-// Persistent extended event_source_drop table: the stage's rows (re-snapshotted
-// each round) plus appended custom rows. Repointed into item_desc and read
-// directly by the picker.
+// The stage's event_source_drop rows (re-snapshotted each round) plus appended
+// custom rows; repointed into item_desc and read directly by the picker.
 static EventSourceDropRow stc_ext_event_drop[CUSTOM_KIND_CEILING];
 static int stc_event_drop_active; // 1 if we repointed event_source_drop this round
 static int stc_event_drop_num;    // row count we repointed it to
@@ -96,8 +86,8 @@ const CustomItemDesc *CustomItems_LoadDescriptor(int file_entrynum, HSD_Archive 
     return desc;
 }
 
-// Base kind a custom kind impersonates for state/category lookups. Used by the
-// clamp hook. Falls back to a benign pickup kind for unmapped values.
+// Base kind a custom kind impersonates for state/category lookups; falls back
+// to a benign pickup kind for unmapped values.
 static int ResolveBaseKind(int kind)
 {
     int idx = kind - ITKIND_NUM;
@@ -106,10 +96,9 @@ static int ResolveBaseKind(int kind)
     return ITKIND_ACCEL;
 }
 
-// Hook body: CityItem_InitData has just written the instance's raw kind to
-// ItemData+0x1c. For a custom kind, rewrite it to the base kind so the
-// state-class ptr table (0x804b6088) and threshold table (0x804b5f18), both
-// indexed by this field, stay in bounds.
+// Rewrite the instance kind at ItemData+0x1c to the base kind, keeping the
+// state-class table (0x804b6088) and threshold table (0x804b5f18), both indexed
+// by this field, in bounds.
 static void ClampInstanceKind(void *item_data)
 {
     int *kindp = (int *)((u8 *)item_data + 0x1c);
@@ -117,8 +106,8 @@ static void ClampInstanceKind(void *item_data)
         *kindp = ResolveBaseKind(*kindp);
 }
 
-// Append (kind, weight) to one box pool's parallel arrays in place (or update the
-// weight if the kind is already present). The 68-wide pools are sparsely filled.
+// Append (kind, weight) to one box pool's parallel arrays, or update the weight
+// if the kind is already there. The 68-wide pools are sparsely filled.
 static void PoolAppend(grBoxGeneObj *g, int box, int kind, int weight)
 {
     if (weight <= 0)
@@ -163,13 +152,12 @@ int CustomItemRegistry_RegisterAll(void)
     if (all == NULL || all->itData == NULL)
         return 0; // item data not loaded - not a City Trial round with items
 
-    // Snapshot the (per-scene) vanilla entries into the persistent array.
     itData *vanilla = all->itData;
     for (int k = 0; k < ITKIND_NUM; k++)
         stc_ext_itdata[k] = vanilla[k];
 
-    // Snapshot the stage's event_source_drop[] rows so custom rows can be
-    // appended without disturbing the (index-referenced) vanilla rows.
+    // Snapshot the stage's rows so custom ones can be appended without moving
+    // the vanilla rows, which are referenced by index.
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
     EventSourceDropRow *ev_src = NULL;
     int ev_base = 0, ev_num = 0;
@@ -199,7 +187,6 @@ int CustomItemRegistry_RegisterAll(void)
         if (desc == NULL)
             continue;
 
-        // Adopt the descriptor's display name (supersedes the discovery filename).
         if (desc->name != NULL)
             CustomItems_CopyName(e->name, desc->name);
 
@@ -209,24 +196,19 @@ int CustomItemRegistry_RegisterAll(void)
 
         int kind = ITKIND_NUM + n;
 
-        // Clone the base kind's itData, then override model and effect.
         stc_ext_itdata[kind] = stc_ext_itdata[base];
 
         if (desc->model != NULL)
         {
-            // The render flag travels with the model (v2+). v1 descriptors carry
-            // no flag, so assume the flat-panel value the carver originally used.
-            // rest[] (the part-counts and trailing fields) stays zero - matching
-            // every vanilla model descriptor.
+            // v1 descriptors carry no render flag, so assume the flat-panel value.
             u32 flag = (desc->version >= 2) ? desc->model_flag : 0x02000000u;
             stc_model_pair[n].j = desc->model;
             stc_model_pair[n].flag = (int)flag;
             stc_ext_itdata[kind].model = (void *)&stc_model_pair[n];
         }
 
-        // Override attributes (stat-grant effect and/or render scale) by cloning
-        // the base kind's attribute record and repointing itData at the clone.
-        // scale is v3+; a 0 or 1.0 multiplier means inherit the base's native size.
+        // Effect / scale overrides clone the base kind's attribute record.
+        // A 0 or 1.0 scale means inherit the base's native size.
         int want_effect = (desc->effect_info != NULL);
         float scale = (desc->version >= 3) ? desc->scale : 0.0f;
         int want_scale = (scale > 0.0f && scale != 1.0f);
@@ -243,7 +225,6 @@ int CustomItemRegistry_RegisterAll(void)
         stc_base_kind[n] = base;
         e->assigned_kind = kind;
 
-        // Box/sky weights: apply now and remember for the per-event re-inject.
         // The engine's pool chance is a u8, so PoolAppend saturates at 255.
         for (int b = 0; b < BOXKIND_NUM; b++)
         {
@@ -255,7 +236,7 @@ int CustomItemRegistry_RegisterAll(void)
                 PoolAppend(g, b, kind, desc->weight_box[b]);
         }
 
-        // Event-source weights: append one row if any source is nonzero.
+        // One event-source row, kept only if some source is nonzero.
         if (ev_src != NULL && ev_num < CUSTOM_KIND_CEILING)
         {
             EventSourceDropRow *row = &stc_ext_event_drop[ev_num];
@@ -277,7 +258,6 @@ int CustomItemRegistry_RegisterAll(void)
     if (n > 0)
         all->itData = stc_ext_itdata; // repoint the engine at the grown array
 
-    // Repoint event_source_drop[] at the grown table only if we added rows.
     if (ev_src != NULL && ev_num > ev_base)
     {
         info->item_desc->event_source_drop = (void *)stc_ext_event_drop;
@@ -291,8 +271,8 @@ int CustomItemRegistry_RegisterAll(void)
     return n;
 }
 
-// Re-apply custom kinds after the per-event re-bias wipes the box/sky pools
-// (PoolAppend is idempotent); re-assert the event_source_drop[] repoint too.
+// The per-event re-bias wipes the box/sky pools and the event_source_drop
+// repoint, so both are re-applied here (PoolAppend is idempotent).
 void CustomItemRegistry_ReinjectPools(void)
 {
     if (!custom_items_enabled || stc_active_count == 0)
@@ -320,29 +300,28 @@ void CustomItemRegistry_ReinjectPools(void)
     }
 }
 
-// Per-round registration: CityItemSpawn_Init epilogue (0x800ec348), after the
-// spawn pools are filled and item data is loaded, before the first spawn tick.
+// CityItemSpawn_Init epilogue (0x800ec348): the spawn pools are filled and item
+// data is loaded, and the first spawn tick has not run.
 static void RegisterAllHook(void)
 {
     CustomItemRegistry_RegisterAll();
 }
 CODEPATCH_HOOKCREATE(0x800ec348, "", RegisterAllHook, "", 0);
 
-// Kind clamp: CityItem_InitData, just after ItemData+0x1c is written (the
-// clobbered `li r4,-1` at 0x8024eb44 is replayed). r31 holds ItemData.
+// CityItem_InitData just after ItemData+0x1c is written; r31 holds ItemData and
+// the clobbered `li r4,-1` at 0x8024eb44 is replayed.
 CODEPATCH_HOOKCREATE(0x8024eb44, "mr 3,31\n\t", ClampInstanceKind, "", 0x8024eb48);
 
-// Per-event re-inject: CityEvent_ModifyItemFallDesc epilogue (0x800ed7f0), whose
-// re-bias rebuilds the box/sky pools and drops our appended kinds.
+// CityEvent_ModifyItemFallDesc epilogue (0x800ed7f0), whose re-bias rebuilds the
+// box/sky pools and drops the appended kinds.
 static void ReinjectPoolsHook(void)
 {
     CustomItemRegistry_ReinjectPools();
 }
 CODEPATCH_HOOKCREATE(0x800ed7f0, "", ReinjectPoolsHook, "", 0);
 
-// Recover the custom kind of an item instance from its itData pointer (ItemData+0x2c,
-// pointed at our grown array for custom items). Survives the +0x1c clamp, which only
-// rewrites the behavior-kind field. Returns -1 for vanilla items.
+// Recovers the custom kind from the instance's itData pointer, which the +0x1c
+// clamp leaves alone. Returns -1 for vanilla items.
 static int CustomKindFromItemData(ItemData *id)
 {
     if (id == NULL)
@@ -354,9 +333,6 @@ static int CustomKindFromItemData(ItemData *id)
     return (kind >= ITKIND_NUM && kind < CUSTOM_KIND_CEILING) ? kind : -1;
 }
 
-// Pickup hook: Machine_OnTouchItem(md, id) fires when a rider collects an item.
-// For a custom item, look up its registry entry and invoke the pickup handler with
-// the collecting player's slot, so a consumer (e.g. hypernova) can react.
 static void OnTouchItem(MachineData *md, ItemData *id)
 {
     int kind = CustomKindFromItemData(id);
@@ -374,9 +350,9 @@ static void OnTouchItem(MachineData *md, ItemData *id)
         }
     }
 }
-// Entry of Machine_OnTouchItem (0x801db34c); r3=MachineData, r4=ItemData. hoshi's
-// trampoline doesn't preserve registers across the C call, so the prologue/epilogue
-// save and restore r3/r4/LR (all three consumed by the vanilla body) around it.
+// Entry of Machine_OnTouchItem (0x801db34c); r3=MachineData, r4=ItemData. The
+// trampoline doesn't preserve registers across the C call, so r3/r4/LR - all
+// consumed by the vanilla body - are saved and restored around it.
 CODEPATCH_HOOKCREATE(0x801db34c,
                      "stwu 1,-0x20(1)\n\t"
                      "stw 3,0x10(1)\n\t"

@@ -4,8 +4,8 @@
 
 #include "event_gravity_change.h"
 
-// Gravity multipliers applied to the stage's base strength (City Trial = 0.025).
-// One is chosen at random each trigger: low = floaty/long air time, high = heavy.
+// Applied to the stage's base strength (City Trial = 0.025); one is picked at
+// random each trigger.
 #define GRAVITY_MULT_LOW   0.5f
 #define GRAVITY_MULT_HIGH  2.0f
 
@@ -31,7 +31,6 @@ void GravityChange_Start(EventCheckData *ev_chk)
         return;
     }
 
-    // Randomly pick low or high gravity for this trigger.
     active_mult = HSD_Randi(2) ? GRAVITY_MULT_HIGH : GRAVITY_MULT_LOW;
 
     original_strength = *strength;

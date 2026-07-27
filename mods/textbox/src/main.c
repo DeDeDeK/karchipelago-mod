@@ -6,20 +6,16 @@
 #include "textbox.h"
 #include "textbox_colors.h"
 
-// Hook installed at 0x80009084 - the instruction right after the `bl
-// TopRide_CustomRenderer` inside TopRide_PostRenderCallback. TR's post-render
-// kicks off a second HSD_StartRender pass that overdraws the EFB after the
-// standard frame render, wiping anything the screen canvas drew. Re-issuing
-// the canvas's render after that pass returns puts the textbox back on top.
+// 0x80009084 is the instruction right after the `bl TopRide_CustomRenderer` inside
+// TopRide_PostRenderCallback, whose second render pass overdraws the EFB and wipes the textbox.
 static void Hook_TopRidePostRender(void)
 {
     TextBox_TopRideReRender();
 }
 CODEPATCH_HOOKCREATE(0x80009084, "", Hook_TopRidePostRender, "", 0)
 
-// Populated at boot from textbox_colors.c. The struct fields can't be
-// initialized statically from extern const GXColor symbols (not constants
-// in C), so we copy them in at OnBoot before exporting.
+// The palette fields are filled in at OnBoot: extern const GXColors aren't constant
+// expressions in C, so they can't initialize the struct statically.
 static TextBoxAPI api = {
     .Enqueue               = TextBox_Enqueue,
     .EnqueueSegments       = TextBox_EnqueueSegments,
@@ -70,8 +66,8 @@ static void OnToggleTypewriter(int val)
     OSReport("[TextBox] Typewriter toggled %s\n", stc_off_on[val]);
 }
 
-// RepositionAll reads the spacing multiplier live each call, so a refresh here
-// reflows whatever's already on screen instead of waiting for the next message.
+// RepositionAll reads the settings live, so this reflows what is already on screen instead of
+// waiting for the next message.
 static void OnChangeSpacing(int val)
 {
     (void)val;

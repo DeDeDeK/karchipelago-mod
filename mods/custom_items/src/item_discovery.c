@@ -1,6 +1,5 @@
-// Drop-in discovery: walk the FST `items/` folder and record each *.dat as a
-// registry entry. Two-pass (count, then index) so the cap warning is reported
-// once before any entries are added.
+// Drop-in discovery is two-pass (count, then index) so the cap warning is
+// reported once before any entries are added.
 
 #include "os.h"
 
@@ -8,8 +7,7 @@
 
 #include "custom_items.h"
 
-// FNV-1a 32-bit over the full FST path - a stable per-file identity independent
-// of registry order.
+// FNV-1a 32-bit; a per-file identity independent of registry order.
 u32 CustomItems_HashPath(const char *path)
 {
     u32 h = 0x811c9dc5u;
@@ -35,20 +33,18 @@ static void IndexCb(int entrynum, void *args)
     (void)args;
 
     CustomItemEntry *e = CustomItems_AppendEntry();
-    if (e == NULL) // registry full - cap already reported in CustomItems_Discover
+    if (e == NULL) // registry full - already reported
         return;
 
     e->file_entrynum = entrynum;
     e->id_hash = CustomItems_HashPath(FST_GetFilePathFromEntrynum(entrynum));
 
-    // Provisional display name = filename. The descriptor's own name supersedes
-    // this once the archive is loaded at registration time.
+    // Provisional name; the descriptor's own name supersedes it once loaded.
     char *filename = FST_GetFilenameFromEntrynum(entrynum);
     CustomItems_CopyName(e->name, filename);
 
-    // Stable settings-menu label = filename with the extension stripped. Unlike
-    // `name` this is never overwritten by the descriptor, so the per-item toggle's
-    // save hash (keyed on the option name) stays stable across reboots.
+    // menu_label is never overwritten by the descriptor, so the per-item
+    // toggle's save hash (keyed on the option name) stays stable across reboots.
     CustomItems_CopyName(e->menu_label, filename);
     int dot = -1;
     for (int i = 0; e->menu_label[i] != '\0'; i++)

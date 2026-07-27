@@ -1,11 +1,13 @@
 # Enemy AI System
 
-Documentation of the enemy AI and behavioral systems in Kirby Air Ride (GKYE01). Covers the state machine, movement, targeting, per-type callbacks, animation scripts, and data structures needed to create custom enemy AI.
+How the enemy/event actors (Waddle Dee, Sword Knight, Scarfy, TAC, Dyna Blade, ...)
+decide what to do and move. Covers the two-level state machine, the animation-script
+bytecode, per-type AI, targeting, knockback, and the `EnemyData` layout needed to write
+custom enemy behavior. The actor creation pipeline, archive loading, and spawn-slot pool
+are a separate system (`enemy-spawn-system.md`); the CPU riders you race against are
+another (`cpu-ai-system.md`).
 
-See [enemy-spawn-system.md](enemy-spawn-system.md) for the actor creation pipeline, descriptor struct, archive loading, and spawn-slot system.
-See [meteor-actor.md](meteor-actor.md) for meteor-specific behavior.
-
-## Architecture Overview
+## Architecture
 
 Enemy behavior is driven by three systems running in parallel each frame:
 
@@ -25,7 +27,7 @@ EnemyStateChange(ed, state_id, flags, anim_rate, anim_end_frame)
             ed+0xAC4 (func4) <- called by priority 6 proc
 ```
 
-These four state-table function pointers **are** the per-type AI brain. There is no separate "AI callback": `ed+0xAC8` (per_type_cb), dispatched at priority 7, is a **dead slot** — no enemy ever installs it (a region-wide scan of all enemy code 0x801fb000–0x8021f000 finds only the zero-store in `EnemyStateChange` at 0x801fc634 and the read in `EventActor_ProcPerType` at 0x801fc85c). See [Per-Type AI Decision Architecture](#per-type-ai-decision-architecture) for how the state funcs compose targeting + movement, and [Influencing Enemy Behavior](#influencing-enemy-behavior) for why the dead per_type_cb is the cleanest injection point.
+These four state-table function pointers **are** the per-type AI brain. There is no separate "AI callback": `ed+0xAC8` (per_type_cb), dispatched at priority 7, is a **dead slot** — across all enemy code (0x801fb000–0x8021f000) the only accesses are the zero-store in `EnemyStateChange` at 0x801fc634 and the read in `EventActor_ProcPerType` at 0x801fc85c. That makes it the cleanest custom-AI injection point.
 
 ## GObj Proc Execution Order
 
@@ -129,12 +131,7 @@ The callable range is exactly **cmd 11-25 (15 handlers)**. The trailing slots ar
 void EnemyStateChange(EnemyData *ed, int state_id, int flags, float anim_rate, float anim_end_frame);
 ```
 
-Parameters:
-- `ed` (r3): Enemy data pointer
-- `state_id` (r4): Target state ID
-- `flags` (r5): Bitmask controlling transition behavior
-- `anim_rate` (f1): Animation playback rate
-- `anim_end_frame` (f2): Animation end frame override
+Register assignment is the natural one: `ed` r3, `state_id` r4, `flags` r5, `anim_rate` f1, `anim_end_frame` f2.
 
 **State table lookup:**
 ```c
@@ -213,7 +210,7 @@ typedef struct StateTableEntry {
 | 0x0C | 12 | NULL | 0x8020e338 | 0x8020e61c | NULL | Launched/airborne |
 | 0x0D | 13 | NULL | 0x8020e7e0 | 0x8020e954 | NULL | Grounded/sliding |
 
-### Common State Callbacks -- Detailed Analysis
+### Common State Callbacks
 
 **States 0x00-0x08 (EnemyState_AnimEnter / AnimTick / AnimExit):**
 
@@ -238,9 +235,7 @@ Only func1 is set (enter-only state). On entry:
 2. Plays death SFX (from `death_sfx_id`, ed+0x9C0) and VFX (from `death_vfx_id`, ed+0x9C4)
 3. Handles special actor cleanup
 4. Sets `death_frame_counter` (ed+0x9C8) to 600
-5. Increments counter each frame -- since 601 > 120 (the destruction threshold), the actor is destroyed on the **next frame** after entering the death state
-
-Death is effectively instantaneous (1 frame).
+5. Increments counter each frame -- since 601 > 120 (the destruction threshold), the actor is destroyed on the **next frame** after entering the death state, making death effectively instantaneous
 
 **State 0x0A (Inhaled):**
 
@@ -272,23 +267,23 @@ States 0x0E+ are type-specific. Each enemy type has its own state table pointed 
 
 T1 and T2 variants of the same enemy always share the same descriptor pointer (so they have identical per-type state tables).
 
-> **Per-type state-table entry counts and the "-1" entry.** Each per-type table is an array of 0x14-byte entries, the same format as the common table. The **first entry (relative index 0) is reached by state ID 0x0E**, and its `anim_idx` is -1 (the default/spawn entry). The *behavioral* descriptions of individual states below are partial/inferred.
+Each per-type table is an array of 0x14-byte entries in the same format as the common table. The **first entry (relative index 0) is reached by state ID 0x0E** and its `anim_idx` is -1 (the default/spawn entry).
 
-**Waddle Dee (0x17)** -- state table at 0x804b3e78, init_cb 0x80219448, **5 entries (states 0x0E-0x12)**. Fully traced — **and it is NOT a pure patroller: it detects and lunges at riders.**
+**Waddle Dee (0x17)** — state table at 0x804b3e78, init_cb 0x80219448, **5 entries (states 0x0E-0x12)**. Not a pure patroller: it detects and lunges at riders.
 
-| State | Entry | Anim | func1 | func2 | func3 | func4 | Purpose (verified) |
+| State | Entry | Anim | func1 | func2 | func3 | func4 | Purpose |
 |-------|-------|------|-------|-------|-------|-------|--------------------|
 | 0x0E | 0 | -1 | 0x80219638 | – | – | – | Spawn — ZeroVelocity, `EnemyPath_FollowUpdate`, →0x0F |
-| 0x0F | 1 | 0x0E | – | – | 0x802196e0 (ground move) | 0x80219704 **player scan** | Patrol a spline **while scanning**; func4 calls `zz_801fe5d4_` (0x801fe5d4, nearest-rider-in-front) — on a hit →0x10 |
+| 0x0F | 1 | 0x0E | – | – | 0x802196e0 (ground move) | 0x80219704 **player scan** | Patrol a spline **while scanning**; func4 calls `EnemyActor_FindNearestPlayerAhead` (0x801fe5d4, nearest rider in a forward cone) — on a hit →0x10 |
 | 0x10 | 2 | 0x0F | 0x802197ac | 0x802197e8 | 0x802197ec | – | Windup / turn toward target → 0x11 |
 | 0x11 | 3 | 0x10 | 0x80219908 | 0x80219988 | 0x80219a48 | 0x80219a84 | Lunge / hop attack (accumulates a swing into ed+0xB54, adjusts height) → 0x12 |
 | 0x12 | 4 | 0x11 | 0x80219b4c | – | 0x80219c40 | 0x80219c64 | Recover / settle → `EnemyPath_FollowUpdate` → 0x0F |
 
-Waddle Dee AI loop: **patrol a spline (scanning for a rider in front) → detect → windup/turn → lunge-hop → recover → patrol.** (The old "spawn → idle → random walk → idle" description was wrong; there is no idle state and there *is* a player-reactive attack chain.)
+Waddle Dee AI loop: **patrol a spline (scanning for a rider in front) → detect → windup/turn → lunge-hop → recover → patrol.** There is no idle state.
 
-**Sword Knight (0x05)** -- state table at 0x804b3118, **4 entries (states 0x0E-0x11)**. Fully traced -- see [Per-Type AI Decision Architecture](#per-type-ai-decision-architecture) § Worked example: Sword Knight:
+**Sword Knight (0x05)** -- state table at 0x804b3118, **4 entries (states 0x0E-0x11)**. Walked through in full under Per-Type AI Decision Architecture below.
 
-| State | Entry | Anim | Purpose (verified) |
+| State | Entry | Anim | Purpose |
 |-------|-------|------|--------------------|
 | 0x0E | 0 | -1 | Default/spawn -- init then `EnemyStateChange`→0x0F (func1 only) |
 | 0x0F | 1 | 0x0E | Seek / slash-watch -- func1 decides, func2/3 move (CombatMovement/CombatAI) |
@@ -297,9 +292,9 @@ Waddle Dee AI loop: **patrol a spline (scanning for a rider in front) → detect
 
 Sword Knight AI loop: spawn → patrol a spline → slash when a rider crosses its front → recover → patrol.
 
-**Wheelie (0x08)** -- state table at 0x804b3350, init_cb 0x802132ec, **3 entries (states 0x0E-0x10)** (verified). Init calls `Enemy_SetTerrainLocked` (0x8020ae54) — **not** "sets the ground flags directly".
+**Wheelie (0x08)** -- state table at 0x804b3350, init_cb 0x802132ec, **3 entries (states 0x0E-0x10)**. Init calls `Enemy_SetTerrainLocked` (0x8020ae54).
 
-| State | Entry | Anim | Purpose (verified) |
+| State | Entry | Anim | Purpose |
 |-------|-------|------|--------------------|
 | 0x0E | 0 | -1 | Spawn -- SetupVelocity + `EnemyPath_FollowUpdate`, →0x0F (func1 only) |
 | 0x0F | 1 | 0x0E | Roam -- func2 `Enemy_AIPhysicsTick` (0x802081ec); when it reports stationary →0x10. func3 `EnemyActor_CombatAI` |
@@ -307,19 +302,19 @@ Sword Knight AI loop: spawn → patrol a spline → slash when a rider crosses i
 
 No player targeting — Wheelie is a roam/drive ground wanderer.
 
-**Gordo (0x0E)** -- state table at 0x804b3808, init_cb 0x80215a00, **3 entries (states 0x0E-0x10)** (verified). Init is just `EventActor_FinalizeInit`; the spawn func sets `grounded_active` (ed+0x908) = 1 **directly** (it does **not** call `Enemy_SetTerrainLocked`).
+**Gordo (0x0E)** -- state table at 0x804b3808, init_cb 0x80215a00, **3 entries (states 0x0E-0x10)**. Init is just `EventActor_FinalizeInit`; the spawn func sets `grounded_active` (ed+0x908) = 1 directly rather than calling `Enemy_SetTerrainLocked`.
 
-| State | Entry | Anim | Purpose (verified) |
+| State | Entry | Anim | Purpose |
 |-------|-------|------|--------------------|
 | 0x0E | 0 | -1 | Spawn -- ZeroVelocity, DisableRendering, ed+0x908=1, →0x0F (func1 only) |
 | 0x0F | 1 | 0x0E | Bounce — func1 is a frame-gated timer (ed+0xB48) that flips to 0x10 at a random threshold; func4 `EnemyActor_FindNearestPlayerFOV` (homes facing toward nearest rider). **No code writes pos.y** — the visible vertical bounce is the looping animation (anim_idx 0x0E), not a `pos.y +=`. |
 | 0x10 | 2 | 0x0F | Hide/timer — func1 counts ed+0xB4A down (model hidden, velocity zeroed) → back to 0x0F; func4 same FOV homing. |
 
-Gordo "oscillates" only as a **state/animation/visibility cycle** (0x0F↔0x10 driven by the timers), not a code-driven Y oscillation.
+Gordo oscillates only as a **state/animation/visibility cycle** (0x0F↔0x10 driven by the timers), not a code-driven Y oscillation.
 
-**Broom Hatter (0x00)** -- state table at 0x804b2d88, init_cb 0x8020ea44, **4 entries (states 0x0E-0x11)** (verified). Composite (init `EventActor_SpawnChild`s the SP Broom Hatter rider, actor 0x48) and terrain-locked via `Enemy_SetTerrainLocked` (0x8020ae54).
+**Broom Hatter (0x00)** -- state table at 0x804b2d88, init_cb 0x8020ea44, **4 entries (states 0x0E-0x11)**. Composite (init `EventActor_SpawnChild`s the SP Broom Hatter rider, actor 0x48) and terrain-locked via `Enemy_SetTerrainLocked` (0x8020ae54).
 
-| State | Entry | Anim | Purpose (verified) |
+| State | Entry | Anim | Purpose |
 |-------|-------|------|--------------------|
 | 0x0E | 0 | -1 | Spawn — `EnemyPath_FollowUpdate`, GroundSnap, →0x0F (func1 only) |
 | 0x0F | 1 | 0x0E | Spline+grounded chase — func2 `EnemyActor_CombatMovement`, func3 `EnemyActor_CombatAI` |
@@ -330,7 +325,7 @@ No player targeting — Broom Hatter is a spline/ground wanderer-chaser (same `C
 
 ## Per-Type AI Decision Architecture
 
-The per-type brain is the set of **per-type state-table functions** (func1–func4 → `ed+0xAB8`–`ed+0xAC4`), dispatched at GObj proc priorities 1/4/5/6 every frame. There is **no** separate AI callback — `ed+0xAC8` (per_type_cb, priority 7) is never installed by any enemy (see Architecture Overview).
+The per-type brain is the set of **per-type state-table functions** (func1–func4 → `ed+0xAB8`–`ed+0xAC4`), dispatched at GObj proc priorities 1/4/5/6 every frame. There is **no** separate AI callback: `ed+0xAC8` (per_type_cb, priority 7) is never installed by any enemy.
 
 ### The decision loop
 
@@ -342,20 +337,20 @@ On spawn an enemy enters its **default state 0x0E**, whose func1 runs a one-time
 
 ### Who targets players
 
-Player targeting is **widespread**, not exceptional. A region-wide `bl`-xref scan of the enemy code (0x801fb000–0x8021f000) gives the authoritative caller counts:
+Player targeting is widespread, not exceptional. Call-site counts are from a `bl`-xref scan of the enemy code region 0x801fb000–0x8021f000:
 
 | Targeting entry point | Address | Call sites | Notes |
 |---|---|---|---|
 | `EnemyActor_FindNearestPlayer` | 0x801ffd78 | 13 | nearest rider within global detect range (50.0) |
 | `EnemyActor_FindNearestPlayerFOV` | 0x801ff8d8 | 13 | + forward-hemisphere + bone-aim. Callers include Scarfy, Bronto Burt, Bomber, Gordo, Walky |
 | `EnemyActor_PlayerAheadDist` | 0x801fea60 | 4 | per-player crossing test (Sword Knight) |
-| `zz_801fe5d4_` (cone scan) | 0x801fe5d4 | 1 | **Waddle Dee** — nearest rider in a forward cone within range |
-| `zz_801fe764_` (cone scan) | 0x801fe764 | — | **TAC** grab probe |
-| `zz_801fe8dc_` (cone scan) | 0x801fe8dc | 2 | **Bronto Burt** dive gate |
+| `EnemyActor_FindNearestPlayerAhead` | 0x801fe5d4 | 1 | **Waddle Dee** — nearest rider in a forward cone within range |
+| `EnemyActor_FindPlayerInRangeFwd` | 0x801fe764 | — | **TAC** grab probe |
+| `EnemyActor_FindDiveTarget` | 0x801fe8dc | 2 | **Bronto Burt** dive gate |
 
-The three `zz_801fe5d4_`/`_764_`/`_8dc_` helpers are a small family of standalone nearest-rider-in-cone scanners (each loops the 4 players via `Ply_GetRiderGObj`/`Ply_GetPosition`, distance-gates, then dot-tests against the enemy's forward axis), siblings of `FindNearestPlayerFOV` that return a player index rather than writing `ed+0xB24`.
+The last three are a small family of standalone nearest-rider-in-cone scanners (each loops the 4 players via `Ply_GetRiderGObj`/`Ply_GetPosition`, distance-gates, then dot-tests against the enemy's forward axis), siblings of `FindNearestPlayerFOV` that return a player index rather than writing `ed+0xB24`.
 
-**Corrections to the old roster:** Waddle Dee **does** target (via `zz_801fe5d4_`, contradicting "pure-patrol does not target"). Cappy and Noddy **do not** target — Cappy is a func1-only animation-driven jump-out machine (all func2/3/4 NULL) and Noddy's combat state is entirely NULL (a "sleeper"); neither appears in any targeting caller list. Sword Knight uses the lighter `EnemyActor_PlayerAheadDist` crossing test instead of a nearest-player scan.
+Cappy and Noddy do **not** target: Cappy is a func1-only animation-driven jump-out machine (all func2/3/4 NULL) and Noddy's combat state is entirely NULL (a sleeper). Neither appears in any targeting caller list. Sword Knight uses the lighter `EnemyActor_PlayerAheadDist` crossing test rather than a nearest-player scan.
 
 ### Worked example: Sword Knight (descriptor 0x804b3168, state table 0x804b3118)
 
@@ -375,7 +370,7 @@ A spline patroller that slashes when a rider passes across its front.
 
 ### Worked example: Scarfy (descriptor 0x804b2ff8, state table 0x804b2f80)
 
-The iconic Kirby-chaser. Scarfy puts its perception in **func4** (0x8021027c → `Scarfy_TargetFOV`), which calls `EnemyActor_FindNearestPlayerFOV` with the global detection range (`*(stc_enemy_param_table) + 0x90`) — acquiring the nearest rider inside a forward hemisphere and homing on a body bone. This shows the slot roles are type-specific: Sword Knight decides in func1, Scarfy targets in func4.
+The iconic Kirby-chaser. Scarfy puts its perception in **func4** (0x8021027c → `Scarfy_TargetFOV`), which calls `EnemyActor_FindNearestPlayerFOV` with the global detection range (`stc_enemy_param_table + 0x90`) — acquiring the nearest rider inside a forward hemisphere and homing on a body bone. Slot roles are type-specific: Sword Knight decides in func1, Scarfy targets in func4.
 
 ### The flyer movement archetype
 
@@ -386,17 +381,17 @@ Airborne enemies do **not** integrate `vel += accel` + ground-snap like grounded
 | `EnemyActor_FlyMovement` (hover/wander/steer) | 0x8020354c | Scarfy, Bomber, Bronto-Burt-recover | Anchored hover. `pos = pos_initial (ed+0x310) + sin(phase)×amplitude` (mode 1, `sin` 0x800638f8), **or** a homing steer offset re-aimed via `HSD_Randf` when blocked (mode 2), plus the animation root-motion. **No gravity, no ground raycast.** Mode is `*(actor_data)+0x148`. |
 | `EnemyActor_FlyForward` (straight/ballistic) | 0x8020335c | Bronto Burt cruise + dive | Builds a basis from forward/up/right (ed+0x334/0x340/0x34C) scaled by speed (ed+0x344) and **adds it straight into pos** — "advance along facing at speed". |
 
-That `0x8020354c` is **shared** is verified: Bomber's cruise func2 (0x802156fc) and Scarfy's cruise func2 (0x80210244) both `bl 0x8020354c` identically. Flyer func3 slots still call the ground-snap/path helpers (0x80205884 / 0x80205a60) to keep the shadow + ground-height reference current while airborne; those are **not** movers. Flyers never hit `Enemy_AIPhysicsTick` except Bronto Burt's cruise (a hybrid that also calls `CombatMovement`).
+`0x8020354c` is shared: Bomber's cruise func2 (0x802156fc) and Scarfy's cruise func2 (0x80210244) both `bl` it identically. Flyer func3 slots still call the ground-snap/path helpers (0x80205884 / 0x80205a60) to keep the shadow + ground-height reference current while airborne; those are **not** movers. Flyers never hit `Enemy_AIPhysicsTick` except Bronto Burt's cruise (a hybrid that also calls `CombatMovement`).
 
 **Worked example: Bronto Burt dive-bomb (0x02, descriptor 0x804b2ecc, state table 0x804b2e68).** A 4-state cycle (cruise/dive-watch are two spawn variants of the same descriptor):
 
-1. **Dive-watch (0x10)** func1 (0x8020f6a8) reads altitude and scans for a rider in range/front via `zz_801fe8dc_` (0x801fe8dc, a cone scanner); on a hit it zeroes velocity and `EnemyStateChange`→**0x11**.
+1. **Dive-watch (0x10)** func1 (0x8020f6a8) reads altitude and scans for a rider in range/front via `EnemyActor_FindDiveTarget` (0x801fe8dc, a cone scanner); on a hit it zeroes velocity and `EnemyStateChange`→**0x11**.
 2. **Dive (0x11)** func2 (0x8020f800) → `EnemyActor_FlyForward` drives the ballistic plunge along the facing; func1 polls `EventActor_JObjCheck` (0x80200d10, the anim/JObj-state gate) and on completion transitions to recover.
 3. **Recover (0x12)** func2 (0x8020f8d4) → `EnemyActor_FlyMovement` drifts back toward the anchor and climbs.
 
 Per-frame, func4 (FOV targeting, 0x801ff8d8) keeps the Burt oriented at the nearest rider; the dive-watch range scan is the actual dive gate.
 
-> **Grounded vs flyer — roster correction.** Of the "FOV-targeting flyers" the older roster implied, only **Bronto Burt, Bomber, Scarfy** are true flyers. **Cappy, Walky, Noddy are grounded** (Cappy = anim-driven ground ambusher with no mover; Walky = grounded spline chaser via `CombatMovement`/`CombatAI`; Noddy = grounded spline "sleeper").
+Only **Bronto Burt, Bomber and Scarfy** are true flyers. **Cappy, Walky and Noddy are grounded**: Cappy is an anim-driven ground ambusher with no mover, Walky a grounded spline chaser via `CombatMovement`/`CombatAI`, Noddy a grounded spline sleeper.
 
 ### Shared movement/decision helpers
 
@@ -453,7 +448,7 @@ Per-type state counts (count = entries between the table pointer and the next da
 
 (\*Scarfy's per-type entry sits at descriptor 0x804b2ff8 / state table 0x804b2f80; the actor-ID/descriptor mapping is in the Per-Type Descriptor Table section.)
 
-The first entry of every per-type table (state 0x0E, entry 0) has `anim_idx = -1` and is the default/spawn entry. Simpler enemies have fewer entries; combat enemies have more. Counts above are verified from the state-table bytes (each 0x14-byte entry array is terminated by the descriptor's own back-pointer).
+The first entry of every per-type table (state 0x0E, entry 0) has `anim_idx = -1` and is the default/spawn entry. Simpler enemies have fewer entries; combat enemies have more. Each 0x14-byte entry array is terminated by the descriptor's own back-pointer, which is how the counts above are read off.
 
 ### Init Callback Pattern
 
@@ -465,7 +460,7 @@ All per-type init callbacks follow a common pattern:
 4. Call `EventActor_FinalizeInit` (0x802042fc, finalize init -- animation setup, collision)
 5. Optionally call `Enemy_SetTerrainLocked` (0x8020ae54) for the terrain-locked flag — sets bit 2 (mask 0x04) of `ed+0xB0B`. **Broom Hatter and Wheelie** call this helper in their init. **Gordo** does not — its spawn func sets `grounded_active` (ed+0x908) = 1 directly.
 
-> Init callbacks do **not** set `ed+0xAC8` (per_type_cb) — no enemy does. The per-frame brain is wired through the per-type state table, not this slot (see [Per-Type AI Decision Architecture](#per-type-ai-decision-architecture)).
+> Init callbacks do **not** set `ed+0xAC8` (per_type_cb) — no enemy does. The per-frame brain is wired through the per-type state table, not this slot.
 
 ### Special Variants (0x48-0x4E)
 
@@ -473,19 +468,19 @@ All per-type init callbacks follow a common pattern:
 |----|------|----------|
 | 0x48-0x4A | Child parts (SP Broom Hatter, SP Sword Knight, SP Waddle Dee Truck) | No init, no default state. Mirror parent's transform via `EventActor_FollowParent` (0x80219eec). `parent_gobj` from descriptor. |
 | 0x4B | Event Gordo | Independent actor, own init and behavior |
-| 0x4C | TAC | Independent. Descriptor 0x804b4178, state table 0x804b4088, 12 states (0x0E-0x19), init 0x8021a534. Chases riders (func4 cone-probe `zz_801fe764_`), dashes/steers to grab, then flees and self-destructs off-screen. **"Steal" = it scatters fresh City Trial pickups into the world** (`Tac_ScatterItems` 0x8021c8ec → `CityItem_GetEventItem`/`CityItem_Throw`) on a grab roll and when struck — it does **not** remove items from a player's inventory. See [TAC AI](#tac-actor-0x4c). |
-| 0x4D | Dyna Blade | Independent. Descriptor 0x804b4288, state table 0x804b41e8, 8 states (0x0E-0x15), init 0x8021c9dc. Spawns high → descends → pass-over (proximity rumble via `DistToPlayer`+`RumblePlayer`, **no targeting**) → cruise/flap → **anim-driven swoop** (flight path is the baked model animation, finite-differenced into velocity) → rains items (`DynaBlade_ThrowItems`) → climbs out → `EventActor_Destroy`. See [Dyna Blade AI](#dyna-blade-actor-0x4d). |
-| 0x4E | Meteor | See [meteor-actor.md](meteor-actor.md) |
+| 0x4C | TAC | Independent. Descriptor 0x804b4178, state table 0x804b4088, 12 states (0x0E-0x19), init 0x8021a534. Chases riders (func4 cone-probe `EnemyActor_FindPlayerInRangeFwd`), dashes/steers to grab, then flees and self-destructs off-screen. **"Steal" = it scatters fresh City Trial pickups into the world** (`Tac_ScatterItems` 0x8021c8ec → `CityItem_GetEventItem`/`CityItem_Throw`) on a grab roll and when struck — it does **not** remove items from a player's inventory. |
+| 0x4D | Dyna Blade | Independent. Descriptor 0x804b4288, state table 0x804b41e8, 8 states (0x0E-0x15), init 0x8021c9dc. Spawns high → descends → pass-over (proximity rumble via `DistToPlayer`+`RumblePlayer`, **no targeting**) → cruise/flap → **anim-driven swoop** (flight path is the baked model animation, finite-differenced into velocity) → rains items (`DynaBlade_ThrowItems`) → climbs out → `EventActor_Destroy`. |
+| 0x4E | Meteor | Independent scripted actor; its behavior is `meteor-actor.md` |
 
 ## Special Event Actor AI
 
-TAC and Dyna Blade are the two complex standalone event actors (Meteor is in [meteor-actor.md](meteor-actor.md)). Both have `actor_id >= 0x4C`, so `EnemyPhysicsProc` skips their OOB floor-kill and `EventActor_SetVisibility` leaves them render-disabled (their idle func re-enables rendering). Neither uses the spawn-slot pool — they spawn through the event system. **Both interact with items by *spawning* City Trial pickups into the world** (`CityItem_GetEventItem` 0x80254114 + `CityItem_Throw` 0x80253ce4), never by removing items from a rider's inventory.
+TAC and Dyna Blade are the two complex standalone event actors (Meteor, actor 0x4E, is the third). Both have `actor_id >= 0x4C`, so `EnemyPhysicsProc` skips their OOB floor-kill and `EventActor_SetVisibility` leaves them render-disabled (their idle func re-enables rendering). Neither uses the spawn-slot pool — they spawn through the event system. **Both interact with items by *spawning* City Trial pickups into the world** (`CityItem_GetEventItem` 0x80254114 + `CityItem_Throw` 0x80253ce4), never by removing items from a rider's inventory.
 
 ### TAC (actor 0x4C)
 
 Descriptor 0x804b4178 → state table 0x804b4088 (12 states 0x0E-0x19), init_cb 0x8021a534.
 
-**Behavior:** spawn (0x0E) randomly enters **chase (0x0F)** or a timed **wander (0x12)**. In chase, func4 (`Tac_Chase_ProbeAndGrab` 0x8021aa6c) runs the forward-cone player probe `zz_801fe764_` (0x801fe764); when a rider is in range/front it commits a **dash → grab (0x14 → 0x15)**, steering toward the target each frame (`RotateVecAroundAxis`) while wall-avoiding, at speed `param[4]`. A successful grab roll → **recover (0x16)** (can re-dash), eventually **flee (0x17)**: it climbs (`pos.y > param[5]`), disables its hitbox, and `EventActor_Destroy`s once off-screen. Getting hit drops it into **hit-reaction (0x19)**.
+**Behavior:** spawn (0x0E) randomly enters **chase (0x0F)** or a timed **wander (0x12)**. In chase, func4 (`Tac_Chase_ProbeAndGrab` 0x8021aa6c) runs the forward-cone player probe `EnemyActor_FindPlayerInRangeFwd` (0x801fe764); when a rider is in range/front it commits a **dash → grab (0x14 → 0x15)**, steering toward the target each frame (`RotateVecAroundAxis`) while wall-avoiding, at speed `param[4]`. A successful grab roll → **recover (0x16)** (can re-dash), eventually **flee (0x17)**: it climbs (`pos.y > param[5]`), disables its hitbox, and `EventActor_Destroy`s once off-screen. Getting hit drops it into **hit-reaction (0x19)**.
 
 **The "steal":** `Tac_ScatterItems` (0x8021c8ec) loops `CityItem_GetEventItem`/`CityItem_Throw`, fanning directions around TAC's forward — called mid-dash (gated by `ed+0xB62%60==30` and `HSD_Randi(5)==0`) and on hit (scatters `param[11]` items). There is **no write to any player item-collect array** anywhere in TAC's code; the on-screen "steals your stuff" reads as TAC lunging and scattering fresh pickups. Its HitColl body is the actual contact/damage mechanism.
 
@@ -506,7 +501,7 @@ Descriptor 0x804b4288 → state table 0x804b41e8 (8 states 0x0E-0x15), init_cb 0
 
 **No player targeting:** zero `FindNearestPlayer`/FOV calls — Dyna Blade flies a fixed baked path; whoever is underneath gets rumbled / hit by its contact body / showered with items.
 
-> **Param caveat.** Both actors' concrete tuning values (`param[N] = *(actor_data+4)[N]`: detect range, dash speed, item-drop counts, swoop count) live in `Enemy.dat` and are not in the `mem1.raw` menu snapshot — the *gating structure* above is verified from disassembly, but the numeric thresholds need a live dump to pin down.
+> **Where the numbers live.** Both actors' concrete tuning values — `param[N] = *(actor_data+4)[N]`: detect range, dash speed, item-drop counts, swoop count — come from `Enemy.dat`, not from code constants. The gating structure above is the code; the thresholds are archive data.
 
 ## Enemy Offensive Hitboxes
 
@@ -514,7 +509,7 @@ The enemy's attack hitboxes live in its HurtData at `ed+0x410`, built by `EventA
 
 Per attack frame the params are refreshed from the current animation frame's hurt descriptor into the TriggerData at `ed+0x45C` by `EventActor_RefreshAttackParams` (0x80201ba4). Enable is `Trigger_SetState1` (data-driven, when the anim frame carries hurt data); disable is anim-script **cmd 13** (`EnemyAnimCmd_DisableHit`).
 
-**Inbound vs outbound.** `EventActor_ProcHitColl` (priority 9, 0x801fc8ec) is **INBOUND only** — the enemy as victim, tested against the rider/machine/enemy/hazard hurtdata lists. The enemy's **OUTBOUND** attack on a rider is delivered on the **MACHINE side**: `Machine_CheckEventCollision` (0x801d71ec) reads the enemy's `ed+0x410` attack regions as the attacker against the machine's HurtData (`MachineData+0x660`). Riders are damaged **through their machine** — there is no `Rider_CheckEventCollision` against enemies. See [hurtdata-system.md](hurtdata-system.md) for the full pipeline.
+**Inbound vs outbound.** `EventActor_ProcHitColl` (priority 9, 0x801fc8ec) is **INBOUND only** — the enemy as victim, tested against the rider/machine/enemy/hazard hurtdata lists. The enemy's **OUTBOUND** attack on a rider is delivered on the **MACHINE side**: `Machine_CheckEventCollision` (0x801d71ec) reads the enemy's `ed+0x410` attack regions as the attacker against the machine's HurtData (`MachineData+0x660`). Riders are damaged **through their machine** — there is no `Rider_CheckEventCollision` against enemies. The full collision pipeline is `hurtdata-system.md`.
 
 ## Movement System
 
@@ -530,9 +525,9 @@ The primary movement function for ground enemies. Follows pre-defined spline pat
 6. Calls `zz_8020a9dc_` for proper orientation (up/right/forward axes)
 
 **Path initialization** (`EnemyPath_Init` / 0x80206e2c):
-- `zz_800cf07c_` finds nearest spline to enemy position
+- `Spline_FindNearest` (0x800cf07c) finds the nearest spline to the enemy position
 - Stores path ID in `ed+0x5DC`, parametric position in `ed+0x5FC`
-- Gets forward/backward spline pointers via `zz_800cf3ac_`/`zz_800cf44c_`
+- Gets forward/backward spline pointers via `Spline_GetForward` (0x800cf3ac) / `Spline_GetBackward` (0x800cf44c)
 
 **Path advancement** (`EnemyPath_Advance` / 0x8020a040):
 - Advances parametric position each frame using movement speed
@@ -583,7 +578,7 @@ Central function used by many enemy types in normal AI states. Handles ground-fo
 1. **Early exit**: If `ed+0x964` (movement speed) is 0.0, returns immediately
 2. **Ground-based path (velocity > 0)**:
    - Checks path following via `Enemy_CheckPathFollow` (0x8020b01c)
-   - Ground collision via `zz_800cf07c_`
+   - Ground collision via `Spline_FindNearest` (0x800cf07c)
    - Updates spline references at `ed+0x5DC/0x5FC/0x5D4/0x5D8`
    - Computes target position from `EnemyPath_Advance` (0x8020a040)
    - Builds local coordinate frame from ground normal
@@ -615,7 +610,7 @@ float EnemyActor_DistToPlayer(int player_idx, Vec3 *enemy_pos);
 
 The main player targeting function. Stores target at `ed+0xB24` (s16, player index; -1 = none) with a retarget cooldown at `ed+0xB26` (s16).
 
-**Detection range:** Read from the global enemy param table at `*(stc_enemy_param_table) + 0x80` = **50.0** (a single scalar, not tier-indexed). This is the max acquisition radius; players beyond it are never targeted. It is the first rung of a distance ladder in the table (from `Enemy.dat` `emDataAll`, file offset 0x30): `+0x80`=50.0 (acquisition radius, here), `+0x84`=30.0 (close range), `+0x88`=30.0, `+0x8C`=300.0 (mid range), `+0x90`=500.0 (max/leash — the dominant range constant, read by ~15 AI state funcs).
+**Detection range:** Read from the global enemy param table at `stc_enemy_param_table + 0x80` = **50.0** (a single scalar, not tier-indexed). This is the max acquisition radius; players beyond it are never targeted. It is the first rung of a distance ladder in the table (from `Enemy.dat` `emDataAll`, file offset 0x30): `+0x80`=50.0 (acquisition radius, here), `+0x84`=30.0 (close range), `+0x88`=30.0, `+0x8C`=300.0 (mid range), `+0x90`=500.0 (max/leash — the dominant range constant, read by ~15 AI state funcs).
 
 **Retarget cooldown:** Random value in `[table+0x94, table+0x98]` = `20 + HSD_Randi(40-20)` = **20–39 frames**, preventing simultaneous retargeting of all enemies when a player moves.
 
@@ -648,7 +643,7 @@ More sophisticated targeting with field-of-view check:
 void EnemyActor_RumblePlayer(int player_idx, int intensity, int duration);
 ```
 
-This function gets the player's rider GObj and triggers controller rumble with `(controller_idx, 2, intensity, duration)`. It does **not** apply direct damage. Actual damage to players flows through the HitColl collision pipeline (see [hurtdata-system.md](hurtdata-system.md)).
+This function gets the player's rider GObj and triggers controller rumble with `(controller_idx, 2, intensity, duration)`. It does **not** apply direct damage; actual damage to players flows through the HitColl collision pipeline.
 
 ## Knockback System
 
@@ -669,17 +664,11 @@ A random 3-bit value from `HSD_Randi(8)` (in `Enemy_ApplyKnockback`, 0x8020b784)
 | 4 | Generic default | Same generic default block as kind 2 (hardcoded direction constant, no source lookup) |
 | 5 | Special | Shares the kind-0/1 HitColl/attacker-position direction path; used by scripted events |
 
-`EnemyKnockback_Default` (0x8020bcd8) maps the hurtdata hit-type (`+0x38`) to a kind via the identity jump table at 0x804b2b50 (type N → kind N for 0..7, type > 7 → skip). Inside `Enemy_ApplyKnockback` (0x8020b784) the dispatch on `ed+0x99C` is: kinds 0/1 → HitColl/attacker-position direction path; kind 5 → shares that same path; kind 3 → enemy-on-enemy (attacker pos at `ed+0xA24`); kinds 2 **and** 4 → the generic default block (hardcoded direction constant, no source lookup).
+### Dispatch (`EnemyKnockback_Default` 0x8020bcd8 -> `Enemy_ApplyKnockback` 0x8020b784)
 
-### Default Knockback Handler (`EnemyKnockback_Default`, 0x8020bcd8)
+`EnemyKnockback_Default` reads the hurtdata hit-type field (`hurtdata+0x38`); if `> 7` it bails (no knockback). Otherwise the 8-entry jump table at 0x804b2b50 maps the hit type to a kind (identity: type N → kind N for 0..7; the jump-table arms just load the constant into r5), and it calls `Enemy_ApplyKnockback` with that kind.
 
-This handler reads the hurtdata hit-type field (`hurtdata+0x38`); if `> 7` it bails (no knockback). Otherwise it uses an 8-entry jump table at 0x804b2b50 to map the hit type to a kind 0-7, then calls `Enemy_ApplyKnockback` (0x8020b784) with that kind. (The jump-table arms simply load the constant kind value into r5.)
-
-`Enemy_ApplyKnockback` (0x8020b784) — **not** the default handler — is where the per-tier knockback parameters are read from the global enemy param table (`*(r13+0x798)`):
-- `+0x50`: launch speed (stored to ed+0x9D8 = `kb_launch_speed`)
-- `+0x60`: secondary knockback parameter
-
-It also performs the `HSD_Randi(8)` direction randomization and branches on the `kb_source_kind` (ed+0x99C) values 0/1/2/3/5.
+`Enemy_ApplyKnockback` — **not** the default handler — is where the work happens. It reads the per-tier knockback parameters from the global enemy param table (`*(r13+0x798)`): `+0x50` launch speed (stored to `ed+0x9D8` = `kb_launch_speed`) and `+0x60` a secondary knockback parameter. It performs the `HSD_Randi(8)` direction randomization, then dispatches on `ed+0x99C`: kinds 0/1/5 → the HitColl/attacker-position direction path; kind 3 → enemy-on-enemy (attacker pos at `ed+0xA24`); kinds 2 and 4 → the generic default block (hardcoded direction constant, no source lookup).
 
 ## Actor Data (from .dat Archives)
 
@@ -699,7 +688,7 @@ The returned pointer points to a per-tier data block:
 
 | Offset | Type | Purpose | Accessed By |
 |--------|------|---------|-------------|
-| +0x00 | ptr | **Parameter block root** -- behavioral floats | `*actor_data` in InitFromDesc, bulk copy in `zz_802006b4_` |
+| +0x00 | ptr | **Parameter block root** -- behavioral floats | `*actor_data` in InitFromDesc, bulk copy in `Enemy_CopyParamBlock` (0x802006b4) |
 | +0x04 | ptr | **Per-type secondary params** -- detection/attack | Per-type callback [3] copies 16 bytes to `ed+0x40C` |
 | +0x08 | int | **`-1` sentinel word** (param header). NOT joint/anim data. | Param-block header |
 | +0x0C | ptr | **Animation state table** -- 0x10-byte animseq entries | `EnemyStateChange` indexes by `anim_idx * 0x10` |
@@ -719,7 +708,7 @@ The returned pointer points to a per-tier data block:
 
 ### Parameter Block Root
 
-`*actor_data` points to behavioral parameters. `zz_802006b4_` bulk-copies 0xA4 bytes from `*actor_data - 4` into `EnemyData+0x364` through `EnemyData+0x408`.
+`*actor_data` points to behavioral parameters. `Enemy_CopyParamBlock` (0x802006b4) bulk-copies 0xA4 bytes from `*actor_data - 4` into `EnemyData+0x364` through `EnemyData+0x408`.
 
 Mapped fields (Waddle Dee T0 as reference):
 
@@ -1039,7 +1028,7 @@ Bulk-copied from `*actor_data - 4` (0xA4 bytes). See Parameter Block Root table 
 
 ### Meteor-Specific (0xB48-0xB78)
 
-See [meteor-actor.md](meteor-actor.md) for full details.
+Reused as generic timers by other actors (Gordo drives its bounce/hide cycle off 0xB48/0xB4A; Sword Knight locks its target into 0xB4C).
 
 | Offset | Type | Name |
 |--------|------|------|
@@ -1054,51 +1043,61 @@ See [meteor-actor.md](meteor-actor.md) for full details.
 
 ## Spawn Manager
 
-### Enemy_Think (0x800f3904) -- Air Ride
-
-Per-frame manager for enemy spawn slots:
-1. Iterates player slots 0-3
-2. Caches per-player data: position, velocity, orientation, boosting state, predicted future position
-3. Scans GObj entities of type 4 for nearby vehicles
-4. Increments global frame counter
-
-### Enemy_CityTrialThink (0x800f33c0) -- City Trial
-
-Extended version:
-1. Tracks City Trial timer via `City_GetMinSecMs`
-2. Computes spawn rate scaling based on elapsed time
-3. Three spawn modes based on sub-state:
-   - **Mode 2 (normal)**: Iterates spawn positions, counts down respawn timers, spawns via `Enemy_SpawnerDecide` when below cap. Round-robin position cycling.
-   - **Mode 1**: Sequential spawning through all positions
-   - **Mode 3**: Random-start sequential spawning
+Two per-frame manager procs feed the actors this doc describes: `Enemy_Think`
+(0x800f3904, Air Ride) and `Enemy_CityTrialThink` (0x800f33c0, City Trial). Both cache
+per-player state into the spawn slots and scan the EventActor list for occupancy; the
+City Trial one additionally makes the spawn decisions. Neither touches per-actor AI —
+the slot pool, spawn cadence and weighted enemy selection are `enemy-spawn-system.md`.
 
 ## Influencing Enemy Behavior
 
-For applying behavior presets (e.g. `mods/custom_ai`), there are two strategies, mirroring `cpu-ai-system.md` § Influencing CPU Behavior.
+Two strategies for applying behavior presets, in increasing order of leverage: retune the global parameters, or inject per-frame logic through the dead `per_type_cb` slot. `mods/custom_ai` uses only the first.
 
-### 1. Tweak — adjust vanilla parameters
+### Implementation (`mods/custom_ai`)
 
-- **Global enemy param table** (`*(stc_enemy_param_table)`, loaded from `Enemy.dat`'s `emDataAll` by `Enemy_LoadCommonParams` 0x801fd580; NULL until a stage with enemies loads). It is RAM-resident, so writing it retunes **all** enemies at once:
-  - **Distance ladder** (from `Enemy.dat` `emDataAll`, file offset 0x30): `+0x80`=50.0 **acquisition radius** (`EnemyActor_FindNearestPlayer`), `+0x84`=30.0 (close range), `+0x88`=30.0, `+0x8C`=300.0 (mid range), `+0x90`=500.0 (**max/leash — the dominant range constant, read by ~15 AI state funcs**). Raise the acquisition/leash rungs for an *Aggressive* feel; drop them for *passive/Coward*.
-  - `+0x94`/`+0x98` **retarget cooldown** (20/40 → 20–39 frames) — how often an enemy re-picks its nearest target. Lower = twitchy / *Erratic* switching.
-  - `+0x04` damage scale (0.4), `+0x08/+0x0C/+0x10` tier thresholds (10/21/32), `+0x30/+0x40/+0x50/+0x60` per-tier knockback magnitude/scale/launch/stun — tune how hard enemies are to knock out (see [enemy-spawn-system.md](enemy-spawn-system.md) § Damage & Knockback System).
-  - Int array at `+0x14..+0x20` = {10,30,50,70} — consumer not yet identified (open).
+`EnemyAI_ApplyParams` retunes the global enemy param table from an epilogue hook on `Enemy_LoadCommonParams` (0x801fd664 — `lwz r0,20(r1)`; the table pointer is already stored to `0x805dd878` by then, so the hook needs no register setup). It snapshots the vanilla values the first time it sees the table and thereafter always writes `base × mult`, so re-application is idempotent whether the table buffer is reloaded fresh or returned cached, and the "Default" preset restores the stock values exactly. `Scene_GetCurrentMajor()` picks the Air Ride vs City Trial selection, since only Air Ride courses and the CT Kirby Melee stadiums spawn pool enemies. Each preset carries three multipliers:
+
+| Dial | Table fields | Effect |
+|------|--------------|--------|
+| `range_mult` | +0x80 acquisition, +0x8C mid, +0x90 leash | how far enemies notice and pursue riders |
+| `retarget_mult` | +0x94/+0x98 `HSD_Randi` cooldown bounds (result clamped >= 1) | <1 = twitchy switching, >1 = locks onto one target |
+| `knockback_mult` | +0x30/+0x40/+0x50 per-tier magnitude/scale/launch | <1 = tanky, shrugs off hits |
+
+| Preset | range | retarget | knockback |
+|--------|-------|----------|-----------|
+| Default | 1.0 | 1.0 | 1.0 |
+| Aggressive | 1.75 | 0.6 | 1.0 |
+| Relentless | 2.5 | 2.0 | 0.65 |
+| Docile | 0.4 | 1.3 | 1.0 |
+| Erratic | 1.15 | 0.3 | 1.0 |
+| Tanky | 1.0 | 1.0 | 0.4 |
+| Random | one of the five non-Default presets, rolled per load | | |
+
+Changing the menu mid-session takes effect on the next enemy-system load (the next Air Ride course or City Trial entry). The per-enemy copies of the same knobs (`ed+0x378` detect range, `ed+0x3c0` move speed) are dead, so the global table is the only lever of this kind.
+
+### Vanilla tuning knobs
+
+- **Global enemy param table** — `stc_enemy_param_table`, the `hoshi` macro for the pointer stored at 0x805dd878, loaded from `Enemy.dat`'s `emDataAll` by `Enemy_LoadCommonParams` (0x801fd580) and NULL until a stage with enemies loads. It is RAM-resident, so writing it retunes **all** enemies at once:
+  - **Distance ladder** (from `Enemy.dat` `emDataAll`, file offset 0x30): `+0x80`=50.0 **acquisition radius** (`EnemyActor_FindNearestPlayer`), `+0x84`=30.0 (close range), `+0x88`=30.0, `+0x8C`=300.0 (mid range), `+0x90`=500.0 (**max/leash — the dominant range constant, read by ~15 AI state funcs**). Raise the acquisition/leash rungs to make enemies notice riders from farther away; drop them to make them passive.
+  - `+0x94`/`+0x98` **retarget cooldown** (20/40 → 20–39 frames) — how often an enemy re-picks its nearest target. Lower = twitchy switching, higher = locks onto one target.
+  - `+0x04` damage scale (0.4), `+0x08/+0x0C/+0x10` tier thresholds (10/21/32), `+0x30/+0x40/+0x50/+0x60` per-tier knockback magnitude/scale/launch/stun — tune how hard enemies are to knock out. The damage-tier/knockback pipeline that consumes them is `enemy-spawn-system.md`.
+  - Int array at `+0x14..+0x20` = {10,30,50,70}; consumer unidentified.
 - **Per-enemy speed** — the live movement speeds are `ed+0x964` (`movement_speed`; `Enemy_AIPhysicsTick` early-exits if 0) and `ed+0x974` (`idle_wander_speed`). The state funcs rewrite these each frame, so a one-time post-spawn write is overwritten — re-assert it every frame (e.g. from an injected per_type_cb, below).
 - **Per-archive detect/chase range** — `EnemyActor_ClassifyRange` reads detect/chase range from the **actor_data param-root** (`*(ed+0x14)+0x10`/`+0x14`), shared by every enemy of that data_index/tier. Patching the archive root scales the proximity bucket for all instances of that type.
 
-> ⚠️ **Dead knobs.** The bulk param copy populates `ed+0x378` (`param_detect_range`) and `ed+0x37c` (`param_chase_range`), but **nothing reads them** (0 references). Scaling these per-enemy copies — as the current `mods/custom_ai` `EnemyAIPresetDef` (`detect_range_mult`/`chase_range_mult`) and `param_move_speed` (ed+0x3c0, also unread) do — is a **no-op**. Use the global table (+0x80) or the archive root (+0x10/+0x14) for range, and `ed+0x964`/`ed+0x974` for speed.
+> **Dead knobs.** The bulk param copy populates `ed+0x378` (`param_detect_range`), `ed+0x37c` (`param_chase_range`) and `ed+0x3c0` (`param_move_speed`), but **nothing reads any of them** (0 references), so scaling those per-enemy copies is a **no-op**. Use the global table (+0x80) or the archive root (+0x10/+0x14) for range, and `ed+0x964`/`ed+0x974` for speed.
 
-### 2. Replace — inject per-frame logic via the dead per_type_cb slot
+### Injecting per-frame logic via the dead per_type_cb slot
 
 The cleanest hook is the **`ed+0xAC8` per_type_cb slot**. Vanilla never installs it, yet `EventActor_ProcPerType` (priority 7) dispatches it every frame with `EnemyData*` in r3 — so writing a function pointer there injects custom per-frame AI **without fighting any vanilla callback**. Because `EnemyStateChange` zeroes `ed+0xAC8` on every transition, re-assert it (set it once per frame from your own proc, or after each `EnemyStateChange`). From the callback you can:
 
-- **Steer targeting** — overwrite `ed+0xB24` (target_player_idx) / `ed+0xB38` (chase_direction) after the vanilla targeting runs: home on an item box instead of a rider (*Hoarder*), or negate the chase direction to flee (*Coward*).
+- **Steer targeting** — overwrite `ed+0xB24` (target_player_idx) / `ed+0xB38` (chase_direction) after the vanilla targeting runs: home on an item box instead of a rider, or negate the chase direction to flee.
 - **Pin movement** — re-assert scaled `ed+0x964`/`ed+0x974` for faster/slower chase.
 - **Force states** — `EnemyStateChange` into the type's attack or idle state to make it relentless or passive.
 
 Alternative hooks: override the state callbacks `ed+0xAB8`–`ed+0xAC4` directly after spawn (re-assert after `EnemyStateChange`); add your own `GObj_AddProc(gobj, cb, priority)` at any priority; or for spawning fresh actors and driving physics directly, write `ed+0x2E0` (accel) / `ed+0x2EC` (vel) / `ed+0x2F8` (pos).
 
-> **Reference implementation (currently dormant).** `mods/custom_events/src/spawn_enemy.c` is a worked example of standalone enemy spawning: `SpawnEnemy_Random` (random actor near a machine, optional `EnemyPath_Init` spline attach via `ed->spline_path_ready`/`ed->path_active_flag`) and `SpawnEnemy_MeteorTrap` (meteor over every human player). It also installs null-safety patches (`SpawnEnemy_OnBoot`) for `EventActor_GetParentScale` and `splArcLengthPoint`, which crash on the null parent/spline pointers that standalone spawns have. **None of these entry points are currently called** anywhere (`SpawnEnemy_OnBoot` is not wired into the custom_events boot path) — treat the file as a reference, not as live behavior.
+> **Standalone spawning.** `mods/custom_events/src/spawn_enemy.c` is a worked but currently uncalled example: `SpawnEnemy_Random` (random actor near a machine, optional `EnemyPath_Init` spline attach via `ed->spline_path_ready`/`ed->path_active_flag`) and `SpawnEnemy_MeteorTrap` (meteor over every human player). Its `SpawnEnemy_OnBoot` installs null-safety patches for `EventActor_GetParentScale` and `splArcLengthPoint`, which crash on the null parent/spline pointers a standalone spawn has; nothing invokes it, so those patches are not live.
 
 ### Key Constraints
 
@@ -1109,7 +1108,7 @@ Alternative hooks: override the state callbacks `ed+0xAB8`–`ed+0xAC4` directly
 - For standalone spawns, `ed+0x020` (spawn_slot) and `ed+0x024` (spawn_index) should be -1
 - Function pointers from the state table are ALWAYS installed during `EnemyStateChange`, regardless of flags. Flag 0x01 only skips animation setup.
 
-## Key Functions Reference
+## Key Functions
 
 | Function | Address | Size | Purpose |
 |----------|---------|------|---------|
@@ -1138,11 +1137,11 @@ Alternative hooks: override the state callbacks `ed+0xAB8`–`ed+0xAC4` directly
 | EnemyActor_FindNearestPlayer | 0x801ffd78 | 0x20c | Target selection: nearest rider within detection range (50.0), retarget cooldown 20-39 |
 | EnemyActor_FindNearestPlayerFOV | 0x801ff8d8 | 0x3f4 | Target selection with forward-hemisphere angle check + bone-based melee aim |
 | EnemyActor_PlayerAheadDist | 0x801fea60 | 0xd0 | Per-player forward-axis dot test: returns signed forward distance + behind flag |
-| EnemyActor_FindNearestPlayerAhead | 0x801fe5d4 | 0x190 | Cone scanner (Waddle Dee): nearest rider in a forward cone within range; returns player index or -1 (was `zz_801fe5d4_`) |
-| EnemyActor_FindPlayerInRangeFwd | 0x801fe764 | 0x178 | Cone scanner (TAC grab probe): nearest in-front rider within range (was `zz_801fe764_`) |
-| EnemyActor_FindDiveTarget | 0x801fe8dc | 0x184 | Cone scanner (Bronto Burt dive gate): in-range/in-front rider (was `zz_801fe8dc_`) |
-| EnemyActor_FlyMovement | 0x8020354c | 0x378 | Shared flyer mover: anchored sin-hover (mode 1) or homing steer (mode 2) + anim root-motion; no gravity/ground (was `zz_8020354c_`) |
-| EnemyActor_FlyForward | 0x8020335c | 0xfc | Shared flyer mover: advance along facing at speed (ballistic); adds basis×speed into pos (was `zz_8020335c_`) |
+| EnemyActor_FindNearestPlayerAhead | 0x801fe5d4 | 0x190 | Cone scanner (Waddle Dee): nearest rider in a forward cone within range; returns player index or -1 |
+| EnemyActor_FindPlayerInRangeFwd | 0x801fe764 | 0x178 | Cone scanner (TAC grab probe): nearest in-front rider within range |
+| EnemyActor_FindDiveTarget | 0x801fe8dc | 0x184 | Cone scanner (Bronto Burt dive gate): in-range/in-front rider |
+| EnemyActor_FlyMovement | 0x8020354c | 0x378 | Shared flyer mover: anchored sin-hover (mode 1) or homing steer (mode 2) + anim root-motion; no gravity/ground |
+| EnemyActor_FlyForward | 0x8020335c | 0xfc | Shared flyer mover: advance along facing at speed (ballistic); adds basis×speed into pos |
 | Enemy_SetTerrainLocked | 0x8020ae54 | -- | Sets terrain-locked flag = bit 2 (0x04) of ed+0xB0B (Broom Hatter, Wheelie). Sibling unlock at 0x8020ae68 |
 | EventActor_OnCapture | 0x802038c4 | -- | Inhale/capture entry: sets captured flags, dispatches descriptor +0x1C (post_capture_cb), → state 0x0A |
 | Tac_Init / Tac_ScatterItems | 0x8021a534 / 0x8021c8ec | -- | TAC init_cb; loot-scatter (CityItem_GetEventItem + CityItem_Throw loop) |
@@ -1151,7 +1150,7 @@ Alternative hooks: override the state callbacks `ed+0xAB8`–`ed+0xAC4` directly
 | EnemyActor_CombatAI | 0x802069e8 | 0x94 | Two-phase grounded movement (ed+0x908): approach collision probe vs engaged ground physics |
 | EnemyActor_CombatMovement | 0x8020b490 | 0x90 | Two-phase movement (ed+0x908): spline AIPhysicsTick vs accel-along-normal ground follow |
 | EnemyActor_GroundFollowMovement | 0x80208bd4 | 0x530 | Ground-following chase physics: orientation, speed, terrain raycast, ground-snap |
-| Enemy_LoadCommonParams | 0x801fd580 | -- | Loads Enemy.dat `emDataAll`, stores param-table pointer to `*0x805dd878` (was `fn_emLoadCommon`) |
+| Enemy_LoadCommonParams | 0x801fd580 | -- | Loads Enemy.dat `emDataAll`, stores param-table pointer to `*0x805dd878` |
 | SwordKnight_Init | 0x802111d8 | -- | Sword Knight init_cb: SpawnChild (rider 0x49) + landing callback trio + FinalizeInit |
 | SwordKnight_BeginCombat | 0x80211444 | -- | Sword Knight spawn helper: SetupVelocity + GroundSnap + state→0x0F + path attach |
 | SwordKnight_State0FDecide | 0x80211520 | -- | Sword Knight state 0x0F func1: player-crossing slash decision |
@@ -1169,7 +1168,7 @@ Alternative hooks: override the state callbacks `ed+0xAB8`–`ed+0xAC4` directly
 | EventActor_SetupVelocity | 0x80205310 | 0x1d4 | Configure movement speed/direction |
 | EventActor_CleanupVfxA3C | 0x8020c6e0 | 0x2c | Stop SFX/VFX at ed+0xA3C handle |
 | EventActor_CleanupVfxA40 | 0x8020c70c | 0x2c | Stop SFX/VFX at ed+0xA40 handle |
-| `zz_80236358_` (SoundStop) | 0x80236358 | 0xc4 | Low-level sound stop (called by the cleanup helpers). |
+| SoundStop (`zz_80236358_`) | 0x80236358 | 0xc4 | Low-level sound stop, called by the cleanup helpers |
 | Enemy_GetActorData | 0x801fd498 | 0xe8 | Look up actor_data by ID |
 
 ## Data Addresses
@@ -1181,7 +1180,7 @@ Alternative hooks: override the state callbacks `ed+0xAB8`–`ed+0xAC4` directly
 | Actor data table | 0x804b22b4 | {data_index, flags} per ActorID, stride 8 |
 | Archive loaded flags | 0x8055a210 | byte per data_index (22 entries) |
 | Archive root pointers | 0x8055a228 | pointer per data_index (22 entries) |
-| Enemy parameter table pointer | 0x805dd878 | Holds a **pointer** to the param table (from `Enemy.dat` `emDataAll`, set by `Enemy_LoadCommonParams`; NULL until enemies load). Distance ladder: `+0x80`=50.0 (acquisition radius, `FindNearestPlayer`), `+0x84`=30.0 (close), `+0x88`=30.0, `+0x8C`=300.0 (mid), `+0x90`=500.0 (max/leash — dominant range constant, ~15 AI state funcs). Other fields: retarget cooldown (+0x94/+0x98=20/40), damage thresholds (+0x08/+0x0C/+0x10), per-tier knockback (+0x30/+0x40/+0x50/+0x60). Int array at `+0x14..+0x20` = {10,30,50,70} (consumer not yet identified). See [enemy-spawn-system.md](enemy-spawn-system.md) § Damage & Knockback System. |
+| Enemy parameter table pointer | 0x805dd878 | Holds a **pointer** to the param table (from `Enemy.dat` `emDataAll`, set by `Enemy_LoadCommonParams`; NULL until enemies load). Distance ladder: `+0x80`=50.0 (acquisition radius, `FindNearestPlayer`), `+0x84`=30.0 (close), `+0x88`=30.0, `+0x8C`=300.0 (mid), `+0x90`=500.0 (max/leash — dominant range constant, ~15 AI state funcs). Other fields: retarget cooldown (+0x94/+0x98=20/40), damage thresholds (+0x08/+0x0C/+0x10), per-tier knockback (+0x30/+0x40/+0x50/+0x60). Int array at `+0x14..+0x20` = {10,30,50,70}, consumer unidentified. |
 | Animation script table (enemy) | 0x804b26b0 | Enemy-specific script commands 11-28, 12-byte entries |
 | Animation script table (HSD) | 0x80499628 | Generic animation script commands 0-10 (11 entries) |
 | Knockback jump table | 0x804b2b50 | 8 entries for hit type mapping |

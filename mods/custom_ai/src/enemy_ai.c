@@ -1,13 +1,10 @@
 #include "custom_ai.h"
 #include "enemy_ai.h"
 
-// Air Ride / City Trial Melee enemy preset selections. Each may hold
-// ENEMY_AI_RANDOM; resolve to a concrete preset with EnemyAI_Resolve.
+// May hold ENEMY_AI_RANDOM; resolve with EnemyAI_Resolve.
 int enemy_ai_preset_ar = ENEMY_AI_DEFAULT;
 int enemy_ai_preset_ct = ENEMY_AI_DEFAULT;
 
-// Multipliers stack on top of the vanilla global param-table values; 1.0 keeps
-// vanilla. EnemyAI_ApplyParams writes base * mult once per enemy-system load.
 static const EnemyAIPresetDef enemy_presets[ENEMY_AI_PRESET_NUM] = {
     [ENEMY_AI_DEFAULT] = {
         .name = "Default",

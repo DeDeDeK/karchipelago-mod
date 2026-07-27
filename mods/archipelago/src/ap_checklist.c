@@ -7,14 +7,12 @@
 #include "ap_check_detect.h"
 #include "custom_checklist_api.h"
 
-// Imported custom_checklist API. Resolved in APChecklist_Register (called from
-// OnSaveLoaded) via Hoshi_ImportMod, deferred past OnBoot since the framework mod
-// boots after us (alphabetical order).
+// Imported custom_checklist API. Resolved in APChecklist_Register rather than at
+// OnBoot, since the framework mod boots after us (alphabetical order).
 static const CustomChecklistAPI *cc_api = NULL;
 
-// One zero-argument predicate per cell, as the framework's CustomCheck wants.
-// Each is a pure read of latched state - all sampling happens in the detection
-// hooks, because the framework polls these every frame in every scene.
+// One zero-argument predicate per cell, as the framework's CustomCheck wants. Each
+// is a pure read of latched state; all sampling happens in the detection hooks.
 #define AP_CHECK_PREDICATE(name) \
     static int Check_##name(void) { return APCheckDetect_IsSet(APCK_##name); }
 
@@ -40,8 +38,7 @@ AP_CHECK_PREDICATE(SR1_PURPLE_3X)
 AP_CHECK_PREDICATE(AIRRIDE_PHOTO)
 
 // The nine Single Race placements and four Drag Race photo finishes are one
-// objective repeated per stadium, so their predicates are generated from the
-// base clear_kind plus an offset rather than named individually.
+// objective repeated per stadium, so their predicates take a clear_kind offset.
 #define AP_CHECK_PREDICATE_N(base, n) \
     static int Check_##base##_##n(void) { return APCheckDetect_IsSet(APCK_##base + (n)); }
 
@@ -60,19 +57,11 @@ AP_CHECK_PREDICATE_N(DRAG1_PHOTO, 2)
 AP_CHECK_PREDICATE_N(DRAG1_PHOTO, 3)
 
 // clear_kind order is the wire contract with APLocation in the apworld (the AP
-// location code is 361 + clear_kind). Labels are the cell text and are
-// independent of the apworld's location names.
-//
-// They follow the vanilla checklist's wording: a title-case category prefix
-// ("City Trial: ", "Stadium: ", "Air Ride: "), the stadium name in caps with no
-// colon of its own, and a trailing "!". Length is bounded - the framework composes
-// each into a fixed 128-byte SIS entry whose glyph budget is 124 bytes, 2 per
-// character and 1 per space, and silently truncates past it.
-//
-// The "\n" is the line break, placed rather than left to the framework's automatic
-// midpoint split: vanilla breaks after the whole stadium designation, which a
-// width-only rule parts from its trailing number ("SINGLE RACE / 8 Finish in 1st!").
-// A label short enough for one line carries none.
+// location code is 361 + clear_kind). Labels are the cell text, worded like the
+// vanilla checklist's and independent of the apworld's location names; the
+// framework silently truncates one past a 124-byte glyph budget (2 bytes per
+// character, 1 per space). Each "\n" is a placed line break - the framework's
+// fallback split balances on width and would part a stadium name from its number.
 static const CustomCheck ap_checks[] = {
     { APCK_CASTLE_FLOWER,   "City Trial: Visit the\ncastle flower on foot!", Check_CASTLE_FLOWER },
     { APCK_BREAK_ALL_CORAL, "City Trial: Break all\nthe coral in one game!", Check_BREAK_ALL_CORAL },
@@ -117,12 +106,11 @@ static const CustomCheck ap_checks[] = {
 
 #define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))
 
-// Every APCheckKind has a cell. A missing entry would leave an AP location with
-// no way to complete it, which strands any progression item fill places on it.
+// A missing entry would leave an AP location with no way to complete it, stranding
+// any progression item fill places on it.
 _Static_assert(AP_CHECK_NUM == APCK_NUM, "ap_checks[] must cover every APCheckKind");
 
-// Already recorded as sent this save? Out-of-range cells report "done". The AP
-// checklist's recorded state is row AP_CHECKLIST_ROW of sent_checks[].
+// Already recorded as sent this save? Out-of-range cells report "done".
 static int APChecklist_IsRecorded(int clear_kind)
 {
     if (clear_kind < 0 || clear_kind >= CLEAR_KIND_NUM)
@@ -130,27 +118,24 @@ static int APChecklist_IsRecorded(int clear_kind)
     return (ap_save->sent_checks[AP_CHECKLIST_ROW][clear_kind >> 6] >> (clear_kind & 63)) & 1ULL;
 }
 
-// Record a completed AP check. Routes through ClearChecker_SetNewUnlock with the
-// framework-assigned ap_checklist_mode, which check_detection's REPLACEFUNC
-// intercepts for that mode: it sets the AP row's sent_checks bit, fires the "Check sent"
-// textbox, re-evaluates goals, and - when the unlock cache is invalid (mid-run) -
-// plays the unlock SFX. The framework seeds the cell's is_new/is_visible after this
-// returns, so the flip-and-sparkle runs on the next tab entry.
+// Record a completed AP check. The ClearChecker_SetNewUnlock REPLACEFUNC in
+// check_detection intercepts ap_checklist_mode and sets the AP row's sent_checks
+// bit, fires the "Check sent" textbox and re-evaluates goals. The framework seeds
+// the cell's is_new/is_visible afterward, so the animation runs on the next entry.
 static void APChecklist_RecordComplete(int clear_kind)
 {
     ClearChecker_SetNewUnlock((GameMode)ap_checklist_mode, (u8)clear_kind);
 }
 
-// The framework's evaluator no-ops until this returns nonzero. game_ready is set
-// at the end of OnSaveLoaded - after the save loads and the textbox API resolves,
-// so RecordComplete's textbox enqueue is safe.
+// The framework's evaluator no-ops until this returns nonzero. game_ready is set at
+// the end of OnSaveLoaded, once the textbox API has resolved.
 static int APChecklist_IsReady(void)
 {
     return ap_data && ap_data->game_ready;
 }
 
-// Tab art: an HSD archive staged to the FST root from this mod's assets/, exporting
-// the banner watermark and tab-emblem image descriptors.
+// Tab art: an HSD archive staged to the FST root, exporting the banner watermark
+// and tab-emblem image descriptors.
 #define AP_TEX_FILE      "ApChecklistTex"
 #define AP_BANNER_SYMBOL "apBannerImg"
 #define AP_EMBLEM_SYMBOL "apEmblemImg"
@@ -203,10 +188,8 @@ void APChecklist_Register(void)
         OSReport("[APChecklist] Registration failed\n");
         return;
     }
-    // Adopt whatever mode the framework assigned (it appends to the next free slot).
-    // RecordComplete and check_detection both read ap_checklist_mode, and
-    // ChecklistModeRow maps it to the fixed AP_CHECKLIST_ROW - so any assigned slot
-    // works and registration order across mods does not matter.
+    // The framework appends to the next free slot; ChecklistModeRow maps whatever it
+    // assigned to the fixed AP_CHECKLIST_ROW, so registration order does not matter.
     ap_checklist_mode = mode;
 
     OSReport("[APChecklist] Registered AP tab (mode %d, %d custom checks)\n", mode, AP_CHECK_NUM);

@@ -11,11 +11,8 @@
 #include "custom_weather.h"
 #include "weather_fx.h"
 
-// The box is a tight volume centered on the machine: stones spawn HAIL_TOP above
-// it, fall through, and recycle once they pass HAIL_BELOW under it (or stray more
-// than HAIL_STRAY away horizontally, e.g. when the machine warps off). The hit
-// sphere is centered slightly above the machine origin so stones strike the body
-// rather than grazing its base.
+// Damaging hail for custom_weather: a per-machine cloud of falling stones that chip
+// an exposed machine. Each cloud is a tight box centered on its machine.
 #define HAIL_MAX_STONES     32       // per-machine pool; resolved count clamps to this
 #define HAIL_BASE_STONES    20       // per-machine stones at "Normal"
 #define HAIL_BOX_HALF       120.0f   // XZ half-extent of the cloud around the machine
@@ -27,17 +24,13 @@
 #define HAIL_FALL           32.0f    // downward speed, world units/frame (heavier than rain)
 #define HAIL_HIT_COOLDOWN   10       // frames a machine is immune after a hail hit (rate cap)
 
-// Shelter probe. A machine with anything overhead takes no hail: cast straight
-// down from the top of the playable volume to just above the machine, and any
-// hit means a roof/overpass/bridge is covering it. Throttled - cover changes
-// slowly relative to the frame rate.
+// Shelter probe, throttled because cover changes slowly relative to the frame rate.
 #define HAIL_SHELTER_INTERVAL  8        // frames between shelter re-checks per machine
 #define HAIL_PROBE_LIFT        20.0f    // end the down-cast this far above the machine origin
 #define HAIL_SKY_MARGIN        50.0f    // start the cast this far above the stage's OoB top
 #define HAIL_SKY_PROBE         3000.0f  // fallback cast height when the stage box is unavailable
 
-// Appearance: a short, thick, icy-white chunk. Shorter streak than rain so it
-// reads as a particle rather than a line; wider GX line so it looks heavy.
+// Appearance: a short, thick, icy-white chunk that reads as a particle, not a line.
 #define HAIL_COLOR_R        230
 #define HAIL_COLOR_G        240
 #define HAIL_COLOR_B        255
@@ -45,25 +38,22 @@
 #define HAIL_LINE_WIDTH     18       // 1/6-pixel units (~3px)
 #define HAIL_STREAK         0.25f    // segment length = per-frame velocity * this
 
-// Render GObj: arbitrary high entity class (avoids real engine classes), a spare
-// p_link past rain (201/25), lightning (202/26) and puddle (203/27), and the
-// world camera's gx_link 0 on the XLU sub-pass.
+// Render GObj: an entity class / p_link high enough to avoid the engine's own, on
+// the world camera's gx_link 0, XLU sub-pass.
 #define HAIL_GOBJ_CLASS  204
 #define HAIL_GOBJ_PLINK  28
 #define HAIL_GX_LINK     0
 #define HAIL_GX_PRI      0
 
-// One world-space hailstone. Velocity is shared across all stones (computed per
-// frame in Hail_Tick), so a stone is just its current position.
+// One world-space hailstone. Velocity is shared across all stones, so a stone is
+// just its current position.
 typedef struct HailStone
 {
     Vec3 pos;
 } HailStone;
 
-// Per-machine cloud. `seeded` doubles as the active flag: a slot with no live
-// machine - or a sheltered one - is cleared to 0 so it neither steps nor draws
-// until its machine returns to the open. `hit_cd` is the post-hit damage cooldown
-// for rate capping; `sheltered`/`shelter_cd` cache the throttled cover probe.
+// Per-machine cloud. `seeded` doubles as the active flag: a slot whose machine is
+// gone or sheltered is cleared to 0 so it neither steps nor draws.
 typedef struct HailCloud
 {
     HailStone stones[HAIL_MAX_STONES];
@@ -73,8 +63,7 @@ typedef struct HailCloud
     int       shelter_cd;
 } HailCloud;
 
-// Cached only to avoid recreating the GObj every frame; never dereferenced (the
-// engine owns it and frees it on scene teardown).
+// Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_hail_gobj = NULL;
 
 static int stc_active = 0;
@@ -85,20 +74,15 @@ static HailCloud stc_clouds[WEATHER_PLAYER_SLOTS];
 // Shared per-frame velocity (fall + wind slant). vel_y is negative (downward).
 static float stc_vel_x = 0.0f, stc_vel_y = -HAIL_FALL, stc_vel_z = 0.0f;
 
-// "Hail" scales the cloud density (stones per machine); denser hail lands more
-// often, so the amount governs both the look and the chip-damage rate (the
-// per-machine cooldown caps the worst case). Off disables hail entirely. The
-// option lives under the Rain submenu (rain.c references hail_option) since hail
-// only falls when the active preset's rain is on.
-// Index 0 = Preset resolves to the active preset's HailDef (stc_preset_amount,
-// latched by Hail_SetActive); the rest force a global amount over every preset.
+// The amount scales the cloud density (stones per machine), so it governs both the
+// look and the chip-damage rate. Index 0 (Preset) resolves to stc_preset_amount;
+// the rest force a global amount over every preset.
 static const float hail_factors[] = {0.0f, 0.0f, 0.5f, 1.0f, 1.5f};
 static char *hail_names[] = {"Preset", "Off", "Light", "Normal", "Heavy"};
 #define HAIL_AMOUNT_NUM (sizeof(hail_factors) / sizeof(hail_factors[0]))
-static int hail_index = 0; // default Preset (the per-preset amount)
+static int hail_index = 0;
 
-// The active preset's hail amount (0 = off), latched by Hail_SetActive and used
-// when hail_index is Preset.
+// The active preset's hail amount, 0 = off.
 static float stc_preset_amount = 0.0f;
 
 // Symmetric random offset in [-half, half].
@@ -107,8 +91,7 @@ static float RandSym(float half)
     return Weather_Randf2() * half;
 }
 
-// Place a stone at the top of the box over the machine's current position, at a
-// fresh random XZ within the box footprint.
+// Place a stone at the top of the box over the machine, at a fresh random XZ.
 static void RespawnStone(HailStone *s, const MachineData *md)
 {
     s->pos.X = md->pos.X + RandSym(HAIL_BOX_HALF);
@@ -116,10 +99,9 @@ static void RespawnStone(HailStone *s, const MachineData *md)
     s->pos.Z = md->pos.Z + RandSym(HAIL_BOX_HALF);
 }
 
-// Fill the whole pool, scattering stones through the full height of the box so
-// the cloud reads as full immediately rather than raining in from the top edge.
-// Only the first stc_stone_count are stepped/drawn, but seeding all of them keeps
-// a later count increase (live menu change) from exposing uninitialized stones.
+// Fill the whole pool, scattering stones through the full height of the box so the
+// cloud reads as full immediately. Only the first stc_stone_count are stepped and
+// drawn, but seeding all of them keeps a later count increase safe.
 static void SeedCloud(HailCloud *c, const MachineData *md)
 {
     for (int i = 0; i < HAIL_MAX_STONES; i++)
@@ -132,9 +114,9 @@ static void SeedCloud(HailCloud *c, const MachineData *md)
     c->seeded = 1;
 }
 
-// Advance one cloud: fall every stone by the shared velocity, deal 1 damage on
-// the first stone to enter the machine's body sphere (then arm the cooldown), and
-// recycle any stone that falls through or strays.
+// Advance one cloud: fall every stone by the shared velocity, deal 1 damage on the
+// first stone to enter the machine's body sphere, and recycle stones that fall
+// through or stray.
 static void StepCloud(HailCloud *c, MachineData *md, GOBJ *mg)
 {
     float r2 = HAIL_HIT_RADIUS * HAIL_HIT_RADIUS;
@@ -153,8 +135,7 @@ static void StepCloud(HailCloud *c, MachineData *md, GOBJ *mg)
 
         if (c->hit_cd == 0 && (dx * dx + dy * dy + dz * dz) <= r2)
         {
-            // Honest contact: this visible stone struck the machine body. The
-            // machine GObj is the damage source (non-NULL as City Trial requires).
+            // The machine GObj is the damage source (City Trial requires non-NULL).
             Machine_GiveDamage(md, 1.0f, mg);
             c->hit_cd = HAIL_HIT_COOLDOWN;
             RespawnStone(s, md);
@@ -170,10 +151,8 @@ static void StepCloud(HailCloud *c, MachineData *md, GOBJ *mg)
 }
 
 // GX callback on the world camera link. Draws every live cloud's stones as short
-// thick icy segments on the XLU pass (pass 1), depth-tested but not depth-writing
-// so opaque geometry occludes hail behind it. Mirrors rain.c's GX setup; stones
-// are world-space, so the current camera's view matrix transforms them per
-// viewport.
+// thick segments on the XLU pass (pass 1), depth-tested but not depth-writing so
+// opaque geometry occludes hail behind it.
 static void Hail_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -223,12 +202,10 @@ static void Hail_Ensure(void)
                                           "[Hail] Damaging hail layer installed");
 }
 
-// Whether the machine has stage geometry overhead (a roof / overpass / bridge),
-// in which case hail neither falls on it nor damages it. Cast straight down from
-// the top of the playable volume to just above the machine: the first surface the
-// ray meets is the lowest thing directly overhead, and any hit at all means the
-// machine is covered. The down-cast detects a roof by its walkable top face, so
-// it works regardless of how the collision triangles are sided.
+// Whether the machine has stage geometry overhead (a roof / overpass / bridge), in
+// which case hail neither falls on it nor damages it. Casting down from the top of
+// the playable volume detects a roof by its walkable top face, so it works
+// regardless of how the collision triangles are sided.
 static int MachineSheltered(const MachineData *md)
 {
     float sky_y;
@@ -248,9 +225,8 @@ static int MachineSheltered(const MachineData *md)
     return EnvColl_Raycast(&start, &end, &hit) >= 0;
 }
 
-// Latch the active preset's hail amount, which the Hail menu's "Preset" index
-// resolves to. NULL or enabled == 0 = no preset hail (still overridable by the
-// menu's forced Light/Normal/Heavy).
+// Latch the active preset's hail amount, which the Hail menu's Preset index
+// resolves to. No preset hail is still overridable by a forced menu amount.
 void Hail_SetActive(const HailDef *def)
 {
     stc_preset_amount = (def && def->enabled) ? (def->amount > 0.0f ? def->amount : 1.0f)
@@ -259,15 +235,12 @@ void Hail_SetActive(const HailDef *def)
 
 void Hail_Tick(void)
 {
-    // Hail only falls when the current preset's rain is active (rain.c owns that
-    // decision, including the master Rain Intensity = Off floor) and hail is on.
-    // Both are read live so the knob takes effect immediately. hail_index 0 =
-    // Preset uses the active preset's amount; the rest force a global amount.
+    // Hail only falls on an active rain layer, read live so the knob takes effect
+    // immediately.
     float f = (hail_index == 0) ? stc_preset_amount : hail_factors[hail_index];
     if (!Rain_IsActive() || f <= 0.0f)
     {
-        // Going inactive drops every cloud so re-enabling re-seeds fresh ones
-        // over the machines' current positions rather than resuming stale boxes.
+        // Drop every cloud so re-enabling re-seeds over current machine positions.
         if (stc_active)
         {
             for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
@@ -288,7 +261,7 @@ void Hail_Tick(void)
     Hail_Ensure();
 
     // Stones fall straight down plus the global wind slant, read fresh each frame
-    // so gusts visibly carry the hail (the same vector that slants the rain).
+    // so gusts visibly carry the hail.
     Vec3 wind;
     Wind_GetVector(&wind);
     stc_vel_x = wind.X;
@@ -313,7 +286,7 @@ void Hail_Tick(void)
         }
 
         // A machine under cover takes no hail; drop its cloud so re-emerging
-        // re-seeds fresh over the open ground rather than resuming a stale box.
+        // re-seeds over open ground.
         if (--c->shelter_cd <= 0)
         {
             c->sheltered = MachineSheltered(md);
@@ -333,9 +306,8 @@ void Hail_Tick(void)
 
 void Hail_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop our cached handle
-    // so the next active frame recreates it, and clear every cloud so the next
-    // round re-seeds over fresh machine positions.
+    // The engine frees every world GObj on scene teardown; drop the cached handle
+    // so the next active frame recreates it.
     stc_hail_gobj = NULL;
     stc_active = 0;
     stc_preset_amount = 0.0f;
@@ -348,8 +320,7 @@ void Hail_Reset(void)
     }
 }
 
-// Surfaced in the Rain submenu (rain.c adds &hail_option to rain_menu) since hail
-// rides on the rain layer.
+// Surfaced in the Rain submenu, since hail only falls on an active rain layer.
 OptionDesc hail_option = {
     .name = "Hail",
     .description = "Mix thicker icy hail into the rain; a stone striking an exposed machine does 1 damage - duck under a roof to take cover (Preset = each preset's own hail, Off = rain only)",

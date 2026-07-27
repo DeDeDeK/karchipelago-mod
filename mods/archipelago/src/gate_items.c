@@ -7,8 +7,7 @@
 #include "textbox_api.h"
 #include "inline.h"
 
-// 1-to-1 inverse of ItemKindToUnlockBit. Lets us reuse hoshi's ItemKind_Names
-// for display rather than maintaining a parallel name table here.
+// Inverse of ItemKindToUnlockBit, so ItemKind_Names can be reused for display.
 static const ItemKind itunlock_to_itkind[ITUNLOCK_NUM] = {
     [ITUNLOCK_ALLUP]            = ITKIND_ALLUP,
     [ITUNLOCK_SPEEDMAX]         = ITKIND_SPEEDMAX,
@@ -87,14 +86,13 @@ static int ItemKindToUnlockBit(u8 it_kind)
     }
 }
 
-// Per-source weights for All-Up when injected into spawn pools. Sized to sit
-// alongside vanilla +1 patch weights, not dominate them (Max Stats bias scales further).
+// Sized to sit alongside vanilla +1 patch weights, not dominate them; the Max Stats
+// drop bias scales them further.
 #define ALLUP_BOX_POOL_CHANCE      8
 #define ALLUP_CHANCE_DESTRUCTIBLE  16
 #define ALLUP_CHANCE_DYNA          4
 
-// Ensure pool[] contains it_kind. If absent, append with `weight` (if there's
-// room). If already present, leave it alone - vanilla weight is preserved.
+// An entry already in the pool keeps its vanilla weight.
 static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
                              u8 it_kind, u8 weight)
 {
@@ -110,11 +108,9 @@ static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
     *num += 1;
 }
 
-// When the Max Stats Insanity goal is active and All-Up is unlocked, make All-Up
-// reachable from every patch source the vanilla tables miss: the three box pools,
-// the Same Item and subsequent pools, and the destructible + Dyna Blade columns
-// (vanilla already covers UFO/Tac/Meteor/Chamber). Off in other goals - broadcasting
-// All-Up everywhere would make individual-patch unlocks pointless.
+// Under the Max Stats Insanity goal, make All-Up reachable from every patch source the
+// vanilla tables miss: the three box pools, the Same Item and subsequent pools, and the
+// destructible + Dyna Blade columns (vanilla already covers UFO/Tac/Meteor/Chamber).
 void GateItems_EnsureAllUpInSpawnPools()
 {
     if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
@@ -230,7 +226,6 @@ void GateItems_FilterEventDropTables()
 }
 
 // Disable legendary piece spawns when all pieces of a type are locked.
-// Called via hook after LegendaryPieces_Init sets up spawn data.
 static void GateItems_FilterLegendaryPieces()
 {
     LegendaryPieceData *lpd = *stc_legendary_piece_data;
@@ -255,7 +250,6 @@ static void GateItems_FilterLegendaryPieces()
 }
 
 // Hook after LegendaryPieces_Init returns in CityItemSpawn_Init.
-// Clobbered instruction: lwz r3, 1552(r13) - restored after hook.
 CODEPATCH_HOOKCREATE(0x800ec284,
     "",
     GateItems_FilterLegendaryPieces,
@@ -263,10 +257,9 @@ CODEPATCH_HOOKCREATE(0x800ec284,
     0
 )
 
-// Wrapper for LegendaryPiece_MarkAsSpawned (REPLACECALL'd at the two bl sites in
-// CityItemSpawn_SpawnLegendaryPiece). For a locked piece we skip the call so the box
-// keeps its default forced_item (-1 = random roll). The slot is still consumed (the
-// caller advances next_piece_index), so the piece waits for its AP unlock.
+// REPLACECALL'd at the two LegendaryPiece_MarkAsSpawned bl sites in
+// CityItemSpawn_SpawnLegendaryPiece. Skipping the call leaves the box on its default
+// forced_item (-1 = random roll); the caller still advances next_piece_index.
 static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
 {
     int bit = ItemKindToUnlockBit(item_kind);

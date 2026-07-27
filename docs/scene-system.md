@@ -1,25 +1,24 @@
 # Scene System
 
-## Overview
+Kirby Air Ride runs a two-level scene hierarchy: **major scenes** (`MajorKind`) are the top-level game modes (Title, Menu, Air Ride, City Trial, ...), and **minor scenes** (`MinorKind`) are the sub-screens within a major (settings, map select, player select, 3D gameplay, ...). The game loops over majors; within each major it loops over minors until a major exit is requested. Every minor has load / think / exit callbacks that drive its per-frame logic.
 
-Kirby Air Ride uses a two-level scene hierarchy:
+## Mode Within a Major
 
-- **Major Scenes** (`MajorKind`) — top-level game modes (Title, Menu, Air Ride, City Trial, etc.)
-- **Minor Scenes** (`MinorKind`) — sub-screens within a major (settings, map select, player select, 3D gameplay, etc.)
-
-The game runs an outer loop over majors. Within each major, it loops over minors until a major exit is requested. Each minor has load/think/exit callbacks that drive per-frame logic.
-
-### Mode Within a Major
-
-The major scene kind (`Scene_GetCurrentMajor()`) only tells you which top-level mode is active. Each gameplay major has a finer **mode** selected from the menu, stored in `GameData` and read via dedicated accessors. This is the most common discriminator used by mod gating code (e.g. `permanent-patches.md` keys off `Scene_GetCurrentMajor() == MJRKIND_CITY` then `Gm_GetCityMode()`).
+`Scene_GetCurrentMajor()` only says which top-level mode is active. Each gameplay major has a finer **mode** chosen from the menu, stored in `GameData` and read through a dedicated accessor. Mod gating code discriminates on the major first, then the mode.
 
 | Major | Mode enum (`game.h`) | Values | Accessor (addr) | GameData field |
 |-------|----------------------|--------|-----------------|----------------|
-| `MJRKIND_AIR` | `AirRideMode` | `AIRRIDEMODE_RACE` (0), `_TIME` (1), `_FREE` (2) | `Gm_GetAirRideMode()` (0x8003D5F0) | `airride_mode` @ 0x35d |
-| `MJRKIND_CITY` | `CityMode` | `CITYMODE_TRIAL` (0), `_STADIUM` (1), `_FREERUN` (2) | `Gm_GetCityMode()` (0x8003F6CC) | `mode` @ 0x399 |
-| `MJRKIND_TOP` | `TopRideMode` | `TOPRIDEMODE_RACE` (0), `_TIME` (1), `_FREE` (2) | `TopRide_GetMode()` (0x8003EA9C) | `topride_mode` @ 0x381 |
+| `MJRKIND_AIR` | `AirRideMode` | `AIRRIDEMODE_RACE` (0), `_TIME` (1), `_FREE` (2) | `Gm_GetAirRideMode()` (0x8003d5f0) | `airride_mode` @ 0x35d |
+| `MJRKIND_CITY` | `CityMode` | `CITYMODE_TRIAL` (0), `_STADIUM` (1), `_FREERUN` (2) | `Gm_GetCityMode()` (0x8003f6cc) | `mode` @ 0x399 |
+| `MJRKIND_TOP` | `TopRideMode` | `TOPRIDEMODE_RACE` (0), `_TIME` (1), `_FREE` (2) | `TopRide_GetMode()` (0x8003ea9c) | `topride_mode` @ 0x381 |
 
-`Gm_IsStadiumMode()` (0x8000c934) is a related helper, but note (per `permanent-patches.md`) it is not equivalent to `Gm_GetCityMode() == CITYMODE_STADIUM` in all contexts — prefer `Gm_GetCityMode()` for mode dispatch.
+Two stage-state predicates sit alongside the mode accessors and answer a different question — *where the player currently is*, not *what was picked in the menu*:
+
+| Predicate | Address | True when |
+|-----------|---------|-----------|
+| `CityTrial_IsInStadium()` | 0x8000ad48 | The loaded stage is a stadium (`city_kind` 7–18). The stadium test mod code uses. |
+| `Gm_IsInCity()` | 0x8000acb0 | The loaded stage is the open City Trial map. |
+| `Gm_IsLegendaryAssembling()` | 0x8000c934 | A Dragoon/Hydra assembly cinematic is running (reads the cinematic GObj pointer at `GameData+0xa8c`). Not a mode or stadium check. |
 
 ## Major Scenes
 
@@ -43,7 +42,7 @@ The major scene kind (`Scene_GetCurrentMajor()`) only tells you which top-level 
 
 ### MajorSceneDesc
 
-Each major is described by a `MajorSceneDesc` (12 bytes):
+Each major is described by a `MajorSceneDesc` (12 bytes); the vanilla table is at `0x80495058` (`stc_major_scene_desc`).
 
 ```c
 struct MajorSceneDesc {
@@ -55,25 +54,23 @@ struct MajorSceneDesc {
 };
 ```
 
-Vanilla table at `0x80495058` (`stc_major_scene_desc`).
-
 ### Major Scene Lifecycle
 
-`Gm_Major` (0x800082d0, 0x5c8 bytes) runs the outer loop. At runtime hoshi redirects this into `Gm_MajorPatch` (hook at 0x8000836c — see [Hoshi Scene Extension](#hoshi-scene-extension)); the re-implemented loop is:
+`Gm_Major` (0x800082d0, 0x5c8 bytes) runs the outer loop. At runtime hoshi redirects it into `Gm_MajorPatch` via a hook at 0x8000836c; the re-implemented loop is:
 
-1. Call `Scene_InitHeaps()` once (hoshi addition, to allow booting into a non-title scene)
-2. Outer loop (infinite — each iteration is one major):
-   a. Set `major_cur = major_pending`
-   b. Find matching `MajorSceneDesc` in `major_scene_descs[]` (asserts if none)
-   c. Set default next major: `major_pending = next_major_id`
-   d. Clear `request_major_exit = 0`
-   e. Set initial minor: `Scene_SetNextMinor(initial_minor_id)`
+1. Call `Scene_InitHeaps()` once (hoshi addition, so the game can boot into a non-title scene).
+2. Outer loop (infinite — one iteration per major):
+   a. `major_cur = major_pending`
+   b. Find the matching `MajorSceneDesc` in `major_scene_descs[]` (asserts if none)
+   c. Set the default next major: `major_pending = next_major_id`
+   d. `request_major_exit = 0`
+   e. `Scene_SetNextMinor(initial_minor_id)`
    f. Call `cb_Enter()` if present
-   g. Inner loop, while `!request_major_exit`: call `Gm_Minor()`, then call `cb_ExitMinor()` after that minor completes (skipped for the memcard-unplug scene and during reboot)
+   g. Inner loop while `!request_major_exit`: call `Gm_Minor()`, then `cb_ExitMinor()` after that minor completes (skipped for the memcard-unplug scene and during reboot)
 
 ### Per-Major Callback Functions
 
-The `cb_Enter` (+0x4) and `cb_ExitMinor` (+0x8) slots of each `MajorSceneDesc` are filled by these functions (the records in `stc_major_scene_desc` are ordered by `major_id`):
+The `cb_Enter` (+0x4) and `cb_ExitMinor` (+0x8) slots of each `MajorSceneDesc` hold these functions (records in `stc_major_scene_desc` are ordered by `major_id`):
 
 | Major | `cb_Enter` (+0x4) | `cb_ExitMinor` (+0x8) |
 |-------|-------------------|------------------------|
@@ -81,12 +78,12 @@ The `cb_Enter` (+0x4) and `cb_ExitMinor` (+0x8) slots of each `MajorSceneDesc` a
 | `MJRKIND_MENU` | `MainMenu_MajorEnter` (0x80015bb4) | `MainMenu_MinorExit` (0x80015be8) |
 | `MJRKIND_TOP` | `TopRide_MajorEnter` (0x8003ed34) | `TopRide_MinorExit` (0x8003eed8) |
 | `MJRKIND_CITY` | `CityTrial_MajorEnter` (0x8003fc5c) | `CityTrial_MinorExit` (0x8003fdd4) |
+| `MJRKIND_CARD` | `CardPrompt_MajorEnter` (0x800476b8) | — |
+| `MJRKIND_LAN` | `LAN_MajorEnter` (0x8004f654) | — |
 
-(`MJRKIND_CARD` and `MJRKIND_LAN` also carry `cb_Enter` callbacks — `CardPrompt_MajorEnter` at 0x800476b8 and `LAN_MajorEnter` at 0x8004f654.)
+`cb_Enter` runs once on major entry to set up the major's data. `cb_ExitMinor` runs after each minor exits and is the major's **minor-transition decider**: a jump table on the major's scene-state field that advances the sub-scene, (re)initializes data, runs the checklist new-unlock flow, or exits the major. The state field is per-major:
 
-`cb_Enter` runs once on major entry to set up the major's data. `cb_ExitMinor` runs after each minor scene exits and is the major's **minor-transition decider**: a jump table on the major's scene-state field that advances the sub-scene, (re)initializes data, runs the checklist new-unlock flow, or exits the major. The state field is per-major:
-
-- `CityTrial_MinorExit` switches on the City Trial scene field `GameData+0x39b` (3 = player select, 4 = in game, 5 = properties graph, 6 = stadium splash, 7 = stadium, 8 = results). It calls `CityTrial_Init`, snapshots per-player stats, runs `CityTrial_CheckForNewUnlocks`, and in the stadium-results state calls **`Stadium_RecordResults`** (0x8004223c) to record the round's per-player result (keyed by stadium kind) into the clear-checker results block.
+- `CityTrial_MinorExit` switches on the City Trial scene field `GameData+0x39b` (3 = player select, 4 = in game, 5 = properties graph, 6 = stadium splash, 7 = stadium, 8 = results). It calls `CityTrial_Init` (0x8003f988), snapshots per-player stats, runs `CityTrial_CheckForNewUnlocks` (0x8004db74), and in the stadium-results state calls `Stadium_RecordResults` (0x8004223c) to record the round's per-player result (keyed by stadium kind) into the clear-checker results block.
 - `TopRide_MinorExit` switches on the Top Ride scene field `GameData+0x385`, branching on `topride_mode` (`GameData+0x381`). It drives course-select → race → results and runs the Top Ride new-unlock flow.
 
 ## Minor Scenes
@@ -106,8 +103,7 @@ The `cb_Enter` (+0x4) and `cb_ExitMinor` (+0x8) slots of each `MajorSceneDesc` a
 | 8 | `MNRKIND_AIRRIDEPLYSELECT` | Air Ride CSS (player/color select) |
 | 9 | `MNRKIND_9` | Unknown |
 | 10 | `MNRKIND_CITYPLYSELECT` | City Trial CSS (player/machine select) |
-| 11 | `MNRKIND_11` | Unknown |
-| 12 | `MNRKIND_12` | Unknown |
+| 11–12 | `MNRKIND_11`–`MNRKIND_12` | Unknown |
 | 13 | `MNRKIND_CITYRESULT` | City Trial results |
 | 14–16 | `MNRKIND_14`–`MNRKIND_16` | Unknown |
 | 17 | `MNRKIND_STADIUMSPLASH` | Stadium splash screen |
@@ -116,19 +112,28 @@ The `cb_Enter` (+0x4) and `cb_ExitMinor` (+0x8) slots of each `MajorSceneDesc` a
 | 20 | `MNRKIND_20` | Unknown |
 | 21 | `MNRKIND_STADIUMSELECT` | Stadium select |
 | 25 | `MNRKIND_MOVIE` | Movie |
+| 28 | `MNRKIND_AIRRIDEENDING` | Ending movie played by the checklist's ending reward (`MvEnding.h4m`) |
+| 29 | `MNRKIND_TOPRIDEENDING` | Ending movie (checklist ending reward) |
+| 30 | `MNRKIND_CITYENDING` | Ending movie (checklist ending reward) |
 | 32 | `MNRKIND_AIRRIDECHECKLIST` | Air Ride checklist |
 | 33 | `MNRKIND_TOPRIDECHECKLIST` | Top Ride checklist |
 | 34 | `MNRKIND_CITYCHECKLIST` | City Trial checklist |
-| 35 | `MNRKIND_AIRRIDERECORDS` | Air Ride records |
-| 36 | `MNRKIND_TOPRIDERECORDS` | Top Ride records |
-| 37 | `MNRKIND_CITYRECORDS` | City Trial records |
+| 35–37 | `MNRKIND_35`–`MNRKIND_37` | LAN menu (`gmLanMenu_InitializeGameState`) |
 | 38 | `MNRKIND_CARD` | Memory card |
 | 39 | `MNRKIND_DEBUGMENU` | Debug menu |
 | 40 | `MNRKIND_40` | Unknown |
 
+### Top Ride Uses Minor 19
+
+Top Ride gameplay runs as **minor 19** (`MNRKIND_19`), *not* the shared minor 18 (`MNRKIND_3D`) that Air Ride and City Trial use. It has its own 2D engine and never goes through the 3D-scene instantiation path, so:
+
+- `On3DLoadStart` (0x80014448) and `On3DLoadEnd` (0x80014d3c) **do not fire** for Top Ride.
+- `OnTopRideLoadEnd` (hook at 0x80008fac, inside minor 19's `cb_Load` `TopRide_SceneLoad` at 0x80008df8) is the Top Ride load notification. Any mod that needs to initialize per-round Top Ride state must use it.
+- `On3DPause` / `On3DUnpause` / `On3DExit` are likewise 3D-only.
+
 ### MinorSceneDesc
 
-Each minor scene's callbacks are described by a `MinorSceneDesc` (0x24 bytes):
+Each minor's callbacks are described by a `MinorSceneDesc` (0x24 bytes); the vanilla table is at `0x80495154` (`stc_minor_scene_desc`).
 
 ```c
 struct MinorSceneDesc {
@@ -146,11 +151,9 @@ struct MinorSceneDesc {
 };
 ```
 
-Vanilla table at `0x80495154` (`stc_minor_scene_desc`).
-
 ### Per-Frame Callback Execution Order
 
-Each frame during a minor scene, the 5 Think callbacks fire in strict order. They are dispatched from `updateFunction` (`0x800067a4`, 0x3b4 bytes). The minor's `MinorSceneDesc` think pointers (offsets 0x0c–0x1c) are copied into a per-frame callback table; `updateFunction` reads that table at offsets 0x0/0x4/0x8/0xc/0x10 and `bctrl`s each non-null entry. The addresses below are the load sites in `updateFunction` (the `lwz r12,N(r3)` immediately preceding each `bctrl`):
+Each frame the 5 Think callbacks fire in strict order, dispatched from `updateFunction` (0x800067a4, 0x3b4 bytes). The minor's `MinorSceneDesc` think pointers (0x0c–0x1c) are copied into a per-frame callback table; `updateFunction` reads that table at offsets 0x0/0x4/0x8/0xc/0x10 and `bctrl`s each non-null entry. The addresses below are the load sites in `updateFunction` (the `lwz r12,N(r3)` immediately preceding each `bctrl`).
 
 | Order | Callback (MinorSceneDesc field) | Load Site | Purpose |
 |-------|----------|-------------|---------|
@@ -162,7 +165,7 @@ Each frame during a minor scene, the 5 Think callbacks fire in strict order. The
 
 ### MinorScene Table
 
-Each major has a table of `MinorScene` entries that maps minor IDs to their behavior:
+Each major has a table of `MinorScene` entries mapping minor IDs to behavior:
 
 ```c
 struct MinorScene {
@@ -176,16 +179,16 @@ struct MinorScene {
 };
 ```
 
-The active major's `MinorScene` list is selected at major entry. At runtime the live table sits at `0x807e0580`, but that address is in the high heap region (not static `.data`) and is not a fixed symbol — treat it as informational rather than a stable pointer.
+The active major's list is selected at major entry. At runtime the live table sits at `0x807e0580`, but that address is in the high heap region rather than static `.data` and is not a fixed symbol — informational only.
 
 ### Minor Scene Lifecycle
 
 `Gm_Minor` (0x80008ad4, 0x324 bytes) handles one minor's lifecycle:
 
-1. Look up `MinorScene` entry for the current minor
+1. Look up the `MinorScene` entry for the current minor
 2. Call `minor_prep()` — initializes data for this minor
 3. Call `cb_Load()` (`MinorSceneDesc` + 0x04) — one-time load
-4. Per-frame loop (`loop` @ 0x80006b58 → `updateFunction` @ 0x800067a4): run the 5 Think callbacks each frame (see [Per-Frame Callback Execution Order](#per-frame-callback-execution-order)) until `Scene_ExitMinor()` is signalled
+4. Per-frame loop (`loop` @ 0x80006b58 → `updateFunction` @ 0x800067a4): run the 5 Think callbacks each frame until `Scene_ExitMinor()` is signalled
 5. On exit: call `cb_Exit()` (`MinorSceneDesc` + 0x08), then `minor_decide()` to determine the next minor (or major)
 
 ## Scene Transition API
@@ -200,17 +203,11 @@ The active major's `MinorScene` list is selected at major entry. At runtime the 
 | `Scene_ExitMinor()` | 0x800064f0 | Trigger minor exit (call from think) |
 | `Scene_SetDirection(dir)` | 0x8000a498 | Store button input for transitions (map name `Scene_StoreDirection`) |
 | `Scene_GetDirection()` | 0x8000a474 | Retrieve stored direction |
-| `Scene_InitHeaps()` | 0x8000891C | Initialize scene heaps (map name `SceneChange_InitHeaps`) |
+| `Scene_InitHeaps()` | 0x8000891c | Initialize scene heaps (map name `SceneChange_InitHeaps`) |
 | `Scene_GetMinorData()` | 0x80008874 | Get current minor's data pointer |
 | `Scene_InitMinorData()` | 0x80008898 | Initialize minor data |
 
-### Transition Pattern
-
-From `scene.h` comments:
-
-> **MinorThink**: call `Scene_ExitMinor()` to trigger `Scene_Decide()`.
->
-> **SceneDecide**: call either `Scene_SetNextMinor()` to enter another minor, OR `Scene_SetNextMajor()` then `Scene_ExitMajor()` to enter another major.
+The transition contract (`scene.h`): a **MinorThink** calls `Scene_ExitMinor()` to trigger the decide step; a **SceneDecide** calls either `Scene_SetNextMinor()` to enter another minor, or `Scene_SetNextMajor()` followed by `Scene_ExitMajor()` to enter another major.
 
 ## Static Data & Runtime Tables
 
@@ -218,22 +215,22 @@ From `scene.h` comments:
 |---------|---------|----------|
 | `stc_major_scene_desc` | 0x80495058 | Vanilla major scene descriptor table |
 | `stc_minor_scene_desc` | 0x80495154 | Vanilla minor scene descriptor table |
-| `stc_scene_menu_common` | 0x80558788 | `ScMenuCommon` — shared menu/select screen state |
+| `stc_scene_menu_common` | 0x80558788 | `ScMenuCommon` — shared menu/select screen state (`Gm_GetMenuData()` @ 0x801311e0) |
 | `stc_menu_select` | 0x804962b0 | `ScMenuSelect` — select screen GObj/model data |
 | Runtime minor table | 0x807e0580 | `MinorScene` entries for the active major (runtime, heap-region — not a stable symbol) |
 
 ## Hoshi Scene Extension
 
-Hoshi extends the scene system in `more_scenes.c` to allow mods to install custom scenes:
+Hoshi extends the scene system in `more_scenes.c` so mods can install custom scenes:
 
-1. **Table relocation** (`Scenes_CopyVanilla`): copies the vanilla `MajorSceneDesc` and `MinorSceneDesc` tables into larger statically allocated arrays (`major_scene_descs[MJRKIND_NUM*2]`, `minor_scene_descs[MNRKIND_NUM*2]`), then `memset`s the vanilla tables to `-1` to catch any unpatched reads. `major_scene_num` / `minor_scene_num` track how many entries are live.
-2. **Reference patching** (`Scenes_ApplyPatches`): patches all 7 vanilla code sites that load the minor scene table address via ASM trampolines (`minor_scene_asm_1..7`) at: `0x80008978`, `0x80008b1c`, `0x80008b90`, `0x80008c04`, `0x80008c70`, `0x80008cc8`, `0x80008d78`. The single major-table site at `0x80008374` is handled by the loop replacement below rather than a trampoline.
-3. **Major loop replacement**: a `CODEPATCH_HOOKCREATE` at `0x8000836c` (inside `Gm_Major`, which starts at `0x800082d0`) redirects into `Gm_MajorPatch`, which re-implements the outer major loop over the relocated `major_scene_descs[]`. It also adds an initial `Scene_InitHeaps()` call so the game can boot directly into a non-title scene.
+1. **Table relocation** (`Scenes_CopyVanilla`): copies the vanilla `MajorSceneDesc` and `MinorSceneDesc` tables into larger statically allocated arrays (`major_scene_descs[MJRKIND_NUM*2]`, `minor_scene_descs[MNRKIND_NUM*2]`), then `memset`s the vanilla tables to `-1` to catch unpatched reads. `major_scene_num` / `minor_scene_num` track how many entries are live.
+2. **Reference patching** (`Scenes_ApplyPatches`): patches the 7 vanilla code sites that load the minor scene table address, via ASM trampolines (`minor_scene_asm_1..7`), at `0x80008978`, `0x80008b1c`, `0x80008b90`, `0x80008c04`, `0x80008c70`, `0x80008cc8`, `0x80008d78`. The single major-table site at `0x80008374` is covered by the loop replacement below instead of a trampoline.
+3. **Major loop replacement**: `CODEPATCH_HOOKCREATE` at `0x8000836c` (inside `Gm_Major`, which starts at `0x800082d0`) redirects into `Gm_MajorPatch`, which re-implements the outer major loop over the relocated `major_scene_descs[]` and adds the initial `Scene_InitHeaps()` call.
 4. **Install API**: `Scenes_InstallMajorScene()` / `Scenes_InstallMinorScene()` append a descriptor to the relocated array, assign the new ID (`major_scene_num` / `minor_scene_num`), and bump the count. Exposed to mods through the hoshi func table as `Hoshi_InstallMajorScene` / `Hoshi_InstallMinorScene` (plus `Hoshi_GetMajorScenes` / `Hoshi_GetMinorScenes`).
 
 ## Hoshi Lifecycle Callbacks
 
-Hoshi provides `ModDesc` callbacks (defined in `hoshi/mod.h`) that fire at specific points in the scene lifecycle. Each is implemented as a `CODEPATCH_HOOKCREATE` in `hoshi.c`:
+Hoshi provides `ModDesc` callbacks (`hoshi/mod.h`) that fire at points in the scene lifecycle. Each is a `CODEPATCH_HOOKCREATE` in `hoshi.c`:
 
 | Callback | Hook Address | When It Fires |
 |----------|-------------|---------------|
@@ -242,19 +239,17 @@ Hoshi provides `ModDesc` callbacks (defined in `hoshi/mod.h`) that fire at speci
 | `OnSaveLoaded` | — (card read) | After save data loaded from memory card |
 | `OnSceneChange` | 0x8000678c | Every scene change (major or minor), after heap init |
 | `OnMainMenuLoad` | 0x80018994 | Main menu minor loads (minor 2) |
-| `OnPlayerSelectLoad` | 0x8003b48c, 0x8002a358 | City Trial CSS (minor 10), Air Ride CSS (minor 8) |
+| `OnPlayerSelectLoad` | 0x8003b48c, 0x8002a358 | City Trial CSS (minor 10) via `CitySelect_MinorLoad`, Air Ride CSS (minor 8) via `CSS_airRide_ModeDispatch` |
 | `On3DLoadStart` | 0x80014448 | Before 3D scene instantiation |
 | `On3DLoadEnd` | 0x80014d3c | After 3D scene fully instantiated (players, machines, map exist) |
 | `On3DPause` | 0x80041160 | Game paused (receives pause player index) |
 | `On3DUnpause` | 0x80113a30 | Game unpaused (receives pause player index) |
 | `On3DExit` | 0x80015274 | Exiting 3D scene |
 | `OnTopRideLoadEnd` | 0x80008fac | After Top Ride gameplay fully initialized (minor 19) |
-| `OnFrameStart` | 0x80006844 | Every frame, very first |
-| `OnFrameEnd` | 0x80006a60 | Every frame, very last |
+| `OnFrameStart` | 0x80006844 | Every frame, first thing |
+| `OnFrameEnd` | 0x80006a30 | Every frame, last thing before the frame index increments |
 
-**Important**: The heap is destroyed and recreated on every scene change. HSD objects (CObj, JObj, GObj) do not persist across scene changes. Use `OnSceneChange` to recreate any persistent processes or objects.
-
-**Important**: `OnBoot` runs with a persistent heap — allocations made here survive the entire runtime. All other callbacks use the scene-scoped heap.
+The heap is destroyed and recreated on every scene change: HSD objects (CObj, JObj, GObj) do not persist across one. Use `OnSceneChange` to recreate any persistent processes or objects. `OnBoot` is the exception — it runs with a persistent heap, so allocations made there survive the entire runtime; every other callback uses the scene-scoped heap.
 
 ## Scene Flow Per Mode
 
@@ -268,7 +263,7 @@ Main Menu (minor 2)
         → 3D Gameplay (minor 18) — actual race
 ```
 
-Major transitions: `MJRKIND_MENU` → `MJRKIND_AIR` when entering 3D.
+Major transition: `MJRKIND_MENU` → `MJRKIND_AIR` when entering 3D.
 
 ### City Trial
 
@@ -282,7 +277,7 @@ Main Menu (minor 2)
             → Results (minor 13)
 ```
 
-Major transitions: `MJRKIND_MENU` → `MJRKIND_CITY` when entering 3D.
+Major transition: `MJRKIND_MENU` → `MJRKIND_CITY` when entering 3D.
 
 ### Top Ride
 
@@ -292,15 +287,13 @@ Main Menu (minor 2)
     → Gameplay (minor 19) — top ride race
 ```
 
-Major transitions: `MJRKIND_MENU` → `MJRKIND_TOP` when entering gameplay.
+Major transition: `MJRKIND_MENU` → `MJRKIND_TOP` when entering gameplay.
 
-**Note:** Top Ride uses **minor 19** (`MNRKIND_19`), not the shared minor 18 (`MNRKIND_3D`) used by Air Ride and City Trial. It has its own 2D engine and does not go through the 3D-scene instantiation path — so `On3DLoadStart`/`On3DLoadEnd` do not fire; the `OnTopRideLoadEnd` hook (minor 19) is the load notification instead. See `topride-system.md`.
-
-For the per-mode character/machine select (CSS) screens that sit between the settings/select minors and 3D gameplay — Air Ride CSS (minor 8), City Trial CSS (minor 10), and Top Ride CSS — see `css-system.md`. For where color gating hooks into those CSS load points, see `gate-colors.md`.
+The per-mode character/machine select screens between the settings minors and gameplay are documented in `css-system.md`.
 
 ## Main Menu
 
-The main menu runs as minor 2 within `MJRKIND_MENU`. It handles mode selection and options.
+The main menu runs as minor 2 within `MJRKIND_MENU` and handles mode selection and options.
 
 ### MainMenuData (GameData + 0x30)
 
@@ -314,7 +307,7 @@ struct MainMenuData {
     u8 cursor_val[2];                     // 0x35
     u8 depth;                             // 0x37 — 0 or 1, indexes cursor_val
     MainMenuSubmenuKind submenu_kind : 8; // 0x38
-    MajorKind major_kind : 8;            // 0x39
+    MajorKind major_kind : 8;             // 0x39
     // ... additional fields
 };
 ```

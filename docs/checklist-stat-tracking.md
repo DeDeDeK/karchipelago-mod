@@ -1,20 +1,16 @@
 # Checklist Stat Tracking (`plclearcheckerlib`)
 
 How the game accumulates the per-player gameplay stats that drive checklist
-completion. This is the *measurement* layer that sits underneath the clear-bit
-storage described in `clearchecker-system.md`: this doc covers **what counts and
-where the running totals live**, the sister doc covers **how a completed
-condition is stored and detected**.
+completion — what counts, where the running totals live, and which threshold
+each of the 360 checkboxes tests. The game-side source file (from assert strings
+such as `s_plclearcheckerlib_c_804b4cdc`) is `plclearcheckerlib.c`, the "player
+clear-checker library"; Top Ride's evaluators instead live in
+`a2d_gamesession.cpp`. Clear-bit *storage and detection* — what happens once a
+condition is met — is `clearchecker-system.md`.
 
-The game-side source file (from the assert strings, e.g.
-`s_plclearcheckerlib_c_804b4cdc`) is `plclearcheckerlib.c` — the "player
-clear-checker library." (Top Ride's evaluators instead live in
-`a2d_gamesession.cpp`.) **All 120 cells
-of all three modes (City Trial mode 2, Air Ride mode 0, Top Ride mode 1) are
-mapped to a game-side condition** — City Trial in the master table below, Air
-Ride and Top Ride in their own sections near the end. The few remaining
-unknowns are collected in the two "Open questions" sections; most need a
-live-only check of values already pinned statically.
+All 120 cells of all three modes (City Trial mode 2, Air Ride mode 0, Top Ride
+mode 1) map to a game-side condition: City Trial in the master table below, Air
+Ride and Top Ride in their own sections.
 
 ## Architecture
 
@@ -29,29 +25,28 @@ Three layers turn gameplay into a checked checklist box:
    threshold, and call `ClearChecker_SetNewUnlock(mode, clear_kind)` for each one
    met.
 3. **Clear-bit storage / detection** — `ClearChecker_SetNewUnlock` flips the
-   `GameClearData.clear[clear_kind]` bit. See `clearchecker-system.md`. (The AP
-   mod hooks this function in `check_detection.c` to capture every check.)
+   `GameClearData.clear[clear_kind]` bit (`clearchecker-system.md`).
 
 ```
 gameplay  --writes-->  per-player stat struct (+0x4c8 item_collect[], +0x62b yakumono[], …)
                               |  Ply_Get* getter family
                               v
-CityTrial_Check*Objectives    --accumulates-->  records block (GameData_CityTrialClear[1] tail)
+CityTrial_Check*Objectives    --accumulates-->  records block (CityTrial GameClearData tail)
                               --threshold met-->  ClearChecker_SetNewUnlock(2, clear_kind)
                               v
-                       GameClearData.clear[clear_kind]   (clearchecker-system.md)
+                       GameClearData.clear[clear_kind]
 ```
 
 All six CT evaluators share a skeleton: bail unless `Checklist_IsCacheValid()`
 (`0x8007b650`) returns 0, then loop player slots 0..4, gate on
-`plGetPlayerKind(player)` (`0x8022c858`; `0` = human), and call
-`ClearChecker_SetNewUnlock(2, kind)` (`0x8004a054`) for each met threshold.
-Per-game cells test a stat directly; cumulative cells fold the per-game value
-into the records block first. **Scope varies**: some accumulators sum over
-*human* players only, others over all *present* players (`plGetPlayerKind != 4`)
+`Ply_GetPKind(player)` (`0x8022c858`, `plGetPlayerKind` in the map; `0` = human),
+and call `ClearChecker_SetNewUnlock(2, kind)` (`0x8004a054`) for each met
+threshold. Per-game cells test a stat directly; cumulative cells fold the
+per-game value into the records block first. **Scope varies**: some accumulators
+sum over *human* players only, others over all *present* players (`PKind != 4`)
 — noted per cell where it matters.
 
-## Per-player stat struct
+## Per-Player Stat Struct
 
 `Ply_GetItemCollectArray(int player)` (`0x8022d248`) returns the base of the
 calling player's stat record:
@@ -114,7 +109,7 @@ writes several of the killer's stat fields:
 - the **King Dedede KO time** `+0x848` (only when victim slot == 4 and the field
   is still 0): `*(+0x848) = current frame`
 
-## Item-collect subsystem
+## Item-Collect Subsystem
 
 The item-collect array at `+0x4c8`: **`ItemKind` 0/1/2 are the
 three boxes (`ITKIND_BOX{BLUE,GREEN,RED}`); 3..0x43 are everything else**
@@ -151,7 +146,7 @@ items" checklist counts patches/abilities/food/etc. but never boxes.
 `How CheckForNewUnlocks consumes them`): `0x27` = Maxim Tomato (→ 0x61),
 `0x28` = Energy Drink (→ 0x62), `0x30` = sushi (→ 0x6b), `0x31` = hot dog (→ 0x6c).
 
-## City Trial evaluators — which function owns which cells
+## City Trial Evaluators
 
 | Address | Function | Cells owned |
 |---------|----------|-------------|
@@ -169,7 +164,7 @@ items" checklist counts patches/abilities/food/etc. but never boxes.
 > `GameData+0xa94` (14 = Destruction Derby, 13 = Kirby Melee) then
 > `GameData+0x5ad` (specific stadium id: DD1..DD5 = 9..13, KM1/KM2 = 7/8).
 
-## Master cell table (City Trial, mode = 2)
+## Master Cell Table (City Trial, Mode 2)
 
 Conditions use the *game's actual comparison* (most "over N" objectives compile
 to `>= N`). Time thresholds are 60 fps frames. `records+N` = the persistent
@@ -306,17 +301,20 @@ field `GameData+0xA38[p]` are unit-`1/60 s` and plain-int respectively.
 `Ply_GetMachineKind` (PlayerData `+0x8F`, `0x8022c8e0`); these are *per-category*
 machine indices, distinct from `VCKIND_*`.
 
-## The records / accumulator block (`GameData_CityTrialClear[1]`)
+## Records / Accumulator Block (City Trial)
 
-`gmGetClearcheckerType2Ptr()` (`0x8000774c`) returns the second
-`GameClearData`-sized slot (base `0x80536980`), reused as a **cross-game stat
-accumulator**. The accumulators live in the slot's tail, past the nominal `0xF4`
-struct. The doc's `records+N` convention is anchored at **base + 0xF8**
-(`records+0` = `0x80536A78`); the raw offset from the type2 base is `0xF8 + N`.
-Each field folds in per-game player totals (capped) and is threshold-tested.
-This block is typed as `CityTrialClearRecords` in `game.h` (the Air Ride analog is
-`AirRideClearRecords`, the Top Ride analog the existing `TopRideStats`), reached as
-`(CityTrialClearRecords *)((u8 *)gmGetClearcheckerTypeP(GMMODE_CITYTRIAL) + 0xF4)`.
+`gmGetClearcheckerType2Ptr()` (`0x8000774c`) returns the City Trial
+`GameClearData` slot (base `0x80536980`), whose tail past the nominal `0xF4`
+struct is reused as a **cross-game stat accumulator**. Each field folds in
+per-game player totals (capped) and is threshold-tested.
+
+The `records+N` convention used throughout this doc is anchored at **base +
+0xF8** (`records+0` = `0x80536A78`), so the raw offset from the type2 base is
+`0xF8 + N`. The block is typed as `CityTrialClearRecords` in `game.h` (Air Ride
+analog `AirRideClearRecords`, Top Ride analog `TopRideStats`), reached as
+`(CityTrialClearRecords *)((u8 *)gmGetClearcheckerTypeP(GMMODE_CITYTRIAL) + 0xF4)`
+— struct-relative offsets are therefore `records+N + 4`, and the rows below are
+in struct field order.
 
 | `records+N` | raw off | type | role | cap | drives |
 |-------------|---------|------|------|-----|--------|
@@ -339,7 +337,7 @@ This block is typed as `CityTrialClearRecords` in `game.h` (the Air Ride analog 
 | `+0x14` | `+0x10C` | f32 | distance total | ~8.75e7 | 0x00 / 0x01 |
 | `+0x18` | `+0x110` | int | Free Run drive time (frames; only *read* here — writer elsewhere) | — | 0x09–0x0B |
 
-## GameData stadium-result fields
+## GameData Stadium-Result Fields
 
 Written at stadium finish; per-player fields are `[5]` arrays, stride 4, based at
 `GameData+0x830`. These match the `x830/x8b8/xa38/xa4c/xa94` placeholders in
@@ -356,7 +354,7 @@ Written at stadium finish; per-player fields are `[5]` arrays, stride 4, based a
 
 ST's jump table is at `0x80497738` (12 × u32, indexed `(city_kind − 7)`).
 
-## The yakumono-break bucket array (`+0x62b`)
+## Yakumono-Break Bucket Array (`+0x62b`)
 
 This array is **not** the broad event-counter
 set (rings/meteor/waterwheel/etc. live in dedicated int/flag fields above). It is
@@ -398,10 +396,9 @@ cover in CT → 0x3f *and* Frozen Hillside ice platforms in AR → AR cell 0x66)
 
 Indices with a producer path but **no checklist consumer** (other stages'
 destructibles or spare): `0x15, 0x16, 0x18*, 0x19, 0x1a, 0x1b, 0x1c, 0x1e, 0x1f,
-0x21, 0x24, 0x27` (*0x18 is consumed in Air Ride, not CT). These are left
-unlabeled deliberately rather than guessed.
+0x21, 0x24, 0x27` (*0x18 is consumed in Air Ride, not CT).
 
-## Vehicle-bust bitfield (`+0x4c4`) — cells 0x6f–0x76
+## Vehicle-Bust Bitfield (`+0x4c4`)
 
 `Ply_GetVehicleBustFlag(player, idx)` (`0x8022f3a4`) returns `*(u16*)(base+0x4c4) & (1 << (15 − idx))`
 (MSB-first). `CityTrial_CheckForNewUnlocks` reads idx 0..7 (bits 15..8) and sets
@@ -429,7 +426,7 @@ the getter (idx only 0..7) — likely vestigial. **Legendary-machine assembly** 
 a *separate* mechanism: `+0x84d` bit2 (Hydra) / bit3 (Dragoon), written by
 `Ply_MarkLegendaryMachineAssembled` (`0x80231198`), which drives cell 0x77.
 
-## Distance → miles math (cells 0x00 / 0x01)
+## Distance to Miles Math (cells 0x00 / 0x01)
 
 `Ply_GetTotalDistance` (`0x80231614`) = `*(f32*)(base+0x60c) + *(f32*)(base+0x610)`.
 FNU accumulates the per-game sum (capped at `0x4CA6E49C` = 8.75e7) into
@@ -452,17 +449,16 @@ per-frame accumulator at `+0x614` adds the same delta only while
 `MachineData+0xbae` bit 5 (a consolidated hit/damage-reaction flag) is set —
 distance travelled while taking a hit — and is summed by no getter.
 
-## Per-player getter names
+## Per-Player Getters
 
-These per-player `Ply_Get*` getters are present under these names in
-`GKYE01.map`. Listed here as the canonical address↔field index for the stat
-layer:
+The address-to-field index for the stat layer. All of these carry these names in
+`GKYE01.map`:
 
 | Address | Name | Field |
 |---------|------|-------|
 | `0x8022fccc` | `Ply_GetYakumonoBreakCount(player, idx)` | `+0x62b+idx` |
 | `0x8022fed8` | `Ply_IncrementYakumonoBreakCount(player, idx)` | `+0x62b+idx` |
-| `0x8022d8c8` | `Ply_ResetGameStats(player)` | zeros yakumono array (full scope TBD) |
+| `0x8022d8c8` | `Ply_ResetGameStats(player)` | zeros the yakumono array `0x640..0x653` |
 | `0x8022f3a4` | `Ply_GetVehicleBustFlag(player, idx)` | `+0x4c4` bit |
 | `0x8022f568` | `Ply_GetKingDededeKOTime(player)` | `+0x848` |
 | `0x80231614` | `Ply_GetTotalDistance(player)` | `+0x60c` + `+0x610` |
@@ -495,18 +491,7 @@ so cell 0x4e fires at 3 distinct rivals. `Ply_GetStatRecordBase` (`0x8022d260`)
 is a second accessor returning the same per-player record base as
 `Ply_GetItemCollectArray`.
 
-## Open questions / to expand
-
-- **Unlabeled yakumono indices** — `0x15,0x16,0x19,0x1a,0x1b,0x1c,0x1e,0x1f,
-  0x21,0x24,0x27` have producers but no checklist consumer; likely other-stage
-  destructibles, left unlabeled rather than guessed.
-- **`MachineData+0x754` state taxonomy** — the 0/1 action-state class that splits
-  the distance (`+0x60c`/`+0x610`) and drive-time (`+0x5e4`/`+0x5e8`) buckets is set
-  0 on entry to grounded/charging/respawn states and 1 on entry to launched/airborne
-  states; the full enumeration of which states fall
-  on each side is not exhaustively mapped.
-
-## Air Ride (mode 0)
+## Air Ride (Mode 0)
 
 Air Ride clear bits are the `clear[]` of the **type-0** `GameClearData` slot
 (`gmGetClearcheckerType0Ptr`, `0x8000771c`, base `0x80536740`; `clear[]` at
@@ -562,11 +547,14 @@ types, etc.).
 
 ### Air Ride records / cumulative accumulators
 
-The cross-game accumulators live in the **tail of the type-0 block** (anchored at
-`0x80536838` = base `+0xF8`, same layout idea as the City Trial records block),
-written once per race finish by `AirRide_CheckRaceFinishObjectives`. Each folds
-the per-game `Σ_human` value into the running total with plain `int` adds — **no
-saturating caps**, unlike CT's u8/u16 records.
+The cross-game accumulators live in the **tail of the type-0 block**, typed as
+`AirRideClearRecords` in `game.h` and reached as
+`(AirRideClearRecords *)((u8 *)gmGetClearcheckerTypeP(GMMODE_AIRRIDE) + 0xF4)`.
+The `records+N` column below keeps the City Trial anchor (base `+0xF8`,
+`0x80536838`), so struct-relative offsets are `records+N + 4`. Written once per
+race finish by `AirRide_CheckRaceFinishObjectives`; each folds the per-game
+`Σ_human` value into the running total with plain `int` adds — **no saturating
+caps**, unlike CT's u8/u16 records.
 
 | records | abs | role (per-game source summed) | writer | drives |
 |---|---|---|---|---|
@@ -621,10 +609,12 @@ for CT, with Air-Ride-specific bits.
 The yakumono-break array `+0x62b` is shared with City Trial; Air Ride adds two
 consumers: idx 0x18 = Sky Sands coral (single-offset getter `0x8022fd48` reading
 `+0x643`, compared against the live stage spawn-count `0x800f7db0(0x18)`) → 0x67,
-and idx 0x20 = Frozen Hillside ice platforms → 0x66. Placement comes from
-`GameData` byte arrays, not the stat struct: `GameData+0x848[p]` (finish rank,
-`0 = 1st`, getter `0x80009534`), `GameData+0x852[p]` (finished flag, `0x8000979c`),
-`GameData+0x868[4p]` (lap count, `0x8000b1ec`).
+and idx 0x20 = Frozen Hillside ice platforms → 0x66.
+
+Race placement is **not** in the stat struct — it lives in `GameData` byte
+arrays: `GameData+0x848[p]` (finish rank, `0 = 1st`, getter `0x80009534`),
+`GameData+0x852[p]` (finished flag, `0x8000979c`), `GameData+0x868[4p]` (lap
+count, `0x8000b1ec`).
 
 The `+0x854` / `+0x855` finish-state bits are all set by one writer `AirRide_RecordFinishStats` (`0x8022e4e0`),
 called per finishing player from `race3D_isFinished` the moment they cross the line; the
@@ -635,7 +625,7 @@ The per-machine cells gate on `Ply_GetVehicleKind` (`0x8022c910`) →
 `Machine_EncodeVehicleKind` (`0x801c85a8`): `mk` for non-bikes, `mk+0x13` for bikes
 (`VCKIND_*` enum + `MachineKind_Names[]` in `machine.h`).
 
-### Master cell table — gameplay & cumulative cells (Air Ride, mode = 0)
+### Master cell table: gameplay and cumulative cells (Air Ride, mode 0)
 
 The per-stage *time/distance* cells are tabulated separately below; everything
 else is here. "& 1st" = the per-player finish-rank check `GameData+0x848[p]==0`.
@@ -755,7 +745,7 @@ one machine-gated cell per stage):
 | Beanstalk Park | 0x4a 01:07, 0x4b 00:58 | 0x4c Winged Star 00:58 |
 | Frozen Hillside | 0x44 01:10, 0x45 00:58 | 0x46 Formula Star 01:10 |
 
-## Top Ride (mode 1)
+## Top Ride (Mode 1)
 
 Top Ride clear bits are the `clear[]` of the **type-1** slot
 (`gmGetClearcheckerType1Ptr`, `0x8000772c`, base `0x80536858`; `clear[]` at
@@ -889,7 +879,10 @@ mode 2; `desc+0x1c`/`+0x1d` clear_kinds, `desc+0x14`/`+0x18` thresholds, best la
 = `session+0x18`): Grass 0x69/0x70, Sand 0x6a/0x71, Sky 0x6c/0x73, Fire 0x6f/0x76,
 Light 0x6b/0x72, Water 0x6d/0x74, Metal 0x6e/0x75.
 
-## Evaluator family (named)
+## Evaluator Functions
+
+Consolidated address index for every evaluator, setter and stat writer named
+above, across all three modes.
 
 | Address | Name | Mode |
 |---------|------|------|
@@ -923,13 +916,23 @@ dispatcher — it scans the `clear[]` bitfield (20 groups × 6 bytes) for any ce
 with a pending "newly unlocked, not yet shown" state, used to drive the unlock
 notification, and is mode-agnostic.
 
-## Open questions (Air Ride / Top Ride)
+## Open Questions
 
-- **TR `TopRideConfig` per-slot layout** — `gmGetTopRideConfigP` returns `0x805366a0` (= `GameData+0xcc8`).
-  Per-slot config begins at base `+0x58` with a 9-byte stride (4 slots); within a slot
-  `+0` = slot-active flag, `+3` = CPU level (`== 4` ⇒ "level 5"). The other 6 bytes per
-  slot are written at scene load but not read by the checklist; their meaning is unknown,
-  and pinning it needs a live capture across mixed human/CPU/level slots.
+- **`MachineData+0x754` state taxonomy** — the 0/1 action-state class that splits
+  the distance (`+0x60c`/`+0x610`) and drive-time (`+0x5e4`/`+0x5e8`) buckets is set
+  0 on entry to grounded/charging/respawn states and 1 on entry to launched/airborne
+  states. The full enumeration of which states fall on each side is not mapped.
+- **`+0x28` yakumono indices without a consumer** — the indices listed in the
+  yakumono section (`0x15, 0x16, 0x19, 0x1a, 0x1b, 0x1c, 0x1e, 0x1f, 0x21, 0x24,
+  0x27`) have producer paths but no checklist consumer; which stage destructible
+  each corresponds to is unknown.
+- **TR `TopRideConfig` per-slot layout** — `gmGetTopRideConfigP` returns `0x805366a0`
+  (= `GameData+0xcc8`). Per-slot config begins at base `+0x58` with a 9-byte stride
+  (4 slots); within a slot `+0` = slot-active flag, `+3` = CPU level (`== 4` ⇒
+  "level 5"). The other 6 bytes per slot are written at scene load but not read by
+  the checklist; their meaning is unknown.
 - **TR finalize-abort vtable predicates** — the abort guard dispatches `KirbyHandle`
-  vtable `+0x34` (is-human) and `+0x2c` (finished); the functions implementing those two
-  slots aren't named yet.
+  vtable `+0x34` (is-human) and `+0x2c` (finished); the functions implementing those
+  two slots are unnamed.
+- **`Ply_ResetGameStats` (`0x8022d8c8`) scope** — confirmed to zero the yakumono
+  array `0x640..0x653`; the rest of the region it clears is not enumerated.

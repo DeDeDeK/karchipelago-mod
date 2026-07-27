@@ -1,32 +1,20 @@
 # Character Select Screen (CSS) System
 
-## Overview
-
-The CSS handles player, machine, and color selection before entering 3D gameplay. There are three independent CSS implementations — one per game mode — each running as minor scene callbacks within `MJRKIND_MENU` (major 3).
+The CSS handles player, machine, and color selection before entering gameplay. There are three independent implementations — one per game mode — each running as minor scene callbacks within `MJRKIND_MENU` (major 3). All three share the same shape: per-player input handling, color cycling via L/R, and machine/character icons rendered out of an HSD archive by material animation.
 
 | Mode | Minor | Main Dispatch Function | Data Struct |
 |------|-------|----------------------|-------------|
-| Air Ride | 8 (`MNRKIND_AIRRIDEPLYSELECT`) | `CSS_airRide_ModeDispatch` (0x8002a1b0) | `airride_select_ply` (GameData+0x10a) |
+| Air Ride | 8 (`MNRKIND_AIRRIDEPLYSELECT`) | `CSS_airRide_ModeDispatch` (0x8002a1b0) | `airride_select_ply` (GameData+0x108, addressed as GameData+0x10a) |
 | City Trial | 10 (`MNRKIND_CITYPLYSELECT`) | `CitySelect_MinorLoad` (0x8003b2c0) | `city_select_ply` (GameData+0x1d0) |
 | Top Ride | — | `TopRide_PreGameThink` (0x8002c06c) | `topride_select_ply` (GameData+0x160) |
 
-All three share common patterns: per-player input handling, color cycling via L/R buttons, and machine/character selection through HSD archive icon rendering.
-
-The hoshi `OnPlayerSelectLoad` callback fires for both Air Ride (minor 8) and City Trial (minor 10). See `scene-system.md` § Hoshi Lifecycle Callbacks.
+The hoshi `OnPlayerSelectLoad` callback is hooked at both CSS load points and therefore fires for Air Ride (minor 8, hook at 0x8002a358) and City Trial (minor 10, hook at 0x8003b48c) — not for Top Ride.
 
 ## Air Ride CSS (Minor 8)
 
 ### Architecture
 
-The Air Ride CSS uses a **two-level dispatch** based on the selected Air Ride sub-mode:
-
-```
-CSS_airRide_ModeDispatch (0x8002a1b0)
-  ├── airride_mode == RACE (0)  → CSS_airRide_RaceUpdate (0x80028888)
-  └── airride_mode != RACE      → CSS_airRide_FreeTimeUpdate (0x80029bd8)
-```
-
-`Gm_GetAirRideMode()` (0x8003d5f0) returns `GameData[0x35d]`:
+The Air Ride CSS uses a **two-level dispatch** keyed on the selected Air Ride sub-mode. `Gm_GetAirRideMode()` (0x8003d5f0) returns `GameData[0x35d]`:
 
 | Value | Mode | CSS Function |
 |-------|------|-------------|
@@ -50,6 +38,8 @@ CSS_airRide_ModeDispatch (0x8002a1b0)
 | `CSS_airRide_colorChanger` | 0x80021654 | 0x2e0 | L/R color cycling |
 | `AirRide_PopulateSelectIcons` | 0x80020a08 | 0xc4c | Builds character icon grid |
 | `AirRide_CheckCharacterAvailable` | 0x8002090c | 0xfc | Character availability check |
+| `SelIcon_GetCKindLinear` | 0x8000b9a8 | 0x14 | Indexes the linear-strip CKIND table at 0x804957ec |
+| `Character_GetDesc` | 0x8000b9dc | 0x18 | Returns `ckind * 3 + 0x80495814` |
 | `TitleScreen_CheckMachineUnlocked` | 0x8000c364 | 0x124 | Machine unlock check — **title-screen demo only** |
 | `TitleScreen_SelectRandomMachine` | 0x8000daa0 | 0x148 | Random machine assignment — **title-screen demo only** |
 | `TitleScreen_SetupDemoMachines` | 0x8000dbe8 | 0x164 | Builds the 4 demo riders/machines (calls `TitleScreen_SelectRandomMachine`) |
@@ -59,15 +49,15 @@ CSS_airRide_ModeDispatch (0x8002a1b0)
 
 ### Init Trigger
 
-`GameData[0x10b]` is an init flag. When non-zero on entry to the CSS update function, it triggers the color init block which sets `color[0..3] = {0, 1, 2, 3}` and resets per-slot state. The flag is set to `0xFF` by `CSS_airRide_InitSelectData` and cleared by the CSS update functions after initialization.
+`GameData[0x10b]` is the init flag. `CSS_airRide_InitSelectData` sets it to `0xFF`; when the CSS update function sees it non-zero on entry it runs the color init block — `color[0..3] = {0, 1, 2, 3}` plus a per-slot state reset — then clears the flag.
 
-Both `CSS_airRide_RaceUpdate` and `CSS_airRide_FreeTimeUpdate` have their own color init blocks. The mod hooks both convergence points to validate colors against the unlock mask. See `gate-colors.md` for details.
+Both `CSS_airRide_RaceUpdate` and `CSS_airRide_FreeTimeUpdate` carry their own copy of that init block, so a mod validating colors against an unlock mask has to hook both convergence points.
 
 ### Select Screen Grid
 
-`AirRide_PopulateSelectIcons` (0x80020a08) has two display modes: a 2×10 grid layout (≥10 available characters) and a linear strip (<10 available).
+`AirRide_PopulateSelectIcons` (0x80020a08) has two layouts: a 2×10 grid (>= 10 available characters) and a linear strip (< 10). It builds the available list at `gd[0x170]` with the count at `gd[0x16f]`, and sets the layout flag at `gd[0x184]` (1 = grid, 0 = linear).
 
-2 rows × 10 columns stored at `0x80495800` (raw CKIND bytes):
+Grid table, raw CKIND bytes at `0x80495800`:
 
 ```
 Row 0: DRAGOON FORMULA WINGED WARP    COMPACT FLIGHT SHADOW WAGON   SWERVE HYDRA
@@ -76,29 +66,28 @@ Row 1: DEDEDE  JET     ROCKET TURBO   BULK    SLICK  WLBIKE WLSCOOT REXWHL METAK
        (18)    (10)    (11)   (2)     (7)     (4)    (13)   (12)    (14)   (19)
 ```
 
-Linear strip order (used when <10 available). The table lives at `0x804957ec`; `SelIcon_GetCKindLinear` (0x8000b9a8, a small function — `lis r4,0x8049; addi r3,r4,0x57ec; lbzx r3,r3,idx`) indexes into it. Raw CKIND bytes:
+Linear strip table at `0x804957ec`, indexed by `SelIcon_GetCKindLinear` (0x8000b9a8 — `lis r4,0x8049; addi r3,r4,0x57ec; lbzx r3,r3,idx`). Raw CKIND bytes:
+
 ```
 DEDEDE DRAGOON JET ROCKET TURBO BULK FORMULA WINGED WARP COMPACT
 FLIGHT SHADOW WAGON SWERVE SLICK WLBIKE WLSCOOT REXWHL HYDRA METAKN
 ```
 
-(Note CKIND_SLICK=4 and CKIND_WAGON=6 per `menu.h` — Slick Star is the slot-4 entry, Wagon Star slot 6.)
+(Per `menu.h`, CKIND_SLICK=4 and CKIND_WAGON=6 — Slick Star is the slot-4 entry, Wagon Star slot 6.)
 
-`AirRide_PopulateSelectIcons` builds the available list at `gd[0x170]` (count at `gd[0x16f]`). Display mode flag at `gd[0x184]`: 1 = grid, 0 = linear.
+#### Grid mode reordering
 
-#### Grid Mode Reordering
+In grid mode the function pulls the four "special" characters (CKIND_DRAGOON=15, CKIND_HYDRA=16, CKIND_DEDEDE=18, CKIND_METAKNIGHT=19) out to the edges of each row for visual balance, then interleaves the two rows. The test is `(byte)(ckind - 0xf) < 2 || ckind == 0x12 || ckind == 0x13`.
 
-In grid mode, the function includes special handling for "special" characters (CKIND_DRAGOON=15, CKIND_HYDRA=16, CKIND_DEDEDE=18, CKIND_METAKNIGHT=19). It checks `(byte)(ckind - 0xf) < 2 || ckind == 0x12 || ckind == 0x13` and moves matching characters to the edges of each row for visual balance, then interleaves the two rows.
+### CharacterKind to MachineKind Mapping
 
-### CharacterKind ↔ MachineKind Mapping
+CharacterKind (20 entries, `menu.h`) maps to MachineKind/VCKIND (26 entries) through the `CharacterDesc` table at `0x80495814`, 3 bytes per entry (`rider_kind`, `is_bike`, `machine_kind`). `Character_GetDesc` (0x8000b9dc) returns `ckind * 3 + 0x80495814`.
 
-CharacterKind (20 entries, in `menu.h`) maps to MachineKind (26 entries) via `CharacterDesc` (table at `0x80495814`, 3 bytes per entry). `Character_GetDesc` (0x8000b9dc) returns `ckind * 3 + 0x80495814`.
+Six VCKINDs have no CharacterKind and are city-spawn or transformation only: FREE, STEER, WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE.
 
-6 machines have no CharacterKind and are city-spawn-only: FREE, STEER, WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE.
+#### Bike-relative indexing
 
-#### Bike-Relative Indexing
-
-For non-bikes (`is_bike=0`), `CharacterDesc.machine_kind` IS the MachineKind/VCKIND directly. For bikes (`is_bike=1`), `machine_kind` is a **bike-relative index** — the actual VCKIND is `VCKIND_WHEELNORMAL(19) + machine_kind`.
+For non-bikes (`is_bike = 0`), `CharacterDesc.machine_kind` **is** the VCKIND. For bikes (`is_bike = 1`), `machine_kind` is a **bike-relative index** and the real VCKIND is `VCKIND_WHEELNORMAL (19) + machine_kind`. Use `CharacterDesc_GetMachineKind()` (inline in `menu.h`) rather than reading the field directly.
 
 | CharacterKind | is_bike | desc.machine_kind | Actual VCKIND |
 |---|---|---|---|
@@ -123,17 +112,14 @@ For non-bikes (`is_bike=0`), `CharacterDesc.machine_kind` IS the MachineKind/VCK
 | CKIND_DEDEDE (18) | 1 | 5 | VCKIND_WHEELDEDEDE (24) |
 | CKIND_METAKNIGHT (19) | 0 | 18 | VCKIND_WINGMETAKNIGHT (18) |
 
-Use `CharacterDesc_GetMachineKind()` (inline in `menu.h`) to get the correct VCKIND from a CharacterDesc; `gate_machines.c` calls it.
-
 ### Vanilla Availability Logic
 
-#### AirRide_CheckCharacterAvailable (0x8002090c)
+`AirRide_CheckCharacterAvailable` (0x8002090c) switches on CharacterKind:
 
-Switch on CharacterKind:
-- `case 0` (CKIND_COMPACT): **always returns 0** — Compact Star never appears in vanilla
+- `case 0` (CKIND_COMPACT): **always returns 0** — Compact Star never appears in vanilla Air Ride
 - `case 1` (CKIND_WARP): **always returns 1** — Warp Star always available
 - `case 15, 16, 17` (DRAGOON, HYDRA, FLIGHT): **always returns 0** — City Trial-only
-- All others: map to an Air Ride checklist reward index, check via `ClearChecker_CheckUnlocked`
+- All others: map to an Air Ride checklist reward index and query it (`Checklist_IsCacheValid` 0x8007b650 → `Checklist_CheckCachedUnlock_AirRide` 0x80007e34, else `ClearChecker_CheckUnlocked` 0x80049e24)
 
 | CharacterKind | Reward Index |
 |---|---|
@@ -153,56 +139,62 @@ Switch on CharacterKind:
 | CKIND_DEDEDE (18) | 0x20 (32) |
 | CKIND_METAKNIGHT (19) | 0x21 (33) |
 
-#### TitleScreen_CheckMachineUnlocked (0x8000c364) / TitleScreen_SelectRandomMachine (0x8000daa0)
+#### Title-screen demo machine pick
 
-**Title-screen demo only.** `TitleScreen_SelectRandomMachine` loops CharacterKinds 0–17 (excludes CKIND_DEDEDE/CKIND_METAKNIGHT), skips the 4 most recently assigned CKinds (history at `gd[0x1d]–gd[0x20]`), lets Warp Star (ckind 1) bypass the unlock check, and gates the rest through `TitleScreen_CheckMachineUnlocked` (takes `machine_class`/is_bike and `machine_id`, returns 0 for unknown IDs). The call chain is `TitleScreen_MinorExit` → `TitleScreen_SetupDemoMachines` (0x8000dbe8) → `TitleScreen_SelectRandomMachine` → `TitleScreen_CheckMachineUnlocked`, with no other callers; none of it runs for CPUs in real Air Ride races.
+`TitleScreen_SelectRandomMachine` (0x8000daa0) loops CharacterKinds 0–17 (excluding CKIND_DEDEDE/CKIND_METAKNIGHT), skips the 4 most recently assigned CKinds (history at `gd[0x1d]`–`gd[0x20]`), lets Warp Star (ckind 1) bypass the unlock check, and gates the rest through `TitleScreen_CheckMachineUnlocked` (0x8000c364; takes `machine_class`/is_bike and `machine_id`, returns 0 for unknown IDs). The only call chain is `TitleScreen_MinorExit` → `TitleScreen_SetupDemoMachines` (0x8000dbe8) → `TitleScreen_SelectRandomMachine` → `TitleScreen_CheckMachineUnlocked`. None of it runs for CPUs in real Air Ride races.
 
-#### Real in-game CPU machine pick (`loadCPU`, 0x80023600)
+#### In-game CPU machine pick (loadCPU)
 
-The actual Air Ride CPU machine is chosen in `loadCPU` (and the sibling ready-screen / setup paths at 0x80026534 and 0x8002988c). Each does `idx = HSD_Randi(gd[0x16f]); icon[slot] = idx; machine[slot] = gd[0x170 + idx]`, where `gd[0x16f]` is the count of unlocked characters and `gd[0x170..]` is the gated available-character list built by `AirRide_PopulateSelectIcons` (via the `AirRide_CheckCharacterAvailable` replacement). So vanilla already picks a random **unlocked** machine here — the mod only needs the available list gated, which it already does. (CPU color is gated separately via the `color[]` validation hooks; see `gate-colors.md`.)
+The actual Air Ride CPU machine is chosen in `loadCPU` (0x80023600) and the sibling ready-screen / setup paths at 0x80026534 and 0x8002988c. All three run the identical sequence against the per-slot base `GameData + 0x10a + slot`:
 
-## Air Ride Select Data
+```
+idx = HSD_Randi(gd[0x16f]);       // count of available characters
+icon[slot]        = idx;          // slot base +0x2d  (GameData 0x137)
+machine_kind[slot] = gd[0x170 + idx]; // slot base +0x61  (GameData 0x16b)
+```
 
-Base: `GameData + 0x10a` (`airride_select_ply`)
+`gd[0x16f]` / `gd[0x170..]` are the count and body of the available-character list built by `AirRide_PopulateSelectIcons`, which is itself filtered by `AirRide_CheckCharacterAvailable`. So vanilla already picks a random **unlocked** machine here — gating the available list is sufficient, no separate CPU hook is needed for the machine.
 
-### Per-Slot Fields
+`CSS_airRide_RaceUpdate` runs the inverse lookup around 0x80029700–0x8002978c: given a slot's `machine_kind` (+0x61) it scans the available list for the matching entry and writes that index back to `icon[]` (+0x2d), falling back to the entry whose value is 1 (Warp Star).
 
-All per-slot fields have 4 entries (slots 0–3). Offsets are from GameData.
+### Air Ride Select Data
 
-| Field | Offset | Per-slot stride | Purpose |
-|-------|--------|----------------|---------|
-| `p_kind[4]` | 0x133 | +1 | Player kind (human/CPU/none) |
-| `icon[4]` | 0x137 | +1 | CSS machine icon display color |
-| `color[4]` | 0x15b | +1 | **Actual in-game Kirby color** (L/R cycling target) |
+The struct starts at `GameData + 0x108` (`airride_select_ply` in `game.h`), but all the CSS code addresses it through a base register holding `GameData + 0x10a`, and adds the player slot to that base. Both offset forms appear below. Note the CSS's fields run past `airride_select_ply`'s nominal end at 0x15f into the bytes `game.h` labels as `topride_select_ply`'s 0x160 header — 0x16b/0x16f/0x170 are Air Ride CSS state (`loadCPU` reads them through the 0x10a base), not Top Ride state.
 
-Other relevant fields (offsets relative to base at 0x10a):
+Per-slot fields (4 entries each, slots 0–3):
 
-| Offset | Purpose |
-|--------|---------|
-| +0x00 (0x10a) | First byte of select struct |
-| +0x01 (0x10b) | Init trigger flag |
-| +0x03 (0x10d) | State flag (init vs active path) |
-| +0x09 | Rendering state (0=inactive, 2=active) |
-| +0x25 | Player identity mapping (slot → player) |
-| +0x2d | Icon color (from machine-to-color lookup) |
-| +0x31 | Secondary color field |
-| +0x45 | CSS state (0=active human, 2=CPU needing random, 3=inactive) |
-| +0x4d | Per-identity state |
-| +0x51 | `color[]` — actual Kirby color |
-| +0x55 | Field initialized to 8 |
-| +0x59 | Field initialized to 8 |
-| +0x5d | Field initialized to 2 |
-| +0x61 | Machine kind |
-| +0x65 | Number of available colors |
-| +0x66 | Machine-to-color mapping table |
+| Field | GameData offset | CSS base offset | Purpose |
+|-------|-----------------|-----------------|---------|
+| `p_kind[4]` | 0x133 | +0x29 | Player kind (human/CPU/none) |
+| `icon[4]` | 0x137 | +0x2d | Index into the available-character list (which icon the slot has selected) |
+| `color[4]` | 0x15b | +0x51 | **Actual in-game Kirby color** (L/R cycling target) |
 
-**Critical**: `icon[]` and `color[]` are separate fields. `color[]` determines the actual in-game Kirby color. `icon[]` controls only the CSS display. See `gate-colors.md` § The Two Color Fields.
+Other fields, by offset from the CSS base (`GameData + 0x10a`):
+
+| Offset | GameData | Purpose |
+|--------|----------|---------|
+| +0x00 | 0x10a | First byte of select struct |
+| +0x01 | 0x10b | Init trigger flag (0xFF = run init block) |
+| +0x03 | 0x10d | State flag (init vs active path) |
+| +0x09 | 0x113 | Rendering state (0 = inactive, 2 = active) |
+| +0x25 | 0x12f | Player identity mapping (slot → player) |
+| +0x31 | 0x13b | Copy of `icon[]` taken during the CSS update |
+| +0x45 | 0x14f | CSS state (0 = active human, 2 = CPU needing random, 3 = inactive) |
+| +0x4d | 0x157 | Per-identity state |
+| +0x55 | 0x15f | Initialized to 8 |
+| +0x59 | 0x163 | Initialized to 8 |
+| +0x5d | 0x167 | Initialized to 2 |
+| +0x61 | 0x16b | Machine kind (VCKIND) |
+| +0x65 | 0x16f | Count of available characters |
+| +0x66 | 0x170 | Available-character list (CKIND bytes, `gd[0x16f]` entries) |
+| +0x7a | 0x184 | Icon layout flag (1 = grid, 0 = linear strip) |
+| +0x7b | 0x185 | When 1, `CSS_airRide_colorChanger` treats every color as available |
+
+**`icon[]` and `color[]` are separate fields.** `color[]` is the value that becomes the in-game Kirby color and is what L/R cycles. `icon[]` is the select-grid index and is never copied into `color[]`.
 
 ## City Trial CSS (Minor 10)
 
-### Architecture
-
-The City Trial CSS is dispatched from `CitySelect_MinorLoad`, which checks `Gm_GetCityMode()` to determine the sub-mode:
+`CitySelect_MinorLoad` checks `Gm_GetCityMode()` and dispatches to a sub-loader:
 
 | CityMode | Value | Sub-loader |
 |----------|-------|-----------|
@@ -229,9 +221,9 @@ The City Trial CSS is dispatched from `CitySelect_MinorLoad`, which checks `Gm_G
 | `CitySelect_LoadMachineSelect` | 0x8003a904 | 0x9bc | Machine selection (Free Run) |
 | `CitySelect_GetColorAnimFrame` | 0x80009630 | 0x28 | Animation frame for color display |
 
-## City Trial Select Data
+### City Trial Select Data
 
-Base: `GameData + 0x1d0` (`city_select_ply`)
+Base: `GameData + 0x1d0` (`city_select_ply`).
 
 | Field | Offset | Purpose |
 |-------|--------|---------|
@@ -247,7 +239,7 @@ Base: `GameData + 0x1d0` (`city_select_ply`)
 | `ply_color[4]` | 0x221 | **Kirby color** |
 | `ply_hmn_handicap[4]` | 0x225 | Human handicap setting |
 | `ply_cpu_handicap[4]` | 0x229 | CPU handicap setting |
-| `ply_cpu_level[4]` | 0x22d | CPU level |
+| `ply_cpu_level[4]` | 0x22d | CPU level (0..8, displayed 1..9) |
 | `ply_icon_ckind[4]` | 0x231 | CharacterKind of selected icon |
 | `machine_select.num` | 0x235 | Number of selectable machines |
 | `machine_select.c_kind_arr[20]` | 0x236 | Array of selectable CharacterKind indices |
@@ -256,39 +248,22 @@ Base: `GameData + 0x1d0` (`city_select_ply`)
 
 Top Ride has a simpler select screen that handles both course and player selection.
 
-### Function Table
-
 | Function | Address | Size | Purpose |
 |----------|---------|------|---------|
 | `TopRide_PreGameThink` | 0x8002c06c | 0xa14 | Course/character selection |
 | `TopRide_OnCourseSelect` | 0x8002cc30 | 0x3a8 | Course selection callback |
+| `TopRide_CSS_PanelThink` | 0x8002b8a8 | 0x7c4 | Bottom-panel editor (CPU level, handicap, control type) |
 | `CSS_topRide_colorChanger` | 0x8002a400 | 0x230 | L/R color cycling |
 
-### Top Ride Select Data
-
-Base: `GameData + 0x160` (`topride_select_ply`)
-
-| Field | Offset | Purpose |
-|-------|--------|---------|
-| `color[4]` | 0x1ba | Kirby color per player |
-
-Course selection: `GameData.topride_selected_course` at offset 0x374.
+Select data base: `GameData + 0x160` (`topride_select_ply`); `color[4]` at 0x1ba, `panel_cpu_level[4]` at 0x1be, `panel_handicap[4]` at 0x1c2, `panel_machine[4]` at 0x1c6. Course selection lives outside the struct in `GameData.topride_selected_course` at 0x374.
 
 ## Common Patterns
 
 ### Input Grabbers
 
-Each CSS has dedicated input grabber functions called per-player per-frame from the CSS Think callback. These handle:
-- Controller port detection and player join/leave
-- D-pad/stick navigation for machine selection
-- A/B button confirm/cancel
-- L/R button color cycling (delegated to colorChanger functions)
-
-Air Ride has separate grabbers for different CSS states: main selection, vehicle choice, ready screen, and Free Run mode.
+Each CSS has dedicated input-grabber functions called per player per frame from its Think callback. They handle controller port detection and join/leave, D-pad/stick navigation, A/B confirm/cancel, and delegate L/R to the colorChanger. Air Ride splits them by CSS state: main selection, vehicle choice, ready screen, and Free Run.
 
 ### Color Cycling
-
-All three modes use dedicated `colorChanger` functions called from their input paths:
 
 | Mode | Function | Address |
 |------|----------|---------|
@@ -296,7 +271,7 @@ All three modes use dedicated `colorChanger` functions called from their input p
 | Top Ride | `CSS_topRide_colorChanger` | 0x8002a400 |
 | City Trial | `CitySelect_ChangeColor` | 0x8002f238 |
 
-Each handles L/R button input to cycle through colors 0–7. Colors 0–3 go through a vanilla unlock check; colors 4–7 are always available in vanilla. The mod hooks all three to gate colors against the AP unlock mask. See `gate-colors.md` § All Hook Sites.
+Each cycles the slot's `color[]` through 0–7 and then runs an availability check on the candidate. In vanilla, **colors 0–3 are unconditionally available** (`li r3, 1`) and **colors 4–7 are checklist rewards** — reward indices 15, 16, 17, 18 respectively, queried through the same `Checklist_IsCacheValid` / `ClearChecker_CheckUnlocked` pair the machine check uses. All the branches merge at a single convergence point per function (Air Ride 0x8002176c, Top Ride 0x8002a510, City Trial 0x8002f350), which is where the mod's mask override attaches.
 
 ### CPU Level / Handicap Bar Widget
 
@@ -305,17 +280,17 @@ The per-player **CPU difficulty** and **handicap** selectors are drawn as a **se
 | Mode | Notches | Internal value | Field |
 |------|---------|----------------|-------|
 | City Trial / Air Ride | **9** | `cpu_level` 0..8 (display 1..9) | `ply_cpu_level` (GameData+0x22d) |
-| Top Ride | **5** | `panel_cpu_level` 0..4 (display 1..5) | `panel_cpu_level` (GameData+0x1be) → committed via `TopRide_SetCpuLevel` |
+| Top Ride | **5** | `panel_cpu_level` 0..4 (display 1..5) | `panel_cpu_level` (GameData+0x1be) → committed via `TopRide_SetCpuLevel` (0x8000be74) |
 
 #### City Trial / Air Ride render path
 
 `CSS_SetBarLevel` (0x80135694) is the generic entry every City Trial bar caller uses; it forwards to `CSS_SetBarLevel_Impl` (0x8015ca8c). Signature `(slot, bar_kind, level)`:
 
-- `bar_kind` selects the bar within `bar_gobj[slot]` (CT scene struct +0x7e8): `0` = handicap, `1` = cpu-level. The "filled" texture frame for each bar kind comes from a 3-byte table (byte +2) at an SDA global.
+- The bar GObj is `bar_gobj[slot][bar_kind]` at CT scene struct `+0x7e8` (`slot * 8 + bar_kind * 4`). `bar_kind` `0` = handicap, `1` = cpu-level. The "filled" texture frame per bar kind is byte +2 of a 3-byte-stride table at `0x805d6978` (r13 − 0x6768).
 - The worker walks the bar GObj's **fixed array of 9 notch JOBJs** (user-data +0x14 … +0x34, stride 4), lighting notches `0..level` with the filled frame and blanking `level+1..8`.
 - The element count is **hardcoded to 9**: `cmpwi r27,8` @ 0x8015cb44 (sibling bounds at 0x8015cbd8 and 0x8015cd3c, plus helper 0x80135f44). The fill loop runs `while r27 <= level`, so **`level > 8` indexes past the 9-JOBJ array → out-of-bounds write (crash/corruption)**, not a cosmetic glitch.
 
-The render is gated on the slot being a CPU (`ply_pkind` == CPU); see the `CSS_SetBarLevel` call sites in `CitySelect_InputUpdate` and `CitySelect_PlayerThink`. Air Ride uses the identical per-player menu struct (`AirRideSelectMenuData`, with `cpu_level_text_j`/`level_bar_pos_j`) and the same 1–9 display, via its own parallel renderer.
+The render is gated on the slot being a CPU (`ply_pkind` == CPU); see the `CSS_SetBarLevel` call sites in `CitySelect_InputUpdate` and `CitySelect_PlayerThink`. Air Ride uses the identical per-player menu struct (`AirRideSelectMenuData`, with `cpu_level_text_j` / `level_bar_pos_j`) and the same 1–9 display, through its own parallel renderer.
 
 #### Top Ride input + render path
 
@@ -328,17 +303,17 @@ Both editing and rendering happen in `TopRide_CSS_PanelThink` (0x8002b8a8), the 
 
 The bar does **not** auto-scale with the cap — the notch models are fixed art in the menu archives (`MnSelplyctAll.dat` / `MnSelplyAll.dat` / `MnSelplym2dAll.dat`). Extending the maximum past 9 (CT/AR) or 5 (TR) needs **three coordinated changes**, per mode:
 
-1. **Input clamp** — raise the `<9` / `<5` guard (Top Ride: the `cmpwi r0,4` @ 0x8002bf8c; the City Trial / Air Ride clamp on `ply_cpu_level` is bounded ≤8 but is not yet pinned to a specific instruction). Trivial `REPLACEINSTRUCTION`.
+1. **Input clamp** — raise the `<9` / `<5` guard (Top Ride: the `cmpwi r0,4` @ 0x8002bf8c; the City Trial / Air Ride clamp on `ply_cpu_level` is bounded <= 8 but is not pinned to a specific instruction here). Trivial `REPLACEINSTRUCTION`.
 2. **Renderer loop bound(s)** — the hardcoded `8`/`9` (CT/AR: 0x8015cb44 and siblings) and Top Ride's baked `4` (clamp + `4−level` subfic + the TR notch helpers).
 3. **New art** — add notch JOBJ nodes to the menu archive and position them along the bar.
 
 Doing only #1 is **worse than nothing** — it is an out-of-bounds write. Steps 1+2 without 3 read past the JOBJ array.
 
-> **UI vs. behavior are decoupled.** The AI's difficulty is `difficulty_level` (CpuData+0x22, 0..8), set at `Rider_CPUInit` and read by `Rider_CPUDifficultyScale`; CT/AR `cpu_level` (0..8) maps to it **1:1**. Making CPUs *harder* therefore does not require extending the UI bar — remap the existing 1–9 / 1–5 selections onto a steeper internal curve, or drive behavior via the `custom_ai` presets. See `cpu-ai-system.md` § Influencing CPU Behavior.
+UI and behavior are decoupled: the AI's difficulty is `difficulty_level` (CpuData+0x22, 0..8), set at `Rider_CPUInit` and read by `Rider_CPUDifficultyScale`, and CT/AR `cpu_level` (0..8) maps onto it **1:1**. Making CPUs harder therefore does not require extending the UI bar — remap the existing 1–9 / 1–5 selections onto a steeper internal curve, or drive behavior through the `custom_ai` presets (`cpu-ai-system.md`).
 
-### Archive/Icon System
+### Archive / Icon System
 
-Select screen icons are rendered from HSD archive files using material animation:
+Select-screen icons are rendered from HSD archive files using material animation:
 
 | Archive | Purpose |
 |---------|---------|
@@ -348,37 +323,33 @@ Select screen icons are rendered from HSD archive files using material animation
 | `SisSelply.dat` | Air Ride system data |
 | `SisSelplyCt.dat` | City Trial system data |
 
-Archive data is loaded into `ScMenuSelect` (at `stc_menu_select`, 0x804962b0) which contains per-mode sub-structs with JOBJSet pointers and GObj arrays for all visual elements.
+Archive data is loaded into `ScMenuSelect` (at `stc_menu_select`, 0x804962b0), which holds per-mode sub-structs with JOBJSet pointers and GObj arrays for every visual element. The loaded `MnSelplyAll` archive pointer itself is cached at `0x805dd7bc` (r13 + 0x6dc, `stc_MnSelplyAll_archive` in `menu.h`).
 
-City Trial's archive (`MnSelplyctAll.dat`) likely has a Compact Star texture since Compact Star is the default City Trial machine. If the Air Ride archive lacks frame 0, the CT archive's texture could potentially be copied.
+#### MnSelplyAll archive structure
 
-#### MnSelplyAll Archive Structure
+`MnSelplyAll.dat` has 22 root symbols. The ones the icon system uses:
 
-The `MnSelplyAll.dat` archive (573 KB, 22 root symbols) is loaded from the game disc during menu initialization. Key symbols:
-
-| Symbol | Offset | Purpose |
-|--------|--------|---------|
+| Symbol | Data offset | Purpose |
+|--------|-------------|---------|
 | `ScMenSelplySicon_scene_models` | 0x040908 | Air Ride character icon model + material animation |
-| `ScMenSelplySicon2_scene_models` | 0x078250 | Alternate icon model (possibly City Trial mode) |
+| `ScMenSelplySicon2_scene_models` | 0x078250 | Alternate icon model |
 | `ScMenSelply_scene_data` | 0x0002a4 | Scene layout/camera data |
 
-The archive pointer is resolved during menu init via `AirRideSelect_Index` (0x801515f8):
-```c
-Archive_GetSymbols(archive, menu_data + 0x51c, "ScMenSelplySicon_scene_models", 0);
-```
+The Sicon pointer is resolved during menu init by `AirRideSelect_Index` (0x801515f8), which calls `Archive_GetSymbols(archive, menu_data + 0x51c, "ScMenSelplySicon_scene_models", 0)` — `+0x51c` is `ScMenSelplySicon_scene_models` inside `ScMenuCommon`'s player-select sub-struct.
 
-#### Scene Models Structure
+#### Scene models structure
 
-Each `scene_models` root is an indirect pointer: root data → scene_models structure:
+Each `scene_models` root is an indirect pointer to a 16-byte model group:
 
 ```
-+0x00: JObjDesc*           — model root
-+0x04: AnimJoint**          — skeletal animation banks (NULL for Sicon)
-+0x08: MatAnimJoint**       — material animation banks (texture swapping)
-+0x0C: ShapeAnimJoint**     — shape animation banks (NULL for Sicon)
++0x00: JObjDesc*          — model root
++0x04: AnimJoint**        — skeletal animation banks
++0x08: MatAnimJoint**     — material animation banks (texture swapping)
++0x0C: ShapeAnimJoint**   — shape animation banks
 ```
 
-For Sicon, the scene_models is at data offset 0x0408f8:
+For Sicon the group sits at data offset 0x0408f8:
+
 ```
 +0x00: 0x00035be8  → JObjDesc (model root)
 +0x04: 0x00000000  → no skeletal animation
@@ -386,9 +357,10 @@ For Sicon, the scene_models is at data offset 0x0408f8:
 +0x0C: 0x00000000  → no shape animation
 ```
 
-#### Icon Animation Pipeline
+#### Icon animation pipeline
 
-`_JObj_AddSetAnim` (0x80055a30) extracts animation from the scene_models:
+`_JObj_AddSetAnim` (0x80055a30) pulls the animation banks out of the model group:
+
 ```c
 void _JObj_AddSetAnim(JObj *jobj, int bank, void *scene_models) {
     AnimJoint *anim = scene_models[1] ? scene_models[1][bank] : NULL;
@@ -398,19 +370,21 @@ void _JObj_AddSetAnim(JObj *jobj, int bank, void *scene_models) {
 }
 ```
 
-The per-icon creation flow in `zz_80151644_` (0x80151644):
-1. `MainMenu_CreateGObj(**scene_models_ptr)` — create GObj from JObjDesc
-2. `GObj_AddProc(gobj, zz_801515d8_)` — add per-frame update callback
-3. `MainMenu_AddAnim(ckind_float, ..., jobj, scene_models_ptr)` — apply material animation at frame = CharacterKind value
+Per-icon creation in `zz_80151644_` (0x80151644):
 
-`MainMenu_AddAnim` → `JObj_AddSetAnim_SetFrameAndRate` (0x80138b10):
+1. `MainMenu_CreateGObj(**scene_models_ptr)` (0x80138934) — create GObj from JObjDesc
+2. `GObj_AddProc(gobj, zz_801515d8_)` (0x801515d8) — per-frame update callback
+3. `MainMenu_AddAnim(ckind_float, ..., jobj, scene_models_ptr)` (0x801389d8) — apply material animation at frame = CharacterKind value
+
+`MainMenu_AddAnim` forwards to `JObj_AddSetAnim_SetFrameAndRate` (0x80138b10):
+
 1. `HSD_JObjRemoveAnimAll()` — clear existing animation
-2. `_JObj_AddSetAnim(jobj, 0, scene_models)` — load bank 0 animation (MatAnimJoint)
+2. `_JObj_AddSetAnim(jobj, 0, scene_models)` — load bank 0 (the MatAnimJoint)
 3. `HSD_JObjReqAnimAllFlags()` — request animation update
-4. `JObj_SetAllAOBJRateByFlags(frame, ..., jobj, 0xffff)` — set frame to ckind value
-5. `HSD_JObjAnimAll_(jobj)` — apply animation (selects texture for that frame)
+4. `JObj_SetAllAOBJRateByFlags(frame, ..., jobj, 0xffff)` — set frame to the ckind value
+5. `HSD_JObjAnimAll_(jobj)` — apply, selecting the texture for that frame
 
-#### JObj Model Tree (Sicon)
+#### JObj model tree (Sicon)
 
 ```
 JObj@0x35be8 (root, container, no display)
@@ -419,49 +393,37 @@ JObj@0x35be8 (root, container, no display)
        └─ DObj 2: 32×32 RGB5A3 texture (decoration/frame)
 ```
 
-The 64×64 CMPR texture is the character icon. The MatAnimJoint (bank 0, at data offset 0x36bd0) controls which texture is displayed by swapping the material's texture image based on the animation frame value (= CharacterKind).
+#### Icon texture animation
 
-#### MatAnimJoint Structure
+Bank 0's MatAnimJoint tree drives the icon texture; the animation frame value (= CharacterKind) selects which image the material displays.
 
 ```
 MatAnimJoint root @0x36bd0: child=0x36bdc, next=NULL, matanim=NULL
-  └─ MatAnimJoint child @0x36bdc: (corresponds to child JObj with display objects)
-       └─ MatAnim → TexAnim with ImageDesc array and keyframes
+  └─ MatAnimJoint child @0x36bdc  (matches the child JObj carrying the display objects)
+       └─ MatAnim @0x36bb0
+            └─ TexAnim @0x36b98 (TEXMAP0, images=20, tluts=20)
+                 ├─ AOBJ @0x36908 — end frame 300.0, 2 FOBJ tracks
+                 │    ├─ FOBJ @0x368e0 track 1  (image index)
+                 │    └─ FOBJ @0x368f4 track 10 (TLUT index)
+                 ├─ ImageDesc[20] @0x36af8 — one 64×64 CMPR image per CharacterKind
+                 └─ TlutDesc[20]  @0x36b48 — 1-entry TLUT per image
 ```
 
-The TexAnim structure (within MatAnim) should contain:
-- `AObjDesc` with keyframes mapping frame values to image indices
-- `ImageDesc**` array of texture images (one per character)
-- `n_images` count
-
-**Open question:** whether frame 0 (CKIND_COMPACT) has a valid texture or is blank/missing. Resolving it needs the MatAnimJoint child at 0x36bdc → MatAnim → TexAnim enumerated for its texture images and keyframe mapping.
+There are 20 image slots, one per CharacterKind, and **every slot including index 0 (CKIND_COMPACT) points at distinct, non-blank pixel data** — index 0's image data is at archive data offset 0x36c00. The static (non-animated) TObj on the icon DObj points at the index-1 image (0x35c80). `MnSelplyctAll.dat`'s City Trial equivalent, `ScMenSelplySiconCt_scene_models` (data offset 0x05c008), carries a parallel 20-image TexAnim at 0x52298.
 
 ## Mod Hook Points
 
-The following mod systems intercept CSS behavior. Each is documented in its own file:
+The mod systems that intercept CSS behavior, each documented in its own file:
 
-### Color Gating (`gate-colors.md`)
+**Color gating (`gate-colors.md`)** — L/R cycling hooks on all 3 colorChanger convergence points; `color[]` init validation in both Air Ride CSS functions; a hook on the machine-to-list lookup that writes `icon[]`; `ValidateCityTrialColors` via `OnPlayerSelectLoad` (CT has no init block to hook).
 
-- L/R cycling hooks on all 3 colorChanger functions
-- `color[]` init validation in both Air Ride CSS functions
-- `icon[]` validation via machine-to-color lookup hook
-- `ValidateCityTrialColors` via `OnPlayerSelectLoad` (CT minor only — CT has no init block to hook)
+**Machine gating (`gate-machines.md`)** — `AirRide_CheckCharacterAvailable` REPLACEFUNC (which is what makes `loadCPU`'s gated `HSD_Randi` index respect the unlock mask); `TitleScreen_CheckMachineUnlocked` REPLACEFUNC for the title-screen demo only; a CT starting-machine convergence hook at `CitySelect_InitPlayerMachines` (0x8002dea0); CT Free Run hooks at `CitySelect_CreateMachineIcons` for counting (0x8002e5c0) and array-building (0x8002e738); CT Free Run select-list filtering in `OnPlayerSelectLoad`.
 
-### Machine Gating (`gate-machines.md`)
+**Stage gating (`gate-stages.md`)** — `AirRide_CheckCourseUnlocked` (0x8000c0e0) REPLACEFUNC gates Air Ride stage availability on the map select screen (`gate_airride_stages.c`).
 
-- `AirRide_CheckCharacterAvailable` REPLACEFUNC — gates the AR character list; this is what makes the in-game CPU machine pick (`loadCPU`'s gated `HSD_Randi` index) respect the unlock mask
-- `TitleScreen_CheckMachineUnlocked` REPLACEFUNC — gates the **title-screen demo** machine pick only (not real CPU gameplay)
-- CT starting machine: convergence hook at `CitySelect_InitPlayerMachines` (0x8002dea0) sets each active slot's machine per the Random Start Machine toggle
-- CT Free Run: hooks at `CitySelect_CreateMachineIcons` for counting (0x8002e5c0) and array-building (0x8002e738)
-- CT Free Run select list filtering via `GateMachines_FilterSelectList` in `OnPlayerSelectLoad`
+### Main-menu demo rider
 
-### Stage Gating (`gate-stages.md`)
-
-- `AirRide_CheckCourseUnlocked` (0x8000c0e0) REPLACEFUNC — gates Air Ride stage availability on the map select screen. Implemented in `gate_airride_stages.c`. See `gate-stages.md`.
-
-### Main-Menu Demo Rider (`main_menu.c`)
-
-The title screen runs a "demo player" setup at `0x8000d300` that configures slot 0's idle rider via a series of `Ply_Set*` calls. Three `li r4, imm` operands choose what's ridden; each is `REPLACEINSTRUCTION`'d at boot to swap the default Kirby-on-Warp-Star for Dedede-on-Wagon:
+The title screen runs a "demo player" setup at `0x8000d300` that configures slot 0's idle rider through a series of `Ply_Set*` calls. Three `li r4, imm` operands choose what is ridden; each is `REPLACEINSTRUCTION`'d at boot to swap the default Kirby-on-Warp-Star for Dedede-on-Wagon:
 
 | Address | Vanilla | Sets |
 |---------|---------|------|
@@ -469,4 +431,4 @@ The title screen runs a "demo player" setup at `0x8000d300` that configures slot
 | 0x8000d34c | `li r4, 0` | `Ply_SetIsBike(0, …)` |
 | 0x8000d358 | `li r4, 0` | `Ply_SetMachineKind(0, …)` (VCKIND) |
 
-`Ply_SetMachineKind` stores a class-relative index: star-class (`is_bike = 0`) uses the `VCKIND_*` value directly, wheel-class is relative to `VCKIND_WHEELNORMAL`. **The demo init calls `MachineStateChange` with hardcoded star-only state ids (82/89)**, so a wheel-class machine crashes here — keep `is_bike = 0` and pick a star machine.
+`Ply_SetMachineKind` stores a class-relative index: star-class (`is_bike = 0`) uses the `VCKIND_*` value directly, wheel-class is relative to `VCKIND_WHEELNORMAL`. The demo init calls `MachineStateChange` with hardcoded star-only state ids (82/89), so a wheel-class machine crashes here — keep `is_bike = 0` and pick a star machine.

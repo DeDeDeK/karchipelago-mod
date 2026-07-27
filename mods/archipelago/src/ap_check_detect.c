@@ -9,15 +9,12 @@
 #include "main.h"
 #include "ap_check_detect.h"
 
-// Detection for the Archipelago checklist's objectives. All sampling lives
-// here, in the two hooks below, because the checklist framework polls every
-// predicate each frame in every scene - a predicate is only ever a read of
-// state latched here.
+// Sampling for the Archipelago checklist's objectives. The framework polls every
+// predicate each frame in every scene, so a predicate is only ever a read of state
+// latched by the two hooks below.
 
-// Objectives observed this boot, one bit per APCheckKind. Transient - the
-// permanent record is ap_save->sent_checks, written by the framework the frame
-// after a predicate first returns true. The two objectives that count across
-// boots ("in total" / "3 times") read ap_save->checks instead.
+// Objectives observed this boot, one bit per APCheckKind. The two objectives that
+// count across boots read ap_save->checks instead.
 static u64 ap_observed;
 
 static void Observe(int ck)
@@ -42,15 +39,11 @@ int APCheckDetect_IsSet(int ck)
     }
 }
 
-// City Trial's coral: yakumono descriptor 33, of which GrCity1 places 10.
-// The count is read from the stage at runtime rather than hardcoded, matching
-// how the vanilla "break all coral" cell resolves Sky Sands' total.
+// Coral is yakumono descriptor 33.
 #define AP_CORAL_DESC_ID 33
 
-// Standing on the flower means standing on one of the tallest structures in the
-// city, on foot. Without the flower's own coordinates this approximates it as
-// "on foot, this high, and staying there" - the dwell requirement is what keeps
-// a dismount-and-fall through the same altitude from counting.
+// Proxy for the castle flower, whose coordinates are unknown: on foot, this high,
+// and staying there. The dwell keeps a dismount-and-fall from counting.
 #define AP_FLOWER_MIN_Y      400.0f
 #define AP_FLOWER_DWELL_FRAMES 30
 
@@ -59,9 +52,8 @@ int APCheckDetect_IsSet(int ck)
 
 #define AP_FEET_PER_METRE (1.0f / 0.3048f)
 
-// Per-City-Trial-run item objectives. Every one is a delta against a baseline
-// taken at the start of the run, so patches applied at round start and anything
-// collected in an earlier run don't count.
+// Per-City-Trial-run item objectives, counted as a delta against a baseline taken
+// at the start of the run.
 typedef struct RunItemCheck
 {
     u8 ck;
@@ -98,8 +90,8 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     int ply = rd->ply;
     PlayerStats *st = Ply_GetItemCollectArray(ply);
 
-    // Baseline on the first frame after the intro, so the round's starting
-    // patches are not read as a collection.
+    // Baseline after the intro, so the round's starting patches are not read as
+    // a collection.
     if (needs_baseline[ply])
     {
         if (Gm_GetIntroState() != GMINTRO_END)
@@ -119,9 +111,8 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
             Observe(run_item_checks[i].ck);
     }
 
-    // All Ups count across the whole save, so the frame delta folds into a
-    // persistent counter. Every pickup path bumps item_collect, including a
-    // patch spawned by an Archipelago item - a received All Up counts.
+    // All Ups count across the whole save. Every pickup path bumps item_collect,
+    // including a patch spawned by an Archipelago item.
     int allup = st->item_collect[ITKIND_ALLUP];
     if (allup > prev_allup[ply] && ap_save->checks.allup_collect_total < AP_ALLUP_TOTAL_NEED)
     {
@@ -131,13 +122,12 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     }
     prev_allup[ply] = allup;
 
-    // Coral: the whole stage's worth, broken by this player, this round.
     // yakumono_break is zeroed per game, so no baseline is needed.
     if (coral_total > 0 && st->yakumono_break[AP_CORAL_DESC_ID] >= coral_total)
         Observe(APCK_BREAK_ALL_CORAL);
 
-    // Out of bounds: the engine's own definition. Negative clearance is what
-    // makes Machine_CheckFallDeath respawn the player.
+    // Negative clearance is the engine's own out-of-bounds definition - what makes
+    // Machine_CheckFallDeath respawn the player.
     if (calcDistanceFromOOB(&rd->pos) < 0.0f)
         Observe(APCK_OUT_OF_BOUNDS);
 
@@ -161,8 +151,7 @@ void APCheckDetect_On3DLoadEnd(void)
     }
     coral_total = 0;
 
-    // City Trial rounds only. "In one game" means one CT Trial run, and every
-    // objective sampled per-frame is a city one.
+    // City Trial rounds only: "in one game" means one CT Trial run.
     if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
@@ -183,16 +172,15 @@ void APCheckDetect_On3DLoadEnd(void)
              attached, coral_total);
 }
 
-// Did this slot's result get recorded? Stadium_ComputeRank* skip slots whose
-// gate byte is nonzero, so their placement and time are stale.
+// Stadium_ComputeRank* skip slots whose gate byte is nonzero, leaving their
+// placement and time stale.
 static int SlotRecorded(const StadiumResults *r, int p)
 {
     return Ply_GetPKind(p) != PKIND_NONE && r->xc00[p] == 0;
 }
 
-// Any two finishers within AP_PHOTO_FINISH_FRAMES of each other. CPU racers
-// count: the latch loop copies all four slots unconditionally and the rankers
-// treat CPUs as players, which is what makes these objectives solo-achievable.
+// Any two finishers within AP_PHOTO_FINISH_FRAMES of each other. CPU racers count -
+// the rankers treat them as players, which makes these objectives solo-achievable.
 static int PhotoFinish(const StadiumResults *r)
 {
     for (int a = 0; a < 4; a++)
@@ -229,9 +217,8 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
 
         if (st >= STKIND_SINGLERACE1 && st <= STKIND_SINGLERACE9)
         {
-            // Stadium_ComputeRankByTime ranks players who never crossed the
-            // line too, ordering them by distance - so placement alone would
-            // hand 1st to whoever was leading when the round was abandoned.
+            // Stadium_ComputeRankByTime ranks players who never crossed the line
+            // too, ordering them by distance, so placement alone is not a win.
             if (!r->ply_finished[p] || r->ply_placement[p] != 0)
                 continue;
             Observe(APCK_SR1_FIRST + (st - STKIND_SINGLERACE1));
@@ -239,9 +226,8 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
                 continue;
             if (Ply_GetMachineKind(p) == VCKIND_BULK)
                 Observe(APCK_SR1_BULK);
-            // Ply_GetColor reads PlayerDesc.color, which is a KirbyColor only
-            // for a Kirby rider - City Trial is Kirby-only, but the stadiums
-            // are reachable from a Dedede match too.
+            // Ply_GetColor reads PlayerDesc.color, a KirbyColor only for a Kirby
+            // rider - the stadiums are reachable from a Dedede match too.
             if (Gm_GetGameData()->ply_desc[p].rider_kind == RDKIND_KIRBY &&
                 Ply_GetColor(p) == KIRBYCOLOR_PURPLE &&
                 ap_save->checks.purple_sr1_wins < AP_PURPLE_SR1_NEED)
@@ -276,9 +262,8 @@ void APCheckDetect_On3DExit(void)
 {
     GameData *gd = Gm_GetGameData();
 
-    // Stadium_ExitMinor skips the results latch for a replay (and for the
-    // title-screen demo, which can't reach here), leaving the previous round's
-    // values in the block.
+    // Stadium_ExitMinor skips the results latch for a replay, leaving the previous
+    // round's values in the block.
     if (gd->is_replay)
         return;
 

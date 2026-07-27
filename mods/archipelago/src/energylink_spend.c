@@ -20,7 +20,7 @@ static int Buy(OptionDesc *self)
     SpendEntry *entry = self->user_data;
 
     // Event-trigger items are gated by the event-unlock mask so energy can't fire
-    // an event out of logic. (item_id - AP_EVENT_BASE is the EventKind.)
+    // an event out of logic.
     if (entry->item_id >= AP_EVENT_BASE && entry->item_id < AP_EVENT_BASE + EVKIND_NUM)
     {
         int kind = entry->item_id - AP_EVENT_BASE;
@@ -42,8 +42,8 @@ static int Buy(OptionDesc *self)
         return 0;
     }
 
-    // Push onto the unprocessed queue so APItems_PerFrame applies it when
-    // the scene/intro gate allows - same path as items received from AP.
+    // Queue it so APItems_PerFrame applies it when the scene/intro gate allows -
+    // the same path as items received from AP.
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
         OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: queue full\n",
@@ -53,9 +53,9 @@ static int Buy(OptionDesc *self)
     }
     ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
 
-    // Withdraw the cost from both the send counter (exact integer, lands
-    // immediately so the client diffs it on its next poll in any scene - this is
-    // what makes menu purchases reach the pool) and the local balance (UI + gate).
+    // The integer cost lands on the send counter immediately so the client diffs
+    // it on the next poll in any scene - no gameplay frame runs in the menu to
+    // drive a per-frame flush. The balance decrement feeds the UI and the gate above.
     ap_data->energy_sent_total -= entry->cost;
     ap_data->energy_balance    -= entry->cost;
 

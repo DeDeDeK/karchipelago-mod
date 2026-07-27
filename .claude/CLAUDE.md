@@ -61,7 +61,9 @@ When reverse engineering game functions and discovering their purpose, **always*
 
 All comment-style rules live here. Keep comments short and minimal - state only what the reader needs, prefer no comment to an obvious one, and match the surrounding code's comment density.
 
+- **ASCII only.** No typographic ligatures or Unicode glyphs anywhere in source - no arrows, dashes, ellipses, or math symbols. Write `->`, `-`, `...`, `~`, `>=`. This applies to string literals too (`OSReport` output is an ASCII console).
 - **No decorations.** No banners, box art, or `====`/`----` rules, and no trailing dressing - not even on a one-line comment. Just `//` or `/* */` and the text.
+- **Minimal by default.** A comment earns its place by carrying information the code cannot. Delete restatements of the code, rationale for decisions no reader will question, and background that belongs in `docs/`. Struct-member comments are fine but stay to one short line.
 - **No section markers.** Don't use comments to label regions of a file or function (`// --- setup ---`, `// helpers below`); let the code's structure do that.
 - **Current-state only.** Say what the code does now and why it is shaped that way. No "how we got here" narration - no RE process, dated/"verified live" notes, past failed/"naive" attempts, or "used to be X" corrections.
 - **No references to other files.** A comment must stand on its own. Don't point at `docs/*.md` (no `see docs/foo.md`, section names, or `docs/*.csv`) or any other file - the target drifts independently and the pointer goes stale silently. State the fact inline.

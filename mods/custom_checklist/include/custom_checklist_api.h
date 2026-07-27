@@ -3,20 +3,19 @@
 
 #include "datatypes.h"
 
-// Custom Checklist - mod-owned checklist tabs alongside the three vanilla ones, folded
-// into the L/R tab rotation. A mod supplies the objectives, theme, and art. Import via
-// Hoshi_ImportMod and call Register from OnSaveLoaded (the framework boots after most mods).
+// Mod-owned checklist tabs alongside the three vanilla ones, folded into the L/R tab
+// rotation. Import via Hoshi_ImportMod and call Register from OnSaveLoaded - the
+// framework boots after most mods.
 
 #define CUSTOM_CHECKLIST_MOD_NAME  "custom_checklist"
 #define CUSTOM_CHECKLIST_API_MAJOR 1
 #define CUSTOM_CHECKLIST_API_MINOR 1
 
-// Valid clear_kind range for a check: [0, CC_CLEAR_KIND_NUM). A tab may define any
-// subset of cells; undefined cells render blank.
+// Grid cells. A tab may define any subset; undefined cells render blank.
 #define CC_CLEAR_KIND_NUM 120
 
-// One checklist cell. is_complete is polled every frame until it first returns nonzero,
-// then the cell is recorded and animated.
+// is_complete is polled every frame until it first returns nonzero, then the cell is
+// recorded and animated.
 typedef struct CustomCheck
 {
     int clear_kind;           // grid cell index, [0, CC_CLEAR_KIND_NUM)
@@ -24,53 +23,44 @@ typedef struct CustomCheck
     int (*is_complete)(void); // nonzero once satisfied
 } CustomCheck;
 
-// Descriptor passed to Register. The framework copies the struct but keeps the
-// pointers it holds (name, checks, label/symbol strings) - pass static data.
+// Copied by Register, but the pointers it holds (name, checks, label/symbol strings)
+// are kept - pass static data.
 typedef struct CustomChecklistDesc
 {
     const char *name;        // identification / logging (e.g. "Archipelago")
 
-    // Tab tint. The framework retints City Trial's green tab onto this hue: the
-    // dominant channel sets the hue, the channel ratios set the saturation.
-    // (0,0,0) keeps CT's green.
+    // Tab tint: the dominant channel sets the hue, the channel ratios the saturation.
+    // (0,0,0) keeps City Trial's green.
     u8 theme_r;
     u8 theme_g;
     u8 theme_b;
 
-    // Tab artwork (optional). HSD archive staged to the FST root (base name, no
-    // extension) exporting two _HSD_ImageDesc publics. NULL tex_file keeps CT's
-    // borrowed art.
+    // Optional tab artwork: an HSD archive staged to the FST root (base name, no
+    // extension) exporting two _HSD_ImageDesc publics. NULL keeps CT's borrowed art.
     const char *tex_file;       // e.g. "ApChecklistTex"
     const char *banner_symbol;  // 248x128 RGB5A3 banner image-desc public
     const char *emblem_symbol;  // 40x40 I4 emblem image-desc public
 
-    // Objectives (static table; kept by pointer).
-    const CustomCheck *checks;
+    const CustomCheck *checks;  // static table, kept by pointer
     int check_num;
 
-    // Persistence (OPTIONAL - leave both NULL and the framework persists the tab in its
-    // own save, keyed by `name`). Provide both only when the mod must own where a
-    // completion is stored; a half-provided pair falls back to framework persistence.
-    //   is_recorded(clear_kind)     -> nonzero if already completed (out-of-range: 1).
-    //   record_complete(clear_kind) -> mark recorded; called on first completion.
-    int  (*is_recorded)(int clear_kind);
-    void (*record_complete)(int clear_kind);
+    // Optional persistence pair; leave both NULL and the framework persists the tab in
+    // its own save, keyed by `name`. A half-provided pair falls back to that too.
+    int  (*is_recorded)(int clear_kind);     // nonzero if already completed (out-of-range: 1)
+    void (*record_complete)(int clear_kind); // mark recorded, on first completion
 
-    // Optional completion cue, called once on first completion whichever side persists -
-    // the seam to raise a mod-specific notification without owning storage. NULL => none.
+    // Optional cue, called once on first completion whichever side persists.
     void (*on_complete)(int clear_kind);
 
-    // Optional readiness gate: evaluation no-ops until this returns nonzero (e.g.
-    // save loaded, dependent APIs resolved). NULL => always ready.
+    // Optional gate: evaluation no-ops until this returns nonzero. NULL = always ready.
     int  (*is_ready)(void);
 } CustomChecklistDesc;
 
-// API published via Hoshi_ExportMod for other mods to consume.
+// Published via Hoshi_ExportMod.
 typedef struct CustomChecklistAPI
 {
-    // Register a checklist tab. Returns the assigned checklist mode index
-    // (>= GMMODE_NUM) or -1 on failure. Pass this returned mode whenever the mod's
-    // record path routes through the engine (e.g. ClearChecker_SetNewUnlock).
+    // Returns the assigned checklist mode index (>= GMMODE_NUM) or -1 on failure. Pass
+    // that mode to any engine record path the tab uses (e.g. ClearChecker_SetNewUnlock).
     int (*Register)(const CustomChecklistDesc *desc);
 } CustomChecklistAPI;
 

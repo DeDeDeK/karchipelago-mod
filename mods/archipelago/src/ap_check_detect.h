@@ -1,9 +1,9 @@
 #ifndef ARCHIPELAGO_AP_CHECK_DETECT_H
 #define ARCHIPELAGO_AP_CHECK_DETECT_H
 
-// clear_kind of every Archipelago checklist objective. The numbering is a
-// cross-repo wire contract - the AP location code is 361 + clear_kind - so an
-// entry may only be renumbered together with APLocation in the apworld.
+// clear_kind of every Archipelago checklist objective. The numbering is a cross-repo
+// wire contract - the AP location code is 361 + clear_kind - so an entry may only be
+// renumbered together with APLocation in the apworld.
 typedef enum APCheckKind
 {
     APCK_CASTLE_FLOWER,     // 0
@@ -40,9 +40,8 @@ typedef enum APCheckKind
     APCK_NUM,
 } APCheckKind;
 
-// Has this objective been achieved? The AP checklist's predicates are one call
-// to this each; it reads only latched state, so it is safe to poll every frame
-// in any scene.
+// Has this objective been achieved? Reads only latched state, so it is safe to
+// poll every frame in any scene.
 int APCheckDetect_IsSet(int ck);
 
 // Attaches the per-frame sampler to every human rider (City Trial rounds only)

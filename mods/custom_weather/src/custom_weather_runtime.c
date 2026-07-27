@@ -1,7 +1,6 @@
-// Per-frame customization runtime for custom_weather: applies each active preset's
-// optional CustomPresetDef layers and ticks the effect modules (rain, lightning,
-// wind, hail, puddles), hooked immediately after Sky_Update so its writes layer on
-// top of the per-frame sky state rather than being clobbered.
+// Applies the active preset's optional CustomPresetDef layers and ticks the effect
+// modules. Hooked immediately after Sky_Update so its writes layer on top of the
+// per-frame sky state rather than being clobbered.
 
 #include "os.h"
 #include "game.h"
@@ -12,9 +11,8 @@
 
 #include "custom_weather.h"
 
-// `grobj` is reused across CT exit/re-entry (same pointer), so it's not a
-// reliable freshness signal. GrObj.fade_slot_id is a fresh integer on every
-// entry (ScreenFade_Alloc uses an incrementing counter), so we use that.
+// `grobj` is reused across CT exit/re-entry, so it can't signal a fresh entry.
+// GrObj.fade_slot_id can: ScreenFade_Alloc hands out an incrementing id per entry.
 static GrObj *s_last_grobj = 0;
 static u32 s_last_slot_id = 0;
 
@@ -69,16 +67,15 @@ static void ApplyTerrainTint(const CustomPresetDef *def)
                       : s_orig_terrain_hw_color;
 }
 
-// CT's ambient LOBJ (slot 8) is full white and is what's keeping unlit faces
-// fully bright when only the directional sun is dimmed. Tint or restore it
-// here. The slot pointer is resolved lazily because the HW slot table is
-// populated by GX rendering, which lags our per-frame think hook by a frame.
+// CT's ambient LOBJ (slot 8) is full white, so it keeps unlit faces bright when
+// only the directional sun is dimmed. The slot pointer resolves lazily: the HW
+// slot table is populated by GX rendering, which lags the think hook by a frame.
 static void ApplyAmbientTint(const CustomPresetDef *def)
 {
     if (!s_ambient_lobj)
         s_ambient_lobj = stc_lobj_hw_slot_table[HSD_LOBJ_HW_SLOT_AMBIENT];
     if (!s_ambient_lobj)
-        return; // not yet populated; we'll retry on the next preset change
+        return; // not yet populated; retried later
 
     if (!s_ambient_cached)
     {
@@ -94,10 +91,7 @@ static void ApplyAmbientTint(const CustomPresetDef *def)
                                    : s_orig_ambient_hw_color;
 }
 
-// Map a preset's WeatherFogCurve to a GXFogType. CT always loads
-// GX_FOG_PERSP_LIN, so "inherit"/"linear" both resolve to it - we write an
-// absolute value every preset change rather than caching a prior (possibly
-// already-modified) type, which keeps it leak-proof across CT re-entry.
+// CT always loads GX_FOG_PERSP_LIN, so inherit and linear both resolve to it.
 static u32 FogCurveToGX(u32 curve)
 {
     switch (curve)
@@ -124,8 +118,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     if (!grobj)
         return;
 
-    // The fog/sky levers below are City-Trial weather features; leave every
-    // other mode's fog untouched.
+    // City Trial only; every other mode keeps its own fog and sky.
     if (grobj->gr_kind != GR_CITY1)
         return;
 
@@ -162,8 +155,8 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         Moon_SetActive(s_active_def ? &s_active_def->moon : 0);
         Star_SetActive(s_active_def ? &s_active_def->stars : 0);
 
-        // Drive the lbfade slot-3 overlay (the global "darken everything" path):
-        // Sky_BeginFade lerps to the target tint over 30 frames and holds.
+        // Sky_BeginFade lerps the lbfade slot-3 overlay to the tint over 30
+        // frames, then holds it.
         if (grobj->fade_slot_id && s_active_def && s_active_def->screen_tint)
         {
             u32 tint = s_active_def->screen_tint;
@@ -189,15 +182,13 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     }
     else if (s_active_def && s_active_def->char_ambient && !s_ambient_lobj)
     {
-        // Ambient slot wasn't populated when the preset first activated
-        // (HW slot table lags think by a frame on the very first frame of CT).
-        // Retry until it resolves, then apply once and stop.
+        // The HW slot table lags think by a frame on the first CT frame; retry
+        // until the ambient slot resolves, then apply once and stop.
         ApplyAmbientTint(s_active_def);
     }
 
-    // Global Fog Distance multiplier - written every frame (cheap) so a live
-    // menu change takes effect immediately and it covers vanilla presets too.
-    // Sky_Update leaves HSD_Fog.scale at 1.0, so we own this field.
+    // Sky_Update leaves HSD_Fog.scale at 1.0, so this field is ours. Written every
+    // frame so a live menu change lands immediately, vanilla presets included.
     if (fog)
         fog->scale = CustomWeather_GetFogScale();
 
@@ -214,9 +205,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     Star_Tick();
 }
 
-// Hook at 0x800ce648 (immediately after `bl Sky_Update`). Prologue copies
-// r31 (= grobj, callee-saved across the bl) into r3 for our C arg. Trampoline
-// then runs the original `lwz r0, 4(r31)` and branches back to 0x800ce64C.
+// Immediately after `bl Sky_Update`; r31 = grobj, callee-saved across the bl.
 CODEPATCH_HOOKCREATE(0x800ce648,
                      "mr 3, 31\n\t",
                      CustomWeatherRuntime_Tick,

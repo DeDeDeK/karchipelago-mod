@@ -1,8 +1,6 @@
 # Machine Charge System
 
-## Overview
-
-The charge system is the core mechanic of Kirby Air Ride machines (stars/bikes/etc.). The player holds A to charge while grounded, then releases to boost. This document covers the vanilla charge mechanics and how EnergyLink interacts with them.
+The charge system is the core mechanic of Kirby Air Ride machines (stars/bikes/etc.): the player holds A to charge while grounded, then releases to boost. This covers the 3D-mode (`MachineData`) charge engine. Top Ride has its own, unrelated charge component with different fields and a per-frame decay branch.
 
 ## Key Data Fields (MachineData)
 
@@ -33,7 +31,7 @@ These are distinct: the stat affects how fast the meter fills, the value is the 
 
 ## Charge Lifecycle
 
-### 1. Entering Charge State
+### Entering charge state
 
 ```
 Player holds A
@@ -47,7 +45,7 @@ Player holds A
           → MachineStateChange to state 0xF
 ```
 
-### 2. Per-Frame Charge Accumulation
+### Per-frame charge accumulation
 
 While in the charge state, the machine's physics function is `MachinePhys_Charge` (0x801EF364):
 
@@ -95,7 +93,7 @@ md->0x798 = charge_value;
 //    set md+0xC32 bit 0x08 ("charging in progress" marker).
 ```
 
-### 3. Charge Hold
+### Charge hold
 
 While held at full charge, `Machine_ChargeUpdate` (0x801CA4C0) decrements the timer at 0x790. When it reaches 0, the charge auto-discharges:
 
@@ -116,7 +114,7 @@ if (md->0x790 != 0) {
 }
 ```
 
-### 4. Charge Release (Boost)
+### Charge release (boost)
 
 When the player releases A:
 ```
@@ -128,7 +126,7 @@ AS_StarChargeRelease (0x801ABC64)
 
 The boost magnitude is proportional to `charge_value` at the moment of release.
 
-### 5. Charge Cleared
+### Charge cleared
 
 `Machine_ClearChargeState` (0x801CA294) resets all charge fields:
 ```c
@@ -140,7 +138,7 @@ md->0x790 = 0;
 
 Called on: hit reactions, state transitions, death, getting knocked off, etc. (11+ call sites).
 
-## Call Hierarchy Summary
+## Call Hierarchy
 
 ```
 Machine_ChargeThink? (0x801C5FE0) — per-frame top-level
@@ -152,21 +150,16 @@ Machine_ChargeThink? (0x801C5FE0) — per-frame top-level
   └── ... other per-frame updates ...
 ```
 
-## EnergyLink Interaction
+## External Writes to `charge_value`
 
-Charge is one of three energy sources tracked by EnergyLink (the others are objects destroyed and patches collected). Charge gain is the positive frame-to-frame delta of `md->charge_value`, scaled by `CHARGE_ENERGY_SCALE` (5.0) — a full 0→1 charge generates 5 energy.
+EnergyLink's Auto-Charge writes `md->charge_value` directly from outside the engine's charge path, and reads its positive frame-to-frame delta as an energy source. The accounting (rates, costs, which characters are excluded) lives in `energylink.md`; what matters here is how the engine reacts to a write it did not make:
 
-Auto-Charge (opt-in toggle under Settings → Energy Link → Auto-Charge) does the inverse: each frame it adds a **capped** amount to `charge_value` by spending `gain * SCALE` energy from the local balance, where `gain = min(1.0 - charge_value, rate_cap)`. The cap is a fixed per-frame rate selected by the **Auto-Charge Rate** setting (Slow `0.00555` / Medium `0.01111` / Fast `0.02222`), so the meter rises steadily and stacks with the player's own charging instead of snapping to full. After injection, `prev_charge_value` is re-snapped so the injected charge is invisible to the next send delta — this is the only feedback-loop guard in the file. See `docs/energylink.md` for the rate table and energy-accounting details.
+- **No SFX or visual.** Bumping `charge_value` doesn't trigger the "charge full" sound (`Machine_PlaySFX(md, 3)`) or the `0x1D` glow — those only fire on `Machine_IncrementCharge`'s own crossing of 1.0. The stored boost is invisible until the player next holds A.
+- **No auto-discharge trigger.** `charge_full_timer` (0x790) is only loaded by `Machine_IncrementCharge`, so an externally filled meter never starts its own countdown. The timer is set on the next frame the player charges and `Machine_IncrementCharge` observes `charge_value >= 1.0`.
+- **State-agnostic.** Nothing gates an external write on the charge state, `charge_is_grounded`, or `charge_cooldown_timer`. The engine's own clears still apply normally: hit reactions and any `Machine_ClearChargeState` path zero the injected value like a legitimately built one.
+- **`VCKIND_WINGMETAKNIGHT` is not a charge meter.** Meta Knight's Wing machine reads `charge_value` as a raw speed term, so writing it every frame is a constant max-speed buff rather than a stored boost. King Dedede's meter is ordinary.
 
-Notes specific to charge:
-- **No SFX/visual on Auto-Charge inject** — bumping `charge_value` doesn't trigger the "charge full" sound or glow. The boost is invisible until the player next holds A.
-- **No auto-discharge trigger** — vanilla sets `charge_full_timer` via `Machine_IncrementCharge`. External writes bypass this; the timer is set the next frame the player charges and `Machine_IncrementCharge` sees `charge_value >= 1.0`.
-- **State-agnostic** — Auto-Charge fills regardless of machine state. Hit reactions / `Machine_ClearChargeState` paths will clear the injected value normally.
-- **Meta Knight excluded** — Auto-Charge skips the Wing machine (`VCKIND_WINGMETAKNIGHT`), whose `charge_value` is a raw speed term rather than a chargeable boost meter; pinning it would give a constant max-speed buff. Dedede has a normal meter and is included.
-
-For the rest of the EnergyLink design (accumulator semantics, baseline gating, patch-receive feedback handling, Top Ride tracking), see `docs/energylink.md`.
-
-## Reference: Key Addresses
+## Key Functions
 
 | Address | Size | Symbol |
 |---------|------|--------|

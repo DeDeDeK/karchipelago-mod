@@ -6,13 +6,12 @@
 
 #include "custom_weather.h"
 
-// On (default) = vanilla: events transition the sky and restore it. Off = keep
-// the round's weather through every event.
+// On (default) = vanilla: events transition the sky and restore it. Off keeps the
+// round's weather through every event.
 static char *event_sky_toggle_names[] = {"Off", "On"};
-static int event_sky_changes = 1; // default On: events change the sky (vanilla)
+static int event_sky_changes = 1;
 
-// Replaces Sky_TransitionGlobal (0x800d5444). Vanilla: begin a smooth transition
-// to the event's themed sky preset. Suppressed: leave the current weather alone.
+// Replaces Sky_TransitionGlobal (0x800d5444), the event-start wrapper.
 void EventSky_TransitionGlobal(int preset_index)
 {
     if (!event_sky_changes)
@@ -20,9 +19,8 @@ void EventSky_TransitionGlobal(int preset_index)
     Sky_BeginTransition(*stc_grobj, preset_index);
 }
 
-// Replaces Sky_RestoreGlobal (0x800d546c). Vanilla: transition back to the
-// round's stored weather preset (sky state +0x1C). Suppressed: nothing to
-// restore, since the transition out was skipped too.
+// Replaces Sky_RestoreGlobal (0x800d546c), the event-end wrapper that transitions
+// back to the round's stored preset (sky state +0x1C).
 void EventSky_RestoreGlobal(void)
 {
     if (!event_sky_changes)

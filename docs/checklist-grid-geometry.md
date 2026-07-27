@@ -1,13 +1,11 @@
 # Checklist Grid Geometry (the 12×10 cell layout)
 
-How the checklist's visible grid of checkboxes is built, positioned, navigated,
-and counted — and exactly which functions hardcode the **12 columns × 10 rows =
-120 cells** layout. This is the layout/rendering layer; the completion *data* it
-reads (`GameClearData.clear[]` / `grid_mapping[]`) is in `clearchecker-system.md`,
-and the synthetic-mode plumbing that lets a mod own a tab is in
-`custom-checklist.md`.
+How the checklist's visible grid of checkboxes is built, positioned, navigated and
+counted, and exactly which functions hardcode the **12 columns × 10 rows = 120 cells**
+layout. This is the layout/rendering layer; the completion *data* it reads
+(`GameClearData.clear[]` / `grid_mapping[]`) is in `clearchecker-system.md`.
 
-## The grid is procedural, not baked art
+## The Grid Is Procedural, Not Baked Art
 
 There is **no 120-cell model**. The checklist art archive `MnClCheckAll.dat`
 (public root `ScMenClearchecker_scene_data`, an `HSD_SOBJ`) contains only
@@ -29,11 +27,11 @@ derived from the `Pos` model's corner joints (giving a fixed per-cell `xstep` /
 `ystep`) times its `(col, row)`. Because spacing is fixed per cell, the grid is
 top-left anchored; it does not stretch to fill the panel.
 
-**Consequence for resizing:** reshaping the grid needs **no new art** — cells
-reflow from arithmetic. What is hardcoded is that arithmetic (the column count 12
-and total 120), spread across the functions below.
+So reshaping the grid needs **no new art** — cells reflow from arithmetic. What is
+hardcoded is that arithmetic (the column count 12 and total 120), spread across the
+functions below.
 
-## The cell-GObj array and its lifecycle
+## Cell GObjs and Their Lifecycle
 
 The occupied cells are **persistent GObjs**, one per grid slot, held in the array
 **`MainMenuData + 0xf0c[120]`** (indexed by physical slot). The cell-state model
@@ -47,7 +45,7 @@ templates are loaded into `MainMenuData + 0xef0 + state*4`.
 | Tear down | `Checklist_DestroyElements` | `0x80182cac` | Destroys `+0xed0`/`+0xee4`/`+0xeec`, the `0xf0c[120]` cell array, the filler array, and the cursor/info/icon elements. |
 | Scene leave | `Checklist_MinorLeave` | `0x80138e00` | Cleanup wrapper that calls `Checklist_DestroyElements`. |
 
-## The grid builder (`Checklist_SetRewardFlagOnUnlocks`, `0x8017df5c`)
+## The Grid Builder (`Checklist_SetRewardFlagOnUnlocks`, `0x8017df5c`)
 
 Despite its name (it also sets the `has_reward` flag on reward cells in an earlier
 loop), this function **creates and positions the cell tiles**. The cell loop
@@ -75,32 +73,45 @@ for phys_slot in 0 .. 119:                       // hardcoded 0x77 bound
         destroy + recreate (state changed)
 ```
 
-Key facts:
 - **A non-visible cell (`clear[]` has none of `is_visible`/`has_reward`/
-  `is_unlocked`/`is_filler`) gets no GObj** — it is truly absent, not an empty
-  box. So the number of boxes already equals the number of cells the data marks
-  visible — and since `is_visible` is only ever granted to the neighbours of a
+  `is_unlocked`/`is_filler`) gets no GObj** — it is truly absent, not an empty box.
+  The number of boxes therefore already equals the number of cells the data marks
+  visible, and since `is_visible` is only ever granted to the neighbours of a
   completed cell, a fresh board draws nothing at all.
 - The **column count 12** appears here as `phys_slot % 12` / `phys_slot / 12`.
 - Cell **size/spacing** comes from the `Pos` element's joint-derived `xstep` /
   `ystep` (`Checklist_Init` reads them); it is independent of the column count.
 
-## Cursor + readout: the rest of the 12×10 hardcoding
+## Where 12×10 Is Hardcoded
 
 Every surface that maps between a cursor `(col, row)` and a `clear_kind` uses
-`phys_slot = col + row*12` plus a reverse scan of `grid_mapping`. The reverse
-scans search all 120 entries and are **column-count-agnostic**; only the
-`phys_slot` arithmetic and the cursor bounds bake in 12.
+`phys_slot = col + row*12` plus a reverse scan of `grid_mapping`. The reverse scans
+search all 120 entries and are **column-count-agnostic**; only the `phys_slot`
+arithmetic and the cursor bounds bake in 12. `ClearCheckerUI` holds the cursor as
+`cursor_col` (`+0x17`) and `cursor_row` (`+0x18`), both `0x81` until first placed.
 
 | Function | Address | Hardcoded geometry |
 |---|---|---|
 | `Checklist_Think` | `0x8017f3bc` | cursor movement: `phys_slot = col + row*12`; column bound `col < 12`; last-column test `col % 12 < 11`; skip-empty navigation; reverse-scan loops |
-| `Checklist_Update` | `0x8018161c` | cursor-highlight position `X = col*xstep, Y = row*ystep`; reverse-scan; the "Clearchecker Number 120" assert when a cursor slot is unmapped |
+| `Checklist_Update` | `0x8018161c` | cursor-highlight position `X = col*xstep, Y = row*ystep` (`stfs` to the cursor JObj's `+0x38` translation, from `cursor_col` at `+0x17`); reverse-scan; the "Clearchecker Number 120" assert when a cursor slot is unmapped |
 | `Checklist_UpdateCellInfo` | `0x80181d70` | hover tooltip: unrolled 12×10 reverse-scan cursor→clear_kind |
 | `Checklist_InitGridMapping` | `0x8004a2bc` | fills `grid_mapping[120]`, pre-places the meta cells, randomizes the remainder (per-mode). Custom tabs bypass it — the framework writes its own permutation. |
 | `Checklist_Init` (counter) | `0x801822f4` | completion counter scans 12×10 cells counting `clear[k] & 0x06` and prints the number. Order-independent: counts completed cells regardless of layout, so the count is unaffected by a column-count change. |
 
-## Resizing the visible grid — what would change
+## The Board Backdrop Is the Banner Quad, Not the Cells
+
+The full board of empty checkbox outlines a player sees is **not** drawn by the cell
+GObjs. Only cells with a state bit get a GObj (an unused slot draws nothing), so a
+tab with N visible checks creates exactly N cell quads. The board *backdrop* — the
+gray panel that reads as a 12×10 grid — is the single **banner quad** at
+`MMD+0xee4` (the `Frame1/2/3` model, a 248×128 textured quad), anchored at the
+top-left cell and sized to span the whole board. The cell quads draw their
+fill/colour *on top of* that panel.
+
+So shrinking the cell count alone leaves the full-board panel behind it, and the
+board still looks 12×10. A visible resize needs **both** halves.
+
+## Resizing the Visible Grid
 
 Because the grid is procedural, a different shape is a code change, not an art
 change. To render N visible cells in **C columns × R rows** (per tab):
@@ -111,40 +122,30 @@ change. To render N visible cells in **C columns × R rows** (per tab):
    last-column test `col % C < C-1`; row bound `R`.
 3. **`Checklist_Update`** / **`Checklist_UpdateCellInfo`** — same `col + row*C`
    for highlight position and hover lookup.
-4. `grid_mapping` stays identity (already set by the framework); every reachable
-   cursor `phys_slot` must map to a `clear_kind` or `Checklist_Update` asserts, so
-   cursor bounds and the occupied slots must agree.
+4. `grid_mapping` must stay a full bijection over `0..119`; every reachable cursor
+   `phys_slot` has to map to a `clear_kind` or `Checklist_Update` asserts, so cursor
+   bounds and the occupied slots must agree.
 5. The completion counter and the reverse scans need **no** change.
 
 The cell **size** is unchanged (it comes from the `Pos` joints); to rescale or
-center a smaller grid, also scale the `xstep`/`ystep` that `Checklist_Init`
-derives from the `Pos` element.
+center a smaller grid, also scale the `xstep`/`ystep` that `Checklist_Init` derives
+from the `Pos` element.
 
 **Scoping constraint:** these functions are shared by all checklist modes, so any
-resize must be **mode-aware** — vanilla `12×10` for Air Ride / Top Ride / City
-Trial (modes 0–2), custom `C×R` only for a synthetic tab (`mode >= GMMODE_NUM`).
-That rules out blind instruction patches (which can't branch on mode) and points
-at `REPLACEFUNC` reimplementations that read a per-tab `(cols, rows)`.
+resize must be **mode-aware** — vanilla `12×10` for Air Ride / Top Ride / City Trial
+(modes 0–2), custom `C×R` only for a synthetic tab (`mode >= GMMODE_NUM`). That
+rules out blind instruction patches (which can't branch on mode) and points at
+`REPLACEFUNC` reimplementations that read a per-tab `(cols, rows)`.
 
-## What "the grid" is visually: the banner panel, not the cells
+Geometry writes must come from in-frame mod code: an asynchronous write to these
+JObjs from outside the frame races the per-frame `HSD_JObjAnimAll` tree walk.
 
-The full board of empty checkbox outlines a player sees is **not** drawn by the
-cell GObjs. Only cells with a state bit get a GObj (an unused slot draws nothing),
-so a tab with N visible checks already creates exactly N cell quads. The board
-*backdrop* — the gray panel that reads as a 12×10 grid — is the single **banner
-quad** at `MMD+0xee4` (the `Frame1/2/3` model, a 248×128 textured quad), anchored
-at the top-left cell and sized to span the whole board. The cell quads draw their
-fill/colour *on top of* that panel.
+## Custom Tabs: No Geometry Change
 
-So shrinking the cell count alone leaves the full-board panel behind it, and the
-board still looks 12×10. A visible resize needs **both** halves.
-
-## What `custom_checklist` does today: nothing geometric
-
-No resize ships. A custom tab uses the full 12×10 board with every engine function
-above unpatched; the only thing the framework writes is its own `grid_mapping`
-permutation (a plain shuffle over `0..119`, seeded from the save), which reorders
-which clear_kind sits in which slot but not the shape of anything.
+No resize ships. A custom checklist tab uses the full 12×10 board with every engine
+function above unpatched; the only thing the `custom_checklist` framework writes is
+its own `grid_mapping` permutation (a shuffle over `0..119`, seeded from its save),
+which reorders which clear_kind sits in which slot but not the shape of anything.
 
 So a tab with fewer than 120 checks reads as a sparse full-size board rather than a
 small dense one, and two consequences follow from the untouched geometry:
@@ -156,8 +157,3 @@ small dense one, and two consequences follow from the untouched geometry:
   8) is plain `col±1` / `row±1` against the hardcoded `11` / `9` wrap with no
   skip-empty step, so it can sit on — and spend a checkbox filler on — any slot,
   occupied or not.
-
-Note: live-poking these JObjs from an external memory tool (e.g. dolphin-memory)
-to derive the scale is unreliable — the async write races the per-frame
-`HSD_JObjAnimAll` tree walk and faults. Apply geometry changes from in-frame mod
-code (as above), where the writes are synchronous.

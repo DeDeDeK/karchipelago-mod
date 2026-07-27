@@ -1,9 +1,5 @@
-// Starfield for custom_weather: faint camera-anchored dots scattered over the City
-// Trial sky dome. Like the moon, each star is a celestial billboard fixed on a
-// world sky direction and clamped inside the backdrop dome (no parallax, terrain
-// occludes them, the fog-free far sky does not). Stars are drawn additively as soft
-// round glows with per-star size/brightness variance, and each shimmers on its own
-// phase to fake atmospheric twinkling.
+// Starfield for custom_weather: faint twinkling dots scattered over the City Trial
+// sky dome, plus occasional shooting stars.
 
 #include "os.h"
 #include "game.h"
@@ -22,11 +18,10 @@
 #define STAR_MAX   220  // field capacity; resolved density clamps to this
 #define STAR_SEGS  6    // rim vertices of each soft dot (a coarse circle is plenty)
 
-// Celestial anchoring, mirroring the moon: each star sits at P = eye + skydir*dist
-// with dist clamped just inside the world backdrop dome (a depth-writing sphere at
-// the origin) so the dome never occludes it, and inside the far plane so it is
-// never frustum-clipped. Apparent size is referenced to STAR_REF_DIST so it stays
-// constant as the distance is clamped.
+// Each star sits at P = eye + skydir*dist (no parallax), with dist clamped inside
+// the backdrop dome - a depth-writing sphere at the origin that would otherwise
+// occlude it - and inside the far plane. Apparent size is referenced to
+// STAR_REF_DIST so it holds constant as the distance is clamped.
 #define STAR_MAX_DIST   6000.0f  // desired anchor distance (always clamped smaller)
 #define STAR_REF_DIST   1800.0f  // world radius == star.size at this distance
 #define STAR_FAR_FRAC   0.9f     // never exceed this fraction of the camera far plane
@@ -42,14 +37,14 @@
 // Per-star base brightness floor: some stars are dim, none fully dark.
 #define STAR_BRIGHT_MIN  0.35f
 
-// Twinkle: each star's brightness is multiplied by 1 + depth*sin(t*speed + phase),
-// so it both brightens and dims about its base. `t` advances one unit per tick.
+// Twinkle: brightness is multiplied by 1 + depth*sin(t*speed + phase), where `t`
+// advances one unit per tick.
 #define STAR_TW_DEPTH      0.7f
 #define STAR_TW_SPEED_MIN  0.05f  // rad/frame (~2s shimmer)
 #define STAR_TW_SPEED_MAX  0.14f  // rad/frame (~0.75s shimmer)
 
-// Defaults applied when a preset leaves the matching StarDef field 0. A faint
-// cool-white; color A is the base brightness before luminosity/twinkle.
+// Defaults applied when a preset leaves the matching StarDef field 0; the color
+// alpha is the base brightness before luminosity/twinkle.
 #define STAR_DEF_COLOR     RGBA(228, 234, 248, 170)
 #define STAR_DEF_DENSITY   120
 #define STAR_DEF_TWINKLE   0.5f
@@ -57,9 +52,8 @@
 #define STAR_DEF_SIZE      5.5f
 #define STAR_DEF_SIZE_VAR  0.5f
 
-// Shooting stars: bright fast meteors that streak a short arc across the sky with a
-// small fading trail, spawned on a random lull (the Shooting Stars menu picks the
-// cadence). They ride along with the starfield (same night presets).
+// Shooting stars: fast meteors that streak a short sky arc with a fading trail,
+// spawned on a random lull and drawn along with the starfield.
 #define SHOOT_MAX          4     // concurrent meteor pool
 #define SHOOT_TRAIL_SEGS   8     // trail line-strip segments behind the head
 #define SHOOT_LINE_WIDTH   12    // trail width in 1/6-pixel units (~2 px)
@@ -73,8 +67,8 @@
 #define SHOOT_FADE_IN      4     // brighten-in frames
 #define SHOOT_FADE_OUT     12    // fade-out frames
 
-// Render GObj: entity class / p_link past the moon (207/31) so the starfield draws
-// first on the XLU sub-pass (farthest back) and the moon/clouds blend over it.
+// Render GObj drawn first on the XLU sub-pass (farthest back) so the moon and the
+// cloud deck blend over the starfield.
 #define STAR_GOBJ_CLASS  208
 #define STAR_GOBJ_PLINK  32
 #define STAR_GX_LINK     0
@@ -99,8 +93,7 @@ typedef struct Shoot
     float arc;    // angular length of the path (radians)
 } Shoot;
 
-// Cached only to avoid recreating the GObj every frame; never dereferenced (the
-// engine owns it and frees it on scene teardown).
+// Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_star_gobj = NULL;
 
 static int   stc_active = 0;
@@ -123,83 +116,73 @@ static float   stc_base_size = STAR_DEF_SIZE;
 static float   stc_size_var = STAR_DEF_SIZE_VAR;
 
 // Menu knobs layered over the active preset. Stars {Preset,Off,On} gates the whole
-// feature; the rest override density/twinkle/luminosity/variance/tint. Persisted by
-// hoshi menu save.
+// feature; the rest override density/twinkle/luminosity/variance/tint.
 static char *show_names[] = {"Preset", "Off", "On"};
-static int   show_index = 0; // Preset
+static int   show_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored density).
 static const float density_factors[] = {1.0f, 0.5f, 1.0f, 1.7f};
 static char *density_names[] = {"Preset", "Sparse", "Normal", "Dense"};
 #define STAR_DENSITY_NUM ((int)(sizeof(density_factors) / sizeof(density_factors[0])))
-static int density_index = 0; // default Preset (1.0)
+static int density_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored twinkle).
 static const float twinkle_factors[] = {1.0f, 0.0f, 1.0f, 2.0f};
 static char *twinkle_names[] = {"Preset", "None", "Gentle", "Lively"};
 #define STAR_TWINKLE_NUM ((int)(sizeof(twinkle_factors) / sizeof(twinkle_factors[0])))
-static int twinkle_index = 0; // default Preset (1.0)
+static int twinkle_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored luminosity).
 static const float lum_factors[] = {1.0f, 0.6f, 1.0f, 1.4f};
 static char *lum_names[] = {"Preset", "Dim", "Normal", "Bright"};
 #define STAR_LUM_NUM ((int)(sizeof(lum_factors) / sizeof(lum_factors[0])))
-static int lum_index = 0; // default Preset (1.0)
+static int lum_index = 0;
 
 // Master scalar over the preset's per-star size spread (resolved var clamped 0..1).
-// Index 0 = Preset (1.0, the preset's authored size variance).
 static const float variance_factors[] = {1.0f, 0.2f, 1.0f, 1.8f};
 static char *variance_names[] = {"Preset", "Uniform", "Normal", "Varied"};
 #define STAR_VARIANCE_NUM ((int)(sizeof(variance_factors) / sizeof(variance_factors[0])))
-static int variance_index = 0; // default Preset (1.0)
+static int variance_index = 0;
 
-// Tint override. Index 0 keeps the per-preset RGB; the rest force an RGB (the base
-// brightness still comes from the preset color's alpha).
+// Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the base
+// brightness from the preset color's alpha.
 static const u32 color_overrides[] = {0, RGBA(255, 255, 255, 255), RGBA(255, 240, 214, 255),
                                       RGBA(210, 224, 255, 255)};
 static char *color_names[] = {"Preset", "White", "Warm", "Cool"};
 #define STAR_COLOR_NUM ((int)(sizeof(color_overrides) / sizeof(color_overrides[0])))
 static int color_index = 0;
 
-// Shooting-star cadence: Off, or a random lull range (frames) between meteors,
-// indexed by cadence level 1 (Off) .. 4 (Frequent). Index 0 = Preset resolves to
-// the active preset's stc_shoot_level; RandLull falls back to Occasional (3) for a
-// disabled level's seed delay. The index-0 range is unused (Preset never resolves
-// to 0) but kept so the array lines up with shoot_names.
+// Random lull range (frames) between meteors, indexed by cadence level 1 (Off) ..
+// 4 (Frequent). The index-0 range is never used (Preset resolves to a real level)
+// but is kept so the arrays line up with shoot_names.
 static const int shoot_lull_min[] = {600, 0, 1200, 600, 240};
 static const int shoot_lull_max[] = {1500, 0, 3000, 1500, 600};
 static char *shoot_names[] = {"Preset", "Off", "Rare", "Occasional", "Frequent"};
 #define STAR_SHOOT_NUM ((int)(sizeof(shoot_names) / sizeof(shoot_names[0])))
-static int shoot_index = 0; // default Preset (the per-preset cadence)
+static int shoot_index = 0;
 
-// Effective cadence level (1..4): the menu forces one directly, or Preset (0)
-// resolves to the active preset's latched level.
+// Effective cadence level 1..4; Preset (0) resolves to the preset's latched level.
 static int ShootLevel(void)
 {
     return (shoot_index == 0) ? stc_shoot_level : shoot_index;
 }
 
-// Meteor head/trail size multiplier. Index 0 = Preset (1.0, the built-in size).
+// Meteor head/trail size multiplier.
 static const float shoot_size_factors[] = {1.0f, 0.65f, 1.0f, 1.5f};
 static char *shoot_size_names[] = {"Preset", "Small", "Normal", "Large"};
 #define SHOOT_SIZE_NUM ((int)(sizeof(shoot_size_factors) / sizeof(shoot_size_factors[0])))
-static int shoot_size_index = 0; // default Preset (1.0)
+static int shoot_size_index = 0;
 
 // Life multiplier: a slower meteor lives longer, crossing its arc more slowly.
-// Index 0 = Preset (1.0, the built-in speed).
 static const float shoot_speed_factors[] = {1.0f, 1.6f, 1.0f, 0.6f};
 static char *shoot_speed_names[] = {"Preset", "Slow", "Normal", "Fast"};
 #define SHOOT_SPEED_NUM ((int)(sizeof(shoot_speed_factors) / sizeof(shoot_speed_factors[0])))
-static int shoot_speed_index = 0; // default Preset (1.0)
+static int shoot_speed_index = 0;
 
 // Additive peak-brightness multiplier over SHOOT_BRIGHT.
-// Index 0 = Preset (1.0, the built-in brightness).
 static const float shoot_bright_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
 static char *shoot_bright_names[] = {"Preset", "Dim", "Normal", "Bright"};
 #define SHOOT_BRIGHT_NUM ((int)(sizeof(shoot_bright_factors) / sizeof(shoot_bright_factors[0])))
-static int shoot_bright_index = 0; // default Preset (1.0)
+static int shoot_bright_index = 0;
 
-// Meteor tint. Index 0 follows the resolved starfield color; the rest force an RGB.
+// Index 0 follows the resolved starfield color; the rest force an RGB.
 static const u32 shoot_color_overrides[] = {0, RGBA(255, 255, 255, 255), RGBA(255, 236, 200, 255),
                                             RGBA(200, 224, 255, 255)};
 static char *shoot_color_names[] = {"Star", "White", "Warm", "Cool"};
@@ -216,8 +199,8 @@ static HSD_Fog *StarLiveFog(void)
     return (HSD_Fog *)gr->sky_gobj->hsd_object;
 }
 
-// Seed one star: a direction uniformly over the upper sky cap (above the min
-// elevation), a size scaled by the resolved variance, and a random twinkle.
+// Seed one star: a direction uniformly over the sky cap above the min elevation,
+// a size scaled by the resolved variance, and a random twinkle.
 static void SeedStar(Star *s, float sin_min, float var)
 {
     float z = sin_min + HSD_Randf() * (1.0f - sin_min);
@@ -238,8 +221,7 @@ static void SeedStar(Star *s, float sin_min, float var)
     s->tw_speed = STAR_TW_SPEED_MIN + HSD_Randf() * (STAR_TW_SPEED_MAX - STAR_TW_SPEED_MIN);
 }
 
-// Scatter the field over the sky cap. No stage dependency (stars are celestial), so
-// this always succeeds once active.
+// Scatter the field over the sky cap. No stage dependency, so this always succeeds.
 static void Star_Arm(void)
 {
     float var = stc_size_var * variance_factors[variance_index];
@@ -280,9 +262,8 @@ static void StarVert(const Vec3 *P, const Vec3 *R, const Vec3 *U, float u, float
     GXColor4u8(cr, cg, cb, ca);
 }
 
-// Anchor a unit sky direction onto the backdrop dome: P = eye + dir*dist, with dist
-// clamped just inside the dome and the far plane. Returns the chosen distance so the
-// caller can hold apparent size constant.
+// Anchor a unit sky direction onto the backdrop dome: P = eye + dir*dist, dist
+// clamped inside the dome and the far plane. Returns the chosen distance.
 static float PlaceOnDome(const Vec3 *dir, const Vec3 *eye, float e2, float maxd, Vec3 *P)
 {
     float edotd = eye->X * dir->X + eye->Y * dir->Y + eye->Z * dir->Z;
@@ -300,10 +281,9 @@ static float PlaceOnDome(const Vec3 *dir, const Vec3 *eye, float e2, float maxd,
     return dist;
 }
 
-// GX callback on the world camera link, XLU pass. Draws each star as a small
-// camera-facing additive glow (soft dot: bright center, transparent rim), fog-free
-// (bracketed HSD_FogSet) so the distant dots aren't washed to fog color;
-// depth-tested but not depth-writing so terrain occludes them.
+// GX callback on the world camera link, XLU pass. Draws each star as a camera-facing
+// additive glow, fog-free (bracketed HSD_FogSet) so the distant dots aren't washed to
+// fog color, depth-tested but not depth-writing so terrain occludes them.
 static void Star_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -316,13 +296,13 @@ static void Star_GX(GOBJ *g, int pass)
     if (!cam)
         return;
 
-    // Camera axes in world space (rows 0/1 of the world->view rotation) give the
-    // billboard basis; every dot faces the camera.
+    // Rows 0/1 of the world->view rotation are the camera axes in world space,
+    // giving the billboard basis.
     float (*m)[4] = cam->view_mtx;
     Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
     Vec3 upW = {m[1][0], m[1][1], m[1][2]};
 
-    // Camera eye in world space from the view matrix (eye = -R^T * t).
+    // Camera eye in world space, eye = -R^T * t.
     Vec3 eye = {
         -(m[0][0] * m[0][3] + m[1][0] * m[1][3] + m[2][0] * m[2][3]),
         -(m[0][1] * m[0][3] + m[1][1] * m[1][3] + m[2][1] * m[2][3]),
@@ -354,7 +334,6 @@ static void Star_GX(GOBJ *g, int pass)
             a = 255.0f;
         u8 A = (u8)a;
 
-        // Anchor along the sky direction, clamped inside the dome and the far plane.
         Vec3 P;
         float dist = PlaceOnDome(&s->dir, &eye, e2, maxd, &P);
         float r = s->size * (dist / STAR_REF_DIST);
@@ -369,13 +348,10 @@ static void Star_GX(GOBJ *g, int pass)
         }
     }
 
-    // Shooting stars: bright fast streaks with a small fading trail. Each meteor
-    // rotates along a great circle head(p) = d0*cos(arc*p) + t*sin(arc*p); the trail
-    // samples the path just behind the head and fades to transparent at the tail.
-    if (ShootLevel() != 1) // 1 = Off; the rest draw meteors
+    // Meteors: the trail samples the great-circle path just behind the head and
+    // fades to transparent at the tail.
+    if (ShootLevel() != 1) // 1 = Off
     {
-        // Resolve the meteor tint (Star = follow the starfield), additive peak, head
-        // radius, and trail width from the Shooting Stars menu.
         GXColor sc = stc_color;
         if (shoot_color_index > 0)
         {
@@ -465,7 +441,7 @@ static int RandLull(void)
 }
 
 // Launch a meteor into a free pool slot: a start direction high in the sky and a
-// downward-biased tangent, tracing a random-length great-circle arc.
+// downward-biased tangent, over a random-length arc.
 static void Shoot_Spawn(void)
 {
     Shoot *sh = NULL;
@@ -486,7 +462,7 @@ static void Shoot_Spawn(void)
     Vec3 d0 = {ce * sinf(az), se, ce * cosf(az)};
 
     // Orthonormal tangent basis to d0 (e1 horizontal, e2 completing it), combined at
-    // a random roll for the travel direction, then biased downward so meteors descend.
+    // a random roll, then flipped downward so meteors descend.
     Vec3 e1 = {-d0.Z, 0.0f, d0.X};
     float e1len = sqrtf(e1.X * e1.X + e1.Z * e1.Z);
     if (e1len < 1e-4f)
@@ -514,8 +490,7 @@ static void Shoot_Spawn(void)
     sh->active = 1;
 }
 
-// Clear the meteor pool and re-seed the spawn timer (fresh cadence for a new preset
-// or CT entry).
+// Clear the meteor pool and re-seed the spawn timer.
 static void Shoot_Reset(void)
 {
     for (int i = 0; i < SHOOT_MAX; i++)
@@ -547,8 +522,7 @@ static void Shoot_Tick(void)
 }
 
 // Latch the active preset's star config, resolving each 0 field to its module
-// default and applying the menu overrides. NULL / enabled == 0 / Stars menu Off
-// turns the starfield off; Stars menu On forces it on for every preset.
+// default and applying the menu overrides.
 void Star_SetActive(const StarDef *def)
 {
     if (show_index == 1) // menu Off
@@ -583,12 +557,10 @@ void Star_SetActive(const StarDef *def)
     stc_base_size = (def && def->size > 0.0f) ? def->size : STAR_DEF_SIZE;
     stc_size_var = (def && def->size_var > 0.0f) ? def->size_var : STAR_DEF_SIZE_VAR;
 
-    // A preset's ShootFreq maps 1:1 onto the menu levels; Default (0) leaves the
-    // built-in Occasional cadence. The Shooting Stars menu's "Preset" index reads
-    // this; a forced menu level overrides it.
+    // A preset's ShootFreq maps 1:1 onto the menu cadence levels; Default (0)
+    // leaves the built-in Occasional cadence.
     stc_shoot_level = (def && def->shoot) ? def->shoot : SHOOT_FREQ_OCCASIONAL;
 
-    // Re-arm the field and the meteor cadence for the new preset.
     stc_inited = 0;
     stc_count = 0;
     Shoot_Reset();
@@ -607,8 +579,8 @@ void Star_Tick(void)
 
 void Star_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop our cached handle so
-    // the next active frame recreates it, and clear the round's field.
+    // The engine frees every world GObj on scene teardown; drop the cached handle so
+    // the next active frame recreates it.
     stc_star_gobj = NULL;
     stc_inited = 0;
     stc_count = 0;

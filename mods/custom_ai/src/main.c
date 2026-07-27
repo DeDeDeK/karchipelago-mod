@@ -7,9 +7,8 @@
 #include "cpu_ai.h"
 #include "cpu_stat_growth.h"
 
-// Menu labels for each selector. Ordered to match the preset enums (concrete
-// presets then the "Random" sentinel) - keep in sync with the preset tables in
-// enemy_ai.c / cpu_ai.c.
+// Menu labels, ordered to match the preset enums: concrete presets, then the
+// "Random" sentinel.
 static char *stc_enemy_names[] = {
     "Default",
     "Aggressive",
@@ -29,13 +28,12 @@ static char *stc_cpu_names[] = {
     "Random",
 };
 
-// City Trial passive CPU stat-growth toggles. Order must match the enums in
-// cpu_stat_growth.h.
 static char *stc_growth_toggle_names[] = {
     "Disabled",
     "Enabled",
 };
 
+// Order must match CpuStatBudget.
 static char *stc_growth_budget_names[] = {
     "Default",
     "Low",
@@ -167,7 +165,7 @@ static MenuDesc tr_menu = {
     },
 };
 
-// One submenu per game mode, each exposing only the AI domains that mode has.
+// One submenu per mode, each exposing only the AI domains that mode has.
 static MenuDesc top_menu = {
     .option_num = 3,
     .options = {

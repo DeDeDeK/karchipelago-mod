@@ -12,18 +12,18 @@ typedef struct CustomEventFunc
     int (*check)(EventCheckData *ev_chk);
 } CustomEventFunc;
 
-// Custom event parameters (indexed by kind - EVKIND_NUM).
+// Indexed by kind - EVKIND_NUM.
 extern CustomEventParam custom_params[CUSTOM_EVENT_COUNT];
 
-// Called from OnBoot to install state handler wrappers and export the API.
+// Installs the state handler wrappers and exports the API. Call once at boot.
 void CustomEvents_OnBoot(void);
 
-// Called from On3DLoadEnd when in City Trial to pre-compose SIS text
-// entries and extend the SIS pointer array.
+// Pre-composes the custom SIS text and extends the SIS pointer array.
+// Call on City Trial load.
 void CustomEvents_InitSis(void);
 
-// Trigger a custom event. Returns 1 on success, 0 if event system
-// is not ready or another event is already active.
+// Returns 1 on success, 0 if the event system is not ready or another event
+// is already active.
 int CustomEvent_Do(int kind);
 
 #endif // CUSTOM_EVENTS_H

@@ -8,8 +8,7 @@
 #include "textbox_api.h"
 #include "inline.h"
 
-// Top Ride items that correspond to copy abilities. Either the item's own TR
-// unlock or its copy ability unlock enables it.
+// TR items whose copy ability unlock is an alternative key to their own TR unlock.
 static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
     { TRITEM_FREEZE_FAN, COPYKIND_FREEZE },
     { TRITEM_FIRE,       COPYKIND_FIRE },
@@ -17,8 +16,7 @@ static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] 
     { TRITEM_WALKY,      COPYKIND_MIC },
 };
 
-// Apply the unlock mask to the ItemMgr's enabled bitmask.
-// Called via hook right after TopRideItem_MgrInit returns.
+// Applies the unlock mask to the ItemMgr's enabled bitmask.
 void GateTopRideItems_ApplyMask()
 {
     TopRideItemMgr *mgr = *stc_topride_itemmgr;
@@ -27,11 +25,9 @@ void GateTopRideItems_ApplyMask()
 
     u32 before = mgr->enabled_mask;
 
-    // The four ability-themed items have two keys: their own TR item unlock or
-    // the matching copy ability unlock. Fold the ability-derived bits into the
-    // allowed mask so either one enables the item. Only when ability gating is
-    // on - an ungated world holds an all-1s ability mask, which would free the
-    // four items outright and leave their TR item unlocks with nothing to do.
+    // Fold the ability-derived bits in so either key enables the item, but only while
+    // ability gating is on: an ungated world holds an all-1s ability mask, which would
+    // free the four items outright and leave their TR item unlocks with nothing to do.
     u32 allowed = ap_save->topride_item_unlocked_mask;
     u16 ability_mask = ap_save->ability_unlocked_mask;
     if (ap_save->options.ability_gating_enabled)
@@ -45,11 +41,9 @@ void GateTopRideItems_ApplyMask()
 
     mgr->enabled_mask &= allowed;
 
-    // Slot 12 (TRITEM_PARTY_BALL_ALT, KirbyKusdama) is the engine's twin
-    // Party Ball variant. AP exposes only one Party Ball (slot 21,
-    // TRITEM_PARTY_BALL, KirbyUshiroyurerun), so mirror bit 21's state
-    // onto bit 12 here. Without this, the kusdama variant never spawns
-    // under the AP mod.
+    // Slot 12 (TRITEM_PARTY_BALL_ALT, KirbyKusdama) is the engine's twin Party Ball
+    // variant. AP exposes only slot 21, so bit 21's state is mirrored onto bit 12;
+    // without this the kusdama variant never spawns.
     if (mgr->enabled_mask & (1 << TRITEM_PARTY_BALL))
         mgr->enabled_mask |= (1 << TRITEM_PARTY_BALL_ALT);
     else
@@ -59,9 +53,8 @@ void GateTopRideItems_ApplyMask()
              MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM), MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM), MaskBits(ability_mask, 16));
 }
 
-// Hook at 0x802db05c - right after TopRideItem_MgrInit (0x8034b5f4) returns
-// in TopRide_KirbyMgrInit (0x802dafb4).
-// Clobbered instruction: lwz r6, 4(r30)
+// Hook at 0x802db05c, right after TopRideItem_MgrInit (0x8034b5f4) returns in
+// TopRide_KirbyMgrInit (0x802dafb4).
 CODEPATCH_HOOKCREATE(0x802db05c,
     "",
     GateTopRideItems_ApplyMask,
@@ -69,11 +62,9 @@ CODEPATCH_HOOKCREATE(0x802db05c,
     0
 )
 
-// Hook at entry of TopRideItem_SpawnAtPosition (0x8034bf50). Returns 1 to
-// block the spawn (locked item, mask bit clear), 0 to let it through.
-// The hook trampoline saves LR around the bl to our C function so the
-// "block" path can return cleanly to the original caller via the blr at
-// 0x8034c12c (the function's epilogue blr).
+// Hook at entry of TopRideItem_SpawnAtPosition (0x8034bf50). Returns 1 to block the
+// spawn (locked item, mask bit clear), 0 to let it through; the block path returns to
+// the original caller via the function's epilogue blr at 0x8034c12c.
 int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
                                  Vec3 *pos, Vec3 *orient,
                                  unsigned int flag1, unsigned int flag2)
@@ -96,14 +87,12 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
     return 1;
 }
 
-// Save r3-r8 (the original SpawnAtPosition args) across the bl into our filter,
-// since the return value clobbers r3 and the function immediately derefs it
-// (lwz r3, 4(r3) at 0x8034bf68).
-// Proceed path: restore args + LR + frame, `b 0x1c` past the block-path tail and
-// the macro's cmpwi/bne, landing on the clobbered instruction (we need r3 = mgr,
-// not the filter result).
-// Block path: restore LR + frame, set r3 = 1 so the macro branches to the alt
-// addr 0x8034c12c (the function's blr) via our saved LR.
+// Saves r3-r8 (the original SpawnAtPosition args) across the bl into the filter, since
+// the return value clobbers r3 and the function immediately derefs it (lwz r3, 4(r3) at
+// 0x8034bf68). Proceed path: restore args + LR + frame, then `b 0x1c` past the
+// block-path tail and the macro's cmpwi/bne, landing on the clobbered instruction with
+// r3 = mgr. Block path: restore LR + frame, set r3 = 1 so the macro branches to the alt
+// addr 0x8034c12c via the saved LR.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     "stwu 1, -48(1)\n\t"
     "mflr 0\n\t"
@@ -135,11 +124,10 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     0,
     0x8034c12c)
 
-// Party Ball burst (TopRideItem_PartyBallUpdate, 0x80356dac, frame 0xFF) runs a
-// weighted-random picker over all 22 items with no enabled_mask check, reading
-// each weight via `bl TopRideItem_GetDataByIndex` then `lfs f0, 16(r3)`.
-// Redirecting those two bl's here returns a weight-0 stub for locked kinds, so
-// the picker can never land on one.
+// The Party Ball burst (TopRideItem_PartyBallUpdate, 0x80356dac, frame 0xFF) runs a
+// weighted-random picker over all 22 items with no enabled_mask check, reading each
+// weight via `bl TopRideItem_GetDataByIndex` then `lfs f0, 16(r3)`. Redirecting those
+// two bl's here returns a weight-0 stub for locked kinds.
 static const float locked_item_stub[8] = {0}; // offset +0x10 (index 4) = 0.0
 
 const void *GateTopRideItems_GetDataGated(int kind)
@@ -155,21 +143,17 @@ void GateTopRideItems_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x802db05c);
     CODEPATCH_HOOKAPPLY(0x8034bf50);
-    // Redirect the Party Ball burst's two weight-lookup bl's inside
-    // TopRideItem_PartyBallUpdate to the gated wrapper. Sum loop + pick loop.
-    CODEPATCH_REPLACECALL(0x803574a4, GateTopRideItems_GetDataGated);
-    CODEPATCH_REPLACECALL(0x803574d0, GateTopRideItems_GetDataGated);
+    CODEPATCH_REPLACECALL(0x803574a4, GateTopRideItems_GetDataGated); // burst sum loop
+    CODEPATCH_REPLACECALL(0x803574d0, GateTopRideItems_GetDataGated); // burst pick loop
     OSReport("[TopRideItems] Top Ride item gating hooks installed\n");
 }
 
-// Chickie / Who? Paint / Lantern are the three "New Item" types, and the unlock mask alone cannot
-// reach them: TopRideItem_MgrInit (0x8034b5f4) clears enabled-mask bits 20/18/15 unless
-// GameData.topride_extra_unlocks[0..2] are set, and TopRide_SetExtraUnlocks (0x8000b5dc) derives those
-// from ClearChecker_CheckUnlocked(GMMODE_TOPRIDE, reward 8/9/10). GateTopRideItems_ApplyMask only ANDs,
-// so it can never restore a cleared bit. Marking the reward received makes CheckUnlocked return true and
-// the engine enable the type at course init. Received bit only - an is_unlocked / clear[] write would
-// badge the cell and send a spurious check. Mode base masks still apply, so this cannot make a type
-// spawn where vanilla never does.
+// Chickie / Who? Paint / Lantern are unreachable through the unlock mask alone:
+// TopRideItem_MgrInit (0x8034b5f4) clears enabled-mask bits 20/18/15 unless
+// ClearChecker_CheckUnlocked(GMMODE_TOPRIDE, reward 8/9/10) passes, and ApplyMask only
+// ANDs. Marking the reward received is the only way to enable them - the received bit
+// only, since an is_unlocked / clear[] write would badge the cell and send a spurious
+// check.
 static void MarkNewItemRewardReceived(TopRideItemKind kind)
 {
     u8 reward_index;
@@ -224,17 +208,14 @@ int GateTopRideItems_GiveItem(TopRideItemKind kind)
     if (!kirby_mgr)
         return 0;
 
-    // TopRide_KirbyApplyItem dereferences kirby+0x7c (held item GObj) which
-    // is only populated once the race is active. round_state == 2 doubles as
-    // the "kirby is fully wired up" gate.
+    // TopRide_KirbyApplyItem dereferences kirby+0x7c (held item GObj), which is only
+    // populated once the race is active; round_state == 2 doubles as the "kirby is
+    // fully wired up" gate.
     if (kirby_mgr->round_state != 2)
         return 0;
 
-    // Don't gate on kirby->is_active - that bit is only set during a Race
-    // round, never in Time Attack or Free Run, even while the human is
-    // actively playing. round_state == 2 already covers "fully wired up";
-    // matches EnergyLink_TopRidePerFrame which uses the same non-null + HMN
-    // pair without is_active.
+    // Deliberately not gated on kirby->is_active: that bit is only set during a Race
+    // round, never in Time Attack or Free Run, even while the human is playing.
     int applied = 0;
     for (int i = 0; i < 4; i++)
     {

@@ -1,5 +1,5 @@
-// Custom backdrops for custom_weather: random City Trial skybox selection,
-// swapping the stage's backdrop JObj for one carved from another stage's archive.
+// Random City Trial skybox selection: swaps the stage's backdrop JObj for one
+// carved out of another stage's archive.
 
 #include "os.h"
 #include "game.h"
@@ -11,15 +11,8 @@
 
 #include "custom_weather.h"
 
-// Backdrop pool. Index 0 ("Vanilla") is the no-override path: the
-// stock loader uses CT's own backdrop, which avoids spending heap
-// when the user just wants the base skybox in the random pool.
-//
-// "City 1" is intentionally absent - it would be a duplicate of
-// "Vanilla" since CT's own archive *is* GrCity1Model.dat. "Simple"
-// (from the 14 MB GrSimpleModel system archive) is also skipped -
-// its backdrop subtree is a 4 KB placeholder, almost certainly a
-// dummy that won't render anything useful in CT.
+// Index 0 ("Vanilla") is the no-override path: the stock loader keeps CT's own
+// backdrop, so no donor archive is loaded.
 typedef struct BackdropDef
 {
     const char *display_name;
@@ -55,8 +48,7 @@ static const BackdropDef backdrop_defs[] = {
 };
 #define BACKDROP_NUM (sizeof(backdrop_defs) / sizeof(backdrop_defs[0]))
 
-// Per-entry enable toggle, default all on. Persisted by hoshi menu
-// save (keyed by option name hash) once the user changes them.
+// Per-entry enable toggle, persisted by hoshi menu save (keyed by option name hash).
 static int backdrop_enabled[BACKDROP_NUM] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -65,22 +57,17 @@ static int backdrop_enabled[BACKDROP_NUM] = {
 
 static char *toggle_names[] = {"Disabled", "Enabled"};
 
-// Backdrop render distance. 3D_CreateStageModel stamps City Trial's StageScale
-// (0.70) uniformly into the backdrop root joint's scale (JOBJ+0x2C), so every
-// backdrop - vanilla or grafted, all normalized to the same geometry radius -
-// renders at one fixed distance. This factor multiplies that stamped scale to
-// push the whole sky dome farther out (or pull it in); it is applied per CT
-// load by CustomBackdrop_ScaleDistance below. The default nudges the dome out a
-// notch since the vanilla distance reads as too close in City Trial.
+// Multiplies the root-joint scale the loader stamps into every backdrop, pushing
+// the whole sky dome out or pulling it in.
 static const float backdrop_distance_factors[] = {1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
 static char *backdrop_distance_names[] = {"100%", "125%", "150%", "175%", "200%"};
 #define BACKDROP_DISTANCE_NUM \
     ((int)(sizeof(backdrop_distance_factors) / sizeof(backdrop_distance_factors[0])))
 static int backdrop_distance_index = 1; // default 125%
 
-// Don't cache the loaded archive across rounds: Archive_LoadFile allocates into
-// the per-scene heap, which is zeroed on 3D scene exit. Reload on each CT entry;
-// scene-exit teardown reclaims it, so no Archive_Free is needed.
+// The donor archive is never cached across rounds: Archive_LoadFile allocates into
+// the per-scene heap, which is zeroed on 3D scene exit. Teardown reclaims it, so
+// there is no Archive_Free.
 
 static int PickEnabled(void)
 {
@@ -143,33 +130,18 @@ static void CustomBackdrop_Override(GrObj *grobj)
     OSReport("[CustomBackdrop] Selected %s\n", def->display_name);
 }
 
-// Hook 3D_CreateStageModel at 0x800dcc18, immediately after r30 has
-// been loaded with `grobj = gobj->user_data` (instruction at
-// 0x800dcc14: `lwz r30, 44(r3)`). At this point the original code
-// is about to read grdata->model_section into r29, so overriding
-// ms.backdrop here takes effect on the very next instruction.
-//
-//   0x800dcc14  lwz r30, 44(r3)        ; r30 = grobj
-//   0x800dcc18  lwz r3,  8(r30)        ; r3  = grobj->gr_data         <- HOOK
-//   0x800dcc1c  lwz r29, 12(r3)        ; r29 = ModelSection *
-//   ...
-//   0x800dcc28  lwz r31, 4(r29)        ; r31 = ms->backdrop (overridden)
-//
-// The macro preserves and replays the clobbered instruction at
-// 0x800dcc18 after the C callback returns, so r3 is correctly
-// reloaded with grdata before execution resumes at 0x800dcc1c.
+// Inside 3D_CreateStageModel, after r30 = grobj and just before it reads
+// grdata->model_section, so the ms.backdrop override lands on the next
+// instruction. The macro replays the clobbered `lwz r3, 8(r30)`.
 CODEPATCH_HOOKCREATE(0x800dcc18,
     "mr 3, 30\n\t",
     CustomBackdrop_Override,
     "",
     0x800dcc1c);
 
-// Push the City Trial sky dome nearer or farther by scaling the backdrop root
-// joint's scale after the loader stamps it. The backdrop branch of
-// 3D_CreateStageModel instantiates the JObj, stores it at GrObj+0xF4, and
-// stamps grGetStageScale() (City's 0.70) into JOBJ+0x2C/30/34. Multiplying that
-// uniformly moves the whole sky dome in or out without re-carving geometry.
-// Other stages are skipped via the gr_kind guard.
+// 3D_CreateStageModel stamps grGetStageScale() (City's 0.70) into the backdrop
+// root joint's JOBJ+0x2C/30/34; scaling that uniformly moves the whole sky dome
+// in or out without re-carving geometry.
 static void CustomBackdrop_ScaleDistance(GrObj *grobj, JOBJ *backdrop)
 {
     if (grobj == NULL || backdrop == NULL || grobj->gr_kind != GR_CITY1)
@@ -184,21 +156,10 @@ static void CustomBackdrop_ScaleDistance(GrObj *grobj, JOBJ *backdrop)
     backdrop->scale.Z *= f;
 }
 
-// Hook 3D_CreateStageModel at 0x800dce84, immediately after the backdrop branch
-// stamps the scale into the root joint:
-//
-//   0x800dce3c  stw r3, 244(r30)       ; grobj->backdrop_jobj (+0xF4) = jobj
-//   0x800dce40  bl  grGetStageScale    ; f1 = City StageScale (0.70)
-//   0x800dce74  stw ..., 44(r29)       ; jobj->scale.x  (JOBJ+0x2C)
-//   0x800dce7c  stw ..., 48(r29)       ; jobj->scale.y  (JOBJ+0x30)
-//   0x800dce80  stw ..., 52(r29)       ; jobj->scale.z  (JOBJ+0x34)
-//   0x800dce84  lwz r0, 20(r29)        ; jobj->flags                   <- HOOK
-//
-// r30 = grobj, r29 = backdrop JObj here (both non-volatile, preserved across the
-// call). The macro replays the clobbered `lwz r0, 20(r29)` and resumes at
-// 0x800dce88, so the classical-scaling flag check that follows sees the freshly
-// rescaled joint. Runs before the per-frame matrix build, so the new scale takes
-// effect immediately.
+// Inside 3D_CreateStageModel, immediately after the backdrop branch stamps the
+// scale into the root joint; r30 = grobj, r29 = backdrop JObj (both non-volatile).
+// The macro replays the clobbered `lwz r0, 20(r29)`, so the classical-scaling flag
+// check that follows sees the rescaled joint, still before the matrix build.
 CODEPATCH_HOOKCREATE(0x800dce84,
     "mr 3, 30\n\t"
     "mr 4, 29\n\t",

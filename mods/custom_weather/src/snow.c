@@ -1,8 +1,5 @@
 // World-space snow for custom_weather: a camera-following field of soft round
-// flakes that fall slowly, flutter sideways on their own phase, and drift with the
-// wind. Mirrors rain.c's camera-following box (a shared wrapping drift over a pool
-// of fixed per-flake offsets), but each flake draws as a small camera-facing glow
-// (like stars.c) rather than a line streak.
+// flakes that fall slowly, flutter sideways, and drift with the wind.
 
 #include "os.h"
 #include "game.h"
@@ -21,23 +18,20 @@
 #define SNOW_BOX_HALF   (SNOW_BOX * 0.5f)
 #define SNOW_SEGS       6          // rim vertices of each soft flake (coarse circle)
 
-// Defaults applied when a preset leaves the corresponding SnowDef field 0. Snow
-// falls far slower than rain and reads as fluttering dots, not streaks.
+// Defaults applied when a preset leaves the corresponding SnowDef field 0.
 #define SNOW_DEF_COLOR       RGBA(245, 248, 255, 230)  // soft white
 #define SNOW_DEF_DENSITY     600
 #define SNOW_DEF_FALL_SPEED  3.0f                       // world units/frame, downward
 #define SNOW_DEF_FLUTTER     1.6f                       // sideways sway amplitude
 #define SNOW_DEF_SIZE        4.0f                       // flake radius in world units
 
-// Per-flake flutter: each flake sways along its own horizontal direction with an
-// independent phase and speed, so the field shimmers instead of moving in lockstep.
+// Each flake sways along its own horizontal direction with an independent phase
+// and speed, so the field shimmers instead of moving in lockstep.
 #define SNOW_TW_SPEED_MIN  0.04f   // rad/frame
 #define SNOW_TW_SPEED_MAX  0.11f
-// Flakes vary in size about the resolved base so the field reads as mixed.
-#define SNOW_SIZE_VAR      0.5f
+#define SNOW_SIZE_VAR      0.5f    // +/- fractional per-flake size spread
 
-// Overlay GObj: arbitrary high entity class (avoids real engine classes) and a
-// spare p_link past the starfield (208/32) on the world camera's gx_link 0.
+// Overlay GObj: an entity class / p_link high enough to avoid the engine's own.
 #define SNOW_GOBJ_CLASS  209
 #define SNOW_GOBJ_PLINK  34
 #define SNOW_GX_LINK     0
@@ -52,8 +46,7 @@ typedef struct Flake
     float sway_z;
 } Flake;
 
-// Cached only to avoid recreating the GObj every frame; never dereferenced (the
-// engine owns it and frees it on scene teardown).
+// Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_snow_gobj = NULL;
 
 static int     stc_active = 0;
@@ -71,32 +64,32 @@ static float   stc_base_size = SNOW_DEF_SIZE;
 static float   stc_vel_x = 0.0f, stc_vel_y = -SNOW_DEF_FALL_SPEED, stc_vel_z = 0.0f;
 static Vec3    stc_drift = {0.0f, 0.0f, 0.0f};
 
-// Per-flake fixed offsets in [0, SNOW_BOX) per axis and flutter params; seeded once
+// Per-flake fixed offsets in [0, SNOW_BOX) per axis and flutter params, seeded once
 // for the full pool so any per-preset density up to the cap is valid.
 static Vec3    stc_offset[SNOW_MAX];
 static Flake   stc_flakes[SNOW_MAX];
 static int     stc_seeded = 0;
 
-// Menu knobs, persisted by hoshi menu save. Intensity scales the preset's flake
+// Menu knobs layered over the active preset. Intensity scales the preset's flake
 // count (Off disables snow); the rest scale fall/flutter or gate the wind slant.
 static const float intensity_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f};
 static char *intensity_names[] = {"Preset", "Off", "Light", "Normal", "Heavy"};
 #define SNOW_INTENSITY_NUM (sizeof(intensity_factors) / sizeof(intensity_factors[0]))
-static int intensity_index = 0; // default Preset (1.0)
+static int intensity_index = 0;
 
 static const float fall_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
 static char *fall_names[] = {"Preset", "Slow", "Normal", "Fast"};
 #define SNOW_FALL_NUM (sizeof(fall_factors) / sizeof(fall_factors[0]))
-static int fall_index = 0; // default Preset (1.0)
+static int fall_index = 0;
 
 static const float flutter_factors[] = {1.0f, 0.0f, 1.0f, 2.0f};
 static char *flutter_names[] = {"Preset", "None", "Gentle", "Lively"};
 #define SNOW_FLUTTER_NUM (sizeof(flutter_factors) / sizeof(flutter_factors[0]))
-static int flutter_index = 0; // default Preset (1.0)
+static int flutter_index = 0;
 
-// {Preset, Off, On}: Preset follows the global wind vector (the built-in default).
+// Preset follows the global wind vector.
 static char *wind_toggle_names[] = {"Preset", "Off", "On"};
-static int wind_slant_index = 0; // default Preset (follow wind)
+static int wind_slant_index = 0;
 
 static float SnowIntensity(void)
 {
@@ -127,8 +120,8 @@ static void SeedField(void)
     stc_seeded = 1;
 }
 
-// Advance one drift axis by v, wrapping into [0, SNOW_BOX). |v| < SNOW_BOX (snow
-// speeds are tiny), so a single add/subtract suffices.
+// Advance one drift axis by v, wrapping into [0, SNOW_BOX). |v| < SNOW_BOX, so a
+// single add/subtract suffices.
 static float WrapStep(float d, float v)
 {
     d += v;
@@ -149,10 +142,9 @@ static void FlakeVert(const Vec3 *P, const Vec3 *R, const Vec3 *U, float u, floa
     GXColor4u8(cr, cg, cb, ca);
 }
 
-// GX callback on the world camera link. Draws each flake as a small camera-facing
-// soft dot (bright center, transparent rim) on the XLU pass (pass 1), alpha-blended
-// so flakes read white over the world; depth-tested but not depth-writing so opaque
-// geometry occludes flakes behind it.
+// GX callback on the world camera link. Draws each flake as a camera-facing soft
+// dot on the XLU pass (pass 1), alpha-blended, depth-tested but not depth-writing
+// so opaque geometry occludes flakes behind it.
 static void Snow_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -165,8 +157,8 @@ static void Snow_GX(GOBJ *g, int pass)
     if (!cam)
         return;
 
-    // Camera axes / eye in world space from the view matrix (rows 0/1 = billboard
-    // basis; eye = -R^T * t), mirroring stars.c.
+    // Camera axes / eye in world space from the view matrix: rows 0/1 are the
+    // billboard basis, eye = -R^T * t.
     float (*m)[4] = cam->view_mtx;
     Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
     Vec3 upW = {m[1][0], m[1][1], m[1][2]};
@@ -182,8 +174,8 @@ static void Snow_GX(GOBJ *g, int pass)
 
     for (int i = 0; i < stc_density; i++)
     {
-        // World pos = eye + center(offset + drift); one subtract folds the sum back
-        // into [0, SNOW_BOX), then -HALF centers the box on the eye (as in rain.c).
+        // World pos = eye + center(offset + drift): one subtract folds the sum back
+        // into [0, SNOW_BOX), then -HALF centers the box on the eye.
         float tx = stc_offset[i].X + stc_drift.X;
         if (tx >= SNOW_BOX)
             tx -= SNOW_BOX;
@@ -225,8 +217,7 @@ static void Snow_Ensure(void)
                                           "[Snow] World-space snow layer installed");
 }
 
-// Latch the active preset's snow config, resolving each 0 field to its module
-// default. NULL or snow->enabled == 0 (or the Snow menu Off) turns snow off.
+// Latch the active preset's snow config, resolving each 0 field to its module default.
 void Snow_SetActive(const SnowDef *snow)
 {
     float intensity = SnowIntensity();
@@ -260,8 +251,7 @@ void Snow_Tick(void)
     Snow_Ensure();
     stc_time += 1.0f;
 
-    // The slant follows the global wind vector when the menu gate is on, read fresh
-    // each frame so gusts carry the field; off, snow falls straight down.
+    // The slant reads the global wind fresh each frame so gusts carry the field.
     if (WeatherToggle(wind_slant_index, 1))
     {
         Vec3 wind;
@@ -277,7 +267,7 @@ void Snow_Tick(void)
     stc_vel_y = -stc_fall;
 
     // Advance the shared drift; the per-flake wrap in Snow_GX recycles any flake
-    // that leaves the box, and the flutter adds independent per-flake sway on top.
+    // that leaves the box.
     stc_drift.X = WrapStep(stc_drift.X, stc_vel_x);
     stc_drift.Y = WrapStep(stc_drift.Y, stc_vel_y);
     stc_drift.Z = WrapStep(stc_drift.Z, stc_vel_z);
@@ -285,8 +275,8 @@ void Snow_Tick(void)
 
 void Snow_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; just drop our cached
-    // handle so the next active frame recreates it.
+    // The engine frees every world GObj on scene teardown; drop the cached handle
+    // so the next active frame recreates it.
     stc_snow_gobj = NULL;
     stc_active = 0;
 }

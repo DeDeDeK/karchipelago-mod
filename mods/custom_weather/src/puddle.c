@@ -27,10 +27,9 @@
 #define PUDDLE_PICK_ATTEMPTS  6       // ground-raycast tries per (re)spawn
 #define PUDDLE_ALPHA_EPS      0.01f   // below this opacity a pool neither draws nor drags
 
-// Lifecycle timing (frames @ 60fps): a slot waits dormant, wells up over
-// FADE_IN, holds a random HOLD, dries out over FADE_OUT, then waits a random GAP
-// before re-rolling a spot. INIT_STAGGER spreads the first appearances across
-// the round's opening so they don't all surface at once.
+// Lifecycle timing in frames: a slot waits dormant, wells up over FADE_IN, holds a
+// random HOLD, dries out over FADE_OUT, then waits a random GAP before re-rolling a
+// spot. INIT_STAGGER spreads the first appearances across the round's opening.
 #define PUDDLE_FADE_IN        24
 #define PUDDLE_FADE_OUT       36
 #define PUDDLE_HOLD_MIN       300
@@ -40,19 +39,16 @@
 #define PUDDLE_INIT_STAGGER   240
 #define PUDDLE_RETRY_GAP      30      // dormant re-wait when a spot pick finds no ground
 
-// Defaults applied when a preset leaves the matching PuddleDef field 0. A light,
-// sky-reflective tone at a fairly high opacity: a flat ground disc is heavily
-// foreshortened at the City Trial camera angle, and a bright reflective pool is
-// both what a real puddle looks like at that grazing angle and far easier to
-// read against the dark, tinted wet ground than a dim dark-blue one.
+// Defaults applied when a preset leaves the matching PuddleDef field 0. The tone is
+// light and fairly opaque because a flat ground disc is heavily foreshortened at the
+// City Trial camera angle, where a bright reflective pool reads far better.
 #define PUDDLE_DEF_COLOR     RGBA(150, 178, 205, 195) // bright reflective pool
 #define PUDDLE_DEF_COUNT     24
 #define PUDDLE_DEF_RADIUS    32.0f
 #define PUDDLE_DEF_FACTOR    0.90f                  // damp horizontal velocity 10%/frame inside
 
-// Render GObj: arbitrary high entity class (avoids real engine classes), a spare
-// p_link, and the world camera's gx_link 0 on the XLU sub-pass - matching the
-// rain / lightning layers so the discs share the same depth-tested world pass.
+// Render GObj: an entity class / p_link high enough to avoid the engine's own, on
+// the world camera's gx_link 0, XLU sub-pass.
 #define PUDDLE_GOBJ_CLASS  203
 #define PUDDLE_GOBJ_PLINK  27
 #define PUDDLE_GX_LINK     0
@@ -78,8 +74,7 @@ typedef struct Puddle
     float alpha;   // 0..1 current opacity / drag scale
 } Puddle;
 
-// Cached only to avoid recreating the GObj every frame; never dereferenced (the
-// engine owns it and frees it on scene teardown).
+// Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_puddle_gobj = NULL;
 
 static int stc_active = 0;
@@ -94,33 +89,30 @@ static int     stc_base_count = PUDDLE_DEF_COUNT;
 static float   stc_base_radius = PUDDLE_DEF_RADIUS;
 static float   stc_base_factor = PUDDLE_DEF_FACTOR;
 
-// Menu settings, persisted by hoshi menu save. Slowdown scales the per-preset
-// drag amount (1 - factor): Off removes the slow (discs still show), 200% doubles it.
-// Index 0 = Preset (1.0, the preset's authored slow factor); the rest scale it.
+// Slowdown scales the per-preset drag amount (1 - factor); Off removes the slow but
+// still draws the discs.
 static const float slow_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *slow_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
 #define PUDDLE_SLOW_NUM (sizeof(slow_strength_factors) / sizeof(slow_strength_factors[0]))
-static int slow_strength_index = 0; // default Preset (1.0)
+static int slow_strength_index = 0;
 
-// Frequency scales the slot count; applied at the next round's arm. Size scales
-// the radius and is read at each (re)spawn, so it affects pools that surface
-// after the change too.
-// Index 0 = Preset (1.0, the preset's authored count).
+// Frequency scales the slot count, applied at the next round's arm.
 static const float freq_factors[] = {1.0f, 0.5f, 1.0f, 1.75f};
 static char *freq_names[] = {"Preset", "Few", "Normal", "Many"};
 #define PUDDLE_FREQ_NUM (sizeof(freq_factors) / sizeof(freq_factors[0]))
-static int freq_index = 0; // default Preset (1.0)
+static int freq_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored radius).
+// Size scales the radius, read at each (re)spawn, so it also affects pools that
+// surface after the change.
 static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
 static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
 #define PUDDLE_SIZE_NUM (sizeof(size_factors) / sizeof(size_factors[0]))
-static int size_index = 0; // default Preset (1.0)
+static int size_index = 0;
 
-// {Preset, Off, On}: Preset = the built-in default (pools roam and draw).
+// Preset = pools roam and draw.
 static char *puddle_toggle_names[] = {"Preset", "Off", "On"};
-static int puddle_roaming = 0; // default Preset (pools pop in/out and move over time)
-static int show_puddles = 0;   // default Preset (draw the discs)
+static int puddle_roaming = 0;
+static int show_puddles = 0;
 
 // Inclusive random integer in [lo, hi].
 static int RandRange(int lo, int hi)
@@ -132,11 +124,9 @@ static int RandRange(int lo, int hi)
 
 // Roll a fresh location + oval shape on flat ground and lay the disc flush in the
 // surface plane. Each candidate XZ is raycast straight down against the map
-// collision; only near-flat hits are kept, then the disc is built from a tangent
-// basis derived from the ground normal (so it conforms to slopes instead of
-// clipping through them) and seated just above the surface along that normal.
-// Fills the slot's center/u/v/rx/rz on success; returns 1, or 0 if no ground was
-// found (stage not ready yet, or every try landed on a wall / the void).
+// collision, keeping only near-flat hits, and the disc is built from a tangent basis
+// derived from the ground normal so it conforms to slopes. Returns 0 if no ground
+// was found (stage not ready, or every try landed on a wall or the void).
 static int PickSpot(Puddle *p)
 {
     GrObj *gr = *stc_grobj;
@@ -188,8 +178,8 @@ static int PickSpot(Puddle *p)
             az = t;
         }
 
-        // Seat the disc just off the surface along the normal (not world +Y) so
-        // the offset is perpendicular to a sloped face too.
+        // Seat the disc off the surface along the normal, not world +Y, so the
+        // offset is perpendicular to a sloped face too.
         p->center.X = hit.X + nrm.X * PUDDLE_LIFT;
         p->center.Y = hit.Y + nrm.Y * PUDDLE_LIFT;
         p->center.Z = hit.Z + nrm.Z * PUDDLE_LIFT;
@@ -202,8 +192,8 @@ static int PickSpot(Puddle *p)
     return 0;
 }
 
-// Advance one pool slot's lifecycle by a frame. `roaming` off freezes the hold
-// phase so the field, once surfaced, stays put.
+// Advance one pool slot's lifecycle by a frame. `roaming` off freezes the hold phase
+// so the field, once surfaced, stays put.
 static void StepPuddle(Puddle *p, int roaming)
 {
     switch (p->phase)
@@ -239,8 +229,8 @@ static void StepPuddle(Puddle *p, int roaming)
 
     case PUD_HELD:
         p->alpha = 1.0f;
-        // The hold timer always counts during roaming; with roaming off it is
-        // simply never consumed, so the pool holds indefinitely.
+        // With roaming off the hold timer is never consumed, so the pool holds
+        // indefinitely.
         if (roaming && --p->timer <= 0)
         {
             p->phase = PUD_FADE_OUT;
@@ -265,9 +255,9 @@ static void StepPuddle(Puddle *p, int roaming)
 
 static int PointInPuddle(float x, float z, const Puddle *p)
 {
-    // Project the horizontal offset onto the disc's in-plane axes (their Y
-    // components are tiny on near-flat ground, so the XZ projection is an
-    // accurate footprint), then test against the ellipse.
+    // Project the horizontal offset onto the disc's in-plane axes, then test against
+    // the ellipse. Their Y components are tiny on near-flat ground, so the XZ
+    // projection is an accurate footprint.
     float ox = x - p->center.X;
     float oz = z - p->center.Z;
     float du = (ox * p->u.X + oz * p->u.Z) / p->rx;
@@ -275,11 +265,9 @@ static int PointInPuddle(float x, float z, const Puddle *p)
     return (du * du + dv * dv) <= 1.0f;
 }
 
-// Arm the pool field for the round: size the active slot set from the preset
-// count and the Frequency scalar, and start every slot dormant on a staggered
-// random timer so they surface across the round's opening rather than all at
-// once. Positions are rolled lazily per slot in StepPuddle (PickSpot), which
-// waits for the stage, so this needs nothing loaded.
+// Arm the pool field for the round: size the slot set from the preset count and the
+// Frequency scalar, and start every slot dormant on a staggered random timer.
+// Positions are rolled lazily per slot in StepPuddle, so this needs no stage loaded.
 static void Puddle_Arm(void)
 {
     int want = (int)(stc_base_count * freq_factors[freq_index] + 0.5f);
@@ -306,10 +294,8 @@ static void Puddle_Arm(void)
 }
 
 // GX callback on the world camera link. Draws each surfaced pool as a flat
-// translucent triangle fan on the XLU pass (pass 1): an opaque-ish center fading
-// to a soft rim, the whole disc scaled by the pool's fade opacity, depth-tested
-// but not depth-writing so opaque geometry occludes pools behind/below it.
-// Mirrors rain.c's GX setup.
+// translucent triangle fan on the XLU pass (pass 1), scaled by the pool's fade
+// opacity, depth-tested but not depth-writing so opaque geometry occludes it.
 static void Puddle_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -335,7 +321,7 @@ static void Puddle_GX(GOBJ *g, int pass)
 
         // Fan = center vertex + a closed rim ring (rim[0] repeated to seal it).
         // Each rim point is center + (cos*rx)*u + (sin*rz)*v, so the disc lies in
-        // the surface plane (conforms to slopes) rather than the world XZ plane.
+        // the surface plane rather than the world XZ plane.
         GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, PUDDLE_SEGMENTS + 2);
         GXPosition3f32(p->center.X, p->center.Y, p->center.Z);
         GXColor4u8(stc_color.r, stc_color.g, stc_color.b, ca);
@@ -365,8 +351,7 @@ static void Puddle_Ensure(void)
 }
 
 // Latch the active preset's puddle config, resolving each 0 field to its module
-// default, and arm a fresh field for the round. NULL or def->enabled == 0 turns
-// puddles off.
+// default, and arm a fresh field for the round.
 void Puddle_SetActive(const PuddleDef *def)
 {
     if (!def || !def->enabled)
@@ -387,7 +372,6 @@ void Puddle_SetActive(const PuddleDef *def)
                           ? def->slow_factor
                           : PUDDLE_DEF_FACTOR;
 
-    // Re-arm the field for the new round on the next active frame.
     stc_inited = 0;
     stc_count = 0;
 }
@@ -405,8 +389,8 @@ void Puddle_Tick(void)
     for (int i = 0; i < stc_count; i++)
         StepPuddle(&stc_puddles[i], roaming);
 
-    // Base per-frame drag amount before per-pool opacity; Off short-circuits the
-    // slowdown but the lifecycle/render above still run (discs keep cycling).
+    // Base per-frame drag before per-pool opacity; Off skips only the slowdown, so
+    // the lifecycle and render above still run.
     float base_amt = (1.0f - stc_base_factor) * slow_strength_factors[slow_strength_index];
     if (base_amt <= 0.0f)
         return;
@@ -434,7 +418,7 @@ void Puddle_Tick(void)
             if (!PointInPuddle(x, z, p))
                 continue;
 
-            // Drag scales with how filled the pool is, so a forming/drying pool
+            // Drag scales with how filled the pool is, so a forming or drying pool
             // bites less than a full one.
             float amt = base_amt * p->alpha;
             if (amt > 0.99f)
@@ -448,8 +432,8 @@ void Puddle_Tick(void)
 
 void Puddle_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop our cached handle
-    // so the next active frame recreates it, and clear the round's field.
+    // The engine frees every world GObj on scene teardown; drop the cached handle
+    // so the next active frame recreates it.
     stc_puddle_gobj = NULL;
     stc_inited = 0;
     stc_count = 0;

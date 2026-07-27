@@ -4,8 +4,7 @@
 
 #include "cpu_stat_growth.h"
 
-// Default to vanilla behavior: growth on, unscaled pool. A stock build is then
-// indistinguishable from vanilla until the menu is touched.
+// Vanilla behavior: growth on, unscaled pool.
 int cpu_stat_growth_enabled = 1;
 int cpu_stat_growth_amount = CPU_STAT_BUDGET_DEFAULT;
 
@@ -25,11 +24,8 @@ float CpuStatGrowth_Factor(void)
     }
 }
 
-// Rescale one slot's just-seeded stat-growth pool. The vanilla seed loop stores
-// GameData.city.cpu_stat_budget[slot] = ct_cpu_stat_seed[cpu_level] for each CPU
-// slot (0 for humans); we multiply that freshly stored float in place. Disabling
-// collapses the pool to 0, so the per-frame drainer finds nothing to hand out.
-// Humans already hold 0, so scaling them is a no-op.
+// Multiplies the float the vanilla seed loop just stored. A factor of 0 leaves
+// the per-frame drainer nothing to hand out. Humans already hold 0.
 void CpuStatGrowth_ScaleSeed(int slot)
 {
     GameData *gd = Gm_GetGameData();
@@ -38,10 +34,8 @@ void CpuStatGrowth_ScaleSeed(int slot)
     gd->city.cpu_stat_budget[slot] *= factor;
 }
 
-// Land on the seed loop's slot-increment `addi r25,r25,1` (0x80014ad4), reached
-// once per player slot right after the pool store. r25 still holds the current
-// slot index there (pre-increment), so `mr 3, 25` hands it to the callback. The
-// clobbered `addi` is re-run by the hook framework.
+// The seed loop's slot-increment `addi r25,r25,1`, reached once per player slot
+// right after the pool store, with r25 still holding the pre-increment index.
 CODEPATCH_HOOKCREATE(0x80014ad4,
     "mr 3, 25\n\t",
     CpuStatGrowth_ScaleSeed,

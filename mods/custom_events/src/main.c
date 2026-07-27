@@ -13,12 +13,11 @@ static void OnBoot(void)
 
 static void On3DLoadEnd(void)
 {
-    // Initialize custom event SIS text entries when in City Trial
     if (stGetCurrentStageKind() == STAGEKIND_CITY1)
         CustomEvents_InitSis();
 
-    // Cannon is WIP investigation scaffolding that runs diagnostic spawns/dumps
-    // on every City Trial load. Keep it off while only Gourmet Race is enabled.
+    // Cannon scaffolding runs diagnostic spawns and memory dumps on every City
+    // Trial load, so it stays off.
     // CannonEvent_On3DLoadEnd();
 }
 

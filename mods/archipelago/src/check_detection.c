@@ -12,12 +12,10 @@
 #include "ap_check_detect.h"
 #include "textbox_api.h"
 
-// SFX cue played by the vanilla ClearChecker_SetNewUnlock on a first-this-frame
-// transition. Guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
+// SFX cue the vanilla ClearChecker_SetNewUnlock plays on a first-this-frame
+// transition, guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
 #define CHECKLIST_UNLOCK_SFX 0x10008
 
-// Bit accessor for sent_checks[row][2] u64 packing. Row r, clear_kind k in
-// [0..CLEAR_KIND_NUM-1]: word index = k / 64, bit index = k % 64.
 #define SENT_CHECK_BIT(r, k)  ((ap_save->sent_checks[(r)][(k) >> 6] >> ((k) & 63)) & 1ULL)
 
 // Beat King Dedede goal: CT clear_kind 0x2F
@@ -27,12 +25,10 @@
 // one match!" cell - NOT the part-unlock cells 0x6D/0x6E (unrelated reward markers).
 #define HYDRA_DRAGOON_CLEAR_KIND 0x77
 
-// Forward declaration: defined mid-file, called from earlier helpers.
 void CheckDetection_EvaluateGoal(void);
 
-// Set the sent_checks bit in both save and the shared-memory mirror. No-op if
-// already set. Returns 1 if newly set, 0 if already set (for callers that
-// want to detect transitions). `row` is a ChecklistModeRow() result.
+// Set the sent_checks bit in both save and the shared-memory mirror. Returns 1 if
+// newly set. `row` is a ChecklistModeRow() result.
 static inline int SetSentCheck(int row, u8 clear_kind)
 {
     u64 bit = 1ULL << (clear_kind & 63);
@@ -44,7 +40,6 @@ static inline int SetSentCheck(int row, u8 clear_kind)
     return 1;
 }
 
-// Clear sent_checks for a single row in both save and mirror.
 static inline void ClearSentChecksForRow(int row)
 {
     ap_save->sent_checks[row][0] = 0;
@@ -53,27 +48,23 @@ static inline void ClearSentChecksForRow(int row)
     ap_data->sent_checks[row][1] = 0;
 }
 
-// popcount the two u64 words covering the 0..CLEAR_KIND_NUM-1 range.
 static inline int PopcountRow(int row)
 {
     return Popcount64(ap_save->sent_checks[row][0]) + Popcount64(ap_save->sent_checks[row][1]);
 }
 
 // Record a check: set the save bit, mirror to shared memory, re-evaluate goal.
-// No-op if the bit was already set. Caller is responsible for bounds checking.
-//
-// Deliberately does not write the card. Hoshi_WriteSave mounts and rewrites the
-// whole file synchronously, which stalls the frame - and checks are recorded
-// mid-run. The bits live in ap_save until the game's own save point (main menu
-// entry) flushes them, and ap_data carries them to the client immediately.
+// Idempotent. Deliberately does not write the card - Hoshi_WriteSave rewrites the
+// whole file synchronously and stalls the frame, and checks are recorded mid-run.
+// The bits live in ap_save until the game's own save point flushes them.
 static void RecordCheck(int mode, int clear_kind)
 {
     int row = ChecklistModeRow(mode);
     if (row < 0 || (unsigned)clear_kind >= CLEAR_KIND_NUM)
         return;
-    // The AP tab's grid is 120 cells wide but only the first APCK_NUM back an AP
-    // location, and the filler cursor can reach the blank ones. Recording those
-    // would send a location code the multiworld has never heard of.
+    // Only the AP tab's first APCK_NUM cells back an AP location, and the filler
+    // cursor can reach the blank ones. Recording those would send a location code
+    // the multiworld has never heard of.
     if (row == AP_CHECKLIST_ROW && clear_kind >= APCK_NUM)
         return;
     if (!SetSentCheck(row, (u8)clear_kind))
@@ -98,13 +89,12 @@ static void RecordCheck(int mode, int clear_kind)
 }
 
 // Replacement for ClearChecker_SetNewUnlock (0x8004A054), the funnel most gameplay
-// code uses to flag a completed objective. Detect the transition (bit was unset) ->
-// RecordCheck, then run the vanilla logic so the UI still works (SFX cue included).
+// code uses to flag a completed objective. Detect the transition -> RecordCheck,
+// then run the vanilla logic so the UI still works.
 static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
 {
-    // Accept the AP-checklist mode too, not just the 3 real modes: the AP-checklist
-    // evaluator drives completions through here via
-    // ClearChecker_SetNewUnlock(ap_checklist_mode, ..).
+    // ChecklistModeRow accepts the AP-checklist mode too, not just the 3 real modes:
+    // the AP-checklist evaluator drives completions through here.
     if (ChecklistModeRow(mode) < 0 || (unsigned)clear_kind >= CLEAR_KIND_NUM)
         return;
     GameClearData *cd = gmGetClearcheckerTypeP(mode);
@@ -121,7 +111,7 @@ static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
     if (Checklist_IsCacheValid() != 0)
         return;
 
-    // Play the unlock SFX at most once per frame (matches vanilla behavior).
+    // Vanilla plays the unlock SFX at most once per frame.
     if (fresh)
     {
         int frame = ClearChecker_GetFrameIndex();
@@ -137,8 +127,7 @@ static void CheckDetection_SetNewUnlockReplacement(int mode, int clear_kind)
 
 // Replacement for ClearChecker_SetNewUnlockSilent (0x80049FCC). Top Ride commits
 // every check through this "silent" variant, not SetNewUnlock, so without this every
-// TR check is dropped. Mirrors the SetNewUnlock replacement (transition detect ->
-// RecordCheck -> vanilla body) but omits the SFX (the caller already played it).
+// TR check is dropped. The SFX is omitted because the caller already played it.
 static void CheckDetection_SetNewUnlockSilentReplacement(int mode, int clear_kind)
 {
     if ((unsigned)mode >= GMMODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
@@ -160,10 +149,8 @@ static void CheckDetection_SetNewUnlockSilentReplacement(int mode, int clear_kin
     cd->clear[clear_kind].is_new = 1;
 }
 
-// Per-row clear_kind of the vanilla "Fill in over 100 Checklist blocks!" cell that
-// GOAL_100_CHECKLIST keys off (distinct from the synthetic popcount GOAL_N_CHECKLIST).
-// Returns 0xFF for the AP checklist row, which has no such cell (callers must
-// range-check before indexing).
+// Per-row clear_kind of the vanilla "Fill in over 100 Checklist blocks!" cell.
+// Returns 0xFF for the AP checklist row, which has no such cell.
 static u8 Fill100ClearKind(int row)
 {
     switch (row)
@@ -175,9 +162,8 @@ static u8 Fill100ClearKind(int row)
     }
 }
 
-// Evaluate a single mode's goal condition. Returns 1 if satisfied (or NONE).
-// `row` is the checklist-mode row, `count` is the popcount, `n` is the threshold
-// for GOAL_N_CHECKLIST.
+// Returns 1 if satisfied (or NONE). `count` is the row's popcount, `n` the
+// GOAL_N_CHECKLIST threshold.
 static int goal_satisfied(APGoalKind goal, int row, int count, int n)
 {
     switch (goal)
@@ -186,8 +172,8 @@ static int goal_satisfied(APGoalKind goal, int row, int count, int n)
         return 1;  // vacuously satisfied
     case GOAL_100_CHECKLIST:
     {
-        // The "Fill in over 100 Checklist blocks!" cell, not a popcount (count is
-        // unused here); GOAL_N_CHECKLIST below is the synthetic count goal.
+        // The "Fill in over 100 Checklist blocks!" cell, not a popcount -
+        // GOAL_N_CHECKLIST below is the synthetic count goal.
         u8 k = Fill100ClearKind(row);
         return (k < CLEAR_KIND_NUM) && SENT_CHECK_BIT(row, k);
     }
@@ -204,16 +190,14 @@ static int goal_satisfied(APGoalKind goal, int row, int count, int n)
         return ((sc[0] & gc[0]) == gc[0]) && ((sc[1] & gc[1]) == gc[1]);
     }
     case GOAL_MAX_STATS_CT:
-        // Set by the CT max-stats goal path when a human player's CT stats all
-        // hit the per-slot patch-cap target in one trial round. Mode-independent.
+        // Mode-independent sticky save bit, latched during a City Trial round.
         return ap_save->max_stats_ct_achieved;
     }
     return 0;
 }
 
-// Announce a single mode's goal completion: "<Mode> goal complete!" with the
-// mode name in its mode color and the rest in GoalColor (gold). Distinct from
-// the aggregate "All Goals complete!" - this fires per mode as each is finished.
+// "<Mode> goal complete!", fired per mode as each is finished. Distinct from the
+// aggregate "All Goals complete!".
 static void AnnounceModeGoal(int row)
 {
     static const char *const mode_names[GMMODE_NUM] = {
@@ -223,8 +207,7 @@ static void AnnounceModeGoal(int row)
     };
     const char *name;
     GXColor color;
-    // The AP row has no ModeColors[] slot - that array is sized GMMODE_NUM - so it
-    // carries its own name and theme color instead.
+    // ModeColors[] is sized GMMODE_NUM, so the AP row carries its own name and tint.
     if (row == AP_CHECKLIST_ROW)
     {
         static const GXColor ap_theme = {AP_THEME_R, AP_THEME_G, AP_THEME_B, 255};
@@ -251,8 +234,8 @@ void CheckDetection_EvaluateGoal(void)
 
     APSlotOptions *opt = &ap_save->options;
 
-    // At least one mode must have a non-NONE goal, and all non-NONE goals
-    // must be satisfied. If every mode is GOAL_NONE, victory never fires.
+    // Victory needs at least one non-NONE goal, all of them satisfied. If every
+    // mode is GOAL_NONE it never fires.
     int any_real_goal = 0;
     int all_ok = 1;
     int newly_satisfied[CHECKLIST_MODE_NUM];
@@ -260,7 +243,6 @@ void CheckDetection_EvaluateGoal(void)
     {
         APGoalKind goal = (APGoalKind)opt->goal[r];
         int sat = goal_satisfied(goal, r, PopcountRow(r), opt->checklist_amount[r]);
-        // A real goal that just flipped to satisfied and hasn't been announced.
         newly_satisfied[r] = (goal != GOAL_NONE) && sat && !ap_save->goal_announced[r];
         if (goal != GOAL_NONE)
             any_real_goal = 1;
@@ -272,8 +254,8 @@ void CheckDetection_EvaluateGoal(void)
     {
         ap_save->goal_complete = 1;
         ap_data->goal_complete = 1;
-        // Mark every real goal announced so the aggregate "All Goals complete!"
-        // isn't doubled by a per-mode message for the final mode.
+        // Suppress the per-mode message for the final mode, so it doesn't double
+        // up with the aggregate "All Goals complete!".
         for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
             if (opt->goal[r] != GOAL_NONE)
                 ap_save->goal_announced[r] = 1;
@@ -282,8 +264,7 @@ void CheckDetection_EvaluateGoal(void)
         return;
     }
 
-    // Overall victory not reached yet: announce each mode goal that just became
-    // satisfied (once each) so the player gets feedback as they finish modes.
+    // Victory not reached yet: announce each mode goal that just became satisfied.
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         if (!newly_satisfied[r])
@@ -293,12 +274,10 @@ void CheckDetection_EvaluateGoal(void)
     }
 }
 
-// Process bits the client wrote into ap_data->client_backfill: each newly set bit is
-// applied additively (sent_checks bit, clear[] is_unlocked/is_visible, optional
-// has_reward, goal re-eval).
+// Apply bits the client wrote into ap_data->client_backfill: sent_checks bit,
+// clear[] is_unlocked/is_visible, optional has_reward, goal re-eval.
 static void ProcessBackfill(void)
 {
-    // Quick check: any nonzero word?
     int has_data = 0;
     for (int r = 0; r < CHECKLIST_MODE_NUM && !has_data; r++)
     {
@@ -332,8 +311,7 @@ static void ProcessBackfill(void)
 
                 SetSentCheck(r, clear_kind);
 
-                // is_visible is what the grid renders as revealed; set has_reward
-                // if a local placement exists and its source item was received.
+                // is_visible is what the grid renders as revealed.
                 if (cd)
                 {
                     cd->clear[clear_kind].is_unlocked = 1;
@@ -347,7 +325,7 @@ static void ProcessBackfill(void)
         }
     }
 
-    // Clear the backfill field (single-writer protocol - mod consumes, then zero).
+    // Single-writer protocol: the mod consumes, then zeroes.
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         ap_data->client_backfill[r][0] = 0;
@@ -362,17 +340,11 @@ static void ProcessBackfill(void)
 }
 
 // Meta auto-unlock handlers (Checklist_ProcessUnlock 0x8017e490): five cells whose
-// clear[] byte vanilla sets via direct `stb`, bypassing SetNewUnlock. Each thin
-// handler records its compile-time (mode, clear_kind), then returns 0 to let the
-// `stb` run (clear[k]=1) or 1 to skip it - skip iff the cell is already is_filler,
-// since the store would wipe the filler byte no other path re-sets.
-//
-// The skip must still set is_unlocked itself. Each vanilla store site is guarded by
-// `!clear[k].is_unlocked` and returns 1 ("an unlock was processed") without arming the
-// phase timer, so Checklist_Think re-enters ProcessUnlock every frame until the guard
-// goes false. Skipping the store alone leaves the guard true forever: the checklist
-// phase never advances and the screen stops taking input. is_filler outranks
-// is_unlocked in the grid builder, so the cell still draws as a filler tile.
+// clear[] byte vanilla sets via direct `stb`, bypassing SetNewUnlock. Return 0 lets
+// the `stb` run, 1 skips it - skip iff the cell is already is_filler, since the store
+// would wipe a filler byte no other path re-sets. The skip must set is_unlocked
+// itself: the store site's `!is_unlocked` guard otherwise stays true forever, and
+// Checklist_Think re-enters ProcessUnlock every frame with the screen taking no input.
 #define META_UNLOCK_HANDLER(name, mode, kind)                            \
     static int name(void)                                                \
     {                                                                    \
@@ -390,10 +362,10 @@ META_UNLOCK_HANDLER(MetaUnlock_CityTrial100,     GMMODE_CITYTRIAL, 0x37)
 META_UNLOCK_HANDLER(MetaUnlock_CityTrialDragoon, GMMODE_CITYTRIAL, 0x6D)
 META_UNLOCK_HANDLER(MetaUnlock_CityTrialHydra,   GMMODE_CITYTRIAL, 0x6E)
 
-// Hook sites. The clobbered `stb` stores 1 via a volatile reg (r4 / r0), which the
-// epilogue re-materializes so the accept (return-0) auto-re-execute lands the 1 after
-// `bl`. Reject (return-1) skips the store and jumps to the function tail below,
-// bypassing the store + display_state update (the filler path already drove both).
+// The clobbered `stb` stores 1 via a volatile reg (r4 / r0), which the epilogue
+// re-materializes so the accept (return-0) auto-re-execute lands the 1 after `bl`.
+// Reject (return-1) jumps to the function tail, bypassing the store and the
+// display_state update.
 #define META_SKIP_EXIT 0x8017f394
 
 // 0x8017efc0: stb r4, 148(r30)   - AR: Complete 100 checkboxes (clear_kind 0x18)
@@ -405,24 +377,17 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8017eff8, "", MetaUnlock_TopRide100,       "li
 // 0x8017f030: stb r4, 179(r30)   - CT: Complete 100 checkboxes (clear_kind 0x37)
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f030, "", MetaUnlock_CityTrial100,     "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017f0ac: stb r0, 233(r30)   - CT: Unlock Dragoon Parts on the Checklist (clear_kind 0x6D),
-// auto-completes once all three Dragoon part rewards are received. Not the goal cell (0x77).
+// 0x8017f0ac: stb r0, 233(r30)   - CT: Unlock Dragoon Parts (clear_kind 0x6D), not the goal cell 0x77
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f0ac, "", MetaUnlock_CityTrialDragoon, "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
-// 0x8017f120: stb r0, 234(r30)   - CT: Unlock Hydra Parts on the Checklist (clear_kind 0x6E),
-// auto-completes once all three Hydra part rewards are received. Not the goal cell (0x77).
+// 0x8017f120: stb r0, 234(r30)   - CT: Unlock Hydra Parts (clear_kind 0x6E), not the goal cell 0x77
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f120, "", MetaUnlock_CityTrialHydra,   "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
-// Filler gate (Checklist_Think case 8). Vanilla hardcodes a filler reject for 3 grid
-// slots to stop cheesing the meta auto-unlock cells; under reward shuffle those cells
-// may hold legitimate rewards, so we replace it with a goal-aware check: reject a
-// filler only on a cell that would satisfy the active mode's goal without doing the
-// objective. Count/NONE goals protect nothing; the cell-anchored goals protect their
-// goal cell; GOAL_CHECKLIST_LIST protects every clear_kind set in goal_checks[mode].
-
+// Filler gate (Checklist_Think case 8), replacing vanilla's 3 hardcoded slot rejects:
+// under reward shuffle those cells may hold legitimate rewards, so reject a filler
+// only on a cell that would satisfy the active mode's goal without doing the objective.
 // Returns 1 to reject (caller branches to errorNoise), 0 to accept. phys_slot is the
-// cursor's grid position (row + col*12); goal cells are clear_kinds translated to
-// their physical slot via grid_mapping[].
+// cursor's grid position (row + col*12), which grid_mapping[] maps a clear_kind to.
 static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
 {
     // Any custom tab other than the AP one has no AP goal to protect.
@@ -438,10 +403,9 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
     {
     case GOAL_100_CHECKLIST:
     {
-        // Protect this mode's "Fill in over 100 Checklist blocks!" cell - it is the
-        // goal cell, so a filler on it would satisfy the goal without filling 100 boxes.
-        // Fill100ClearKind returns 0xFF for the AP row (no fill-100 cell), so nothing
-        // is protected there (AP 100-block goals are rejected at generation instead).
+        // A filler on the "Fill in over 100 Checklist blocks!" cell would satisfy the
+        // goal without filling 100 boxes. Nothing to protect on the AP row, which has
+        // no such cell (AP 100-block goals are rejected at generation instead).
         u8 k = Fill100ClearKind(row);
         return (k < CLEAR_KIND_NUM) && cd->grid_mapping[k] == phys_slot;
     }
@@ -455,7 +419,6 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
         return cd->grid_mapping[KD_CLEAR_KIND] == phys_slot;
     case GOAL_CHECKLIST_LIST:
     {
-        // Protect every clear_kind whose bit is set in the mode's goal_checks.
         u64 *gc = ap_save->options.goal_checks[row];
         for (int w = 0; w < 2; w++)
         {
@@ -475,20 +438,17 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
     }
 }
 
-// Filler-apply hook (Checklist_Think 0x80180dc4). The filler-apply path sets
-// clear[k].is_filler directly without calling SetNewUnlock, so the REPLACEFUNC never
-// sees a spent filler; this hook records it (RecordCheck is idempotent). At the hook,
-// r31 = UI state (mode at +0x14) and r18 = clear_kind (both non-volatile here).
+// Filler-apply hook. The filler-apply path sets clear[k].is_filler directly without
+// calling SetNewUnlock, so the REPLACEFUNC never sees a spent filler.
 static void CheckDetection_OnFillerApplied(int mode, int clear_kind)
 {
-    // RecordCheck maps the mode to its row and range-checks, so a filler spent on the
-    // Archipelago tab is recorded like any other check.
     RecordCheck(mode, clear_kind);
 }
 
-// Hook site: 0x80180dc4. Clobbered instruction is `lbz r3, 2(r29)` (start of
-// the checkbox_filler_num decrement); auto re-execution after the helper
-// returns reloads r3 from r29 (non-volatile), so no epilogue is needed.
+// Hook site: 0x80180dc4 in Checklist_Think, where r31 = UI state (mode at +0x14) and
+// r18 = clear_kind. Clobbered instruction is `lbz r3, 2(r29)` (start of the
+// checkbox_filler_num decrement); auto re-execution reloads r3 from the non-volatile
+// r29, so no epilogue is needed.
 CODEPATCH_HOOKCREATE(
     0x80180dc4,
     "lbz 3, 20(31)\n\t"   // r3 = mode
@@ -499,11 +459,10 @@ CODEPATCH_HOOKCREATE(
 )
 
 // Hook site 0x80180A64 (vanilla's `lbz r3, 20(r31)` mode-load). The prologue replays
-// vanilla's phys_slot computation (row + col*12) into the non-volatile r18 where
-// downstream code at 0x80180AA4 expects it, and passes mode/phys_slot to the helper.
-// Accept (return 0): clobbered insn auto-re-execs (r3 = mode) and branches to
-// 0x80180A9C, past vanilla's 3 hardcoded rejects. Reject (return 1): branches to
-// 0x80180C24 (errorNoise).
+// vanilla's phys_slot computation into the non-volatile r18 where downstream code at
+// 0x80180AA4 expects it. Accept (return 0): clobbered insn auto-re-execs (r3 = mode)
+// and branches to 0x80180A9C, past vanilla's 3 hardcoded rejects. Reject (return 1):
+// branches to 0x80180C24 (errorNoise).
 CODEPATCH_HOOKCONDITIONALCREATE(
     0x80180a64,
     "lbz 3, 20(31)\n\t"    // r3 = mode (helper arg 1)
@@ -528,7 +487,7 @@ void CheckDetection_OnFrameStart(void)
 
 void CheckDetection_OnSaveLoaded(void)
 {
-    // Mirror save state into shared memory for the client to read.
+    // Mirror into shared memory for the client to read.
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         ap_data->sent_checks[r][0] = ap_save->sent_checks[r][0];
@@ -536,8 +495,8 @@ void CheckDetection_OnSaveLoaded(void)
     }
     ap_data->goal_complete = ap_save->goal_complete;
 
-    // Initial goal evaluation in case options changed since last boot or
-    // saved checks already satisfy the active goal.
+    // Covers options changing since last boot, or saved checks already satisfying
+    // the active goal.
     CheckDetection_EvaluateGoal();
 
     OSReport("[Check] Loaded sent_checks AR=%d TR=%d CT=%d AP=%d goal=%d\n",
@@ -556,19 +515,15 @@ void CheckDetection_OnBoot(void)
     // bypasses SetNewUnlock entirely - replace it too or every TR check is lost.
     CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlockSilent, CheckDetection_SetNewUnlockSilentReplacement);
 
-    // Meta auto-unlock hooks inside Checklist_ProcessUnlock.
+    // Meta auto-unlocks inside Checklist_ProcessUnlock.
     CODEPATCH_HOOKAPPLY(0x8017efc0);  // AR 100-checklist
     CODEPATCH_HOOKAPPLY(0x8017eff8);  // TR 100-checklist
     CODEPATCH_HOOKAPPLY(0x8017f030);  // CT 100-checklist
     CODEPATCH_HOOKAPPLY(0x8017f0ac);  // CT Dragoon assembly
     CODEPATCH_HOOKAPPLY(0x8017f120);  // CT Hydra assembly
 
-    // Filler gate: replace vanilla's 3 hardcoded immediate rejects with a
-    // goal-aware check.
-    CODEPATCH_HOOKAPPLY(0x80180a64);
-
-    // Filler-apply: record the check when the player spends a filler.
-    CODEPATCH_HOOKAPPLY(0x80180dc4);
+    CODEPATCH_HOOKAPPLY(0x80180a64);  // Goal-aware filler gate
+    CODEPATCH_HOOKAPPLY(0x80180dc4);  // Filler-apply: record the check
     OSReport("[Check] Hooks installed\n");
 }
 
@@ -593,8 +548,6 @@ void CheckDetection_DebugClearAll(void)
 
 void CheckDetection_DebugForceMarkAll(void)
 {
-    // Set bits 0..CLEAR_KIND_NUM-1 for each mode. With CLEAR_KIND_NUM=120:
-    // word 0 holds bits 0..63 (all set), word 1 holds bits 64..119.
     _Static_assert(CLEAR_KIND_NUM > 64 && CLEAR_KIND_NUM <= 128,
                    "clear-kind packing assumes 2 u64 words");
     const u64 lo_mask = ~0ULL;

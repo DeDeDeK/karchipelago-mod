@@ -3,44 +3,25 @@
 
 #include "datatypes.h"
 
-// ---------------------------------------------------------------------------
-// Custom Items - framework for adding new City Trial item kinds from drop-in
-// HSD archives.
-//
-// A custom item is shipped as a self-contained .dat dropped into the FST's
-// `items/` folder (mods/custom_items/assets/items/ at build time, or any file
-// added to that folder in the Riivolution mount). At boot the mod scans that
-// folder, and per City Trial round it loads each archive, validates it, and
-// splices a new ItemKind into the game's item tables so it can spawn from the
-// sky, boxes, and events with author-specified weights.
-//
-// This header is the authoring contract: it defines the public symbol and the
-// descriptor layout a custom-item .dat must export, plus the API other mods
-// (e.g. archipelago) import to gate/query custom items.
-// ---------------------------------------------------------------------------
+// New City Trial item kinds loaded from .dat archives in the FST items/ folder.
 
 #define CUSTOM_ITEMS_MOD_NAME  "custom_items"
 #define CUSTOM_ITEMS_API_MAJOR 1
 #define CUSTOM_ITEMS_API_MINOR 2
 
-// Each custom-item .dat must export one public symbol named `customItem` whose
-// address is a CustomItemDesc. (Big-endian magic, ASCII "CITM".)
+// Each custom-item .dat exports one public symbol named `customItem` whose
+// address is a CustomItemDesc. Magic is big-endian ASCII "CITM".
 #define CUSTOM_ITEM_SYMBOL        "customItem"
 #define CUSTOM_ITEM_MAGIC         0x4349544Du
-// v1: model is a JOBJDesc root; render flag assumed flat (0x02000000).
-// v2: adds model_flag, carrying the model's itData render flag so complex /
-//     skinned models (Hydra/Dragoon pieces use 0x03/0x05/0x0b) render correctly.
-// v3: adds scale, a render-scale multiplier over the base kind's native size so
-//     a model carved onto a differently-scaled base kind renders at true size.
-// Older descriptors remain supported (the loader rejects only newer versions).
+// v2 adds model_flag, v3 adds scale; older descriptors stay supported (the
+// loader rejects only versions newer than this one).
 #define CUSTOM_ITEM_DESC_VERSION  3
 
 // Folder (relative to FST root) and extension scanned for drop-in items.
 #define CUSTOM_ITEM_DROPIN_DIR    "items"
 #define CUSTOM_ITEM_DROPIN_EXT    ".dat"
 
-// Spawn-weight source columns for CustomItemDesc.weight_event[]. These mirror
-// the per-kind chance columns of the engine's event_source_drop[] table.
+// Chance columns of the engine's event_source_drop[] rows; indexes weight_event[].
 typedef enum CustomItemEventSource
 {
     CUSTOM_ITEM_EVSRC_DYNABLADE,    // 0 Dyna Blade feather drops
@@ -52,18 +33,10 @@ typedef enum CustomItemEventSource
     CUSTOM_ITEM_EVSRC_NUM,
 } CustomItemEventSource;
 
-// Descriptor exported by a custom-item .dat under the `customItem` symbol.
-//
-// A custom item is a "skin/clone": the new kind inherits behavior (state class,
-// trigger, hurt, animation) from an existing vanilla ItemKind (`base_kind`) and
-// optionally overrides the visual model and/or the stat-grant effect. All
-// pointers are resolved within the archive by Archive_GetPublicAddress, so they
-// are valid for the loaded archive's lifetime (one scene).
-//
-// The model may be any item model carved from Item.dat - from a flat patch/copy
-// panel up to a multi-material, multi-texture, skinned model (the Hydra/Dragoon
-// legendary pieces). `model_flag` carries that model's render flag so skinned
-// geometry sets up correctly.
+// Descriptor exported under the `customItem` symbol. The new kind inherits
+// behavior (state class, trigger, hurt, animation) from a vanilla base_kind and
+// optionally overrides model/effect/scale. All pointers resolve inside the
+// archive, so they are valid only for the loaded archive's scene.
 typedef struct CustomItemDesc
 {
     u32 magic;          // 0x00 CUSTOM_ITEM_MAGIC
@@ -72,73 +45,52 @@ typedef struct CustomItemDesc
     const char *name;   // 0x08 display name (NUL-terminated)
 
     int base_kind;      // 0x0c ItemKind to clone behavior from (0..ITKIND_NUM-1)
-    int reserved_group; // 0x10 reserved. ItemGroup (BAD/GOOD/FAKE) is not a free
-                        //      standalone field: it is read from the effect record
-                        //      (PatchEffectInfo.group), so it follows base_kind, or
-                        //      the effect_info override below when one is supplied.
+    int reserved_group; // 0x10 unused; the BAD/GOOD/FAKE group comes from PatchEffectInfo.group
 
     void *model;        // 0x14 optional JOBJDesc* model override (NULL = inherit base_kind)
-    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit).
-                        //      Applied generically on pickup, so it can grant any
-                        //      combination of stat entries; base_kind still drives
-                        //      category-specific pickup reaction (pick base_kind in
-                        //      the intended family, e.g. a stat patch).
+    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit)
 
-    // Spawn weights. The sky/free-fall picker draws from the union of the three
-    // box pools, so weight_box already governs both box breaks and sky drops;
-    // weight_free is reserved (there is no separate free-fall pool to weight).
-    // NOTE: the engine's box/sky pools store the chance as a u8, so weight_box
-    // values saturate at 255 (weights are relative - values well under 255 are
-    // the norm). Event weights are u16 and are used unclamped.
+    // The sky picker draws from the union of the three box pools, so weight_box
+    // covers sky drops too and weight_free is unused. Box chances are u8 in the
+    // engine and saturate at 255; event weights are u16 and used unclamped.
     u16 weight_box[3];  // 0x1c spawn weight in the blue/green/red box pools (0-255; 0 = never)
-    u16 weight_free;    // 0x22 reserved - sky drops are covered by weight_box
+    u16 weight_free;    // 0x22 reserved
     u16 weight_event[CUSTOM_ITEM_EVSRC_NUM]; // 0x24 weight per event source (0 = never)
 
-    u32 model_flag;     // 0x30 (v2+) itData model render flag for `model`
-                        //      (0x02000000 flat; 0x03/0x05/0x0b legendary/skinned)
-    float scale;        // 0x34 (v3+) render-scale multiplier applied over the base
-                        //      kind's native scale (0 or 1.0 = inherit base size)
+    u32 model_flag;     // 0x30 (v2+) itData render flag (0x02000000 flat; 0x03/0x05/0x0b skinned)
+    float scale;        // 0x34 (v3+) multiplier over the base kind's scale (0 or 1.0 = inherit)
 } CustomItemDesc;
 
-// Handler invoked when a custom item is collected by a rider. `id_hash` and
-// `name` identify which custom item was picked up; `player` is the collector's
-// 0..4 player slot. Registered via CustomItemsAPI.SetPickupHandler; the handler
-// filters by id_hash/name and applies whatever effect it wants (e.g. Hypernova).
+// Invoked when a rider collects a custom item; `player` is the 0..4 slot.
 typedef void (*CustomItemPickupFn)(u32 id_hash, const char *name, int player);
 
-// API published via Hoshi_ExportMod for other mods to consume. Custom items are
-// addressed by their stable id hash (derived from the .dat's FST path), which
-// survives reboots and reordering of the drop-in folder.
+// Published via Hoshi_ExportMod. Items are addressed by their id hash (derived
+// from the .dat's FST path), stable across reboots and folder reordering.
 typedef struct CustomItemsAPI
 {
-    // Number of discovered custom items (registry entries).
+    // Number of discovered custom items.
     int (*GetCount)(void);
 
-    // Stable id hash of the index-th discovered item (0 if out of range).
+    // Id hash of the index-th item (0 if out of range).
     u32 (*GetIdHash)(int index);
 
     // Display name of the index-th item (NULL if out of range).
     const char *(*GetName)(int index);
 
-    // 1 if the item is enabled for spawning (master toggle AND per-item gate).
+    // 1 if enabled for spawning (master toggle AND per-item gate).
     int (*IsEnabled)(u32 id_hash);
 
-    // Enable/disable an item for spawning (e.g. an AP gate granting it).
+    // Enable/disable an item for spawning.
     void (*SetEnabled)(u32 id_hash, int enabled);
 
-    // ItemKind assigned to this item in the extended item tables for the current
-    // round, or -1 if it has not been registered yet this scene.
+    // ItemKind assigned this round, or -1 if not registered yet this scene.
     int (*GetAssignedKind)(u32 id_hash);
 
-    // Legacy single-handler setter (API minor 1+). Kept for compatibility: a
-    // non-NULL handler is added to the subscriber list (deduplicated); NULL
-    // clears all subscribers. Prefer AddPickupHandler/RemovePickupHandler.
+    // Legacy (minor 1+): adds a handler (deduplicated); NULL clears all of them.
     void (*SetPickupHandler)(CustomItemPickupFn handler);
 
-    // Subscribe/unsubscribe a handler fired when any custom item is collected by
-    // a rider (API minor 2+). Multiple consumer mods may subscribe; every
-    // registered handler is invoked on each pickup. Add is a no-op if the handler
-    // is already registered or the subscriber table is full.
+    // Subscribe/unsubscribe a pickup handler (minor 2+); every registered
+    // handler runs on each pickup. Add is a no-op if present or the list is full.
     void (*AddPickupHandler)(CustomItemPickupFn handler);
     void (*RemovePickupHandler)(CustomItemPickupFn handler);
 } CustomItemsAPI;

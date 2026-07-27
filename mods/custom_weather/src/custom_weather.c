@@ -9,10 +9,9 @@
 
 #include "custom_weather.h"
 
-// Custom presets, in enum order (WEATHER_BLOOD_RAIN .. WEATHER_BUBBLEGUM). Each
-// clones base_preset then overrides fog/sky/light and opts into effect layers.
+// Custom presets in enum order, WEATHER_BLOOD_RAIN .. WEATHER_BUBBLEGUM.
 const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
-    // Blood Rain: red downpour under red lightning.
+    // Blood Rain
     { .base_preset = WEATHER_RED_VIGNETTE,
       .fog_color = RGBA(130, 36, 14, 255),
       .fog_start = 60.0f,
@@ -36,7 +35,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .bolt = LTNG_BOLT_AUGMENT,
       },
     },
-    // Storm: dark, heavy rain, wind, lightning bolts, low cloud deck.
+    // Storm
     { .base_preset = WEATHER_DARK_VIGNETTE,
       .fog_color = RGBA(14, 18, 28, 255),
       .fog_start = 10.0f,
@@ -81,7 +80,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .height_var = 120.0f,
       },
     },
-    // Rain: cool blue, mostly clear skies, steady rain, a few light puddles, no hail.
+    // Rain
     { .base_preset = WEATHER_GRAY_SKY,
       .fog_color = RGBA(90, 110, 140, 255),
       .fog_start = 600.0f,
@@ -113,7 +112,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .slow_factor = 0.93f,
       },
     },
-    // Hailstorm: darker, windier, heavier rain than Rain, with damaging hail.
+    // Hailstorm
     { .base_preset = WEATHER_GRAY_SKY,
       .fog_color = RGBA(50, 60, 78, 255),
       .fog_start = 200.0f,
@@ -154,7 +153,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .height_var = 110.0f,
       },
     },
-    // Snowstorm: soft white flat lighting, slow dense fluttering snow, windy.
+    // Snowstorm
     { .base_preset = WEATHER_DENSE_FOG,
       .fog_color = RGBA(225, 230, 240, 255),
       .fog_start = 150.0f,
@@ -190,7 +189,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .size = 68.0f,
       },
     },
-    // Moonlight: clear dark sky, moon + moonlight, dense stars, frequent meteors.
+    // Moonlight
     { .base_preset = WEATHER_MIDNIGHT,
       .fog_color = RGBA(4, 6, 16, 255),
       .fog_start = 300.0f,
@@ -218,7 +217,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .shoot = SHOOT_FREQ_FREQUENT,
       },
     },
-    // Cotton Candy: pink sky over teal fog with pale drifting clouds.
+    // Cotton Candy
     { .base_preset = WEATHER_PINK_SKY,
       .fog_color = RGBA(0, 160, 160, 255),
       .fog_start = 200.0f,
@@ -236,7 +235,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .size_var = 0.4f,
       },
     },
-    // Toxic: green fog, barely-there green drizzle, green puddles.
+    // Toxic
     { .base_preset = WEATHER_DARK_VIGNETTE,
       .fog_color = RGBA(24, 72, 28, 255),
       .fog_start = 80.0f,
@@ -271,7 +270,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .slow_factor = 0.90f,
       },
     },
-    // Bubblegum: uniformly pink - pink fog, sky, lights, and clouds, no rain.
+    // Bubblegum
     { .base_preset = WEATHER_PINK_SKY,
       .fog_color = RGBA(255, 150, 205, 255),
       .fog_start = 250.0f,
@@ -315,11 +314,10 @@ const char *CustomWeather_GetPresetName(int weather_kind)
     return preset_names[weather_kind];
 }
 
-// Extended preset buffer: vanilla entries copied from stage file + custom appended.
+// Vanilla entries copied from the stage file, custom entries appended.
 static SkyPresetEntry extended_presets[WEATHER_TOTAL];
 
-// Per-preset enabled toggle. 1 = Enabled, 0 = Disabled. Default: all enabled.
-// Each entry is persisted by hoshi menu save (keyed by option name hash).
+// Per-preset pool toggle, persisted by hoshi menu save (keyed by option name hash).
 static int weather_enabled[WEATHER_TOTAL] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -330,50 +328,42 @@ _Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_T
 
 static char *toggle_names[] = {"Disabled", "Enabled"};
 
-// Global "Fog Distance" multiplier written into HSD_Fog.scale every frame by
-// the anim runtime. Index into fog_distance_factors; the engine emits
-// GXSetFog(..., end * scale, ...), so <1 pulls the fog wall in (denser, closer)
-// and >1 pushes it out (clearer). Default 100% = no change. Persisted by hoshi
-// menu save (keyed by option name).
-// Index 0 = Preset (1.0, the preset's authored fog distance); the rest force a scale.
+// Global "Fog Distance" multiplier written into HSD_Fog.scale. HSD_FogSet emits
+// GXSetFog(..., end * scale, ...), so <1 pulls the fog wall in and >1 pushes it out.
 static const float fog_distance_factors[] = {1.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
 static char *fog_distance_names[] = {"Preset", "50%", "75%", "100%", "125%", "150%", "200%"};
 #define FOG_DISTANCE_NUM (sizeof(fog_distance_factors) / sizeof(fog_distance_factors[0]))
-static int fog_distance_index = 0; // default Preset (1.0)
+static int fog_distance_index = 0;
 
 float CustomWeather_GetFogScale(void)
 {
     return fog_distance_factors[fog_distance_index];
 }
 
-// Copy vanilla presets into our static buffer, append custom presets,
-// and repoint the game's sub-header to use the extended array.
-// Safe to call each stage load (idempotent).
+// Repoints the game's preset sub-header at the extended array. Idempotent, so it
+// can run on every stage load.
 static void ExtendPresetArray(GrObj *grobj)
 {
-    // grobj->gr_data->sky_block->preset_header holds {preset_array, preset_count}.
     SkyBlock *sky_block = grobj->gr_data->sky_block;
     SkyPresetSubHeader *sub_header = sky_block->preset_header;
     SkyPresetEntry *vanilla_array = sub_header->preset_array;
 
-    // Copy all vanilla presets
     memcpy(extended_presets, vanilla_array,
            WEATHER_VANILLA_NUM * sizeof(SkyPresetEntry));
 
-    // Build each custom preset by cloning its base then overriding colors/fog/light
     for (int i = 0; i < WEATHER_CUSTOM_NUM; i++)
     {
         const CustomPresetDef *def = &custom_defs[i];
         SkyPresetEntry *entry = &extended_presets[WEATHER_VANILLA_NUM + i];
 
-        // Clone base (inherits non-overridden area light params: flags, attn, header)
+        // Inherits the base's un-overridden AreaLight params (flags, attn, header)
         *entry = extended_presets[def->base_preset];
 
         entry->fog_color = def->fog_color;
         entry->fog_start = def->fog_start;
         entry->fog_end = def->fog_end;
         entry->sky_ambient_color = def->sky_color;
-        entry->fade_color = 0;          // we drive screen tint ourselves via screen_tint + Sky_BeginFade
+        entry->fade_color = 0;          // screen tint is driven from screen_tint via Sky_BeginFade
         entry->area_light.color = def->char_diffuse;
         entry->area_light.hw_color = def->char_specular;
         entry->area_light.direction = def->char_dir;
@@ -381,18 +371,16 @@ static void ExtendPresetArray(GrObj *grobj)
         entry->transition_frames = 1;
     }
 
-    // Repoint game data to our extended array
     sub_header->preset_array = extended_presets;
     sub_header->preset_count = WEATHER_TOTAL;
 }
 
-// Replaces vanilla random/fixed sky selection.
-// Extends the preset array, then picks uniformly from enabled presets.
+// Replaces vanilla random/fixed sky selection with a uniform pick over the
+// enabled presets.
 static void CustomWeather_OverrideSky(GrObj *grobj)
 {
     ExtendPresetArray(grobj);
 
-    // Count enabled presets
     int enabled_count = 0;
     for (int i = 0; i < WEATHER_TOTAL; i++)
     {
@@ -400,7 +388,6 @@ static void CustomWeather_OverrideSky(GrObj *grobj)
             enabled_count++;
     }
 
-    // Pick random from enabled set; fall back to Day if none enabled
     int preset = WEATHER_DAY;
     if (enabled_count > 0)
     {
@@ -425,15 +412,15 @@ static void CustomWeather_OverrideSky(GrObj *grobj)
     Sky_SetPresetIndex(grobj, preset);
 }
 
-// Hook at 0x8010f1a4 (inside Sky_Init): City Trial (stage kind 9) random selection block.
-// r30 = grobj (the extended stage object). Exits past vanilla setSkyIndex.
+// Inside Sky_Init: the City Trial (gr_kind 9) random selection block. r30 = grobj;
+// the hook exits past the vanilla Sky_SetPresetIndex call.
 CODEPATCH_HOOKCREATE(0x8010f1a4,
     "mr 3, 30\n\t",
     CustomWeather_OverrideSky,
     "", 0x8010f1d0);
 
-// Hook at 0x8010f224 (inside Sky_Init): City Trial Free Run (stage kind 52) sky init.
-// Vanilla hardcodes preset 0. Same r30 = grobj.
+// Inside Sky_Init: City Trial Free Run (stage kind 52) sky init, where vanilla
+// hardcodes preset 0. Same r30 = grobj.
 CODEPATCH_HOOKCREATE(0x8010f224,
     "mr 3, 30\n\t",
     CustomWeather_OverrideSky,
@@ -494,7 +481,6 @@ MenuDesc weather_menu = {
             .kind = OPTKIND_ACTION,
             .on_action = DisableAllWeather,
         },
-        // Vanilla presets
         WEATHER_TOGGLE(WEATHER_DAY,            "Day"),
         WEATHER_TOGGLE(WEATHER_MIDNIGHT,       "Midnight"),
         WEATHER_TOGGLE(WEATHER_LIGHT_FOG,      "Light Fog"),
@@ -512,7 +498,6 @@ MenuDesc weather_menu = {
         WEATHER_TOGGLE(WEATHER_DARK_PURPLE,    "Dark Purple"),
         WEATHER_TOGGLE(WEATHER_RED_VIGNETTE,   "Red Vignette"),
         WEATHER_TOGGLE(WEATHER_DARK_LOW_VIS,   "Dark Low Vis"),
-        // Custom presets
         WEATHER_TOGGLE(WEATHER_BLOOD_RAIN,     "Blood Rain"),
         WEATHER_TOGGLE(WEATHER_STORM,          "Storm"),
         WEATHER_TOGGLE(WEATHER_RAIN,           "Rain"),

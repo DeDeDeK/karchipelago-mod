@@ -19,8 +19,7 @@
 #define LTNG_DEF_MAX_LULL      420                      // 7s at 60fps
 #define LTNG_INITIAL_LULL      30                       // first strike after 0.5s
 
-// Per-strike flicker ranges, rolled fresh each strike so no two flashes read
-// alike (peak brightness, envelope length, strobe cadence, dim depth).
+// Per-strike flicker ranges, rolled fresh each strike so no two flashes read alike.
 #define LTNG_INTENSITY_MIN    0.55f  // dimmest strike; 1.0 = full brilliant strike
 #define LTNG_LEN_MIN_SCALE    0.65f  // envelope length rolled around the preset len
 #define LTNG_LEN_MAX_SCALE    1.35f
@@ -31,8 +30,7 @@
 #define LTNG_STROBE_FLOOR_MIN 0.08f  // sharp near-dark flicker
 #define LTNG_STROBE_FLOOR_MAX 0.45f  // shallow shimmer
 
-// Bolt geometry (world units). A jagged channel descending from sky to ground
-// with one offshoot fork, jittered horizontally as it falls.
+// Bolt geometry (world units): a jagged channel from sky to ground with one fork.
 #define BOLT_TOP_Y        820.0f
 #define BOLT_GROUND_Y     -40.0f
 #define BOLT_SEGMENTS     13              // main channel segment count
@@ -46,16 +44,15 @@
 #define BOLT_CORE_WIDTH   14             // thin bright core pass
 #define BOLT_GLOW_ALPHA   0.5f           // glow alpha relative to the core
 
-// Point light at the bolt midpoint. Computed attenuation (ref_br at ref_dist)
-// so the engine derives the GX coefficients; omnidirectional.
+// Omnidirectional point light at the bolt midpoint, with computed attenuation
+// (ref_br at ref_dist) so the engine derives the GX coefficients.
 #define BOLT_LIGHT_REF_DIST  520.0f
 #define BOLT_LIGHT_REF_BR    0.5f
 #define GX_SPOT_OFF          0           // GXSpotFn GX_SP_OFF (omnidirectional)
 #define GX_DIST_MEDIUM       2           // GXDistAttnFn GX_DA_MEDIUM
 
-// Bolt render GObj: arbitrary high entity class (avoids real engine classes), a
-// spare p_link, and the world camera's gx_link 0 on the XLU sub-pass - matching
-// the rain layer so the bolt shares the same depth-tested world pass.
+// Bolt render GObj: an entity class / p_link high enough to avoid the engine's own,
+// on the world camera's gx_link 0, XLU sub-pass.
 #define BOLT_GOBJ_CLASS   202
 #define BOLT_GOBJ_PLINK   26
 #define BOLT_GX_LINK      0
@@ -65,9 +62,9 @@
 #define LTNG_LOBJ_GOBJ_CLASS  38
 #define LTNG_LOBJ_GOBJ_PLINK  32
 
-// Overhead INFINITE flash LOBJ (the global rider flash). INFINITE (flags & 3 ==
-// 1): LObjLoad allocates a WObj from `position` and ignores the union; the WObj
-// pos vector is the light direction (shining toward the origin from that point).
+// Overhead INFINITE flash LOBJ (the global rider flash). For INFINITE (flags & 3
+// == 1) LObjLoad allocates a WObj from `position` and ignores the union; the WObj
+// pos vector is the direction, shining toward the origin from that point.
 static WOBJDesc s_flash_pos_desc = {
     .class_name = 0,
     .pos = { 0.0f, 1500.0f, 0.0f }, // overhead
@@ -85,9 +82,9 @@ static LObjDesc s_flash_lobj_desc = {
     .u = { .p = 0 },
 };
 
-// POINT LOBJ at the bolt midpoint. POINT (flags & 3 == 2): LObjLoad loads
-// `position` as the world point; the computed point desc (attnflags bit 0
-// clear) gives ref-brightness/ref-distance falloff.
+// POINT LOBJ at the bolt midpoint. For POINT (flags & 3 == 2) LObjLoad loads
+// `position` as the world point; a clear attnflags bit 0 selects the computed
+// ref-brightness/ref-distance falloff.
 static WOBJDesc s_bolt_pos_desc = {
     .class_name = 0,
     .pos = { 0.0f, 400.0f, 0.0f }, // repositioned to the bolt midpoint each strike
@@ -130,7 +127,7 @@ static int     stc_preset_bolt = LTNG_BOLT_OFF; // this preset's bolt mode
 static int s_lull_frames = LTNG_INITIAL_LULL;
 static int s_flash_frames = 0;
 
-// Per-strike appearance, rolled when a strike fires (see the LTNG_* ranges).
+// Per-strike appearance, rolled when a strike fires.
 static int   s_strike_len = LTNG_DEF_FLASH_FRAMES; // this strike's envelope length
 static float s_strike_intensity = 1.0f;            // this strike's peak brightness
 static int   s_strike_on = LTNG_STROBE_ON_MAX;     // frames at full per strobe cycle
@@ -147,9 +144,9 @@ static Vec3 s_bolt_mid = {0.0f, 0.0f, 0.0f};
 static char *bolt_override_names[] = {"Auto", "Off", "Force"};
 static int   bolt_override_index = 0; // 0=Auto (honor preset), 1=Off, 2=Force
 
-// Resolve the effective bolt mode from the active preset's setting and the
-// global menu override. Force lifts an off/augment preset to at least augment,
-// but honors a preset that specifically asked to replace the flash.
+// Effective bolt mode from the preset's setting and the menu override. Force lifts
+// an off/augment preset to augment, but honors a preset that asked to replace the
+// flash.
 static int EffectiveBoltMode(void)
 {
     switch (bolt_override_index)
@@ -160,8 +157,8 @@ static int EffectiveBoltMode(void)
     }
 }
 
-// Shared strobe brightness in [0, 1] for the current frame of the flash window:
-// a few sharp pulses decaying to nothing. Drives the flash and the bolt alike.
+// Strobe brightness in [0,1] for the current frame of the flash window: a few sharp
+// pulses decaying to nothing, driving the flash and the bolt alike.
 static float FlashBrightness(void)
 {
     if (s_flash_frames <= 0 || s_strike_len <= 0)
@@ -173,10 +170,8 @@ static float FlashBrightness(void)
     return decay * strobe * s_strike_intensity;
 }
 
-// Ground anchor for a strike. Primary: a uniform random XZ inside the stage's
-// out-of-bounds death box, so bolts fall anywhere across the map (including the
-// OOB margin), independent of any camera. Fallback (no OOB box): a random
-// active rider's XZ plus a wide scatter, else the world origin.
+// Ground anchor for a strike: a uniform random XZ inside the stage's out-of-bounds
+// box. Without one, a random active rider's XZ plus a wide scatter, else the origin.
 static void StrikeAnchor(float *ax, float *az)
 {
     GrObj *gr = *stc_grobj;
@@ -252,8 +247,8 @@ static void EnsureBoltLight(void)
     GObj_AddGXLink(gobj, LObj_GX, 0, 0);
 }
 
-// Build a fresh jagged bolt near the stashed camera focus and move the midpoint
-// point light onto it. Called once when a strike fires.
+// Build a fresh jagged bolt at a random anchor and move the midpoint point light
+// onto it. Called once when a strike fires.
 static void GenerateBolt(void)
 {
     float x, z;
@@ -304,9 +299,8 @@ static void GenerateBolt(void)
         s_bolt_lobj->position->pos = s_bolt_mid;
 }
 
-// Draw the bolt as GX line segments. Flat per-vertex color, additive blend so
-// the core glows, depth-tested but not depth-writing so stage geometry occludes
-// the bolt (same occlusion rule as the rain). Mirrors rain.c's GX setup.
+// Draw the bolt as GX line segments: flat per-vertex color, additive blend so the
+// core glows, depth-tested but not depth-writing so stage geometry occludes it.
 static void DrawBoltPass(COBJ *cam, GXColor col, int width, u8 alpha)
 {
     WeatherGX_BeginXlu(cam, 1, width); // additive
@@ -357,9 +351,8 @@ static void EnsureBoltRender(void)
                                           "[Lightning] Bolt render layer installed");
 }
 
-// Latch the active preset's lightning config, resolving each 0 field to its
-// module default. NULL or def->enabled == 0 turns lightning off. Resets the
-// strike timers so the first strike fires a short beat after the preset starts.
+// Latch the active preset's lightning config, resolving each 0 field to its module
+// default and re-arming the strike timers.
 void Lightning_SetActive(const LightningDef *def)
 {
     if (!def || !def->enabled)
@@ -370,8 +363,7 @@ void Lightning_SetActive(const LightningDef *def)
     stc_active = 1;
 
     stc_flash_color = GXColor_Unpack(def->flash_color ? def->flash_color : LTNG_DEF_FLASH_COLOR);
-    // The bolt glow inherits the preset's flash color (red for Blood Rain,
-    // near-white for Storm); the core is always white-hot.
+    // The bolt glow inherits the preset's flash color; the core is always white-hot.
     stc_bolt_color = GXColor_Unpack(def->flash_color ? def->flash_color : BOLT_DEF_COLOR);
     stc_flash_len = def->flash_frames > 0 ? def->flash_frames : LTNG_DEF_FLASH_FRAMES;
     stc_min_lull = def->min_lull > 0 ? def->min_lull : LTNG_DEF_MIN_LULL;
@@ -384,9 +376,9 @@ void Lightning_SetActive(const LightningDef *def)
     s_flash_frames = 0;
 }
 
-// Lerp the per-frame fog/EFB color toward the flash color by `bright` and pull
-// the fog wall in so the brightness reaches near terrain. This is what lights
-// the (LOBJ-blind) stage geometry on a strike.
+// Lerp the per-frame fog/EFB color toward the flash color by `bright` and pull the
+// fog wall in so the brightness reaches near terrain. This is what lights the
+// LOBJ-blind stage geometry on a strike.
 static void ApplyScreenFlash(HSD_Fog *fog, float bright)
 {
     u8 fr = stc_flash_color.r, fg = stc_flash_color.g, fb = stc_flash_color.b;
@@ -411,8 +403,8 @@ static void ApplyScreenFlash(HSD_Fog *fog, float bright)
     *stc_global_fog_color = RGBA(nr, ng, nb, ba);
 }
 
-// Per-frame strike driver. `fog` is the active HSD_Fog (already written this
-// frame by Sky_Update); we lerp it toward the flash color during a strike.
+// Per-frame strike driver. `fog` is the active HSD_Fog, already written this frame
+// by Sky_Update, lerped toward the flash color during a strike.
 void Lightning_Tick(HSD_Fog *fog)
 {
     if (!stc_active)
@@ -453,7 +445,6 @@ void Lightning_Tick(HSD_Fog *fog)
         s_lull_frames--;
         if (s_lull_frames <= 0)
         {
-            // Roll this strike's shape (length, brightness, cadence, floor).
             float lenscale = LTNG_LEN_MIN_SCALE + HSD_Randf() * (LTNG_LEN_MAX_SCALE - LTNG_LEN_MIN_SCALE);
             s_strike_len = (int)(stc_flash_len * lenscale);
             if (s_strike_len < 1)
@@ -476,8 +467,8 @@ void Lightning_Tick(HSD_Fog *fog)
 
 void Lightning_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop our cached
-    // handles so the next active frame recreates them, and re-arm the timer.
+    // The engine frees every world GObj on scene teardown; drop the cached handles
+    // so the next active frame recreates them.
     s_flash_lobj = 0;
     s_bolt_lobj = 0;
     s_bolt_render = 0;

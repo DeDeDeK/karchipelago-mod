@@ -9,12 +9,12 @@
 #include "deathlink.h"
 #include "textbox_api.h"
 
-// Reentrancy guard - prevents send hooks from echoing when we call
-// Machine_SetFallDead or Ply_SetHP from the receive path.
+// Stops the send hooks echoing when the receive path calls Machine_SetFallDead
+// or Ply_SetHP.
 static int applying_deathlink = 0;
 
-// Common send gate. The human-vs-CPU check is mode-specific and stays at the
-// call site (3D: Ply_CheckIfCPU, TR: TopRide_GetPlayerKind).
+// The human-vs-CPU check is mode-specific and stays at the call site
+// (3D: Ply_CheckIfCPU, TR: TopRide_GetPlayerKind).
 static int DeathLinkSendAllowed(void)
 {
     if (applying_deathlink)
@@ -24,7 +24,6 @@ static int DeathLinkSendAllowed(void)
     return 1;
 }
 
-// 3D-mode helper - gates on Ply_CheckIfCPU then sends.
 static void SendDeathLink(int ply)
 {
     if (!DeathLinkSendAllowed())
@@ -36,17 +35,18 @@ static void SendDeathLink(int ply)
     ap_data->deathlink_send = 1;
 }
 
-// Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0 - fires when Machine_IsDead returns
-// true (HP death). Does NOT fire for fall deaths (different bit in md->x0C35).
+// Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0, where
+// Machine_IsDead returns true. Fall deaths use a different bit in md->x0C35 and
+// do not reach here.
 static void DeathLink_OnHpDeath(RiderData *rd)
 {
     SendDeathLink(rd->ply);
 }
 CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", DeathLink_OnHpDeath, "", 0)
 
-// Hook inside Machine_SetFallDead (0x801e6540) - fires when a machine falls out of
-// bounds. At this point r31 = MachineData* and rider_gobj is known non-null.
-// Clobbered instruction: stw r4, 0x1b48(r31)
+// Hook inside Machine_SetFallDead (0x801e6540), where a machine falls out of
+// bounds. r31 = MachineData*, rider_gobj known non-null.
+// Clobbered: stw r4, 0x1b48(r31)
 static void DeathLink_OnFallDeath(MachineData *md)
 {
     int ply = Machine_GetRiderPly(md);
@@ -80,7 +80,6 @@ static void KillPlayer(RiderData *rd, MachineData *md)
                 || stadium == STKIND_MELEE2;
     if (hp_death)
     {
-        // Zero HP to trigger normal death flow
         DmgLog dl = md->dmg_log;
         dl.attacker_ply = 0;
         Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);
@@ -88,15 +87,14 @@ static void KillPlayer(RiderData *rd, MachineData *md)
     }
     else
     {
-        // Air Ride / Top Ride: trigger fall-off-course death. respawn_pos holds
-        // the checkpoint spline params; use backup_respawn_pos on failed lookup.
-        // -1 ground_handle matches vanilla's no-dead-zone-surface case.
+        // respawn_pos holds the checkpoint spline params; backup_respawn_pos
+        // covers a failed lookup. -1 ground_handle matches vanilla's
+        // no-dead-zone-surface case.
         float *pos = md->use_backup_checkpoint ? md->backup_respawn_pos : md->respawn_pos;
         Machine_SetFallDead(md, -1, pos);
     }
 }
 
-// Check for deathlink receive and kill all human players
 static void DeathLink_PerFrame(GOBJ *g)
 {
     if (Gm_GetIntroState() != GMINTRO_END)
@@ -139,9 +137,9 @@ void DeathLink_On3DLoadEnd()
 }
 
 // Top Ride send hook for the SAND-course sand-pit enemy, which swallows a kirby
-// and spits it out via the KirbyDoodlebugOut wrapper (vt+0xD0). Hooking this call
-// site (0x80331a94) catches only the sand-pit eject, not Doodlebug-item ejection
-// (which uses the same wrapper at 0x802e2804). r31 = kirby.
+// and spits it out via the KirbyDoodlebugOut wrapper (vt+0xD0). This call site
+// catches only the sand-pit eject, not Doodlebug-item ejection (same wrapper at
+// 0x802e2804). r31 = kirby.
 static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
 {
     if (!DeathLinkSendAllowed())
@@ -167,9 +165,9 @@ CODEPATCH_HOOKCREATE(0x80331a94,
     "lwz 12, 0(31)\n\t",
     0)
 
-// Top Ride deathlink receive. TR has no HP/fall-death system, so pick one
-// damage-class state and apply it to every human kirby. SpeedDown is reserved
-// for traplink; Burn/Spin/Crush/Strike/Explode/Elec are excluded.
+// TR has no HP/fall-death system, so the receive picks one damage-class state and
+// applies it to every human kirby. SpeedDown is reserved for traplink;
+// Burn/Spin/Crush/Strike/Explode/Elec are excluded.
 typedef void (*KirbyStateFn)(TopRideKirby *);
 static const KirbyStateFn deathlink_states[] = {
     TopRide_KirbyPress,
@@ -229,14 +227,10 @@ void DeathLink_OnTopRideLoadEnd()
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_TopRidePerFrame, 0, 0, 0, 0);
 }
 
-// Apply patches needed for deathlink
 void DeathLink_OnBoot()
 {
-    // HP death: hook in Rider_CheckToDieOnMachine
-    CODEPATCH_HOOKAPPLY(0x801a06d0);
-    // Fall death: hook in Machine_SetFallDead
-    CODEPATCH_HOOKAPPLY(0x801e6540);
-    // TR scenery: sand-pit enemy on the SAND course (DoodlebugOut wrapper)
-    CODEPATCH_HOOKAPPLY(0x80331a94);
+    CODEPATCH_HOOKAPPLY(0x801a06d0); // HP death
+    CODEPATCH_HOOKAPPLY(0x801e6540); // Fall death
+    CODEPATCH_HOOKAPPLY(0x80331a94); // TR sand pit
     OSReport("[DeathLink] Hooks installed\n");
 }

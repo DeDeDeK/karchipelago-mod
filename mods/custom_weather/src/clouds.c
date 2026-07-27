@@ -1,5 +1,5 @@
-// High cloud deck for custom_weather: a low deck of soft, fly-through clusters of
-// translucent spheroids drifting over the City Trial map with the global wind.
+// Cloud deck for custom_weather: soft, fly-through clusters of translucent
+// spheroids drifting over the City Trial map with the global wind.
 
 #include "os.h"
 #include "game.h"
@@ -18,16 +18,16 @@
 #define CLOUD_MAX       30   // field capacity; resolved count clamps to this
 #define CLOUD_PUFFS     5    // overlapping spheroids per cloud (fluffy silhouette)
 
-// Each puff is a flattened UV sphere, re-emitted as triangle strips every frame;
-// keep the tessellation coarse - the soft per-vertex alpha hides the low poly count.
+// Each puff is a flattened UV sphere, re-emitted as triangle strips every frame.
+// The tessellation stays coarse: the soft per-vertex alpha hides the low poly count.
 #define CLOUD_SPHERE_RINGS    4      // latitude bands
 #define CLOUD_SPHERE_SECTORS  8      // longitude divisions
 #define CLOUD_SPHERE_VERTS    ((CLOUD_SPHERE_RINGS + 1) * (CLOUD_SPHERE_SECTORS + 1))
 #define CLOUD_FLATTEN         0.55f  // spheroid vertical squash (ry = r * this)
 #define CLOUD_RIM_MIN         0.12f  // silhouette alpha floor (0 = fully wispy edge)
 
-// Defaults applied when a preset leaves the matching CloudDef field 0. A soft,
-// fairly opaque off-white deck; A is the base per-cloud opacity before the menu scalar.
+// Defaults applied when a preset leaves the matching CloudDef field 0; the color
+// alpha is the base per-cloud opacity before the menu scalar.
 #define CLOUD_DEF_COLOR       RGBA(236, 240, 248, 205)
 #define CLOUD_DEF_COUNT       12
 #define CLOUD_DEF_SIZE        58.0f   // base puff radius (world units)
@@ -35,26 +35,24 @@
 #define CLOUD_DEF_PUFF_VAR    0.6f    // per-puff size variance within a cluster (0..1)
 #define CLOUD_DEF_HEIGHT_VAR  90.0f   // +/- world units of height spread about the deck
 
-// Global baseline puff-size multiplier over every preset's resolved size (and the
-// menu Size scalar).
+// Global multiplier over the resolved size and the menu Size scalar.
 #define CLOUD_SIZE_SCALE      1.2f
 
 // Deck height when a preset leaves CloudDef.height 0: this fraction up the CT OOB box.
 #define CLOUD_DECK_FRACTION   0.35f
 
-// Cluster shape. Puffs scatter within these multiples of the cloud's puff radius
-// (flattish deck, so vertical spread is smaller); puff 0 anchors the center core.
+// Puffs scatter within these multiples of the cloud's puff radius; puff 0 anchors
+// the center core.
 #define CLOUD_SPREAD_H  1.6f
 #define CLOUD_SPREAD_V  0.45f
 
-// Per-puff size variance within a cluster: the resolved variance (puff_var times
-// the menu scalar, clamped 0..1) sets how far scattered puffs shrink below the
-// core, floored at CLOUD_PUFF_FLOOR. 0 = uniform, 1 = a lumpy mix of sizes.
+// How far scattered puffs shrink below the core at variance 1, and the floor on
+// that shrink.
 #define CLOUD_PUFF_SPREAD  0.85f
 #define CLOUD_PUFF_FLOOR   0.15f
 
-// Drift. Clouds follow the wind direction at a damped speed, floored so a calm
-// preset still drifts them slowly and capped so gusts don't rip the deck across.
+// Clouds follow the wind direction at a damped speed, floored so a calm preset
+// still drifts them and capped so gusts don't rip the deck across.
 #define CLOUD_WIND_FACTOR   0.30f
 #define CLOUD_DRIFT_MIN     0.45f   // world units/frame floor (the calm drift)
 #define CLOUD_DRIFT_MAX     3.5f
@@ -64,8 +62,7 @@
 // ghosts in/out at the walls rather than popping. Y clearance is ignored.
 #define CLOUD_EDGE_FADE  260.0f
 
-// Render GObj: entity class / p_link after hail (204/28); world camera gx_link 0
-// on the XLU sub-pass, like the other weather layers.
+// Render GObj on the world camera's gx_link 0, XLU sub-pass.
 #define CLOUD_GOBJ_CLASS  205
 #define CLOUD_GOBJ_PLINK  29
 #define CLOUD_GX_LINK     0
@@ -84,8 +81,7 @@ typedef struct Cloud
     float     alpha_scale;       // subtle per-cloud opacity variety, 0..1
 } Cloud;
 
-// Cached only to avoid recreating the GObj every frame; never dereferenced (the
-// engine owns it and frees it on scene teardown).
+// Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_cloud_gobj = NULL;
 
 static int stc_active = 0;
@@ -104,46 +100,40 @@ static float   stc_pre_height = 0.0f;   // absolute preset height, or 0 = derive
 static float   stc_height_var = CLOUD_DEF_HEIGHT_VAR;
 
 // Menu knobs layered over the active preset's CloudDef: master coverage/opacity/
-// size scalars, a height offset, and an optional tint override. Coverage Off
-// disables clouds for every preset. Persisted by hoshi menu save.
-// Index 0 = Preset (1.0, the preset's authored cloud count); Off disables clouds.
+// size scalars, a height offset, and an optional tint override.
 static const float cover_factors[] = {1.0f, 0.0f, 0.55f, 1.0f, 1.6f};
 static char *cover_names[] = {"Preset", "Off", "Sparse", "Normal", "Dense"};
 #define CLOUD_COVER_NUM ((int)(sizeof(cover_factors) / sizeof(cover_factors[0])))
-static int cover_index = 0; // default Preset (1.0)
+static int cover_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored opacity).
 static const float opacity_factors[] = {1.0f, 0.6f, 1.0f, 1.35f};
 static char *opacity_names[] = {"Preset", "Thin", "Normal", "Thick"};
 #define CLOUD_OPACITY_NUM ((int)(sizeof(opacity_factors) / sizeof(opacity_factors[0])))
-static int opacity_index = 0; // default Preset (1.0)
+static int opacity_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored puff radius).
 static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
 static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
 #define CLOUD_SIZE_NUM ((int)(sizeof(size_factors) / sizeof(size_factors[0])))
-static int size_index = 0; // default Preset (1.0)
+static int size_index = 0;
 
 // Master scalar over the preset's per-puff variance (resolved var clamped 0..1).
-// Index 0 = Preset (1.0, the preset's authored variance).
 static const float variance_factors[] = {1.0f, 0.2f, 1.0f, 1.7f};
 static char *variance_names[] = {"Preset", "Uniform", "Normal", "Varied"};
 #define CLOUD_VARIANCE_NUM ((int)(sizeof(variance_factors) / sizeof(variance_factors[0])))
-static int variance_index = 0; // default Preset (1.0)
+static int variance_index = 0;
 
 // Additive world-unit offset applied to the resolved deck height.
-// Index 0 = Preset (0, the preset's authored deck height).
 static const float height_offsets[] = {0.0f, -220.0f, 0.0f, 220.0f};
 static char *height_names[] = {"Preset", "Low", "Normal", "High"};
 #define CLOUD_HEIGHT_NUM ((int)(sizeof(height_offsets) / sizeof(height_offsets[0])))
-static int height_index = 0; // default Preset (0 offset)
+static int height_index = 0;
 
-// Tint override. Index 0 keeps the per-preset RGB; the rest force an RGB (the
-// alpha still comes from the preset opacity * the Opacity scalar).
+// Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the alpha from
+// the preset opacity * the Opacity scalar.
 static const u32 color_overrides[] = {0, RGBA(246, 249, 255, 255), RGBA(150, 160, 175, 255), RGBA(66, 72, 86, 255)};
 static char *color_names[] = {"Preset", "White", "Gray", "Storm"};
 #define CLOUD_COLOR_NUM ((int)(sizeof(color_overrides) / sizeof(color_overrides[0])))
-static int color_index = 0; // default Preset
+static int color_index = 0;
 
 static void Cloud_GX(GOBJ *g, int pass);
 
@@ -155,8 +145,8 @@ static StageNode *CloudStageNode(void)
     return gr->gr_data->stage_node;
 }
 
-// Unit-sphere vertex directions (rows of latitude x longitude), doubling as
-// vertex normals. Built once; each puff scales/translates these into world space.
+// Unit-sphere vertex directions (latitude rows x longitude), doubling as vertex
+// normals; each puff scales/translates these into world space.
 static Vec3 stc_sphere[CLOUD_SPHERE_VERTS];
 static int  stc_sphere_seeded = 0;
 
@@ -192,7 +182,6 @@ static float DeckBaseY(StageNode *sn)
 }
 
 // Roll a fresh cluster shape (puff offsets + radii) and per-cloud opacity variety.
-// Puff 0 anchors a dense core at the center; the rest scatter around it.
 static void SeedShape(Cloud *c)
 {
     float scale = 1.0f + Weather_Randf2() * stc_size_var;
@@ -200,7 +189,7 @@ static void SeedShape(Cloud *c)
         scale = 0.4f;
     float r = stc_base_size * size_factors[size_index] * scale * CLOUD_SIZE_SCALE;
 
-    // Resolved per-puff variance -> smallest scattered puff as a fraction of r.
+    // Resolved variance -> smallest scattered puff as a fraction of r.
     float var = stc_puff_var * variance_factors[variance_index];
     if (var < 0.0f) var = 0.0f;
     if (var > 1.0f) var = 1.0f;
@@ -221,8 +210,8 @@ static void SeedShape(Cloud *c)
     c->alpha_scale = 0.82f + HSD_Randf() * 0.18f;
 }
 
-// Scatter the field across the OOB box at the deck height. Needs the stage
-// (OOB box) loaded; if not ready it leaves stc_inited 0 to retry next frame.
+// Scatter the field across the OOB box at the deck height. Needs the stage loaded;
+// if not ready it leaves stc_inited 0 to retry next frame.
 static void Cloud_Arm(void)
 {
     StageNode *sn = CloudStageNode();
@@ -263,10 +252,9 @@ static void Cloud_Ensure(void)
                                            "[Clouds] Cloud deck layer installed");
 }
 
-// GX callback on the world camera link. Draws each cloud as a cluster of
-// translucent spheroids on the XLU pass (pass 1): flat per-vertex color, alpha
-// blend, depth-tested but not depth-writing so stage geometry occludes clouds
-// behind it. A silhouette alpha (below) feathers each spheroid's grazing edge.
+// GX callback on the world camera link. Draws each cloud as a cluster of translucent
+// spheroids on the XLU pass (pass 1): flat per-vertex color, alpha blend,
+// depth-tested but not depth-writing so stage geometry occludes clouds behind it.
 static void Cloud_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -284,9 +272,9 @@ static void Cloud_GX(GOBJ *g, int pass)
 
     SeedSphere();
 
-    // Camera forward axis in world space (row 2 of the world->view rotation).
-    // Only |n . fwd| is used, so its sign is irrelevant: a spheroid's front and
-    // back both stay opaque while its silhouette (normals grazing the view) fades.
+    // Camera forward axis in world space (row 2 of the world->view rotation). Only
+    // |n . fwd| is used, so a spheroid's front and back both stay opaque while its
+    // silhouette (normals grazing the view) fades.
     float (*m)[4] = cam->view_mtx;
     Vec3 fwd = {m[2][0], m[2][1], m[2][2]};
 
@@ -300,7 +288,7 @@ static void Cloud_GX(GOBJ *g, int pass)
     {
         Cloud *c = &stc_clouds[i];
 
-        // Horizontal OOB clearance -> edge fade. Skip a cloud that has faded out.
+        // Horizontal OOB clearance -> edge fade; a fully faded cloud is skipped.
         float cl = c->pos.X - minx;
         float t = maxx - c->pos.X;
         if (t < cl) cl = t;
@@ -361,8 +349,7 @@ static void Cloud_GX(GOBJ *g, int pass)
 }
 
 // Latch the active preset's cloud config, resolving each 0 field to its module
-// default and applying the menu Color override. NULL, def->enabled == 0, or
-// Coverage Off turns clouds off.
+// default and applying the menu Color override.
 void Cloud_SetActive(const CloudDef *def)
 {
     if (!def || !def->enabled || cover_factors[cover_index] <= 0.0f)
@@ -391,7 +378,6 @@ void Cloud_SetActive(const CloudDef *def)
     stc_pre_height = def->height; // 0 => derive from the OOB box at arm
     stc_height_var = def->height_var > 0.0f ? def->height_var : CLOUD_DEF_HEIGHT_VAR;
 
-    // Re-arm the field for the new preset on the next active frame.
     stc_inited = 0;
     stc_count = 0;
 }
@@ -446,10 +432,8 @@ void Cloud_Tick(void)
         c->pos.X += dx;
         c->pos.Z += dz;
 
-        // Wrap to the upwind wall on exit. It lands at the opposite wall where the
-        // edge fade holds it invisible, so re-rolling its shape/height there is
-        // hidden; it then ghosts in as it drifts inward. Preserving the crossing
-        // axis keeps the field streaming across.
+        // Wrap to the upwind wall on exit, where the edge fade holds the cloud
+        // invisible so re-rolling its shape/height there is hidden.
         int wrapped = 0;
         if (c->pos.X > maxx)
         {
@@ -481,8 +465,8 @@ void Cloud_Tick(void)
 
 void Cloud_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop our cached handle
-    // so the next active frame recreates it, and clear the round's field.
+    // The engine frees every world GObj on scene teardown; drop the cached handle
+    // so the next active frame recreates it.
     stc_cloud_gobj = NULL;
     stc_inited = 0;
     stc_count = 0;

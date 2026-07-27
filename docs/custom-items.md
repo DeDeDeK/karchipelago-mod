@@ -5,23 +5,20 @@ custom item ships as a self-contained `.dat` dropped into the FST `items/`
 folder; the mod discovers it at boot and registers it as a new `ItemKind` that
 spawns from the sky and boxes with author-specified weights.
 
-Status: discovery, the descriptor contract, the exported API, the engine splice
-(itData growth, kind-ceiling lift, behavior clamp, box/sky-pool weight injection,
-event-source-drop injection), and the carve tool are all implemented. Custom
-items spawn from every source - box breaks, sky falls, and event drops (Tac,
-meteor, broken structures, secret chamber, UFO, Dyna Blade) - and the model may
-be any item model carved from `Item.dat`, including the multi-texture, skinned
+Custom items spawn from every source - box breaks, sky falls, and event drops (Tac,
+meteor, broken structures, secret chamber, UFO, Dyna Blade) - and the model may be
+any item model carved from `Item.dat`, including the multi-texture, skinned
 Hydra/Dragoon legendary pieces. A build with no custom item `.dat`s in `items/`
 installs no hooks and leaves vanilla play untouched.
 
-## The vanilla item system this builds on
+## Game System
 
 All item structs and accessors are in `externals/hoshi/include/item.h`.
 
 - **`ItemKind`** — 69 vanilla kinds (`ITKIND_NUM = 69`, indices 0–68): 3 boxes,
   the up/down stat patches, special patches, candy, 11 copy abilities, 12 foods,
   3 traps, Gordo, 6 legendary-machine pieces, 8 fake patches.
-- **`itData`** (`item.h:302`) — the per-kind static asset record, `0x18`-byte
+- **`itData`** — the per-kind static asset record, `0x18`-byte
   stride, indexed positionally by `ItemKind`: `{ attr, unique_attr, model, anim,
   hurt, trigger }`. The array lives in `Item.dat` (public `itData`) and is grafted
   onto `itCommonDataAll` (`ItCommon.dat`, public `itCommonDataAll`) at
@@ -29,27 +26,27 @@ All item structs and accessors are in `externals/hoshi/include/item.h`.
   `Item_GetItDataPtr(kind)` (`0x80250038`) = `itCommonDataAll.itData + kind*0x18`.
   There is no per-kind filename indirection — the model for kind N is simply the
   Nth entry's `model->j` pointer into the shared `Item.dat` archive.
-- **`ItemCommonAttr`** (`item.h:256`) — per-kind scale/cull/land-offset/box-color,
+- **`ItemCommonAttr`** — per-kind scale/cull/land-offset/box-color,
   plus `effect_info` (`PatchEffectInfo`, the authoritative stat-grant list and
   BAD/GOOD/FAKE group).
 - **Spawn pipeline** — periodic sky/box drops run
   `CityItemSpawn_Think` (`0x800eb108`) → `CityItemSpawn_GetRandomItemID`
-  (`0x800eb7e4`, weighted) → `Item_Create` (`0x8024eef4`). Event/destructible
+  (`0x800eb7e4`, weighted) → `CityItem_Create` (`0x8024eef4`). Event/destructible
   drops run `City_SpawnMiscItems` (`0x80104db0`) → `CityItem_GetEventItem`
-  (`0x80254114`) → `Item_Create`. Box breaks read a box's `forced_item` (+0x35c)
-  or pick from the pool, then `Item_Create` per contained item.
+  (`0x80254114`) → `CityItem_Create`. Box breaks read a box's `forced_item` (+0x35c)
+  or pick from the pool, then `CityItem_Create` per contained item.
 - **Weight tables** — box/sky pools live in `grBoxGeneObj`
   (`item_group_spawn[BOXKIND_NUM]`, parallel `u8 it_kind[68]`/`chance[68]`/`num`);
   event drops live in `grBoxGeneInfo`'s `event_source_drop[]` (one row per kind,
   six `u16` chance columns: Dyna Blade / Tac / meteor / destructible / chamber /
   UFO). Populated at scene init by `CityItemSpawn_InitItemFallChances`
-  (`0x800eb374`) and retuned per event by `CityEvent_ModifyItemFallDesc` — the
-  same hook points the gating mods use.
-- **Hard ceiling** — `Item_Create` asserts `kind < 69` at `0x8024efb4` (so
+  (`0x800eb374`) and retuned per event by `CityEvent_ModifyItemFallDesc`
+  (`0x800ed784`) — the same hook points the gating mods use.
+- **Hard ceiling** — `CityItem_Create` asserts `kind < 69` at `0x8024efb4` (so
   vanilla kinds 0–68 pass). The weight arrays are sized `ITKIND_NUM-1` (68). The
   bound must be widened to admit kinds `>= ITKIND_NUM` (69+).
 
-## Drop-in discovery
+## Drop-In Discovery
 
 `items/` is scanned at boot by `CustomItems_Discover` (`item_discovery.c`) using
 `FST_ForEachInFolder("items", ".dat", …)` in two passes (count, then index),
@@ -68,7 +65,7 @@ mirroring KAR Deluxe's custom-song loader. Each `.dat` becomes a
 The registry is a fixed `CUSTOM_ITEM_MAX` (16) array — the practical ceiling
 imposed by the 68-entry weight arrays, not an arbitrary limit.
 
-## Descriptor contract
+## Descriptor Contract
 
 A custom-item `.dat` exports one HSD public symbol, `customItem`, whose address
 is a `CustomItemDesc` (`include/custom_items_api.h`). It is a clone model: the new
@@ -95,7 +92,7 @@ check. The archive and descriptor are valid only for the current scene
 (`Archive_LoadFile` allocates from the per-scene heap, wiped on 3D scene exit), so
 registration reloads per round.
 
-## Registration / engine splice
+## Registration / Engine Splice
 
 `CustomItemRegistry_RegisterAll` (`item_registry.c`) runs once per City Trial
 round via a hook on `CityItemSpawn_Init`'s epilogue (`0x800ec348`) — after
@@ -111,7 +108,7 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    itData lookup in `CityItem_InitData` reads the raw kind from the `ItemDesc` arg,
    so a custom kind resolves to its own appended entry (custom model/effect). The
    overridden `model` points at a per-kind *synthesized* descriptor, not the raw
-   `JOBJDesc`: `CityItem_Create`'s part setup (`zz_80252824_`) reads three
+   `JOBJDesc`: `CityItem_Create`'s part setup (`Item_InitPartsModel` `0x80252824`) reads three
    "item-parts" counts at descriptor `+0x8/+0xc/+0x10` and asserts each `<= 11`
    ("item parts model num over!"). Vanilla model descriptors are full-width with
    those counts zero, so each custom kind gets a full-width, zero-filled
@@ -122,7 +119,8 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
 2. **Lift the ceiling** — `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
    is patched to `cmpwi r4, ITKIND_NUM + CUSTOM_ITEM_MAX` once at boot.
 3. **Clamp behavior** — the state-handler table (`0x804b6088`, 69 entries) and the
-   threshold category are indexed by `ItemData+0x1c` (the instance kind). A custom
+   25-entry ascending threshold-category table (`0x804b5f18`) are both indexed by
+   `ItemData+0x1c` (the instance kind). A custom
    kind has no entry, so a hook at `0x8024eb44` (right after `CityItem_InitData`
    writes `ItemData+0x1c`) rewrites it to the descriptor's `base_kind`. The item
    therefore behaves and is categorized as its base kind while rendering/applying
@@ -138,8 +136,9 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    archipelago spawn filter hooks; hoshi chains the two.
 5. **Inject event-source weights** — `event_source_drop[]`
    (`grBoxGeneInfo->item_desc`, stride `0x10`: `int it_kind` + six `u16` chance
-   columns) is read straight from the table by `_CityItem_GetEventItem` on every
-   pick, so the stage's rows are snapshotted into a persistent array, one row per
+   columns) is read straight from the table by `_CityItem_GetEventItem`
+   (`0x800ebe44`) on every pick, so the stage's rows are snapshotted into a
+   persistent array, one row per
    custom kind (carrying its `weight_event[6]`) is appended, and the table pointer
    and `event_source_drop_num` are repointed/bumped. This covers Tac, meteor,
    broken structures, secret chamber, UFO, and Dyna Blade drops.
@@ -159,7 +158,7 @@ off its native size; the descriptor's `scale` (v3) multiplies `scale_factor` on
 the clone to correct it (the `custom_items` register step clones `attr` whenever
 `effect_info` or `scale` is overridden).
 
-## Authoring a custom item — the carve tool
+## Authoring a Custom Item
 
 `scripts/hsd/carve_custom_item.py` carves a model subtree out of `iso/files/Item.dat`
 and packs it into a `customItem` `.dat`, reusing the backdrop walker/reloc
@@ -212,17 +211,17 @@ A pickup handler is a `void (*)(u32 id_hash, const char *name, int player)` invo
 from a hook on `Machine_OnTouchItem` (`0x801db34c`) whenever a custom item is
 collected — the collected kind is recovered from `ItemData->itData` (which still
 points into the grown array after the behavior clamp), and the collector's slot
-comes from `Machine_GetRiderPly`. Because hoshi's hook trampoline does not preserve
-registers across the C call, the hook's prologue/epilogue save and restore `r3`
-(MachineData), `r4` (ItemData), and `LR` around it. Multiple consumer mods may
-subscribe (a small fixed subscriber list); each is invoked on every pickup.
+comes from `Machine_GetRiderPly` (`0x801caa40`). Because hoshi's hook trampoline does
+not preserve registers across the C call, the hook's prologue/epilogue save and
+restore `r3` (MachineData), `r4` (ItemData), and `LR` around it. Up to four consumer
+mods may subscribe (`CUSTOM_ITEM_PICKUP_HANDLERS_MAX`); each is invoked on every pickup.
 `SetPickupHandler` is retained for compatibility — a non-NULL handler is added
 (deduplicated), NULL clears every subscriber. This is how the **Miracle Fruit**
 grants Hypernova: the `hypernova` mod adds a handler that calls
 `HypernovaAPI.ActivatePlayer` for the collector when the picked-up item's name
 matches.
 
-## File layout
+## File Layout
 
 - `src/main.c` — `ModDesc` and the settings menu, built at boot: a master enable
   toggle plus one enable toggle per discovered item, each bound to its registry

@@ -6,15 +6,13 @@
 #include "settings_menu.h"
 #include "energylink_spend.h"
 
-// Defaults match pre-toggle behavior so existing installs keep working on
-// first boot. Hoshi's Mod_CopyFromSave overwrites these later if a saved hash
-// exists.
+// Hoshi's Mod_CopyFromSave overwrites these later if a saved hash exists.
 APMenuSettings ap_menu_settings = {
     .ct_permanent_patches_enabled         = 1,
     .ct_stadium_permanent_patches_enabled = 1,
     .ar_permanent_patches_enabled         = 1,
-    .energylink_autocharge_rate           = 1, // Medium by default (~1.5s to fill)
-    .ct_random_start_machine              = 1, // random unlocked start machine on by default
+    .energylink_autocharge_rate           = 1, // Medium, ~1.5s to fill
+    .ct_random_start_machine              = 1,
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
@@ -41,9 +39,8 @@ static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Sta
 static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
 static void OnToggleAirQuickSpin(int val)        { OSReport("[Main] Air Quick Spin toggled %s\n", stc_off_on[val]); }
 
-// Submenu: gates whether accumulated permanent patches are re-applied at round
-// start. Receiving AP permanent-patch items still increments save counters
-// regardless; only round-start application is toggled. Default all On.
+// Only round-start application is toggled here - receiving AP permanent-patch items
+// still increments the save counters either way.
 static MenuDesc permanent_patches_menu = {
     .option_num = 3,
     .options = {
@@ -86,7 +83,6 @@ static MenuDesc permanent_patches_menu = {
     },
 };
 
-// Top-level Archipelago Settings menu. Wired into mod_desc.option_desc.
 OptionDesc ModSettings = {
     .name = "Archipelago Settings",
     .description = "Interface with mod settings here",

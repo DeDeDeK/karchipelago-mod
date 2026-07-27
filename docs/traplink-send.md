@@ -1,11 +1,6 @@
-# Traplink
+# TrapLink
 
-## Overview
-
-TrapLink has two sides:
-
-- **Send**: Detects when negative events happen to a human player in-game and writes a `TrapLinkKind` enum value (>0) into `ap_data->traplink_send`. The AP client reads and clears this field, looks up the corresponding `trap_name` string, and forwards a TrapLink Bounce to the AP server.
-- **Receive**: When the AP client sets `ap_data->traplink_receive = 1`, `TrapLink_PerFrame` dispatches a mode-appropriate trap effect on every human player. The GOBJ is installed by `TrapLink_On3DLoadEnd` (Air Ride / City Trial) and `TrapLink_OnTopRideLoadEnd` (Top Ride).
+TrapLink has two sides. **Send** detects negative events happening to a human player in-game and writes a `TrapLinkKind` enum value (>0) into `ap_data->traplink_send`; the AP client reads and clears the field, looks up the corresponding `trap_name` string, and forwards a TrapLink Bounce. **Receive** happens when the client sets `ap_data->traplink_receive = 1`: `TrapLink_PerFrame` dispatches a mode-appropriate trap effect on every human player. The GOBJ is installed by `TrapLink_On3DLoadEnd` (Air Ride / City Trial) and `TrapLink_OnTopRideLoadEnd` (Top Ride), and only when `ap_menu_settings.traplink_enabled` is set.
 
 **Outgoing kind enum (see `traplink.h`):**
 
@@ -33,11 +28,11 @@ The TrapLink protocol (Bounce tag `"TrapLink"`, `data = {time, source, trap_name
 | Map incoming `trap_name` to a known local trap; drop if unknown | Apply a random local trap regardless of `trap_name` | KAR's trap pool doesn't have a clean 1:1 mapping to other worlds' trap names. "Any TrapLink hit applies some local trap" is gameplay-balanced and avoids no-op receives. |
 | Discard Priority Trap if not immediately activatable ("close-in-time" guarantee) | Retry next frame until activatable (or scene exit drops the GObj) | The only non-activatable conditions in KAR are CT Free Run (we drop the receive immediately) and intro state (resolves in ~2 seconds). Retrying is benign in practice and avoids silently dropping traps mid-intro. |
 
-The kind-to-name strings (`"Bad Patch"`, `"Sleep"`, `"Speed Down"`) follow the centralized TrapLink name spreadsheet convention; KAR should be added there so other worlds know which names we send and that we accept all incoming.
+The kind-to-name strings (`"Bad Patch"`, `"Sleep"`, `"Speed Down"`) follow the centralized TrapLink name-list convention, so other worlds can tell which names KAR sends and that it accepts all incoming ones.
 
-## Implemented Send Triggers
+## Send Triggers
 
-### 1. Bad Patch / Stat-Cap Items (City Trial)
+### Bad patch / stat-cap items (City Trial)
 
 **What:** Player picks up an item the game classifies as bad or fake (SPEEDMIN, CHARGENONE, all `*DOWN` stat patches, all `*FAKE` patches).
 
@@ -52,7 +47,7 @@ The kind-to-name strings (`"Bad Patch"`, `"Sleep"`, `"Speed Down"`) follow the c
 4. Hook fires: looks up the player via `Machine_GetRiderPly`, drops if `Ply_CheckIfCPU`
 5. Calls `TrapLink_Send(TRAPLINK_KIND_BAD_PATCH)` which gates on `traplink_enabled`
 
-### 2. Sleep Copy Ability (City Trial)
+### Sleep copy ability (City Trial / Air Ride)
 
 **What:** Player receives COPYSLEEP from inhaling/touching a Noddy or other sleep-granting enemy, or from a copy ability item.
 
@@ -66,7 +61,7 @@ The kind-to-name strings (`"Bad Patch"`, `"Sleep"`, `"Speed Down"`) follow the c
 3. Otherwise calls `Rider_GiveAbility` and captures the result
 4. If the grant succeeded AND `kind == COPYKIND_SLEEP` AND the player is human, calls `TrapLink_Send(TRAPLINK_KIND_SLEEP)`. The success check avoids phantom traps when the rider is in an unable state and `Rider_GiveAbility` returns 0.
 
-### 3. Bad Top Ride Item Pickup
+### Bad Top Ride item pickup
 
 **What:** A human Top Ride Kirby collects a bad TR item (currently only `TRITEM_SPEED_DOWN`).
 
@@ -127,6 +122,6 @@ When a receive applies, `TrapLink_PerFrame` enqueues a "Trap received!" textbox,
 ## Implementation Notes
 
 - `TrapLink_Send(kind)` is the single entry point for all send triggers. It has no mode gate — hooks only fire in their applicable gameplay contexts. Each call site passes its own `TrapLinkKind` so the client can label the outgoing Bounce.
-- All triggers check `Ply_CheckIfCPU` to avoid sending traps for CPU players.
-- The `ap_menu_settings.traplink_enabled` menu toggle is checked in `TrapLink_Send(kind)`, so individual hooks don't need to check it. The toggle also gates GObj installation: `main.c`'s `On3DLoadEnd`/`OnTopRideLoadEnd` only call `TrapLink_On3DLoadEnd`/`TrapLink_OnTopRideLoadEnd` when it is set, so the receive proc isn't even created while TrapLink is off.
+- Human-vs-CPU filtering is per call site, since the two engines discriminate differently: the 3D hooks use `Ply_CheckIfCPU`, the Top Ride hook uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`.
+- The `ap_menu_settings.traplink_enabled` menu toggle is checked in `TrapLink_Send(kind)`, so individual hooks don't need to check it. The toggle also gates GObj installation: `On3DLoadEnd`/`OnTopRideLoadEnd` only call `TrapLink_On3DLoadEnd`/`TrapLink_OnTopRideLoadEnd` when it is set, so the receive proc isn't even created while TrapLink is off.
 - `IsTrapItemLocked` filters the candidate trap pool in `TrapLink_PerFrame` before random selection. If a trap item's corresponding gate (currently only events) is locked in the current session, it is excluded from the candidate list so the receive path never tries to apply an inaccessible effect.

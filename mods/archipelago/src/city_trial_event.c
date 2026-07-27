@@ -3,9 +3,9 @@
 #include "main.h"
 #include "city_trial_event.h"
 
-// Trigger a specific event. Similar to the game's CityEvent_ForceStart (0x800ee778),
-// but adds the event to prev_kind[] history (prevents natural re-occurrence stacking)
-// and does not use the reserve queue (AP item handler retries via returning 0 instead).
+// Similar to the game's CityEvent_ForceStart (0x800ee778), but adds the event to
+// prev_kind[] history so it can't stack with a natural re-occurrence, and skips
+// the reserve queue - the AP item handler retries by returning 0 instead.
 int Event_Do(EventKind kind)
 {
     if (!stc_eventcheck_gobj || !*stc_eventcheck_gobj)

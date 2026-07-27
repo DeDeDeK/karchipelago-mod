@@ -21,20 +21,16 @@
 #define WIND_DEF_GUSTINESS  0.35f   // speed pulses +/-35% around the base
 #define WIND_DEF_CHAOS      0.25f   // heading wanders gently
 
-// Gust / heading random-walk shape: a fresh target is rolled every *_PERIOD
-// frames and eased toward by *_LERP each frame, so motion reads as smooth
-// gusting rather than jitter. WIND_HEAD_RANGE is the max heading deviation
-// (degrees) at chaos = 1.
+// Gust / heading random walk: a fresh target is rolled every *_PERIOD frames and
+// eased toward by *_LERP each frame, so motion reads as gusting rather than jitter.
 #define WIND_GUST_PERIOD    40
 #define WIND_GUST_LERP      0.04f
 #define WIND_HEAD_PERIOD    90
 #define WIND_HEAD_LERP      0.02f
-#define WIND_HEAD_RANGE     75.0f
+#define WIND_HEAD_RANGE     75.0f      // max heading deviation (deg) at chaos = 1
 
-// Per-consumer coupling. The wind vector is one shared magnitude; each consumer
-// scales it by its own susceptibility. Rain uses it directly (factor 1). Items
-// are light and blow easily; machines are heavy and only the airborne/gliding
-// ones are meaningfully shoved.
+// Per-consumer coupling: the wind vector is one shared magnitude that each consumer
+// scales by its own susceptibility (rain uses it directly, at factor 1).
 #define WIND_ITEM_FACTOR        0.08f  // fraction of wind added to an airborne item's velocity/frame
 #define WIND_MACHINE_FACTOR     0.012f // fraction added to an airborne machine's velocity/frame at full glide
 #define WIND_MACHINE_GLIDE_BASE 0.40f  // floor of the glide-stat susceptibility scale
@@ -55,19 +51,17 @@ static int   stc_gust_timer = 0;
 static float stc_head_cur = 0.0f, stc_head_target = 0.0f; // heading offset, degrees
 static int   stc_head_timer = 0;
 
-// Menu settings, persisted by hoshi menu save. Index 0 = Preset (1.0, the
-// preset's authored wind speed).
+// Master multiplier over the preset's authored wind speed.
 static const float wind_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *wind_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
 #define WIND_STRENGTH_NUM (sizeof(wind_strength_factors) / sizeof(wind_strength_factors[0]))
-static int wind_strength_index = 0; // default Preset (1.0)
+static int wind_strength_index = 0;
 
-// {Preset, Off, On} toggles. Preset = the built-in default: honor each preset's
-// heading (no randomize), and let wind affect machines and items.
+// Preset = honor each preset's heading (no randomize) and affect machines and items.
 static char *wind_toggle_names[] = {"Preset", "Off", "On"};
-static int wind_randomize_dir = 0;    // default Preset (honor preset heading)
-static int wind_affect_machines = 0;  // default Preset (affect machines)
-static int wind_affect_items = 0;     // default Preset (affect items)
+static int wind_randomize_dir = 0;
+static int wind_affect_machines = 0;
+static int wind_affect_items = 0;
 
 static float WindStrength(void)
 {
@@ -75,9 +69,7 @@ static float WindStrength(void)
 }
 
 // Latch the active preset's wind config, resolving each 0 field to its module
-// default and folding in the global strength. NULL, disabled, or strength Off
-// turns wind off (calm). Re-seeds the gust/heading walks so a preset change
-// starts fresh.
+// default, folding in the global strength, and re-seeding the gust/heading walks.
 void Wind_SetActive(const WindDef *def)
 {
     if (!def || !def->enabled || WindStrength() <= 0.0f)
@@ -91,8 +83,7 @@ void Wind_SetActive(const WindDef *def)
     float speed = def->speed > 0.0f ? def->speed : WIND_DEF_SPEED;
     stc_base_speed = speed * WindStrength();
 
-    // Randomize Direction rolls a fresh base heading per activation; otherwise
-    // the preset's authored heading is used (default 0 -> module default).
+    // Randomize Direction rolls a fresh base heading per activation.
     if (WeatherToggle(wind_randomize_dir, 0))
         stc_base_heading = HSD_Randf() * 360.0f;
     else
@@ -118,8 +109,8 @@ void Wind_GetVector(Vec3 *out)
     out->Z = stc_vz;
 }
 
-// Blow every airborne item sideways. Settled items (grounded bit 0x10 set) are
-// left alone so wind never drags a resting item across the ground.
+// Blow every airborne item sideways; settled items (grounded bit 0x10) are left
+// alone so wind never drags a resting item across the ground.
 static void Wind_ApplyToItems(float wx, float wz)
 {
     float ax = wx * WIND_ITEM_FACTOR;
@@ -138,9 +129,8 @@ static void Wind_ApplyToItems(float wx, float wz)
     }
 }
 
-// Push gliding machines. Only airborne machines (action_state_class == 1) are
-// affected, scaled by their glide stat so a Winged Star catches far more wind
-// than a Wheelie Bike. Dead/respawning machines are skipped.
+// Push gliding machines: only airborne ones (action_state_class == 1), scaled by
+// their glide stat so a Winged Star catches far more wind than a Wheelie Bike.
 static void Wind_ApplyToMachines(float wx, float wz)
 {
     for (int ply = 0; ply < WEATHER_PLAYER_SLOTS; ply++)
@@ -172,7 +162,7 @@ void Wind_Tick(void)
         return;
     }
 
-    // Gust: ease the speed multiplier toward a fresh random target periodically.
+    // Ease the speed multiplier toward a fresh random target periodically.
     if (--stc_gust_timer <= 0)
     {
         stc_gust_target = Weather_Randf2();
@@ -180,8 +170,8 @@ void Wind_Tick(void)
     }
     stc_gust_cur += (stc_gust_target - stc_gust_cur) * WIND_GUST_LERP;
 
-    // Heading: ease the heading offset toward a fresh random target, bounded by
-    // chaos so calm presets stay near their base direction.
+    // Ease the heading offset toward a fresh random target, bounded by chaos so
+    // calm presets stay near their base direction.
     if (--stc_head_timer <= 0)
     {
         stc_head_target = Weather_Randf2() * WIND_HEAD_RANGE * stc_chaos;

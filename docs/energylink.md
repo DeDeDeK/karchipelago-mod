@@ -6,20 +6,20 @@ Source: `mods/archipelago/src/energylink.c`, `mods/archipelago/src/energylink_sp
 
 ## Protocol
 
-Two shared fields in `APData` (`docs/client-game-protocol.md` is canonical):
+Two shared fields in `APData`; `client-game-protocol.md` holds the full client-side contract.
 
 | Field | Direction | Semantics |
 |-------|-----------|-----------|
 | `energy_balance` (s64) | Client → Game | Current AP pool total in raw MJ units (1 MJ = 1,000,000 J on the AP pool). Game reads for purchase validation and Auto-Charge; the game also locally subtracts on spend for immediate UI feedback (eventually overwritten by client). Widened to s64 so multiworld pools that exceed u64 joules still fit at MJ scale. |
 | `energy_sent_total` (s64, signed) | Game → Client | **Cumulative net** energy emitted to the pool this session, raw MJ. Positive contributions = deposits (generation), negative = withdrawals (spends / Auto-Charge). **Single-writer:** the game only ever adds/subtracts; the client only **reads-and-diffs** it (never writes). Resets to 0 on mod boot; persists across scene loads. |
 
-Cumulative-counter model: the game maintains a running net total and writes it freely — generation adds, spends/Auto-Charge subtract — as many times per frame as it likes. The client reads the counter once per ~1s poll, computes `delta = current − last_seen`, forwards that delta to the server, and advances `last_seen`. Any number of game-side writes between two polls collapse into one net delta, so there is **no flush, no slot handshake, and no per-frame polling**. Sub-MJ generation accumulates in a `float` carry (`energy_frac_accumulator`); only whole MJ are committed to the counter, and the fractional remainder rolls forward.
+Cumulative-counter model: the game maintains a running net total and writes it freely — generation adds, spends/Auto-Charge subtract — as many times per frame as it likes. The client reads the counter once per ~1s poll, computes `delta = current − last_seen`, forwards that delta to the server, and advances `last_seen`. Any number of game-side writes between two polls collapse into one net delta, so there is **no flush, no slot handshake, and no per-frame polling**. Sub-MJ generation accumulates in a `float` carry (`energy_frac_accumulator`); only whole MJ are committed to the counter (`EnergyLink_Emit`), and the fractional remainder rolls forward.
 
-64-bit fields are not atomic on PPC32, so a client poll mid-write could see a torn value. With the counter this is **self-correcting**: a torn read skews one poll's delta, but the client sets `last_seen` to whatever it read and the next poll's diff compensates exactly. The client re-seeds `last_seen` on a fresh `game_ready` transition so the boot reset (counter → 0) is never misread as a giant withdrawal. See `docs/client-game-protocol.md` "APData Layout" / "EnergyLink" for the full contract.
+The counter is chosen over a consume-once mailbox partly because a 64-bit field can't be read atomically on PPC32: a torn read skews one poll's delta, but the client sets `last_seen` to whatever it read and the next poll's diff compensates exactly.
 
-The mod side stores raw MJ; the AP server stores integer Joules (`ENERGY_LINK_EXCHANGE_RATE = 1_000_000`). The client scales between them. See `docs/client-game-protocol.md` "EnergyLink" for the conversion contract.
+The mod side stores raw MJ; the AP server stores integer Joules (`ENERGY_LINK_EXCHANGE_RATE = 1_000_000`), and the client scales between them.
 
-## Received energy
+## Received Energy
 
 Energy arriving from the AP server (other players' generated energy, or a credit from an energylink trade) lands in `ap_data->energy_balance` via the client's `set_notify` push. The game reads the balance for purchase validation and Auto-Charge; **no in-game notification is shown** when the balance rises. Receiving energy is silent by design — only spends (the buy menu) surface a TextBox.
 
@@ -27,7 +27,7 @@ Energy arriving from the AP server (other players' generated energy, or a credit
 
 Three sources, all positive deltas only:
 
-1. **Objects destroyed** — `stc_playerdata[ply].objects_destroyed_num`. Effectively City-Trial-only; AR never increments this.
+1. **Objects destroyed** — `stc_playerdata[ply].stat_record.objects_destroyed_num`. Effectively City-Trial-only; AR never increments this.
 2. **Patches collected** — `rd->stats.values[i]` delta across all 9 `PatchKind` slots. Each +1 stat = 1 energy.
 3. **Charge gained** — `md->charge_value` delta, scaled by `CHARGE_ENERGY_SCALE` (5.0). A full 0→1 charge = 5 energy.
 
@@ -67,28 +67,24 @@ prev_charge_value[ply] = md->charge_value        // mask injection from next-fra
 
 Because the per-frame cap keeps the cost (`gain * SCALE`, max ≈ 0.11) well under one energy unit, any positive integer `balance` can pay for a full step — so the affordability check collapses to `balance > 0`, with no `s64→float` partial-affordability math (`balance / SCALE`) needed. The small per-frame deltas also shrink the torn-read window on the 64-bit fields.
 
-### Passive vs. active charging — mode difference (limitation)
+The `prev_charge_value` re-snap after injection is the only thing preventing a feedback loop: without it the injected charge would read back as a positive charge delta next frame and mint the energy it just cost.
 
-Auto-Charge behaves differently between modes, and this is a **known limitation**, not a bug:
+`EnergyLink_Withdraw` decrements `ap_data->energy_balance` immediately (by whole MJ, with a fractional carry for sub-1-MJ Auto-Charge spends), so the affordability gate self-limits in real time. This is essential: the gate reads the local balance, which is only refreshed by the client's `set_notify` push at its ~1s poll rate. If withdrawals waited for that push, Auto-Charge would re-read the same stale positive balance every frame and keep approving spends for up to a second — committing far more energy than the shared pool holds, which the client then reports as an under-subtraction. Decrementing locally closes that window; `set_notify` still overwrites the balance with the authoritative value (it *replaces* rather than subtracts, so the local decrement is never double-counted).
+
+### Mode difference: passive vs active fill
 
 | Mode | Builds charge passively? | Behavior |
 |------|--------------------------|----------|
-| **Air Ride / City Trial** | **Yes** | The meter fills from the energy pool even when you are *not* holding A. The 3D engine doesn't aggressively bleed off an idle charge, so the small per-frame injection accumulates on its own — energy steadily becomes a topped-up boost you can release at will. |
-| **Top Ride** | **No** | Auto-Charge only *assists while you are actively holding A to charge*. It cannot build the meter passively. |
-
-The Top Ride restriction is forced by the engine: `TopRide_ChargeUpdate` **decays `charge_value` toward 0 on every frame A isn't held**, at roughly `1.0/charge_tier_count` (~0.3) per frame — over 10× the fastest injection cap (0.02222). Any energy injected while idle is wiped the next frame before it can accumulate, so passive fill is physically impossible without fighting (and visibly stuttering against) the engine's depletion. Auto-Charge therefore gates on `is_charging` in TR and only tops up the meter *faster* while the player charges, rather than charging *for* them. This is also moot for play: in Top Ride a boost only fires on A-release, so a passively-filled idle meter would do nothing anyway. See the "Top Ride" section below and `docs/topride-system.md` for the engine details.
+| **Air Ride / City Trial** | **Yes** | The 3D engine doesn't bleed off an idle charge, so the per-frame injection accumulates on its own even when A isn't held. Energy steadily becomes a topped-up boost the player can release at will. |
+| **Top Ride** | **No** | Auto-Charge only assists while the player is actively holding A. See the Top Ride section below. |
 
 ### Meta Knight exclusion
 
 Auto-Charge is **skipped entirely for Meta Knight** (`md->kind == VCKIND_WINGMETAKNIGHT`). His Wing machine has no chargeable boost meter — `charge_value` acts as a raw speed term, so injecting it every frame pins him at a constant max-speed buff instead of assisting a charge cycle. The guard is on the injection block in `EnergyLink_PerFrame` only; his charge-gain *generation* (holding A for a charge dash) is left intact and mints energy like any other character. King Dedede has a normal charge meter and is **not** excluded. Top Ride has no machine kinds, so the exclusion doesn't apply there.
 
-`EnergyLink_Withdraw` decrements `ap_data->energy_balance` immediately (by whole MJ, with a fractional carry for sub-1-MJ Auto-Charge spends), so the affordability gate self-limits in real time. This is essential: the gate reads the local balance, which is only refreshed by the client's `set_notify` push at its ~1s poll rate. If withdrawals waited for that push, Auto-Charge would re-read the same stale positive balance every frame and keep approving spends for up to a second — committing far more energy than the shared pool holds. The client then reports each over-commit as `[EnergyLink] withdrawal under-subtracted ... pool was lower than the mod expected`. Decrementing locally closes that window; `set_notify` still overwrites the balance with the authoritative value (it *replaces* rather than subtracts, so the local decrement is never double-counted). See "Under-subtraction" below.
+## Spending
 
-The `prev_charge_value` re-snap is the only thing preventing a feedback loop on charge.
-
-## Spending (`energylink_spend.c`)
-
-A static tree of `SpendEntry { APItemId item_id; s64 cost }` (cost in integer raw MJ), exported as `MenuDesc energylink_spend_menu` (`energylink_spend.h`) and plugged into the Settings menu. Each leaf is built by the `BUY(item, cost, label)` macro, which wires `Buy` as the `OptionDesc.on_action` and stores the `SpendEntry` in `user_data`. Top-level categories:
+`energylink_spend.c` holds a static tree of `SpendEntry { APItemId item_id; s64 cost }` (cost in integer raw MJ), exported as `MenuDesc energylink_spend_menu` and plugged into the Settings menu. Each leaf is built by the `BUY(item, cost, label)` macro, which wires `Buy` as the `OptionDesc.on_action` and stores the `SpendEntry` in `user_data`. Top-level categories:
 
 | Category | Items | Cost (raw MJ) |
 |----------|-------|---------------|
@@ -127,7 +123,7 @@ The client logs `[EnergyLink] withdrawal under-subtracted by N J (asked X, got Y
 - **Stale-balance over-commit.** If `EnergyLink_Withdraw` didn't decrement the local balance, Auto-Charge would keep spending against a stale positive `energy_balance` every frame within the client's ~1s poll window — committing several MJ more than the pool held, often a full meter-fill (`asked 5000000, got 0`), and producing *repeated* log spam (especially visible in Top Ride where boosts, hence meter-refills, come fast). `EnergyLink_Withdraw` decrements the local balance immediately, so the affordability gate stops once the locally-known pool is exhausted.
 - **Shared-pool race (inherent, benign).** In a multiworld the pool is shared and each client only resyncs every ~1s, so two players can both see the same balance and both spend it before either withdrawal reaches the server. The server clamps at 0 and one client under-subtracts. This can't be eliminated mod-side without server-authoritative ask-before-spend, which the polling protocol doesn't provide. Expect occasional lines of this kind under concurrent play; they're informational, not a fault.
 
-## Received-patch feedback prevention
+## Received-Patch Feedback Prevention
 
 When AP delivers a stat patch (e.g. another player buys you "HP Patch" via energylink trade), the patch goes through `Patch_GiveItem` / `Patch_AllUp_GiveItem` in `patch_item.c`. Without masking, stats go up → next EnergyLink frame sees a positive `stat_diff` → energy is generated, partially refunding the cost.
 
@@ -140,20 +136,16 @@ If the leak ever matters (cross-world energy farming concerns), add `EnergyLink_
 
 ## Top Ride
 
-Top Ride has no `RiderData`/`MachineData`, so the per-rider hook can't fire. `EnergyLink_OnTopRideLoadEnd` creates a standalone GOBJ that walks `TopRideKirbyMgr.kirbys[0..3]` and tracks each human Kirby's `charge.charge_value` (offset 0xB4 — see `docs/topride-system.md`). Charge is the *only* energy source in Top Ride; there are no patches and no breakable objects.
+Top Ride has no `RiderData`/`MachineData`, so the per-rider hook can't fire. `EnergyLink_OnTopRideLoadEnd` creates a standalone GOBJ that walks `TopRideKirbyMgr.kirbys[0..3]` and tracks each human Kirby's `charge.charge_value` (offset 0xB4). Charge is the *only* energy source in Top Ride; there are no patches and no breakable objects.
 
-Human filtering uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN` (per-slot config block at `GameData[slot*9 + 0xD20]`). Iterating `mgr->kirbys[i]` directly would also pick up CPU kirbys; `kirby->start_position` (Kirby+0x0E) is a per-round shuffled grid index, **not** a CPU level. See `docs/topride-system.md` "Player Kind" section.
+Human filtering uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`; iterating `mgr->kirbys[i]` alone would also pick up CPU kirbys. `needs_baseline` is forced to 0 on Top Ride entry — there is no intro/perm-patch sequence to skip.
 
-`needs_baseline` is forced to 0 on Top Ride entry — there is no intro/perm-patch sequence to skip.
+Auto-Charge runs the same deficit/withdraw math as AR/CT, but is gated on **`kirby->charge.is_charging && kirby->charge.charge_ready`** — only while the player is actively holding A and not in the post-release boost lockout. That window is exactly the one in which `TopRide_ChargeUpdate` (0x802df900) accumulates charge; on every other frame it runs its depletion branch, which subtracts roughly `1.0 / charge_tier_count` (~0.3) per frame and dwarfs the ~0.02 inject cap. Injection outside the window is wiped before it can accumulate, so the gate is what makes TR Auto-Charge work at all. `topride-system.md` documents the branch.
 
-Auto-Charge is supported in TR with the same deficit/withdraw math as AR/CT, but gated on **`kirby->charge.is_charging && kirby->charge.charge_ready`** — i.e. only while the player is *actively charging* (A held, and not in the post-release boost lockout).
+Outside that window nothing is injected, and neither omission costs the player anything:
 
-This is stricter than AR/CT, and necessarily so. Unlike 3D mode, the Top Ride engine (`TopRide_ChargeUpdate`, 0x802df900) **decays `charge_value` toward 0 every frame that A is not held**: it takes its depletion branch whenever `(!A_held || charge_ready == 0)` and subtracts roughly `1.0 / charge_tier_count` per frame (~0.3), which dwarfs our per-frame inject cap (~0.02). So a `charge_ready`-only gate (the original) let injection fire during *idle* too — where the engine wipes it the very next frame and the meter never fills. That was the "received energy doesn't charge up in Top Ride" bug.
-
-The engine only *accumulates* charge in its other branch, which runs exactly when `A_held && charge_ready == 1`. Gating Auto-Charge on `is_charging` (A held, set/cleared by the engine) plus `charge_ready` matches that window: there, our injection sticks and stacks on top of the player's own charging, so they reach a bigger boost with less hold time — the "assist your charging" semantics of AR/CT. Outside that window we inject nothing:
-
-- **Post-release depletion** (`charge_ready == 0`): the boost mechanic — `boost_speed` is computed from `charge_at_release` snapped at the moment A is released, and the engine subtracts charge each frame until it hits 0. Injecting here would fight the depletion math or stall the next charge cycle.
-- **Idle** (`is_charging == 0`): the engine is decaying charge to 0 by design; there is no charge to maintain, and in TR you cannot boost without holding then releasing A, so a topped-up idle meter would do nothing anyway.
+- **Post-release depletion** (`charge_ready == 0`): `boost_speed` is computed from `charge_at_release`, snapped when A is released, and the engine drains charge each frame until it hits 0. Injecting here would fight the depletion math or stall the next charge cycle.
+- **Idle** (`is_charging == 0`): a TR boost only fires on A-release, so a topped-up idle meter would do nothing even if it survived.
 
 ## Lifecycle
 
@@ -166,12 +158,13 @@ The engine only *accumulates* charge in its other branch, which runs exactly whe
 
 ## Public API
 
+`energylink.h` exports four functions:
+
 ```c
 void EnergyLink_On3DLoadEnd(void);
 void EnergyLink_OnTopRideLoadEnd(void);
-void EnergyLink_Withdraw(float amount);    // emit -amount into energy_sent_total (via the float carry) AND decrement ap_data->energy_balance by whole MJ (fractional carry). Auto-Charge path; purchases subtract from the counter/balance directly.
 void EnergyLink_Deposit(float amount);     // local-only balance bump (debug). Does NOT queue a server send.
 void EnergyLink_RebaseStats(int ply);      // re-snap prev_stats[ply] to current rider stats
 ```
 
-`EnergyLink_PerFrame` and `EnergyLink_TopRidePerFrame` are static — they're only registered as GObj procs from inside the file.
+`EnergyLink_Emit`, `EnergyLink_Withdraw`, `AutoCharge_Gain`, `ResetTracking`, `EnergyLink_PerFrame` and `EnergyLink_TopRidePerFrame` are all static to `energylink.c` — the send channel has exactly one writer by construction, and the two per-frame functions are only ever registered as GObj procs from inside the file.

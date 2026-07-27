@@ -9,16 +9,14 @@
 
 #include "custom_items_api.h"
 
-// Name of the custom item that grants Hypernova on pickup (matches the descriptor
-// name in mods/custom_items/assets/items/MiracleFruit.dat).
+// Must match the custom item descriptor's name.
 #define HYPERNOVA_TRIGGER_ITEM_NAME "Miracle Fruit"
 
 static const CustomItemsAPI *stc_ci_api;
 static const HypernovaAPI   *stc_hn_api;
 static int stc_pickup_registered;
 
-// custom_items pickup handler: when a rider collects the Miracle Fruit, grant Hypernova
-// to that player only.
+// Grants Hypernova to the player who collected the Miracle Fruit, and to nobody else.
 static void OnCustomItemPickup(u32 id_hash, const char *name, int player)
 {
     (void)id_hash;
@@ -31,8 +29,7 @@ static void OnCustomItemPickup(u32 id_hash, const char *name, int player)
         stc_hn_api->ActivatePlayer(player, 0);
 }
 
-// Import custom_items and register the pickup handler once it is available. Called
-// from boot and scene-change so it succeeds regardless of mod load order.
+// Called from boot and scene change, so registration succeeds regardless of mod load order.
 static void TryRegisterPickupHandler(void)
 {
     if (stc_pickup_registered)
@@ -48,7 +45,7 @@ static void TryRegisterPickupHandler(void)
     }
 }
 
-// Menu value labels. Order must match the values written to the bound ints.
+// Order must match the values written to the bound ints.
 static char *stc_toggle_names[] = {
     "Disabled",
     "Enabled",

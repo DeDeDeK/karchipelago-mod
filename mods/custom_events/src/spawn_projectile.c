@@ -6,32 +6,16 @@
 
 #include "spawn_projectile.h"
 
-// Forward throw impulse on top of the machine's world velocity. Without
-// this, the projectile inherits only md->velocity and rides along with
-// Kirby - looking "attached" - until gravity drops the bomb onto stage
-// geometry and detonates it. A constant outward speed keeps the trap's
-// trajectory predictable regardless of how fast Kirby is moving.
+// Outbound impulse added to the machine's world velocity. Inheriting only
+// md->velocity leaves the projectile co-moving with Kirby until it drops.
 #define THROW_SPEED 30.0f
 
-// Spawn one vanilla projectile of `kind` in front of `ply_idx`'s machine.
-// Uses the machine's world pos/forward/up rather than the rider's hand
-// bone, so there is no dependency on any copy ability being active - this
-// is the whole point of bypassing spawnBomb and friends.
+// Builds the spawn from the machine's pos/forward/up instead of the rider's
+// hand bone, so no copy ability has to be active.
 //
-// Position is offset forward by `distance` so the projectile visually spawns
-// in front of the machine rather than clipping through it. Velocity is
-// md->velocity + md->forward * THROW_SPEED so the projectile carries the
-// machine's motion AND has its own outbound impulse.
-//
-// Bomb / sensor-bomb / gordo come out of Projectile_Create in state 0
-// (HELD) - the post-init callback puts them in the rider's hand and the
-// detonation logic never runs until a separate throw transition. Bomb and
-// sensor bomb just need a Projectile_SetState(1) to start their flying
-// physics. Gordo additionally needs all the per-kind scratch that vanilla
-// 0x8022a544 sets up (rotation cache, accel from kind_data, lifetime), so
-// for that case we call Gordo_EnterThrownState directly instead of doing
-// our own SetState - a bare SetState(1) leaves the gordo invisible, with
-// no rotation, no real impulse, and a zero lifetime.
+// Bomb and sensor bomb leave Projectile_Create in state 0 (held) and just need
+// Projectile_SetState(1) to start flying. Gordo also needs the per-kind scratch
+// (rotation cache, accel, lifetime) that only Gordo_EnterThrownState sets up.
 static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float distance)
 {
     GOBJ *mg = Ply_GetMachineGObj(ply_idx);
@@ -41,11 +25,8 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
     if (!md)
         return 0;
 
-    // Pull the rider's owner id if available - vanilla writes rider->x0 into
-    // desc.owner_unk1 / unk2, and Projectile_Create copies that into
-    // proj->owner_gobj at proj+0x08. Gordo_EnterThrownState reads bone
-    // basis vectors via owner_gobj (rd+0x324, rd+0x330), so this needs to
-    // be a real rider GObj for the gordo path.
+    // Projectile_Create copies these into proj->owner_gobj. The gordo path needs
+    // a real rider GObj there - it reads bone basis vectors through it.
     int owner = 0;
     GOBJ *rg = Ply_GetRiderGObj(ply_idx);
     if (rg && rg->userdata)
@@ -83,12 +64,8 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
     if (!proj)
         return 0;
 
-    // The trapped player IS the owner, so vanilla owner-exclusion would
-    // drop the explosion / hit on Kirby unless we explicitly opt in to
-    // self-hit on both scan paths. Sensor bomb's post_init already sets
-    // the inbound bit but never the outbound one; bomb and gordo set
-    // neither. Setting both unconditionally keeps the trap reliable when
-    // the trapped player is the only target near the detonation.
+    // The trapped player is the owner, so owner-exclusion would drop the hit
+    // unless both scan paths opt in to self-hit.
     proj->flag_a |= PROJ_ALLOW_SELF_HIT_INBOUND;
     proj->flag_b |= PROJ_ALLOW_SELF_HIT_OUTBOUND;
 
@@ -101,10 +78,8 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
         int throw_state = (kind == PROJKIND_BOMB)
             ? BOMB_STATE_THROWN
             : SENSOR_BOMB_STATE_ARMED_FLYING;
-        // Projectile_Create snapshotted desc.velocity at proj+0x88
-        // (spawn_velocity, read-only) but per-frame physics reads
-        // proj+0x94 - vanilla throw writes that explicitly before
-        // Projectile_SetState. flags=1 matches vanilla throw.
+        // Projectile_Create only snapshots desc.velocity at proj+0x88; per-frame
+        // physics reads proj+0x94, which vanilla throw seeds before SetState.
         proj->velocity = throw_vel;
         Projectile_SetState(proj, throw_state, 1.0f, 1.0f, 1);
     }

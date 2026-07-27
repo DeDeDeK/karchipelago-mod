@@ -1,6 +1,3 @@
-// Shared helpers for the custom_weather effect layers: a common translucent GX
-// pass setup and world-camera GX-layer creation, plus the symmetric RNG.
-
 #include "os.h"
 #include "hsd.h"
 #include "obj.h"

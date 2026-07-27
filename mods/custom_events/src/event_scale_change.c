@@ -11,41 +11,31 @@
 // How small players shrink to. 0.5 = half size -> the world feels ~2x bigger.
 #define SCALE_TARGET_FACTOR 0.5f
 
-// Per-frame ease step. (1.0 - target) / step frames to fully ease; 0.02 over a
-// 0.5 swing is ~25 frames (~0.4s at 60fps), applied at both start and end.
+// Per-frame ease step; 0.02 covers the 0.5 swing in ~25 frames.
 #define SCALE_EASE_STEP 0.02f
 
 // City Trial player slots.
 #define SCALE_MAX_PLAYERS 4
 
-// A single-frame position jump larger than this many times the machine's own top
-// speed is a teleport (respawn / warp), not driving - we pass it straight through
-// unscaled so the machine lands on its target instead of being clamped to half
-// way there. Keyed off top_speed_current so it is unit-agnostic; 5x leaves plenty
-// of headroom for fast falls / knockback while staying far below any real warp.
+// A single-frame position jump above this many times top_speed_current is a
+// teleport (respawn / warp) and passes through unscaled, so the machine lands on
+// its target instead of being clamped halfway there.
 #define SCALE_TELEPORT_SPEED_MULT 5.0f
 
-// Levers, each independently toggleable so a single one can be isolated when
-// tuning live. The rider- and machine-model levers both write a per-object
-// `model_scale` float the engine bakes into the model's user matrix every frame
-// (Rider_ApplyModelMatrix / the machine model appliers around 0x801c9074), the
-// collision lever writes the mpColl sphere radius, and the speed lever scales the
-// machine's per-frame world displacement.
+// Each lever is independently toggleable so one can be isolated when tuning live.
 #define SCALE_AFFECTS_RIDER_MODEL   1
 #define SCALE_AFFECTS_MACHINE_MODEL 1
 #define SCALE_AFFECTS_COLLISION     1
 #define SCALE_AFFECTS_SPEED         1
 #define SCALE_AFFECTS_CAMERA        1
 
-// The bl CObj_SetEyePosition inside PlyCam_Think we replace with our distance
-// shim. PlyCam_Think sets the interest on the same COBJ the instruction before
-// (bl CObj_SetInterest @ 0x800b38f4), so by the time our shim runs the COBJ's
-// interest is already this frame's value and we read it straight back.
+// The bl CObj_SetEyePosition inside PlyCam_Think. The instruction before it is
+// bl CObj_SetInterest (0x800b38f4) on the same COBJ, so by the time the shim
+// runs the COBJ already holds this frame's interest.
 #define SCALE_PLYCAM_SETEYE_CALL 0x800b3900
 
-// Per-slot captured originals, so restore is exact regardless of vehicle type
-// and survives machine swaps. Captured the first frame we touch a given machine
-// GObj; re-captured when the slot's machine changes.
+// Captured on first touch of a slot's machine GObj, re-captured when that GObj
+// changes, so restore is exact regardless of vehicle type.
 typedef struct SlotScale
 {
     GOBJ *machine;     // machine GObj these originals belong to (NULL = empty)
@@ -61,14 +51,9 @@ static SlotScale slot[SCALE_MAX_PLAYERS];
 static int scale_active;
 static float cur_factor;
 
-// Replacement for the bl CObj_SetEyePosition inside PlyCam_Think: pull the final
-// camera eye toward its interest by cur_factor, so the follow distance shrinks in
-// lockstep with the players. The interest was set on this same COBJ one call
-// earlier, so we read it back from the COBJ and move the eye along the
-// eye->interest line - distance changes, view direction / up / FOV do not. When
-// the event is idle (the overwhelmingly common case) this is a pure passthrough,
-// so every non-event camera in every mode is unaffected. Runs for all player
-// cameras while active, matching the world-wide (all-players) nature of the event.
+// Dolly the eye along the eye->interest line by cur_factor so the follow
+// distance shrinks with the players; view direction, up and FOV are untouched.
+// A pure passthrough while the event is idle.
 static void ScaleChange_CObjSetEyePosition(COBJ *cobj, Vec3 *eye)
 {
 #if SCALE_AFFECTS_CAMERA
@@ -86,7 +71,6 @@ static void ScaleChange_CObjSetEyePosition(COBJ *cobj, Vec3 *eye)
     CObj_SetEyePosition(cobj, eye);
 }
 
-// Ease cur toward target by at most `step`.
 static float ApproachFactor(float cur, float target, float step)
 {
     if (cur < target)
@@ -104,13 +88,9 @@ static float ApproachFactor(float cur, float target, float step)
     return cur;
 }
 
-// Keep only `factor` of the machine's per-frame world displacement, so the player
-// travels across the unchanged world at a tiny-appropriate pace. We pull the
-// machine's position back by (1 - factor) of the distance it moved since our last
-// pass; the engine's velocity integration and collision resolution run normally
-// around this, so the machine never ends a frame in a penetrating state and the
-// rider/camera follow the machine position with no desync. factor 1.0 is an exact
-// no-op (clamped == cur).
+// Keep only `factor` of the machine's per-frame world displacement by pulling
+// its position back after the engine has integrated velocity and resolved
+// collision, so no frame ends in a penetrating state. factor 1.0 is a no-op.
 static void ApplyMachineSpeed(SlotScale *s, MachineData *md, float factor)
 {
     Vec3 cur = md->pos;
@@ -129,7 +109,7 @@ static void ApplyMachineSpeed(SlotScale *s, MachineData *md, float factor)
     float maxstep = md->top_speed_current * SCALE_TELEPORT_SPEED_MULT;
     if (maxstep > 1.0f && dx * dx + dy * dy + dz * dz > maxstep * maxstep)
     {
-        // Teleport (respawn / warp): let it through, re-seed from the destination.
+        // Teleport: let it through, re-seed from the destination.
         s->last_pos = cur;
         return;
     }
@@ -142,11 +122,9 @@ static void ApplyMachineSpeed(SlotScale *s, MachineData *md, float factor)
     s->last_pos = clamped;
 }
 
-// Capture this slot's collision originals the first time we see its current
-// machine, then write the scaled values. factor 1.0 restores them exactly. The
-// model scale needs no capture: model_scale is a "1.0 = normal" multiplier (the
-// vehicle's intrinsic size lives in model_scale_base), so writing the factor
-// directly is the machine analogue of rd->model_scale = factor for the rider.
+// factor 1.0 restores the captured collision originals exactly. model_scale
+// needs no capture - it is a "1.0 = normal" multiplier, with the vehicle's
+// intrinsic size held in model_scale_base.
 static void ApplyMachineScale(int ply, GOBJ *mg, MachineData *md, float factor)
 {
     SlotScale *s = &slot[ply];
@@ -199,8 +177,7 @@ static void ApplyScale(float factor)
         GOBJ *mg = Ply_GetMachineGObj(ply);
         if (!mg)
         {
-            // No machine in this slot - drop its capture so a future mount
-            // re-captures fresh originals.
+            // Drop the capture so a future mount re-captures fresh originals.
             slot[ply].machine = NULL;
             slot[ply].captured = 0;
             continue;
@@ -249,8 +226,8 @@ void ScaleChange_End2(EventCheckData *ev_chk)
     if (!scale_active)
         return;
 
-    // Final exact restore: factor 1.0 writes the captured collision originals back
-    // and makes the speed clamp a no-op.
+    // Exact restore: writes the captured collision originals back and makes the
+    // speed clamp a no-op.
     ApplyScale(1.0f);
 
     scale_active = 0;
@@ -258,11 +235,9 @@ void ScaleChange_End2(EventCheckData *ev_chk)
     OSReport("[ScaleChange] restored players to normal scale\n");
 }
 
-// Install the persistent code patches this event needs. Called once at boot.
 void ScaleChange_InstallHooks(void)
 {
 #if SCALE_AFFECTS_CAMERA
-    // Route the player camera's per-frame eye write through our distance shim.
     CODEPATCH_REPLACECALL(SCALE_PLYCAM_SETEYE_CALL, ScaleChange_CObjSetEyePosition);
 #endif
 }

@@ -1,8 +1,18 @@
 # Box Type Gating
 
-## Overview
+Each City Trial item-box color can be individually locked behind an Archipelago unlock item; a locked color never spawns. A color is also auto-disabled when the other gating systems have emptied its item pool, so opening a box always awards something.
 
-Each `BoxKind` (`BOXKIND_BLUE` 0, `BOXKIND_GREEN` 1, `BOXKIND_RED` 2 — see `item.h`) can be individually locked. When locked, that box color does not spawn. Additionally, a box color is auto-disabled when all of its contents have been filtered out by other gating systems (abilities, patches, items) — see `gate-abilities.md`, `gate-patches.md`, `gate-items.md`. This prevents opening a box that would award nothing.
+## What Is Gated
+
+The 3 `BoxKind` values (`item.h`), one bit each in `box_unlocked_mask`:
+
+| Bit | `BoxKind` | Name | AP item |
+|----:|-----------|------|--------:|
+| 0 | `BOXKIND_BLUE` | Blue | 860 |
+| 1 | `BOXKIND_GREEN` | Green | 861 |
+| 2 | `BOXKIND_RED` | Red | 862 |
+
+Auto-disable is layered on top: a color whose post-filter pool has no entry with `chance > 0` is treated as locked for this spawn, even with its bit set. The abilities, patches, and items gates each zero or remove their own entries from those pools (`gate-abilities.md`, `gate-patches.md`, `gate-items.md`), so any of them can empty a color.
 
 ## Entry Points
 
@@ -26,7 +36,7 @@ City Trial decides what to spawn in `CityItemSpawn_Think` (0x800eb108). It first
 |----------|---------|----------------------------------|--------------------------|
 | 0 | Patch | `CityItemSpawn_GetRandomItemID` (0x800eb7e4); `box_color = box_size = -1` | No (patches gated separately) |
 | 1 | Item box (**any** color) | `GrBoxGeneratorDetermine` at **0x800eb20c** → return saved in r30 (0x800eb210) | **Yes** |
-| 2 | Legendary machine-piece carrier | hardcodes `box_color = 2`, `box_size = 2` (a red box), then `CityItemSpawn_SpawnLegendaryPiece` (0x800ed384) attaches the Dragoon/Hydra part | No (see note) |
+| 2 | Legendary machine-piece carrier | hardcodes `box_color = 2`, `box_size = 2` (a red box) at 0x800eb218, then `CityItemSpawn_SpawnLegendaryPiece` (0x800ed384) attaches the Dragoon/Hydra part | No (see note) |
 | 3 | Nothing | returns early | — |
 
 The category value has two sources inside `UpdateAndCheckToSpawn`. `CityItemSpawn_CheckToSpawnLegendaryPiece` (0x800ed2f0) returns **2** when a legendary piece is pending (the Dragoon/Hydra part flag is set and the round's progress threshold has been passed) or **3** otherwise; when no piece is pending and the spawn cooldown has elapsed, a script-byte table (`DAT_805d617c`, values `{0, 1, …}`) selects **0** (patch) or **1** (box). **The script path never yields 2** — category 2 is reachable *only* through the legendary-piece subsystem.
@@ -55,7 +65,7 @@ When no color is eligible the replacement returns `-1` (and, in that early-exit 
 
 This is **safer than vanilla**, which never returns `-1` on an all-zero chance table: with `total == 0` the cumulative walk never matches, so `selected` falls through to `9`, making `box_color = 9 / 3 = 3`. That trips the `box_color < 3` bounds check at 0x800ebda4, which calls `__assert` (0x804284b8) and panics. Returning `-1` instead masks that crash path on the locked-out edge case.
 
-### Box Auto-Disable
+### Box auto-disable
 
 A color is treated as locked for selection if its post-filter pool is empty, even when its `box_unlocked_mask` bit is set. `BoxHasItems` scans `obj->item_group_spawn[box].chance[i]` for `i < .num` (struct `grBoxGeneObj` in `game.h`) at decision time, so it always reflects the current pool after the items/patches/abilities filters have zeroed their entries — no separate update pass or cross-system ordering rule is needed. Without this, a player could open (e.g.) a green box and get nothing because every green-box item was independently locked.
 
@@ -63,7 +73,7 @@ A color is treated as locked for selection if its post-filter pool is empty, eve
 
 `u8 box_unlocked_mask` in `APSave` (`mods/archipelago/src/main.h`, accessed via the global `ap_save`). Bit N = `BoxKind` N (0 = BLUE, 1 = GREEN, 2 = RED).
 
-The mask is also exposed through `ArchipelagoAPI` as the `AP_UNLOCK_BOX` category (`archipelago_api.c`), so `archipelago_debug` can read/write it.
+The mask is also exposed through `ArchipelagoAPI` as the `AP_UNLOCK_BOX` category (`archipelago_api.c`), so `archipelago_debug` can read/write it. When the slot option `box_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` in `main.c` pre-fills the mask with `(1 << BOXKIND_NUM) - 1` at connect, so every color spawns with no AP items required.
 
 ## AP Items
 

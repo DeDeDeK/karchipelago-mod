@@ -1,8 +1,5 @@
-// Moon for custom_weather: a distant fog-free disc fixed on the sky dome that
-// crosses the sky over a City Trial round (synced to the match timer), showing
-// craters and one of the eight canonical phases. When a preset asks for it, the
-// moon also casts a directional moonlight LOBJ and suppresses the leftover
-// distant stage light so it becomes the dominant directional light.
+// Moon for custom_weather: a phased disc crossing the City Trial sky over the
+// round, optionally casting a directional moonlight.
 
 #include "os.h"
 #include "game.h"
@@ -18,56 +15,44 @@
 #define MOON_PI      3.14159265358979f
 #define MOON_DEG2RAD (MOON_PI / 180.0f)
 
-// The moon is anchored along the sky direction from the camera eye (celestial:
-// no parallax, consistent apparent elevation). The anchor distance is clamped so
-// the moon always stays INSIDE the backdrop dome - the dome is a depth-writing
-// sphere at the world origin, so a moon beyond it gets occluded (it would vanish
-// as the camera nears the edge and the dome closes in). Terrain nearer than the
-// anchor still occludes the moon via the depth test; the fog-free far sky does
-// not. Apparent size is referenced to MOON_REF_DIST so it stays constant as the
-// distance is clamped.
+// Anchored along the sky direction from the camera eye (no parallax), with the
+// distance clamped inside the backdrop dome - a depth-writing sphere at the world
+// origin that would otherwise occlude the moon. Apparent size is referenced to
+// MOON_REF_DIST so it holds constant as the distance is clamped.
 #define MOON_MAX_DIST   1800.0f  // desired anchor distance from the eye
 #define MOON_REF_DIST   1800.0f  // r == stc_size at this distance (sets apparent size)
 #define MOON_FAR_FRAC   0.85f    // never exceed this fraction of the camera far plane
 #define MOON_DOME_R     2500.0f  // CT backdrop dome radius (geometry ~2856 * stage scale)
 #define MOON_DOME_FRAC  0.82f    // keep the moon within this fraction of the dome distance
 
-// Disc tessellation: horizontal scanline bands over the lit region (the phase
-// terminator is a per-scanline ellipse), each band split into MOON_COLS columns so
-// the radial soft-edge alpha blends across the rim. Craters are small filled circles.
 #define MOON_BANDS        28
 #define MOON_COLS         6
 #define MOON_CRATERS      13
 #define MOON_CRATER_SEGS  9
 
-// Radial fraction of the disc where the soft edge begins; disc alpha fades from full
-// here to 0 at the rim so the silhouette blends into the sky. Craters are kept fully
-// inside this so they never sit on the fading rim.
+// Radial fraction of the disc where the soft edge begins; alpha fades to 0 at the rim.
 #define MOON_RIM_FADE     0.85f
 
-// Defaults applied when a preset leaves the matching MoonDef field 0. A soft
-// off-white disc; A is the base opacity before the menu Brightness scalar.
+// Defaults applied when a preset leaves the matching MoonDef field 0; the color
+// alpha is the base opacity before the menu Brightness scalar.
 #define MOON_DEF_COLOR        RGBA(232, 234, 240, 255)
 #define MOON_DEF_SIZE         92.0f   // disc radius in world units on the dome
 #define MOON_DEF_ARC          26.0f   // peak elevation degrees over the round
 #define MOON_DEF_BEARING      95.0f   // rise compass bearing (deg); ~east
 #define MOON_DEF_LIGHT_COLOR  RGBA(120, 140, 195, 255)
 
-// Global size multiplier over the resolved size and the menu Size scalar.
+// Global multiplier over the resolved size and the menu Size scalar.
 #define MOON_SIZE_SCALE  1.0f
 
-// Craters: darker translucent patches over the lit disc (maria).
 #define MOON_CRATER_SHADE  0.58f  // crater RGB = disc RGB * this
 #define MOON_CRATER_ALPHA  95     // crater opacity over the disc
 
-// Disc render GObj: entity class / p_link after clouds (205/29); world camera
-// gx_link 0, drawn first on the XLU sub-pass so the cloud deck blends over it.
+// Disc render GObj, drawn first on the XLU sub-pass so the cloud deck blends over it.
 #define MOON_GOBJ_CLASS  207
 #define MOON_GOBJ_PLINK  31
 #define MOON_GX_LINK     0
 #define MOON_GX_PRI      0
 
-// Moonlight LOBJ carrier GObj (a spare class/p_link past the lightning ones).
 #define MOON_LOBJ_GOBJ_CLASS  39
 #define MOON_LOBJ_GOBJ_PLINK  33
 
@@ -83,43 +68,41 @@ static float   stc_bearing = MOON_DEF_BEARING;
 static int     stc_light = 0;
 static GXColor stc_light_color = {120, 140, 195, 255};
 
-// Crater shape: seeded once in unit-disc coords (X=cu, Y=cv in [-1,1], Z=radius
-// as a fraction of the disc radius). Reused every frame, scaled into world space.
+// Crater shape in unit-disc coords (X, Y in [-1,1]; Z = radius as a fraction of
+// the disc radius), seeded once and scaled into world space each frame.
 static Vec3 stc_crater[MOON_CRATERS];
 static int  stc_crater_seeded = 0;
 
-// Menu knobs layered over the active preset. Moon {Preset,Off,On} gates the
-// whole feature; the rest override appearance/arc/phase. Persisted by hoshi menu.
+// Menu knobs layered over the active preset. Moon {Preset,Off,On} gates the whole
+// feature; the rest override appearance/arc/phase.
 static char *show_names[] = {"Preset", "Off", "On"};
-static int   show_index = 0; // Preset
+static int   show_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored disc size).
 static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
 static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
 #define MOON_SIZE_NUM ((int)(sizeof(size_factors) / sizeof(size_factors[0])))
-static int size_index = 0; // default Preset (1.0)
+static int size_index = 0;
 
-// Index 0 = Preset (1.0, the preset's authored brightness).
 static const float bright_factors[] = {1.0f, 0.6f, 1.0f, 1.3f};
 static char *bright_names[] = {"Preset", "Dim", "Normal", "Bright"};
 #define MOON_BRIGHT_NUM ((int)(sizeof(bright_factors) / sizeof(bright_factors[0])))
-static int bright_index = 0; // default Preset (1.0)
+static int bright_index = 0;
 
 // Index 0 = Preset; 1..8 map to the MoonPhase enum in order.
 static char *phase_names[] = {"Preset", "Full", "Waxing Crescent", "First Quarter",
                               "Waxing Gibbous", "Waning Gibbous", "Last Quarter",
                               "Waning Crescent", "New"};
 #define MOON_PHASE_NUM ((int)(sizeof(phase_names) / sizeof(phase_names[0])))
-static int phase_index = 0; // Preset
+static int phase_index = 0;
 
-// Peak-elevation override (degrees). Index 0 = Preset.
+// Peak-elevation override in degrees.
 static const float arc_degs[] = {0.0f, 15.0f, 26.0f, 42.0f, 62.0f};
 static char *arc_names[] = {"Preset", "Low", "Mid", "High", "Overhead"};
 #define MOON_ARC_NUM ((int)(sizeof(arc_degs) / sizeof(arc_degs[0])))
 static int arc_index = 0;
 
-// Tint override. Index 0 keeps the per-preset RGB; the rest force an RGB (the
-// alpha still comes from the preset opacity * the Brightness scalar).
+// Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the alpha from
+// the preset opacity * the Brightness scalar.
 static const u32 color_overrides[] = {0, RGBA(242, 244, 250, 255), RGBA(210, 214, 224, 255),
                                       RGBA(150, 175, 230, 255), RGBA(240, 214, 158, 255)};
 static char *color_names[] = {"Preset", "White", "Silver", "Blue", "Amber"};
@@ -127,7 +110,7 @@ static char *color_names[] = {"Preset", "White", "Silver", "Blue", "Amber"};
 static int color_index = 0;
 
 static char *light_names[] = {"Preset", "Off", "On"};
-static int   light_index = 0; // Preset
+static int   light_index = 0;
 
 static void Moon_GX(GOBJ *g, int pass);
 
@@ -139,9 +122,8 @@ static HSD_Fog *MoonLiveFog(void)
     return (HSD_Fog *)gr->sky_gobj->hsd_object;
 }
 
-// Normalized round progress 0 (start) .. 1 (end) from the CT match timer. The
-// game keeps grBoxGeneInfo.match_progress consistent with pause/intro handling.
-// No timer (menus / non-city / match intro) holds the moon at the rise point.
+// Normalized round progress 0 (start) .. 1 (end) from the CT match timer; no timer
+// (menus, non-city, match intro) holds the moon at its rise point.
 static float MoonProgress(void)
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
@@ -155,9 +137,8 @@ static float MoonProgress(void)
     return p;
 }
 
-// Sky direction of the moon at the current progress: it rises at `stc_bearing`,
-// arcs to `stc_arc` peak elevation at mid-round, and sets at the opposite
-// bearing. Below the horizon (start/end instants) dir.Y <= 0.
+// Sky direction at the current progress: rises at `stc_bearing`, peaks at `stc_arc`
+// elevation mid-round, sets at the opposite bearing. Below the horizon dir.Y <= 0.
 static void MoonDirection(Vec3 *out)
 {
     float p = MoonProgress();
@@ -193,9 +174,8 @@ static void PhaseParams(int phase, float *k, int *side)
     }
 }
 
-// Lit horizontal extent [uL,uR] at billboard height v (disc half-width
-// w = sqrt(r^2 - v^2)). Lit-right spans [-k*w, w], lit-left spans [-w, k*w];
-// the far edge is always the disc rim, the near edge the terminator ellipse.
+// Lit horizontal extent [uL,uR] at billboard height v, disc half-width
+// w = sqrt(r^2 - v^2): lit-right spans [-k*w, w], lit-left spans [-w, k*w].
 static void LitExtent(float v, float r, float k, int side, float *uL, float *uR)
 {
     float w = r * r - v * v;
@@ -214,8 +194,7 @@ static void LitExtent(float v, float r, float k, int side, float *uL, float *uR)
         *uR = *uL; // empty scanline (deep crescent): collapse to zero width
 }
 
-// Radial soft-edge factor: 1 in the interior, fading to 0 at the disc rim so the
-// silhouette blends into the sky rather than ending on a hard circle.
+// Radial soft-edge factor: 1 in the interior, fading to 0 at the disc rim.
 static float MoonRimFade(float u, float v, float r)
 {
     float d = sqrtf(u * u + v * v) / r;
@@ -227,9 +206,8 @@ static float MoonRimFade(float u, float v, float r)
     return 1.0f - t;
 }
 
-// Whether a crater circle sits entirely on the lit face: fully inside the opaque
-// interior (off the soft rim) and on the lit side of the terminator (rim-sampled, so
-// it never overhangs into the dark or off the disc edge).
+// Whether a crater circle sits entirely inside the opaque interior and on the lit
+// side of the terminator, sampled around its rim.
 static int CraterFits(float cu, float cv, float crad, float r, float k, int side)
 {
     if (sqrtf(cu * cu + cv * cv) + crad > r * MOON_RIM_FADE)
@@ -272,9 +250,8 @@ static void MoonVert(const Vec3 *P, const Vec3 *R, const Vec3 *U, float u, float
     GXColor4u8(cr, cg, cb, ca);
 }
 
-// GX callback on the world camera link, XLU pass. Draws the moon as a
-// camera-facing disc (phase-clipped scanline bands + crater patches), fog-free
-// (bracketed HSD_FogSet) so the distant disc isn't washed to fog color;
+// GX callback on the world camera link, XLU pass. Draws a camera-facing disc
+// fog-free (bracketed HSD_FogSet) so the distant disc isn't washed to fog color,
 // depth-tested but not depth-writing so terrain occludes it.
 static void Moon_GX(GOBJ *g, int pass)
 {
@@ -300,14 +277,13 @@ static void Moon_GX(GOBJ *g, int pass)
     int side;
     PhaseParams(phase, &k, &side);
 
-    // Camera axes in world space (rows 0/1 of the world->view rotation) give the
-    // billboard basis; the disc always faces the camera.
+    // Rows 0/1 of the world->view rotation are the camera axes in world space,
+    // giving the billboard basis.
     float (*m)[4] = cam->view_mtx;
     Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
     Vec3 upW = {m[1][0], m[1][1], m[1][2]};
 
-    // Camera eye in world space from the view matrix (eye = -R^T * t), so the
-    // moon can be anchored relative to the eye.
+    // Camera eye in world space, eye = -R^T * t.
     Vec3 eye = {
         -(m[0][0] * m[0][3] + m[1][0] * m[1][3] + m[2][0] * m[2][3]),
         -(m[0][1] * m[0][3] + m[1][1] * m[1][3] + m[2][1] * m[2][3]),
@@ -315,15 +291,14 @@ static void Moon_GX(GOBJ *g, int pass)
     };
 
     // Distance from the eye to the backdrop dome (sphere at the origin) along the
-    // sky direction, so we can keep the moon inside it.
+    // sky direction.
     float edotd = eye.X * dir.X + eye.Y * dir.Y + eye.Z * dir.Z;
     float e2 = eye.X * eye.X + eye.Y * eye.Y + eye.Z * eye.Z;
     float disc = edotd * edotd + MOON_DOME_R * MOON_DOME_R - e2;
     float t_dome = (disc > 0.0f) ? (-edotd + sqrtf(disc)) : MOON_DOME_R;
 
-    // Anchor along the sky direction: the smaller of the desired distance, a
-    // fraction of the dome distance (so it never pokes through the dome), and a
-    // fraction of the far plane.
+    // Anchor at the smallest of the desired distance, a fraction of the dome
+    // distance, and a fraction of the far plane.
     float dist = MOON_MAX_DIST;
     float lim = MOON_DOME_FRAC * t_dome;
     if (dist > lim)
@@ -345,14 +320,11 @@ static void Moon_GX(GOBJ *g, int pass)
     HSD_Fog *fog = MoonLiveFog();
 
     WeatherGX_BeginXlu(cam, 0, 0);
-    // Keep the depth test (LEQUAL from BeginXlu, no depth write): terrain nearer
-    // than the anchor distance occludes the moon, while the fog-free far sky and
-    // the (non-depth-writing) backdrop dome do not.
     if (fog)
         HSD_FogSet(NULL); // draw the distant moon fog-free
 
-    // Disc: horizontal scanline bands over the lit extent, each split into MOON_COLS
-    // columns so the radial soft-edge alpha (MoonRimFade) blends the rim smoothly.
+    // Scanline bands over the lit extent, each split into columns so the radial
+    // soft-edge alpha blends the rim.
     for (int b = 0; b < MOON_BANDS; b++)
     {
         float v0 = -r + (2.0f * r) * (float)b / (float)MOON_BANDS;
@@ -376,7 +348,6 @@ static void Moon_GX(GOBJ *g, int pass)
         }
     }
 
-    // Craters: darker translucent patches, only where the disc is lit.
     u8 kR = (u8)(dR * MOON_CRATER_SHADE);
     u8 kG = (u8)(dG * MOON_CRATER_SHADE);
     u8 kB = (u8)(dB * MOON_CRATER_SHADE);
@@ -386,7 +357,7 @@ static void Moon_GX(GOBJ *g, int pass)
         float cu = stc_crater[i].X * r;
         float cv = stc_crater[i].Y * r;
         float crad = stc_crater[i].Z * r;
-        if (!CraterFits(cu, cv, crad, r, k, side)) // not fully on the lit face
+        if (!CraterFits(cu, cv, crad, r, k, side))
             continue;
 
         GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, MOON_CRATER_SEGS + 2);
@@ -413,9 +384,8 @@ static void Moon_EnsureRender(void)
                                           "[Moon] Moon layer installed");
 }
 
-// The moonlight: a directional (INFINITE) LOBJ shining from the moon's sky
-// direction. INFINITE lights use only their position vector as the direction
-// origin, so we point it along the moon direction each frame.
+// Directional (INFINITE) moonlight. An INFINITE LOBJ uses only its position vector
+// as the direction origin, so it is pointed along the moon direction each frame.
 static WOBJDesc s_moon_pos_desc = {
     .class_name = 0,
     .pos = {0.0f, 1500.0f, 0.0f}, // overwritten each frame
@@ -434,9 +404,9 @@ static LObjDesc s_moon_lobj_desc = {
 };
 static LOBJ *s_moon_lobj = 0;
 
-// The leftover distant stage light we suppress while the moonlight is on (the
-// secondary INFINITE; the primary sun *stc_main_light is owned by the weather
-// runtime's terrain tint). Cached so we restore it, leak-safe like the runtime.
+// The secondary INFINITE stage light, zeroed while the moonlight is on so the moon
+// dominates (the primary sun *stc_main_light drives the weather runtime's terrain
+// tint). Cached so it can be restored.
 static LOBJ  *s_sup_lobj = 0;
 static GXColor s_sup_color, s_sup_hw;
 
@@ -468,9 +438,8 @@ static void MoonLight_Zero(void)
     s_moon_lobj->hw_color.r = s_moon_lobj->hw_color.g = s_moon_lobj->hw_color.b = 0;
 }
 
-// Zero the secondary INFINITE stage light (found via the HW slot table), caching
-// its original color on first touch. The slot table lags a frame, so this may
-// resolve nothing the first frame and retry.
+// Zero the secondary INFINITE stage light, found via the HW slot table and cached
+// on first touch. The slot table lags a frame, so this may resolve nothing and retry.
 static void SuppressSecondary(void)
 {
     if (s_sup_lobj)
@@ -496,8 +465,7 @@ static void SuppressSecondary(void)
     }
 }
 
-// Restore the suppressed light to its cached original (mid-session, e.g. moving
-// to a non-moon preset). Safe no-op if nothing was suppressed.
+// Restore the suppressed light to its cached original; no-op if nothing was suppressed.
 static void RestoreSecondary(void)
 {
     if (s_sup_lobj)
@@ -520,7 +488,7 @@ static void MoonLight_Tick(void)
 
     Vec3 dir;
     MoonDirection(&dir);
-    if (dir.Y <= 0.0f) // moon down (start/end): let the normal sun light the scene
+    if (dir.Y <= 0.0f) // moon down: let the normal sun light the scene
     {
         MoonLight_Zero();
         RestoreSecondary();
@@ -545,8 +513,7 @@ static void MoonLight_Tick(void)
 }
 
 // Latch the active preset's moon config, resolving each 0 field to its module
-// default and applying the menu overrides. NULL / enabled == 0 / Moon menu Off
-// turns the moon off; Moon menu On forces it on for every preset.
+// default and applying the menu overrides.
 void Moon_SetActive(const MoonDef *def)
 {
     if (show_index == 1) // menu Off
@@ -585,8 +552,8 @@ void Moon_SetActive(const MoonDef *def)
     stc_light_color = GXColor_Unpack((def && def->light_color) ? def->light_color
                                                               : MOON_DEF_LIGHT_COLOR);
 
-    // Drop the suppressed-sun cache so the new preset re-resolves it fresh next
-    // tick (restores the old preset's suppressed light first).
+    // Restore the old preset's suppressed light and drop the cache so the new
+    // preset re-resolves it next tick.
     RestoreSecondary();
 }
 
@@ -601,10 +568,9 @@ void Moon_Tick(void)
 
 void Moon_Reset(void)
 {
-    // The engine frees every world GObj (our disc layer and the moonlight LOBJ
-    // carrier) on scene teardown; drop the cached handles so the next active
-    // frame recreates them. The suppressed stage LOBJ is freed too - just drop
-    // the pointer, never write through it after teardown.
+    // The engine frees every world GObj (and the stage LOBJs) on scene teardown;
+    // drop the cached handles so the next active frame recreates them, and never
+    // write through them after.
     stc_moon_gobj = NULL;
     s_moon_lobj = 0;
     s_sup_lobj = 0;

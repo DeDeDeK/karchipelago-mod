@@ -10,10 +10,10 @@
 #include "gate_base_abilities.h"
 #include "textbox_api.h"
 
-// Gates Kirby's inhale, quick spin, and machine charge behind AP unlock items;
-// each stays dead until its bit is set in ap_save->base_ability_unlocked_mask.
-// Human-only - CPUs keep every ability. Every gate is reversible: the patch stays
-// installed and runs the original engine behavior once unlocked.
+// Gates Kirby's inhale, quick spin, and machine charge behind AP unlock items.
+// Human-only - CPUs keep every ability, since gating the universal machine charge
+// would leave every CPU racer unable to boost. Each gate reads the mask every time it
+// runs, so the patch stays installed and defers to the engine once unlocked.
 
 static const char *const BaseAbility_Names[BASEABILITY_NUM] = {
     "Inhale",
@@ -51,8 +51,8 @@ void GateBaseAbilities_StartInhale(RiderData *rd)
     Rider_StartInhale(rd);
 }
 
-// Replaces both bl Rider_QuickSpin_Enter sites (0x801b7ec0, 0x801b7e58). Kirby
-// only - Dedede and Meta Knight have their own enters below.
+// Replaces both bl Rider_QuickSpin_Enter sites (0x801b7ec0, 0x801b7e58). Kirby only -
+// Dedede and Meta Knight have their own enters below.
 void GateBaseAbilities_QuickSpinEnter(float f, RiderData *rd, int dir, int flag)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
@@ -100,10 +100,9 @@ void GateBaseAbilities_AddChargeEx(double rate, MachineData *md)
     Machine_AddChargeEx(rate, md);
 }
 
-// Conditional-hook body for the inline charge store at 0x802e01b4 (stfs f0,52(r3))
-// in TopRide_ChargeUpdate: r3 = charge component, f1 = post-add value. Skips the
-// store for a locked human; returns 1 so the hook's alt exit (0x802e01b8) is taken
-// and the original store never re-runs.
+// Conditional-hook body for the inline charge store at 0x802e01b4 (stfs f0,52(r3)) in
+// TopRide_ChargeUpdate: r3 = charge component, f1 = post-add value. Always returns 1 so
+// the hook's alt exit (0x802e01b8) is taken and the original store never re-runs.
 int GateBaseAbilities_TopRideChargeStore(TopRideChargeComponent *comp, float new_value)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && TRKirbyIsHuman((TopRideKirby *)comp->kirby_ptr))
@@ -119,10 +118,9 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x802e01b4,
     0,
     0x802e01b8)
 
-// Replaces the bl TopRide_KirbyHistoryQuery at 0x802d5f90 in TopRide_KirbyPhysUpdate
-// (the stick-flick spin's oscillation query). Returns 0 ("no flick") for a locked
-// human so the spin block is skipped. The query gets &kirby->history (kirby+0x64)
-// in r3, so kirby is that pointer minus 0x64.
+// Replaces the bl TopRide_KirbyHistoryQuery at 0x802d5f90 in TopRide_KirbyPhysUpdate,
+// the stick-flick spin's oscillation query. Returning 0 ("no flick") skips the whole
+// spin block. The query receives &kirby->history (kirby+0x64) in r3.
 int GateBaseAbilities_TopRideQuickSpinQuery(int *history)
 {
     TopRideKirby *k = (TopRideKirby *)((char *)history - 0x64);

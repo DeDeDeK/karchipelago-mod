@@ -1,5 +1,3 @@
-// Custom Items - boot, registry storage, and the exported API.
-
 #include "os.h"
 #include "hsd.h"
 #include "hoshi/mod.h"
@@ -7,16 +5,13 @@
 #include "custom_items.h"
 #include "custom_items_api.h"
 
-// Master toggle. Off gates every custom item out of spawning regardless of the
-// per-item flags.
+// Off gates every custom item out of spawning regardless of the per-item flags.
 int custom_items_enabled = 1;
 
 static CustomItemEntry stc_registry[CUSTOM_ITEM_MAX];
 static int stc_registry_count;
 
-// Subscriber list of handlers fired by the pickup hook (item_registry.c) when a
-// custom item is collected. Multiple consumer mods may subscribe; each is
-// invoked on every pickup. Empty until a consumer registers one via the API.
+// Pickup subscribers; multiple consumer mods may register, each runs on every pickup.
 #define CUSTOM_ITEM_PICKUP_HANDLERS_MAX 4
 static CustomItemPickupFn stc_pickup_handlers[CUSTOM_ITEM_PICKUP_HANDLERS_MAX];
 
@@ -67,8 +62,6 @@ void CustomItems_CopyName(char *dst, const char *src)
     }
     dst[i] = '\0';
 }
-
-// --- Exported API ---
 
 static int Api_GetCount(void)
 {
@@ -136,9 +129,7 @@ static void Api_RemovePickupHandler(CustomItemPickupFn handler)
     }
 }
 
-// Legacy single-handler setter. NULL clears every subscriber; a non-NULL handler
-// is added (deduplicated), matching the old replace-then-fire behavior for the
-// common case of a single consumer while coexisting with AddPickupHandler.
+// Legacy setter: NULL clears every subscriber, otherwise the handler is added.
 static void Api_SetPickupHandler(CustomItemPickupFn handler)
 {
     if (handler == NULL)
@@ -150,7 +141,6 @@ static void Api_SetPickupHandler(CustomItemPickupFn handler)
     Api_AddPickupHandler(handler);
 }
 
-// Invoked by the pickup hook (item_registry.c) on each custom-item collection.
 void CustomItems_FirePickup(u32 id_hash, const char *name, int player)
 {
     for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
@@ -176,8 +166,7 @@ void CustomItems_OnBoot(void)
 {
     int n = CustomItems_Discover();
 
-    // Wire the per-round itData/spawn-weight splice only when there is something
-    // to register, so a build with no custom items leaves the game untouched.
+    // With nothing to register, install no hooks so vanilla play is untouched.
     if (n > 0)
         CustomItemRegistry_InstallHook();
 

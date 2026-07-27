@@ -3,8 +3,7 @@
 
 #include "hoshi/settings.h"
 
-// Menu descriptor for the Energy Link Spend submenu.
-// Plug this into the main settings menu as an OPTKIND_MENU option.
+// Energy Link Spend submenu, plugged into the settings menu as OPTKIND_MENU.
 extern MenuDesc energylink_spend_menu;
 
 #endif // ENERGYLINK_SPEND_H

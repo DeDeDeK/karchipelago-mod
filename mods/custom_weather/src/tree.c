@@ -1,6 +1,5 @@
-// Wind bends the City Trial forest trees (yakumono desc_id 34): each frame a small
-// tilt following the global wind vector (wind.c) is written into each tree's skeleton
-// joint rotation, so calm presets leave them rigid and storms lean them over. Visual
+// Wind bends the City Trial forest trees: each frame a small tilt following the
+// global wind vector is written into each tree's skeleton joint rotation. Visual
 // only - collision is never touched.
 
 #include "os.h"
@@ -16,9 +15,8 @@
 #define TREE_MAX         96  // CT ships 53; headroom for the enumeration cache
 #define TREE_MAX_PARENTS 16  // tree-family yakumono GObjs owning the instances
 
-// Bend shape. The lean angle scales with wind speed up to a cap; a per-tree
-// sinusoidal gust breaks the grove out of lockstep so it reads as wind through
-// foliage rather than one rigid block pivoting together.
+// The lean angle scales with wind speed up to a cap; a per-tree sinusoidal gust
+// breaks the grove out of lockstep.
 #define TREE_BEND_PER_SPEED 0.018f  // radians of lean per world-unit of wind speed
 #define TREE_BEND_MAX       0.25f   // hard cap on lean (~14 deg)
 #define TREE_RUSTLE         0.22f   // per-tree gust modulates the lean +/- this fraction
@@ -37,22 +35,19 @@ static int   stc_tree_count = 0;
 static int   stc_enumerated = 0;
 static float stc_phase = 0.0f;
 
-// Settings (persisted by hoshi menu save). {Preset, Off, On}: Preset = the
-// built-in default (trees bend in wind).
+// Preset = trees bend in wind.
 static char *tree_toggle_names[] = {"Preset", "Off", "On"};
-static int   tree_enabled = 0; // default Preset (bend in wind)
+static int   tree_enabled = 0;
 
-// Index 0 = Preset (1.0, the module's baseline sway).
 static const float tree_strength_factors[] = {1.0f, 0.6f, 1.0f, 1.6f};
 static char *tree_strength_names[] = {"Preset", "Subtle", "Normal", "Strong"};
 #define TREE_STRENGTH_NUM ((int)(sizeof(tree_strength_factors) / sizeof(tree_strength_factors[0])))
-static int tree_strength_index = 0; // default Preset (1.0)
+static int tree_strength_index = 0;
 
 // Collect the forest-tree yakumono GObjs (desc_id 34) into `out`, returning the
-// count. Walking the yakumono GObj list is the safe way to reach tree parents:
-// each list node is a live GObj, so its userdata->desc_id is real. A scene
-// record's owner slot (record+0x90) is meaningless for non-break instances and
-// must never be dereferenced, so records are matched against these by pointer.
+// count. Every node of the yakumono GObj list is a live GObj, so its
+// userdata->desc_id is real; a scene record's owner slot is only ever compared
+// against these by pointer, never dereferenced.
 static int Tree_CollectParents(GOBJ **out, int max)
 {
     int n = 0;
@@ -69,8 +64,8 @@ static int Tree_CollectParents(GOBJ **out, int max)
 }
 
 // Scan the ground scene-instance pool once per stage, caching every forest-tree
-// joint and its authored rotation. The pool holds every placed prop; trees are
-// the records whose owner (record+0x90) is one of the tree-family yakumono GObjs.
+// joint and its authored rotation. The pool holds every placed prop; trees are the
+// records whose owner is one of the tree-family yakumono GObjs.
 static void Tree_Enumerate(void)
 {
     stc_tree_count = 0;
@@ -153,8 +148,8 @@ void Tree_Tick(void)
     {
         TreeEntry *t = &stc_trees[i];
 
-        // Skip a tree that has been knocked down - its collision is retired on
-        // break, and the break tail owns the joint from then on.
+        // A knocked-down tree has its collision retired and the break tail owns
+        // its joint from then on.
         if (!grScene_IsInstanceCollAll(t->record, 1))
             continue;
 

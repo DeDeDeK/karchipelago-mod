@@ -10,9 +10,8 @@
 #include "inline.h"
 #include "textbox_api.h"
 
-// True if the post-filter pool for `box` still has at least one item with chance > 0.
-// Other gating systems (abilities/patches/items) zero entries in this pool, so a
-// box color may end up empty even when its bit in box_unlocked_mask is set.
+// The ability / patch / item filters zero entries in this pool, so a box color can end
+// up empty even when its bit in box_unlocked_mask is set.
 static int BoxHasItems(grBoxGeneObj *obj, int box)
 {
     for (int i = 0; i < obj->item_group_spawn[box].num; i++)
@@ -23,9 +22,8 @@ static int BoxHasItems(grBoxGeneObj *obj, int box)
     return 0;
 }
 
-// Replacement for GrBoxGeneratorDetermine (0x800ebc04). Zeroes the chance entries
-// for locked box colors and colors with no remaining items, then does the weighted
-// random pick. Returns box_color (-1 if no data).
+// Replaces GrBoxGeneratorDetermine (0x800ebc04). Returns box_color, or -1 when nothing
+// is eligible - PowerUp_SpawnFromSky treats -1 as "place no box".
 int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
