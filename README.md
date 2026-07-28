@@ -1,4 +1,4 @@
-<img src="https://github.com/DeDeDeK/karchipelago-mod/blob/main/art/karchipelago-logo.png" alt="karchipelago logo" width="300"/>
+<img src="art/karchipelago-logo.png" alt="karchipelago logo" width="400"/>
 
 # karchipelago-mod
 
