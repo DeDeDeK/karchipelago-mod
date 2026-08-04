@@ -197,6 +197,44 @@ Five "meta" cells are set by vanilla with direct `stb` instructions inside
 | City Trial | 0x6D (109) | Unlock Dragoon Parts on the Checklist (all 3 parts) | `0x8017f0ac` (`stb r0,233(r30)`) |
 | City Trial | 0x6E (110) | Unlock Hydra Parts on the Checklist (all 3 parts) | `0x8017f120` (`stb r0,234(r30)`) |
 
+### Air Ride distance objectives ("Race over N feet in 2 minutes!")
+
+`AirRide_CheckRaceDistanceObjectives` (`0x8004d454`) evaluates all eight of these cells.
+`AirRide_CheckRaceFinishObjectives` (`0x8004aa58`) calls it once per Air Ride minor-scene
+exit — that function is the Air Ride major's `cb_ExitMinor`, entry 4 of the major
+scene-desc table at `0x80495058` — so it is a single snapshot at race end, not a per-frame
+poll.
+
+It switches on `Stage_GetGrKindFromStageKind(Gm_GetCurrentStageKind())`, a **GroundKind**
+(file order), to pick the per-course threshold and `clear_kind`:
+
+| GroundKind | Course | Feet | clear_kind |
+|---|---|---|---|
+| 0 `GR_PLANTS1` | Fantasy Meadows | 4,500 | 20 |
+| 1 `GR_HEAT2` | Magma Flows | 4,800 | 12 |
+| 2 `GR_DESERT1` | Sky Sands | 4,000 | 22 |
+| 3 `GR_CHECK2` | Checker Knights | 5,500 | 11 |
+| 4 `GR_VALLEY2` | Celestial Valley | 6,000 | 21 |
+| 5 `GR_MACHINE2` | Machine Passage | 4,500 | 33 |
+| 6 `GR_SPACE2` | **Nebula Belt** | — | — |
+| 7 `GR_SKY2` | Beanstalk Park | 5,500 | 34 |
+| 8 `GR_ICE1` | Frozen Hillside | 5,300 | 23 |
+
+Nebula Belt's jump-table slot points straight at the loop, leaving the required-frames
+local at 0, so the objective can never fire there — the course has no cell of this kind.
+
+"In 2 minutes" is the **configured race time limit**, not a mid-race sample: the gate is
+`Gm_GetRaceTimeLimitSeconds() * 60 == 7200`, i.e. `GameData.time_seconds` (`0xa9c`) is
+exactly 120. That field holds the limit the rules menu set, which `Game_Think` compares an
+elapsed counter against to end the round; the player has to run a 2-minute timed race.
+
+Per slot the loop takes `p = 0..4` where `plGetPlayerKind(p) == 0` (human), reads
+`Gm_GetPlayerRaceDistance(p)` (metres), divides by `0.3048` and awards when the result is
+**`>=`** the threshold. `ClearChecker_GetKindClear(GMMODE_AIRRIDE, clear_kind) & 5`
+(`is_new | is_unlocked`) suppresses a repeat before `ClearChecker_SetNewUnlock`. Because it
+reads `GameData` live rather than the latched results block, there is no `xc00[p]` validity
+gate.
+
 ### Unlock-gated settings menus (City Trial rules)
 
 The City Trial pre-game **settings/rules menu** (minor scene `MNRKIND_CITYSETTINGS`,

@@ -88,9 +88,11 @@ event) without taking over storage — the thing a NULL `record_complete` otherw
 up. A mod owning persistence may instead notify inside `record_complete` (the AP tab does);
 then `on_complete` is left NULL.
 
-A `CustomCheck` is `{ int clear_kind; const char *label; int (*is_complete)(void); }`.
+A `CustomCheck` is `{ int clear_kind; const char *label; int (*is_complete)(int clear_kind); }`.
 `clear_kind` is the grid cell index (`0..CC_CLEAR_KIND_NUM-1`, the 12×10 = 120-cell board);
-a tab may define any subset, the rest render blank.
+a tab may define any subset, the rest render blank. `is_complete` is handed its own row's
+`clear_kind`, so a tab whose cells all resolve through one lookup points every row at the
+same function instead of generating a predicate per cell — which is what the AP tab does.
 
 The framework caps tabs at `CC_MAX_CHECKLISTS` (16) and copies the descriptor; the pointers
 it holds (checks, labels, symbol names) must stay valid for the program lifetime (pass
@@ -136,9 +138,10 @@ A composed entry holds only glyphs, `TEXTCMD_SPACE` word separators, an optional
 vanilla objective entries in `SisClrChk2D`/`3D`/`CT`, which carry no align, fit, kerning,
 color or scale opcodes and no trailing break. The checklist UI's `Text` object supplies all
 of that, so a label that pushes its own renders unlike the three vanilla tabs; a
-`TEXTCMD_SCALE` in particular shrinks the cell text against its neighbours. Of the 128-byte
-entry the composer accepts glyphs only while under byte 125, at 2 bytes per character and 1
-per space or break, and a longer label is truncated silently. Any character
+`TEXTCMD_SCALE` in particular shrinks the cell text against its neighbours. Of the 160-byte
+entry the composer accepts glyphs only while under byte 157, at 2 bytes per character and 1
+per space or break, and a longer label is truncated silently. Every vanilla entry fits in
+128; the extra room is for custom labels that restate a longer Archipelago location name. Any character
 `Text_CharToCommand` does not map is dropped, also silently — it covers `0-9`, `A-Z`, `a-z`,
 and the common punctuation including `!` and `:`.
 

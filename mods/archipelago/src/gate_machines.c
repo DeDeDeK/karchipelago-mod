@@ -27,6 +27,22 @@
      (1u << VCKIND_WHEELDEDEDE)  | \
      (1u << VCKIND_WHEELVSDEDEDE))
 
+// Weight handed to an unlocked machine the vanilla table gives 0 chance, so it can
+// still appear on the field. Only these four reach it - every other VCKIND either
+// carries a real weight in all three table windows or sits in CT_SPAWN_EXCLUDED_MASK.
+// Vanilla per-machine weights run 6-10 out of a ~111-119 table total, so these land
+// well under the machines the table actually wants: Compact ~4% of spawns, Flight
+// ~1.7%, each legendary ~0.8%.
+static float ZeroChanceSpawnWeight(int vckind)
+{
+    switch (vckind)
+    {
+    case VCKIND_COMPACT: return 5.0f;
+    case VCKIND_FLIGHT:  return 2.0f;
+    default:             return 1.0f; // Hydra, Dragoon
+    }
+}
+
 static int IsCKindUnlocked(CharacterKind ckind)
 {
     CharacterDesc *desc = Character_GetDesc(ckind);
@@ -279,7 +295,7 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
         else if (!(unlocked_mask & (1u << i)))
             spawn_chances[i] = 0;
         else if (spawn_chances[i] == 0)
-            spawn_chances[i] = 10;
+            spawn_chances[i] = ZeroChanceSpawnWeight(i);
     }
 
     int spawnable_count = 0;
@@ -527,19 +543,14 @@ CODEPATCH_HOOKCREATE(0x801952c8,
 )
 
 // Replaces AirRide_CheckCharacterAvailable (0x8002090c), which decides who appears on
-// the Air Ride character select screen from checklist reward indices.
+// the Air Ride character select screen from checklist reward indices. Vanilla also
+// hardcodes Compact Star, Dragoon, Hydra and Flight Warp Star out of Air Ride whatever
+// the save holds; the mask is the only rule here, so an owned machine is selectable in
+// every mode whose select screen offers it. The icon archive backs all 20 characters,
+// and the CSS reorder already places Dragoon and Hydra at the row ends.
 int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
 {
-    // Dragoon, Hydra, and Flight Warp Star are City Trial-only.
-    if (ckind == CKIND_DRAGOON || ckind == CKIND_HYDRA || ckind == CKIND_FLIGHT)
-        return 0;
-
-    CharacterDesc *desc = Character_GetDesc(ckind);
-    if (!desc)
-        return 0;
-
-    MachineKind vckind = CharacterDesc_GetMachineKind(desc);
-    return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
+    return IsCKindUnlocked(ckind);
 }
 
 // Replaces TitleScreen_CheckMachineUnlocked (0x8000c364), the unlock query for the

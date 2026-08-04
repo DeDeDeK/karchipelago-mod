@@ -28,6 +28,7 @@
 #include "gate_abilities.h"
 #include "gate_base_abilities.h"
 #include "air_quick_spin.h"
+#include "onfoot_zoom.h"
 #include "gate_boxes.h"
 #include "gate_items.h"
 #include "gate_machines.h"
@@ -117,6 +118,7 @@ void OnBoot()
     // After ChecklistRewards_OnBoot - they patch related code.
     CheckDetection_OnBoot();
 
+    APCheckDetect_OnBoot();
     GateStadiums_OnBoot();
     PatchCap_OnBoot();
     DeathLink_OnBoot();
@@ -124,6 +126,7 @@ void OnBoot()
     GateAbilities_OnBoot();
     GateBaseAbilities_OnBoot();
     AirQuickSpin_OnBoot();
+    OnFootZoom_OnBoot();
     GateItems_OnBoot();
     GateBoxes_OnBoot();
     GateMachines_OnBoot();

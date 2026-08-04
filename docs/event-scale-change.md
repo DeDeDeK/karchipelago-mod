@@ -62,7 +62,7 @@ Uniformly scaling the whole scene up by `1/factor` - geometry **and the camera r
 
 The lever is a true **dolly** (move the eye in along the eye->interest line), not a zoom. The eye-set call inside `PlyCam_Think` is replaced rather than the COBJ written from the event loop, because the camera is recomputed from scratch every frame *after* most game logic - an external poke would be overwritten - and `PlyCam_Think`'s own input (`CamData.x14`) is recomputed inside the same function just before it is consumed, so there is no field to pre-seed either. Intercepting the final `CObj_SetEyePosition` is downstream of the entire camera pipeline (kind dispatch, C-stick `zoom_amt`, rail/normal transitions), so it works regardless of how the eye was produced.
 
-**FOV** was rejected as the lever (it is what the C-stick zoom does via `zoom_amt`, max 8.4): a wider FOV magnifies but also warps perspective (foreshortening changes, a fish-eye look), which is not what scaling the world does. A dolly preserves perspective exactly.
+**FOV** was rejected as the lever: a wider FOV magnifies but also warps perspective (foreshortening changes, a fish-eye look), which is not what scaling the world does. A dolly preserves perspective exactly.
 
 ## Implementation
 

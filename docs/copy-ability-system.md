@@ -30,10 +30,10 @@ Both teardown slots are live. Most grant functions fill **+0x7f8** plus the +0x7
 2. Look up the grant function in `stc_ability_init_table` at **0x804af4f0** (11 entries indexed by `CopyKind`); a null entry aborts with a 0 return.
 3. `Rider_AbilityRemoveModel` (0x80191554) — strip the currently-held ability.
 4. `Rider_AbilityClearQueued` (0x801915c4) — frees the pending queued objects (+0x8fc / +0x904) and resets `queued_ability_kind` / `queued_powerup_kind` to -1.
-5. `Rider_RecordCopyAbility(ply, kind)` (0x8022ee00) — ability history + checklist sequence tracking.
+5. `Rider_RecordCopyAbility(ply, kind)` (0x8022ee00) — appends to the 6-entry ability history (`PlayerStats+0x360`, count and the three sequence flags packed into `+0x378`), tests the sequence tables at 0x804b4c20 / 0x804b4c38 / 0x804b4c50, and bumps the per-kind grant counter `PlayerStats.copy_obtain_count[kind]` (`+0x334`).
 6. Call the per-kind grant function; return 1.
 
-`Rider_MarkCopyAbilityObtained` (0x8022f150) is **not** part of this sequence — only the copy-wheel callers invoke it (`randomAbility_aPress` at 0x801ae874, `randomAbility_autoSelect` at 0x801ae910).
+`Rider_MarkCopyAbilityObtained` (0x8022f150) is **not** part of this sequence — only the copy-wheel callers invoke it (`randomAbility_aPress` at 0x801ae874, `randomAbility_autoSelect` at 0x801ae910). It sets `PlayerStats.copy_chance_mask` (`+0x37a`), MSB-first bit `15 - CopyKind`, so that mask means "the Copy Chance Wheel granted this kind" while `copy_obtain_count` counts grants from every source.
 
 `stc_ability_init_table` (0x804af4f0), per `CopyKind` index:
 
@@ -50,6 +50,8 @@ Both teardown slots are live. Most grant functions fill **+0x7f8** plus the +0x7
 | FREEZE (8) | `ability_Ice` | 0x801b454c |
 | TORNADO (9) | `ability_Tornado` | 0x801b4a3c |
 | BIRD (10) | `ability_Bird` | 0x801b5480 |
+
+Mic runs three action states: the hold pose `0x3e`, the singing blast `0x61` (entered from the hold on an attack press; spawns Effect `0x5a5a2` and SFX `0x2006b`) and the recovery `0x62` the blast falls into once its body anim ends. `ability_Mic` installs no hitbox of its own, so the blast has no attack-method index in the `+0x74` / `+0xe4` cause space the way Tornado (`0x0e`) and Quick Spin (`0x10`) do; the rider's single `TriggerData` (`RiderData+0x674`) takes its cause from the rider archetype once at `Rider_Create`. Identifying a Mic kill therefore means reading `copy_kind` plus the live action state.
 
 Each grant function transitions the rider into the ability's hold action-state (`RiderStateChange` 0x8018e580 — Fire uses state 57), calls `ability_ChangeSpeedometerDesign` (0x801a809c), swaps in the ability model + hat (`randomAbility_changeModel` 0x801a6640 dispatches to `randomAbility_changeModel_<Kind>`, then `ability_<Kind>_giveHat`), arms the countdown (`copy_timer` seeded via `zz_801a7bdc_` 0x801a7bdc), and installs the ability's callbacks.
 

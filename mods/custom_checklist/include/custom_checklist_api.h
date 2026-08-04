@@ -8,19 +8,20 @@
 // framework boots after most mods.
 
 #define CUSTOM_CHECKLIST_MOD_NAME  "custom_checklist"
-#define CUSTOM_CHECKLIST_API_MAJOR 1
-#define CUSTOM_CHECKLIST_API_MINOR 1
+#define CUSTOM_CHECKLIST_API_MAJOR 2
+#define CUSTOM_CHECKLIST_API_MINOR 0
 
 // Grid cells. A tab may define any subset; undefined cells render blank.
 #define CC_CLEAR_KIND_NUM 120
 
 // is_complete is polled every frame until it first returns nonzero, then the cell is
-// recorded and animated.
+// recorded and animated. It receives its own clear_kind, so a tab whose cells share one
+// predicate can point every row at the same function.
 typedef struct CustomCheck
 {
-    int clear_kind;           // grid cell index, [0, CC_CLEAR_KIND_NUM)
-    const char *label;        // objective text (plain ASCII)
-    int (*is_complete)(void); // nonzero once satisfied
+    int clear_kind;                    // grid cell index, [0, CC_CLEAR_KIND_NUM)
+    const char *label;                 // objective text (plain ASCII)
+    int (*is_complete)(int clear_kind); // nonzero once satisfied
 } CustomCheck;
 
 // Copied by Register, but the pointers it holds (name, checks, label/symbol strings)
@@ -39,7 +40,7 @@ typedef struct CustomChecklistDesc
     // extension) exporting two _HSD_ImageDesc publics. NULL keeps CT's borrowed art.
     const char *tex_file;       // e.g. "ApChecklistTex"
     const char *banner_symbol;  // 248x128 RGB5A3 banner image-desc public
-    const char *emblem_symbol;  // 40x40 I4 emblem image-desc public
+    const char *emblem_symbol;  // tab-emblem image-desc public, any size
 
     const CustomCheck *checks;  // static table, kept by pointer
     int check_num;

@@ -62,7 +62,9 @@ Known fields (offsets relative to `base`):
 
 | Offset | Type | Meaning | Getter | Drives |
 |--------|------|---------|--------|--------|
-| `+0x37a` | u8 bits | Copy-Chance ability flags: bit3 = got Bomb, bit5 = got Sleep | `0x8022ed50` (bomb) / `0x8022eda8` (sleep) | 0x46 / 0x47 |
+| `+0x334` | int[11] | Per-`CopyKind` grant counter, bumped by `Rider_RecordCopyAbility` for every grant whatever the source | — | — |
+| `+0x360` | int[6] | Most recent `CopyKind`s granted, oldest first; entry count in the high 5 bits of `+0x378` (low 3 = the three ability-sequence flags `Rider_RecordCopyAbility` tests against the tables at `0x804b4c20`/`0x804b4c38`/`0x804b4c50`) | — | — |
+| `+0x37a` | u16 bits | Copy-Chance ability mask, **MSB-first**: bit `15 - CopyKind`, so byte `+0x37a` bit3 = Bomb and bit5 = Sleep. Written only by `Rider_MarkCopyAbilityObtained` (`0x8022f150`), which only the copy-wheel paths call, so the bit means "the wheel gave it" | `0x8022ed50` (bomb) / `0x8022eda8` (sleep) | 0x46 / 0x47 |
 | `+0x37c` | int[26] | Per-MachineKind change counter; sum = total Air Ride machine changes | `0x8022f19c` (sums all 26) | 0x06 |
 | `+0x4b4` | int | KO-by-cause: CPU machine broken (written by `Ply_AddDeath` on cause byte) | `0x8022f418` | 0x4d |
 | `+0x4b8` | int | KO-by-cause: Firework | `0x8022f46c` | 0x60 |
@@ -108,6 +110,20 @@ writes several of the killer's stat fields:
   `0x804B4C68` (see Vehicle-bust section)
 - the **King Dedede KO time** `+0x848` (only when victim slot == 4 and the field
   is still 0): `*(+0x848) = current frame`
+
+The cause byte it selects on is the low byte of the killing hit's attacker log,
+copied into `DmgLog+0x4` by `Machine_StoreAttacker` (`0x80231d90`) — the same
+index space that keys `+0x74` and `+0xe4`. Known values: `0x0e` Tornado, `0x0f`
+and `0x15` exhaled star, `0x10` Quick Spin, `0x11` Firework, `0x12` Sensor Bomb,
+`0x13` Gold Spike. A cause of 0 or above `0x1a` falls into the `+0x16` bucket.
+
+### Enemy-defeat recorder: `Ply_RecordEnemyDefeat` (`0x8023205c`)
+
+The enemy-side counterpart, reached only from `0x802022ec`. Args: credited player
+= arg0, the victim's attacker log = arg1, the enemy GObj = arg2. It bumps
+`+0xe0` (enemies defeated), `+0xe4[cause]` (enemy-defeat-by-method) and the
+per-ACTORID defeat counter at `+0x210`, and routes cause `0x0e` into the Tornado
+KO counter `+0x7d8` via `0x8022ed18`.
 
 ## Item-Collect Subsystem
 
@@ -599,6 +615,7 @@ for CT, with Air-Ride-specific bits.
 | `+0x82c` | int | positions gained over the final lap = (rank at prev lap boundary) − (rank at final-lap-start boundary); written at finish from the per-lap rank tracker `AirRide_TrackLapRank` (`0x8022e88c`) | `0x8022e48c` | 0x55 |
 | `+0x844` | int | cannon simultaneous-launch count (Machine Passage) | `0x8022dec8` | 0x6b |
 | `+0x84c` bit2 | bit | bumped a flaming dragon (Magma) | `0x80230ae0` | 0x6f |
+| `+0x84c` bit4 | bit | speed has stayed ≥20 mph for the whole current lap (armed at each lap boundary, cleared the first frame the machine falls under) | `0x80231670` | - |
 | `+0x84c` bit5 | bit | completed a lap ≥20 mph (Fantasy Meadows) | `0x8022e788` | 0x60 |
 | `+0x84c` bit6 | bit | touched a wall (Machine Passage; cell wants it **clear**) | `0x80230a88` | 0x6d |
 | `+0x84d` bit6 | bit | lap-time last two digits equal | `0x8022e7e0` | 0x53 |
@@ -624,6 +641,37 @@ on the rider's live `RiderData.copy_kind` (`+0x454`; CopyKind 6 / 0 / 2 / 10). T
 The per-machine cells gate on `Ply_GetVehicleKind` (`0x8022c910`) →
 `Machine_EncodeVehicleKind` (`0x801c85a8`): `mk` for non-bikes, `mk+0x13` for bikes
 (`VCKIND_*` enum + `MachineKind_Names[]` in `machine.h`).
+
+The Fantasy Meadows ≥20 mph cell (0x60) runs on a pair of bits.
+
+`AirRide_TrackMinLapSpeed` (`0x80231670`) is the per-frame watcher. It is not called
+directly: `Ply_UnkUpdate` (`0x80231340`, reached each frame per rider from
+`RiderThink_Unk` at `0x8018fc40`) resolves the stage group via
+`Stage_GetGrKindFromStageKind(Gm_GetCurrentStageKind())` and tail-dispatches through a
+group-indexed function-pointer table at `0x804b4cb8`. Only two slots are populated —
+group 0 → `AirRide_TrackMinLapSpeed`, group 7 → `0x80231700` (the Beanstalk Ferris-wheel
+tracker) — with group 9 handled by a separate `bl 0x8023177c`. So the watcher only runs
+on Fantasy Meadows in the first place. Four early-outs above the dispatch suppress it
+entirely for that frame (leaving bit4 as it stands): `Gm_GetIntroState()` not in {0, 4},
+`0x8022d434` (`RiderData+0x826` bit5) set, `Ply_CheckIfFallDead?` (`RiderData+0x823`
+bit2) set, or `0x8000a97c` non-zero.
+
+What it measures is `MachineData.world_velocity` (`+0x354`) — the machine's *measured*
+per-frame displacement, computed by `Machine_ShadowThink` (`0x801c69f0`) as
+`pos (0x3e8) - prev_pos (0x3f4)`, not the commanded velocity at `+0x324`. Collisions,
+wall scrapes and slope drag are therefore already folded in. The watcher takes
+`PSVECMagnitude` of that vector, divides by the mile/km constant `1.609344` (double at
+`0x805e2a58`) and compares against `0.8101851f` (`0x805e2a60`); below that — or with the
+player on foot, since a null machine GObj takes the same branch — it clears `+0x84c`
+bit4. That is a raw threshold of **1.303867 world units per frame**, so the "mph" the
+cell talks about is `|world_velocity| * 15.339`.
+
+At each lap boundary `AirRide_TrackLapRank` (`0x8022e88c`) latches `+0x84c` bit5 from
+bit4 when the stage group is 0, then `AirRide_ArmLapStats` (`0x8022ea10`) re-arms bit4
+for the next lap. Lap 1 therefore can never satisfy it — the grid start is stationary, so
+the frame watcher clears bit4 immediately. Since the bar has to be cleared on every
+frame of a lap, what it really tests is a machine's *sustained* cruise speed,
+`MachineData.top_speed_ground` (`0x4f0`).
 
 ### Master cell table: gameplay and cumulative cells (Air Ride, mode 0)
 
@@ -908,6 +956,7 @@ above, across all three modes.
 | `0x8004a130` | `ClearChecker_GetKindClear` (re-set gate) | — |
 | `0x8022ebdc` | `ClearChecker_CheckJustUnlocked_CityTrial_RivalDamage10Sec` | CT |
 | `0x8022f648` | `Ply_AddDeath` (unified KO-event recorder) | — |
+| `0x8023205c` | `Ply_RecordEnemyDefeat` (enemy-side counterpart; single call site `0x802022ec`) | — |
 | `0x80231198` | `Ply_MarkLegendaryMachineAssembled` | — |
 | `0x80231340` | `Ply_UnkUpdate` (per-frame distance accumulator) | — |
 

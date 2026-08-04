@@ -479,7 +479,7 @@ Air Ride path:
 1. Check the flags byte at extended data +0x4A (8 bits: occupied, player nearby, various state)
 2. Read the weight table from extended data (up to 4 entries, -1 terminated)
 3. Sum weights, random select
-4. **Meta-enemy expansion** for IDs in `(0x4F, 0x5F)` (i.e. 0x50-0x5E): `group_index = id - 0x4F`, index `secondary_table` at `stc_enemy_spawn_data+0x0C`, then weighted-random select from that sub-table of `{enemy_id, weight}` short pairs (looping until the resolved ID is no longer a meta-enemy)
+4. **Meta-enemy expansion** for IDs in `(0x4F, 0x5F)` (i.e. 0x50-0x5E): `group_index = id - 0x50` (`addi r5, r29, -320` at `0x800f1bd4`, with `r29 = id * 4`), index `secondary_table` at `stc_enemy_spawn_data+0x0C`, then weighted-random select from that sub-table of `{enemy_id, weight}` short pairs, **terminated by `weight == -1`, not by `enemy_id == -1`** - a leading `{-1, N}` pair is a legitimate "spawn nothing" outcome and several vanilla groups open with one. Loop until the resolved ID is no longer a meta-enemy. The separate `id - 0x4F` value is the +1-biased variant packed into the descriptor's high byte, not a table index
 5. Call `Enemy_SpawnActor` with the concrete base ID
 
 The City Trial path is the same flow but uses time-based difficulty scaling via `EnemyMgr.time_progress` to bias toward higher-tier enemies as the match progresses.

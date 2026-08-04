@@ -51,7 +51,29 @@ Six VCKINDs have no `CharacterKind` and are city-spawn or transformation only: F
 
 ### Game system
 
-Machine spawning in City Trial is chance-based. The game reads a spawn table (`(*stc_vcDataCommon)->spawn_data->spawn_desc[]`; `stc_vcDataCommon` is `vcDataCommon**` at r13+0x758, the `spawn_data` sub-struct pointer sits at `vcDataCommon+0x20` and `spawn_desc` at `spawn_data+0x8`) indexed by match progress, with `float chance[VCKIND_NUM]` per entry. Some machines have 0 weight at certain match progress points (e.g. Hydra/Dragoon early in a match).
+Machine spawning in City Trial is chance-based. The game reads a spawn table (`(*stc_vcDataCommon)->spawn_data->spawn_desc[]`; `stc_vcDataCommon` is `vcDataCommon**` at r13+0x758, the `spawn_data` sub-struct pointer sits at `vcDataCommon+0x20` and `spawn_desc` at `spawn_data+0x8`) indexed by match progress, with `float chance[VCKIND_NUM]` per entry.
+
+The table lives in `VcCommon.dat` (public `vcDataCommon`, data offset 0x2b1c) and has exactly **three** entries, thresholds `0.0` / `0.5` / `1.1`, selected by `while (match_progress > spawn_desc[i].match_progress) i++`. Only **14** of the 26 VCKINDs carry a nonzero weight, and the same 14 in all three entries — the weights only shuffle between windows:
+
+| Machine | 0.0 | 0.5 | 1.1 |
+|---------|----:|----:|----:|
+| WARP | 10 | 10 | 10 |
+| WINGED | 8 | 8 | 8 |
+| SHADOW | 8 | 8 | 8 |
+| BULK | 7 | 9 | 9 |
+| SLICK | 6 | 10 | 10 |
+| FORMULA | 8 | 8 | 10 |
+| WAGON | 10 | 6 | 6 |
+| ROCKET | 8 | 8 | 8 |
+| SWERVE | 8 | 8 | 8 |
+| TURBO | 8 | 8 | 8 |
+| JET | 6 | 10 | 10 |
+| WHEELIEBIKE | 8 | 8 | 8 |
+| REXWHEELIE | 6 | 10 | 10 |
+| WHEELIESCOOTER | 10 | 6 | 6 |
+| **total** | **111** | **117** | **119** |
+
+The four non-spawning machines outside `CT_SPAWN_EXCLUDED_MASK` are `VCKIND_COMPACT` (the starting machine), `VCKIND_FLIGHT`, `VCKIND_HYDRA` and `VCKIND_DRAGOON` — all 0 in every window, and so the only four that ever reach the mod's zero-chance fallback. The two legendaries are assembly-only in vanilla and never appear whole on the field.
 
 `CityMachineSpawn_DecideAndSpawn` (0x801defac) and `cityTrialSpawnFormationStar` (0x801df408) build a `u32` exclusion bitmask from `MachineSpawnData.prev_machine_kind[4]` (+0x50, recently spawned machines), then do a two-pass weighted random selection: pass 1 (r5) computes the total spawn chance sum, pass 2 (r29) performs the selection via `HSD_Randf`.
 
@@ -76,7 +98,7 @@ At both hook points `r30` = `MachineSpawnData*` (moved to r3) and `f1` = match_p
 
 1. Walks `spawn_desc[]` to the entry for the current match progress.
 2. Copies that entry's `chance[VCKIND_NUM]` into a local float array.
-3. Zeros `CT_SPAWN_EXCLUDED_MASK` machines and locked machines; gives every remaining unlocked machine with 0 base chance a fallback weight of **10**.
+3. Zeros `CT_SPAWN_EXCLUDED_MASK` machines and locked machines; gives every remaining unlocked machine with 0 base chance its `ZeroChanceSpawnWeight` fallback (Compact **5**, Flight Warp Star **2**, Hydra / Dragoon **1**).
 4. Counts `spawnable_count` (chance > 0). If **0**, returns `GetFirstUnlockedCTMachine()` immediately with no weighted roll — that fallback also skips `CT_SPAWN_EXCLUDED_MASK`, so an unlock state holding only Free/Steer Star (or transform forms) never leaks a TR-only machine onto the field.
 5. Shrinks the history exclusion: `history_size = (spawnable_count <= 4) ? spawnable_count - 1 : 4`, i.e. `min(spawnable_count - 1, 4)` — this prevents the only spawnable machine from being excluded by its own spawn history.
 6. Zeros candidates found in `msd->prev_machine_kind[]` within that reduced history.
@@ -194,7 +216,7 @@ The vanilla select screen system, grid layout, icon animation pipeline, `Charact
 
 Two `CODEPATCH_REPLACEFUNC`s:
 
-1. **`AirRide_CheckCharacterAvailable` (0x8002090c) → `GateMachines_CheckAirRideCharacterAvailable`** — gates the select screen icon grid. Takes a CharacterKind, returns 1/0. `CKIND_DRAGOON`, `CKIND_HYDRA`, and `CKIND_FLIGHT` always return 0 (City Trial-only); everything else resolves through `Character_GetDesc` + `CharacterDesc_GetMachineKind()` to the actual VCKIND and tests `machine_unlocked_mask`. Vanilla instead maps each ckind to a checklist reward index, makes only Warp Star available by default, and hardcodes Compact Star unavailable (`case 0: return 0`).
+1. **`AirRide_CheckCharacterAvailable` (0x8002090c) → `GateMachines_CheckAirRideCharacterAvailable`** — gates the select screen icon grid. Takes a CharacterKind, returns 1/0, and defers to the same `IsCKindUnlocked` rule the City Trial passes use: `Character_GetDesc` + `CharacterDesc_GetMachineKind()` to the actual VCKIND, then `machine_unlocked_mask`. Vanilla instead maps each ckind to a checklist reward index, makes only Warp Star available by default, and hardcodes four ckinds unavailable whatever the save holds — its jump table at 0x80496e10 sends 0 (Compact Star), 15 (Dragoon), 16 (Hydra) and 17 (Flight Warp Star) to a bare `li r3, 0` with no reward query. Dropping those four exclusions is what makes an owned City Trial machine rideable in Air Ride, mirroring what the CT Stadium / Free Run passes above already do with their own hardcoded 15–19 exclusion. Nothing else has to move: the 2x10 icon grid at 0x80495800 places Dragoon and Hydra at row 0 columns 0 and 9, `AirRide_PopulateSelectIcons`'s reorder block already treats ckinds 15/16/18/19 as the row-end special characters, and the `MnSelplyAll` icon TexAnim carries 20 distinct 64x64 CMPR images, one per ckind.
 2. **`TitleScreen_CheckMachineUnlocked` (0x8000c364) → `GateMachines_CheckTitleDemoMachineUnlocked`** — gates the **title-screen attract-demo** machine pick (`TitleScreen_SelectRandomMachine` 0x8000daa0, reachable only via `TitleScreen_MinorExit` → `TitleScreen_SetupDemoMachines`). Takes `machine_class` (= `CharacterDesc.is_bike`) and `machine_id` (= `CharacterDesc.machine_kind`, a bike-relative index for bikes, not the absolute VCKIND), converts to the actual VCKIND (`VCKIND_WHEELNORMAL + machine_id` when `machine_class` is set), range-checks it, then tests the mask. This does **not** run for CPUs in real Air Ride races.
 
 **Real in-game CPU machine pick.** The actual Air Ride CPU machine is chosen in `loadCPU` (0x80023600) and its sibling setup paths, which index a random entry out of the available-character list that `AirRide_PopulateSelectIcons` builds through the replaced `AirRide_CheckCharacterAvailable`. CPUs therefore already draw a random **unlocked** machine with no separate machine-pick hook. CPU color is gated on an independent path (`gate-colors.md`).
@@ -239,7 +261,17 @@ AP item ID = `AP_MACHINE_UNLOCK_BASE` (830, `archipelago_api.h`) + `MachineKind`
 
 **Full selection replacement over exclusion mask:** the exclusion mask approach is attractive (minimal code change) but fundamentally broken — the game uses separate registers for the two passes, and hooking between them clobbers the random result. The KAR Deluxe full-replacement approach is more code but provably correct.
 
-**Base chance of 10 for zero-weight unlocked machines:** without this, machines with 0 spawn weight in the current time window (e.g. Hydra early in a match) can never spawn even when unlocked. The fallback ensures every unlocked machine has some possibility of appearing, which matters for AP progression.
+**Fallback weight for zero-weight unlocked machines:** without one, a machine the vanilla table gives 0 weight (Compact, Flight Warp Star, Hydra, Dragoon) could never spawn on the field even when unlocked. The fallback ensures every unlocked machine has some possibility of appearing, which matters for AP progression.
+
+**The fallback is a token weight, not a competitive one, and it is tiered by power.** Exactly four machines reach it — Compact, Flight Warp Star, Hydra, Dragoon — since every other VCKIND either carries a real weight in all three table windows or sits in `CT_SPAWN_EXCLUDED_MASK`. Vanilla per-machine weights run 6-10 against a table total of 111-119, so a flat fallback in that range makes each of the four a joint-highest-weight entry at roughly 8% of field spawns, crowding out the 14 machines the table actually wants. The tier instead scales with how much the machine warps a match:
+
+| Machine | Weight | Share | Rationale |
+|---------|-------:|------:|-----------|
+| Compact | 5 | ~4% | Ordinary all-rounder; only absent from the table because it is the starting machine, so it is the one that can safely sit near the low end of the vanilla 6-10 band |
+| Flight Warp Star | 2 | ~1.7% | Strong flyer, but recoverable to fight against |
+| Hydra / Dragoon | 1 | ~0.8% each | The two strongest machines in the game |
+
+Together the four take ~7.5% of spawns, leaving the vanilla 14 with ~92%. For the legendaries, assembling them from field pieces stays the primary route and the whole-machine spawn is a rare bonus.
 
 **History size reduction:** `min(spawnable_count - 1, 4)` prevents deadlock when few machines are spawnable. With only 2 spawnable machines and history size 4, both would be excluded.
 
@@ -249,4 +281,4 @@ AP item ID = `AP_MACHINE_UNLOCK_BASE` (830, `archipelago_api.h`) + `MachineKind`
 
 **Legendary delivery is City Trial only.** The `Gm_IsInCity()` guard exists because the assembly cinematic loads legendary piece models and drives the CT sky/area-light setup, which only exist on the open City Trial map — running it in a stadium or in Air Ride / Top Ride dereferences a null jobj or hits the area-light assert. `AP_ITEM_GIVE_DRAGOON` / `AP_ITEM_GIVE_HYDRA` received elsewhere return 0, so the unprocessed-items list retries them until the player enters City Trial.
 
-**Compact Star has no Air Ride select icon.** Vanilla `AirRide_CheckCharacterAvailable` hardcodes `case 0: return 0` — Compact Star was never meant to appear on the Air Ride select screen. The replacement allows it when unlocked, but the icon material animation in the `MnSelplyAll` archive uses the CharacterKind value as the animation frame and frame 0 likely has no valid texture, so the entry exists and is selectable/functional but renders no icon. Resolving it needs the frame-0 state along the MatAnimJoint child → MatAnim → TexAnim chain (structure documented in `css-system.md`); if blank, the options are patching the archive `.dat` or a runtime texture swap from the City Trial archive (`MnSelplyctAll.dat`).
+**Nothing gates the Air Ride start.** The Top Ride lobby has `GateMachines_TRLobbyCanStart` on both start-match sites, but Air Ride has no equivalent, so a save with zero Air Ride machines unlocked reaches an empty select screen and can still start a race on whatever the committed icon index resolves to.

@@ -43,7 +43,9 @@ The category value has two sources inside `UpdateAndCheckToSpawn`. `CityItemSpaw
 
 In every spawn case the resulting `box_color` (the picker's return value, or the hardcoded value) is forwarded as the first argument to `PowerUp_SpawnFromSky` (0x800ecdf4) at 0x800eb260, which actually places the box.
 
-> **Note — "red box" is not one thing.** The `GKYE01.map` comment labels category 1 "blue/green box" and category 2 "red box", but that is misleading. Category 1's picker (`GrBoxGeneratorDetermine`) selects from a 9-entry table that **includes red** (color 2), so *normal* red item boxes are fully gated by our hook. Category 2 is not a normal box at all — it is the legendary machine-piece carrier, which is intentionally **not** subject to box-color gating (it belongs to the machine / legendary-piece gating systems). Locking the Red Box suppresses every random red box; it does not — and should not — hide Dragoon/Hydra part deliveries.
+> **Note — "red box" is not one thing.** The `GKYE01.map` comment labels category 1 "blue/green box" and category 2 "red box", but that is misleading. Category 1's picker (`GrBoxGeneratorDetermine`) selects from a 9-entry table that **includes red** (color 2), so *normal* red item boxes are fully gated by our hook. Category 2 is not a normal box at all — it is the legendary machine-piece carrier, which is intentionally **not** subject to box-color gating (it belongs to the machine / legendary-piece gating systems). Locking the Red Box suppresses every random red box; it does not — and should not — hide Dragoon/Hydra part deliveries. A carrier box is still a real red box, so it bumps the red-box break counter and stays available with the Red Box locked or the red pool empty.
+
+A carrier only stops spawning when `GateItems_FilterLegendaryPieces` clears `is_enabled`, which needs **all three** of that machine's pieces locked. `GateItems_MarkAsSpawnedGated` suppresses a single locked piece by skipping `LegendaryPiece_MarkAsSpawned`, which leaves the box's `forced_item` at -1 (random roll) and still advances `next_piece_index` — so one unlocked piece keeps all three of that machine's carrier boxes spawning. Breaking one while the red pool is empty is harmless: `CityItemSpawn_GetRandomItemID` (0x800eb7e4) walks a zero-length pool, `HSD_Randi(0)` returns 0 without dividing, and the roll falls through to a -1 return, which spawns no item.
 
 `GrBoxGeneratorDetermine` reads a 9-entry chance table from `grBoxGeneInfo->item_desc->box_spawn_chances` (`grBoxGeneInfo` at r13+0x610; `item_desc` at +0xc; `box_spawn_chances` at +0x0 — see `game.h`). The table is 3 colors × 3 sizes, color-major: `[blue_small, blue_medium, blue_large, green_*, red_*]`. Vanilla sums the nine entries, rolls `HSD_Randi(total)`, walks the cumulative distribution to a `selected` index, then writes `selected / 3` → `*box_color` and `selected % 3` → `*box_size`.
 
@@ -68,6 +70,18 @@ This is **safer than vanilla**, which never returns `-1` on an all-zero chance t
 ### Box auto-disable
 
 A color is treated as locked for selection if its post-filter pool is empty, even when its `box_unlocked_mask` bit is set. `BoxHasItems` scans `obj->item_group_spawn[box].chance[i]` for `i < .num` (struct `grBoxGeneObj` in `game.h`) at decision time, so it always reflects the current pool after the items/patches/abilities filters have zeroed their entries — no separate update pass or cross-system ordering rule is needed. Without this, a player could open (e.g.) a green box and get nothing because every green-box item was independently locked.
+
+The three pools are **disjoint**. `CityItemSpawn_InitItemFallChances` (0x800eb374) walks the stage's `item_spawn` table and appends each kind to exactly one `item_group_spawn[]` slot, chosen by `Gm_GetItemsCommonAttr(kind)->box_kind` (`ItemCommonAttr` +0x1c) — so which gate can empty a color is fixed:
+
+| Color | Contents | Emptied by |
+|-------|----------|-----------|
+| Blue | the 8 stat patches with their 8 down variants, HP, All Up and the 12 foods | patches **and** items gating together |
+| Green | Speed Max/Min, Offense Max, Defense Max, Charge Max/None, Candy, Fireworks, Panic Spin, Sensor Bomb, Gordo | items gating |
+| Red | the 11 copy-ability panels | abilities gating |
+
+The table has 52 entries, `ITKIND_ACCEL` through `ITKIND_GORDO`. The fake patches and the 6 Hydra/Dragoon pieces have no entry at all, so they never reach a box pool — the pieces are delivered only by the category 2 carrier box, and the fakes only by the event drop paths.
+
+An entry is also skipped when its `fall_chance` for the current `StadiumGroup` column is 0. All Up is the one kind zeroed in City Trial's column, so vanilla never drops it from a city box; `GateItems_EnsureAllUpInSpawnPools` appends it to all three pools by hand under the Max Stats Insanity goal.
 
 ## Save Data
 

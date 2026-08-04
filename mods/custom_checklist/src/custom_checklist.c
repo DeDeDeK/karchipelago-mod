@@ -179,7 +179,9 @@ static ClearCheckerUI *CC_GetUI(void)
 
 #define CC_SIS_HEADER_NUM 4                       // entries 0..3 are CT's title/legend
 #define CC_SIS_PTR_NUM (CC_CLEAR_KIND_NUM + 4)    // covers index clear_kind + 4
-#define CC_SIS_LABEL_MAX 128
+// Wider than the 128 bytes every vanilla objective entry fits in: a custom tab's labels
+// restate an Archipelago location name, and the longest of those spend ~130.
+#define CC_SIS_LABEL_MAX 160
 
 static void *g_sis_ptrs[CC_SIS_PTR_NUM];
 static u8 g_sis_blank[24];
@@ -284,7 +286,7 @@ static void CC_InitSisForList(int idx)
 // Loaded into the reclaimable per-scene heap, so valid only for the current tab's
 // scene; NULL'd on failure and the swaps skip on NULL.
 static _HSD_ImageDesc *g_logo_imagedesc;   // banner watermark (RGB5A3 248x128)
-static _HSD_ImageDesc *g_emblem_imagedesc; // tab emblem (I4 40x40)
+static _HSD_ImageDesc *g_emblem_imagedesc; // tab emblem, any size
 
 static void CC_LoadTexturesForList(int idx)
 {
@@ -873,7 +875,7 @@ static void CC_Evaluate(void)
                                          : L->desc.is_recorded(ck);
             if (!recorded)
             {
-                if (!chk->is_complete || !chk->is_complete())
+                if (!chk->is_complete || !chk->is_complete(ck))
                     continue;
                 if (L->fw_persist)
                     CC_DefaultRecord(i, ck);

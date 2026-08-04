@@ -38,6 +38,7 @@ static void OnToggleARPermanent(int val)        { OSReport("[Main] AR Permanent 
 static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Start Machine toggled %s\n", stc_off_on[val]); }
 static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
 static void OnToggleAirQuickSpin(int val)        { OSReport("[Main] Air Quick Spin toggled %s\n", stc_off_on[val]); }
+static void OnToggleOnFootZoom(int val)          { OSReport("[Main] On-Foot Zoom toggled %s\n", stc_off_on[val]); }
 
 // Only round-start application is toggled here - receiving AP permanent-patch items
 // still increments the save counters either way.
@@ -88,7 +89,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 7,
+        .option_num = 8,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -208,6 +209,18 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleAirQuickSpin,
+            },
+            &(OptionDesc){
+                .name = "On-Foot Zoom",
+                .description = "Zoom the camera with the C-Stick while on foot, as on a machine",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.onfoot_zoom_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleOnFootZoom,
             },
         },
     },

@@ -36,9 +36,11 @@ extern int ap_checklist_mode;
 // through extsb, so anything above 127 sign-extends negative.
 #define PATCH_STAT_MAX 127
 
-// Targets of the two AP checklist objectives backed by APSave.checks counters.
-#define AP_ALLUP_TOTAL_NEED 10
+// Targets of the AP checklist objectives backed by APSave.checks counters.
+#define AP_ALLUP_TOTAL_NEED 5
 #define AP_PURPLE_SR1_NEED  3
+// One bit per KirbyColor, all 8 set.
+#define AP_RACE_COLOR_MASK_ALL 0xFF
 
 typedef enum APGoalKind
 {
@@ -94,8 +96,9 @@ typedef struct APSlotOptions
 // more than one session.
 typedef struct APCheckProgress
 {
-    u16 allup_collect_total; // APCK_ALLUPS_10: lifetime All Ups picked up by a human in City Trial
+    u16 allup_collect_total; // APCK_ALLUPS_5: lifetime All Ups picked up by a human in City Trial
     u8 purple_sr1_wins;      // APCK_SR1_PURPLE_3X: SINGLE RACE 1 first places taken by a Purple Kirby
+    u8 race_color_mask;      // APCK_AIRRIDE_ALL_COLORS: bit N = an Air Ride race finished as KirbyColor N
 } APCheckProgress;
 
 typedef struct APSave
