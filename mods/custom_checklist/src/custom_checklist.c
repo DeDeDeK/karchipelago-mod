@@ -38,6 +38,7 @@ typedef struct CCList
     u32 name_hash;              // stable tab identity: save key (fw_persist) and grid-layout key (all tabs)
     int save_slot;              // resolved CCSave slot, -1 until first access
     int layout_done;            // 1 once the saved grid layout has been applied this session
+    int reveal_all;             // 1 once RevealAll latched the tab open for the session
 } CCList;
 
 #define CC_BIT_TEST(w, k) (((w)[(k) >> 6] >> ((k) & 63)) & 1ULL)
@@ -679,6 +680,21 @@ static int CC_EnsureLayoutSeed(void)
     return 1;
 }
 
+// Show every cell the tab defines a check for. Cells with no check behind them stay
+// hidden - a revealed empty box reads as an objective that can never be completed.
+static void CC_RevealChecks(int idx)
+{
+    GameClearData *cd = CC_CLEAR(idx);
+    const CustomChecklistDesc *d = &g_lists[idx].desc;
+
+    for (int c = 0; c < d->check_num; c++)
+    {
+        int ck = d->checks[c].clear_kind;
+        if (ck >= 0 && ck < CC_CLEAR_KIND_NUM)
+            cd->clear[ck].is_visible = 1;
+    }
+}
+
 // Shuffle grid_mapping from the save seed mixed with the tab's name hash, so tabs neither
 // share a layout nor reshuffle each other. clear[] completion state is live by now and is
 // left alone; the reveals are positional and so stale under a new layout. No meta-cell
@@ -707,6 +723,11 @@ static void CC_ApplyLayout(int idx)
         cd->clear[k].is_visible = 0;
     g_lists[idx].revealed[0] = 0;
     g_lists[idx].revealed[1] = 0;
+
+    // The latch outlives the wipe: a consumer can call RevealAll from its OnSaveLoaded,
+    // before the shuffle this session's first frame runs.
+    if (g_lists[idx].reveal_all)
+        CC_RevealChecks(idx);
 }
 
 // Once per tab per session, lazily: a consumer registers from its own OnSaveLoaded, which
@@ -942,6 +963,7 @@ static int CC_Register(const CustomChecklistDesc *desc)
     L->name_hash = CC_HashName(desc->name);
     L->save_slot = -1;
     L->layout_done = 0;
+    L->reveal_all = 0;
 
     CC_InitClearData(idx);
 
@@ -960,8 +982,24 @@ static int CC_Register(const CustomChecklistDesc *desc)
     return L->mode;
 }
 
+// Latched rather than applied and forgotten: the tab's is_visible bits live in RAM, and
+// the layout shuffle drops them once per session at a moment the caller cannot see.
+static void CC_RevealAll(int mode)
+{
+    int idx = mode - GMMODE_NUM;
+    if (idx < 0 || idx >= g_count)
+        return;
+
+    g_lists[idx].reveal_all = 1;
+    CC_RevealChecks(idx);
+    OSReport("[CustomChecklist] '%s': revealed %d cells\n",
+             g_lists[idx].desc.name ? g_lists[idx].desc.name : "?",
+             g_lists[idx].desc.check_num);
+}
+
 static const CustomChecklistAPI g_api = {
     .Register = CC_Register,
+    .RevealAll = CC_RevealAll,
 };
 
 static void OnBoot(void)

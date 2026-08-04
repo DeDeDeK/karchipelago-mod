@@ -104,14 +104,21 @@ will surface boxes that have no objective behind them, and cells whose only neig
 undefined stay dark until their own check fires. That resolves itself as the tab fills out
 toward 120.
 
-`APChecklist_RevealAll` is the exception: the `reveal_checklists` slot option (applied when
-the client hands over its options) and the debug menu's "Reveal All Checklists" both route
-through `RevealAllChecklists`, which reveals all 120 cells of each vanilla mode and then
-calls into the AP tab. The AP tab reveals only the cells in `ap_checks[]` — the other 70
-have no objective behind them, so revealing them would show boxes that can never be checked.
-It sets `is_visible` only, leaving `is_unlocked` to the normal completion path, and no-ops
-when the framework never registered the tab. The framework clears `is_visible` only in its
-layout shuffle, which runs once per tab per session, before either caller.
+`APChecklist_RevealAll` is the exception: the `reveal_checklists` slot option and the debug
+menu's "Reveal All Checklists" both route through `RevealAllChecklists`, which reveals all
+120 cells of each vanilla mode and then calls into the AP tab. The AP tab reveals only the
+cells in `ap_checks[]` — the other 70 have no objective behind them, so revealing them would
+show boxes that can never be checked. It sets `is_visible` only, leaving `is_unlocked` to the
+normal completion path, and no-ops when the framework never registered the tab.
+
+The AP cells are opened through the framework's `RevealAll(mode)` rather than by writing
+`is_visible` from here, because the framework latches the request per tab and re-applies it
+after its layout shuffle drops every `is_visible` bit. Reveal state is also **re-applied on
+every boot**, from `OnSaveLoaded` right after `APChecklist_Register`, gated on
+`options_received && reveal_checklists`: the option transfer runs once per save file, and the
+vanilla modes' reveal survives in the game's own clear data, but a custom tab's cells live in
+RAM and come up blank. Without the re-apply the AP tab would be revealed only during the
+session the client first connected in.
 
 ## Wire Layout
 

@@ -9,7 +9,7 @@
 
 #define CUSTOM_CHECKLIST_MOD_NAME  "custom_checklist"
 #define CUSTOM_CHECKLIST_API_MAJOR 2
-#define CUSTOM_CHECKLIST_API_MINOR 0
+#define CUSTOM_CHECKLIST_API_MINOR 1
 
 // Grid cells. A tab may define any subset; undefined cells render blank.
 #define CC_CLEAR_KIND_NUM 120
@@ -63,6 +63,12 @@ typedef struct CustomChecklistAPI
     // Returns the assigned checklist mode index (>= GMMODE_NUM) or -1 on failure. Pass
     // that mode to any engine record path the tab uses (e.g. ClearChecker_SetNewUnlock).
     int (*Register)(const CustomChecklistDesc *desc);
+
+    // Show every cell backed by a check, latched for the session so the grid shuffle
+    // cannot drop it. Cells with no check stay hidden; unlock state is untouched. The
+    // latch is not saved - a consumer whose option outlives a boot calls this each
+    // OnSaveLoaded, right after Register.
+    void (*RevealAll)(int mode);
 } CustomChecklistAPI;
 
 #endif // CUSTOM_CHECKLIST_API_H

@@ -186,6 +186,12 @@ void OnSaveLoaded()
     // us, so its API only resolves once every mod has exported.
     APChecklist_Register();
 
+    // Re-applied every boot, not just at option transfer: the vanilla modes' reveal
+    // rides along in the game's own clear data, but the AP tab's cells live in RAM
+    // and come up blank.
+    if (ap_save->options_received && ap_save->options.reveal_checklists)
+        RevealAllChecklists();
+
     // Hoshi's Mod_CopyFromSave has run by now, so ap_menu_settings reflects the
     // player's persisted toggle choices.
     SyncLinkMenuStateToAPData();

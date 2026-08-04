@@ -152,14 +152,12 @@ static const CustomChecklistDesc ap_desc = {
 
 void APChecklist_RevealAll(void)
 {
-    GameClearData *cd = gmGetClearcheckerTypeP((GameMode)ap_checklist_mode);
-    if (!cd)
+    if (!cc_api)
         return;
 
-    for (int i = 0; i < AP_CHECK_NUM; i++)
-        cd->clear[ap_checks[i].clear_kind].is_visible = 1;
-
-    OSReport("[APChecklist] Revealed %d cells\n", AP_CHECK_NUM);
+    // Through the framework rather than by writing is_visible here: it latches the tab
+    // open for the session, so a reveal that lands before the grid shuffle survives it.
+    cc_api->RevealAll(ap_checklist_mode);
 }
 
 void APChecklist_Register(void)

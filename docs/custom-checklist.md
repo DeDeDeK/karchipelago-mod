@@ -56,6 +56,8 @@ A consumer imports the API via `Hoshi_ImportMod(CUSTOM_CHECKLIST_MOD_NAME, …)`
 `Register(desc)`. Because the framework mod boots after most others (alphabetical order),
 import + register run from **`OnSaveLoaded`**, not `OnBoot`. `Register` returns the
 assigned mode (`GMMODE_NUM` for the first registrant, then `+1` each) or `-1` on failure.
+The API's other entry, `RevealAll(mode)`, opens every cell of a registered tab that has a
+check behind it (below).
 
 The descriptor (`custom_checklist_api.h`):
 
@@ -246,6 +248,16 @@ The reveal is purely positional and ignores whether the neighbour has a check, m
 engine. On a tab defining fewer than 120 cells that means some revealed boxes can never be
 filled — they read as objectives the player has yet to reach.
 
+`RevealAll(mode)` opens a whole tab at once, for a consumer whose own option asks for it. It
+marks `is_visible` on every cell the descriptor defines a check for and leaves the rest hidden
+(a revealed empty box is an objective that can never be completed), touching no unlock state.
+It **latches** — the flag is held per tab and re-applied at the end of the layout shuffle —
+because a consumer registers and reveals from `OnSaveLoaded`, while the shuffle runs on the
+session's first frame and wipes every `is_visible` bit; without the latch the reveal would be
+silently undone one frame later. The latch is session state, not saved: a tab's `is_visible`
+bits are RAM-only and come up blank each boot, so a consumer whose option persists calls
+`RevealAll` every `OnSaveLoaded`, right after `Register`.
+
 ### Recorded state: framework-managed by default
 
 A tab that leaves `is_recorded`/`record_complete` NULL delegates its recorded state to the
@@ -325,7 +337,7 @@ movie — confining the chain to runs.
 
 - `mods/custom_checklist/include/custom_checklist_api.h` — the public API: the
   `CustomChecklistDesc` / `CustomCheck` authoring contract and the `CustomChecklistAPI`
-  (`Register`).
+  (`Register`, `RevealAll`).
 - `mods/custom_checklist/src/custom_checklist.c` — the registry, `CCSave`, the minor-scene
   install + shared `cb_Load`, the six REPLACEFUNCs, the per-frame evaluator, the grid shuffle
   and neighbour reveal, the SIS slot-0 override, the target-color recolor, and the
