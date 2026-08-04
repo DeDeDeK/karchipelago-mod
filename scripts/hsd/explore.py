@@ -24,15 +24,11 @@ import os
 import re
 import struct
 import sys
-from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from hsd import Archive, Walker, classify_symbol, image_size, u16, u32, cstr
+from hsd import Archive, Walker, classify_symbol, f32, image_size, u16, u32, cstr
 from hsd.archive import NotAnHSDArchive
-
-
-def f32(b, o):
-    return struct.unpack(">f", b[o : o + 4])[0]
+from hsd.gx import FORMAT_NAME
 
 
 def _open_or_complain(path):
@@ -47,7 +43,6 @@ def _open_or_complain(path):
         return None
 
 
-# --- Flag / enum decode tables ----------------------------------------
 # Ported from HSDLib (HSDRaw/Common/HSD_*.cs). Single-bit flags only;
 # multi-bit fields (billboard, joint type) are handled separately.
 
@@ -307,21 +302,6 @@ GX_TEX_FILTER = {
 # CameraProjection (HSDLib HSD_COBJ.cs).
 CAMERA_PROJ = {1: "PERSPECTIVE", 2: "FRUSTRUM", 3: "ORTHO"}
 
-# GXTexFmt (HSDLib HSDRaw.GX.Enums) -- used by ImageDesc + IOBJDesc.
-GX_TEX_FMT = {
-    0: "I4",
-    1: "I8",
-    2: "IA4",
-    3: "IA8",
-    4: "RGB565",
-    5: "RGB5A3",
-    6: "RGBA8",
-    8: "C4",
-    9: "C8",
-    10: "C14X2",
-    14: "CMPR",
-}
-
 # AOBJ_Flags (HSDLib HSD_AOBJ.cs). Low 24 bits are reserved for the
 # anim-frame counter at runtime; only the named flags are stored on disc.
 AOBJ_FLAGS = [
@@ -354,9 +334,6 @@ def _decode_anim_flag(b):
     return ANIM_FMT.get(b & 0xE0, f"?{b & 0xE0:#x}"), b & 0x1F
 
 
-# --- ls ----------------------------------------------------------------
-
-
 def cmd_ls(args):
     arc = _open_or_complain(args.path)
     if arc is None:
@@ -382,8 +359,6 @@ def cmd_ls(args):
             print(f"    {off:#08x}  {name}")
     return 0
 
-
-# --- tree --------------------------------------------------------------
 
 # Per-type children: list of either
 #   (field_offset, child_type)           - single pointer
@@ -421,7 +396,7 @@ TREE_FIELDS = {
     "FOBJ": [],
     "LightGroup": [(0x00, "LightNode"), (0x04, "LightNode"), (0x08, "LightNode")],
     "LightNode": [(0x00, "Light"), (0x04, "Light"), (0x08, "Light"), (0x0C, "Light")],
-    "Light": [(0x00, "LObjDesc")],
+    "Light": [(0x00, "LObjDesc"), (0x04, "LightAnimPointer", "array")],
     # SOBJ: three NULL-terminated pointer arrays + an inline FogAnim.
     "SOBJ": [
         (0x00, "ModelGroup", "array"),
@@ -429,7 +404,56 @@ TREE_FIELDS = {
         (0x08, "Light", "array"),
         (0x0C, "FogAnim"),
     ],
-    "ModelGroup": [(0x00, "JOBJDesc")],
+    "ModelGroup": [
+        (0x00, "JOBJDesc"),  # root joint
+        (0x04, "AnimJoint", "array"),  # joint animations
+        (0x08, "MatAnimJoint", "array"),  # material animations
+        (0x0C, "ShapeAnimJoint", "array"),  # shape animations
+    ],
+    # KAR stage-model roots. grModel -> MainModel/SkyboxModel, each of
+    # which roots a JOBJ tree; the skybox also carries a motion (anim) joint.
+    "grModel": [(0x00, "MainModel"), (0x04, "SkyBoxModel")],
+    "MainModel": [(0x00, "JOBJDesc"), (0x10, "ModelBounding")],
+    "SkyBoxModel": [(0x00, "JOBJDesc"), (0x04, "ModelMotion")],
+    "ModelBounding": [],  # sizer walks its containers; tree summarizes via _detail
+    "ModelMotion": [(0x00, "AnimJoint"), (0x04, "MatAnimJoint")],
+    # Animation joint trees (reached from ModelGroup / ModelMotion / Light).
+    "AnimJoint": [(0x00, "AnimJoint"), (0x08, "AOBJ"), (0x04, "AnimJoint")],
+    "MatAnimJoint": [(0x00, "MatAnimJoint"), (0x08, "MatAnim"), (0x04, "MatAnimJoint")],
+    "MatAnim": [(0x04, "AOBJ"), (0x08, "TexAnim"), (0x00, "MatAnim")],
+    "TexAnim": [
+        (0x08, "AOBJ"),
+        (0x0C, "ImageDesc", "count", 0x14, 2),  # ImageBuffers (ImageCount u16)
+        (0x10, "TlutDesc", "count", 0x16, 2),  # TlutBuffers (TlutCount u16)
+        (0x00, "TexAnim"),
+    ],
+    "ShapeAnimJoint": [
+        (0x00, "ShapeAnimJoint"),
+        (0x08, "ShapeAnim"),
+        (0x04, "ShapeAnimJoint"),
+    ],
+    "ShapeAnim": [(0x04, "AOBJDesc"), (0x00, "ShapeAnim")],
+    "AOBJDesc": [(0x04, "AOBJ"), (0x00, "AOBJDesc")],
+    "ROBJAnimJoint": [(0x04, "AOBJ"), (0x00, "ROBJAnimJoint")],
+    "WOBJAnim": [(0x00, "AOBJ"), (0x04, "ROBJAnimJoint")],
+    "LightAnimPointer": [
+        (0x04, "AOBJ"),
+        (0x08, "WOBJAnim"),
+        (0x0C, "WOBJAnim"),
+        (0x00, "LightAnimPointer"),
+    ],
+    "FigaTree": [],  # count table + embedded track blob; summarized via _detail
+    # KAR grData sub-animations (reached from grData, shown via `grdata`; also
+    # walkable with --root-type grSubAnimNode).
+    "grSubAnimNode": [
+        (0x00, "grSubAnim"),
+        (0x04, "grSubAnim"),
+        (0x08, "grSubAnim"),
+        (0x0C, "grSubAnim"),
+        (0x10, "grSubAnim"),
+        (0x14, "grSubAnim"),
+    ],
+    "grSubAnim": [(0x00, "AnimJoint", "count", 0x04, 4)],  # AnimJoint[] (Count i32)
     "Camera": [
         (0x18, "WObjDesc"),  # eye
         (0x1C, "WObjDesc"),
@@ -486,6 +510,53 @@ FIELD_LABEL = {
     ("SOBJ", 0x08): "lights",
     ("SOBJ", 0x0C): "fog",
     ("ModelGroup", 0x00): "root",
+    ("ModelGroup", 0x04): "jointanim",
+    ("ModelGroup", 0x08): "matanim",
+    ("ModelGroup", 0x0C): "shapeanim",
+    ("grModel", 0x00): "main",
+    ("grModel", 0x04): "skybox",
+    ("MainModel", 0x00): "root",
+    ("MainModel", 0x10): "bounding",
+    ("SkyBoxModel", 0x00): "root",
+    ("SkyBoxModel", 0x04): "motion",
+    ("Light", 0x04): "anim",
+    ("ModelMotion", 0x00): "jointanim",
+    ("ModelMotion", 0x04): "matanim",
+    ("AnimJoint", 0x00): "child",
+    ("AnimJoint", 0x04): "next",
+    ("AnimJoint", 0x08): "aobj",
+    ("MatAnimJoint", 0x00): "child",
+    ("MatAnimJoint", 0x04): "next",
+    ("MatAnimJoint", 0x08): "matanim",
+    ("MatAnim", 0x00): "next",
+    ("MatAnim", 0x04): "aobj",
+    ("MatAnim", 0x08): "texanim",
+    ("TexAnim", 0x00): "next",
+    ("TexAnim", 0x08): "aobj",
+    ("TexAnim", 0x0C): "images",
+    ("TexAnim", 0x10): "tluts",
+    ("ShapeAnimJoint", 0x00): "child",
+    ("ShapeAnimJoint", 0x04): "next",
+    ("ShapeAnimJoint", 0x08): "shapeanim",
+    ("ShapeAnim", 0x00): "next",
+    ("ShapeAnim", 0x04): "aobjdesc",
+    ("AOBJDesc", 0x00): "next",
+    ("AOBJDesc", 0x04): "aobj",
+    ("ROBJAnimJoint", 0x00): "next",
+    ("ROBJAnimJoint", 0x04): "aobj",
+    ("WOBJAnim", 0x00): "aobj",
+    ("WOBJAnim", 0x04): "animjoint",
+    ("LightAnimPointer", 0x00): "next",
+    ("LightAnimPointer", 0x04): "aobj",
+    ("LightAnimPointer", 0x08): "position",
+    ("LightAnimPointer", 0x0C): "interest",
+    ("grSubAnimNode", 0x00): "superjump",
+    ("grSubAnimNode", 0x04): "x04",
+    ("grSubAnimNode", 0x08): "rail",
+    ("grSubAnimNode", 0x0C): "x0c",
+    ("grSubAnimNode", 0x10): "x10",
+    ("grSubAnimNode", 0x14): "x14",
+    ("grSubAnim", 0x00): "anims",
     ("Camera", 0x18): "eye",
     ("Camera", 0x1C): "target",
     ("FogAnim", 0x00): "fog",
@@ -721,6 +792,17 @@ def _detail(arc: Archive, typ: str, off: int) -> str:
         return " " + " ".join(bits)
     if typ == "ModelGroup":
         return ""
+    if typ == "MainModel":
+        jc = u32(arc.data, off + 0x04)
+        dc = u32(arc.data, off + 0x08)
+        pc = u32(arc.data, off + 0x0C)
+        return f" jobj={jc} dobj={dc} pobj={pc}"
+    if typ == "ModelBounding":
+        vr = u16(arc.data, off + 0x04)
+        dy = u16(arc.data, off + 0x0C)
+        st = u16(arc.data, off + 0x14)
+        ix = u16(arc.data, off + 0x1C)
+        return f" viewregions={vr} dynbbox={dy} statbbox={st} indices={ix}"
     if typ == "FogAnim":
         anim_set = (off + 0x04) in arc.reloc_set and u32(arc.data, off + 0x04) != 0
         return " [anim]" if anim_set else ""
@@ -758,6 +840,29 @@ def _detail(arc: Archive, typ: str, off: int) -> str:
         vfmt, vscale = _decode_anim_flag(arc.data[off + 0x01])
         tfmt, tscale = _decode_anim_flag(arc.data[off + 0x02])
         return f" track={track} v={vfmt}/2^{vscale} t={tfmt}/2^{tscale}"
+    if typ == "AnimJoint":
+        flags = u32(arc.data, off + 0x10)
+        has_aobj = (off + 0x08) in arc.reloc_set and u32(arc.data, off + 0x08) != 0
+        return f" flags={flags:#010x}{' [aobj]' if has_aobj else ''}"
+    if typ == "TexAnim":
+        texmap = u32(arc.data, off + 0x04)  # GX texmap id
+        imgs = u16(arc.data, off + 0x14)
+        tluts = u16(arc.data, off + 0x16)
+        return f" map=TEXMAP{texmap} images={imgs} tluts={tluts}"
+    if typ == "FigaTree":
+        ftype = u32(arc.data, off + 0x00)
+        frames = f32(arc.data, off + 0x08)
+        nodes = tracks = 0
+        if (off + 0x0C) in arc.reloc_set:
+            tbl = u32(arc.data, off + 0x0C)
+            i = 0
+            while tbl + i < len(arc.data) and arc.data[tbl + i] != 0xFF:
+                tracks += arc.data[tbl + i]
+                nodes += 1
+                i += 1
+        return f" type={ftype} frames={frames:.1f} nodes={nodes} tracks={tracks}"
+    if typ == "grSubAnim":
+        return f" count={u32(arc.data, off + 0x04)}"
     if typ == "ShapeSet":
         flags = u16(arc.data, off + 0x00)
         n = u16(arc.data, off + 0x02)
@@ -769,7 +874,7 @@ def _detail(arc: Archive, typ: str, off: int) -> str:
         h = u16(arc.data, off + 0x02)
         fmt = u32(arc.data, off + 0x04)
         sz = image_size(w, h, fmt)
-        return f" {w}x{h} fmt={GX_TEX_FMT.get(fmt, fmt)} ({sz} B)"
+        return f" {w}x{h} fmt={FORMAT_NAME.get(fmt, fmt)} ({sz} B)"
     if typ == "ParticleGroup":
         u1 = u16(arc.data, off + 0x00)
         u2 = u16(arc.data, off + 0x02)
@@ -817,12 +922,30 @@ def _walk_print(arc: Archive, root: int, root_type: str, max_depth):
         "SOBJ": 0x10,
         "Camera": 0x40,
         "ModelGroup": 0x10,
+        "grModel": 0x10,
+        "MainModel": 0x14,
+        "SkyBoxModel": 0x08,
+        "ModelBounding": 0x20,
+        "ModelMotion": 0x14,
         "FogAnim": 0x08,
         "ShapeSet": 0x1C,
         "IOBJDesc": 0x0C,
         "AOBJ": 0x10,
         "FOBJDesc": 0x14,
         "FOBJ": 0x08,
+        "AnimJoint": 0x14,
+        "MatAnimJoint": 0x0C,
+        "MatAnim": 0x10,
+        "TexAnim": 0x18,
+        "ShapeAnimJoint": 0x0C,
+        "ShapeAnim": 0x08,
+        "AOBJDesc": 0x08,
+        "ROBJAnimJoint": 0x08,
+        "WOBJAnim": 0x08,
+        "LightAnimPointer": 0x10,
+        "FigaTree": 0x14,
+        "grSubAnimNode": 0x18,
+        "grSubAnim": 0x08,
     }
 
     def line(depth, label, typ, off, suffix=""):
@@ -845,7 +968,8 @@ def _walk_print(arc: Archive, root: int, root_type: str, max_depth):
         if max_depth is not None and depth >= max_depth:
             return
         for child in _tree_children(arc, typ, off):
-            # child is either (foff, ftyp) or (foff, ftyp, 'array').
+            # child is (foff, ftyp), (foff, ftyp, 'array'), or
+            # (foff, ftyp, 'count', count_field_off).
             if len(child) == 3 and child[2] == "array":
                 foff, ftyp, _ = child
                 slot = off + foff
@@ -868,6 +992,28 @@ def _walk_print(arc: Archive, root: int, root_type: str, max_depth):
                         break
                     go(depth + 2, f"[{i}]: ", ftyp, tgt)
                     i += 1
+            elif len(child) == 5 and child[2] == "count":
+                # Count-delimited contiguous pointer array (HSDArrayAccessor /
+                # HSDFixedLengthPointerArrayAccessor); length read from a sibling
+                # field of the given width, not self-terminating.
+                foff, ftyp, _, cnt_off, cnt_w = child
+                slot = off + foff
+                if slot not in arc.reloc_set:
+                    continue
+                arr = u32(arc.data, slot)
+                count = (u16 if cnt_w == 2 else u32)(arc.data, off + cnt_off)
+                if not arr or count <= 0:
+                    continue
+                lab = FIELD_LABEL.get((typ, foff), f"+{foff:#x}=")
+                indent = "  " * (depth + 1)
+                print(f"{indent}{lab}: {ftyp}[{count}] @ {arr:#x}")
+                for i in range(count):
+                    entry = arr + i * 4
+                    if entry + 4 > len(arc.data) or entry not in arc.reloc_set:
+                        break
+                    tgt = u32(arc.data, entry)
+                    if tgt:
+                        go(depth + 2, f"[{i}]: ", ftyp, tgt)
             else:
                 foff, ftyp = child
                 slot = off + foff
@@ -891,8 +1037,16 @@ CLASS_TO_ROOT = {
     "HSD_JOBJ": "JOBJDesc",  # our "JOBJDesc" name == HSDLib HSD_JOBJ
     "HSD_JOBJDesc": "ModelGroup",  # the 0x10 wrapper
     "HSD_ModelGroup": "ModelGroup",  # same layout as HSD_JOBJDesc
+    "KAR_grModel": "grModel",  # MainModel + SkyboxModel roots
+    "KAR_grModelMotion": "ModelMotion",  # AnimJoint + MatAnimJoint pair
     "HSD_FogDesc": "FogDesc",
     "HSD_ParticleGroup": "ParticleGroup",
+    # Standalone animation publics (suffix-classified in symbols.py).
+    "HSD_AnimJoint": "AnimJoint",
+    "HSD_MatAnimJoint": "MatAnimJoint",
+    "HSD_ShapeAnimJoint": "ShapeAnimJoint",
+    "HSD_TexAnim": "TexAnim",
+    "HSD_FigaTree": "FigaTree",
 }
 
 # Roots whose backing storage IS a NULL-terminated pointer array. Each
@@ -953,26 +1107,9 @@ def cmd_tree(args):
     if not args.root_type and root_type != "JOBJDesc":
         print(f"# auto root-type: {root_type} (from {klass})")
 
-    if klass == "KAR_grModel":
-        # ModelSection: JOBJDesc**[4]. Each non-NULL slot points at a pp
-        # slot whose first dword is a JOBJDesc*. Walk each slot.
-        for i in range(4):
-            slot = off + i * 4
-            in_reloc = slot in arc.reloc_set
-            pp = u32(arc.data, slot) if in_reloc else 0
-            if pp == 0:
-                print(f"\nms[{i}] @ {slot:#x}: NULL")
-                continue
-            jobj = u32(arc.data, pp) if pp in arc.reloc_set else 0
-            print(f"\nms[{i}] @ {slot:#x} -> pp {pp:#x} -> JOBJDesc {jobj:#x}")
-            if jobj:
-                c = _walk_print(arc, jobj, args.root_type or "JOBJDesc", args.max_depth)
-                for t, n in c.items():
-                    counts_total[t] = counts_total.get(t, 0) + n
-    else:
-        c = _walk_print(arc, off, root_type, args.max_depth)
-        for t, n in c.items():
-            counts_total[t] = counts_total.get(t, 0) + n
+    c = _walk_print(arc, off, root_type, args.max_depth)
+    for t, n in c.items():
+        counts_total[t] = counts_total.get(t, 0) + n
 
     if counts_total:
         print("\n# type counts:")
@@ -983,24 +1120,7 @@ def cmd_tree(args):
     # so users get a precise byte-budget of the reachable subtree.
     if args.summary and "ImageDesc" in counts_total:
         print("\n# full reachable summary (sized):")
-        if klass == "KAR_grModel":
-            roots = []
-            for i in range(4):
-                slot = off + i * 4
-                if slot in arc.reloc_set:
-                    pp = u32(arc.data, slot)
-                    if pp and pp in arc.reloc_set:
-                        jobj = u32(arc.data, pp)
-                        if jobj:
-                            roots.append(jobj)
-        else:
-            roots = [off]
-        all_visited = OrderedDict()
-        for r in roots:
-            w = Walker(arc)
-            v = w.walk(r, args.root_type or "JOBJDesc")
-            for k, val in v.items():
-                all_visited.setdefault(k, val)
+        all_visited = Walker(arc).walk(off, root_type)
         by_type = {}
         for o, (t, sz) in all_visited.items():
             by_type.setdefault(t, []).append(sz or 0)
@@ -1010,8 +1130,6 @@ def cmd_tree(args):
 
     return 0
 
-
-# --- grdata ------------------------------------------------------------
 
 # Field layout for KAR_grData (HSDLib KAR_grData.cs). Each row:
 #   (offset, name, type-string, kind)
@@ -1083,7 +1201,6 @@ def _print_lobj(arc: Archive, off: int, indent: str):
     """Print a single LObjDesc node and recurse into its `next` chain."""
     seen = set()
     cur = off
-    idx = 0
     while cur and cur not in seen:
         seen.add(cur)
         print(f"{indent}LObjDesc @ {cur:#x}{_detail(arc, 'LObjDesc', cur)}")
@@ -1100,7 +1217,6 @@ def _print_lobj(arc: Archive, off: int, indent: str):
         if nxt_slot not in arc.reloc_set:
             break
         cur = u32(arc.data, nxt_slot)
-        idx += 1
 
 
 def _print_light_group(arc: Archive, lg: int):
@@ -1179,6 +1295,37 @@ def _print_position_node(arc: Archive, pn: int):
         print(f"    +{foff:02X}  {fname:14s} -> {_fmt_ptr(v, rel)}")
 
 
+def _print_sub_anim_node(arc: Archive, sn: int):
+    """Expand a KAR_grSubAnimNode: six named KAR_grSubAnim slots, each a
+    Count-delimited array of HSD_AnimJoint (stage sub-animations)."""
+    SLOTS = [
+        (0x00, "SuperJump"),
+        (0x04, "x04"),
+        (0x08, "Rail"),
+        (0x0C, "x0C"),
+        (0x10, "x10"),
+        (0x14, "x14"),
+    ]
+    nonnull = [(f, n, v) for f, n in SLOTS for v, r in [_ptr(arc, sn + f)] if v and r]
+    if not nonnull:
+        print(f"\n  SubAnimNode @ {sn:#x}: (all NULL)")
+        return
+    print(f"\n  SubAnimNode @ {sn:#x}: (NULL slots omitted)")
+    for foff, fname, sa in nonnull:
+        arr, arr_rel = _ptr(arc, sa + 0x00)
+        count = u32(arc.data, sa + 0x04)
+        print(f"    +{foff:02X}  {fname:9s} -> grSubAnim @ {sa:#x}  count={count}")
+        if not (arr and arr_rel):
+            continue
+        for j in range(count):
+            e = arr + j * 4
+            if e + 4 > len(arc.data) or e not in arc.reloc_set:
+                break
+            aj = u32(arc.data, e)
+            if aj:
+                print(f"          [{j:2d}] AnimJoint @ {aj:#x}{_detail(arc, 'AnimJoint', aj)}")
+
+
 def cmd_grdata(args):
     arc = _open_or_complain(args.path)
     if arc is None:
@@ -1233,10 +1380,10 @@ def cmd_grdata(args):
     pn, pn_rel = _ptr(arc, off + 0x20)
     if pn and pn_rel:
         _print_position_node(arc, pn)
+    san, san_rel = _ptr(arc, off + 0x24)
+    if san and san_rel:
+        _print_sub_anim_node(arc, san)
     return 0
-
-
-# --- find --------------------------------------------------------------
 
 
 def cmd_find(args):
@@ -1277,9 +1424,6 @@ def cmd_find(args):
     suffix = f" ({skipped} skipped as non-HSD)" if skipped else ""
     print(f"\n# {hits} hit(s) across {len(paths)} file(s){suffix}")
     return 0
-
-
-# --- entrypoint --------------------------------------------------------
 
 
 def main(argv):

@@ -7,16 +7,27 @@
 
 extern MenuDesc weather_menu;
 extern MenuDesc backdrop_menu;
+extern MenuDesc rain_menu;
+extern MenuDesc snow_menu;
+extern MenuDesc wind_menu;
+extern MenuDesc lightning_menu;
+extern MenuDesc puddle_menu;
+extern MenuDesc tree_menu;
+extern MenuDesc clouds_menu;
+extern MenuDesc moon_menu;
+extern MenuDesc stars_menu;
+extern OptionDesc event_sky_option;
 
 static void OnBoot(void)
 {
     CustomWeather_OnBoot();
-    CustomWeatherAnim_OnBoot();
+    CustomWeatherRuntime_OnBoot();
     CustomBackdrop_OnBoot();
+    EventSky_OnBoot();
 }
 
 static MenuDesc top_menu = {
-    .option_num = 2,
+    .option_num = 12,
     .options = {
         &(OptionDesc){
             .name = "Weather Presets",
@@ -30,6 +41,61 @@ static MenuDesc top_menu = {
             .kind = OPTKIND_MENU,
             .menu_ptr = &backdrop_menu,
         },
+        &(OptionDesc){
+            .name = "Rain",
+            .description = "Master rain intensity and wind slant for City Trial presets",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &rain_menu,
+        },
+        &(OptionDesc){
+            .name = "Snow",
+            .description = "Master snow intensity, fall speed, and flutter for City Trial presets",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &snow_menu,
+        },
+        &(OptionDesc){
+            .name = "Wind",
+            .description = "Wind strength, random direction, and what it affects in City Trial",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &wind_menu,
+        },
+        &(OptionDesc){
+            .name = "Lightning",
+            .description = "Visible lightning bolts in storm presets (Auto / Off / Force)",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &lightning_menu,
+        },
+        &(OptionDesc){
+            .name = "Puddles",
+            .description = "Puddle slowdown strength, frequency, size, and disc visibility (Puddles preset)",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &puddle_menu,
+        },
+        &(OptionDesc){
+            .name = "Trees",
+            .description = "Let wind lean the City Trial forest trees",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &tree_menu,
+        },
+        &(OptionDesc){
+            .name = "Clouds",
+            .description = "Cloud deck coverage, opacity, size, height, and tint for City Trial presets",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &clouds_menu,
+        },
+        &(OptionDesc){
+            .name = "Moon",
+            .description = "Moon disc size, brightness, phase, arc, color, and moonlight for City Trial presets",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &moon_menu,
+        },
+        &(OptionDesc){
+            .name = "Stars",
+            .description = "Starfield density, twinkle, luminosity, size variance, and tint for City Trial presets",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &stars_menu,
+        },
+        &event_sky_option,
     },
 };
 

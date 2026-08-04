@@ -1,22 +1,16 @@
 # Client-Game Protocol
 
-This document describes the shared memory interface between the Python Archipelago client and the Kirby Air Ride game mod. The client uses `dolphin-memory-engine` to read/write game memory while the mod is running in Dolphin.
+The shared-memory wire contract between the Python Archipelago client and the game mod. The client drives it with `dolphin-memory-engine` while the mod runs in Dolphin.
 
 ## Shared Memory Access
 
-The game allocates an `APData` struct in `OnBoot()` and stores a pointer to it at the static address `0x805d52d4`. The client reads this pointer to locate the struct.
-
-```python
-# Python client startup
-ap_data_ptr = memory.read_u32(0x805d52d4)
-# ap_data_ptr now points to the APData struct
-```
+`OnBoot` allocates the `APData` struct and stores its pointer at the static address `0x805d52d4`; the client reads that pointer (`memory.read_u32(0x805d52d4)`) to locate the struct. The allocation is made from `OnBoot` specifically because `HSD_MemAlloc` there persists for the whole runtime — anywhere else it would be freed at the next scene change.
 
 ## APData Layout
 
-All 32-bit fields are 4-byte aligned and atomic on PPC at this alignment. 64-bit fields (`energy_balance`, `energy_sent_total`, `sent_checks`, `client_backfill`, `goal_checks`) are NOT atomic on PPC32 — readers may observe a torn value during a writer's update. For `energy_sent_total` this is self-correcting: it's a cumulative counter the client reads-and-diffs, so a torn read only skews one poll's delta and the client sets `last_seen` to whatever it read — the next poll's diff compensates exactly (the old clear-to-zero mailbox, by contrast, applied a torn delta permanently). Per-frame deltas are also far below 2^31, bounding the magnitude of any single torn read.
+Offsets are relative to the struct base and are pinned by `_Static_assert(offsetof(APData, ...))` lines in `main.c`. Adding a field shifts everything after it, so those asserts and the client's offset table move together; the field order in `APData` / `APSlotOptions` (`mods/archipelago/src/main.h`) is the canonical reference.
 
-Offsets are relative to the struct base address. Struct size and individual field offsets may shift as fields are added; the Python client should locate the struct via the static pointer at `0x805d52d4` and use the field order in `mods/archipelago/src/main.h` (`APData` struct) as the canonical reference.
+All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64-bit fields (`energy_balance`, `energy_sent_total`, `sent_checks`, `client_backfill`, `goal_checks`) are NOT atomic on PPC32 — a reader may observe a torn value mid-write. For `energy_sent_total` this is self-correcting: the client reads-and-diffs a cumulative counter, so a torn read only skews one poll's delta and sets `last_seen` to whatever it read; the next poll's diff compensates exactly. Per-frame deltas are far below 2^31, bounding the magnitude of any single torn read.
 
 ### Communication Fields
 
@@ -45,8 +39,8 @@ Offsets are relative to the struct base address. Struct size and individual fiel
 
 | Offset | Type        | Field                 | Writer | Reader            | Description |
 |--------|-------------|-----------------------|--------|-------------------|-------------|
-| 0x0C8  | u32         | `location_data_valid` | Client | Game (clear to 0) | 1 after client has written `locations` |
-| 0x0CC  | u16[3][46]  | `locations`           | Client | Game              | `locations[source_mode][source_reward_index]` = destination cell for this slot's checklist reward. Padded to 46 per mode. |
+| 0x0E8  | u32         | `location_data_valid` | Client | Game (clear to 0) | 1 after client has written `locations` |
+| 0x0EC  | u16[3][46]  | `locations`           | Client | Game              | `locations[source_mode][source_reward_index]` = destination cell for this slot's checklist reward. Padded to 46 per mode. Indexed by the 3 real game modes only — the AP checklist tab has no native rewards. |
 
 `locations` is indexed by **source reward** — the entry at `[m][i]` tells the game where in the checklist grid this slot's reward `i` of mode `m` lives. Per-mode meaningful entry counts: AR=46, TR=33, CT=44. Unused trailing entries (e.g. TR indices 33-45) should be `0xFFFF`.
 
@@ -61,25 +55,25 @@ This carries only vanilla checklist rewards (AP item IDs `500..649`); non-vanill
 
 ### Check Detection Fields
 
-| Type | Field | Writer | Reader | Description |
-|------|-------|--------|--------|-------------|
-| u64[3][2] | `sent_checks`     | Game   | Client | Bitmask of checkboxes the player has completed in gameplay or via filler. Bit `(k % 64)` of word `(k / 64)` for clear_kind `k` in mode `m`. Mirror of `APSave.sent_checks`. |
-| u64[3][2] | `client_backfill` | Client | Game (clears) | Additive backfill: client writes bits for checks the AP server already knows about (e.g., fresh save / slot takeover). Mod ORs new bits into `sent_checks`, also sets `clear[].is_unlocked` and `has_reward` where applicable, re-evaluates goal, then clears this field. |
-| u8        | `goal_complete`   | Game   | Client | Sticky once set. 1 when the active goal condition is satisfied. Mod evaluates per-frame after every check transition; client reads on connect and on poll, forwards victory to AP server. Persisted to `APSave.goal_complete`. |
+| Offset | Type | Field | Writer | Reader | Description |
+|--------|------|-------|--------|--------|-------------|
+| 0x200 | u64[4][2] | `sent_checks`     | Game   | Client | Bitmask of checkboxes the player has completed in gameplay or via filler. Bit `(k % 64)` of word `(k / 64)` for clear_kind `k` in the mode at row `m`. Mirror of `APSave.sent_checks`. |
+| 0x240 | u64[4][2] | `client_backfill` | Client | Game (clears) | Additive backfill: client writes bits for checks the AP server already knows about (e.g., fresh save / slot takeover). Mod ORs new bits into `sent_checks`, also sets `clear[].is_unlocked` and `has_reward` where applicable, re-evaluates goal, then clears this field. |
+| 0x280 | u8        | `goal_complete`   | Game   | Client | Sticky once set. 1 when the active goal condition is satisfied. Mod evaluates per-frame after every check transition; client reads on connect and on poll, forwards victory to AP server. Persisted to `APSave.goal_complete`. |
+
+Both bitmasks are `CHECKLIST_MODE_NUM` (4) rows: rows 0-2 are Air Ride / Top Ride / City Trial, and row 3 is the synthetic AP checklist tab.
 
 ### Menu Toggle State
 
 Live mirror of the Settings menu toggles. Written by the game on boot (after save-restore), on first-connect option transfer, and every time the player changes a toggle. Game-owned: client reads, never writes. The player can disable/re-enable these mid-session, and the client must forward the change to the AP server (e.g., `ConnectUpdate` `tags` for DeathLink, and the equivalent for TrapLink/EnergyLink).
 
-| Type | Field | Writer | Reader | Description |
-|------|-------|--------|--------|-------------|
-| u32  | `deathlink_menu_enabled`  | Game | Client | 1 if DeathLink toggle is On. Diff against last-seen to detect toggles. |
-| u32  | `energylink_menu_enabled` | Game | Client | 1 if EnergyLink toggle is On. |
-| u32  | `traplink_menu_enabled`   | Game | Client | 1 if TrapLink toggle is On. |
+| Offset | Type | Field | Writer | Reader | Description |
+|--------|------|-------|--------|--------|-------------|
+| 0x284 | u32  | `deathlink_menu_enabled`  | Game | Client | 1 if DeathLink toggle is On. Diff against last-seen to detect toggles. |
+| 0x288 | u32  | `energylink_menu_enabled` | Game | Client | 1 if EnergyLink toggle is On. |
+| 0x28C | u32  | `traplink_menu_enabled`   | Game | Client | 1 if TrapLink toggle is On. |
 
-On connect, the client should read all three and send the corresponding state to the AP server. `APSlotOptions.death_link_enabled` / `energy_link_enabled` / `trap_link_enabled` only set the *initial* values and are not updated on subsequent toggles — these mirrors are the authoritative current state.
-
-The exact byte offsets are computed by the compiler and may shift as fields are added to `APData`. The Python client should locate the struct via the static pointer at `0x805d52d4` and use the field order in `mods/archipelago/src/main.h` (`APData` struct) as the canonical reference.
+On connect, the client should read all three and send the corresponding state to the AP server. `APSlotOptions.death_link_enabled` / `energy_link_enabled` / `trap_link_enabled` only set the *initial* values and are not updated on subsequent toggles — these mirrors are the authoritative current state. `SyncLinkMenuStateToAPData` in `settings_menu.c` writes them on boot, on the first-connect option transfer, and from each toggle's `on_change`.
 
 ## Connection Handshake
 
@@ -117,32 +111,35 @@ The client should write options and location data on **every connection**. The g
 
 ### APSlotOptions Layout
 
-All fields are `u32` unless noted. Field order in `APSlotOptions` in `main.h` is the canonical reference for offsets.
+All fields are `u32` unless noted. Field order in `APSlotOptions` in `main.h` is the canonical reference; the offsets below are relative to the `APData` base and are pinned by `_Static_assert`s in `main.c`.
 
-| Field                             | Values | Description |
-|-----------------------------------|--------|-------------|
-| `death_link_enabled`              | 0 or 1 | Sets initial deathlink menu toggle |
-| `energy_link_enabled`             | 0 or 1 | Sets initial energylink menu toggle |
-| `trap_link_enabled`               | 0 or 1 | Sets initial traplink menu toggle |
-| `reveal_checklists`               | 0 or 1 | Reveal all checklist squares |
-| `goal[3]`                         | GoalKind | Completion condition per mode (indexed by GameMode) |
-| `checklist_amount[3]`             | 1-120  | N for GOAL_N_CHECKLIST per mode (indexed by GameMode) |
-| `city_trial_progressive_patch_caps` | 0 or 1 | Patch cap starts low, items raise it |
-| `city_trial_patch_cap_amount`     | 1-127  | Target patch cap (also the threshold for GOAL_MAX_STATS_CT) |
-| `spawn_rate_min`                  | 100-500 (percent) | Spawn rate floor for CT/TR items. 100 = vanilla. Each Spawn Rate Up item adds +10% on top, capped at 500. AP world ships `(max - min) / 10` items so collecting all reaches the configured max. 0 is treated as 100. |
-| `goal_checks[3][2]`              | u64 bitmask | Required checkboxes per mode for GOAL_CHECKLIST_LIST (48 bytes, see below) |
-| `machine_gating_enabled`         | 0 or 1 | 1 = gated (default). 0 = all machine unlocks pre-applied at connect; AP world ships no machine unlock items. |
-| `ability_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all copy abilities unlocked at connect; AP world ships no ability unlock items. |
-| `event_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all CT events unlocked at connect; AP world ships no event unlock items. |
-| `patch_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all patch types unlocked at connect; AP world ships no patch unlock items. |
-| `item_gating_enabled`            | 0 or 1 | 1 = gated. 0 = all item-category unlocks (All-Up, food, fireworks, etc.) applied at connect; AP world ships no item unlock items. |
-| `box_gating_enabled`             | 0 or 1 | 1 = gated. 0 = all box types unlocked at connect; AP world ships no box unlock items. |
-| `airride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Air Ride stages unlocked at connect; AP world ships no AR stage unlock items. |
-| `topride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Top Ride courses unlocked at connect; AP world ships no TR stage unlock items. |
-| `topride_item_gating_enabled`    | 0 or 1 | 1 = gated. 0 = all Top Ride items unlocked at connect; AP world ships no TR item unlock items. (Ability-gated TR items remain gated by `ability_gating_enabled`.) |
-| `color_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all Kirby colors unlocked at connect; AP world ships no color unlock items. |
-| `stadium_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all stadiums unlocked at connect; AP world ships no stadium unlock items. (The KAROptions toggle `city_trial_stadiums_gated` maps directly to this.) |
-| `checklist_rewards_gating_enabled` | 0 or 1 | 1 = gated (default): each non-progression checklist reward (music, sound test, extra rules, endings, filler boxes, …) is an AP item the player finds. 0 = ungated: the mod marks every such reward received at connect (`ChecklistRewards_GrantAllCosmetic`, tracked via `received_checklist_rewards` — **not** a mask), and the AP world ships none. The 6 Dragoon/Hydra part markers are progression and are **not** affected by this flag. |
+Per-mode arrays are `CHECKLIST_MODE_NUM` (4) wide, indexed by **checklist-mode row**: 0=Air Ride, 1=Top Ride, 2=City Trial, 3=the synthetic AP checklist tab.
+
+| Offset | Field                             | Values | Description |
+|--------|-----------------------------------|--------|-------------|
+| 0x030 | `death_link_enabled`              | 0 or 1 | Sets initial deathlink menu toggle |
+| 0x034 | `energy_link_enabled`             | 0 or 1 | Sets initial energylink menu toggle |
+| 0x038 | `trap_link_enabled`               | 0 or 1 | Sets initial traplink menu toggle |
+| 0x03C | `reveal_checklists`               | 0 or 1 | Reveal all checklist squares |
+| 0x040 | `goal[4]`                         | GoalKind | Completion condition per checklist-mode row |
+| 0x050 | `checklist_amount[4]`             | 1-120  | N for GOAL_N_CHECKLIST per checklist-mode row |
+| 0x060 | `city_trial_patch_cap_min`        | 1-127  | Per-stat patch cap the player starts at. Each Patch Cap Increase item adds +1. 0 is treated as the max. |
+| 0x064 | `city_trial_patch_cap_max`        | 1-127  | Patch cap ceiling (also the threshold for GOAL_MAX_STATS_CT). AP world ships `max - min` Patch Cap Increase items so collecting all reaches it. `min == max` is a flat cap. 0 is treated as `PATCH_STAT_MAX` (127). |
+| 0x068 | `spawn_rate_min`                  | 10-100 (percent) | Spawn rate floor for CT/TR items. 100 = vanilla, below 100 suppresses spawns. Each Spawn Rate Up item adds +10% on top, capped at 300. AP world ships `(max - min) / 10` items so collecting all reaches the configured max. 0 is treated as 100. |
+| 0x070 | `goal_checks[4][2]`              | u64 bitmask | Required checkboxes per checklist-mode row for GOAL_CHECKLIST_LIST (64 bytes, see below) |
+| 0x0B0 | `machine_gating_enabled`         | 0 or 1 | 1 = gated (default). 0 = all machine unlocks pre-applied at connect; AP world ships no machine unlock items. |
+| 0x0B4 | `ability_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all copy abilities unlocked at connect; AP world ships no ability unlock items. |
+| 0x0B8 | `event_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all CT events unlocked at connect; AP world ships no event unlock items. |
+| 0x0BC | `patch_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all patch types unlocked at connect; AP world ships no patch unlock items. |
+| 0x0C0 | `item_gating_enabled`            | 0 or 1 | 1 = gated. 0 = all item-category unlocks (All-Up, food, fireworks, etc.) applied at connect; AP world ships no item unlock items. |
+| 0x0C4 | `box_gating_enabled`             | 0 or 1 | 1 = gated. 0 = all box types unlocked at connect; AP world ships no box unlock items. |
+| 0x0C8 | `airride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Air Ride stages unlocked at connect; AP world ships no AR stage unlock items. |
+| 0x0CC | `topride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Top Ride courses unlocked at connect; AP world ships no TR stage unlock items. |
+| 0x0D0 | `topride_item_gating_enabled`    | 0 or 1 | 1 = gated. 0 = all Top Ride items unlocked at connect; AP world ships no TR item unlock items. (Ability-gated TR items remain gated by `ability_gating_enabled`.) |
+| 0x0D4 | `color_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all Kirby colors unlocked at connect; AP world ships no color unlock items. |
+| 0x0D8 | `stadium_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all stadiums unlocked at connect; AP world ships no stadium unlock items. (The KAROptions toggle `city_trial_stadiums_gated` maps directly to this.) |
+| 0x0DC | `base_ability_gating_enabled`    | 0 or 1 | 1 = gated. 0 = inhale / quick spin / charge unlocked at connect; AP world ships no base ability unlock items. |
+| 0x0E0 | `checklist_rewards_gating_enabled` | 0 or 1 | 1 = gated (default): each non-progression checklist reward (music, sound test, extra rules, endings, filler boxes, …) is an AP item the player finds. 0 = ungated: the mod marks every such reward received at connect (`ChecklistRewards_GrantAllCosmetic`, tracked via `received_checklist_rewards` — **not** a mask), and the AP world ships none. The 6 Dragoon/Hydra part markers are progression and are **not** affected by this flag. |
 
 ### GoalKind Enum
 
@@ -158,17 +155,18 @@ All fields are `u32` unless noted. Field order in `APSlotOptions` in `main.h` is
 
 ### goal_checks Layout (GOAL_CHECKLIST_LIST)
 
-When a mode's goal is `GOAL_CHECKLIST_LIST`, the required checkboxes are specified in `goal_checks[mode][2]` (2 × u64 = 128 bits per mode). Same encoding as `sent_checks`: bit `(k % 64)` of word `(k / 64)` for clear_kind `k`. The goal is satisfied when every set bit in `goal_checks[mode]` is also set in `sent_checks[mode]`.
+When a row's goal is `GOAL_CHECKLIST_LIST`, the required checkboxes are specified in `goal_checks[row][2]` (2 × u64 = 128 bits per row). Same encoding as `sent_checks`: bit `(k % 64)` of word `(k / 64)` for clear_kind `k`. The goal is satisfied when every set bit in `goal_checks[row]` is also set in `sent_checks[row]`.
 
 Offsets relative to `APData` struct base:
 
 | Offset | Field | Description |
 |--------|-------|-------------|
-| 0x068  | `goal_checks[0][0..1]` | Air Ride required checkboxes (2 × u64, clear_kinds 0-119) |
-| 0x078  | `goal_checks[1][0..1]` | Top Ride required checkboxes (2 × u64, clear_kinds 0-119) |
-| 0x088  | `goal_checks[2][0..1]` | City Trial required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x070  | `goal_checks[0][0..1]` | Air Ride required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x080  | `goal_checks[1][0..1]` | Top Ride required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x090  | `goal_checks[2][0..1]` | City Trial required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x0A0  | `goal_checks[3][0..1]` | AP checklist tab required checkboxes (2 × u64, clear_kinds 0-119) |
 
-Client writes big-endian u64s (dolphin-memory-engine handles byte order). Zero-fill any mode that does not use `GOAL_CHECKLIST_LIST`. Fillers are blocked on goal-list checkboxes to prevent cheesing.
+Client writes big-endian u64s (dolphin-memory-engine handles byte order). Zero-fill any row that does not use `GOAL_CHECKLIST_LIST`. Fillers are blocked on goal-list checkboxes to prevent cheesing.
 
 ### KAROptions.py to APSlotOptions Mapping
 
@@ -182,8 +180,8 @@ The client reads slot options from the AP server (as defined in `KAROptions.py`)
 | `reveal_checklists` | `reveal_checklists` | Toggle, direct value |
 | `city_trial_goal` | `goal[GMMODE_CITYTRIAL]` | **TextChoice -> GoalKind conversion** (see enum table) |
 | `city_trial_checklist_amount` | `checklist_amount[GMMODE_CITYTRIAL]` | Range, direct value |
-| `city_trial_progressive_patch_caps` | `city_trial_progressive_patch_caps` | Toggle, direct value |
-| `city_trial_patch_cap_amount` | `city_trial_patch_cap_amount` | Range, direct value |
+| `city_trial_patch_cap_min` | `city_trial_patch_cap_min` | Range, direct value |
+| `city_trial_patch_cap_max` | `city_trial_patch_cap_max` | Range, direct value |
 | `city_trial_stadiums_gated` | `stadium_gating_enabled` | Same semantic (1 = gated/items-required, 0 = ungated/all unlocked). |
 | `checklist_rewards_gated` | `checklist_rewards_gating_enabled` | Toggle, direct value (1 = each cosmetic reward is an AP item; 0 = mod pre-grants them all at connect) |
 | `spawn_rate_min` | `spawn_rate_min` | Range (percent), direct value. AP world also has `spawn_rate_max` for item-count generation but does not write it to the mod. |
@@ -213,12 +211,6 @@ Per-category gating toggles (one slot option per `APUnlockCategory`). Each KAROp
 
 Options **not written to the mod** (used at AP generation time, or carried only in `slot_data` for the client's own logic): `trap_chance`, `spawn_rate_max`, `city_trial_permanent_patches` (gen-time only — controls whether permanent-patch items enter the pool; the mod has no corresponding slot field and always treats permanent patches as an active item category), and the per-mode `air_ride_checkbox_fillers` / `top_ride_checkbox_fillers` / `city_trial_checkbox_fillers` fields. (`trap_chance` is present in `slot_data` for the client's trap-roll logic but is not written into `APSlotOptions`.)
 
-### Menu Toggle Interaction
-
-The `death_link_enabled`, `energy_link_enabled`, and `trap_link_enabled` options set the **initial** values of the in-game menu toggles (on first connection only). The player can override them locally via the Settings menu at any time. The menu toggle is the authoritative source for whether each feature is active.
-
-The current menu state is exposed live via `deathlink_menu_enabled`, `energylink_menu_enabled`, and `traplink_menu_enabled` in `APData` (see Menu Toggle State above). The client should watch those fields and forward changes to the AP server so server-side membership (DeathLink tag, TrapLink/EnergyLink participation) tracks the player's current choice.
-
 ## Protocol Rules
 
 Almost every shared field follows one rule: **exactly one side writes, the other side reads and clears.** Aligned 32-bit reads and writes are atomic on the GameCube's PowerPC processor, so no locking is needed for 32-bit fields. 64-bit fields are not atomic; see the APData Layout note for the torn-read risk on `energy_balance` / `energy_sent_total`.
@@ -246,8 +238,6 @@ The one exception is `energy_sent_total` (see EnergyLink below): it is a **singl
 
 ## Item Delivery
 
-### Overview
-
 Item receipt and application are decoupled. When the game reads an item from the mailbox, it immediately acknowledges receipt by incrementing `item_received_index` and adds the item to an unprocessed list in save data. Items are applied from the unprocessed list when their conditions are met, and items that can't apply yet (e.g., an event while another event is active) are skipped so that items behind them can still process.
 
 ### Client Responsibilities
@@ -265,11 +255,11 @@ Item receipt and application are decoupled. When the game reads an item from the
    - Increment `item_received_count` and sync it to `item_received_index` in shared memory
    - Clear the mailbox to `0`
    - **Exception — queue full:** if `unprocessed_items` is already at capacity (`MAX_RECEIVED_ITEMS`), the game does **not** clear the mailbox and does **not** increment `item_received_count`. It leaves `incoming_item_id` set so the same item is retried each frame as the list drains. This is the protocol's backpressure: because the client gates its next write on `incoming_item_id == 0` and only advances its send cursor after a successful write, holding the value stalls the client safely. Clearing it would lose the item permanently — the client has already advanced past it and `item_received_count` was never bumped for it.
-2. **Every frame**: Scan the `unprocessed_items` list and attempt to apply the first item whose conditions are met:
-   - Scene-independent items (checkbox fillers, patch cap increase, checklist rewards, stadium unlocks) apply immediately.
-   - All other items require the game to be in a 3D scene (`MJRKIND_CITY`, `MJRKIND_AIR`, or `MJRKIND_TOP`) with the intro countdown finished (`GmIntroState == GMINTRO_END`).
+2. **Every frame**: Scan the `unprocessed_items` list and attempt to apply the first item whose conditions are met (`APItems_HandleItem` in `ap_item_handler.c`):
+   - Scene-independent items apply immediately: checkbox fillers, patch cap increase, spawn rate up, checklist rewards, permanent patches, every `*_UNLOCK_` category, the Top Ride item gives, and the cosmetic scale items. (The last two run their own scene checks and return retry until Top Ride / a Kirby model exists.)
+   - Everything else requires major `MJRKIND_CITY` / `MJRKIND_AIR` / `MJRKIND_TOP`, minor `MNRKIND_3D`, and `Gm_GetIntroState() == GMINTRO_END`. The minor check matters: the CSS shares the major, and `intro_state` reads `GMINTRO_END` outside 3D. City Trial Free Run and stadiums are excluded too — they don't load the item data tables, so the spawn pipeline would fault in `Item_GetItDataPtr`.
    - If an item can't apply (e.g., event blocked), it is skipped and the next item is tried.
-3. **On successful application**: Remove the item from the `unprocessed_items` list.
+3. **On resolution**: remove the item from `unprocessed_items` (swap-with-last). Both "applied" and "dropped" (unrecognized or out-of-range ID) remove it; only "retry" keeps it queued, so a malformed ID can't wedge the queue.
 
 ### AP Item ID Map
 
@@ -282,15 +272,16 @@ These IDs must match between the APWorld Python code and the game mod (defined a
 | 1   | `AP_ITEM_CHECKBOX_FILLER_AIRRIDE` | `Checklist_GrantFiller(GMMODE_AIRRIDE)` — grants a checkbox filler for Air Ride |
 | 2   | `AP_ITEM_CHECKBOX_FILLER_TOPRIDE` | `Checklist_GrantFiller(GMMODE_TOPRIDE)` — grants a checkbox filler for Top Ride |
 | 3   | `AP_ITEM_CHECKBOX_FILLER_CITYTRIAL` | `Checklist_GrantFiller(GMMODE_CITYTRIAL)` — grants a checkbox filler for City Trial |
-| 4   | `AP_ITEM_PATCH_CAP_INCREASE` | `PatchCap_Increment()` — raises the patch cap by 1 |
-| 5   | `AP_ITEM_1_HP_TRAP`        | Damage every human player's machine to 1 HP |
-| 6   | `AP_ITEM_ALL_UP`           | `Patch_AllUp_GiveItem(+1)` — raise every stat by 1 for each human player |
-| 7   | `AP_ITEM_PERM_PATCH_ALL_UP`| `PermanentPatch_GiveAllUp()` — permanent +1 to all stats, increments every `ap_save->permanent_patches[]` slot |
-| 8   | `AP_ITEM_ALL_DOWN`         | `Patch_AllUp_GiveItem(-1)` — drop every stat by 1 for each human player |
-| 9   | `AP_ITEM_GIVE_DRAGOON`     | `GateMachines_GiveLegendaryMachine(0)` — assembles the Dragoon for the player (cinematic legendary-machine grant, not the three individual parts) |
-| 10  | `AP_ITEM_GIVE_HYDRA`       | `GateMachines_GiveLegendaryMachine(1)` — assembles the Hydra for the player (cinematic legendary-machine grant, not the three individual parts) |
-| 11  | `AP_ITEM_SPAWN_RATE_UP`    | `SpawnRate_Increment()` — adds +10% to the CT/TR item spawn rate scale (capped at 5×) |
-| 12  | `AP_ITEM_DROP_PATCHES_TRAP`| `Patch_DropTrap()` — ejects every human rider's equipped stat patches behind the machine (CT only) |
+| 4   | `AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO` | `Checklist_GrantFiller(ap_checklist_mode)` — filler for the synthetic AP checklist tab. Dropped if the custom_checklist framework never registered the tab. |
+| 5   | `AP_ITEM_PATCH_CAP_INCREASE` | `PatchCap_Increment()` — raises the patch cap by 1 |
+| 6   | `AP_ITEM_1_HP_TRAP`        | Damage every human player's machine to 1 HP |
+| 7   | `AP_ITEM_ALL_UP`           | `Patch_AllUp_GiveItem(+1)` — raise every stat by 1 for each human player |
+| 8   | `AP_ITEM_PERM_PATCH_ALL_UP`| `PermanentPatch_GiveAllUp()` — permanent +1 to all stats, increments every `ap_save->permanent_patches[]` slot |
+| 9   | `AP_ITEM_ALL_DOWN`         | `Patch_AllUp_GiveItem(-1)` — drop every stat by 1 for each human player |
+| 10  | `AP_ITEM_GIVE_DRAGOON`     | `GateMachines_GiveLegendaryMachine(0)` — assembles the Dragoon for the player (cinematic legendary-machine grant, not the three individual parts) |
+| 11  | `AP_ITEM_GIVE_HYDRA`       | `GateMachines_GiveLegendaryMachine(1)` — assembles the Hydra for the player (cinematic legendary-machine grant, not the three individual parts) |
+| 12  | `AP_ITEM_SPAWN_RATE_UP`    | `SpawnRate_Increment()` — adds +10% to the CT/TR item spawn rate scale (capped at 5×) |
+| 13  | `AP_ITEM_DROP_PATCHES_TRAP`| `Patch_DropTrap()` — ejects every human rider's equipped stat patches behind the machine (CT only) |
 
 **Permanent +1 patches (100-108, aligned to PatchKind):**
 
@@ -380,6 +371,7 @@ These items unlock gated game features. Each category uses a bitmask in save dat
 |----------|------|-------------|----------|-------|------------|
 | 700-715 | 700 | `AP_EVENT_UNLOCK_` | City Trial events (aligned to EventKind) | 16 | `event_unlocked_mask` |
 | 760-770 | 760 | `AP_ABILITY_UNLOCK_` | Copy abilities (aligned to CopyKind) | 11 | `ability_unlocked_mask` |
+| 771-773 | 771 | `AP_BASE_ABILITY_UNLOCK_` | Kirby's base moves — inhale, quick spin, charge (aligned to `BaseAbilityKind`) | 3 | `base_ability_unlocked_mask` |
 | 780-788 | 780 | `AP_PATCH_UNLOCK_` | Patch types (aligned to PatchKind) | 9 | `patch_unlocked_mask` |
 | 790-819 | 790 | `AP_ITEM_UNLOCK_` | Item groups (aligned to ItemUnlockKind, `ITUNLOCK_NUM` = 30) | 30 | `item_unlocked_mask` |
 | 830-854 | 830 | `AP_MACHINE_UNLOCK_` | Machines (aligned to VCKIND, contiguous — see note) | 25 | `machine_unlocked_mask` |
@@ -412,18 +404,23 @@ AP item ID = `950 + TopRideItemKind` value. Applies the matching Top Ride item d
 |----------|-------|
 | 950-971 | Hammer, Big Cake, Speed Up, Speed Down, Spinner, Charge Tank, Invincible Candy, Buzz Saw, Drill, Freeze Fan, Missile, Fire, Party Ball (alt), Bomb, Step-Boom, Lantern, Walky, Kracko, Who? Paint, Smokescreen, Chickie, Party Ball |
 
+**Cosmetic items (972-973):**
+
+Not unlocks and not gated, so they carry no game-enum alignment. Handled by `KirbyScale_HandleItem` above the 3D-scene gate, since they also apply in Top Ride; it returns retry until Kirby models exist.
+
+| ID  | Enum Name             | Game Behavior |
+|-----|-----------------------|---------------|
+| 972 | `AP_ITEM_BIG_KIRBY`   | Scale every human Kirby model by ×1.5, clamped to 2.0 |
+| 973 | `AP_ITEM_SMALL_KIRBY` | Scale every human Kirby model by ×0.5, clamped to 0.5 |
+
 **Machine unlock note:** The range covers VCKINDs 0–24 (IDs 830–854). VCKIND 25 (WHEELVSDEDEDE) is the Vs. King Dedede stadium's CPU-only machine — it is omitted from the AP item range entirely; ID 855 is rejected by the mod handler and is not a valid machine unlock.
 
 The AP world (`worlds/kirby_air_ride/KARItems.py`) generates an unlock item for **all 25 in-range IDs (830–854)** as `progression`; only 855 is excluded. Two caveats for modders:
 
-- **Top Ride machines are live gates, not placeholders:** 845 (FREE) and 846 (STEER) are read by the mod's Top Ride lobby gating (`GateMachines_TRLobbyCanStart` / `IsTRMachineUnlocked`, in `gate_machines.c`). The mod **hard-blocks** starting a Top Ride race unless at least one is unlocked. In the apworld they're tagged `source_modes=_TR` (they're Top Ride control machines — they don't spawn in City Trial via `CT_SPAWN_EXCLUDED_MASK`, and aren't Air Ride machines), and a **guaranteed Top Ride machine starter** (one of Free/Steer, precollected when `machines_gated` + Top Ride) keeps the gate satisfiable in every seed config. When `machine_gating_enabled == 0`, the mod sets the whole machine mask (`(1u << VCKIND_NUM) - 1`, bits 0–25 incl. Free/Steer) at connect, so the Top Ride lobby is freely startable.
+- **Top Ride machines are live gates, not placeholders:** 845 (FREE) and 846 (STEER) are read by the mod's Top Ride lobby gating (`GateMachines_TRLobbyCanStart` / `IsTRMachineUnlocked`, in `gate_machines.c`). The mod **hard-blocks** starting a Top Ride race unless at least one is unlocked. In the apworld they're tagged `source_modes=_TR` (they're Top Ride control machines — they don't spawn in City Trial via `CT_SPAWN_EXCLUDED_MASK`, and aren't Air Ride machines), and a **guaranteed Top Ride machine starter** (one of Free/Steer, precollected when `machines_gated` + Top Ride) keeps the gate satisfiable in every seed config — AP logic doesn't model the lobby gate, so without the precollect the `_TR`-confined unlocks could land behind it (circular placement / Top-Ride-only softlock). Free/Steer are also excluded from the AR/CT machine starter pool, since they can't be ridden there. When `machine_gating_enabled == 0`, the mod sets the whole machine mask (`(1u << VCKIND_NUM) - 1`, bits 0–25 incl. Free/Steer) at connect, so the Top Ride lobby is freely startable.
 - **A few bits are cosmetic in-game:** 847 (WINGKIRBY), 849 (WHEELNORMAL), 850 (WHEELKIRBY) are set by their unlock items but read by no game code — no character rides them in player-controlled contexts, and they are force-excluded from City Trial spawns (`CT_SPAWN_EXCLUDED_MASK`). The items still exist for AP logic, but the grant has no in-game effect. The canonical Dedede unlock is 854 (WHEELDEDEDE), which is what `CharacterDesc[CKIND_DEDEDE]` resolves to.
 
-> **Resolved (was Q3, apworld side):** Free (845) / Steer (846) are now tagged `source_modes=_TR` in `KARItems.py` (they're Top Ride machines, not `_AR_CT`). Because the mod hard-gates the Top Ride lobby on Free/Steer and AP logic doesn't model that gate, the apworld also precollects a **guaranteed Top Ride machine starter** (one of Free/Steer when `machines_gated` + Top Ride) so the `_TR`-confined unlocks always sit on reachable Top Ride locations — no circular placement, no Top-Ride-only softlock. Free/Steer are also excluded from the AR/CT machine starter pool (they can't be ridden there). See `doc-review-tracking.md`.
-
 ## Location Data
-
-### Concept
 
 In Archipelago, each checkbox in the game's three checklists is a **location**. The multiworld generator decides what *item* is placed at each location. From this slot's perspective:
 
@@ -464,7 +461,7 @@ Remote rewards and cross-mode source rows never read or write a same-mode placem
 
 ### Cross-Mode Reward Display
 
-Vanilla rewards can be shuffled across modes (e.g., an Air Ride reward appearing on a City Trial checkbox). `cross_mode_slots[3][120]` maps `(target_mode, clear_kind)` → `(source_mode, source_reward_index)`, populated during the per-cell rebuild above. All three checklist SIS files are loaded simultaneously so reward text and icons from any mode can be displayed. See `checklist_rewards.c` for implementation.
+Vanilla rewards can be shuffled across modes (e.g., an Air Ride reward appearing on a City Trial checkbox). `cross_mode_slots[4][120]` maps `(target_mode, clear_kind)` → `(source_mode, source_reward_index)`, populated during the per-cell rebuild above. All three checklist SIS files are loaded simultaneously so reward text and icons from any mode can be displayed. See `checklist_rewards.c` for implementation.
 
 ### How Local Rewards Are Displayed
 
@@ -479,18 +476,18 @@ Local non-vanilla items (fillers, traps, gating unlocks) are not part of the `lo
 
 When a player completes a checkbox, that location needs to be reported to the AP server so the item placed there can be delivered to whoever owns it.
 
-The mod is the source of truth: it owns a `sent_checks[3][2]` bitmask in shared memory and in save data. The client polls the bitmask, diffs against last-seen state, and sends new checks to the AP server. **The client never reads `GameClearData.clear[]` directly.**
+The mod is the source of truth: it owns a `sent_checks[4][2]` bitmask in shared memory and in save data. The client polls the bitmask, diffs against last-seen state, and sends new checks to the AP server. **The client never reads `GameClearData.clear[]` directly.**
 
 ### Client Responsibilities
 
 1. **On connect**:
-   - Read `sent_checks[3][2]` and `goal_complete` from `APData`.
-   - For each set bit in `sent_checks`, decode `(mode, clear_kind)` and look up the AP location code via the per-world checklist mappings (see `docs/checklist-mappings.csv`). Send each as a location check (the AP server dedupes against its existing record).
+   - Read `sent_checks[4][2]` and `goal_complete` from `APData`.
+   - For each set bit in `sent_checks`, decode `(mode, clear_kind)` and look up the AP location code via the per-world checklist mappings in `checklist-mappings.csv`. Send each as a location check (the AP server dedupes against its existing record).
    - If `goal_complete == 1`, send the victory message.
    - Compute the diff between AP server's `checked_locations` for this slot and the bits that are set in `sent_checks`. For any locations the server knows about that the mod does not (e.g., fresh save / slot takeover), write those bits into `client_backfill` so the mod can mark them as completed locally.
 
 2. **Steady state (poll cadence is flexible — 1 Hz is fine)**:
-   - Read `sent_checks[3][2]` and diff against the last-known state. For each newly set bit, send the corresponding location check.
+   - Read `sent_checks[4][2]` and diff against the last-known state. For each newly set bit, send the corresponding location check.
    - Read `goal_complete`. If newly set, forward victory.
    - Watch the AP server's `RoomUpdate` events for `checked_locations` updates (e.g., from `!collect`). For any new entries the mod doesn't know about, write them into `client_backfill`.
 
@@ -517,7 +514,7 @@ The mod evaluates the goal condition mod-side using `ap_save->options` (the slot
 | `GOAL_HYDRA_AND_DRAGOON` | Single bit `0x77` set in `sent_checks[CT]` (the native "complete both Dragoon and Hydra in one match" cell). **Not** bits `0x6D`/`0x6E` — those are the separate part-unlock cells. |
 | `GOAL_BEAT_KING_DEDEDE` | Bit `0x2F` set in `sent_checks[CT]` |
 | `GOAL_CHECKLIST_LIST` | `(sent_checks[mode] & goal_checks[mode]) == goal_checks[mode]` — all required bits set |
-| `GOAL_MAX_STATS_CT` | Sticky save bit `max_stats_ct_achieved`; set when any human player's 9 CT stats simultaneously reach the runtime patch-cap target (`city_trial_patch_cap_amount`, 1–127 — **not** `PATCH_STAT_MAX`, which is the absolute clamp ceiling of 127) during a `CITYMODE_TRIAL` round. Stadium and Free Run do not count. With `city_trial_progressive_patch_caps` enabled, the player must receive enough Patch Cap Increase items to make the target reachable. |
+| `GOAL_MAX_STATS_CT` | Sticky save bit `max_stats_ct_achieved`; set when any human player's 9 CT stats simultaneously reach the patch-cap ceiling (`city_trial_patch_cap_max`, 1–127 — **not** `PATCH_STAT_MAX`, which is the absolute clamp ceiling of 127) during a `CITYMODE_TRIAL` round. Stadium and Free Run do not count. When `min < max`, the player must first receive every Patch Cap Increase item to make the ceiling reachable. |
 
 Victory fires only if at least one mode has a non-NONE goal AND every mode's goal is satisfied. Mode goals are independent — set `*_goal = GOAL_NONE` for modes that should not contribute to victory.
 
@@ -548,28 +545,28 @@ The AP server stores the EnergyLink pool in **integer Joules**. The mod side sto
 ### Client Responsibilities
 
 - **Processing sends**: `energy_sent_total` (signed s64, raw MJ) is a **game-owned cumulative counter** — read-and-diff it, never write it. Handle this **before** updating the balance (below); the ordering is what closes the overdraw window.
-  - **Seeding / restart detection**: maintain a `last_seen` watermark, **re-seeded** (record the current value, apply nothing) whenever a fresh game session starts — on connect, on a struct-pointer change at `0x805d52d4`, and on a `game_ready` 1→0 transition. The mod sets `game_ready` once in `OnBoot` and never clears it during play, so the reboot `memset` zeroing it (observing 0 after 1) is the restart signal. Do **not** persist `last_seen` across sessions — the counter resets to 0 each boot, so a persisted watermark would turn the boot's `N→0` drop into a phantom withdrawal. (There is no magnitude backstop: a small reset-to-0 is indistinguishable from ordinary spending, so the client relies on the `game_ready` signal alone.)
+  - **Seeding / restart detection**: maintain a `last_seen` watermark, **re-seeded** (record the current value, apply nothing) whenever a fresh game session starts — on connect, on a struct-pointer change at `0x805d52d4`, and on a `game_ready` 1→0 transition. The mod sets `game_ready` once in `OnSaveLoaded` and never clears it during play, so the reboot `memset` zeroing it (observing 0 after 1) is the restart signal. Do **not** persist `last_seen` across sessions — the counter resets to 0 each boot, so a persisted watermark would turn the boot's `N→0` drop into a phantom withdrawal. (There is no magnitude backstop: a small reset-to-0 is indistinguishable from ordinary spending, so the client relies on the `game_ready` signal alone.)
   - **Each poll (~1s)**: `cur = read(energy_sent_total)`, `delta = cur − last_seen`.
     - `delta == 0`: nothing to send.
     - `delta > 0` (deposit): send `Set` with `add: delta * 1_000_000` and no tag.
     - `delta < 0` (withdrawal): send `Set` with operations `[add: delta * 1_000_000, max: 0]`, plus a unique `tag` (uuid) and `want_reply: true`. On the matching `SetReply`, compare `original_value - value` against the requested subtraction; if the server actually subtracted less (pool ran out), log the discrepancy — the mod's local balance already overshot and will be corrected on the next `set_notify` push.
     - Advance `last_seen = cur` after handling the delta, then **optimistically** fold the delta into the cached pool: `current_energy_link_value = max(0, current_energy_link_value + delta_joules)`. See "Updating balance" for why.
   - **Optional torn-read guard:** read the field twice and skip the poll if the two reads disagree. Belt-and-suspenders only — because the counter is cumulative (not consume-once), an unguarded torn read self-heals on the very next poll's diff.
-- **Updating balance**: **After** processing sends, write the current AP EnergyLink pool total (in raw MJ — `pool_joules // 1_000_000`) to `energy_balance` as a u64, **unconditionally** every poll (so seed polls, `delta==0` polls, and other players' deposits all keep the mod's pool view fresh). Sub-MJ remainders aren't representable on the mod side and are dropped.
-  - **Why order + optimistic fold matter (overdraw fix):** the balance is sourced from `current_energy_link_value` (the last server-pushed pool). If the balance were written *before* the diff — or without folding in the just-sent delta — it would bounce the mod's immediate local decrement (from a purchase) back up to the stale pre-purchase pool. Across the ~1–2 poll server round-trip the affordability gate would then see a stale-high balance and permit a **self-induced overdraw**. Processing the send first and applying the `max(0, value + delta_joules)` optimistic update makes the balance reflect the spend *now*. The optimistic guess is harmless: `set_notify`'s `SetReply` reassigns `current_energy_link_value` to the server's **absolute** pool value on every change, overwriting the guess with no double-count. Residual: a *concurrent shared-pool change by another player* still leaves the value off by ≤1 poll until the next absolute push — the irreducible shared-pool race.
+- **Updating balance**: **After** processing sends, write the current AP EnergyLink pool total (in raw MJ — `pool_joules // 1_000_000`) to `energy_balance` as an s64, **unconditionally** every poll (so seed polls, `delta==0` polls, and other players' deposits all keep the mod's pool view fresh). Sub-MJ remainders aren't representable on the mod side and are dropped.
+  - **Why order + optimistic fold matter (overdraw prevention):** the balance is sourced from `current_energy_link_value` (the last server-pushed pool). If the balance were written *before* the diff — or without folding in the just-sent delta — it would bounce the mod's immediate local decrement (from a purchase) back up to the stale pre-purchase pool. Across the ~1–2 poll server round-trip the affordability gate would then see a stale-high balance and permit a **self-induced overdraw**. Processing the send first and applying the `max(0, value + delta_joules)` optimistic update makes the balance reflect the spend *now*. The optimistic guess is harmless: `set_notify`'s `SetReply` reassigns `current_energy_link_value` to the server's **absolute** pool value on every change, overwriting the guess with no double-count. Residual: a *concurrent shared-pool change by another player* still leaves the value off by ≤1 poll until the next absolute push — the irreducible shared-pool race.
 - **`set_notify`**: Subscribe to `EnergyLink{team}` once on connect. The standard CommonClient handler updates `current_energy_link_value` from each broadcast SetReply (to the server's absolute pool value).
 
 ### Game Responsibilities
 
 - **Generating energy**: Accumulates energy locally from destroyed objects, collected patches, and machine charging. Sub-MJ precision is kept in a float carry (charge gain produces fractional MJ per frame); whenever the carry crosses a whole MJ, that whole part is *added* to `energy_sent_total` and the remainder rolls forward. No flush and no slot check — the counter is written directly and the client diffs it.
-- **Spending energy**: When the player purchases an item via the in-game EnergyLink menu, subtracts the (integer) cost directly from both `energy_sent_total` (the client diffs it and forwards the withdrawal) and the local `energy_balance` (immediate UI feedback). This happens on the purchase event itself in **any** scene — no gameplay frame or flush is required, which is why menu purchases now reliably reach the pool. Auto-Charge's per-frame fractional withdrawals fold into the same `energy_sent_total` carry.
+- **Spending energy**: When the player purchases an item via the in-game EnergyLink menu, subtracts the (integer) cost directly from both `energy_sent_total` (the client diffs it and forwards the withdrawal) and the local `energy_balance` (immediate UI feedback). This happens on the purchase event itself in **any** scene — no gameplay frame or flush is required, so menu purchases reliably reach the pool. Auto-Charge's per-frame fractional withdrawals fold into the same `energy_sent_total` carry.
 
 ## TrapLink
 
 ### Client Responsibilities
 
 - **Receiving traps**: When the AP server sends a trap to this player, wait until `traplink_receive == 0`, then write `1`. The incoming Bounce's `trap_name` field is **ignored** — KAR applies a random local trap from its own pool (see "Game Responsibilities" below) regardless of which named trap the source world sent. This is a deliberate design choice: KAR's trap pool doesn't have a clean 1:1 mapping to other worlds' trap names, so we treat any incoming TrapLink Bounce as "apply some trap locally."
-- **Sending traps**: Watch `traplink_send`. When it becomes non-zero, read the value as a `TrapLinkKind` enum (see below), look up the corresponding `trap_name` string, send a TrapLink Bounce to the AP server with `{"time", "source", "trap_name"}`, then clear `traplink_send` to `0`. The game may set the field multiple times in quick succession (e.g., picking up several bad items from one box burst). The client is responsible for debouncing — it should not forward every set as a separate trap. The game has no send cooldown.
+- **Sending traps**: Watch `traplink_send`. When it becomes non-zero, read the value as a `TrapLinkKind` enum (see below), look up the corresponding `trap_name` string, send a TrapLink Bounce to the AP server with `{"time", "source", "trap_name"}`, then clear `traplink_send` to `0` — one Bounce per non-zero read. The game has no send cooldown, but the field is a single `u32` rather than a queue, so several triggers inside one poll window (e.g. picking up multiple bad items from one box burst) collapse into the last kind written. No further client-side debounce is needed.
 
 ### `traplink_send` kind enum
 
@@ -591,16 +588,17 @@ Unknown kinds (future additions seen by older clients) should fall back to a gen
   - **Air Ride**: gives `COPYKIND_SLEEP` to every human rider directly via `Rider_GiveAbility`.
   - **Top Ride**: applies `TRITEM_SPEED_DOWN` directly to every human Kirby via the shared item-give path (`GateTopRideItems_GiveItem` → `TopRide_KirbyApplyItem`) — a direct apply, not a position spawn.
 
-  If the trap can't apply (e.g., event slot busy), it retries next frame. Once applied, clears the flag to `0`. See `docs/traplink-send.md` for the full dispatch table.
+  If the trap can't apply (e.g., event slot busy), it retries next frame. Once applied, clears the flag to `0`. See `traplink-send.md` for the full dispatch table.
 - **Detecting traps**: Code hooks detect natural negative gameplay events and set `traplink_send` to the corresponding `TrapLinkKind` value. Current triggers map to the enum above.
 
   AP-delivered items may also trigger the flag (e.g., a received SPEEDMIN trap re-fires the bad-patch hook); the client must handle deduplication.
 - **Receive recursion guard**: After applying an *incoming* trap, the mod suppresses *outgoing* sends for ~120 frames (`recv_suppress_frames`). This stops a received trap whose effect re-fires a send hook (e.g. an applied bad-patch tripping the bad-patch send detector) from echoing straight back out as a new Bounce. It is a recursion guard, not a rate-limit — burst collapsing and dedup of distinct logical traps are still the client's responsibility.
 
-## Important Notes
+## Invariants
 
 - **ID 0 is reserved** as the "empty" sentinel for `incoming_item_id`. Never use 0 as a valid AP item ID.
 - **Items can process out of order.** If an item can't apply (e.g., an event while another is active), it is skipped and items behind it can still be applied. The unprocessed list shrinks as items are applied.
 - **`item_received_index` reflects receipt, not application.** It increments as soon as an item is read from the mailbox, before the item is applied. The client should use this to avoid re-sending items.
 - **The unprocessed item list persists in save data.** `unprocessed_items` is stored on the memory card and survives reboots, so items received but not yet applied (e.g., player powered off before an event item could fire) are retained. `item_received_count` is also persisted and mirrored to `item_received_index` on boot so the client can resume sending from the right position.
 - **One item per frame.** The game applies at most one item from the unprocessed list per frame (60 items/sec max throughput). The client can write to the mailbox as fast as the game clears it.
+- **Queue capacity is `MAX_RECEIVED_ITEMS` (512).** In-game EnergyLink purchases share the same queue, so a player can fill it without the client sending anything.

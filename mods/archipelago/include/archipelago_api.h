@@ -1,23 +1,25 @@
 #ifndef ARCHIPELAGO_API_H
 #define ARCHIPELAGO_API_H
 
-#include "game.h"  // GameMode, datatypes (u8/u16/u32)
+#include "game.h"
 
-// API version: bump major on breaking changes, minor on additions.
-#define ARCHIPELAGO_API_MAJOR 2
+// Bump major on breaking changes, minor on additions.
+#define ARCHIPELAGO_API_MAJOR 3
 #define ARCHIPELAGO_API_MINOR 0
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
 
-// AP Item IDs - must match the IDs defined in the APWorld Python code.
+// AP item IDs - must match the IDs defined in the APWorld Python code.
 // ID 0 is reserved as the "empty" sentinel for the mailbox.
 typedef enum APItemId
 {
-    // Standalone items (1-99)
+    // Standalone items (1-99). The 4 checkbox fillers lead, one per checklist
+    // mode, in checklist-mode row order.
     AP_ITEM_CHECKBOX_FILLER_AIRRIDE = 1,
     AP_ITEM_CHECKBOX_FILLER_TOPRIDE,
     AP_ITEM_CHECKBOX_FILLER_CITYTRIAL,
+    AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO,
     AP_ITEM_PATCH_CAP_INCREASE,
     AP_ITEM_1_HP_TRAP,
     AP_ITEM_ALL_UP,
@@ -326,6 +328,13 @@ typedef enum APItemId
     AP_ABILITY_UNLOCK_TORNADO,             // COPYKIND_TORNADO
     AP_ABILITY_UNLOCK_BIRD,                // COPYKIND_BIRD
 
+    // Base ability unlock items (771-773, aligned to BaseAbilityKind). Kirby's
+    // fundamental moves are dead until their unlock is received.
+    AP_BASE_ABILITY_UNLOCK_BASE = 771,
+    AP_BASE_ABILITY_UNLOCK_INHALE = 771,   // BASEABILITY_INHALE
+    AP_BASE_ABILITY_UNLOCK_QUICKSPIN,      // BASEABILITY_QUICKSPIN
+    AP_BASE_ABILITY_UNLOCK_CHARGE,         // BASEABILITY_CHARGE
+
     // Patch type unlock items (780-788, aligned to PatchKind)
     AP_PATCH_UNLOCK_BASE = 780,
     AP_PATCH_UNLOCK_WEIGHT = 780,          // PATCHKIND_WEIGHT
@@ -372,9 +381,8 @@ typedef enum APItemId
     AP_ITEM_UNLOCK_DRAGOON3,               // ITUNLOCK_DRAGOON3
 
     // Machine unlock items (830-854, aligned to MachineKind).
-    // VCKIND_WHEELVSDEDEDE (would be 855) is intentionally NOT exposed: it is
-    // the Vs. King Dedede stadium's CPU-only machine, no character can ride it
-    // in player-controlled contexts, and no game code reads its unlock bit.
+    // VCKIND_WHEELVSDEDEDE (would be 855) is not exposed: it is the Vs. King
+    // Dedede stadium's CPU-only machine and no game code reads its unlock bit.
     AP_MACHINE_UNLOCK_BASE = 830,
     AP_MACHINE_UNLOCK_WARP = 830,          // VCKIND_WARP
     AP_MACHINE_UNLOCK_COMPACT,             // VCKIND_COMPACT
@@ -442,10 +450,9 @@ typedef enum APItemId
     AP_STAGE_UNLOCK_METAL,                 // TOPRIDE_METAL
 
     // Top Ride item unlock items (900-921, aligned to TopRideItemKind).
-    // PARTY_BALL_ALT (912) and PARTY_BALL (921) are both Party Ball variants in
-    // the engine (KirbyKusdama and KirbyUshiroyurerun). AP exposes only one
-    // Party Ball at slot 21; the mod mirrors bit 21's unlock state onto
-    // bit 12 so both spawn together. AP never sends item id 912 directly.
+    // PARTY_BALL_ALT (912) and PARTY_BALL (921) are both engine Party Ball
+    // variants. AP exposes only slot 21; the mod mirrors bit 21's unlock onto
+    // bit 12 so both spawn together, and AP never sends 912 directly.
     AP_TOPRIDE_ITEM_UNLOCK_BASE = 900,
     AP_TOPRIDE_ITEM_UNLOCK_HAMMER = 900,        // TRITEM_HAMMER
     AP_TOPRIDE_ITEM_UNLOCK_BIG_CAKE,            // TRITEM_BIG_CAKE
@@ -459,7 +466,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_FREEZE_FAN,          // TRITEM_FREEZE_FAN
     AP_TOPRIDE_ITEM_UNLOCK_MISSILE,             // TRITEM_MISSILE
     AP_TOPRIDE_ITEM_UNLOCK_FIRE,                // TRITEM_FIRE
-    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL_ALT,      // TRITEM_PARTY_BALL_ALT - kusdama variant; unused by AP, see header comment above
+    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL_ALT,      // TRITEM_PARTY_BALL_ALT - kusdama variant, not sent by AP
     AP_TOPRIDE_ITEM_UNLOCK_BOMB,                // TRITEM_BOMB
     AP_TOPRIDE_ITEM_UNLOCK_STEP_BOOM,           // TRITEM_STEP_BOOM
     AP_TOPRIDE_ITEM_UNLOCK_LANTERN,             // TRITEM_LANTERN
@@ -470,9 +477,8 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_CHICKIE,             // TRITEM_CHICKIE
     AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL,          // TRITEM_PARTY_BALL - ushiroyurerun variant; canonical Party Ball AP unlock
 
-    // Top Ride item give items (950-971, aligned to TopRideItemKind).
-    // Spawns the matching TR item at each human Kirby's position so it's
-    // collected on the next frame. Only effective in a Top Ride scene.
+    // Top Ride item give items (950-971, aligned to TopRideItemKind). Only
+    // effective in a Top Ride scene.
     AP_TOPRIDE_ITEM_GIVE_BASE = 950,
     AP_TOPRIDE_ITEM_GIVE_HAMMER = 950,          // TRITEM_HAMMER
     AP_TOPRIDE_ITEM_GIVE_BIG_CAKE,              // TRITEM_BIG_CAKE
@@ -486,7 +492,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_FREEZE_FAN,            // TRITEM_FREEZE_FAN
     AP_TOPRIDE_ITEM_GIVE_MISSILE,               // TRITEM_MISSILE
     AP_TOPRIDE_ITEM_GIVE_FIRE,                  // TRITEM_FIRE
-    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT,        // TRITEM_PARTY_BALL_ALT - kusdama variant; unused by AP, see header comment above
+    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT,        // TRITEM_PARTY_BALL_ALT - kusdama variant, not sent by AP
     AP_TOPRIDE_ITEM_GIVE_BOMB,                  // TRITEM_BOMB
     AP_TOPRIDE_ITEM_GIVE_STEP_BOOM,             // TRITEM_STEP_BOOM
     AP_TOPRIDE_ITEM_GIVE_LANTERN,               // TRITEM_LANTERN
@@ -497,18 +503,15 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_CHICKIE,               // TRITEM_CHICKIE
     AP_TOPRIDE_ITEM_GIVE_PARTY_BALL,            // TRITEM_PARTY_BALL - ushiroyurerun variant; canonical Party Ball AP give
 
-    // Cosmetic all-mode filler (972-973). Scale the player's Kirby model on
-    // receipt, applied live in City Trial, Air Ride, and Top Ride, and reset
-    // on scene change. Not an unlock and not gated, so they carry no game-enum
-    // alignment. Must match the APWorld's BIG_KIRBY / SMALL_KIRBY item codes.
+    // Cosmetic all-mode filler (972-973). Not unlocks and not gated, so they
+    // carry no game-enum alignment.
     AP_ITEM_BIG_KIRBY = 972,                    // grow Kirby's model
     AP_ITEM_SMALL_KIRBY,                        // shrink Kirby's model
 
 } APItemId;
 
-// Archipelago-defined unlock kinds whose bit indices live in the masks below
-// but are not part of any vanilla game enum. Public so the debug mod (and
-// future API consumers) can index into the matching unlock category.
+// Archipelago-defined unlock kinds whose bit indices live in the masks below but
+// are not part of any vanilla game enum.
 typedef enum ItemUnlockKind
 {
     ITUNLOCK_ALLUP,
@@ -544,10 +547,20 @@ typedef enum ItemUnlockKind
     ITUNLOCK_NUM,
 } ItemUnlockKind;
 
-// Categories for the unlock-mask getter/setter pair below. Each backs a
-// bitmask field on archipelago's per-mod save (machine_unlocked_mask,
-// ability_unlocked_mask, etc.). Masks narrower than 32 bits return
-// zero-extended; SetUnlockMask truncates back to the underlying width.
+// Archipelago-defined base-ability kinds - Kirby's fundamental moves gated
+// behind AP items. Not a vanilla game enum; index N = bit N in
+// base_ability_unlocked_mask.
+typedef enum BaseAbilityKind
+{
+    BASEABILITY_INHALE,
+    BASEABILITY_QUICKSPIN,
+    BASEABILITY_CHARGE,
+    BASEABILITY_NUM,
+} BaseAbilityKind;
+
+// Categories for the unlock-mask getter/setter pair below, one per bitmask field
+// on archipelago's per-mod save. Masks narrower than 32 bits return zero-extended;
+// SetUnlockMask truncates back to the underlying width.
 typedef enum APUnlockCategory
 {
     AP_UNLOCK_MACHINE,         // u32 - VCKIND_*
@@ -561,6 +574,7 @@ typedef enum APUnlockCategory
     AP_UNLOCK_TOPRIDE_ITEM,    // u32 - TRITEM_*
     AP_UNLOCK_COLOR,           // u8  - KIRBYCOLOR_*
     AP_UNLOCK_STADIUM,         // u32 - STKIND_*
+    AP_UNLOCK_BASE_ABILITY,    // u8  - BaseAbilityKind (inhale / quick spin / charge)
     AP_UNLOCK_NUM,
 } APUnlockCategory;
 
@@ -568,64 +582,61 @@ typedef enum APUnlockCategory
 // `Hoshi_ImportMod(ARCHIPELAGO_MOD_NAME, ARCHIPELAGO_API_MAJOR, ARCHIPELAGO_API_MINOR)`.
 typedef struct ArchipelagoAPI
 {
-    // Per-category unlock-bitmask access.
     u32  (*GetUnlockMask)(APUnlockCategory cat);
     void (*SetUnlockMask)(APUnlockCategory cat, u32 mask);
 
-    // Queue an item by AP item ID for normal AP-receipt processing. Returns
-    // 1 if queued, 0 if the queue is full.
+    // Queue an item for normal AP-receipt processing. Returns 1 if queued,
+    // 0 if the queue is full.
     int  (*QueueItem)(int ap_item_id);
 
     // Add to the EnergyLink balance.
     void (*AddEnergy)(float amount);
 
-    // Grant a checklist reward identified by source mode + reward_index. Sets
-    // the AP-received bit and applies the reward to its target cell (which
-    // may be in a different mode for cross-mode placements).
+    // Grant a checklist reward by source mode + reward_index. Sets the
+    // AP-received bit and applies the reward to its target cell, which may be
+    // in a different mode for cross-mode placements.
     void (*GrantReward)(GameMode mode, u8 reward_index);
 
-    // Identify the checklist cell the player is currently hovering. Returns
-    // 1 if a cell is hovered (writes mode/clear_kind), 0 otherwise.
+    // Identify the checklist cell under the cursor. Returns 1 if the cursor is on
+    // a grid cell (writes mode/clear_kind), 0 if no checklist screen is up or the
+    // cursor is off the grid.
     int  (*GetHoveredCell)(u8 *out_mode, u8 *out_clear_kind);
 
-    // Resolve which (source_mode, reward_index) is placed at this checklist
-    // cell, accounting for cross-mode shuffling. Returns 1 if a placement
-    // exists locally, 0 if remote (no local reward).
+    // Resolve which (source_mode, reward_index) is placed at this checklist cell,
+    // accounting for cross-mode shuffling. Returns 1 if a placement exists
+    // locally, 0 if remote.
     int  (*ResolveCell)(u8 mode, u8 clear_kind,
                         u8 *out_src_mode, u8 *out_src_ri);
 
     // Number of reward rows for the given mode. Out-of-range returns 0.
     int  (*GetRewardCount)(GameMode mode);
 
-    // Encoded `shuffled_rewards[mode][index]` for a given (mode, reward_index).
-    // Encoding: high byte = target mode, low byte = target clear_kind, 0xFFFF
-    // = remote (no local placement). Out-of-range inputs return 0xFFFF.
+    // Encoded placement for (mode, reward_index): high byte = target mode, low
+    // byte = target clear_kind, 0xFFFF = remote. Out-of-range returns 0xFFFF.
     u16  (*GetShuffledReward)(GameMode mode, u8 reward_index);
 
     // Player-visible textbox feedback ("All abilities unlocked").
     void (*Textbox)(const char *msg);
 
-    // Debug-only operations. These touch internal AP state (clearchecker
-    // flags, sticky goal bits, ArchipelagoData side-channel fields) that
-    // doesn't decompose into clean primitives - they're stable hooks
-    // exposed so the debug mod doesn't have to reimplement them.
+    // Debug-only operations, touching internal AP state (clearchecker flags,
+    // sticky goal bits, wire side-channel fields) that doesn't decompose into
+    // clean primitives.
 
     // Reveal every checkbox in every mode (visual-only).
     void (*DebugRevealAllChecklists)(void);
 
-    // Fill location_data arrays with a random shuffle. For test builds that
-    // don't have an AP server connected.
+    // Fill location_data arrays with a random shuffle, for test builds with no
+    // AP server connected.
     void (*DebugSimulateLocationData)(void);
 
     // Wipe every checkbox flag, sent_checks bit, and shuffled-rewards entry.
     void (*DebugClearAllChecklistData)(void);
 
-    // Goal/check detection debug ops.
     void (*DebugClearAllSentChecks)(void);
     void (*DebugForceMarkAllChecks)(void);
     void (*DebugTriggerGoalComplete)(void);
 
-    // Simulate AP client side-channel writes (for testing the receive path).
+    // Simulate AP client side-channel writes, for testing the receive path.
     void (*DebugWriteIncomingItem)(int ap_item_id);
     void (*DebugTriggerDeathlinkReceive)(void);
     void (*DebugTriggerTraplinkReceive)(void);

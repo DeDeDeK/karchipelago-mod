@@ -22,18 +22,15 @@ TextBoxSettings textbox_settings = {
     .corner             = TEXTBOX_CORNER_TOP_LEFT,
 };
 
-// Canvas extents and edge padding for corner anchoring. The screen canvas is
-// ortho 640x480 (see hoshi/src/screen_cam.c). MARGIN keeps the textbox stack
-// off the screen edges.
+// The hoshi screen canvas is ortho 640x480; MARGIN keeps the stack off the screen edges.
 #define TEXTBOX_CANVAS_W 640.0f
 #define TEXTBOX_CANVAS_H 480.0f
 #define TEXTBOX_MARGIN   10.0f
 
-// Preset tables. Indexed by the matching settings field.
+// Preset tables, indexed by the matching settings field.
 static const float font_size_scales[] = { 0.30f, 0.40f, 0.55f };
 static const u8    typewriter_dwells[] = { 8, 4, 2 };
-// Extra vertical gap between stacked messages, expressed as a fraction of the
-// rendered text height. Tight=touching, Med/Wide add progressively more space.
+// Extra vertical gap between stacked messages, as a fraction of the rendered text height.
 static const float spacing_extras[] = { 0.0f, 0.25f, 0.5f };
 static const u8    bg_alpha_targets[] = { 0, 100, 200 };
 static const u8    max_visible_caps[] = { 3, 4, 6, 8 };
@@ -41,8 +38,7 @@ static const u16   display_wait_frames[] = { 180, 300, 480 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
-// Bounds-checked accessors so an out-of-range setting can't index past the
-// preset array. Defaults match the Med/Normal preset for each.
+// Bounds-checked accessors, falling back to the Med/Normal preset.
 static float Settings_FontScale(void)
 {
     int i = textbox_settings.font_size;
@@ -92,8 +88,7 @@ static int Settings_Corner(void)
     return i;
 }
 
-// Text* pointers inside each entry are invalidated on scene change and recreated
-// by CreateTextBox_OnSceneChange.
+// Text* pointers inside each entry are invalidated on scene change and recreated afterwards.
 typedef struct
 {
     TextBoxMessage queue[TEXTBOX_QUEUE_SIZE];
@@ -104,19 +99,14 @@ typedef struct
 
 static TextBoxState textbox_state;
 
-// Internal helpers defined lower in the file but referenced before their
-// definition (the per-frame callback and the queue accessors). Everything else
-// is either declared in textbox.h (public) or defined before first use.
 static void            TextBox_PerFrame(GOBJ *g);
 static int             TextBox_Dequeue(TextBoxMessage *text_out);
 static int             TextBoxQueue_IsEmpty(void);
 static int             TextBoxQueue_Count(void);
 static TextBoxMessage *TextBoxQueue_GetAt(int index);
 
-// Byte width of the opcode at a stream position. Char codes (>= 0x20) are
-// 2-byte glyphs; the rest are SIS control opcodes whose sizes mirror text.h's
-// TextCmdOpcode comments. This is the single source of truth shared by the
-// three walkers below, so a newly-learned opcode width only changes one place.
+// Byte width of the opcode at a stream position: char codes (>= 0x20) are 2-byte glyphs, the
+// rest are SIS control opcodes.
 static int Sis_OpWidth(u8 op)
 {
     if (op >= 0x20)
@@ -135,20 +125,15 @@ static int Sis_OpWidth(u8 op)
     }
 }
 
-// A visible glyph is either a 2-byte char code (>= 0x20) or the 1-byte SPACE
-// opcode (0x1a); both advance the typewriter by one.
+// A char code (>= 0x20) and the 1-byte SPACE opcode (0x1a) each advance the typewriter by one.
 static int Sis_IsGlyph(u8 op)
 {
     return op >= 0x20 || op == 0x1a;
 }
 
-// Count visible glyphs (2-byte char codes >= 0x20 and the 1-byte SPACE) in a SIS
-// opcode stream, walking from `start` to the inline 0x00 TERMINATE at the buffer
-// tail. Text_AddSubtext / Text_SetText don't update text->text_end, so we derive
-// the count by scanning the stream ourselves. This matches the engine's final
-// temp.reveal_count (glyphs and SPACE each advance the reveal frontier) and so
-// bounds the typewriter fade-pause. A safety cap guards against runaway scans on
-// malformed data.
+// Text_AddSubtext / Text_SetText don't update text->text_end, so the glyph count is derived by
+// walking the stream to its inline 0x00 TERMINATE. The result matches the engine's final
+// temp.reveal_count. The limit guards against a runaway scan on malformed data.
 static int Sis_CountGlyphs(u8 *start)
 {
     if (!start)
@@ -165,28 +150,24 @@ static int Sis_CountGlyphs(u8 *start)
     return count;
 }
 
-// Enable (or clear) the engine's built-in typewriter on a message's Text. The
-// renderer reveals one glyph every char_delay frames on its own (paced via
-// temp.wait_countdown / text_end), so there's no per-frame work on our side.
-// 0 = reveal instantly.
+// Arms the engine's built-in typewriter, which reveals one glyph every char_delay frames on its
+// own. A delay of 0 reveals instantly.
 static void TextBox_ApplyTypewriter(TextBoxMessage *msg)
 {
     if (!msg || !msg->text)
         return;
     u16 delay = msg->typewriter_active ? msg->typewriter_dwell : 0;
 
-    // Seed the live temp.char_delay/space_delay directly: char_delay_init is dead
-    // for Text_AddSubtext buffers (the renderer only copies it on a 0x01/0x02 SUBTEXT
-    // opcode, which these 0x07-POS-delimited buffers never contain). The renderer
-    // reloads temp each render and never clears it, so one write at enqueue persists.
+    // The live temp fields must be seeded directly: char_delay_init is only copied in on a
+    // 0x01/0x02 SUBTEXT opcode, which these 0x07-POS-delimited buffers never contain. The
+    // renderer reloads temp each render and never clears it, so one write at enqueue persists.
     msg->text->char_delay_init  = delay;
     msg->text->space_delay_init = delay;
     msg->text->temp.char_delay  = delay;
     msg->text->temp.space_delay = delay;
 
-    // Resume from chars_revealed (mirrored from temp.reveal_count each frame), so a
-    // scene-change rebuild doesn't re-type finished messages. text_end stays NULL so
-    // the engine re-derives the reveal frontier from reveal_count.
+    // Resume from chars_revealed so a scene-change rebuild doesn't re-type finished messages.
+    // text_end stays NULL so the engine re-derives the reveal frontier from reveal_count.
     u16 revealed = msg->chars_revealed;
     if (revealed > msg->chars_total)
         revealed = msg->chars_total;
@@ -194,9 +175,7 @@ static void TextBox_ApplyTypewriter(TextBoxMessage *msg)
     msg->text->text_end          = NULL;
 }
 
-// Build a multi-segment Text GObj. Each segment becomes one subtext at the
-// computed x cursor position, with its own COLOR opcode (Text_AddSubtext
-// captures t->color at emit time).
+// Build a multi-segment Text GObj: one subtext per segment, laid out left to right on one line.
 static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2 scale, uint lifetime, u8 bg_alpha)
 {
     if (seg_count <= 0 || seg_count > TEXTBOX_MAX_SEGMENTS)
@@ -208,12 +187,12 @@ static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2
 
     t->kerning = 1;
     t->use_aspect = 1;
-    // trans is a placeholder - TextBoxQueue_RepositionAll runs before the next
-    // render and is the single source of truth for on-screen position.
+    // A placeholder - TextBoxQueue_RepositionAll runs before the next render and is the single
+    // source of truth for on-screen position.
     t->trans = (Vec3){0, 0, 0};
     t->viewport_scale = scale;
-    // Background quad alpha is independent of text alpha - clamped against the
-    // text fade in TextBox_SetAlpha so the bg can't outlast the text.
+    // The background quad's alpha is independent of the text alpha, but clamped against it so
+    // the panel can't outlast the glyphs.
     t->viewport_color = (GXColor){0, 0, 0, (bg_alpha < lifetime) ? bg_alpha : (u8)lifetime};
 
     char sanitize_buf[TEXTBOX_SEGMENT_TEXT_SIZE * 2];
@@ -223,8 +202,8 @@ static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2
 
     for (int i = 0; i < seg_count; i++)
     {
-        // t->color is captured by Text_AddSubtext into the subtext's COLOR
-        // opcode. Set it BEFORE adding the subtext.
+        // Text_AddSubtext captures t->color into the subtext's COLOR opcode, so it must be set
+        // before the subtext is added.
         t->color = (GXColor){segs[i].color.r, segs[i].color.g, segs[i].color.b, lifetime};
 
         Text_AddSubtext(t, x_cursor, 0, "");
@@ -232,8 +211,8 @@ static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2
         Text_Sanitize((char *)segs[i].text, sanitize_buf, sizeof(sanitize_buf));
         Text_SetText(t, i, sanitize_buf);
 
-        // Measure this subtext's rendered width (pre-viewport-scale, post-text-scale)
-        // so the next segment starts immediately after it on the same line.
+        // Measured pre-viewport-scale, post-text-scale, so the next segment starts immediately
+        // after this one on the same line.
         float seg_w = 0, seg_h = 0;
         Text_GetWidthAndHeight(t, i, &seg_w, &seg_h);
         x_cursor += seg_w;
@@ -242,18 +221,17 @@ static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2
             line_height = seg_h;
     }
 
-    // Aspect must enclose the whole line so the viewport_color background
-    // rect (and any future scissor) covers all segments.
+    // Aspect must enclose the whole line, or the viewport_color background rect won't cover
+    // every segment.
     t->aspect = (Vec2){total_width, line_height};
 
     return t;
 }
 
-// Creates the GOBJ for per-frame textbox operations
+// Rebuilds the queued Text objects invalidated by the scene change, then installs the per-frame
+// GObj.
 void CreateTextBox_OnSceneChange()
 {
-    // Re-create any Text objects that are still in the queue, for persistent
-    // message display across scenes
     if (!TextBoxQueue_IsEmpty())
     {
         int count = TextBoxQueue_Count();
@@ -276,31 +254,20 @@ void CreateTextBox_OnSceneChange()
                 continue;
             }
 
-            // Re-snapshot the glyph count and re-arm the built-in typewriter on the
-            // rebuilt Text. The engine's reveal_count lived in the old (destroyed)
-            // Text, but chars_revealed mirrored it every frame (TextBox_PerFrame), so
-            // TextBox_ApplyTypewriter resumes the reveal from there - a finished
-            // message stays fully shown instead of re-typing from scratch.
+            // The engine's reveal_count died with the old Text, so the reveal resumes from the
+            // mirrored chars_revealed instead of re-typing from scratch.
             msg->chars_total = (u16)Sis_CountGlyphs(msg->text->text_start);
             TextBox_ApplyTypewriter(msg);
         }
-        // Reposition all recreated messages
         TextBoxQueue_RepositionAll();
     }
 
-    // Init per-frame GOBJ for textbox operations
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, TextBox_PerFrame, 0, 0, 0, 0);
 }
 
-// The renderer uses text->color.a as a global alpha modulator - TEXTCMD_COLOR
-// only updates temp.color RGB, alpha is sourced from text->color.a at init and
-// applied to every glyph in every subtext. So fading the whole textbox =
-// touching .a only.
-// We must NOT overwrite RGB, or per-segment noun colors would all collapse to white.
-//
-// Background opacity is set independently from text alpha: bg.a sits at
-// `bg_target` until the text fade brings text_alpha below the target, at which
-// point bg fades together with the text so it can't outlast the glyphs.
+// text->color.a is a global alpha modulator: TEXTCMD_COLOR only updates temp.color RGB, while
+// alpha comes from text->color.a and applies to every glyph in every subtext. So a fade touches
+// .a only - overwriting RGB would collapse the per-segment noun colors to white.
 static void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target)
 {
     if (!text)
@@ -309,16 +276,8 @@ static void TextBox_SetAlpha(Text *text, u8 text_alpha, u8 bg_target)
     text->viewport_color.a = (text_alpha < bg_target) ? text_alpha : bg_target;
 }
 
-// Repositions all messages in the queue based on the selected corner. Top
-// corners stack newest at top, older flowing down; bottom corners stack
-// newest at bottom, older flowing up. Right corners right-align each
-// message individually against the right edge (per-message width since
-// each TextBox can have a different width).
-//
-// Line advance is the rendered text height (aspect.Y * viewport_scale.Y)
-// plus an optional fractional gap from the Spacing setting, so Tight always
-// lays messages flush regardless of font size and Med/Wide scale their gap
-// with the font.
+// Top corners stack newest at top with older flowing down, bottom corners the reverse; right
+// corners right-align each message individually, since messages differ in width.
 void TextBoxQueue_RepositionAll()
 {
     int count = TextBoxQueue_Count();
@@ -331,8 +290,7 @@ void TextBoxQueue_RepositionAll()
 
     float spacing_extra = Settings_SpacingExtra();
 
-    // edge_y is the canvas y of the next anchor edge - top edge for top
-    // corners, bottom edge for bottom corners.
+    // Canvas y of the next anchor edge.
     float edge_y = is_bottom ? (TEXTBOX_CANVAS_H - TEXTBOX_MARGIN) : TEXTBOX_MARGIN;
 
     for (int i = count - 1; i >= 0; i--)
@@ -345,9 +303,8 @@ void TextBoxQueue_RepositionAll()
         float text_h = t->text->aspect.Y * t->text->viewport_scale.Y;
         float line_h = text_h * (1.0f + spacing_extra);
 
-        // trans is the top-left of the message bounding box. For bottom
-        // corners we shift up by line_h so the message's bottom edge sits
-        // at edge_y.
+        // trans is the top-left of the message bounding box, so bottom corners shift up by
+        // line_h to put the message's bottom edge at edge_y.
         float trans_x = is_right  ? (TEXTBOX_CANVAS_W - TEXTBOX_MARGIN - w_px) : TEXTBOX_MARGIN;
         float trans_y = is_bottom ? (edge_y - line_h) : edge_y;
 
@@ -366,10 +323,8 @@ static void TextBox_PerFrame(GOBJ *g)
     if (TextBoxQueue_IsEmpty())
         return;
 
-    // Mirror each visible message's engine-side reveal progress into the message,
-    // so it survives the Text being destroyed and recreated on a scene change.
-    // Every message reveals independently (the engine paces each Text on its own),
-    // so we snapshot the whole queue, not just the oldest.
+    // Mirror the engine-side reveal progress so it survives a scene change. The engine paces
+    // each Text independently, so the whole queue is snapshotted, not just the oldest.
     int count = TextBoxQueue_Count();
     for (int i = 0; i < count; i++)
     {
@@ -384,9 +339,8 @@ static void TextBox_PerFrame(GOBJ *g)
     if (oldest->typewriter_active && oldest->text->temp.reveal_count < oldest->chars_total)
         return;
 
-    // After the player-configured display window since the last removed message,
-    // subtract from the alpha value of the oldest message until it reaches 0.
-    // When it hits 0, dequeue it.
+    // Once the display window since the last removal elapses, fade the oldest message out and
+    // dequeue it at zero alpha.
     if (++textbox_state.framecounter > Settings_DisplayWait())
     {
         if (oldest->lifetime > 0)
@@ -403,26 +357,22 @@ static void TextBox_PerFrame(GOBJ *g)
     }
 }
 
-// Common queue/dequeue/creation logic shared by all enqueue entry points.
+// Shared by every enqueue entry point.
 static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
 {
     if (!textbox_settings.enabled)
         return 0;
     if (seg_count <= 0 || seg_count > TEXTBOX_MAX_SEGMENTS)
         return 0;
-    // Hoshi creates the screen canvas in Hook_SceneChange, so callers that
-    // fire pre-first-scene (e.g. ChecklistRewards regrant from OnSaveLoaded)
-    // would walk an empty canvas list inside Text_CreateText and dereference
-    // NULL+0xA. Drop the message instead.
+    // Hoshi creates the screen canvas on scene change, so a caller that fires before the first
+    // one would walk an empty canvas list inside Text_CreateText and dereference NULL+0xA.
     if (!*stc_textcanvas_first)
     {
         OSReport("[TextBox] Dropping enqueue - no canvas yet (pre-first-scene)\n");
         return 0;
     }
 
-    // Honor the runtime "Max On Screen" cap. The static array can hold up to
-    // TEXTBOX_QUEUE_SIZE; the cap is whatever the player picked. Drop oldest
-    // until count < cap so the new message fits.
+    // Drop oldest until the new message fits under the player's "Max On Screen" cap.
     u8 max_visible = Settings_MaxVisible();
     while (TextBoxQueue_Count() >= max_visible)
     {
@@ -432,13 +382,10 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
         OSReport("[TextBox] Visible cap reached, auto-dequeued oldest message.\n");
     }
 
-    // Reset framecounter if adding to an empty queue
     if (TextBoxQueue_IsEmpty())
         textbox_state.framecounter = 0;
 
-    // Build a local segment array so we can apply the Colored Names policy
-    // without mutating the caller's buffer. When colors are off, every
-    // segment renders in DefaultColor.
+    // A local copy, so applying the Colored Names setting doesn't mutate the caller's buffer.
     int colored = textbox_settings.colored_names ? 1 : 0;
     TextSegment local_segs[TEXTBOX_MAX_SEGMENTS];
     for (int i = 0; i < seg_count; i++)
@@ -468,15 +415,12 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
         return 0;
     }
 
-    // Sample the typewriter setting at enqueue time so per-message behavior
-    // stays stable even if the player toggles mid-reveal. chars_total bounds the
-    // fade-pause (we hold the fade until temp.reveal_count reaches it).
+    // Sampled at enqueue so per-message behavior stays stable if the player toggles mid-reveal.
     entry.typewriter_active = textbox_settings.typewriter_enabled ? 1 : 0;
     entry.typewriter_dwell  = Settings_TypewriterDwell();
     entry.chars_total       = (u16)Sis_CountGlyphs(entry.text->text_start);
-    entry.chars_revealed    = 0; // fresh message - reveal starts from the first glyph
+    entry.chars_revealed    = 0;
 
-    // Hand the message's reveal to the engine's built-in typewriter.
     TextBox_ApplyTypewriter(&entry);
 
     textbox_state.queue[textbox_state.tail] = entry;
@@ -553,7 +497,6 @@ int TextBox_Enqueue(const char *format, ...)
     return TextBox_EnqueueInternal(&seg, 1);
 }
 
-// Dequeue a TextBoxMessage object from the textbox queue
 static int TextBox_Dequeue(TextBoxMessage *text_out)
 {
     if (TextBoxQueue_IsEmpty())
@@ -573,14 +516,12 @@ static int TextBoxQueue_IsEmpty(void)
     return textbox_state.head == textbox_state.tail;
 }
 
-// Derive count from head and tail indices
 static int TextBoxQueue_Count(void)
 {
     return (textbox_state.tail - textbox_state.head + TEXTBOX_QUEUE_SIZE) % TEXTBOX_QUEUE_SIZE;
 }
 
-// Get a TextBoxMessage at a specific index in the queue (for iteration).
-// Index 0 is the head (oldest), count-1 is the newest.
+// Index 0 is the head (oldest), count-1 the newest.
 static TextBoxMessage *TextBoxQueue_GetAt(int index)
 {
     if (index < 0 || index >= TextBoxQueue_Count())
@@ -589,12 +530,9 @@ static TextBoxMessage *TextBoxQueue_GetAt(int index)
     return &textbox_state.queue[actual_index];
 }
 
-// Top Ride's `cb_ThinkPostRender` (TopRide_PostRenderCallback @ 0x80009074)
-// runs TopRide_CustomRenderer, which kicks off an entirely new HSD_StartRender
-// pass for the 2D engine. That pass overwrites the EFB after the standard
-// frame render - wiping the textbox drawn by the hoshi screen canvas's
-// camera. Re-issuing CObjThink_Common on each canvas's cam_gobj after TR's
-// post-render returns redraws the text on top of the second pass.
+// TopRide_PostRenderCallback (0x80009074) runs TopRide_CustomRenderer, whose second
+// HSD_StartRender pass overwrites the EFB and wipes the screen canvas. Re-issuing
+// CObjThink_Common on each canvas cam redraws the text on top of that pass.
 void TextBox_TopRideReRender(void)
 {
     TextCanvas *canvas = *stc_textcanvas_first;

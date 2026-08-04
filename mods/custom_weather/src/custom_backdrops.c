@@ -1,34 +1,5 @@
-// Custom backdrops - random skybox selection in City Trial.
-//
-// Replaces City Trial's vanilla backdrop JObj (the city horizon /
-// distant skyline subtree at GrObj+0xF4) with a backdrop carved out
-// of a different stage's archive. Pool of 21 carved donor backdrops
-// plus a "Vanilla" no-op option lives in `mods/custom_weather/assets/`,
-// extracted by `scripts/hsd/carve_all_backdrops.py`.
-//
-// Mechanism:
-//   stage init pipeline is grLoadStage -> grLoadStageArchive ->
-//   3D_CreateStageModel (0x800dcbf0). The last reads
-//   grdata->model_section (a ModelSection * at grdata + 0x0C) and
-//   instantiates ms.terrain and ms.backdrop as JObj trees. By
-//   overriding ms.backdrop *before* 3D_CreateStageModel reads it,
-//   the stock loader does the work for us - instantiation,
-//   JObj+0x2C scale set-up, attach to GrObj+0xF4 - using the
-//   donor's backdrop description.
-//
-// Selection / lifetime:
-//   On every CT stage init we pick uniformly from the user-enabled
-//   subset of `backdrop_defs[]`. If "Vanilla" wins we fall through
-//   and the stock loader uses CT's own ms.backdrop. Otherwise we
-//   load the donor archive fresh and repoint ms.backdrop at the
-//   donor's pp slot.
-//
-//   We deliberately do NOT cache the donor across rounds. Despite
-//   passing heap_id 0, Archive_LoadFile ends up allocating into a
-//   per-scene heap that is wiped on 3D scene exit (verified: a
-//   stashed archive pointer reads back as all-zeros after returning
-//   from player select). Reloading each round is cheap relative to
-//   the full stage load and avoids a dangling-pointer footgun.
+// Random City Trial skybox selection: swaps the stage's backdrop JObj for one
+// carved out of another stage's archive.
 
 #include "os.h"
 #include "game.h"
@@ -40,15 +11,8 @@
 
 #include "custom_weather.h"
 
-// Backdrop pool. Index 0 ("Vanilla") is the no-override path: the
-// stock loader uses CT's own backdrop, which avoids spending heap
-// when the user just wants the base skybox in the random pool.
-//
-// "City 1" is intentionally absent - it would be a duplicate of
-// "Vanilla" since CT's own archive *is* GrCity1Model.dat. "Simple"
-// (from the 14 MB GrSimpleModel system archive) is also skipped -
-// its backdrop subtree is a 4 KB placeholder, almost certainly a
-// dummy that won't render anything useful in CT.
+// Index 0 ("Vanilla") is the no-override path: the stock loader keeps CT's own
+// backdrop, so no donor archive is loaded.
 typedef struct BackdropDef
 {
     const char *display_name;
@@ -84,8 +48,7 @@ static const BackdropDef backdrop_defs[] = {
 };
 #define BACKDROP_NUM (sizeof(backdrop_defs) / sizeof(backdrop_defs[0]))
 
-// Per-entry enable toggle, default all on. Persisted by hoshi menu
-// save (keyed by option name hash) once the user changes them.
+// Per-entry enable toggle, persisted by hoshi menu save (keyed by option name hash).
 static int backdrop_enabled[BACKDROP_NUM] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -94,9 +57,17 @@ static int backdrop_enabled[BACKDROP_NUM] = {
 
 static char *toggle_names[] = {"Disabled", "Enabled"};
 
-// Don't cache the loaded archive across rounds: Archive_LoadFile allocates into
-// the per-scene heap, which is zeroed on 3D scene exit. Reload on each CT entry;
-// scene-exit teardown reclaims it, so no Archive_Free is needed.
+// Multiplies the root-joint scale the loader stamps into every backdrop, pushing
+// the whole sky dome out or pulling it in.
+static const float backdrop_distance_factors[] = {1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
+static char *backdrop_distance_names[] = {"100%", "125%", "150%", "175%", "200%"};
+#define BACKDROP_DISTANCE_NUM \
+    ((int)(sizeof(backdrop_distance_factors) / sizeof(backdrop_distance_factors[0])))
+static int backdrop_distance_index = 1; // default 125%
+
+// The donor archive is never cached across rounds: Archive_LoadFile allocates into
+// the per-scene heap, which is zeroed on 3D scene exit. Teardown reclaims it, so
+// there is no Archive_Free.
 
 static int PickEnabled(void)
 {
@@ -124,7 +95,7 @@ static int PickEnabled(void)
 
 static void CustomBackdrop_Override(GrObj *grobj)
 {
-    if (grobj == NULL || grobj->gr_kind != GRKIND_CITY1)
+    if (grobj == NULL || grobj->gr_kind != GR_CITY1)
         return;
 
     int picked = PickEnabled();
@@ -159,30 +130,47 @@ static void CustomBackdrop_Override(GrObj *grobj)
     OSReport("[CustomBackdrop] Selected %s\n", def->display_name);
 }
 
-// Hook 3D_CreateStageModel at 0x800dcc18, immediately after r30 has
-// been loaded with `grobj = gobj->user_data` (instruction at
-// 0x800dcc14: `lwz r30, 44(r3)`). At this point the original code
-// is about to read grdata->model_section into r29, so overriding
-// ms.backdrop here takes effect on the very next instruction.
-//
-//   0x800dcc14  lwz r30, 44(r3)        ; r30 = grobj
-//   0x800dcc18  lwz r3,  8(r30)        ; r3  = grobj->gr_data         <- HOOK
-//   0x800dcc1c  lwz r29, 12(r3)        ; r29 = ModelSection *
-//   ...
-//   0x800dcc28  lwz r31, 4(r29)        ; r31 = ms->backdrop (overridden)
-//
-// The macro preserves and replays the clobbered instruction at
-// 0x800dcc18 after the C callback returns, so r3 is correctly
-// reloaded with grdata before execution resumes at 0x800dcc1c.
+// Inside 3D_CreateStageModel, after r30 = grobj and just before it reads
+// grdata->model_section, so the ms.backdrop override lands on the next
+// instruction. The macro replays the clobbered `lwz r3, 8(r30)`.
 CODEPATCH_HOOKCREATE(0x800dcc18,
     "mr 3, 30\n\t",
     CustomBackdrop_Override,
     "",
     0x800dcc1c);
 
+// 3D_CreateStageModel stamps grGetStageScale() (City's 0.70) into the backdrop
+// root joint's JOBJ+0x2C/30/34; scaling that uniformly moves the whole sky dome
+// in or out without re-carving geometry.
+static void CustomBackdrop_ScaleDistance(GrObj *grobj, JOBJ *backdrop)
+{
+    if (grobj == NULL || backdrop == NULL || grobj->gr_kind != GR_CITY1)
+        return;
+
+    float f = backdrop_distance_factors[backdrop_distance_index];
+    if (f == 1.0f)
+        return;
+
+    backdrop->scale.X *= f;
+    backdrop->scale.Y *= f;
+    backdrop->scale.Z *= f;
+}
+
+// Inside 3D_CreateStageModel, immediately after the backdrop branch stamps the
+// scale into the root joint; r30 = grobj, r29 = backdrop JObj (both non-volatile).
+// The macro replays the clobbered `lwz r0, 20(r29)`, so the classical-scaling flag
+// check that follows sees the rescaled joint, still before the matrix build.
+CODEPATCH_HOOKCREATE(0x800dce84,
+    "mr 3, 30\n\t"
+    "mr 4, 29\n\t",
+    CustomBackdrop_ScaleDistance,
+    "",
+    0x800dce88);
+
 void CustomBackdrop_OnBoot(void)
 {
     CODEPATCH_HOOKAPPLY(0x800dcc18);
+    CODEPATCH_HOOKAPPLY(0x800dce84);
     OSReport("[CustomBackdrop] Hook installed (%d backdrops in pool)\n",
              (int)BACKDROP_NUM);
 }
@@ -213,8 +201,16 @@ static int DisableAllBackdrops(OptionDesc *self)
     }
 
 MenuDesc backdrop_menu = {
-    .option_num = BACKDROP_NUM + 2,
+    .option_num = BACKDROP_NUM + 3,
     .options = {
+        &(OptionDesc){
+            .name = "Backdrop Distance",
+            .description = "How far the City Trial sky backdrop renders (scales all backdrops, including Vanilla)",
+            .kind = OPTKIND_VALUE,
+            .val = &backdrop_distance_index,
+            .value_num = BACKDROP_DISTANCE_NUM,
+            .value_names = backdrop_distance_names,
+        },
         &(OptionDesc){
             .name = "Enable All",
             .description = "Enable all backdrops",

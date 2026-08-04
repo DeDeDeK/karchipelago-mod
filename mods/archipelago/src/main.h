@@ -4,12 +4,10 @@
 #include "structs.h"
 #include "event.h"
 
-// Public API (APItemId enum lives here so external mods can use it too).
 #include "archipelago_api.h"
 
-// Imported textbox API. Resolved in OnSaveLoaded via Hoshi_ImportMod (deferred
-// past OnBoot since mods boot alphabetically and textbox boots after us);
-// callers dereference directly (e.g. tb_api->Enqueue("..."), tb_api->EventColor).
+// Resolved in OnSaveLoaded, not OnBoot: mods boot alphabetically and textbox
+// boots after us, so Hoshi_ImportMod returns NULL during our own OnBoot.
 #include "textbox_api.h"
 extern const TextBoxAPI *tb_api;
 
@@ -18,18 +16,31 @@ extern const TextBoxAPI *tb_api;
 #define REWARD_COUNT_AIRRIDE   46
 #define REWARD_COUNT_TOPRIDE   33
 #define REWARD_COUNT_CITYTRIAL 44
-#define REWARD_COUNT_MAX       REWARD_COUNT_AIRRIDE  // Largest per-mode reward count (46)
+#define REWARD_COUNT_MAX       REWARD_COUNT_AIRRIDE
 
-// Number of checkboxes per mode (clear_kind range 0..CLEAR_KIND_NUM-1).
+// Checkboxes per mode (clear_kind 0..119).
 #define CLEAR_KIND_NUM 120
 
-// Hard ceiling on per-stat patch totals. PowerPC `extsb` in the original
-// Patch_GetMaxValue caller path sign-extends the low byte, so values >127
-// wrap negative - 127 is the firm hardware limit. The runtime cap (see
-// PatchCap_GetCap in patch_cap.c) ranges from the city_trial_patch_cap_min
-// the player starts at up to the city_trial_patch_cap_max ceiling; PATCH_STAT_MAX
-// is only the absolute clamp ceiling for guards and storage widths.
+// GMMODE_NUM (3) stays "the three real game modes" and sizes the reward tables.
+// Per-checklist-mode recorded state is one row wider, with the AP tab at the
+// fixed row AP_CHECKLIST_ROW.
+#define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
+#define AP_CHECKLIST_ROW   GMMODE_NUM
+
+// Runtime checklist mode the custom_checklist framework assigned to the AP tab.
+// Always >= GMMODE_NUM but not necessarily AP_CHECKLIST_ROW - another custom tab
+// registering first pushes it higher. GMMODE_NUM until APChecklist_Register.
+extern int ap_checklist_mode;
+
+// Absolute clamp ceiling for per-stat patch totals. Patch_GetMaxValue returns
+// through extsb, so anything above 127 sign-extends negative.
 #define PATCH_STAT_MAX 127
+
+// Targets of the AP checklist objectives backed by APSave.checks counters.
+#define AP_ALLUP_TOTAL_NEED 5
+#define AP_PURPLE_SR1_NEED  3
+// One bit per KirbyColor, all 8 set.
+#define AP_RACE_COLOR_MASK_ALL 0xFF
 
 typedef enum APGoalKind
 {
@@ -39,37 +50,29 @@ typedef enum APGoalKind
     GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
     GOAL_NONE,                  // No goal for this mode
     GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
-    GOAL_MAX_STATS_CT,          // City Trial only: reach the patch cap ceiling (city_trial_patch_cap_max, up to 127) on every stat in one CT run
+    GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
 } APGoalKind;
 
 typedef struct APSlotOptions
 {
-    // General
-    u32 death_link_enabled;                // 0 or 1 - sets initial deathlink menu toggle
-    u32 energy_link_enabled;               // 0 or 1 - sets initial energylink menu toggle
-    u32 trap_link_enabled;                 // 0 or 1 - sets initial traplink menu toggle
+    u32 death_link_enabled;                // 0 or 1 - initial deathlink menu toggle
+    u32 energy_link_enabled;               // 0 or 1 - initial energylink menu toggle
+    u32 trap_link_enabled;                 // 0 or 1 - initial traplink menu toggle
     u32 reveal_checklists;                 // 0 or 1 - reveal all checklist squares
 
-    // Per-mode goal settings
-    u32 goal[GMMODE_NUM];                  // APGoalKind - completion condition per mode
-    u32 checklist_amount[GMMODE_NUM];      // 1-120 - threshold for GOAL_N_CHECKLIST per mode
+    u32 goal[CHECKLIST_MODE_NUM];             // APGoalKind per checklist-mode row
+    u32 checklist_amount[CHECKLIST_MODE_NUM]; // 1-120 - threshold for GOAL_N_CHECKLIST per row
 
-    // City Trial-specific
-    u32 city_trial_patch_cap_min;          // 1-127 - per-stat cap the player starts at; Patch Cap Increase items grow it toward max
-    u32 city_trial_patch_cap_max;          // 1-127 - per-stat cap ceiling (also the threshold for GOAL_MAX_STATS_CT). min == max -> flat cap
+    u32 city_trial_patch_cap_min;          // 1-127 - per-stat cap the player starts at
+    u32 city_trial_patch_cap_max;          // 1-127 - per-stat cap ceiling; min == max -> flat cap
 
-    // Spawn rate floor, percent (10-100; 100 = vanilla, below 100 suppresses spawns).
-    // 0 means options not yet received; the spawn-rate code falls back to vanilla.
-    u32 spawn_rate_min;
+    u32 spawn_rate_min;                    // Percent floor; 0 means options not yet received
 
-    // Required checkboxes per mode for GOAL_CHECKLIST_LIST.
-    u64 goal_checks[GMMODE_NUM][2];
+    u64 goal_checks[CHECKLIST_MODE_NUM][2];   // Required checkboxes per row for GOAL_CHECKLIST_LIST
 
-    // Per-category access gating. 1 = gated (default - players unlock via AP
-    // items). 0 = ungated (mod pre-fills the corresponding unlock mask with
-    // all-1s at connect time; AP world ships no unlock items for that
-    // category). Order matches APUnlockCategory but each is a flat field so
-    // it maps 1:1 to a KAROptions.py progression toggle.
+    // Per-category access gating. 1 = gated (AP ships unlock items), 0 = ungated
+    // (the mod fills the matching unlock mask at connect). Order matches
+    // APUnlockCategory, but each is a flat field so it maps 1:1 to a slot option.
     u32 machine_gating_enabled;
     u32 ability_gating_enabled;
     u32 event_gating_enabled;
@@ -81,115 +84,80 @@ typedef struct APSlotOptions
     u32 topride_item_gating_enabled;
     u32 color_gating_enabled;
     u32 stadium_gating_enabled;
+    u32 base_ability_gating_enabled;
 
-    // Non-progression checklist rewards (music, sound test, extra rules, endings, filler boxes, …).
-    // 1 = gated (default: each reward is an AP item the player finds). 0 = ungated (the mod marks
-    // every such reward received at connect via received_checklist_rewards; the AP world ships none).
-    // The 6 Dragoon/Hydra part markers are progression and are NOT affected by this flag.
+    // Non-progression checklist rewards: 1 = each is an AP item, 0 = the mod
+    // pre-grants them all at connect. The 6 Dragoon/Hydra part markers are
+    // progression and are not affected.
     u32 checklist_rewards_gating_enabled;
 } APSlotOptions;
+
+// Cross-boot progress for AP checklist objectives whose predicate counts over
+// more than one session.
+typedef struct APCheckProgress
+{
+    u16 allup_collect_total; // APCK_ALLUPS_5: lifetime All Ups picked up by a human in City Trial
+    u8 purple_sr1_wins;      // APCK_SR1_PURPLE_3X: SINGLE RACE 1 first places taken by a Purple Kirby
+    u8 race_color_mask;      // APCK_AIRRIDE_ALL_COLORS: bit N = an Air Ride race finished as KirbyColor N
+} APCheckProgress;
 
 typedef struct APSave
 {
     uint boot_num;
     uint item_received_count;                           // Total items received from AP client
     uint unprocessed_count;                             // Number of items in the unprocessed list
-    u32 stadium_unlocked_mask;                          // Bitmask of AP-unlocked stadiums (bit N = StadiumKind N)
-    u32 event_unlocked_mask;                            // Bitmask of AP-unlocked events (bit N = EventKind N)
-    u16 ability_unlocked_mask;                          // Bitmask of AP-unlocked copy abilities (bit N = CopyKind N)
-    u8 box_unlocked_mask;                               // Bitmask of AP-unlocked box types (bit N = BoxKind N)
-    u16 patch_unlocked_mask;                            // Bitmask of AP-unlocked patch types (bit N = PatchKind N)
-    u32 item_unlocked_mask;                              // Bitmask of AP-unlocked items (bit N = ItemUnlockKind N)
-    u32 machine_unlocked_mask;                          // Bitmask of AP-unlocked machines (bit N = MachineKind N)
-    u16 airride_stage_unlocked_mask;                    // Bitmask of AP-unlocked Air Ride stages (bit N = StageKind N)
-    u16 topride_stage_unlocked_mask;                    // Bitmask of AP-unlocked Top Ride courses (bit N = course N)
-    u32 topride_item_unlocked_mask;                     // Bitmask of AP-unlocked Top Ride items (bit N = TopRideItemKind N)
-    u8 color_unlocked_mask;                             // Bitmask of AP-unlocked Kirby colors (bit N = KirbyColor N)
+    u32 stadium_unlocked_mask;                          // Bit N = StadiumKind N unlocked
+    u32 event_unlocked_mask;                            // Bit N = EventKind N unlocked
+    u16 ability_unlocked_mask;                          // Bit N = CopyKind N unlocked
+    u8 box_unlocked_mask;                               // Bit N = BoxKind N unlocked
+    u16 patch_unlocked_mask;                            // Bit N = PatchKind N unlocked
+    u32 item_unlocked_mask;                             // Bit N = ItemUnlockKind N unlocked
+    u32 machine_unlocked_mask;                          // Bit N = MachineKind N unlocked
+    u16 airride_stage_unlocked_mask;                    // Bit N = StageKind N unlocked
+    u16 topride_stage_unlocked_mask;                    // Bit N = Top Ride course N unlocked
+    u32 topride_item_unlocked_mask;                     // Bit N = TopRideItemKind N unlocked
+    u8 color_unlocked_mask;                             // Bit N = KirbyColor N unlocked
+    u8 base_ability_unlocked_mask;                      // Bit N = BaseAbilityKind N unlocked
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
     u8 spawn_rate_level;                                // Number of Spawn Rate Up items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-PATCH_STAT_MAX)
-    u8 options_received;                                // Nonzero if AP slot options have been saved
-    u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX]; // Saved location assignment per mode: (target_mode << 8) | clear_kind, 0xFFFF = remote
-    u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received for that mode
-    u64 sent_checks[3][2];                              // Authoritative completed-checkbox bitmask per mode.
-    u8 goal_complete;                                   // Sticky once set; persisted across boots
-    u8 goal_announced[GMMODE_NUM];                       // Sticky per mode: 1 once that mode's goal first satisfied (drives the per-mode "X goal complete!" textbox, fired once each)
-    u8 max_stats_ct_achieved;                           // Sticky: 1 once any human player hit the runtime patch cap target on all 9 stats during a CT trial round
-    APSlotOptions options;                              // AP slot options (copied from APData on first connect)
+    u8 options_received;                                // Nonzero once AP slot options have been saved
+    u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX]; // (target_mode << 8) | clear_kind, 0xFFFF = remote
+    u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received
+    u64 sent_checks[CHECKLIST_MODE_NUM][2];             // Authoritative completed-checkbox bitmask per row
+    u8 goal_complete;                                   // Sticky once set
+    u8 goal_announced[CHECKLIST_MODE_NUM];              // Sticky per row; fires that row's "goal complete" textbox once
+    u8 max_stats_ct_achieved;                           // Sticky once a human hit the cap on all 9 stats in a CT round
+    APSlotOptions options;                              // Copied from APData on first connect
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
+    APCheckProgress checks;
 } APSave;
 
-// Shared data struct stored at a static location in memory.
-// The Python AP client reads/writes this via dolphin-memory-engine.
-// All 32-bit fields are 4-byte aligned and atomic on PPC at this alignment.
-// 64-bit fields (energy_balance, energy_sent_total, sent_checks, client_backfill,
-// goal_checks) are not atomic on PPC32 - readers may observe a torn value
-// during a writer's update. For energy_sent_total this is self-correcting: it's
-// a cumulative counter the client reads-and-diffs, so a torn read only skews one
-// poll's delta and the next poll's diff compensates exactly (see the field).
-//
-// Field offsets are computed by the compiler; field order in this struct is
-// the source of truth for the Python client.
+// Shared struct the Python AP client reads and writes with dolphin-memory-engine
+// (OnBoot stores the pointer at 0x805d52d4). Field order is the wire contract.
 typedef struct APData
 {
-    // EnergyLink pool balance in raw units (1 raw unit = 1 MJ in the AP pool).
-    // Client → game. Game reads for display and purchase validation; may
-    // locally decrement for immediate UI feedback on purchases, but the next
-    // client write is authoritative. Widened to s64 so multiworld pools that
-    // exceed u64 joules (i.e. > ~1.8e19 J) still fit at MJ scale.
-    s64 energy_balance;
-    // Cumulative net energy emitted to the pool this session, raw MJ.
-    // Game → client, SINGLE-writer: the game only ever writes (+= deposits from
-    // generation, −= withdrawals from spends/Auto-Charge); the client only ever
-    // reads-and-diffs (delta since its last poll → forward to server) and NEVER
-    // writes it. Resets to 0 on each mod boot (this struct is memset in OnBoot);
-    // persists across scene loads within a session. Not atomic on PPC32, but
-    // self-correcting: a torn read skews one poll's delta and the next diff
-    // compensates. The client re-seeds its watermark on a fresh game_ready
-    // transition so the boot reset isn't misread as a giant withdrawal.
-    s64 energy_sent_total;
+    s64 energy_balance;    // EnergyLink pool, raw MJ. Client -> game; the game may decrement locally for purchase UI, the next client write wins.
+    s64 energy_sent_total; // Cumulative net MJ emitted this session. Game -> client, single-writer; the client reads-and-diffs and never writes. Resets each mod boot.
     uint deathlink_receive;
     uint deathlink_send;
     uint traplink_receive;
-    // Game → client. Value is a TrapLinkKind enum (0 = no pending send,
-    // >0 = pending send with this kind). Game writes the kind at the send
-    // site; client reads, maps to a trap_name string for the outgoing Bounce,
-    // and clears to 0. See traplink.h for the kind enum.
-    uint traplink_send;
+    uint traplink_send;       // Game -> client. TrapLinkKind value, 0 = no pending send; client clears to 0.
     uint incoming_item_id;    // Mailbox: client writes AP item ID, game reads and clears to 0
-    uint item_received_index; // Mirror of ap_save->item_received_count for client to read
-    u32 game_ready;           // Game sets to 1 after save data is loaded and mod is initialized
+    uint item_received_index; // Mirror of ap_save->item_received_count for the client to read
+    u32 game_ready;           // Game sets to 1 after save data is loaded and the mod is initialized
     u32 options_valid;        // Client sets to 1 after writing all options fields
     APSlotOptions options;    // Slot options from AP server
 
-    // Location assignment: which checklist slot each reward_index is placed at.
-    // Written by the AP client once per session after the server reveals placement.
-    // Encoding: (target_mode << 8) | clear_kind. target_mode selects which mode's
-    // checklist the reward appears in (enables cross-mode reward shuffling).
-    // 0xFFFF means the reward has no local slot (it will arrive from another world via the mailbox).
-    u32 location_data_valid;                         // Client sets to 1; game clears after applying
-    u16 locations[GMMODE_NUM][REWARD_COUNT_MAX];      // location per reward_index, indexed by mode
+    u32 location_data_valid;                     // Client sets to 1; game clears after applying
+    u16 locations[GMMODE_NUM][REWARD_COUNT_MAX]; // Per reward_index: (target_mode << 8) | clear_kind, 0xFFFF = remote
 
-    // Check detection: mod-side authoritative record of completed checkboxes.
-    // sent_checks mirrors ap_save->sent_checks; bit (k%64) of word (k/64)
-    // is set when the player completes checkbox clear_kind k in mode m.
-    // The Python client polls this and forwards new bits as AP location checks.
-    u64 sent_checks[3][2];
+    u64 sent_checks[CHECKLIST_MODE_NUM][2];      // Game -> client. Bit (k%64) of word (k/64) = checkbox k complete on that row.
+    u64 client_backfill[CHECKLIST_MODE_NUM][2];  // Client -> game, additive. Mod ORs into sent_checks each frame, then clears.
+    u8 goal_complete;                            // Game -> client. Sticky once the active goal is satisfied.
 
-    // Client backfill: AP client writes bits here to back-fill checks the
-    // server already knows about (e.g., fresh-save / slot-takeover). Mod ORs
-    // them into sent_checks each frame and clears this field. Additive only.
-    u64 client_backfill[3][2];
-
-    // Goal completion: mod sets to 1 when the player satisfies the active
-    // goal. Sticky and persisted to save. Client reads and forwards victory.
-    u8 goal_complete;
-
-    // Live mirrors of the Settings menu toggles. Written by the game on boot,
-    // on first-connect option transfer, and on every menu change. Client polls
-    // to forward deathlink/traplink/energylink enable/disable to the AP server
-    // whenever the player changes them mid-session. Game-owned: client reads
-    // only, never writes.
+    // Live mirrors of the Settings menu toggles, game-owned. The client polls
+    // them to forward mid-session enable/disable to the AP server.
     u32 deathlink_menu_enabled;
     u32 energylink_menu_enabled;
     u32 traplink_menu_enabled;
@@ -213,13 +181,11 @@ void OnTopRideLoadEnd();
 void OnFrameStart();
 void OnFrameEnd();
 
-// Register the public API instance with hoshi so other mods can import it
-// via Hoshi_ImportMod(). Call once from OnBoot. Defined in archipelago_api.c.
+// Register the public API instance with hoshi so other mods can import it via
+// Hoshi_ImportMod(). Call once from OnBoot.
 void ArchipelagoAPI_Export(void);
 
-// Per-category unlock-mask access. Backs the ArchipelagoAPI Get/SetUnlockMask
-// entry points; also called directly from main.c for connect-time pre-fill.
-// Set truncates to the underlying width (u8/u16/u32).
+// Per-category unlock-mask access. Set truncates to the underlying width.
 u32  Unlock_GetMask(APUnlockCategory cat);
 void Unlock_SetMask(APUnlockCategory cat, u32 mask);
 

@@ -6,15 +6,13 @@
 #include "settings_menu.h"
 #include "energylink_spend.h"
 
-// Defaults match pre-toggle behavior so existing installs keep working on
-// first boot. Hoshi's Mod_CopyFromSave overwrites these later if a saved hash
-// exists.
+// Hoshi's Mod_CopyFromSave overwrites these later if a saved hash exists.
 APMenuSettings ap_menu_settings = {
     .ct_permanent_patches_enabled         = 1,
     .ct_stadium_permanent_patches_enabled = 1,
     .ar_permanent_patches_enabled         = 1,
-    .energylink_autocharge_rate           = 1, // Medium by default (~1.5s to fill)
-    .ct_random_start_machine              = 1, // random unlocked start machine on by default
+    .energylink_autocharge_rate           = 1, // Medium, ~1.5s to fill
+    .ct_random_start_machine              = 1,
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
@@ -38,12 +36,12 @@ static void OnToggleCTPermanent(int val)        { OSReport("[Main] CT Permanent 
 static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleARPermanent(int val)        { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Start Machine toggled %s\n", stc_off_on[val]); }
+static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
+static void OnToggleAirQuickSpin(int val)        { OSReport("[Main] Air Quick Spin toggled %s\n", stc_off_on[val]); }
+static void OnToggleOnFootZoom(int val)          { OSReport("[Main] On-Foot Zoom toggled %s\n", stc_off_on[val]); }
 
-// Submenu: controls whether accumulated permanent stat patches are re-applied
-// at the start of each round/race. Receiving AP permanent-patch items still
-// increments save counters unconditionally - the toggles only gate round-start
-// application. Default: all On, matching the historical behavior before the
-// toggles existed.
+// Only round-start application is toggled here - receiving AP permanent-patch items
+// still increments the save counters either way.
 static MenuDesc permanent_patches_menu = {
     .option_num = 3,
     .options = {
@@ -86,13 +84,12 @@ static MenuDesc permanent_patches_menu = {
     },
 };
 
-// Top-level Archipelago Settings menu. Wired into mod_desc.option_desc in main.c.
 OptionDesc ModSettings = {
     .name = "Archipelago Settings",
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 5,
+        .option_num = 8,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -188,6 +185,42 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleRandomStartMachine,
+            },
+            &(OptionDesc){
+                .name = "Drop Ability",
+                .description = "Press Z to discard your current copy ability (City Trial / Air Ride)",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.drop_ability_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleDropAbility,
+            },
+            &(OptionDesc){
+                .name = "Air Quick Spin",
+                .description = "Allow the L/R-flick quick spin while airborne (City Trial / Air Ride)",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.air_quick_spin_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleAirQuickSpin,
+            },
+            &(OptionDesc){
+                .name = "On-Foot Zoom",
+                .description = "Zoom the camera with the C-Stick while on foot, as on a machine",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.onfoot_zoom_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleOnFootZoom,
             },
         },
     },

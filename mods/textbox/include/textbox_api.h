@@ -6,47 +6,40 @@
 #include "gx.h"
 #include "rider.h"
 
-// Hoshi mod name for Hoshi_ImportMod() lookups.
 #define TEXTBOX_MOD_NAME "textbox"
 
-// API version: bump major on breaking changes, minor on additions.
 #define TEXTBOX_API_MAJOR 1
 #define TEXTBOX_API_MINOR 0
 
-// Maximum colored runs per message. Each segment becomes one subtext (with its
-// own COLOR opcode) inside the underlying Text GObj.
+// Maximum colored runs per message; each becomes one subtext of the underlying Text GObj.
 #define TEXTBOX_MAX_SEGMENTS 5
 
-// One coloured run of text.
+// One colored run of text. `text` is copied at enqueue, so it need not outlive the call.
 typedef struct TextSegment
 {
     const char *text;
     GXColor color;
 } TextSegment;
 
-// Function-pointer table exported by the textbox mod via Hoshi_ExportMod.
-// Imported by other mods with
-// `Hoshi_ImportMod(TEXTBOX_MOD_NAME, TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR)`.
+// Exported via Hoshi_ExportMod; every Enqueue* returns 1 on success, 0 if the message was
+// dropped (textbox disabled, bad segment count, or no screen canvas yet).
 typedef struct TextBoxAPI
 {
-    // Plain message - single segment in TextBox_DefaultColor. printf-style.
+    // printf-style single segment in DefaultColor.
     int (*Enqueue)(const char *format, ...);
 
-    // N-segment message with per-segment colors.
+    // 1..TEXTBOX_MAX_SEGMENTS segments with per-segment colors.
     int (*EnqueueSegments)(const TextSegment *segs, int seg_count);
 
-    // Three-segment shortcut: prefix + noun + suffix, where only the noun gets
-    // a custom color (prefix/suffix render in DefaultColor). NULL/empty prefix
-    // or suffix is allowed.
+    // prefix + noun + suffix, only the noun colored; NULL/empty prefix or suffix is allowed.
     int (*EnqueueColoredNoun)(const char *prefix, const char *noun, GXColor noun_color, const char *suffix);
 
-    // Same as EnqueueColoredNoun, but suffix is a printf-style format string
-    // with vararg substitutions.
+    // EnqueueColoredNoun with a printf-style suffix.
     int (*EnqueueColoredNounFmt)(const char *prefix, const char *noun, GXColor noun_color,
                                  const char *suffix_format, ...);
 
-    // Named color palette. RGB only - alpha is set per-frame by the lifetime/
-    // fade machinery, so the alpha byte here is ignored.
+    // Named color palette. RGB only - the alpha byte is ignored, since alpha is set per-frame
+    // by the fade machinery.
     GXColor DefaultColor;     
     GXColor MachineColor;     
     GXColor EventColor;       

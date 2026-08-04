@@ -1,6 +1,3 @@
-// Cannon event - WIP investigation toward spawning a working cannon yakumono
-// in City Trial. See cannon_event.h for the high-level approach.
-
 #include "os.h"
 #include "game.h"
 #include "hsd.h"
@@ -15,37 +12,26 @@
 #define CANNON_SPAWN_ENABLED 1
 #endif
 
-// Disabled by default. Loading GrMachine2Model.dat (1.6MB) in CT exhausts
-// heap 1 - the JObj instantiation needs ~1KB and only ~30 bytes were left
-// after the load. CT's memory budget can't accommodate the full model
-// archive.
+// Off by default: GrMachine2Model.dat is 1.6MB and exhausts CT's heap 1, so the
+// next allocation (the JObj instantiation needs ~1KB) asserts.
 #ifndef CANNON_LOAD_ENABLED
 #define CANNON_LOAD_ENABLED 0
 #endif
 
 #define CANNON_DESC_ID 48
 
-// CT path: hijack a spare data_array slot for a zeroed-param ghost spawn.
 // CT's data_count is 33 with slots 31, 32 unused.
 #define CT_HIJACK_DATA_IDX 31
 
-// Machine Passage path: data_array[1] is the live cannon param block populated
-// by GrMachine2.dat. We spawn a *second* cannon using the same slot - both
-// yakumono will share the param read-only and have separate ydata, giving us a
-// clean ydata to dump alongside the param.
+// Machine Passage's live cannon param block, populated by GrMachine2.dat. A
+// second cannon spawned from the same slot shares the param read-only and gets
+// its own ydata.
 #define MP_CANNON_DATA_IDX 1
-// Gm_GetCurrentGrKind reads r13[0x7f8] which actually stores StageKind /
-// AirRideCourse (Machine Passage = 6), NOT the per-grkind hook table index
-// (which is 5 for MP). The doc's "GroundKind = 5" refers to the internal
-// dispatch table, not this runtime accessor. CT happens to be 9 in both.
-#define MACHINE_PASSAGE_GRKIND 6
 
 static u8 s_zero_cannon_param[256] __attribute__((aligned(4))) = {0};
 
-// Cache loaded archives - Archive_LoadFile is expensive and we only need to
-// do it once per session. Order matters: model must load first so the
-// stage archive's extern (the cannon animjoint) resolves automatically when
-// HSD_ArchiveParse walks the global archive list.
+// Load order matters: the model archive's publics must be in the global list
+// before the stage archive's cannon-animjoint extern is parsed.
 static HSD_Archive *s_grmachine2_model_archive = NULL;
 static HSD_Archive *s_grmachine2_archive = NULL;
 
@@ -55,13 +41,7 @@ static int ReadCount(void)
     return p ? *p : -1;
 }
 
-// Tag a 4-byte value with a hint about what it likely is, to make the dump
-// readable at a glance:
-//   "ROM"  = pointer into 0x80000000..0x80600000 (game code/data)
-//   "HEAP" = pointer into 0x80800000..0x81800000 (HSD heap, MEM1 dynamic)
-//   "f"    = looks like a small float (1.0, 0.0, common transform values)
-//   "0"    = exact zero
-//   "?"    = anything else (small ints, packed flags, etc.)
+// Dump annotation: game code/data range, HSD heap range, or small-float shape.
 static const char *Tag(u32 v)
 {
     if (v == 0)
@@ -84,7 +64,6 @@ static int IsLikelyPointer(u32 v)
            (v >= 0x80800000 && v < 0x81800000);
 }
 
-// Dump `nbytes` of memory at `addr`, in 16-byte rows (4 words per row) with tags.
 static void DumpRange(const char *prefix, const void *addr, int nbytes)
 {
     const u32 *raw = (const u32 *)addr;
@@ -99,8 +78,8 @@ static void DumpRange(const char *prefix, const void *addr, int nbytes)
     }
 }
 
-// Dump a param block, then for each pointer-looking word in the first
-// `nbytes_chase` bytes, dump 32 bytes at the target.
+// Dumps the block, then 32 bytes at each pointer-looking word in its first
+// `nbytes_chase` bytes.
 static void DumpParamWithChase(const char *tag, const void *param,
                                int nbytes_dump, int nbytes_chase)
 {
@@ -126,9 +105,8 @@ static void DumpYData(const char *tag, YakumonoData *yd)
     DumpRange("[CannonEvent]", yd, 0x180);
 }
 
-// City Trial: hijack a spare slot, point it at a zeroed param, spawn the
-// cannon, restore the slot. Confirms framework plumbing is stage-agnostic;
-// resulting ydata is the "ghost" baseline (no JObj, no model, no audio).
+// Point a spare slot at a zeroed param, spawn, restore the slot. The resulting
+// ydata is the "ghost" baseline: no JObj, no model, no audio.
 static void DumpZeroParamCT(void)
 {
     GrObj *grobj = *stc_grobj;
@@ -162,15 +140,14 @@ static void DumpZeroParamCT(void)
 
     int count_after = ReadCount();
     YakumonoData *yd = Yaku_GetData(yaku_gobj);
-    OSReport("[CannonEvent] spawn-CT(zeroed): count %d→%d gobj=%p yd=%p\n",
+    OSReport("[CannonEvent] spawn-CT(zeroed): count %d->%d gobj=%p yd=%p\n",
              count_before, count_after, yaku_gobj, yd);
     if (yd)
         DumpYData("CT-zeroed", yd);
 }
 
-// Machine Passage: data_array[1] is already populated by vanilla. Dump the
-// real param block (with pointer chasing), then spawn a second cannon from
-// the same slot - ydata is fresh and isolated, the param is shared read-only.
+// Dump Machine Passage's real cannon param block, then spawn a second cannon
+// from the same slot to get a fresh, isolated ydata alongside it.
 static void DumpHealthyMP(void)
 {
     GrObj *grobj = *stc_grobj;
@@ -200,10 +177,8 @@ static void DumpHealthyMP(void)
 
     DumpParamWithChase("MP-real", cannon_param, /*nbytes_dump=*/0x80, /*nbytes_chase=*/0x40);
 
-    // Walk the GAMEPLINK_YAKUMONO=8 GObj list and dump every yakumono whose
-    // desc_id (ydata+0x04) == 48. This finds the *vanilla* cannons spawned by
-    // grInitYakumono, before our duplicate spawn, so we can compare a real
-    // working cannon's ydata against ours.
+    // The vanilla cannons grInitYakumono spawned, for comparison. GObj list 8
+    // is GAMEPLINK_YAKUMONO; desc_id is ydata+0x04.
     GOBJ *head = (*stc_gobj_lookup)[8];
     int vidx = 0;
     for (GOBJ *g = head; g; g = g->next)
@@ -228,7 +203,7 @@ static void DumpHealthyMP(void)
 
     int count_after = ReadCount();
     YakumonoData *yd = Yaku_GetData(yaku_gobj);
-    OSReport("[CannonEvent] spawn-MP(real): count %d→%d gobj=%p yd=%p\n",
+    OSReport("[CannonEvent] spawn-MP(real): count %d->%d gobj=%p yd=%p\n",
              count_before, count_after, yaku_gobj, yd);
     if (yd)
         DumpYData("MP-real", yd);
@@ -264,7 +239,7 @@ static void DumpPublicSymbols(const char *tag, HSD_Archive *arch, int max)
         HSD_ArchivePublicInfo *info = &arch->public_info[i];
         char *name = arch->symbols + info->symbol;
         void *data = arch->data + info->offset;
-        OSReport("[CannonEvent] load:   [%d] +%08x → %p  %s\n",
+        OSReport("[CannonEvent] load:   [%d] +%08x -> %p  %s\n",
                  i, info->offset, data, name);
     }
     if (shown < n)
@@ -279,8 +254,7 @@ static void DumpExternSymbols(const char *tag, HSD_Archive *arch)
     {
         HSD_ArchiveExternInfo *info = &arch->extern_info[i];
         char *name = arch->symbols + info->symbol;
-        // After parse, the extern's slot inside data should be patched to
-        // the resolved address. Read it to check if resolution succeeded.
+        // Parse patches the resolved address into this slot; 0 = unresolved.
         u32 *slot = (u32 *)(arch->data + info->offset);
         OSReport("[CannonEvent] load:   [%d] +%08x slot=%p  *slot=%08x  %s\n",
                  i, info->offset, slot, *slot, name);
@@ -292,8 +266,6 @@ static void CrossLoadCT(void)
     if (!Gm_IsInCity())
         return;
 
-    // Load model archive FIRST so its public symbols are in the global list
-    // when we parse the stage archive's externs.
     HSD_Archive *model = LoadArchive("GrMachine2Model.dat", &s_grmachine2_model_archive);
     if (!model)
         return;
@@ -306,7 +278,6 @@ static void CrossLoadCT(void)
     DumpPublicSymbols("Stage.dat", stage, 10);
     DumpExternSymbols("Stage.dat", stage);
 
-    // Resolve grDataMachine2 by name and inspect its yakumono table.
     GrData *grdata = (GrData *)Archive_GetPublicAddress(stage, "grDataMachine2");
     if (!grdata)
     {
@@ -335,9 +306,6 @@ static void CrossLoadCT(void)
         DumpRange("[CannonEvent]", cannon_param, 0x80);
     }
 
-    // Inspect the model archive's two public symbols to identify their
-    // struct types. grModelMachine2 is most likely a JObjSet or HSD_SObjDesc;
-    // dumping the first 0x40 bytes lets us pattern-match against known layouts.
     void *grmodel = Archive_GetPublicAddress(model, "grModelMachine2");
     void *grmotion = Archive_GetPublicAddress(model, "grModelMotionMachine2");
     OSReport("[CannonEvent] load: grModelMachine2 = %p, grModelMotionMachine2 = %p\n",
@@ -348,26 +316,18 @@ static void CrossLoadCT(void)
         OSReport("[CannonEvent] load: === grModelMachine2 first 0x40 bytes ===\n");
         DumpRange("[CannonEvent]", grmodel, 0x40);
 
-        // The first 3 pointers in grModelMachine2 are very close to grModelMachine2
-        // itself (8-36 bytes earlier). That's the HSD_SObjDesc indirect-pointer
-        // pattern: each field is a pointer to a NULL-terminated array of pointers
-        // to the actual data. Dump the first ~16 bytes at each indirection target
-        // to see what kind of pointer-array we get.
         u32 *raw = (u32 *)grmodel;
         for (int i = 0; i < 6; i++)
         {
             u32 v = raw[i];
             if (v >= 0x80000000 && v < 0x81800000)
             {
-                OSReport("[CannonEvent] load:   grModel+0x%02x = %08x → contents:\n", i * 4, v);
+                OSReport("[CannonEvent] load:   grModel+0x%02x = %08x -> contents:\n", i * 4, v);
                 DumpRange("[CannonEvent]    ", (const void *)v, 16);
-                // For HSD_SObjDesc, each field is JObjSet** (etc) - the contents
-                // we just dumped should be a NULL-terminated pointer array. Chase
-                // the first entry to see if it points at a real JObjSet.
                 u32 inner = *(u32 *)v;
                 if (inner >= 0x80000000 && inner < 0x81800000)
                 {
-                    OSReport("[CannonEvent] load:     **chase = %08x → first 0x20:\n", inner);
+                    OSReport("[CannonEvent] load:     **chase = %08x -> first 0x20:\n", inner);
                     DumpRange("[CannonEvent]      ", (const void *)inner, 0x20);
                 }
             }
@@ -379,9 +339,6 @@ static void CrossLoadCT(void)
         DumpRange("[CannonEvent]", grmotion, 0x40);
     }
 
-    // Also dump grdata->stage_node - this is what GrData+0x4 ("stage_node")
-    // points at; might be a top-level scene-graph node or a struct that
-    // bridges grdata and grmodel.
     if (grdata->stage_node)
     {
         OSReport("[CannonEvent] load: === grdata->stage_node @ %p first 0x40 bytes ===\n",
@@ -394,10 +351,10 @@ void CannonEvent_On3DLoadEnd(void)
 {
 #if CANNON_SPAWN_ENABLED
     {
-        GroundKind grkind = Gm_GetCurrentGrKind();
+        StageKind stage_kind = stGetCurrentStageKind();
         if (Gm_IsInCity())
             DumpZeroParamCT();
-        else if (grkind == MACHINE_PASSAGE_GRKIND)
+        else if (stage_kind == AIRRIDE_MACHINE_PASSAGE)
             DumpHealthyMP();
     }
 #endif
@@ -437,8 +394,8 @@ void CannonEvent_TryRender(int set_index)
     OSReport("[CannonEvent] render: trying grmodel[%d] = %p, set->jobj = %p\n",
              set_index, set, set->jobj);
 
-    // Pass is_add_anim=0 so the inline doesn't dereference set->animjoint -
-    // those fields are small ints (counts) in this struct, not real pointers.
+    // is_add_anim=0: this JOBJSet's trailing fields are joint/dobj/mobj counts,
+    // not the animjoint pointers the inline would otherwise dereference.
     GOBJ *g = JObj_LoadSet_SetPri(
         /*is_hidden=*/0, set, /*anim_id=*/0, /*frame=*/0.0f,
         /*p_link=*/14 /* GAMEPLINK_USER */, /*gx_link=*/0,

@@ -4,6 +4,7 @@
 /externals/devkitpro/
 /iso/
 /.claude/settings.local.json
+/mods/custom_weather/assets/
 __pycache__/
 mem1.raw
 notes.txt

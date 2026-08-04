@@ -21,7 +21,7 @@ from typing import Optional
 _PREFIX_TABLE = [
     # AirRide stage/model
     ("grModelMotion", "KAR_grModelMotion"),
-    ("grModel", "KAR_grModel"),  # ModelSection (JOBJDesc**[4])
+    ("grModel", "KAR_grModel"),  # MainModel + SkyboxModel roots
     ("grDataCommon", "KAR_grDataCommon"),
     ("grData", "KAR_grData"),
     ("grGroundParam", "SBM_GroundParam"),

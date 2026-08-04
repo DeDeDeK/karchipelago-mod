@@ -2,10 +2,9 @@
 #include "main.h"
 #include "textbox_api.h"
 
-// Give copy ability to every human Kirby rider via the raw rider API.
-// Used in Air Ride (and as a CT fallback when item data tables are unavailable);
-// City Trial normally spawns a real ITKIND_COPY* item through SpawnItemHumans so
-// the pickup visual plays. Skips non-Kirby riders and players with no rider GObj.
+// Give a copy ability to every human Kirby rider via the raw rider API. Used in
+// Air Ride, and as a CT fallback when item data tables are unavailable; City
+// Trial normally spawns a real ITKIND_COPY* item so the pickup visual plays.
 int Ability_GiveItem(CopyKind copy_kind)
 {
     int applied = 0;

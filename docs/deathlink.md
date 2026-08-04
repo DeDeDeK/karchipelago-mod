@@ -1,26 +1,22 @@
-# Deathlink
+# DeathLink
 
-## Overview
+Deathlink synchronizes deaths between players in a multiworld: dying in Kirby Air Ride sets `ap_data->deathlink_send`, and the client setting `ap_data->deathlink_receive` kills the local player. Implemented in `deathlink.c` / `deathlink.h`, gated on `ap_menu_settings.deathlink_enabled`.
 
-Deathlink synchronizes deaths between players in a multiworld. When enabled, dying in Kirby Air Ride sends a death signal to other players, and receiving one kills the local player.
-
-**Files:** `deathlink.c` / `deathlink.h`
-
-**Top Ride uses the sand-pit enemy as the death proxy.** TR has no rider/machine/HP/fall-death system, so the AR/CT send hooks (`Rider_CheckToDieOnMachine`, `Machine_SetFallDead`) do not fire there. Instead, TR send fires when a human kirby gets swallowed by the sand-pit enemy on the SAND course and spit back out. See "Top Ride Send" below.
-
-Receive is wired separately via `DeathLink_OnTopRideLoadEnd` (called from `OnTopRideLoadEnd` since TR uses minor 19, not 18, so `On3DLoadEnd` does not fire). The TR receive path picks one random damage state from {Press, Freeze, Numb, Confuse} and applies that same state to all human kirbys — see "Top Ride Receive" below.
+Air Ride / City Trial and Top Ride are two separate implementations. Top Ride has no rider, machine, HP or fall-death system, so it gets its own send hook (the SAND-course sand pit) and its own receive effect (a random damage state), wired through `OnTopRideLoadEnd` because TR loads on minor 19 and never fires `On3DLoadEnd`.
 
 ## Sending Deaths
 
-Two hooks detect player deaths:
+Three hooks detect player deaths, all applied from `DeathLink_OnBoot`:
 
-1. **HP death** — `HOOKCREATE` at `0x801a06d0` in `Rider_CheckToDieOnMachine`. Fires when `Machine_IsDead` returns true (machine HP reaches zero). Sets `ap_data->deathlink_send = 1`.
+| Hook addr | Vanilla function | Trigger |
+|-----------|------------------|---------|
+| `0x801a06d0` | `Rider_CheckToDieOnMachine` | HP death — `Machine_IsDead` returned true (machine HP reached zero) |
+| `0x801e6540` | `Machine_SetFallDead` | Fall death — machine went out of bounds |
+| `0x80331a94` | per-frame TR-stage function at `0x8033158c` | Top Ride sand pit ejected a swallowed kirby |
 
-2. **Fall death** — `HOOKCREATE` at `0x801e6540` inside `Machine_SetFallDead`. Fires when a machine falls out of bounds. At this hook point, r31 = MachineData*, r4 = ground_handle, r5 = respawn_pos. The hook must save/restore r3, r4, r5 (volatile registers still in use by the function) via explicit prologue/epilogue assembly.
+All three funnel through `DeathLinkSendAllowed()`, which requires (a) the reentrancy guard `applying_deathlink` to be clear — so the receive path's own `Machine_SetFallDead` / `Ply_SetHP` calls don't echo a death back out — and (b) `ap_menu_settings.deathlink_enabled` to be set. Each hook then applies its own human-vs-CPU filter before setting the flag, because the two engines discriminate differently: the 3D path (`SendDeathLink`) uses `Ply_CheckIfCPU`, the TR path uses `TopRide_GetPlayerKind == TR_PKIND_HMN`.
 
-Both hooks funnel through the common gate `DeathLinkSendAllowed()`, which requires (a) the reentrancy guard `applying_deathlink` to be clear — avoiding echoing deaths back when the receive path triggers `Machine_SetFallDead` or `Ply_SetHP` — and (b) `ap_menu_settings.deathlink_enabled` to be set. Each hook then applies its own mode-specific human-vs-CPU filter before setting the flag: the 3D path (`SendDeathLink`) skips CPUs via `Ply_CheckIfCPU`; the TR path uses `TopRide_GetPlayerKind == TR_PKIND_HMN`.
-
-### Machine_SetFallDead Hook Register Preservation
+### `Machine_SetFallDead` hook register preservation
 
 The hook at `0x801e6540` is inside `Machine_SetFallDead`, 0x20 bytes past the function entry at `0x801e6520`. At this point, the function prologue has saved r31 = md (non-volatile), but the argument registers r3 (md), r4 (ground_handle), and r5 (respawn_pos) are still volatile and in active use by later instructions:
 
@@ -32,9 +28,7 @@ The hook's prologue saves r4/r5 to the stack and the epilogue restores all three
 
 ## Receiving Deaths
 
-`DeathLink_PerFrame` runs as a GObj update function (created in `DeathLink_On3DLoadEnd`, which is called from `main.c::On3DLoadEnd` for the 3D modes — Air Ride, City Trial, and the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `ap_data->deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) that is currently on a machine (`Rider_IsOnMachine`), calls `KillPlayer(rd, md)` under the `applying_deathlink` reentrancy guard. After killing everyone it enqueues a "Deathlink received!" textbox notification and clears `deathlink_receive`.
-
-Top Ride is **not** handled here — it has no rider/machine and uses minor 19, so neither this proc nor `On3DLoadEnd` ever fires there. See "Top Ride Receive" below.
+`DeathLink_PerFrame` runs as a GObj update function created in `DeathLink_On3DLoadEnd`, called from `On3DLoadEnd` for the 3D modes (Air Ride, City Trial, the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `ap_data->deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) currently on a machine (`Rider_IsOnMachine`), calls `KillPlayer(rd, md)` under the `applying_deathlink` reentrancy guard. After killing everyone it enqueues a "Deathlink received!" textbox and clears `deathlink_receive`.
 
 ### Kill Mechanism by Mode
 
@@ -54,9 +48,9 @@ The HP-death stadiums run **outside** `Gm_IsInCity` but use CT-style HP-based de
 
 **Fall death path:** `Machine_SetFallDead(md, -1, pos)` triggers a fall-off-course death; the machine flies off the track and respawns at the last spline checkpoint.
 
-The checkpoint position `pos` is selected by the backup flag at `md->xc37` bit 6: clear = `respawn_pos` (0x8A8, primary checkpoint), set = `backup_respawn_pos` (0x8C0, last-known-good checkpoint saved when the per-frame spline lookup fails). This matches the vanilla `Machine_CheckFallDeath` OOB-distance path behavior.
+The checkpoint position `pos` is selected by the backup flag at `md->xc37` bit 6: clear = `respawn_pos` (0x8A8, primary checkpoint), set = `backup_respawn_pos` (0x8C0, last-known-good checkpoint saved when the per-frame spline lookup fails). This matches vanilla `Machine_CheckFallDeath`'s OOB-distance path, which also passes ground handle -1 when no dead zone surface is found — the global dead zone system respawns correctly with an invalid handle, and deathlink kills happen mid-track where `Machine_GetGroundHandle` would return -1 anyway.
 
-Ground handle is passed as -1. The vanilla game does this in `Machine_CheckFallDeath`'s OOB-distance branch when no dead zone surface is found. The global dead zone system handles respawn correctly with an invalid handle.
+The mpColl position (md+0x6F8 at +0x8/+0xC/+0x10) is **not** an alternative here: it stores world-space XYZ, and `Machine_SetFallDead` expects spline parameters, so passing it produces incorrect respawns.
 
 ## Checkpoint System
 
@@ -158,38 +152,22 @@ This data is preserved through the fall animation (read-only by `Machine_ApplyFa
 - Packet[7..9]: current mpColl position (from `Machine_GetMpCollPosition`)
 - Packet[0x18+]: for type 4 — stored fall-dead data from 0x1B48 (ground_handle, checkpoint, timestamp)
 
-## Design Notes (Deathlink Receive)
+## Known Limitations
 
-### Checkpoint-Based Respawn
-
-The deathlink receive uses the game's existing checkpoint system for respawn positioning. `respawn_pos` stores spline parameters (not world XYZ), updated per-frame by `Machine_UpdateCheckpoint`. The backup checkpoint is used when the spline lookup has failed (xc37 bit 6 set). This matches vanilla fall-death behavior.
-
-Checkpoint density varies by course — some courses have sparse checkpoints, meaning the player may respawn noticeably behind where they died. This is consistent with natural fall deaths in the vanilla game.
-
-### Why Not mpColl Position
-
-The mpColl position (md+0x6F8 at offsets +0x8/+0xC/+0x10) stores **world-space XYZ coordinates**, not spline parameters. Passing these to `Machine_SetFallDead` (which expects spline params) causes incorrect respawns. The checkpoint spline params in `respawn_pos` are the correct format.
-
-### Why -1 for Ground Handle
-
-Deathlink kills happen mid-track where the machine's collision surface typically has no dead zone entry, so `Machine_GetGroundHandle` would return -1 anyway. The vanilla game passes -1 in `Machine_CheckFallDeath`'s OOB-distance path, and the global dead zone system handles it correctly.
+Checkpoint density varies by course. On sparse courses a fall-death respawn can put the player noticeably behind where they died — the same behavior as a natural fall death, since the receive path reuses the vanilla checkpoint system unmodified.
 
 ## Top Ride Send
 
-Single hook on the sand-pit enemy's "spit kirby out" path. Sets `deathlink_send = 1` for human kirbys, gated by `deathlink_enabled` and the `applying_deathlink` reentrancy guard.
+The sand-pit enemy on the SAND course is the death proxy: `DeathLink_OnTopRideSandPit(kirby)` sets `deathlink_send = 1` when the pit spits a swallowed human kirby back out. It checks `applying_deathlink` clear, `deathlink_enabled` set, `TR_PKIND_HMN`, and `round_state == 2`. The pit's eject is a discrete event, not a per-frame tick, so no rising-edge gate is needed.
 
-| Hazard | Hook addr | Vanilla function | Kirby reg | Notes |
-|--------|-----------|------------------|-----------|-------|
-| Sand-pit enemy (SAND course) | `0x80331a94` | per-frame TR-stage function at `0x8033158c` | r31 | Clobbered: `lwz r12, 0xd0(r12)` (vt+0xD0 = `KirbyDoodlebugOut` wrapper). The function loops over all 4 kirby slots and dispatches the eject-from-pit knockback. The other vt+0xD0 call site (0x802e2804, Doodlebug item) is intentionally NOT hooked. r3 (=kirby), r4 (=stack+0x90), r5 (=stack+0x84), r6 (=30), r7 (=60), and r12 are restored in the epilogue from r31 + r1 + immediates so the imminent vtable bctrl has its args. |
-
-`DeathLink_OnTopRideSandPit(kirby)` checks: not in receive (`applying_deathlink`), `deathlink_enabled` set, `TR_PKIND_HMN`, `round_state == 2`. The function only fires when the pit decides to eject a swallowed kirby (a discrete event, not a per-frame tick), so no state-transition or rising-edge gate is needed.
+The hook site is `0x80331a94`, inside the per-frame TR-stage function at `0x8033158c` that loops all 4 kirby slots and dispatches the eject knockback. Kirby is in r31. The clobbered instruction is `lwz r12, 0xd0(r12)` — vt+0xD0 is the `KirbyDoodlebugOut` wrapper; the other vt+0xD0 call site (`0x802e2804`, the Doodlebug item) is deliberately **not** hooked. The epilogue rebuilds r3 (=kirby), r4 (=stack+0x90), r5 (=stack+0x84), r6 (=30), r7 (=60) and r12 from r31 / r1 / immediates so the imminent vtable `bctrl` still has its arguments.
 
 ### Why not other TR scenery / damage paths
 
-Several other terrain-driven damage states were investigated and excluded:
+Several other terrain-driven damage states are excluded:
 
-- **KirbyBurn (lava / fire tiles)** — `BurnAreaTickAll` (`zz_803218dc_`) calls `KirbyBurnMethod` once per kirby per frame, AND KirbyBurn's per-frame tick transitions back to Normal between frames. Both a vtable-equality gate and a state-ID gate failed to suppress per-frame spam; only a per-kirby frame-counter rising-edge gate worked, but the complexity wasn't worth it for the lava case alone.
-- **KirbySpin / KirbySandSpin / KirbyWhirlpool** (spin-class effector functions at `0x802e7570 / 0x802e7750 / 0x802e79a4`) — all hooked at one point, but none fired for the actual in-game sand pit. The sand-pit ejection uses `KirbyDoodlebugOut` instead.
+- **KirbyBurn (lava / fire tiles)** — `BurnAreaTickAll` (`zz_803218dc_`) calls `KirbyBurnMethod` once per kirby per frame, AND KirbyBurn's per-frame tick transitions back to Normal between frames. Neither a vtable-equality gate nor a state-ID gate suppresses the per-frame spam; only a per-kirby frame-counter rising-edge gate would, and the complexity isn't worth it for the lava case alone.
+- **KirbySpin / KirbySandSpin / KirbyWhirlpool** (spin-class effector functions at `0x802e7570 / 0x802e7750 / 0x802e79a4`) — none of these fire for the in-game sand pit. The sand-pit ejection uses `KirbyDoodlebugOut` instead.
 - **KirbyCrush** (heavy-machine landing on a kirby) is kirby-vs-machine, not pure terrain.
 - **KirbyFreeze** is item-derived in TR (the Freeze projectile item, not a stage hazard).
 - **KirbyPress** has both terrain-effector and physics-internal entry paths; neither is unambiguously scenery.
@@ -212,7 +190,7 @@ The pool is `deathlink_states[]` in `deathlink.c`, each entry a `static inline` 
 | 2 | `TopRide_KirbyNumb`    | `[64]` / +0x100 | `TopRide_KirbyNumbMethod` (0x802d5b74)    | Numb (paralysis) |
 | 3 | `TopRide_KirbyConfuse` | `[66]` / +0x108 | `TopRide_KirbyConfuseMethod` (0x802d5c64) | Confuse (controls scrambled) |
 
-`SpeedDown` is reserved for traplink (see `traplink-send.md`). `Burn`, `Spin`, `Crush`, `Strike`, `Explode`, and `Elec` are deliberately excluded — see `docs/topride-kirby-states.md` "Caveats & Open Items" for the per-state reasoning (NULL-deref hazards in their setters, item-only derivation, etc.). Each wrapper passes zero args, producing a static stun: the state's animation plays in place with no knockback impulse.
+`SpeedDown` is reserved for traplink. `Burn`, `Spin`, `Crush`, `Strike`, `Explode`, and `Elec` are deliberately excluded: their setters either NULL-deref without an originating item or derive their parameters from one. Each wrapper passes zero args, producing a static stun: the state's animation plays in place with no knockback impulse.
 
 ### Velocity Neutralization
 
@@ -221,7 +199,7 @@ Around each `apply(kirby)` call the proc zeros the kirby's `ChargeComponent.velo
 - **Pre-zero** pre-empts setters that read `kirby+0xA0` and rescale it (e.g. the AC_TOBASARE / knockback-class setters).
 - **Post-zero** overrides setters that ignore `kirby+0xA0` and instead `PSVECNormalize` the (zero) Vec3 arg into NaN and write that back.
 
-The result is no residual launch impulse. See `docs/topride-kirby-states.md` for the per-setter details.
+The result is no residual launch impulse. See `topride-kirby-states.md` for the per-setter details.
 
 ### Round-State Gate
 

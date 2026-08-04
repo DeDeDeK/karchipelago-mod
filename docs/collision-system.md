@@ -2,22 +2,20 @@
 
 The map collision system handles all entity-vs-environment interactions in Kirby Air Ride — ground detection, wall/ceiling collisions, raycasting, and surface response. This is distinct from the **HitColl** system (documented in `hurtdata-system.md`), which handles entity-vs-entity combat collisions.
 
-## System Overview
+## Collision Approaches
 
-There are three collision approaches used by different entity types:
+Four strategies, picked per entity type:
 
 | Approach | Used by | CollData allocated? | Description |
 |----------|---------|---------------------|-------------|
 | **Full mpColl** | Machines, Riders | Yes | Full 0x400-byte CollData with sphere collision, floor/wall/ceiling detection |
 | **Item mpColl (coll_kind=1)** | Boxes landing | Yes | CollData with bounce physics, transitions to point coll on landing |
-| **Point collision** | Most items (coll_kind≥2) | Optional | Simple downward raycast for ground detection |
+| **Point collision** | Most items (coll_kind>=2) | Optional | Simple downward raycast for ground detection |
 | **Raw raycast** | Items (coll_kind=0) | No | Initial spawn raycast, transitions to point coll (coll_kind=3) |
 
-## CollData Struct (0x400 bytes) — `collision.h`
+## CollData Struct (0x400 bytes)
 
-Allocated by `mpColl_Create` (0x80245b4c) from a freelist pool at `0x8056dbc8`. All active CollData objects are linked via `next` into a global list headed at `r13+0x7E4` (`0x805DD8C4`).
-
-### Key Fields
+Defined in `collision.h`. Allocated by `mpColl_Create` (0x80245b4c) from a freelist pool at `0x8056dbc8`. All active CollData objects are linked via `next` into a global list headed at `r13+0x7E4` (`0x805DD8C4`).
 
 | Offset | Type | Name | Description |
 |--------|------|------|-------------|
@@ -26,8 +24,8 @@ Allocated by `mpColl_Create` (0x80245b4c) from a freelist pool at `0x8056dbc8`. 
 | 0x008 | Vec3 | pos | Current world position |
 | 0x014 | Vec3 | pos_delta | Frame delta (pos - prev_pos), computed by mpColl_Update |
 | 0x020 | Vec3 | prev_pos | Previous frame position |
-| 0x02C–0x040 | | | Position backup / computed fields |
-| 0x044 | mpCollInfo* | coll_info | **Floor/wall/ceiling collision results** (see below). Allocated by mpColl_Create |
+| 0x02C-0x040 | | | Position backup / computed fields |
+| 0x044 | mpCollInfo* | coll_info | **Floor/wall/ceiling collision results**. Allocated by mpColl_Create |
 | 0x048 | mpCollInfo* | coll_info2 | Second collision info (alternative collision set). Freed in mpColl_Destroy |
 | 0x33C | CollShapeKind | coll_shape_kind | Collision shape type (0 = sphere) |
 | 0x340 | CollShapeData* | shape_data | Shape parameters. Allocated from pool at 0x8056dbf4 |
@@ -39,79 +37,75 @@ Allocated by `mpColl_Create` (0x80245b4c) from a freelist pool at `0x8056dbc8`. 
 
 | Offset | Type | Name | Description |
 |--------|------|------|-------------|
-| 0x00–0x0B | | | Unknown |
+| 0x00-0x0B | | | Unknown |
 | 0x0C | Vec3 | direction | Direction/orientation vector |
-| 0x30 | float | radius | Sphere radius |
+| 0x30 | float | radius | Sphere radius (lerp endpoint) |
+| 0x34 | float | radius2 | Second sphere radius; `mpColl_GetSphereRadius` lerps +0x30 <-> +0x34 |
 | 0x38 | Vec3 | scale | Scale vector, set during mpColl_Init |
 
 ## mpCollInfo Sub-Struct (at CollData+0x44)
 
-Contains the results of floor/wall/ceiling collision checks. Allocated internally by `mpColl_Create` via `mpColl_AllocCollInfo` (0x802416cc). Has three collision "slots" (floor, wall, ceiling), each with validity flags and result data.
-
-### Status Fields
+Holds the results of floor/wall/ceiling collision checks. Allocated internally by `mpColl_Create` via `mpColl_AllocCollInfo` (0x802416cc). Three collision "slots" (floor, wall, ceiling), each with validity flags and result data.
 
 | Offset | Type | Name | Description |
 |--------|------|------|-------------|
 | 0x118 | int | floor_count | Number of floor collision entries found |
 | 0x11C | void* | floor_entry | Pointer to floor collision entry data |
-| 0x144 | int | floor_valid | Non-zero when floor collision result is available |
+| 0x144 | int | floor_valid | Non-zero when a floor collision result is available |
 | 0x148 | void* | wall_entry | Pointer to wall collision entry data |
-| 0x170 | int | wall_valid | Non-zero when wall collision result is available |
+| 0x170 | int | wall_valid | Non-zero when a wall collision result is available |
 | 0x174 | void* | ceil_entry | Pointer to ceiling collision entry data |
-| 0x19C | int | ceil_valid | Non-zero when ceiling collision result is available |
+| 0x19C | int | ceil_valid | Non-zero when a ceiling collision result is available |
 
-### Collision Entry Layout (0x1C bytes)
-
-Each entry contains a triangle reference and result data:
+Each collision entry is 0x1C bytes:
 
 | Offset | Type | Description |
 |--------|------|-------------|
 | 0x00 | u8 | Flags |
 | 0x01 | u8 | Type flags (bit 0=floor, bit 1=wall, bit 2=ceiling) |
-| 0x04 | void* | Vertex data pointer (contains triangle ID at +0x00, normal Vec3 at +0x08) |
-| 0x08–0x18 | | Additional collision result data |
+| 0x04 | void* | Vertex data pointer (triangle ID at +0x00, normal Vec3 at +0x08) |
+| 0x08-0x18 | | Additional collision result data |
 
-## Item Collision — coll_kind Dispatch
+## Item Collision: coll_kind Dispatch
 
-Items use the `coll_kind` field (3-bit field in ItemData+0x359, **bits 2-4, mask 0x1C**) to select their collision strategy. This is set during `Item_Create` from the `coll_kind` parameter of `Item_InitDesc`, and stored by `CityItem_AllocCollData` (0x80254318) via `rlwimi r0,kind,2,27,29` (insert 3 bits at byte position 2). It is read back in `Item_GenericEnvColl` via `rlwinm. r0,byte,30,29,31` (rotate right 2, mask low 3 bits). **Note:** the `item.h` bitfield models `coll_kind : 3` at the low 3 bits (mask 0x07); per the actual rlwimi/rlwinm the field is at bits 2-4 (mask 0x1C) — header bitfield/mask comment is a known discrepancy (see open question in the reconciliation notes).
-
-### coll_kind Values
+Items use the `coll_kind` field (3-bit field in ItemData+0x359, **bits 2-4, mask 0x1C**) to select their collision strategy. It is set during `Item_Create` from the `coll_kind` parameter of `Item_InitDesc` and stored by `CityItem_AllocCollData` (0x80254318) via `rlwimi r0,kind,2,27,29` (insert 3 bits at byte position 2). It is read back in `Item_GenericEnvColl` via `rlwinm. r0,byte,30,29,31` (rotate right 2, mask low 3 bits). The `item.h` bitfield models `coll_kind : 3` at the low 3 bits (mask 0x07); the `rlwimi`/`rlwinm` place it at bits 2-4 (mask 0x1C) — the header bitfield and its mask comment are a known discrepancy.
 
 | Value | CollData allocated? | Behavior | Used by |
 |-------|---------------------|----------|---------|
 | **0** | No | **Raw raycast / initial spawn.** Iterative ground search (up to 10 raycast iterations), then **transitions to 3** once grounded. Only valid during the first frame — requires `is_airborne != -1`. If CollData is NULL and code takes this path, the floor/wall/ceiling reads in `CityItem_GetGroundInfo` crash. |
-| **1** | **Yes** (via mpColl_Create) | **Full CollData collision.** Updates mpColl each frame, reads floor/wall/ceiling from mpCollInfo. On wall/ceiling hit: zeroes velocity. On floor hit: calls `ItemColl_BounceLand` for bounce response. After landing (bounce settles): **destroys CollData, transitions to point coll (3)**. |
+| **1** | **Yes** (via mpColl_Create) | **Full CollData collision.** Updates mpColl each frame, reads floor/wall/ceiling from mpCollInfo. On wall/ceiling hit: zeroes velocity. On floor hit: calls `ItemColl_BounceLand`. After the bounce settles: **destroys CollData, transitions to 3**. |
 | **2** | No | **Point collision with HandleLand.** Uses `ItemColl_HandleLand` (0x80255aa4) for ground detection via raycast. If CollData exists (optional), updates it but uses a different parameter function. |
-| **3** | No | **Point collision with HandleLand.** Same as 2. This is the steady-state for most items after landing. **Most items use this.** |
-| **4–7** | No | Same as 2/3. No behavioral distinction between values 2–7. |
+| **3** | No | Same as 2. Steady state for most items after landing. **Most items use this.** |
+| **4-7** | No | Same as 2/3. No behavioral distinction between values 2-7. |
 
-### Lifecycle: Box-Spawned Item
+### Lifecycle: box-spawned item
 
-1. `Item_Create` → `CityItem_AllocCollData(ItemData, 1)` → allocates CollData, stores coll_kind=1
-2. Each frame: `Item_GenericEnvColl` → coll_kind=1 path → updates mpColl, checks floor/wall/ceiling
-3. On bounce: `ItemColl_BounceLand` handles physics response
-4. When bounce settles: **destroys CollData** (`mpColl_Destroy`), sets `coll_data = NULL`, writes coll_kind=3
-5. Steady state: coll_kind=3, no CollData, uses `ItemColl_HandleLand` for simple ground tracking
+1. `Item_Create` -> `CityItem_AllocCollData(ItemData, 1)` -> allocates CollData, stores coll_kind=1
+2. Each frame: `Item_GenericEnvColl` -> coll_kind=1 path -> updates mpColl, checks floor/wall/ceiling
+3. On bounce: `ItemColl_BounceLand` handles the physics response
+4. When the bounce settles: **destroys CollData** (`mpColl_Destroy`), sets `coll_data = NULL`, writes coll_kind=3
+5. Steady state: coll_kind=3, no CollData, `ItemColl_HandleLand` for simple ground tracking
 
-### Lifecycle: Sky-Spawned / Mod-Spawned Item
+### Lifecycle: sky-spawned / mod-spawned item
 
-1. `Item_Create` with `coll_kind=3, is_airborne=1` → no CollData allocated
+1. `Item_Create` with `coll_kind=3, is_airborne=1` -> no CollData allocated
 2. Initial raycast at spawn to find ground (controlled by `is_airborne` / ItemDesc[0x50])
-3. Each frame: `Item_GenericEnvColl` → coll_kind≥2 path → `ItemColl_HandleLand`
+3. Each frame: `Item_GenericEnvColl` -> coll_kind>=2 path -> `ItemColl_HandleLand`
 
-### The coll_kind=0 Crash Bug
+### The coll_kind=0 crash
 
-If `coll_kind` is 0 (either intentionally as initial spawn state, or from garbage stack data), the code path at `Item_GenericEnvColl` falls through to the raw raycast handler. This path:
+If `coll_kind` is 0 (either intentionally as initial spawn state, or from garbage stack data), `Item_GenericEnvColl` falls through to the raw raycast handler. That path:
+
 1. Checks `ItemData->is_airborne` — if -1, exits immediately (safe)
-2. Otherwise, calls `ItemColl_GetGenericCollFlags` on `ItemData->point_coll.raycast_idx`
-3. If flags indicate no collision needed, attempts raycast
-4. **The danger:** `CityItem_GetGroundInfo` (0x80254464) unconditionally dereferences `ItemData->coll_data` (offset 0x1A4) to read `coll_info->floor_valid` at +0x44→+0x144. If `coll_data` is NULL (which it is when `CityItem_AllocCollData` was called with coll_kind=0), this crashes with a DSI at address 0x00000044.
+2. Otherwise calls `ItemColl_GetGenericCollFlags` on `ItemData->point_coll.raycast_idx`
+3. If flags indicate no collision needed, attempts the raycast
+4. `CityItem_GetGroundInfo` (0x80254464) then unconditionally dereferences `ItemData->coll_data` (offset 0x1A4) to read `coll_info->floor_valid` at +0x44 -> +0x144. When `coll_data` is NULL — which it is whenever `CityItem_AllocCollData` was called with coll_kind=0 — this is a DSI at address 0x00000044.
 
-`coll_kind=0` is used by the game's debug item spawner (`3DDebug_CheckToSpawnItem`), which presumably handles this case specially or always transitions before `Item_GenericEnvColl` runs.
+`coll_kind=0` is used by the game's debug item spawner (`3DDebug_CheckToSpawnItem`, 0x80081600), which either handles this case specially or always transitions before `Item_GenericEnvColl` runs.
 
 ## Point Collision (ItemData Fields)
 
-Items using point collision (coll_kind ≥ 2) track their ground state in ItemData directly:
+Items using point collision (coll_kind >= 2) track their ground state in ItemData directly:
 
 | Offset | Type | Name | Description |
 |--------|------|------|-------------|
@@ -119,34 +113,22 @@ Items using point collision (coll_kind ≥ 2) track their ground state in ItemDa
 | 0x1A8 | int | point_coll.raycast_idx | Triangle ID from last raycast (-1 = no ground) |
 | 0x1AC | Vec3 | point_coll.land_pos | Ground position from last raycast |
 | 0x1C8 | Vec3 | fall_dir | Gravity/down direction for raycasting |
-| 0x1D4 | int | is_airborne | If not -1, ground raycast is performed each frame |
+| 0x1D4 | int | is_airborne | If not -1, a ground raycast is performed each frame |
 | 0x35A | u8 | flags | Bit 4 = grounded (set by Item_SetGroundedFlag) |
 
 ## Raycast System
 
-### EnvColl_Raycast (0x800d1ac4)
+| Function | Address | Description |
+|---|---|---|
+| `EnvColl_Raycast` | 0x800d1ac4 | Wrapper around `Raycast_Do`. Takes start position, end position, output buffer. Uses the global map collision data at `r13+0x5EC` (+0x54 sub-offset). |
+| `Item_Raycast` | 0x802546e4 | Iterative raycast for items: position + direction + iteration count, calls `EnvColl_Raycast` in a loop (up to N steps) accumulating position. Returns the final triangle ID. |
+| `CityItem_FindGroundBelow` | 0x802547cc | Raycasts downward from item position (offset along the stored ground normal at ItemData+0x1C8). Stores to `point_coll.raycast_idx` (+0x1A8) and `point_coll.land_pos` (+0x1AC). |
+| `PointCollision_EnsureIDValid` | 0x800d1838 | Validates a triangle ID against the global map collision manager. Returns 0 if valid, 1 if invalid/out-of-range. |
+| `PointCollision_GetNormalByID` | 0x800d1860 | Given a triangle ID and an output Vec3, looks up the triangle (stride 0x40 per entry in map data) and copies the 12-byte surface normal. |
 
-Wrapper around `Raycast_Do` (0x800d9958). Takes start position, end position, and output buffer. Uses the global map collision data at `r13+0x5EC` (+0x54 sub-offset).
+## Item_InitDesc Parameter List
 
-### Item_Raycast (0x802546e4, size 0xe8)
-
-Iterative raycast for items. Given position + direction + iteration count, calls `EnvColl_Raycast` in a loop (up to N steps), accumulating position. Returns the final triangle ID.
-
-### CityItem_FindGroundBelow (0x802547cc, size 0x24c)
-
-Ground detection for items. Raycasts downward from item position (offset along the stored ground normal at ItemData+0x1C8). Stores result in `ItemData->point_coll.raycast_idx` (+0x1A8) and `point_coll.land_pos` (+0x1AC).
-
-### PointCollision_EnsureIDValid (0x800d1838)
-
-Validates a triangle ID against the global map collision manager. Returns 0 if valid, 1 if invalid/out-of-range.
-
-### PointCollision_GetNormalByID (0x800d1860)
-
-Given a triangle ID and output Vec3 pointer, looks up the triangle (stride 0x40 per entry in map data) and copies the 12-byte surface normal.
-
-## Item_InitDesc — Full Parameter List
-
-`Item_InitDesc` (0x802509a0) takes 13 parameters: 8 GPR (r3-r10) + 1 FPR (f1) + 4 stack. The GC EABI does **not** shadow floats in GPRs.
+`Item_InitDesc` (0x802509a0) takes 13 parameters: 8 GPR (r3-r10) + 1 FPR (f1) + 4 stack. The GC EABI does **not** shadow floats in GPRs. The `GKYE01.map` symbol at this address is `CityItem_InitDesc`; `Item_InitDesc` is the `link.ld` export name mod code uses.
 
 ```c
 void Item_InitDesc(
@@ -166,21 +148,17 @@ void Item_InitDesc(
 );
 ```
 
-### Vanilla Caller Values
+### Vanilla caller values
 
 | Caller | is_airborne | coll_kind | x38 | x3c |
 |--------|-------------|-----------|-----|-----|
-| 3DDebug_CheckToSpawnItem | 1 | 0 | -1 | -1 |
+| 3DDebug_CheckToSpawnItem (0x80081600) | 1 | 0 | -1 | -1 |
 | PowerUp_SpawnFromSky | 1 | 0 | variable | variable |
-| Box_SpawnContents | 1 | 1 or 2 | -1 | -1 |
+| Box_SpawnContents (0x80253378) | 1 | 1 or 2 | -1 | -1 |
 | zz_80253ad0_ (item spawn) | 1 | 1 | -1 | -1 |
 | **Mod code (recommended)** | **1** | **3** | **-1** | **-1** |
 
-(`3DDebug_CheckToSpawnItem` = `zz_80081600_`, `Box_SpawnContents` = `zz_80253610_` in the Ghidra project; verified caller args by disassembly. The actual map symbol for `Item_InitDesc` is `CityItem_InitDesc` at 0x802509a0 — `Item_InitDesc` is the link.ld export name used by mod code.)
-
 ## Item Environment Collision Pipeline
-
-### Per-Frame Flow (GObj proc)
 
 ```
 CityItem_EnvColl (0x8024f814)          — GObj proc callback
@@ -205,7 +183,7 @@ CityItem_EnvColl (0x8024f814)          — GObj proc callback
                  └─ if landed: mpColl_Destroy (if exists), coll_kind stays
 ```
 
-### Key Item Collision Functions
+### Key item collision functions
 
 | Address | Size | Name | Description |
 |---------|------|------|-------------|
@@ -213,15 +191,15 @@ CityItem_EnvColl (0x8024f814)          — GObj proc callback
 | 0x80254318 | 0x6C | CityItem_AllocCollData | Allocates CollData if coll_kind==1; writes coll_kind bits |
 | 0x80254384 | 0x80 | CityItem_InitCollData | Sets up CollData with position/scale from ItemData |
 | 0x80254444 | 0x20 | CityItem_ValidatePointCollID | Wrapper: PointCollision_EnsureIDValid |
-| 0x80254464 | 0x1DC | CityItem_GetGroundInfo | Reads CollData→coll_info floor/wall/ceiling results. **Crashes if coll_data is NULL** |
+| 0x80254464 | 0x1DC | CityItem_GetGroundInfo | Reads CollData->coll_info floor/wall/ceiling results. **Crashes if coll_data is NULL** |
 | 0x802546E4 | 0xE8 | Item_Raycast | Iterative raycast (N steps along direction) |
 | 0x802547CC | 0x24C | CityItem_FindGroundBelow | Downward raycast, stores to ItemData point_coll |
-| 0x80255438 | 0x370 | Item_GenericEnvColl | Main dispatch: coll_kind → collision path |
+| 0x80255438 | 0x370 | Item_GenericEnvColl | Main dispatch: coll_kind -> collision path |
 | 0x802557A8 | 0x14 | Item_SetGroundedFlag | Sets bit 4 of ItemData+0x35A |
 | 0x802557BC | 0x2E8 | ItemColl_BounceLand | Bounce/wall collision response for coll_kind=1 |
-| 0x80255AA4 | 0x4EC | ItemColl_HandleLand | Point-collision ground landing (coll_kind≥2) |
+| 0x80255AA4 | 0x4EC | ItemColl_HandleLand | Point-collision ground landing (coll_kind>=2) |
 
-### Core mpColl Functions
+### Core mpColl functions
 
 | Address | Size | Name | Description |
 |---------|------|------|-------------|
@@ -239,13 +217,13 @@ CityItem_EnvColl (0x8024f814)          — GObj proc callback
 | 0x80245ED0 | 0xA0 | mpColl_Destroy | Frees coll_info, coll_info2, shape_data, unlinks |
 | 0x80245F70 | 0x164 | mpColl_Update | Per-frame: update pos, compute delta, update shape |
 | 0x802460D4 | 0x38 | mpColl_SetDefaultParams | Sets default collision parameters |
-| 0x802461B4 | 0x38 | mpColl_SetDefaultParams2 | Alternative parameter set (for coll_kind≥2) |
+| 0x802461B4 | 0x38 | mpColl_SetDefaultParams2 | Alternative parameter set (for coll_kind>=2) |
 | 0x8024625C | 0xA4 | mpColl_UpdateShapeExtents | Updates shape extents from scale |
 | 0x80247E2C | 0x2C | mpColl_SetFlag | Sets/clears bit 7 of flags byte |
 | 0x80247FAC | 0xC4 | Machine_GetGroundHandle | Searches collision entries for ground type 0x19 |
 | 0x802485E0 | 0x5D4 | mpColl_UpdateCollision | Large collision processing update |
 
-### Map/Ground Functions
+### Map/ground functions
 
 | Address | Size | Name | Description |
 |---------|------|------|-------------|
@@ -256,15 +234,28 @@ CityItem_EnvColl (0x8024f814)          — GObj proc callback
 | 0x800D1860 | 0x90 | PointCollision_GetNormalByID | Looks up triangle normal (stride 0x40 per entry) |
 | 0x800D1AC4 | 0x70 | EnvColl_Raycast | Wrapper around Raycast_Do |
 | 0x800D9958 | 0x4DC | Raycast_Do | Core raycast against map geometry |
+| 0x800D4F20 | 0x98 | calcDistanceFromOOB | Minimum signed clearance from the stage OoB death box |
+
+## Stage Out-of-Bounds Death Box
+
+The playfield is bounded by an axis-aligned box stored in the stage file, separate from the triangle-mesh collision above. It lives in the `StageNode` sub-block at `GrData+0x04` (`externals/hoshi/include/stage.h`):
+
+```
+StageNode.oob_min   // +0xCC  Vec3 (minX, minY, minZ)
+StageNode.oob_max   // +0xD8  Vec3 (maxX, maxY, maxZ)
+```
+
+For City Trial (`GrCity1.dat`) these are `(-1300, -300, -1300)` / `(1300, 1500, 1300)`.
+
+`calcDistanceFromOOB(Vec3 *pos)` (0x800d4f20) reads the box from `(*stc_grobj)->gr_data->stage_node` and returns the minimum signed distance to any of the six planes: positive while `pos` is inside the box, negative once it has crossed a wall. Out-of-bounds death/fall logic uses this clearance. The box is plain spatial data (not a JObj), so scaling the stage visuals does not move it — `event_scale_change.c` rescales `oob_min`/`oob_max` explicitly to keep the kill box matched to the resized stage.
 
 ## Who Uses What
 
 ### Machines (MachineData)
 
-Machines use full mpColl through their own collision processing:
 - `Machine_EnvCollThink` (0x801c65a8) — GObj proc for environment collision
 - `Machine_ProcessEnvColl` (0x801e5108) — main collision processing
-- CollData stored at an offset in MachineData (not yet fully mapped)
+- CollData at `MachineData+0x6F8` (`coll_data`): created at spawn, the `mpColl_Update` target in `Machine_InitialCollisionCheck` (radius source `MachineData+0x46C`), and passed to the mpColl query helpers each frame in `Machine_ProcessEnvColl`
 
 ### Riders (RiderData)
 
@@ -274,12 +265,10 @@ Machines use full mpColl through their own collision processing:
 
 ### Enemies (EnemyData)
 
-- `EventActor_EnvCollRaycastDown` (0x80204e24) — downward raycast
-- `EventActor_EnvCollRaycastUp` (0x80204e44) — upward raycast
+- `EventActor_EnvCollRaycastDown` (0x80204e24) / `EventActor_EnvCollRaycastUp` (0x80204e44) — directional raycasts
 - `EventActor_GroundSnap` (0x80204fac) — snap to ground surface
 - `EnemyActor_GroundFollowMovement` (0x80208bd4) — movement along ground
-- `Enemy_GroundPhysicsVelocity` (0x80209104) — ground physics
-- `Enemy_GroundPhysicsSurface` (0x802096b4) — surface physics
+- `Enemy_GroundPhysicsVelocity` (0x80209104) / `Enemy_GroundPhysicsSurface` (0x802096b4) — ground physics
 - `Enemy_GroundAttach` (0x8020a664) — ground attachment
 - Map collision object at EnemyData+0x594
 
@@ -291,8 +280,6 @@ Machines use full mpColl through their own collision processing:
 - coll_kind at ItemData+0x359 bits 2-4
 
 ## Practical Guide for Mod Code
-
-### Spawning Items Safely
 
 Always pass all 13 parameters to `Item_InitDesc`. For most items:
 
@@ -308,15 +295,49 @@ GOBJ *item = Item_Create(&desc);
 // Item_Create returns NULL if raycast validation fails (coll_kind=3 + bad position)
 ```
 
-### coll_kind Selection Guide
-
 | Scenario | coll_kind | is_airborne | Notes |
 |----------|-----------|-------------|-------|
 | Item at known good position | 3 | 1 | Standard. Raycast finds ground, point coll tracks it. |
 | Item that should bounce on landing | 1 | 1 | Allocates CollData. Bounces, then transitions to 3. |
-| Item placed exactly (no raycast) | 3 | -1 | Skips initial ground raycast. Item stays at spawn pos. |
+| Item placed exactly (no raycast) | 3 | -1 | Skips the initial ground raycast. Item stays at spawn pos. |
 | **AVOID** | 0 | any | Crashes if CollData is NULL (which it will be). |
 
-### Destroying Items with CollData
+If you create an item with coll_kind=1 (has CollData), cleanup is automatic — when the bounce settles, `Item_GenericEnvColl` calls `mpColl_Destroy` and NULLs the pointer. Destroying the item GObj directly leaves the item's destructor to free CollData.
 
-If you create an item with coll_kind=1 (has CollData), the system handles cleanup automatically — when the bounce settles, `Item_GenericEnvColl` calls `mpColl_Destroy` and NULLs the pointer. If you destroy the item GObj directly, the item's destructor should handle freeing CollData.
+## Scene-Object Collision (Breakable Stage Props)
+
+Distinct from the static triangle-mesh map collision above, the rider/machine `mpColl` query also tests against **scene objects** — the placed-instance records that City Trial breakable props (houses, trees, rocks, walls, holes, star pole, pitfall) bind to. This is the solid collision that stops you driving through a house *and* the path that breaks it. The yakumono side — records, `desc_id`s, the break tail — is in `yakumono-system.md`; this section is the collision-engine view.
+
+### The holder and the global region array
+
+The ground runtime object (`*stc_grobj`, at `*(r13+0x5ec)`) carries a **scene-collision holder at `stc_grobj+0x54`**:
+
+| Holder offset | Meaning |
+|---|---|
+| `+0x08` | base of the **global mpColl region array** (`0x40`-byte stride). For City Trial this is `*(stc_grobj+0x5c)` and holds ~14000 regions. |
+| `+0x10` | base of the **placed-instance record pool** (`0x98`-byte records; == `*(stc_grobj+0x64)`). |
+| `+0x14` | live record count (== `*(stc_grobj+0x68)`). |
+
+`stc_grobj+0x454` is a *different, unrelated* struct whose `+0x08` is **not** the region array — indexing regions against it yields negative indices and silently no-ops.
+
+Each `0x98` record owns a contiguous **slice** of the global region array: pointer at `record+0x0c`, count at `record+0x10`. A record's global region index is `(record+0x0c - *(holder+0x08)) / 0x40`. Each region:
+
+| Region offset | Meaning |
+|---|---|
+| `+0x0c` | outward surface normal (Vec3). |
+| `+0x34` | flags word; bit `0x20` selects a geometry-refined impact-speed path. |
+| `+0x38` | back-pointer to the owning `0x98` record (so a hit maps back to its prop; `record+0x90` is then the yakumono GObj). |
+| `+0x3c` | flags byte; **bit 6 (`0x40`) = collidable/intact**, bit 7 (`0x80`) asserted clear. |
+
+### Per-frame query and the bit-6 lever
+
+`mpColl_UpdateCollision` (`0x802485e0`) drives the rider/machine sphere each frame in two phases:
+
+1. **Sweep** (`mpColl_SphereSceneObjColl` `0x8024d414`): finds the geometrically nearest facing region **without checking bit 6**, then gates a `collideWithObject` break-test on `mpColl_SceneObjBreakGate` (`0x80241574`: collider `+0x34c` bit 2 set **and** `record+0x8c == 3`). If `collideWithObject` breaks the prop it recurses; otherwise it records the contact.
+2. **Response** (`mpResponse_DispatchSceneObjColl` `0x80248bb4`): walks the accumulated floor/wall/ceil contacts and, for each, **reads `region+0x3c` bit 6 — if clear, removes the contact** (`zz_80242508_`) so the rider is *not* pushed out of it.
+
+Clearing bit 6 on a record's regions (`grScene_SetInstanceColl(record, 0)`, `0x800d7ad0`) therefore makes the prop pass-through, because the response stops resolving its penetration. Only break/init code writes that bit — nothing re-arms it per frame — so the clear sticks until something re-arms it. This is what the vanilla break tail does on destruction, and what Hypernova uses to retire a vacuumed prop's collision so the moved model leaves no invisible wall behind.
+
+### Breaking a prop
+
+The break is reached only through the region's family `coll_func`, dispatched by `collideWithObject(yaku_gobj, collider, holder, regionIdx, contact)` (`0x800f5004`): it reads `stc_yaku_descs[record_desc_id]->+0x04` and calls it. The handler computes `force = collider.radius (CollData+0x344) * impactSpeed^2` and compares it to the prop's HP. `impactSpeed` comes from `grScene_GetImpactSpeed` (`0x800d8edc`), which **normalizes** the collider delta (`CollData+0x14`), scales by -1.0, and projects onto `region+0x0c` (clamping <=0 to 0) — so the delta must point *into* the surface and its magnitude is irrelevant. On `force > HP` the handler runs the full break tail (retire collision, hide mesh, debris, drops, SFX, break-count, broken-state). The tail and the recipe for synthesizing a no-contact break are in `yakumono-system.md`.

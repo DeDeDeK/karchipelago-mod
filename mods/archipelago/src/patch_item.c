@@ -9,7 +9,7 @@
 #include "os.h"
 #include "energylink.h"
 
-// Map PatchKind to the matching "+1" ITKIND. Same ordering as PatchKind.
+// PatchKind to the matching "+1" ITKIND.
 static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
     [PATCHKIND_WEIGHT]   = ITKIND_WEIGHT,
     [PATCHKIND_ACCEL]    = ITKIND_ACCEL,
@@ -22,9 +22,8 @@ static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
     [PATCHKIND_HP]       = ITKIND_HP,
 };
 
-// Inverse of stc_patch_itkinds: map a "+1" stat-patch ItemKind back to its PatchKind.
-// Returns PATCHKIND_NUM for any ItemKind that is not one of the nine stat "+1" patches
-// (down/max/fake variants, All Up, food, boxes, copy abilities, etc.).
+// Returns PATCHKIND_NUM for any ItemKind that is not one of the nine stat "+1"
+// patches (down/max/fake variants, All Up, food, boxes, copy abilities, etc.).
 PatchKind Patch_ItKindToPatchKind(ItemKind it_kind)
 {
     for (int k = 0; k < PATCHKIND_NUM; k++)
@@ -33,11 +32,10 @@ PatchKind Patch_ItKindToPatchKind(ItemKind it_kind)
     return PATCHKIND_NUM;
 }
 
-// Give PatchKind to every human rider on a machine.
-// In City Trial, positive deltas go through the item pickup pipeline so the
-// player sees the normal "+1 stat" visual. Air Ride has no item data tables
-// loaded (SpawnItem would crash), so AR - and any negative delta - falls back
-// to a direct Machine_GivePatch that only applies the stat change.
+// Give PatchKind to every human rider on a machine. In City Trial, positive
+// deltas go through the item pickup pipeline so the player sees the normal
+// "+1 stat" visual. Air Ride has no item data tables loaded (SpawnItem would
+// crash), so AR - and any negative delta - falls back to Machine_GivePatch.
 int Patch_GiveItem(PatchKind kind, int num)
 {
     int use_item_spawn = (num > 0) && Gm_IsInCity() && (kind < PATCHKIND_NUM);
@@ -58,10 +56,7 @@ int Patch_GiveItem(PatchKind kind, int num)
         {
             MachineData *md = mg->userdata;
             Machine_GivePatch(md, kind, num);
-            // Stats just changed; mask from EnergyLink so the receive doesn't
-            // refund energy back into the pool. The CT spawn-pickup branch
-            // also applies same-frame (SpawnItemPlayer drives
-            // Machine_OnTouchItem for non-fake kinds) but doesn't rebase yet.
+            // Rebase so the stat change doesn't refund energy into the pool.
             EnergyLink_RebaseStats(i);
         }
         OSReport("[PatchItem] Giving %d patches of kind %d to player %d (%s)...\n",
@@ -70,11 +65,9 @@ int Patch_GiveItem(PatchKind kind, int num)
     return 1;
 }
 
-// Give num of AllUp to every human rider on a machine.
-// Same City Trial / Air Ride split as Patch_GiveItem.
-// Returns 1 if at least one player got the apply, 0 otherwise - Top Ride has
-// no MachineData so every iter skips, and AP_ITEM_ALL_DOWN (the only negative
-// caller) is a one-shot trap that must defer instead of being consumed.
+// Same City Trial / Air Ride split as Patch_GiveItem. Returns 1 if at least one
+// player got the apply: Top Ride has no MachineData so every iteration skips, and
+// AP_ITEM_ALL_DOWN must defer rather than be consumed there.
 int Patch_AllUp_GiveItem(int num)
 {
     int use_item_spawn = (num > 0) && Gm_IsInCity();
@@ -105,10 +98,9 @@ int Patch_AllUp_GiveItem(int num)
     return applied;
 }
 
-// Drop-patches trap: eject each human rider's current stats as physical
-// patches behind the machine. Caller must guarantee item data is loaded - the
-// open City Trial phase only; Free Run, the stadium phase, and non-CT modes
-// would crash inside Rider_DropPatches when it tries to spawn the patch items.
+// Eject each human rider's current stats as physical patches behind the machine.
+// Caller must guarantee item data is loaded - the open City Trial phase only;
+// elsewhere Rider_DropPatches crashes trying to spawn the patch items.
 int Patch_DropTrap()
 {
     int dropped = 0;
@@ -128,10 +120,9 @@ int Patch_DropTrap()
     return dropped;
 }
 
-// Record a permanent +1 patch in save data. The actual stat application
-// happens at the next round start via PermanentPatch_On3DLoadEnd - applying
-// here too would double up against the carry-over of stats into stadium loads
-// (and against the round-start re-apply on subsequent rounds).
+// Record a permanent +1 patch in save data. Stat application is deferred to the
+// next round start - applying here too would double up against the carry-over of
+// stats into stadium loads and against the round-start re-apply.
 int PermanentPatch_GiveItem(PatchKind kind)
 {
     if (ap_save->permanent_patches[kind] < PATCH_STAT_MAX)
@@ -143,8 +134,8 @@ int PermanentPatch_GiveItem(PatchKind kind)
     return 1;
 }
 
-// Record a permanent +1 all-up in save data. As with PermanentPatch_GiveItem,
-// stat application is deferred to the next round start.
+// Stat application is deferred to the next round start, as with the single-stat
+// permanent patch.
 int PermanentPatch_GiveAllUp()
 {
     for (int i = 0; i < PATCHKIND_NUM; i++)
@@ -158,14 +149,13 @@ int PermanentPatch_GiveAllUp()
     return 1;
 }
 
-// Flag to track whether round-start patches have been applied this scene
 static int permanent_patches_applied;
 
-// Apply accumulated permanent patches to all human players.
-// Consolidates into all-ups where possible to reduce the number of calls.
+// Apply accumulated permanent patches to all human players, consolidating into
+// all-ups where possible to reduce the number of calls.
 static void PermanentPatch_DoApply()
 {
-    // Find the minimum across all stats - this is how many all-ups we can apply
+    // The minimum across all stats is how many all-ups we can apply.
     u8 min_patches = ap_save->permanent_patches[0];
     for (int i = 1; i < PATCHKIND_NUM; i++)
     {
@@ -199,11 +189,9 @@ static void PermanentPatch_DoApply()
             continue;
         MachineData *md = mg->userdata;
 
-        // Apply consolidated all-ups
         if (min_patches > 0)
             Machine_GiveAllUp(md, min_patches);
 
-        // Apply individual remainders
         for (int i = 0; i < PATCHKIND_NUM; i++)
         {
             int remainder = ap_save->permanent_patches[i] - min_patches;
@@ -213,7 +201,6 @@ static void PermanentPatch_DoApply()
     }
 }
 
-// Per-frame check: wait for intro to finish, then apply permanent patches once.
 static void PermanentPatch_PerFrame(GOBJ *g)
 {
     if (permanent_patches_applied)
@@ -225,11 +212,10 @@ static void PermanentPatch_PerFrame(GOBJ *g)
     PermanentPatch_DoApply();
 }
 
-// Round-start permanent patch re-application, per-mode menu toggle.
 // Gm_IsInCity() is stage-based (only true on the CT main map, stage_kind 9/52)
-// and excludes stadiums, so we dispatch off the CT major + city_mode instead.
-// Free Run never loads item data tables, so inflated stats from perm patches
-// would crash Item_GetItDataPtr on damage-driven patch ejection.
+// and excludes stadiums, so dispatch off the CT major + city_mode instead. Free
+// Run never loads item data tables, so inflated stats from perm patches would
+// crash Item_GetItDataPtr on damage-driven patch ejection.
 static int PermanentPatch_ShouldApply(void)
 {
     if (Scene_GetCurrentMajor() == MJRKIND_CITY)
@@ -247,16 +233,13 @@ static int PermanentPatch_ShouldApply(void)
     return ap_menu_settings.ar_permanent_patches_enabled;
 }
 
-// Called from On3DLoadEnd to set up the per-frame GObj for round-start
-// application. Applies whatever is in ap_save->permanent_patches[] to all
-// human MachineData, gated by mode + menu toggle. Works for any 3D mode that
-// has Rider/Machine objects (City Trial and Air Ride).
+// Set up the per-frame GObj that applies ap_save->permanent_patches[] to all
+// human MachineData at round start, gated by mode + menu toggle.
 void PermanentPatch_On3DLoadEnd()
 {
     if (!PermanentPatch_ShouldApply())
         return;
 
-    // Check if there are any patches to apply
     int total = 0;
     for (int i = 0; i < PATCHKIND_NUM; i++)
         total += ap_save->permanent_patches[i];

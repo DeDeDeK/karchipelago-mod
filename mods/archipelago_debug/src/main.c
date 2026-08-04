@@ -5,9 +5,11 @@
 #include "hoshi/func.h"
 
 #include "archipelago_api.h"
+#include "custom_events_api.h"
 #include "debug_menu.h"
 
 const ArchipelagoAPI *ap_api = 0;
+static const CustomEventsAPI *ce_api = 0;
 
 static void TryImportApi(void)
 {
@@ -15,6 +17,10 @@ static void TryImportApi(void)
         ap_api = (const ArchipelagoAPI *)Hoshi_ImportMod(
             (char *)ARCHIPELAGO_MOD_NAME,
             ARCHIPELAGO_API_MAJOR, ARCHIPELAGO_API_MINOR);
+    if (!ce_api)
+        ce_api = (const CustomEventsAPI *)Hoshi_ImportMod(
+            (char *)CUSTOM_EVENTS_MOD_NAME,
+            CUSTOM_EVENTS_API_MAJOR, CUSTOM_EVENTS_API_MINOR);
 }
 
 static void OnSaveLoaded(void)
@@ -25,8 +31,9 @@ static void OnSaveLoaded(void)
         OSReport("[ApDebug] failed to import KARchipelago API\n");
         return;
     }
-    // Reflect archipelago's masks into our local toggle state so the menu
-    // matches reality after AP grants from save load.
+    if (!ce_api)
+        OSReport("[ApDebug] custom_events API unavailable (Scale Change trigger disabled)\n");
+    // Save load may have applied AP grants; resync the menu toggles.
     DebugMenu_RefreshStateFromMasks();
     OSReport("[ApDebug] API imported, debug menu ready\n");
 }
@@ -40,8 +47,7 @@ static void OnFrameStart(void)
 
     if (pad->down & PAD_BUTTON_DPAD_LEFT)
     {
-        // Build a pool of every remote-placed reward (shuffled == 0xFFFF),
-        // pick one at random, grant it.
+        // Grant a random remote-placed reward (shuffled == 0xFFFF).
         u16 pool[256];
         int n = 0;
         for (int m = 0; m < GMMODE_NUM; m++)
@@ -67,11 +73,8 @@ static void OnFrameStart(void)
 
     if (pad->down & PAD_BUTTON_DPAD_RIGHT)
     {
-        // Pick uniformly across every AP unlock pool plus the persistent
-        // progression items (patch-cap, spawn-rate, permanent patches). Useful
-        // for exercising the receive path, including idempotence (the same
-        // unlock landing twice should be a no-op). Each entry is a contiguous
-        // { base, count } block; singletons use count == 1.
+        // Uniform pick across every AP unlock pool plus the persistent progression
+        // items. Each entry is a contiguous { base, count } block, singletons count 1.
         static const struct
         {
             int base;
@@ -82,18 +85,15 @@ static void OnFrameStart(void)
             { AP_ABILITY_UNLOCK_BASE,       COPYKIND_NUM   },
             { AP_PATCH_UNLOCK_BASE,         PATCHKIND_NUM  },
             { AP_ITEM_UNLOCK_BASE,          ITUNLOCK_NUM   },
-            // VCKIND_WHEELVSDEDEDE is the last enum value but is intentionally
-            // not exposed as an AP unlock (see archipelago_api.h).
+            // VCKIND_WHEELVSDEDEDE is the last enum value and is not an AP unlock.
             { AP_MACHINE_UNLOCK_BASE,       VCKIND_NUM - 1 },
             { AP_BOX_UNLOCK_BASE,           BOXKIND_NUM    },
             { AP_STAGE_UNLOCK_AIRRIDE_BASE, AIRRIDE_NUM    },
             { AP_COLOR_UNLOCK_BASE,         KIRBYCOLOR_NUM },
             { AP_STAGE_UNLOCK_TOPRIDE_BASE, TOPRIDE_NUM    },
             { AP_TOPRIDE_ITEM_UNLOCK_BASE,  TRITEM_NUM     },
-            // Persistent progression items (not unlocks): the permanent-patch
-            // range, permanent All Up, and the two save-only upgrades. These
-            // apply globally / at next round start rather than spawning a
-            // pickup, so they live here rather than in the L+Up in-match pool.
+            // Progression, not unlocks: applied globally or at next round start
+            // rather than spawning a pickup, so they are not in the L+Up pool.
             { AP_PERM_PATCH_BASE,           PATCHKIND_NUM  },
             { AP_ITEM_PERM_PATCH_ALL_UP,    1              },
             { AP_ITEM_PATCH_CAP_INCREASE,   1              },
@@ -129,26 +129,15 @@ static void OnFrameStart(void)
     {
         if (pad->held & PAD_TRIGGER_L)
         {
-            // L+Up: queue a random in-game item from the pool that applies to
-            // the current major mode. Complements the unlocks pool on D-Pad
-            // Right - these are the items you'd actually pick up in-game.
+            // L+Up: queue a random in-game item that applies to the current major mode.
             MajorKind major = Scene_GetCurrentMajor();
             int picked = -1;
             const char *mode_name = 0;
             if (major == MJRKIND_CITY)
             {
-                // Full CT give pool, in three contiguous segments:
-                //   1. the event range (AP_EVENT_BASE + EventKind),
-                //   2. the full ITKIND range - boxes, copies, food, patches,
-                //      fakes, etc. (AP_ITKIND_BASE + ItemKind),
-                //   3. the standalone CT gives that live in the 1-99 block:
-                //      bulk stat gives, legendary-machine assembly, and the CT
-                //      traps. (The other 1-99 standalones - checkbox filler,
-                //      patch-cap, spawn-rate, permanent patches - are global or
-                //      save-only progression, not in-match pickups, so they're
-                //      left out.)
-                // All three are serviced by ap_item_handler as CT gives, so
-                // they share one uniform random pool.
+                // One uniform pool over the three CT give segments: the event range,
+                // the full ITKIND range, and the standalone CT gives in the 1-99
+                // block (the rest of that block is global or save-only progression).
                 static const u16 ct_singletons[] = {
                     AP_ITEM_ALL_UP,
                     AP_ITEM_ALL_DOWN,
@@ -171,17 +160,15 @@ static void OnFrameStart(void)
             }
             else if (major == MJRKIND_AIR)
             {
-                // Only copy abilities are honored outside CT - every other
-                // ITKIND falls through to the Gm_IsInCity gate in
-                // ap_item_handler and no-ops.
+                // Only copy abilities are honored outside CT; every other ITKIND
+                // no-ops behind the Gm_IsInCity gate.
                 int range = AP_ITKIND_COPYMIC - AP_ITKIND_COPYBOMB + 1;
                 picked = AP_ITKIND_COPYBOMB + HSD_Randi(range);
                 mode_name = "AR";
             }
             else if (major == MJRKIND_TOP)
             {
-                // TR-specific GIVE pool spawns the matching TR item at each
-                // human Kirby's position.
+                // The TR gives apply their item to each human Kirby directly.
                 int range = AP_TOPRIDE_ITEM_GIVE_PARTY_BALL - AP_TOPRIDE_ITEM_GIVE_BASE + 1;
                 picked = AP_TOPRIDE_ITEM_GIVE_BASE + HSD_Randi(range);
                 mode_name = "TR";
@@ -200,22 +187,24 @@ static void OnFrameStart(void)
         }
         else
         {
-            ap_api->DebugTriggerTraplinkReceive();
-            OSReport("[ApDebug] triggered traplink_receive\n");
+            // Do() returns 0 outside City Trial, when an event is already active,
+            // or if custom_events didn't export its API.
+            if (ce_api && ce_api->Do(CUSTOM_EVKIND_SCALE_CHANGE))
+                OSReport("[ApDebug] triggered Scale Change event\n");
+            else
+                OSReport("[ApDebug] Scale Change trigger unavailable (needs City Trial, no active event, custom_events loaded)\n");
         }
     }
 
     if (pad->down & PAD_TRIGGER_Z)
     {
-        // In a checklist menu, Z unlocks the currently hovered cell as if the
-        // objective had been completed in-game. Z is unused by vanilla
-        // checklist navigation. ClearChecker_SetNewUnlock is REPLACEFUNC'd by
-        // archipelago's check_detection, so the AP check fires and goal
-        // evaluation runs.
+        // Unlock the hovered checklist cell as if completed in-game (Z is unused
+        // by vanilla checklist navigation). ClearChecker_SetNewUnlock is
+        // REPLACEFUNC'd, so the AP check fires and goal evaluation runs.
         u8 mode, k;
         if (!ap_api->GetHoveredCell(&mode, &k))
         {
-            OSReport("[ApDebug] Z pressed but no cell hovered yet (move cursor first)\n");
+            OSReport("[ApDebug] Z pressed but the cursor is not on a checklist cell\n");
             return;
         }
 
@@ -236,9 +225,8 @@ static void OnFrameStart(void)
         }
 
         ClearChecker_SetNewUnlock(mode, k);
-        // SetNewUnlock bails when Checklist_IsCacheValid (always true in
-        // menus), so RecordCheck ran but no clear[] bits got written. Set the
-        // end-state bits directly.
+        // SetNewUnlock bails when Checklist_IsCacheValid (always true in menus), so
+        // RecordCheck ran but no clear[] bits were written; set the end state here.
         GameClearData *cd = gmGetClearcheckerTypeP(mode);
         cd->clear[k].is_new = 1;
         cd->clear[k].is_unlocked = 1;

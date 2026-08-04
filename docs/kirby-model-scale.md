@@ -8,7 +8,7 @@ until the next scene change.
 
 Implementation: `mods/archipelago/src/kirby_scale.c`.
 
-## How scaling is applied
+## Implementation
 
 Both player systems expose a per-object `model_scale` float that the engine
 multiplies into the model's transform **every frame**. Writing that field is the
@@ -24,7 +24,7 @@ gmLanMenu_Scale3DObject(base_scale(rider+0x2c8) * model_scale(rider+0x348),
                         rider_model_jobj, forward(+0x324), up(+0x330), pos(+0x300));
 ```
 
-`gmLanMenu_Scale3DObject` (0x80054...) bakes `scale × orientation` into the
+`gmLanMenu_Scale3DObject` (0x80054414) bakes `scale × orientation` into the
 model JObj's matrix (JOBJ+0x44) and marks it dirty. `Rider_ApplyModelMatrix` is
 called from `Rider_ModelMatrixThink` (0x8018f79c), which `Rider_Create`
 registers as GObj proc priority 6 — i.e. it runs **every frame** (it also
@@ -47,7 +47,9 @@ HSD_JObjSetMtxDirtySub(m);
 Accessed from mod code via `TopRide_KirbyModelScalePtr` (see `topride.h`).
 
 Unlike City Trial / Air Ride — where the rider (`RiderData`) and machine
-(`MachineData`) are separate objects and `model_scale` touches only the rider —
+(`MachineData`) are separate objects and `RiderData.model_scale` touches only the
+rider (the machine has its own analogous `MachineData.model_scale` at +0x310,
+baked by `Machine_ApplyModelMatrix`; the Scale Change event drives both) —
 Top Ride merges Kirby and his star into a **single JObj tree** under the scaled
 root (`RdKirby.dat` + a `VcStar*.dat`, combined at runtime). `model_scale` scales
 that shared root, so Big / Small Kirby grows / shrinks Kirby **and** the star
@@ -92,7 +94,7 @@ and the merged "big Kirby on a big star" look is acceptable for cosmetic filler.
   recreation (respawns). It is a no-op until a Big / Small Kirby is received
   this scene (the target stays neutral, 1.0), so vanilla behavior is untouched.
 
-## In-game surfaces
+## In-Game Surfaces
 
 Besides AP item receipt, the two scale items can be triggered locally:
 
@@ -103,11 +105,11 @@ Besides AP item receipt, the two scale items can be triggered locally:
   (`energylink_spend.c`). Both route through the normal receive queue, so the
   same scene-gating / RETRY behavior applies.
 
-## Symbols
+## Key Functions
 
 | Symbol | Address | Notes |
 |--------|---------|-------|
 | `Rider_ApplyModelMatrix` | 0x80190848 | Builds rider model matrix from `base × model_scale` |
 | `Rider_ModelMatrixThink` | 0x8018f79c | GObj proc pri 6 (per-frame); calls the above + hand-bone update |
 | `TopRide_KirbyModelThink` | 0x802e26dc | Per-frame; applies `model_scale × table` to the model JObj |
-| `gmLanMenu_Scale3DObject` | 0x80054... | Generic helper: writes `scale × orientation` into a JObj matrix |
+| `gmLanMenu_Scale3DObject` | 0x80054414 | Generic helper: writes `scale × orientation` into a JObj matrix |

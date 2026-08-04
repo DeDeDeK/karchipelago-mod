@@ -1,8 +1,6 @@
 # Top Ride System
 
-## Overview
-
-Top Ride is a 2D mode with its own engine, completely separate from the 3D mode's Rider/Machine/Player system. It does **not** use `Player_Create`, `Rider_Create`, `Machine_Create`, `stc_playerdata`, `RiderData`, or `MachineData`. The scene loads through **minor 19** (not minor 18), so `On3DLoadEnd` does not fire for Top Ride.
+Top Ride is a 2D mode with its own engine, completely separate from the 3D mode's Rider/Machine/Player system. It does **not** use `Player_Create`, `Rider_Create`, `Machine_Create`, `stc_playerdata`, `RiderData`, or `MachineData` — a Top Ride player is a `TopRideKirby` object with an inline charge component and a polymorphic state handler. The scene loads through **minor 19** (`MNRKIND_19`), not the shared minor 18 (`MNRKIND_3D`), so `On3DLoadEnd` never fires for Top Ride; hoshi's `OnTopRideLoadEnd` mod callback is the load notification instead.
 
 ## Scene Flow
 
@@ -10,8 +8,8 @@ Top Ride is a 2D mode with its own engine, completely separate from the 3D mode'
 Main Menu (minor 2)
   -> MJRKIND_TOP (major 5)
     -> minor 24: Top Ride settings
-    -> minor 7: Course select (TopRide_CourseSelectInit)
-    -> minor 9: Player select (TopRide_LobbyInit)
+    -> minor 7: Course select (TopRide_CourseSelectInit, 0x8003d0dc)
+    -> minor 9: Player select (TopRide_LobbyInit, 0x8002dc9c)
     -> minor 19: Gameplay (cb_Load = 0x80008df8)
 ```
 
@@ -19,24 +17,24 @@ Main Menu (minor 2)
 
 | Callback | Address | Purpose |
 |----------|---------|---------|
-| cb_Load | 0x80008df8 | Scene load: RNG seed, speed init, calls `TopRide_GameInit` |
-| cb_Exit | 0x80008fe4 | Scene exit |
-| cb_ThinkPreGObjProc | 0x80009004 | Empty (returns immediately) |
+| cb_Load | 0x80008df8 | `TopRide_SceneLoad` — RNG seed, speed init, calls `TopRide_GameInit` |
+| cb_Exit | 0x80008fe4 | Scene exit (thin wrapper around 0x80286df0) |
+| cb_ThinkPreGObjProc | 0x80009004 | Empty (single `blr`) |
 | cb_ThinkPostGObjProc | 0x80009008 | `TopRide_SceneInit` — checks for exit conditions |
-| cb_ThinkPreRender | 0x80009070 | Pre-render |
+| cb_ThinkPreRender | 0x80009070 | Empty (single `blr`) |
 | cb_ThinkPostRender | 0x80009074 | `TopRide_PostRenderCallback` |
 
-### Post-render second pass wipes screen overlays
+## Post-Render Second Pass
 
-`TopRide_PostRenderCallback` (cb_ThinkPostRender, 0x80009074) calls `TopRide_CustomRenderer`, which kicks off an **entirely new `HSD_StartRender` pass** for the 2D engine. That pass overwrites the EFB *after* the standard frame render — so anything a mod drew through a hoshi screen-space canvas (HUD text, notifications, the textbox) is wiped every frame in Top Ride.
+`TopRide_PostRenderCallback` (cb_ThinkPostRender, 0x80009074) is a bare wrapper whose only body is `bl TopRide_CustomRenderer` (0x80286d7c) at 0x80009080. `TopRide_CustomRenderer` kicks off an **entirely new `HSD_StartRender` pass** for the 2D engine. That pass overwrites the EFB *after* the standard frame render — so anything a mod drew through a hoshi screen-space canvas (HUD text, notifications, the textbox) is wiped every frame in Top Ride.
 
-To keep a screen overlay visible in TR, re-issue its render *after* the post-render pass returns. The textbox mod hooks `0x80009084` (the instruction right after the `bl TopRide_CustomRenderer`) and, for each `TextCanvas` in the `stc_textcanvas_first` list, re-calls `CObjThink_Common(canvas->cam_gobj)` — redrawing on top of the second pass. Any mod with a Top Ride HUD/text overlay needs the same re-render.
+To keep a screen overlay visible in TR, re-issue its render *after* the post-render pass returns. The textbox mod hooks **0x80009084** (the instruction right after the `bl`) and, for each `TextCanvas` in the `stc_textcanvas_first` list, re-calls `CObjThink_Common(canvas->cam_gobj)` — redrawing on top of the second pass. Any mod with a Top Ride HUD/text overlay needs the same re-render.
 
 ## Object Hierarchy
 
 ```
 GameSession (TopRide_GameSessionInit, per-scene)
-  └── KirbyMgr singleton (TopRide_FielderInit, 0x802dafb4)
+  └── KirbyMgr singleton (TopRide_KirbyMgrInit, 0x802dafb4)
         ├── Kirby[0..3] (TopRide_KirbyInit, per-player)
         │     ├── StateHandler (+0x7C ptr, vtable 0x804d6f5c)
         │     ├── ChargeComponent (+0x80, initialized by TopRide_KirbyChargeInit)
@@ -51,18 +49,26 @@ GameSession (TopRide_GameSessionInit, per-scene)
         └── round_state (+0x4028, u8: 0=pre-init, 1=countdown, 2=race active)
 ```
 
+Manager classes are identified by RTTI `dynamic_cast` typeinfo and the construction stores in `TopRide_KirbyMgrInit` / `TopRide_GameSessionInit`. The offsets in the diagram are KirbyMgr-struct member offsets, a separate mapping from the globals below.
+
 ## Globals
 
 | Address | Name | Description |
 |---------|------|-------------|
-| 0x805ddb44 | KirbyMgr | Fielder singleton. NULL when not in Top Ride gameplay. |
-| 0x805ddb38 | GameSession | Session-level manager (contains KirbyMgr) |
-| 0x805ddb60 | EnemyMgr | Sub-object of KirbyMgr |
-| 0x805ddb5c | MineMgr | Sub-object of KirbyMgr |
-| 0x805ddb58 | EmberMgr | Sub-object of KirbyMgr |
-| 0x805ddb54 | SmokeMgr | Sub-object of KirbyMgr |
-| 0x805ddb50 | MissileMgr | Sub-object of KirbyMgr |
+| 0x805ddb44 | KirbyMgr | `stc_topride_kirbymgr` (r13+0xA64). NULL when not in Top Ride gameplay. |
+| 0x805ddb48 | ChickMgr | Sub-object of KirbyMgr |
+| 0x805ddb4c | ItemBall | Sub-object of KirbyMgr (item-ball manager) |
+| 0x805ddb50 | KurakkoMgr | Sub-object of KirbyMgr |
+| 0x805ddb54 | MissileMgr | Sub-object of KirbyMgr |
+| 0x805ddb58 | SmokeMgr | Sub-object of KirbyMgr |
+| 0x805ddb5c | EmberMgr | Sub-object of KirbyMgr (clear-checker reads field +0x18) |
+| 0x805ddb60 | MineMgr | Sub-object of KirbyMgr |
+| 0x805ddb64 | GrenadeMgr | Sub-object of KirbyMgr (clear-checker reads field +0x1c) |
+| 0x805ddb68 | EnemyMgr | Sub-object of KirbyMgr |
+| 0x805ddb84 | GameSession | Session-level singleton (contains KirbyMgr) |
+| 0x805ddb38 | CpuObstacleMgr | Created in `TopRide_GameSessionInit` |
 | 0x805ddb8c | SoundHandles | Sub-object of KirbyMgr |
+| 0x805ddba4 | TopRideItemMgr | `stc_topride_itemmgr` (r13+0xAC4) |
 | 0x805ddbec | GameSession sub | Scene-level sub-object |
 
 ## Round State
@@ -82,7 +88,7 @@ The TR round phase is tracked by a single u8 at **`KirbyMgr+0x4028`**. Values pr
 | 0x802db850 | `TopRide_KirbyMgrUpdate` | `+0x4028 != 0` | Skip per-Kirby physics + tracking block (incl. `TopRide_KirbyPhysUpdate`) |
 | 0x802db8b0 | `TopRide_KirbyMgrUpdate` | `+0x4028 == 2` | Run per-Kirby weighted item-spawn picker |
 | 0x802dc570 | `TopRide_KirbyMgrUpdate` | `+0x4028 == 2` | Call `TopRideItem_Update` (item lifetime/render tick) |
-| 0x8029c714 / 0x8029c7ec | `TopRide_FielderUpdate` | `+0x4028 == 2` | Gameplay branch |
+| 0x8029c714 / 0x8029c7ec | `zz_8029c650_` (session per-frame update) | `+0x4028 == 2` | Gameplay branch |
 
 ### Write sites (transitions)
 
@@ -93,7 +99,7 @@ The TR round phase is tracked by a single u8 at **`KirbyMgr+0x4028`**. Values pr
 
 ### Implication for mod code
 
-When spawning a TR item from outside the per-frame engine flow (AP item give, traplink, etc.), the spawn must wait for `round_state == 2`. Spawning during countdown (`round_state == 1`) puts the item on the list but `TopRideItem_Update` doesn't tick it, and the item gets culled at race-start. `GateTopRideItems_GiveItem` returns 0 in that window so `APItems_PerFrame` retries the item next frame.
+When spawning a TR item or driving a Kirby state from outside the per-frame engine flow (AP item give, traplink, deathlink), the action must wait for `round_state == 2`. Before that, `state_handler` may be only partially wired and the item list isn't ticked: spawning during countdown (`round_state == 1`) puts the item on the list but `TopRideItem_Update` doesn't tick it, and the item gets culled at race-start. `GateTopRideItems_GiveItem` returns 0 in that window so `APItems_PerFrame` retries the item next frame.
 
 ### Secondary state bytes
 
@@ -102,7 +108,7 @@ When spawning a TR item from outside the per-frame engine flow (AP item give, tr
 
 ## Player Kind (Human / CPU / Empty)
 
-The per-slot human/CPU/empty discriminator is stored at **`GameData[slot*9 + 0xD20]`** (a 9-byte-stride config block, 4 entries for slots 0–3). Values:
+The per-slot human/CPU/empty discriminator is the first byte of the 9-byte `TopRideSlot` config block at **`GameData[slot*9 + 0xD20]`** (= `GameData.topride_config.slots[slot]`, 4 entries for slots 0–3). Values:
 
 | Value | Meaning |
 |-------|---------|
@@ -117,26 +123,51 @@ Vanilla provides accessors:
 | 0x8000bd6c | `TopRide_GetPlayerKind` | `TopRidePlayerKind(int slot)` |
 | 0x8000bda8 | `TopRide_SetPlayerKind` | `void(int slot, TopRidePlayerKind kind)` |
 
-`TopRide_PreGameThink` (0x8002c06c) populates these bytes from menu input each round. `TopRide_FielderInit` (0x802dafb4) reads them at construction time to decide which kirbys to spawn.
+`TopRide_PreGameThink` (0x8002c06c) populates these bytes from menu input each round. `TopRide_KirbyMgrInit` (0x802dafb4) reads them at construction time to decide which kirbys to spawn.
 
-**Filtering humans in mod code**: iterate `kirby_mgr->kirbys[i]` and check `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`. **Do not** use `kirby->start_position` (Kirby+0x0E) — that's the per-round shuffled grid position, not a CPU flag.
+**Filtering humans in mod code**: iterate `kirby_mgr->kirbys[i]` and check `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`. **Do not** use `kirby->start_position` (Kirby+0x0E) — that's the per-round shuffled grid position, not a CPU flag — and do not use `kirby->is_active` (Kirby+0x10), which stays 0 in the solo modes.
 
 ## Kirby Object Layout
 
-Each player is represented by a Kirby object (~0x500+ bytes). Vtable at `0x804d2304`, RTTI name "Kirby". Created by `TopRide_KirbyInit` (0x802d4d64, size 0x788).
+Each player is represented by a Kirby object (>0x1400 bytes — an `Absorber`
+sub-object lives at +0xD00). Vtable at `0x804d2304`, RTTI name "Kirby" (name
+string at `0x805d9134`, typeinfo record at `0x805d913c`). Created
+by `TopRide_KirbyInit` (0x802d4d64, size 0x788). The struct `TopRideKirby` in
+`topride.h` maps the head plus the inline charge component (the 0x00..~0x530
+region); the rest of the object is unmapped.
+
+`session_data` (+0x04) points at the inline charge component (kirby+0x80) — this
+is how `TopRide_KirbyModelThink` (0x802e26dc) reaches `model_jobj` / `model_scale`
+via `session_data[+0x460]` / `session_data[+0x4A4]` (absolute kirby+0x4E0 / +0x524).
 
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
 | 0x00 | ptr | vtable | `0x804d2304` |
-| 0x04 | ptr | session_data | Points to game session config |
+| 0x04 | ptr | session_data | Aliases the inline charge component (= kirby+0x80) |
 | 0x0C | u8 | player_slot | Controller slot (0–3). Pass to `TopRide_GetPlayerKind` to discriminate human vs CPU vs empty. |
 | 0x0D | u8 | char_type | Character kind |
-| 0x0E | u8 | start_position | Fisher-Yates shuffled grid position (0–3), reset each round in `TopRide_FielderInit`. **Not** a CPU level — every kirby (human or CPU) is assigned a starting position 0–3. |
-| 0x10 | u8 | is_active | Set on race start; stays 0 in Time Attack and Free Run even while the human is playing. **Do not gate solo-mode mod code on this bit** — use `round_state == 2` + `TopRide_GetPlayerKind() == TR_PKIND_HMN` instead (see `gate_topride_items.c` / `energylink.c`). |
-| 0x4C | Vec3 | position | World position |
-| 0x58 | Vec3 | target_pos | Camera target |
-| 0x64 | int[3] | angles | Rotation |
-| 0x7C | ptr | state_handler | Input/state handler (charge state machine) |
+| 0x0E | u8 | start_position | Fisher-Yates shuffled grid position (0–3), reset each round in `TopRide_KirbyMgrInit` from `KirbyMgr+0x4024+i`. **Not** a CPU level — every kirby (human or CPU) is assigned a starting position 0–3. |
+| 0x0F | u8 | place | Current race placement / finish rank, written each frame by the ranking pass in `TopRide_KirbyMgrUpdate`. 0 while still racing; gated `== 0` as "not yet finished". |
+| 0x10 | u8 | is_active | Final standings byte set by the same ranking pass on race start; stays 0 in Time Attack and Free Run even while the human is playing. **Do not gate solo-mode mod code on this bit** — use `round_state == 2` + `TopRide_GetPlayerKind() == TR_PKIND_HMN` instead. |
+| 0x11 | u8 | active_item_kind | Currently-held TR item kind (`TopRideItemKind`), `0xFF` = none. Written by `TopRide_KirbyApplyItem` (0x802d8cb4); **not** reset on natural expiry, so it is not a reliable "power active" flag. |
+| 0x14 | int | lap_progress | Accumulates the per-frame CheckLine cross result (init -1); going positive completes a lap/segment. |
+| 0x18 | u8 | lap_pending | Set when a checkpoint is crossed backward; gates the lap-completion branch. |
+| 0x1C | u32 | finish_time | Total frame counter; latched to the master race timer (`KirbyMgr+0x402C`) when `finished` is set. |
+| 0x20 | u32 | prev_lap_frames | Snapshot of `cur_lap_frames` at lap completion. |
+| 0x24 | u32 | cur_lap_frames | Current-lap frame counter; reset to 0 on lap completion, incremented every frame. |
+| 0x2C | float | mass | Per-character mass / scale base (read constantly in physics; scales knockback). |
+| 0x30 | float | gravity | Gravity / vertical-accel base. |
+| 0x34 | float | accel_param | Frame-scaled acceleration parameter. |
+| 0x38 | float | decel_param | Frame-scaled deceleration parameter. |
+| 0x3E | u8 | finished | Set to 1 when the kirby crosses the finish line; gates the per-frame counter increments in `TopRide_KirbyPhysUpdate`. |
+| 0x40 | u8 | direction_sign | Movement-direction sign flag, refreshed each frame from the run mode. |
+| 0x42 | u16 | screen_w | Viewport width (init 320). |
+| 0x44 | u16 | screen_h | Viewport height (init 240). |
+| 0x48 | ptr | input_reader | Controller / input source object (vt+0x14 polls the stick). Human slots get a pad reader (vtable `0x804d25e0`), CPU slots the AI brain reader (vtable `0x804d8710`). |
+| 0x4C | Vec3 | position | Spawn / default pos — **not** tracked per frame. Use `charge.position` (0x88) for the live in-world position. |
+| 0x58 | Vec3 | target_pos | Initial camera target / lookat. |
+| 0x64 | u8[0x18] | history | 10-entry circular history ring (head index + paired byte values), pushed by `TopRide_KirbyHistoryPush` (0x80311f88) and queried by `TopRide_KirbyHistoryQuery` (0x80312000) for an anti-jitter snap and the voluntary quick-spin flick test. Constructed by `TopRide_KirbyHistoryInit` (0x80311f2c). |
+| 0x7C | ptr | state_handler | Polymorphic state object; the kirby's current state is whichever class instance lives here. |
 | 0x80 | — | **charge_component** | Start of charge component (inline sub-object) |
 
 ## Charge Component Layout (at Kirby+0x80)
@@ -175,19 +206,19 @@ All offsets listed both from component base and from Kirby base.
 | 0x468 | 0x4E8 | ptr | arrow_jobj | Direction arrow JObj |
 | 0x480 | 0x500 | ptr | charge_anim_1 | AC_S_CHARGE animation object |
 | 0x490 | 0x510 | ptr | charge_anim_2 | Second charge animation object |
-| 0x4A4 | 0x524 | float | model_scale | Initialized to 1.0 |
+| 0x4A4 | 0x524 | float | model_scale | Initialized to 1.0; multiplied into the model JObj scale every frame by `TopRide_KirbyModelThink`, so a write persists until the kirby is recreated. |
 | 0x4AC | 0x52C | ptr | anim_controller | Animation state controller |
 
 ## Charge System
 
-### Charge Lifecycle
+### Charge lifecycle
 
-**1. Start Charging (A pressed)**
+**1. Start charging (A pressed)**
 - Condition: `button_A != 0` AND `is_charging == 0`
 - Sets `is_charging = 1`
 - Swaps frame counters, starts rumble
 
-**2. Per-Frame Accumulation (while A held and charge_ready)**
+**2. Per-frame accumulation (while A held and charge_ready)**
 ```
 base_rate = frame_scale^2
 angle_factor = lookup_charge_rate(steering_angle, speed)  // from data table
@@ -197,19 +228,19 @@ charge_value += charge_rate * charge_multiplier
 charge_value = min(charge_value, 1.0)  // clamped to max
 ```
 
-**3. Max Charge Reached**
+**3. Max charge reached**
 - When `charge_value` reaches ~1.0 (100.0 * 0.01 * frame_scale)
 - Triggers max-charge rumble and visual effect
 - Charge stays at max (no auto-discharge timer like 3D mode)
 
-**4. Release / Boost (A released)**
+**4. Release / boost (A released)**
 - `charge_at_release = charge_value` (snapshot)
 - `is_charging = 0`
 - `charge_ready = 0`
 - Calculates `boost_speed` from charge level + angle lookup tables
 - Starts release rumble proportional to charge level
 
-**5. Charge Depletion (after release)**
+**5. Charge depletion (after release)**
 ```
 rate = (100.0 / charge_tier_count) * 0.01 * frame_scale^3
 charge_value -= rate
@@ -218,9 +249,11 @@ if charge_value == 0.0:
     charge_ready = 1  // can start accumulating again
 ```
 
-> **Branch condition.** `TopRide_ChargeUpdate` (0x802df900) accumulates (step 2) only when `A_held && charge_ready == 1`; **every other frame it runs this depletion branch** — i.e. whenever `!A_held || charge_ready == 0`. So charge decays toward 0 not just after a boost release but on *any* idle frame where A isn't held. The depletion rate (~`1.0/charge_tier_count`, ≈0.3/frame) is much larger than a single charge step. This is why EnergyLink Auto-Charge in TR must gate injection on `is_charging` (A held), not just `charge_ready` — see `docs/energylink.md` "Top Ride". Idle injection is wiped by this branch the next frame.
+### Per-frame decay branch
 
-### Comparison with 3D Mode
+`TopRide_ChargeUpdate` (0x802df900) accumulates (step 2) only when `A_held && charge_ready == 1`; **every other frame it runs the depletion branch** — i.e. whenever `!A_held || charge_ready == 0`. So charge decays toward 0 not just after a boost release but on *any* idle frame where A isn't held. The depletion rate (~`1.0/charge_tier_count`, ≈0.3/frame) is much larger than a single charge step, so anything a mod injects into `charge_value` on an idle frame is wiped the next frame. EnergyLink Auto-Charge in TR therefore gates injection on `is_charging` (A held), not just on `charge_ready`.
+
+### Comparison with 3D mode
 
 | Aspect | 3D Mode (MachineData) | Top Ride (ChargeComponent) |
 |--------|----------------------|---------------------------|
@@ -237,23 +270,29 @@ if charge_value == 0.0:
 |---------|------|------|-------------|
 | 0x80008df8 | 0x1C8 | TopRide_SceneLoad | Minor 19 cb_Load |
 | 0x80009008 | 0x68 | TopRide_SceneInit | Minor 19 post-GObj think |
+| 0x80009074 | 0x20 | TopRide_PostRenderCallback | Minor 19 post-render; calls `TopRide_CustomRenderer` |
+| 0x80286d7c | 0x74 | TopRide_CustomRenderer | Second `HSD_StartRender` pass for the 2D engine |
 | 0x80286be8 | 0x170 | TopRide_GameInit | Main game init (allocs 5MB buffer, creates session) |
 | 0x80284298 | 0x2D0 | TopRide_SessionInit | Session constructor |
 | 0x8028c010 | 0x820 | TopRide_GameSessionInit | Game session init (creates KirbyMgr etc.) |
-| 0x802dafb4 | 0x538 | TopRide_FielderInit | KirbyMgr constructor |
+| 0x802dafb4 | 0x538 | TopRide_KirbyMgrInit | KirbyMgr constructor |
+| 0x802db518 | 0x234 | TopRide_SpawnKirby | Per-slot kirby spawn helper |
 | 0x802d4d64 | 0x788 | TopRide_KirbyInit | Per-player Kirby constructor |
 | 0x802d1fe8 | 0x1918 | TopRide_KirbyChargeInit | Charge component constructor |
 | 0x802df900 | 0xEA0 | TopRide_ChargeUpdate | **Per-frame charge state machine** |
 | 0x802d5ec0 | 0xDCC | TopRide_KirbyPhysUpdate | Per-Kirby physics update |
+| 0x802e26dc | 0x1E8 | TopRide_KirbyModelThink | Per-frame model JObj transform (applies `model_scale`) |
 | 0x802db74c | 0xEBC | TopRide_KirbyMgrUpdate | KirbyMgr per-frame (iterates all 4 Kirbys) |
-| 0x8029c650 | 0x8D4 | TopRide_FielderUpdate | Fielder main update loop |
+| 0x8029c650 | 0x8D4 | `zz_8029c650_` | Session main update loop (unnamed in the map) |
 | 0x802d9a24 | 0x8 | TopRide_GetChargeMultiplier | Returns 1.0f (charge rate multiplier) |
 | 0x802d98f0 | 0x134 | TopRide_GetChargeTierCount | Charge tier count for depletion rate |
 | 0x802de0e4 | 0xC | TopRide_GetDataTable | Returns data table ptr (0x804d40f0) |
 | 0x80296264 | 0x8 | TopRide_GetFrameScale | Returns frame rate scale (1.0 at 60fps) |
 | 0x802d1d84 | 0x264 | TopRide_VelocityDecay | Post-boost velocity decay |
-
-> **Map note.** A few related functions have no discovered name yet and are still `zz_`-named in `externals/hoshi/GKYE01.map` — grep them by address: the round_state writers `zz_8029e334_` (→1, write at 0x8029ec04) and `zz_8029eda4_` (→2, write at 0x8029efa4), and the `+0x40` config writer `zz_802c50ac_`.
+| 0x80311f2c | 0x5C | TopRide_KirbyHistoryInit | Constructs the per-kirby anti-jitter history ring (kirby+0x64) |
+| 0x80311f88 | 0x78 | TopRide_KirbyHistoryPush | Pushes the current paired sign values into the ring |
+| 0x80312000 | 0xC0 | TopRide_KirbyHistoryQuery | Queries the ring (spline-snap / direction smoothing, quick-spin flick test) |
+| 0x802cf83c | 0xEB4 | TopRide_ApexGridScan | Tile/grid collision + per-sector apex evaluation |
 
 ### Data Table
 

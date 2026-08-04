@@ -1,7 +1,7 @@
 #ifndef GATE_ITEMS_H
 #define GATE_ITEMS_H
 
-#include "archipelago_api.h"  // ItemUnlockKind / ITUNLOCK_*
+#include "archipelago_api.h"
 
 void GateItems_OnBoot();
 void GateItems_FilterSpawnTables();

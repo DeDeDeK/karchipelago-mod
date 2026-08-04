@@ -26,6 +26,7 @@ u32 Unlock_GetMask(APUnlockCategory cat)
         case AP_UNLOCK_TOPRIDE_ITEM:   return ap_save->topride_item_unlocked_mask;
         case AP_UNLOCK_COLOR:          return ap_save->color_unlocked_mask;
         case AP_UNLOCK_STADIUM:        return ap_save->stadium_unlocked_mask;
+        case AP_UNLOCK_BASE_ABILITY:   return ap_save->base_ability_unlocked_mask;
         default:                       return 0;
     }
 }
@@ -45,6 +46,7 @@ void Unlock_SetMask(APUnlockCategory cat, u32 mask)
         case AP_UNLOCK_TOPRIDE_ITEM:   ap_save->topride_item_unlocked_mask   = (u32)mask; break;
         case AP_UNLOCK_COLOR:          ap_save->color_unlocked_mask          = (u8)mask;  break;
         case AP_UNLOCK_STADIUM:        ap_save->stadium_unlocked_mask        = (u32)mask; break;
+        case AP_UNLOCK_BASE_ABILITY:   ap_save->base_ability_unlocked_mask   = (u8)mask;  break;
         default: break;
     }
 }

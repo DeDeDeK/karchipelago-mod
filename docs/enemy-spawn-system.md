@@ -1,10 +1,8 @@
 # Enemy & Event Actor Spawn System
 
-Documentation of the enemy/event actor spawning system in Kirby Air Ride (GKYE01), focused on enabling standalone actor spawning in City Trial.
+Every enemy and event actor in Kirby Air Ride is created through one factory, `EventActor_Create`, from one descriptor struct. Around it sits a spawn manager that owns per-stage spawn positions, weighted enemy selection and respawn timers. This doc covers that creation pipeline, the descriptor, archive loading, and the spawn-slot system — including how to bypass the spawn manager and spawn actors standalone in City Trial.
 
-## Architecture Overview
-
-All enemies and event actors share a single creation pipeline:
+## Architecture
 
 ```
 Enemy_SpawnActor()  ──builds descriptor──►  EventActor_Create(descriptor)
@@ -17,9 +15,9 @@ event_meteor_start()    ──builds descriptor─────────┘
 
 ## Actor Type IDs
 
-There are 79 actor type IDs organized into tiers. All share the same data table at `0x804b22b4` (stride 8 per entry: `{int data_index, int flags}`). The `data_index` selects which archive to load; `flags` selects the variant within that archive.
+79 actor type IDs organized into tiers. All share the same data table at `0x804b22b4` (stride 8 per entry: `{int data_index, int flags}`). The `data_index` selects which archive to load; `flags` selects the variant within that archive.
 
-### Tier 0 — Base Enemies (IDs 0x00-0x17)
+### Tier 0 — base enemies (IDs 0x00-0x17)
 
 | ID | Hex | data_idx | Enemy | Copy Ability |
 |----|-----|----------|-------|-------------|
@@ -48,17 +46,11 @@ There are 79 actor type IDs organized into tiers. All share the same data table 
 | 22 | 0x16 | 0x11 | Waddle Dee Truck | None |
 | 23 | 0x17 | 0x12 | Waddle Dee | None |
 
-### Tier 1 — Enhanced Variants (IDs 0x18-0x2F)
+### Tiers 1 and 2 (IDs 0x18-0x2F, 0x30-0x47)
 
-Same 24 enemies as Tier 0 with `flags=1` (enhanced variant). Same `data_index` sequence. Tier 1 Phan Phan (ID 0x21) is "Heat Phan Phan" — visually distinct fire model, but both T0 and T1 Phan Phan share the Fire copy ability (determined by the archive at data_index 6, not the tier flags).
+Both tiers repeat the same 24 enemies in the same `data_index` sequence with `flags=1` — **identical flags**, so T1 and T2 select the same archive sub-entry and are functionally identical. The distinction is only which spawn pool the City Trial timer draws from. Tier 1 Phan Phan (ID 0x21) is "Heat Phan Phan", a visually distinct fire model; both T0 and T1 Phan Phan share the Fire copy ability, because the ability comes from the archive at data_index 6, not the tier flags.
 
-### Tier 2 — Further Enhanced (IDs 0x30-0x47)
-
-Same 24 enemies with `flags=1` — **identical flags to Tier 1**. Both T1 and T2 select the same sub-entry from the archive, meaning they are functionally identical. The distinction is only in which spawn pool the City Trial timer draws from.
-
-### Tier Differences (T0 vs T1/T2)
-
-The tier flag is used **only at load time** by `Enemy_GetActorData` to select a sub-entry from the enemy's archive. Each archive contains multiple data sets (at offsets 0, 4, 8, 12, 16), and the flags field indexes into them. Once loaded into `EnemyData.actor_data` (+0x14), the tier flag itself is not stored or checked at runtime.
+The tier flag is used **only at load time** by `Enemy_GetActorData` to select a sub-entry from the enemy's archive (each archive holds data sets at offsets 0, 4, 8, 12, 16, indexed by the flags field). Once loaded into `EnemyData.actor_data` (+0x14), the tier flag is neither stored nor checked at runtime.
 
 What varies per tier sub-entry:
 
@@ -70,9 +62,9 @@ What varies per tier sub-entry:
 | Animation data | `actor_data->+0x0C + state*0x10` | Per-state animation timing |
 | Model/textures | Archive sub-entry | Visual variants (e.g. Heat Phan Phan) |
 
-The final visual scale is computed as: `mode_scale * spawn_scale * tier_base_scale * global_enemy_scale` where mode_scale is 1.0 (Air Ride), 1.1 (Top Ride), or 1.2 (City Trial).
+Final visual scale is `mode_scale * spawn_scale * tier_base_scale * global_enemy_scale`, where mode_scale is 1.0 (Air Ride), 1.1 (Top Ride) or 1.2 (City Trial).
 
-### Special / Event Actors (IDs 0x48-0x4E)
+### Special / event actors (IDs 0x48-0x4E)
 
 | ID | Hex | data_idx | flags | Archive | Actor |
 |----|-----|----------|-------|---------|-------|
@@ -86,7 +78,7 @@ The final visual scale is computed as: `mode_scale * spawn_scale * tier_base_sca
 
 ## Archive System
 
-### 22 Unique Archives (data_index 0x00-0x15)
+22 unique archives, one per data_index 0x00-0x15:
 
 | data_idx | Archive File | Group Name |
 |----------|-------------|------------|
@@ -113,24 +105,23 @@ The final visual scale is computed as: `mode_scale * spawn_scale * tier_base_sca
 | 0x14 | EmDynaData.dat | emDynaDataGroup |
 | 0x15 | EmMeteoData.dat | emMeteoDataGroup |
 
-### Loading
+### Archive loading
 
-- `Enemy_CheckAndLoad(actor_id)` (0x801fd060) — validates ID, calls `Enemy_LoadFile`.
-- `Enemy_LoadFile(actor_id)` (0x801fd348) — looks up `data_index` from the table, checks loaded flag at `0x8055a210[data_index]`, loads archive via `lbLoadArchive` if not already loaded.
-- `Enemy_LoadStageEnemies()` (0x800f25b4) — called during `grLoadStage`. Skips in City Trial Free Run (major == MJRKIND_CITY && city_mode == CITYMODE_FREERUN). Runs normally in City Trial mode, iterating the stage's enemy ID list (which includes event actors: TAC 0x4C, Dyna Blade 0x4D, Meteor 0x4E) and calling `Enemy_CheckAndLoad` for each.
-- Loading is idempotent — calling `Enemy_CheckAndLoad` for an already-loaded archive is a no-op.
+- `Enemy_CheckAndLoad(actor_id)` (0x801fd060) — validates the ID, calls `Enemy_LoadFile`. Idempotent: a no-op for an already-loaded archive.
+- `Enemy_LoadFile(actor_id)` (0x801fd348) — looks up `data_index` from the table, checks the loaded flag at `0x8055a210[data_index]`, loads the archive via `lbLoadArchive` if not already loaded.
+- `Enemy_LoadStageEnemies()` (0x800f25b4) — called during `grLoadStage`. Skipped in City Trial Free Run (major == MJRKIND_CITY && city_mode == CITYMODE_FREERUN). Runs normally in timed City Trial, iterating the stage's enemy ID list (which includes event actors TAC 0x4C, Dyna Blade 0x4D, Meteor 0x4E) and calling `Enemy_CheckAndLoad` for each.
 
-### Data Lookup at Runtime
+### Data lookup at runtime
 
-`Enemy_GetActorData(actor_id)` (0x801fd498) looks up the actor's data pointer. It indexes the actor data table at `0x804b22b4` by ActorID to get `{data_index, flags}`, then indexes the archive root-pointer array at `0x8055a228` by `data_index` and reads the tier sub-entry (offsets +0x00/+0x04/+0x08/+0x0C, selected by `flags`). Returns 0 if the archive is not loaded. `EventActor_Create` uses this internally — if the data isn't loaded, the actor will fail to create properly.
+`Enemy_GetActorData(actor_id)` (0x801fd498) indexes the actor data table at `0x804b22b4` by ActorID to get `{data_index, flags}`, then indexes the archive root-pointer array at `0x8055a228` by `data_index` and reads the tier sub-entry (offsets +0x00/+0x04/+0x08/+0x0C, selected by `flags`). Returns 0 if the archive is not loaded. `EventActor_Create` uses this internally — if the data isn't loaded, the actor fails to create properly.
 
 ## EventActor_Create
 
 **Address:** 0x801fbb50 (size 0x3dc)
 
-### Descriptor Struct (EventActorDesc)
+### EventActorDesc
 
-`EventActor_Create` takes a pointer to a descriptor struct (0x60 bytes, 24 fields). Reconstructed from `EventActor_InitFromDesc` (0x801fb53c, the setup function that copies descriptor -> EnemyData), cross-referenced with `Enemy_SpawnActor` and `event_dynablade`/`event_meteor` callers.
+`EventActor_Create` takes a pointer to a 0x60-byte descriptor (24 fields). `EventActor_InitFromDesc` (0x801fb53c) copies descriptor -> EnemyData; the callers that build descriptors are `Enemy_SpawnActor`, `Enemy_SpawnActorMode2` and the `event_dynablade` / `event_meteor` event starters.
 
 ```c
 typedef struct EventActorDesc
@@ -152,9 +143,7 @@ typedef struct EventActorDesc
 } EventActorDesc; // 0x60 bytes
 ```
 
-#### Descriptor -> EnemyData Field Mapping
-
-Traced from `EventActor_InitFromDesc` (0x801fb53c), which copies descriptor fields into the EnemyData userdata:
+Field mapping performed by `EventActor_InitFromDesc`:
 
 | Desc Field | Offset | -> EnemyData[N] | ED Offset | Purpose |
 |------------|--------|-----------------|-----------|---------|
@@ -162,42 +151,44 @@ Traced from `EventActor_InitFromDesc` (0x801fb53c), which copies descriptor fiel
 | position | 0x04 | [0xC1-0xC3] | 0x304 | World position (also copied to [0xBE-0xC0] and [0xC4-0xC6]) |
 | forward | 0x10 | [0xD3-0xD5] | 0x34C | Forward direction (also to [0x2AA-0x2AC]) |
 | up | 0x1C | [0xD6-0xD8] | 0x358 | Up direction |
-| scale | 0x28 | [0xB3] | 0x2CC | Base scale factor (feeds into damage/size calculations) |
-| spawn_index | 0x2C | [10] | 0x28 | Checked against -1; if not -1, lifetime field is written |
+| scale | 0x28 | [0xB3] | 0x2CC | Base scale factor (feeds damage/size calculations) |
+| spawn_index | 0x2C | [10] | 0x28 | Checked against -1; if not -1, the lifetime field is written |
 | spawn_slot | 0x30 | [8] | 0x20 | Spawn slot tracking |
 | x34 | 0x34 | [9] | 0x24 | -- |
 | lifetime | 0x38 | [0xB] | 0x2C | Lifetime frames (only if spawn_index != -1) |
-| x3C | 0x3C | [2], [0xC] | 0x08, 0x30 | -> EnemyData.parent_gobj for special actors (0x48-0x4A); 0 otherwise. See Parent/Child System below. |
+| x3C | 0x3C | [2], [0xC] | 0x08, 0x30 | -> EnemyData.parent_gobj for special actors (0x48-0x4A); 0 otherwise |
 | x40 | 0x40 | [0x242] | 0x908 | -- |
 | custom_bounds | 0x44 | [0x2A0-0x2A2] | 0xA80 | Custom collision bounds (only if bounds_flag != -1.0) |
 | bounds_flag | 0x50 | [0x2A3] | 0xA8C | -1.0 triggers default bounds (all zeros from 0x804b1d40) |
 | ground_normal | 0x54 | [0x23F-0x241] | 0x8FC | Surface normal at spawn point |
 
-#### Parent/Child Actor System
+### Parent/child actor system
 
-Some enemies are **composite** — they consist of a main body and a rider/attached entity:
+Some enemies are **composite** — a main body plus a rider/attached entity:
+
 - Broom Hatter (0x00/0x01) -> spawns SP Broom Hatter (0x48) as rider
 - Sword Knight (0x05) -> spawns SP Sword Knight (0x49) as rider
 - Waddle Dee Truck (0x16) -> spawns SP Waddle Dee Truck (0x4A) as driver
 
-`EventActor_SpawnChild` (0x801fcda0) creates the child actor and sets `child.parent_gobj = parent_gobj`. The child's state functions use this reference:
+`EventActor_SpawnChild` (0x801fcda0) creates the child and sets `child.parent_gobj = parent_gobj`. The child's state functions use that reference:
 
-- `EventActor_FollowParent` (0x80219eec) — reads `parent_gobj` to get parent's scale and timing, then copies position data
-- `EventActor_CopyParentState` (0x80219fd4) — copies position/direction from parent's EnemyData into child
-- `EventActor_GetParentScale` (0x802049b8) — reads `parent_gobj->userdata + 0x2B0` (parent's scale). **Crashes if parent_gobj is null** (DAR=0x2C null deref).
+- `EventActor_FollowParent` (0x80219eec) — reads `parent_gobj` for the parent's scale and timing, then copies position data
+- `EventActor_CopyParentState` (0x80219fd4) — copies position/direction from the parent's EnemyData
+- `EventActor_GetParentScale` (0x802049b8) — reads `parent_gobj->userdata + 0x2B0`. **Crashes if parent_gobj is null** (DAR=0x2C null deref).
 
-**EnemyData layout for references:**
+The relevant EnemyData head:
+
 ```c
 EnemyData[0] (0x00) = GOBJ *gobj;         // this actor's own GOBJ
 EnemyData[1] (0x04) = GOBJ *child_gobj;   // child/rider GOBJ (0 if none)
 EnemyData[2] (0x08) = GOBJ *parent_gobj;  // parent/target GOBJ (null crashes some states)
 ```
 
-**For standalone spawns**: `parent_gobj` must be set to a valid GOBJ after creation. Setting it to the player's machine GOBJ makes enemies track/follow the player. If left null, actors whose state functions call `EventActor_FollowParent` will crash.
+For standalone spawns, `parent_gobj` must be set to a valid GOBJ after creation. Setting it to the player's machine GOBJ makes enemies track/follow the player; left null, actors whose state functions call `EventActor_FollowParent` crash.
 
-#### Standalone Spawn Recipe
+### Standalone spawn recipe
 
-For spawning an actor without the spawn-slot system (e.g., in City Trial):
+Spawning an actor without the spawn-slot system (e.g. in City Trial):
 
 ```c
 Enemy_CheckAndLoad(ACTORID_WADDLE_DEE); // ensure archive loaded
@@ -223,21 +214,21 @@ if (actor)
 }
 ```
 
-### Creation Flow
+### Creation flow
 
-1. Creates GOBJ with entity_class=21 (0x15), plink=12 (0xC, GAMEPLINK_ENEMY)
+1. Creates a GOBJ with entity_class=21 (0x15), plink=12 (0xC, GAMEPLINK_ENEMY)
 2. Allocates EnemyData userdata (3008 bytes / 0xBC0) via `HSD_ObjAlloc` + `memset`
 3. Attaches EnemyData with `GObj_AddUserData` at priority 21, destructor `EventActor_GObjDestroyHandler` (0x801fcca0)
 4. Copies descriptor fields into EnemyData via `EventActor_InitFromDesc`
 5. Looks up per-type data via `Enemy_GetActorData(actor_id)`
-6. Loads JObj model from archive
-7. Calls per-type init callback from table at `PTR_PTR_804b1d98[actor_id]`
-8. Attaches 10 GOBJProc callbacks for AI, physics, collision, rendering, etc.
-9. Registers GXLink with function 0x801fd158, priority 9, render pass 1
+6. Loads the JObj model from the archive
+7. Calls the per-type init callback from the table at `PTR_PTR_804b1d98[actor_id]`
+8. Attaches 10 GOBJProc callbacks for AI, physics, collision, rendering
+9. Registers a GXLink with `Enemy_GX` (0x801fd158), priority 9, render pass 1
 
-### GOBJProc Priorities
+### GOBJProc priorities
 
-EventActor_Create registers 10 procs unconditionally for each actor:
+All 10 procs are registered unconditionally for every actor, regardless of type:
 
 | Priority | Function | Address | Purpose |
 |----------|----------|---------|---------|
@@ -247,16 +238,14 @@ EventActor_Create registers 10 procs unconditionally for each actor:
 | 5 | `EventActor_ProcStateActive` | 0x801fc7c4 | state_func3 dispatch (main per-state AI logic) |
 | 6 | `EventActor_ProcSharedModel` | 0x801fc7f8 | Shadow update + state_func4 dispatch + position/direction to model matrix |
 | 7 | `EventActor_ProcPerType` | 0x801fc848 | per_type_cb dispatch + HurtData update + position snap |
-| 8 | `EventActor_ProcHitCollInit` | 0x801fc8e8 | No-op stub (`blr`) — does nothing |
+| 8 | `EventActor_ProcHitCollInit` | 0x801fc8e8 | No-op stub (`blr`) |
 | 9 | `EventActor_ProcHitColl` | 0x801fc8ec | HitColl collision setup; checks `damage_accum_1` (+0x994) against `param_hp_threshold` (+0x3b0) |
 | 10 | `EventActor_ProcDamage` | 0x801fc9f0 | Reads HurtData output, calls `giveEnemyDamage`, dispatches `hit_reaction_cb2` |
-| 21 | `EventActor_ProcFinal` | 0x801fcabc | pos → pos_prev, ground-state flags, lifetime/despawn, OOB destroy |
-
-Note: Priority 8 (`EventActor_ProcHitCollInit`, 0x801fc8e8) is a single `blr` no-op stub registered unconditionally. All 10 procs are always created regardless of actor type. The GXLink render callback (`zz_801fd158_`, priority 9, render pass 1) is registered separately via `GObj_AddGXLink`.
+| 21 | `EventActor_ProcFinal` | 0x801fcabc | pos -> pos_prev, ground-state flags, lifetime/despawn, OOB destroy |
 
 ## Spawn Manager System
 
-### Global Variables
+### Global variables
 
 | Address | r13 offset | Type | Name | Description |
 |---------|-----------|------|------|-------------|
@@ -266,7 +255,7 @@ Note: Priority 8 (`EventActor_ProcHitCollInit`, 0x801fc8e8) is a single `blr` no
 | 0x805DD714 | +0x634 | ptr | stc_enemy_mgr | EnemyMgr struct pointer |
 | 0x805DE334 | +0x1254 | ptr | stc_event_actor_list | Global EventActor linked list root |
 
-### EnemyMgr Struct (0x3C bytes)
+### EnemyMgr struct (0x3C bytes)
 
 Pointed to by r13+0x634 (0x805DD714). Manages all spawning state for the current stage.
 
@@ -279,7 +268,7 @@ Pointed to by r13+0x634 (0x805DD714). Manages all spawning state for the current
 | +0x10 | u32 | total_spawns | Total enemies spawned (lifetime) |
 | +0x14 | u16 | active_count | Current alive enemy count |
 | +0x16 | u16 | active_event_count | Alive "event" enemies (actor_id >= 0x18). CT mode 3 only. |
-| +0x18 | u16 | unknown_counter | |
+| +0x18 | u16 | (reserved) | Unused — memset-0 at manager init (`Enemy_InitPositionData`), never read or written afterward. The live counters are +0x14/+0x16/+0x1A/+0x1C. |
 | +0x1A | s16 | slots_initialized | Count of initialized spawn slots |
 | +0x1C | s16 | last_spawn_slot | Last spawn slot index used |
 | +0x20 | u32[3] | ct_time | City_GetMinSecMs output (min, sec, ms) |
@@ -288,7 +277,7 @@ Pointed to by r13+0x634 (0x805DD714). Manages all spawning state for the current
 | +0x34 | float | time_progress | current_time / total_time (0.0-1.0) for CT difficulty |
 | +0x38 | u32 | ct_next_spawn_pos | CT rotating spawn position index |
 
-### SpawnSlot Struct (0x48 bytes, 4 slots)
+### SpawnSlot struct (0x48 bytes, 4 slots)
 
 Array at r13+0x62C (0x805DD70C). Four spawn slots, one per player in Air Ride.
 
@@ -305,7 +294,7 @@ Array at r13+0x62C (0x805DD70C). Four spawn slots, one per player in Air Ride.
 | +0x44 | u8 | flags | Bit 7: is_spawned, bit 6: player_nearby |
 | +0x46 | u16 | initialized | 1 = valid data |
 
-### Per-Slot Extended Data (stride 0x5C)
+### Per-slot extended data (stride 0x5C)
 
 Array at EnemyMgr+0x04. One entry per spawn position defined in the stage data.
 
@@ -324,19 +313,43 @@ Array at EnemyMgr+0x04. One entry per spawn position defined in the stage data.
 | +0x50 | s16 | owning_slot_index |
 | +0x58 | ptr | actor_gobj |
 
-### Spawn Data Structure
+### EnemySpawnData (from the stage .dat)
 
-From stage .dat file, pointed to by r13+0x630 (0x805DD710).
+Pointed to by r13+0x630 (0x805DD710). Defined as `EnemySpawnData` in `enemy.h`.
 
 | Offset | Type | Description |
 |--------|------|-------------|
 | +0x00 | s16 | spawn_count |
-| +0x04 | ptr | spawn_entries (stride **0x38** per entry; see `EnemySpawnData` in `enemy.h`). Indexed by `position_index * 0x38` in `Enemy_SpawnActor`. |
+| +0x04 | ptr | spawn_entries — table of `EnemySpawnEntry` (stride **0x38**). Indexed by `position_index`. |
 | +0x08 | int | (mode-dependent) |
 | +0x0C | ptr | secondary_table — pointer-array of meta-enemy sub-tables (0x50-0x5E). May be NULL. Read by `Enemy_SpawnerDecide`. |
 | +0x10 | ptr | config struct |
 
-Note: the **0x5C stride** is the per-position *extended data* array at `EnemyMgr+0x04` (runtime), not the stage-file `spawn_entries` (0x38).
+The **0x5C stride** is the per-position *extended data* array at `EnemyMgr+0x04` (runtime), not the stage-file `spawn_entries` (0x38).
+
+### EnemySpawnEntry (0x38 bytes)
+
+One entry per spawn position, loaded verbatim from the stage `.dat` (the engine only reads it). Defined as `EnemySpawnEntry` in `enemy.h`. The id/weight arrays live at **mode-dependent offsets** (the three modes pack them differently), so the struct models them as a union keyed on `config.mode`.
+
+| Offset | Type | Name | Description |
+|--------|------|------|-------------|
+| +0x00 | s16 | location_index | Index into the stage enemy-position table (`GrData+0x138`, stride 0x24 of three Vec3s). Resolved by `loadEnemy_spawnXYLocation?`; the position/direction/ground-normal go into the runtime per-position extended data, not back into this entry. |
+| +0x02 | s16 | pad02 | — |
+| +0x04 | s16 | entry_type | Sub-kind selector (modes 2/3): e.g. point vs spline spawn. |
+| +0x30 | f32 | scale | Per-spawn model scale (negated if negative, 1.0 if zero). |
+| +0x34 | s32 | variant | Copied into the actor descriptor's parent/variant slot. |
+
+Mode-dependent id/weight/lifetime fields (the union at +0x06..+0x2F):
+
+| Mode | ids | weights | lifetime base/range |
+|------|-----|---------|---------------------|
+| 1 (Air Ride courses) | s16[4] @ +0x1E | s16[4] @ +0x26 (-1 terminates) | +0x1A / +0x1C |
+| 2 (STKIND_MELEE1) | s16 enemy_id @ +0x06 | s16 weight_columns[N] @ +0x08 (one per meta-enemy category) | +0x24 / +0x26 |
+| 3 (STKIND_MELEE2) | s16[5] @ +0x06 | s16[5] @ +0x10 (-1 terminates) | +0x1A / +0x1C |
+
+`location_index`, `scale`, `lifetime` and `variant` are read by `Enemy_SpawnActor` (modes 1/3) and `Enemy_SpawnActorMode2` (mode 2). The `ids`/`weights` arrays are read by `Enemy_SpawnerDecide` (modes 1/3) and `Enemy_SpawnerDecideMode2` (mode 2). Lifetime values 0 or 1 mean "no lifetime"; values > 1 get +/- random jitter from the range field.
+
+Mode 2 is two-stage: `Enemy_SpawnerDecideMode2` weighted-picks a meta-enemy category from `secondary_table[0]` (biased by `EnemyMgr.time_progress`), then picks a concrete enemy from that category's per-entry `weight_columns` and returns the entry's `enemy_id`.
 
 Config struct at spawn_data+0x10:
 
@@ -346,22 +359,85 @@ Config struct at spawn_data+0x10:
 | +0x26 | s16 | random respawn range |
 | +0x28 | s16 | mode (1=Air Ride courses, 2=STKIND_MELEE1, 3=STKIND_MELEE2) |
 
-Empirically, `stc_enemy_spawn_data` is NULL in the City Trial city map (whether
-timed or Free Run), Top Ride, and stadiums that don't use stage-based enemy
-spawning (Air Glider, Destruction Derby, Single Race, etc.). The CT city's
-event actors (TAC, Dyna Blade, Meteor) are loaded by `Enemy_LoadStageEnemies`
-but do not populate `stc_enemy_spawn_data` — they spawn through the event
-system, not the spawn-position pool.
+`stc_enemy_spawn_data` is NULL in the City Trial city map (timed or Free Run), Top Ride, and stadiums that don't use stage-based enemy spawning (Air Glider, Destruction Derby, Single Race, etc.). The CT city's event actors (TAC, Dyna Blade, Meteor) are loaded by `Enemy_LoadStageEnemies` but do not populate `stc_enemy_spawn_data` — they spawn through the event system, not the spawn-position pool.
 
-## Spawning in City Trial
+## Air Ride Per-Course Enemy Rosters
 
-### The Problem
+Which enemies each Air Ride course can spawn, from the vanilla stage `.dat` spawn tables (mode 1: `ids[4]` at entry `+0x1E`, `weights[4]` at `+0x26`, stride `0x38`; meta-enemy IDs `0x50-0x5E` expanded through `secondary_table`). An enemy is listed if it appears with a positive weight at any spawn position on that course. Tiers T0/T1/T2 of an enemy share one copy ability and are collapsed.
 
-In City Trial Free Run, `Enemy_LoadStageEnemies` is skipped, so no enemy archives are loaded by default. In City Trial mode, `Enemy_LoadStageEnemies` runs normally and loads all stage enemies including event actors (TAC, Dyna Blade, Meteor).
+**StageKind -> GroundKind -> stage file** — do not infer the file from the course name. The mapping comes from `Stage_GetGrKindFromStageKind` (0x80261ce8: global stage table at `*(*(r13+0x7FC))`, stride `0x58`, GroundKind at `+0x00`) plus the stage-def filename table in `main.dol`. `GrPasture1` is **Kirby Melee 1** (spawn mode 2) and `GrColosseum5` is **Kirby Melee 2** (mode 3) — neither is an Air Ride course.
 
-### Spawning Custom Actors
+Copy-ability enemies are **bold** with their ability; the rest are ability-less "garbage" enemies (the "swallow garbage enemies" checklist cell takes any of these).
 
-In City Trial mode, event actor archives are already loaded. To spawn actors in modes where they aren't loaded (Free Run, Air Ride), call `Enemy_CheckAndLoad(actor_id)` first — it's idempotent and no-ops if already loaded. Then call `EventActor_Create` with a descriptor struct.
+| StageKind | Course | Stage file | Copy-ability enemies | Garbage enemies |
+|---|---|---|---|---|
+| 0 | Fantasy Meadows | GrPlants1.dat | **Bomber** (Bomb), **Dayl** (Fire), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Sword Knight** (Sword), **Walky** (Mic) | Bronto Burt, Bronto Burt B, Broom Hatter, Cappy, Scarfy, Waddle Dee, Waddle Dee Truck |
+| 1 | Magma Flows | GrHeat2.dat | **Bomber** (Bomb), **Dayl** (Fire), **Flappy** (Wing), **Noddy** (Sleep), **Phan Phan** (Fire), **Plasma Wisp** (Plasma), **Sword Knight** (Sword), **Walky** (Mic) | Bronto Burt, Broom Hatter |
+| 2 | Sky Sands | GrDesert1.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Sword Knight** (Sword), **Walky** (Mic), **Wheelie** (Wheel) | Bronto Burt, Bronto Burt B, Broom Hatter, Cappy, Waddle Dee, Waddle Dee Truck |
+| 3 | Frozen Hillside | GrIce1.dat | **Bomber** (Bomb), **Chilly** (Freeze), **Dayl** (Fire), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Sword Knight** (Sword) | Bronto Burt B, Broom Hatter, Scarfy, Waddle Dee Truck |
+| 4 | Beanstalk Park | GrSky2.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Flappy** (Wing), **Noddy** (Sleep), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Walky** (Mic) | Bronto Burt, Broom Hatter, Cappy, Waddle Dee Truck |
+| 5 | Celestial Valley | GrValley2.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Chilly** (Freeze), **Flappy** (Wing), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Plasma Wisp** (Plasma), **Sword Knight** (Sword) | Bronto Burt, Broom Hatter, Cappy, Scarfy, Waddle Dee, Waddle Dee Truck |
+| 6 | Machine Passage | GrMachine2.dat | **Bomber** (Bomb), **Dayl** (Fire), **Phan Phan** (Fire), **Pichikuri** (Needle), **Pichikuri B** (Needle), **Plasma Wisp** (Plasma), **Walky** (Mic), **Wheelie** (Wheel) | Bronto Burt B, Gordo, Waddle Dee, Waddle Dee Truck |
+| 7 | Checker Knights | GrCheck2.dat | **Bomber** (Bomb), **Caller/Shaturn** (Tornado), **Chilly** (Freeze), **Flappy** (Wing), **Noddy** (Sleep), **Phan Phan** (Fire), **Plasma Wisp** (Plasma), **Sword Knight** (Sword), **Walky** (Mic), **Wheelie** (Wheel) | Bronto Burt, Broom Hatter, Waddle Dee, Waddle Dee Truck |
+| 8 | Nebula Belt | GrSpace2.dat | — | — (no enemy spawn table) |
+
+The reverse view, enemy -> courses. The Archipelago world uses the Sword Knight / Wheelie / Chilly / Plasma Wisp rows to gate the "swallow this enemy" checklist cells on `HasAny` of those courses when `air_ride_courses_gated` is on (`_SWALLOW_ENEMY_COURSE_RULES` in the apworld's `KARRules.py`).
+
+| Enemy | Ability | Spawns on |
+|---|---|---|
+| Sword Knight | Sword | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Celestial Valley, Checker Knights |
+| Wheelie | Wheel | Sky Sands, Machine Passage, Checker Knights |
+| Phan Phan | Fire | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Beanstalk Park, Machine Passage, Checker Knights |
+| Noddy | Sleep | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Beanstalk Park, Checker Knights |
+| Chilly | Freeze | Frozen Hillside, Celestial Valley, Checker Knights |
+| Flappy | Wing | Magma Flows, Beanstalk Park, Celestial Valley, Checker Knights |
+| Plasma Wisp | Plasma | Magma Flows, Celestial Valley, Machine Passage, Checker Knights |
+| Bomber | Bomb | Fantasy Meadows, Magma Flows, Sky Sands, Frozen Hillside, Beanstalk Park, Celestial Valley, Machine Passage, Checker Knights |
+| Pichikuri | Needle | Fantasy Meadows, Sky Sands, Frozen Hillside, Beanstalk Park, Celestial Valley, Machine Passage |
+| Pichikuri B | Needle | Fantasy Meadows, Sky Sands, Frozen Hillside, Beanstalk Park, Celestial Valley, Machine Passage |
+| Dayl | Fire | Fantasy Meadows, Magma Flows, Frozen Hillside, Machine Passage |
+| Caller/Shaturn | Tornado | Sky Sands, Beanstalk Park, Celestial Valley, Checker Knights |
+| Walky | Mic | Fantasy Meadows, Magma Flows, Sky Sands, Beanstalk Park, Machine Passage, Checker Knights |
+
+## Which Modes Spawn Regular Enemies
+
+Regular per-type AI enemies spawn **only** when the loaded stage's `.dat` ships a non-NULL enemy-spawn array. The decision is data-driven, not derived from a stadium/mode constant:
+
+1. `grLoadStage` -> `Enemy_InitPositionData` (0x800f2634) -> gate `0x8000a228` (GameData+0xAA6 bit 4, "enemies enabled", effectively always on) -> spawn-data provider `0x800da4c4`.
+2. `0x800da4c4` reads `GrData+0x28`. **If it is NULL, no enemies** (returns NULL). Otherwise it indexes a per-stage `EnemySpawnData` array (stride 0x18) by the stage's EnemyposId and stores the result at `stc_enemy_spawn_data` (0x805DD710).
+3. `Enemy_InitPositionData` then bails to the no-spawn path if `spawn_count == 0` / `config == 0` / `spawn_entries == 0`. Otherwise the **`mode` is read straight from `config->mode` (config+0x28)** — baked into the stage file, never computed from a stadium kind.
+
+So spawning regular enemies requires (a) the always-on enemies-enabled bit and (b) a stage file that ships a populated enemy-spawn array.
+
+| Mode group | Stage file | Spawns regular enemies? | mode |
+|------------|-----------|-------------------------|------|
+| Air Ride courses 0-7 | GrPlants1 / Heat2 / Desert1 / Ice1 / Sky2 / Valley2 / Machine2 / Check2 | **Yes** | 1 |
+| Air Ride — Nebula Belt | GrSpace2 | No (NULL spawn array) | — |
+| City Trial — **Kirby Melee 1** | GrPasture1 | **Yes** | 2 |
+| City Trial — **Kirby Melee 2** | GrColosseum5 | **Yes** | 3 |
+| City Trial — Drag Race / Air Glider / Target Flight / High Jump / Destruction Derby / Single Race / Vs. Dedede | GrZeroyon* / GrSimple* / GrJump* / GrColosseum1,3 / GrDedede1 | No (NULL spawn array) | — |
+| City Trial — open city (timed) | GrCity1 | No — `GrData+0x28` base is non-NULL but the selected `EnemySpawnData` entry is empty (spawn_count 0), so the spawner is inert | — |
+| City Trial — Free Run | GrCity1 | No (`Enemy_LoadStageEnemies` skipped entirely) | — |
+
+Kirby Melee 1 and Kirby Melee 2 are the only City Trial events that spawn the regular AI enemy pool. Every other City Trial context (open city, Free Run, all other stadiums) produces only **event actors** (TAC, Dyna Blade, Event Gordo, Meteor), which spawn through the event system.
+
+### StadiumKind vs StageKind vs physical GroundKind
+
+Three different "kind" numbers get conflated here. `stage.h` defines a distinct enum for each of the two that mod code touches:
+
+- **StageKind** (`stage.h` `enum StageKind`, members `STAGEKIND_*`): the 0-59 stage *selection* index, returned by `Gm_GetCurrentStageKind()` (GameData+0xA97) and `stGetCurrentStageKind()` (r13[0x7F8] cache). For Air Ride it equals `AirRideCourse` (0-8); the City Trial stadiums occupy 9-33. `STAGEKIND_KIRBYMELEE1 = 17`, `STAGEKIND_KIRBYMELEE2 = 18`. Each stadium member equals `STKIND_x + 10`.
+- **Physical GroundKind** (`stage.h` `enum GroundKind`, members `GR_*`): which ground geometry file loads — an index into the stage-file table in `main.dol` at `0x804A2FFC` (stage-def pointers indexed from 0): `0=GrPlants1 ... 8=GrIce1, 9=GrCity1, 10-13=GrZeroyon1/3/4/5, 14=GrPasture1, 15=GrColosseum1, 16=GrColosseum3, 17=GrColosseum5, 18-20=GrJump1/2/3, 21=GrDedede1, 23-25=GrTest*, 26-27=GrSimple*`. This is `GrObj.gr_kind` (+0x04), returned by `Gr_GetCurrentGrKind()`. So **Kirby Melee 1 = GroundKind 14 (GrPasture1)** and **Kirby Melee 2 = GroundKind 17 (GrColosseum5)**.
+- **StadiumKind** (`stadium.h` `STKIND_*`, the City Trial event index, 0-based): `STKIND_MELEE1 = 7`, `STKIND_MELEE2 = 8`.
+
+`Stage_GetGrKindFromStageKind` (`0x80261ce8`, exported to mod code as `Gm_GetGrKindFromStageKind`; table `*(*(r13+0x7FC))`, stride `0x58`, GroundKind at `+0x00`) maps StageKind -> GroundKind: StageKind 17 -> GroundKind 14 (GrPasture1), StageKind 18 -> GroundKind 17 (GrColosseum5), matching the `.dat` evidence above. StageKind uses menu order and GroundKind uses file order, so the two spaces coincide only at 0/1/2 and City Trial (9) and diverge everywhere else (Machine Passage is StageKind 6 but GroundKind 5).
+
+Because City Trial is 9 in both spaces, a "current stage is City Trial" check (`== STAGEKIND_CITY1`, or `grobj->gr_kind == GR_CITY1`) is space-agnostic; the spaces only matter once you touch a stadium or a re-ordered Air Ride course. The physical GroundKind -> file-name table is decoded in `sky-backdrop-system.md`. The yakumono per-grkind hook table is *also* indexed by physical GroundKind (so Machine Passage = 5 there too).
+
+## Spawning Custom Actors in City Trial
+
+In City Trial Free Run, `Enemy_LoadStageEnemies` is skipped, so no enemy archives are loaded by default. In timed City Trial and the Melee stadiums it runs normally and loads the stage's enemy archives (including event actors TAC, Dyna Blade, Meteor).
+
+To spawn actors in modes where their archive isn't already loaded (Free Run, Air Ride), call `Enemy_CheckAndLoad(actor_id)` first — it is idempotent — then call `EventActor_Create` with a descriptor:
 
 ```c
 // Example: spawn Dyna Blade near a player
@@ -376,165 +452,124 @@ desc.position = player_position;
 GOBJ *actor = EventActor_Create(&desc);
 ```
 
-### Considerations
+Constraints:
 
-- **Memory**: Each archive uses heap memory. Loading all 22 archives simultaneously may exceed available memory. Load only what's needed.
-- **Position**: Regular enemies (IDs 0x00-0x47) have patrol AI that references their spawn position. Event actors (0x48-0x4E) have more autonomous movement (Dyna Blade swoops, Meteor falls, TAC chases).
-- **Cleanup**: Actors created via `EventActor_Create` are GOBJs on plink 0xC. They can be destroyed via `GObj_Destroy` or will be cleaned up on scene change.
-- **Collision**: Event actors have built-in hurt/hit collision via their GOBJProc callbacks. They interact with machines and riders using the standard collision system.
+- **Memory**: each archive uses heap memory. Loading all 22 simultaneously may exceed available memory — load only what's needed.
+- **Position**: regular enemies (IDs 0x00-0x47) have patrol AI that references their spawn position. Event actors (0x48-0x4E) move more autonomously (Dyna Blade swoops, Meteor falls, TAC chases).
+- **Cleanup**: actors created via `EventActor_Create` are GOBJs on plink 0xC. They can be destroyed via `GObj_Destroy` or are cleaned up on scene change.
+- **Collision**: event actors have built-in hurt/hit collision via their GOBJProc callbacks, and interact with machines and riders through the standard collision system.
 
 ## Enemy_SpawnActor
 
-**Address:** 0x800f13a8 (size 0x318)
+**Address:** 0x800f13a8 (size 0x318). Takes `(spawn_slot_index, enemy_id_packed, position_index)`.
 
-Takes `(spawn_slot_index, enemy_id_packed, position_index)`.
+If `enemy_id_packed` has bits set in the 0xFF00 mask, the variant is extracted: `variant = (packed >> 8) - 1`, base enemy ID = `packed & 0xFF`. The extracted enemy is recorded into the group ring buffer at `EnemyMgr+0x08` (`spawn_group_pool`, a 12-byte entry per group with a 5-slot mod-5 ring). The base ID (< 0x4F) is then used to build the descriptor and call `EventActor_Create`.
 
-### Variant Extraction
+Meta-enemy *expansion* (IDs 0x50-0x5E -> weighted random pick) is **not** done here — it happens in `Enemy_SpawnerDecide`, which resolves a meta-enemy ID before passing the concrete base ID to `Enemy_SpawnActor`.
 
-If `enemy_id_packed` has bits set in the 0xFF00 mask, the variant is extracted:
-- `variant = (packed >> 8) - 1`
-- Base enemy ID = `packed & 0xFF`
-
-The extracted enemy is recorded into the group ring buffer at `EnemyMgr+0x08` (`spawn_group_pool`, a 12-byte entry per group with a 5-slot mod-5 ring). The base ID (< 0x4F) is then used to build the descriptor and call `EventActor_Create`.
-
-Meta-enemy *expansion* (IDs 0x50-0x5E → weighted random pick) is **not** done here — it happens in `Enemy_SpawnerDecide`, which resolves a meta-enemy ID before passing the concrete base ID to `Enemy_SpawnActor`. See the [Meta-Enemy Expansion](#enemy_spawnerdecide) note under `Enemy_SpawnerDecide`.
-
-### Scale and Lifetime
-
-- **Scale**: Read from `spawn_entries[position_index] + 0x30` (stride 0x38). Negated if negative, defaults to 1.0 if zero.
-- **Lifetime**: Read from position data, absolute value. If > 1, random jitter is added.
+- **Scale**: read from `spawn_entries[position_index] + 0x30` (stride 0x38). Negated if negative, defaults to 1.0 if zero.
+- **Lifetime**: read from position data, absolute value. If > 1, random jitter is added.
 
 ## Enemy_SpawnerDecide
 
-**Address:** 0x800F1A14 (size 0xA54)
+**Address:** 0x800F1A14 (size 0xA54). Decides **what** enemy to spawn at a given position. Mode-branched.
 
-Large function that decides **what** enemy to spawn at a given position. Mode-branched.
+Air Ride path:
 
-### Air Ride Path
-
-1. Check flags byte at extended data +0x4A (8 bits: occupied, player nearby, various state)
-2. Read weight table from extended data (up to 4 entries, -1 terminated)
+1. Check the flags byte at extended data +0x4A (8 bits: occupied, player nearby, various state)
+2. Read the weight table from extended data (up to 4 entries, -1 terminated)
 3. Sum weights, random select
-4. **Meta-enemy expansion** for IDs in `(0x4F, 0x5F)` (i.e. 0x50-0x5E): `group_index = id - 0x4F`, index `secondary_table` at `stc_enemy_spawn_data+0x0C`, then weighted-random select from that sub-table of `{enemy_id, weight}` short pairs (loops until the resolved ID is no longer a meta-enemy)
+4. **Meta-enemy expansion** for IDs in `(0x4F, 0x5F)` (i.e. 0x50-0x5E): `group_index = id - 0x50` (`addi r5, r29, -320` at `0x800f1bd4`, with `r29 = id * 4`), index `secondary_table` at `stc_enemy_spawn_data+0x0C`, then weighted-random select from that sub-table of `{enemy_id, weight}` short pairs, **terminated by `weight == -1`, not by `enemy_id == -1`** - a leading `{-1, N}` pair is a legitimate "spawn nothing" outcome and several vanilla groups open with one. Loop until the resolved ID is no longer a meta-enemy. The separate `id - 0x4F` value is the +1-biased variant packed into the descriptor's high byte, not a table index
 5. Call `Enemy_SpawnActor` with the concrete base ID
 
-### City Trial Path
-
-Similar flow but uses time-based difficulty scaling via `EnemyMgr.time_progress` to bias toward higher-tier enemies as the match progresses.
+The City Trial path is the same flow but uses time-based difficulty scaling via `EnemyMgr.time_progress` to bias toward higher-tier enemies as the match progresses.
 
 ## Enemy_Think vs Enemy_CityTrialThink
 
-Both update slot positions/vectors and scan the EventActor linked list for occupancy. Key differences:
+Both update slot positions/vectors and scan the EventActor linked list for occupancy.
 
-### Air Ride (Enemy_Think, 0x800f3904)
+`Enemy_Think` (0x800f3904, Air Ride): 4 spawn slots tied to players; updates player positions, direction and ground normal each frame; scans the linked list to set occupancy bits. No spawn decision logic — that lives in a separate spawn loop.
 
-- 4 spawn slots tied to players
-- Updates player positions, direction, ground normal each frame
-- Scans linked list to set occupancy bits
-- No spawn decision logic in the think function (handled by separate spawn loop)
+`Enemy_CityTrialThink` (0x800f33c0): recomputes `time_progress = current / total` each frame, does the same slot/occupancy update, then runs a spawn decision phase with three modes:
 
-### City Trial (Enemy_CityTrialThink, 0x800f33c0)
+- **Mode 1 (sequential)**: iterates from `last_spawn_slot` through all positions
+- **Mode 2 (CT proper)**: clears all position weights/flags, iterates all positions. Spawn cap is `slots_initialized * 2` indexed into the config table; if `active_count >= cap`, spawning stops.
+- **Mode 3 (CT Free Run)**: random starting position, same loop as mode 1
 
-- **Time progress update**: recomputes `time_progress = current / total` each frame
-- Same slot/occupancy update as Air Ride
-- **Spawn decision phase** with 3 modes:
-  - **Mode 1 (sequential)**: Iterates from `last_spawn_slot` through all positions
-  - **Mode 2 (CT proper)**: Clears all position weights/flags, iterates all positions. **Spawn cap**: `slots_initialized * 2` indexed into config table. If `active_count >= cap`, stops spawning.
-  - **Mode 3 (CT Free Run)**: Random starting position, same loop as mode 1
-- Each position: decrements respawn timer, calls spawn decision, calls `Enemy_SpawnerDecide` for weighted random enemy selection
+Each position decrements its respawn timer, calls the spawn decision, then calls `Enemy_SpawnerDecide` for weighted random enemy selection.
 
 ## Enemy_UnregisterFromSpawnSlot
 
-**Address:** 0x800F3B28 (size 0xBC)
-
-Called when an enemy dies or despawns:
+**Address:** 0x800F3B28 (size 0xBC). Called when an enemy dies or despawns:
 
 1. Gets `spawn_slot` from EnemyData. If < 0, returns (standalone actor).
-2. Verifies GOBJ matches slot entry
-3. Clears slot state: `actor_id = -1`, nulls GOBJ pointer, clears flags
-4. Decrements `active_count`. For CT Free Run: separate tracking for tier >= 0x18 (`event_count` vs `active_count`)
-5. Assigns new respawn timer from random range (config +0x24 base, +0x26 random range)
+2. Verifies the GOBJ matches the slot entry.
+3. Clears slot state: `actor_id = -1`, nulls the GOBJ pointer, clears flags.
+4. Decrements `active_count`. For CT Free Run there is separate tracking for tier >= 0x18 (`event_count` vs `active_count`).
+5. Assigns a new respawn timer from the random range (config +0x24 base, +0x26 random range).
 
 ## EventActor_Destroy
 
-**Address:** 0x801fbf2c (size 0x368)
-
-**Recursive depth-first** destruction. The child chain (each node's `child_gobj` at EnemyData+0x04) is descended with the first 5 levels manually unrolled; a deeper sixth level recurses back into `EventActor_Destroy`.
+**Address:** 0x801fbf2c (size 0x368). **Recursive depth-first** destruction. The child chain (each node's `child_gobj` at EnemyData+0x04) is descended with the first 5 levels manually unrolled; a deeper sixth level recurses back into `EventActor_Destroy`.
 
 Per node (deepest child first):
-1. Destroy child first (recursive — clears the parent's `child_gobj` after)
-2. Conditionally unregister from spawn slot — only when `kind < 0x48` (non-special) **and** the actor is not Tier 1/2 (`0x18 <= kind < 0x48` is false) **and** the mode is not City Trial (`config.mode != 3`). The effective condition is **Tier 0 enemies (kind < 0x18) outside City Trial**.
-3. Cleanup VFX/SFX handles (`EventActor_CleanupVfxA3C` 0x8020c6e0, `EventActor_CleanupVfxA40` 0x8020c70c)
-4. Call `GObj_Destroy`
 
-Spawn-slot logic: only Tier 0 enemies in non-CT modes call the Air-Ride spawn-slot unregister (`zz_80114524_` → `zz_801218a4_`). Tier 1/2 enemies and all City Trial enemies simply skip the unregister call here. (This is a different path from `Enemy_UnregisterFromSpawnSlot` at 0x800f3b28, which is called from the death/respawn flow, not from `EventActor_Destroy`.)
+1. Destroy the child first (recursive — clears the parent's `child_gobj` after).
+2. Conditionally unregister from the spawn slot — only when `kind < 0x48` (non-special) **and** the actor is not Tier 1/2 (`0x18 <= kind < 0x48` is false) **and** the mode is not City Trial (`config.mode != 3`). The effective condition is Tier 0 enemies (kind < 0x18) outside City Trial. Tier 1/2 enemies and all City Trial enemies skip the unregister call (`zz_80114524_` -> `zz_801218a4_`). This is a different path from `Enemy_UnregisterFromSpawnSlot` (0x800f3b28), which is called from the death/respawn flow.
+3. Cleanup VFX/SFX handles (`EventActor_CleanupVfxA3C` 0x8020c6e0, `EventActor_CleanupVfxA40` 0x8020c70c).
+4. Call `GObj_Destroy`.
 
 ## Damage & Knockback System
 
 Enemies do **not** have traditional HP. Death is determined by per-hit knockback, not accumulated damage.
 
-### Per-Hit Response
-
-Each hit is classified into a response tier (0-3) by `Enemy_ClassifyDamageTier` (0x8020b740). It loads a pointer from `r13+0x798` (= `0x805dd878`, `stc_enemy_param_table`) and compares the incoming damage against three float thresholds at that struct's `+0x08`, `+0x0C`, `+0x10`:
+Incoming damage is first scaled x**0.4** (`Enemy_ScaleDamage` 0x8020b71c, reads table `+0x04`), then classified into a response tier (0-3) by `Enemy_ClassifyDamageTier` (0x8020b740). The classifier compares against three float thresholds at the param table's `+0x08`, `+0x0C`, `+0x10`:
 
 ```
-if (dmg < thr[+0x08]) return 0;
-if (dmg < thr[+0x0C]) return 1;
-if (dmg < thr[+0x10]) return 2;
+if (dmg < thr[+0x08]) return 0;   // 10.0
+if (dmg < thr[+0x0C]) return 1;   // 21.0
+if (dmg < thr[+0x10]) return 2;   // 32.0
 return 3;
 ```
 
-| Tier | Damage Threshold | Stun Frames | Knockback Speed | Stun Duration |
-|------|-----------------|-------------|-----------------|---------------|
-| 0 | < 10.0 | 20 | 2.0 | 2.0 |
-| 1 | 10.0 - 20.9 | 30 | 3.0 | 4.0 |
-| 2 | 21.0 - 31.9 | 40 | 4.0 | 6.0 |
-| 3 | >= 32.0 | 50 | 5.0 | 8.0 |
+`Enemy_ApplyKnockback` (0x8020b784) then indexes four per-tier arrays in the table by the tier (`ed+0xA1C`) and writes the results into EnemyData:
 
-These thresholds and response values are **global** — shared across all enemy types regardless of tier. (The classification *structure* above — three thresholds at +0x08/+0x0C/+0x10 returning tiers 0-3 — is verified from `Enemy_ClassifyDamageTier`. The specific numeric values for thresholds, stun frames, knockback speeds, and stun durations live in the runtime-populated param table and are **not** confirmable from the vanilla menu memory snapshot.)
+| Tier | Damage | Stun frames (ed+0xA18, +0x60) | Launch speed (ed+0x9D8, +0x50) | KB scale (ed+0x878, +0x40) | KB base mag (+0x30) |
+|------|--------|-------------------------------|--------------------------------|----------------------------|---------------------|
+| 0 | < 10.0 | 2 | 2.0 | 1.0 | 20 |
+| 1 | 10.0 - 20.9 | 4 | 3.0 | 0.8 | 30 |
+| 2 | 21.0 - 31.9 | 6 | 4.0 | 0.6 | 40 |
+| 3 | >= 32.0 | 8 | 5.0 | 0.5 | 50 |
 
-### Death Sequence
+These values are **global** (shared across all enemy types/tiers) and **static** — they live in `Enemy.dat` (public `emDataAll`), loaded into RAM by `Enemy_LoadCommonParams` (0x801fd580), which stores the table pointer to `*0x805dd878`. The knockback magnitude passed to the launch is `int(KB_base_mag[tier] * actor_data->+0x00->+0xA0 * KB_scale[tier])` (clamped >= 1), so the per-tier `actor_data` launch multiplier (`+0xA0`) further scales how far that enemy flies. Higher-tier enemies can carry a lower multiplier, flying less far from the same hit and so being harder to knock out of the arena.
 
-1. A hit sets `EnemyData.stun_frames` (+0xA18) based on the response tier
-2. `EnemyState_AnimExit` (0x8020c558, func3 for states 0-8) decrements `stun_frames` by 1 each frame during the knockback state
-3. When `stun_frames` reaches 0, the enemy enters the death state
-4. `EnemyData.death_timer` (+0xA28) counts up; enemy is destroyed after 30 frames
+Death sequence:
 
-### Damage Accumulators
+1. A hit sets `EnemyData.stun_frames` (+0xA18) based on the response tier.
+2. `EnemyState_AnimExit` (0x8020c558, func3 for states 0-8) decrements `stun_frames` by 1 each frame during the knockback state.
+3. When `stun_frames` reaches 0, the enemy enters the death state.
+4. `EnemyData.death_timer` (+0xA28) counts up; the enemy is destroyed after 30 frames.
 
-`EnemyData.damage_accum_1` (+0x994) and `damage_accum_2` (+0x998) track total damage received (capped at 9999). These are written by `giveEnemyDamage` (0x8020b680) but **nothing reads them for death logic** — they appear to be cosmetic/diagnostic only.
-
-### Per-Tier Knockback Differences
-
-The tier-specific data at `actor_data->+0x00->+0xA0` provides a **launch multiplier** that scales the knockback velocity when the enemy is hit. Higher-tier enemies may have a lower multiplier, meaning they fly less far from the same hit — making them harder to knock out of the arena.
+`EnemyData.damage_accum_1` (+0x994) and `damage_accum_2` (+0x998) track total damage received (capped at 9999). They are written by `giveEnemyDamage` (0x8020b680) but nothing reads them for death logic — they are cosmetic/diagnostic only.
 
 ## Gm_CheckEnemyEnabled
 
-**Address:** 0x8000a348 (size 0x28)
-
-Reads `GameData+0x0AA7`, extracts bit 4. Returns 1 if enemies are enabled for the current stage/mode, 0 if disabled. This is a per-stage/mode flag set during stage configuration.
+**Address:** 0x8000a348 (size 0x28). Reads `GameData+0x0AA7`, extracts bit 4. Returns 1 if enemies are enabled for the current stage/mode, 0 if disabled. This is a per-stage/mode flag set during stage configuration.
 
 ## Spline / Path-Following System
 
 Enemies can follow predefined spline paths embedded in stage data (`GrData->spline` at +0x14).
 
-### Path Initialization
-
 `EnemyPath_Init` (0x80206e2c) takes an `EnemyData*` and:
+
 1. Calls `Spline_FindNearest` (0x800cf07c) to find the nearest spline segment to the enemy's position (`ed->pos` at +0x2F8)
-2. If found: stores segment index to `ed->spline_segment` (+0x5DC), arc parameter to `ed->spline_arc_param` (+0x5FC), and assigns spline curve pointers to `ed->spline_primary` (+0x5D4) / `ed->spline_secondary` (+0x5D8) based on `ed->spline_direction` (+0x5F8)
+2. If found: stores the segment index to `ed->spline_segment` (+0x5DC), the arc parameter to `ed->spline_arc_param` (+0x5FC), and assigns spline curve pointers to `ed->spline_primary` (+0x5D4) / `ed->spline_secondary` (+0x5D8) based on `ed->spline_direction` (+0x5F8)
 3. If not found: sets bit 2 of `ed+0xB0A` (alternative movement mode)
 
-### Path-Following Update
-
-`EnemyPath_FollowUpdate` (0x80209ce4) runs each frame for enemies with `ed->path_active_flag` (+0xA8C) == -1.0:
-1. Checks stage has splines via `Spline_GetCount` (0x800cf38c)
-2. Evaluates `splArcLengthPoint` on the enemy's spline pointer to compute direction
-3. Updates enemy position along the path
-
-### Standalone Spawn Path Setup
+`EnemyPath_FollowUpdate` (0x80209ce4) runs each frame for enemies with `ed->path_active_flag` (+0xA8C) == -1.0: checks the stage has splines via `Spline_GetCount` (0x800cf38c), evaluates `splArcLengthPoint` on the enemy's spline pointer to compute direction, and updates the enemy's position along the path.
 
 For standalone-spawned actors to follow paths, set these fields after `EventActor_Create` returns:
+
 ```c
 ed->spline_path_ready = 1;    // +0x654
 ed->spline_direction = 1;     // +0x5F8 (1=forward)
@@ -542,13 +577,11 @@ ed->path_active_flag = -1.0f; // +0xA8C (enables path following)
 EnemyPath_Init(ed);           // finds nearest spline
 ```
 
-The `splArcLengthPoint_Safe` patch (installed by `SpawnEnemy_OnBoot`) provides null-safety for actors whose init callbacks try to use splines before path setup.
+The `splArcLengthPoint_Safe` patch (installed by `SpawnEnemy_OnBoot` in `spawn_enemy.c`) provides null-safety for actors whose init callbacks try to use splines before path setup.
 
-> **WIP / not integrated.** The standalone-spawn entry points in `mods/custom_events/src/spawn_enemy.c` — `SpawnEnemy_OnBoot` (installs the `EventActor_GetParentScale_Safe` and `splArcLengthPoint_Safe` `CODEPATCH_REPLACEFUNC` patches plus the meteor fake-event-data), `SpawnEnemy_Random`, and `SpawnEnemy_MeteorTrap` — are currently **uncalled** (no callers anywhere in `mods/`). They are exploratory scaffolding; the null-safety patches are therefore **not** active in builds, and the recipes above are validated by analysis, not by a live integration. Treat this whole section as a reference for *how* standalone spawning would work, not as a description of shipped behavior.
+## Key Functions
 
-## Key Functions Reference
-
-For meteor-specific documentation (state machine, standalone spawn, patches), see [meteor-actor.md](meteor-actor.md).
+Meteor-specific behavior (state machine, standalone spawn, patches) is in `meteor-actor.md`.
 
 | Function | Address | Size | Purpose |
 |----------|---------|------|---------|
@@ -561,8 +594,10 @@ For meteor-specific documentation (state machine, standalone spawn, patches), se
 | EventActor_CopyParentState | 0x80219fd4 | 0x9c | State function: copy position/direction from parent |
 | EventActor_GetParentScale | 0x802049b8 | 0xc | Reads parent_gobj->userdata + 0x2B0 (scale). Crashes if null. |
 | EnemyPath_Init | 0x80206e2c | 0xd4 | Find nearest spline and assign path data to EnemyData |
-| Enemy_SpawnActor | 0x800f13a8 | 0x318 | Spawn-slot wrapper: variant extraction, meta-enemy expansion, calls EventActor_Create |
+| Enemy_SpawnActor | 0x800f13a8 | 0x318 | Spawn-slot wrapper (modes 1/3): variant extraction, calls EventActor_Create |
+| Enemy_SpawnActorMode2 | 0x800f16c0 | 0x354 | Mode-2 spawn helper: builds descriptor from a spawn entry, calls EventActor_Create |
 | Enemy_SpawnerDecide | 0x800f1a14 | 0xa54 | Decides what enemy to spawn at a position (weighted random, mode-branched) |
+| Enemy_SpawnerDecideMode2 | 0x800f0efc | 0x1f8 | Mode-2 two-stage picker: meta-enemy category from secondary[0], then concrete enemy from its weight column |
 | Enemy_UnregisterFromSpawnSlot | 0x800f3b28 | 0xbc | Remove actor from spawn-slot tracking, set respawn timer |
 | Enemy_GetActorData | 0x801fd498 | 0xe8 | Look up loaded archive data pointer by ActorID (tier-aware) |
 | Enemy_CheckAndLoad | 0x801fd060 | 0x5c | Load archive for actor ID |
@@ -575,22 +610,28 @@ For meteor-specific documentation (state machine, standalone spawn, patches), se
 | Enemy_GetStagesEnemies | 0x80262808 | 0x84 | Get enemy ID list for stage |
 | Gm_CheckEnemyEnabled | 0x8000a348 | 0x28 | Check if enemies are enabled for current stage/mode |
 | grGetEnemyposNum | 0x800d0c88 | 0x4c | Get number of enemy spawn positions for stage |
-| loadEnemy_spawnXYLocation | 0x800d0cd4 | 0xf8 | Load enemy spawn XY locations from stage data |
+| loadEnemy_spawnXYLocation? | 0x800d0cd4 | 0xf8 | Load enemy spawn XY locations from stage data |
 | loadEventLocations | 0x800d11fc | 0xf4 | Load event position data |
 | EnemyPhysicsProc | 0x801fc6fc | 0xc8 | Priority 4 GObj proc: `vel += accel`, `pos += vel`, floor-kill check (skipped for actor_id >= 0x4C) |
 | EventActor_ProcUpdate | 0x801fc698 | 0x64 | Priority 1 GObj proc: HSD anim advance + state machine + state_func1 dispatch |
-| EventActor_AnimProcessor | 0x80200838 | 0x36c | Anim subroutine invoked via `EventActor_UpdateState`: advances JObj animation, extracts position delta to ed+0x550, zeros JObj translate. (Named in the map; NOT the registered proc.) |
+| EventActor_AnimProcessor | 0x80200838 | 0x36c | Anim subroutine invoked via `EventActor_UpdateState`: advances JObj animation, extracts position delta to ed+0x550, zeros JObj translate. Not the registered proc. |
+| Enemy_GX | 0x801fd158 | 0x1f0 | GXLink render callback (priority 9, render pass 1) |
 | gmLanMenu_Scale3DObject | 0x80054414 | 0x168 | Sets JObj world matrix from position + forward/up vectors + scale |
-| EnemyActor_DistToPlayer | 0x801fffa4 | 0x60 | Returns distance from enemy to player by index (named in the map, link.ld + enemy.h) |
+| EnemyActor_DistToPlayer | 0x801fffa4 | 0x60 | Returns distance from enemy to player by index |
 | EnemyActor_RumblePlayer | 0x801ff80c | 0x58 | `(player_idx, rumble_type, intensity)` -- triggers controller rumble for player |
 | giveEnemyDamage | 0x8020b680 | 0x9c | Apply damage to enemy (writes accumulators) |
-| Enemy_ClassifyDamageTier | 0x8020b740 | 0x44 | Classify hit damage into response tier (0-3) via 3 thresholds |
+| Enemy_ScaleDamage | 0x8020b71c | 0x24 | Scale incoming damage by the global multiplier (table +0x04 = 0.4) |
+| Enemy_ClassifyDamageTier | 0x8020b740 | 0x44 | Classify hit damage into response tier (0-3) via 3 thresholds (10/21/32) |
+| Enemy_LoadCommonParams | 0x801fd580 | 0xf4 | Load `Enemy.dat` `emDataAll`; store the param-table pointer to `*0x805dd878` |
 | Enemy_ApplyKnockback | 0x8020b784 | 0x554 | Full knockback state transition: sets stun_frames, computes velocity, enters knockback state |
 | EnemyState_AnimExit | 0x8020c558 | 0xdc | func3 for states 0-8: decrement stun_frames each frame, ground physics, stun spark VFX; triggers death at 0 |
 | EnemyPath_FollowUpdate | 0x80209ce4 | 0x35c | Enemy path-following movement update |
+| Spline_FindNearest | 0x800cf07c | 0x80 | Find the spline segment nearest a position |
+| Spline_GetCount | 0x800cf38c | 0x20 | Number of splines in the loaded stage |
 | splArcLengthPoint | 0x80415958 | 0x48 | Evaluate spline position (wrapper) |
 | splGetSplinePoint | 0x80414fc0 | 0x490 | Evaluate spline at parameter |
 | splArcLengthGetParameter | 0x80415758 | 0x200 | Get arc-length parameter for spline |
+| Stage_GetGrKindFromStageKind | 0x80261ce8 | 0x80 | StageKind -> physical GroundKind (hoshi exports it as `Gm_GetGrKindFromStageKind`) |
 
 ## Data Addresses
 
@@ -598,9 +639,12 @@ For meteor-specific documentation (state machine, standalone spawn, patches), se
 |------|---------|-----------|-------------|
 | Actor data table | 0x804b22b4 | -- | {data_index, flags} per actor ID, stride 8 |
 | Archive loaded flags | 0x8055a210 | -- | byte per data_index, 1 = loaded |
+| Archive root pointers | 0x8055a228 | -- | archive root pointer per data_index |
 | Archive filename ptrs | 0x804b2204 | -- | 2 pointers per data_index (dat, group) |
 | Per-type callback table | 0x804b1d98 | -- | pointer per actor ID |
-| Enemy parameter table | 0x805dd878 | -- | Global knockback thresholds and response values |
+| Default collision bounds | 0x804b1d40 | -- | all-zero bounds used when `bounds_flag == -1.0` |
+| Enemy parameter table pointer | 0x805dd878 | -- | Holds a pointer to the param table (from `Enemy.dat` `emDataAll`; set by `Enemy_LoadCommonParams`, NULL until enemies load). Fields: damage scale +0x04, thresholds +0x08/+0x0C/+0x10, per-tier KB mag/scale/launch/stun +0x30/+0x40/+0x50/+0x60, mode scale +0x70, detection range +0x80, retarget cooldown +0x94/+0x98 |
+| Stage-file table | 0x804A2FFC | -- | stage-def pointers indexed by physical GroundKind |
 | EnemyMgr pointer | 0x805DD714 | +0x634 | EnemyMgr struct (0x3C bytes) |
 | SpawnSlot array | 0x805DD70C | +0x62C | Array of 4 SpawnSlot structs (0x48 each) |
 | Enemy spawn data | 0x805DD710 | +0x630 | Per-stage spawn config pointer |

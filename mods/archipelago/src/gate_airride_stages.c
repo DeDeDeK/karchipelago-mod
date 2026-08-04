@@ -7,12 +7,9 @@
 #include "textbox_api.h"
 #include "inline.h"
 
-// Replacement for AirRide_CheckCourseUnlocked (0x8000c0e0).
-// The vanilla function only checks stage_kind 8 (Nebula Belt) against the
-// checklist. Our replacement checks ALL stages against the AP unlock mask.
-// Returns 1 if the stage is unlocked, 0 if locked.
-// Stage kind 9 (random button) is only available if at least one stage is unlocked,
-// to prevent a soft-lock in AirRide_RandomStageSelect when no candidates exist.
+// Replaces AirRide_CheckCourseUnlocked (0x8000c0e0), which only checks stage_kind 8
+// (Nebula Belt) against the checklist. Stage kind 9 (random button) needs at least one
+// unlocked stage, otherwise AirRide_RandomStageSelect soft-locks.
 static int GateAirRideStages_CheckCourseUnlocked(s8 stage_kind)
 {
     if (!ap_save || stage_kind < 0)
@@ -24,35 +21,29 @@ static int GateAirRideStages_CheckCourseUnlocked(s8 stage_kind)
 
 void GateAirRideStages_OnBoot()
 {
-    // Replace AirRide_CheckCourseUnlocked to check AP mask instead of vanilla checklist
     CODEPATCH_REPLACEFUNC(AirRide_CheckCourseUnlocked, GateAirRideStages_CheckCourseUnlocked);
 
-    // Patch call site 1: AirRideSelect_Init (0x8003c114)
-    // The vanilla code only checks stage_kind == 8 before calling CheckCourseUnlocked.
-    // We patch out the guard so ALL stages go through the unlock check.
-    // Original:  cmpwi r0, 8 / bne skip / li r3, 8
-    // Patched:   mr r3, r0   / nop       / nop
+    // Every caller guards the unlock check with `cmpwi rX, 8 / bne skip / li r3, 8`, so
+    // only Nebula Belt ever reaches it. Patching the guard to `mr r3, rX / nop / nop`
+    // routes all stages through.
+
+    // AirRideSelect_Init (0x8003c114)
     CODEPATCH_REPLACEINSTRUCTION(0x8003c210, 0x7c030378); // mr r3, r0
     CODEPATCH_REPLACEINSTRUCTION(0x8003c214, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x8003c218, 0x60000000); // nop
 
-    // Patch call site 2: course init with random select (0x8003b4e8)
-    // Same pattern as site 1.
+    // Course init with random select (0x8003b4e8)
     CODEPATCH_REPLACEINSTRUCTION(0x8003b520, 0x7c030378); // mr r3, r0
     CODEPATCH_REPLACEINSTRUCTION(0x8003b524, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x8003b528, 0x60000000); // nop
 
-    // Patch call site 3: AirRide_RandomStageSelect (0x8000dd4c)
-    // Loop var is r27. Original: cmpwi r27, 8 / bne skip / li r3, 8
-    // Patched:   mr r3, r27  / nop       / nop
+    // AirRide_RandomStageSelect (0x8000dd4c), loop var r27
     CODEPATCH_REPLACEINSTRUCTION(0x8000ddc4, 0x7f63db78); // mr r3, r27
     CODEPATCH_REPLACEINSTRUCTION(0x8000ddc8, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x8000ddcc, 0x60000000); // nop
 
-    // Call site 4: gmLanMenu_RenderMainMenuUI (0x80052028)
-    // Slightly different layout: cmpwi r28, 8 / beq check / li r0, 1 / b past / li r3, 8
-    // We NOP the guard and unconditional branch so all stages call the check.
-    // Patched: mr r3, r28 / nop / nop / nop / nop
+    // gmLanMenu_RenderMainMenuUI (0x80052028) has a longer guard
+    // (cmpwi r28, 8 / beq check / li r0, 1 / b past / li r3, 8), so it takes five.
     CODEPATCH_REPLACEINSTRUCTION(0x80052070, 0x7f83e378); // mr r3, r28
     CODEPATCH_REPLACEINSTRUCTION(0x80052074, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x80052078, 0x60000000); // nop

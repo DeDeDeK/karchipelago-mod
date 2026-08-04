@@ -30,6 +30,7 @@ HSD_HEADER = 0x20
 
 def u32(b, o): return struct.unpack(">I", b[o:o+4])[0]
 def u16(b, o): return struct.unpack(">H", b[o:o+2])[0]
+def f32(b, o): return struct.unpack(">f", b[o:o+4])[0]
 def cstr(b, o):
     end = b.find(b'\0', o)
     return b[o:end].decode('ascii', errors='replace') if end >= 0 else ''
@@ -106,3 +107,39 @@ class Archive:
             if o == off:
                 return name
         return None
+
+
+def build_archive(data, relocs, publics, version, externs=()):
+    """Serialize an HSD archive (the inverse of `Archive`).
+
+    data:    the data section (bytes/bytearray).
+    relocs:  iterable of u32 source offsets within data (sorted here).
+    publics: iterable of (name, data_off).
+    externs: iterable of (name, data_off).
+    version: 4-byte version tag (e.g. b'001B', or an existing arc.version).
+
+    Names are interned into a shared string table (identical names share
+    one slot). Returns the complete archive as bytes.
+    """
+    relocs = sorted(relocs)
+    strings = bytearray()
+    str_off = {}
+
+    def intern(name):
+        if name not in str_off:
+            str_off[name] = len(strings)
+            strings.extend(name.encode("ascii") + b"\0")
+        return str_off[name]
+
+    pub_entries = [(doff, intern(name)) for name, doff in publics]
+    ext_entries = [(doff, intern(name)) for name, doff in externs]
+
+    data = bytes(data)
+    reloc_bytes = b"".join(struct.pack(">I", r) for r in relocs)
+    pub_bytes = b"".join(struct.pack(">II", d, n) for d, n in pub_entries)
+    ext_bytes = b"".join(struct.pack(">II", d, n) for d, n in ext_entries)
+    file_size = (HSD_HEADER + len(data) + len(reloc_bytes)
+                 + len(pub_bytes) + len(ext_bytes) + len(strings))
+    header = struct.pack(">IIIII4s8x", file_size, len(data), len(relocs),
+                         len(pub_entries), len(ext_entries), version)
+    return header + data + reloc_bytes + pub_bytes + ext_bytes + bytes(strings)

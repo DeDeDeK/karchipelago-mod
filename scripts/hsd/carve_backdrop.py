@@ -29,11 +29,13 @@ import sys
 # by making `scripts/` importable; harmless when imported as a package.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hsd.archive import Archive, HSD_HEADER, u32
-from hsd.walker import Walker, merge_intervals
+from hsd.archive import Archive, build_archive, u32
+from hsd.geom_bounds import measure_root, scale_geometry
+from hsd.walker import Walker, carve_ranges
 
 
-def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
+def carve(input_path, src_symbol, slot_index, output_path, new_symbol,
+          target_radius=None):
     arc = Archive(input_path)
     if src_symbol not in arc.publics:
         raise SystemExit(f"public symbol {src_symbol!r} not found")
@@ -48,100 +50,49 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
         f"  source {src_symbol}[{slot_index}] pp={pp_off:#x} -> JOBJDesc={root_jobj:#x}"
     )
 
-    walker = Walker(arc)
-    visited = walker.walk(root_jobj, "JOBJDesc")
+    # Normalize the backdrop's on-screen size. 3D_CreateStageModel stamps
+    # the host stage's grStageScale onto the instantiated root joint,
+    # overwriting the donor's own. City Trial's scale is 0.70, so a donor
+    # whose geometry radius differs from City's renders its sky dome at a
+    # different distance (too close -> obscures the map; too far -> tiny).
+    # Pre-scaling the geometry to City's reference radius makes every
+    # carved backdrop render at the same distance as vanilla City Trial.
+    gdata = arc.data
+    if target_radius is not None:
+        rad = measure_root(arc, root_jobj)["radius"]
+        if rad <= 0:
+            print(f"  WARN: measured radius {rad:.1f}; skipping size normalization")
+        else:
+            f = target_radius / rad
+            gdata = scale_geometry(arc, root_jobj, f)
+            print(f"  geometry radius {rad:.1f} -> x{f:.4f} -> {target_radius:.1f} "
+                  f"(City reference)")
+
+    visited = Walker(arc).walk(root_jobj, "JOBJDesc")
     print(f"  reached {len(visited)} objects")
 
-    intervals = [(off, off + sz) for off, (_, sz) in visited.items()]
-    intervals = merge_intervals(intervals)
-    kept_bytes = sum(e - s for s, e in intervals)
+    # Layout: a ModelSection (only [+0x04] populated) + a pp slot mirroring
+    # a vanilla stage's grModel<X>[1], then the kept ranges. carve_ranges
+    # concatenates the reachable bytes after this prefix and rebuilds the
+    # reloc table; base_relocs seeds the two synthetic prefix pointers.
+    PP_OFFSET = 0x10
+    PREFIX = 0x24  # ModelSection (0x10) + pp slot (0x14)
+    res = carve_ranges(arc, visited, bytearray(PREFIX),
+                       base_relocs=(0x04, PP_OFFSET), source=gdata)
     print(
-        f"  kept {len(intervals)} ranges, {kept_bytes / 1024:.1f} KB total "
+        f"  kept {len(res.intervals)} ranges, {len(res.remap) / 1024:.1f} KB total "
         f"(source data was {len(arc.data) / 1024:.1f} KB)"
     )
+    if res.dropped:
+        print(f"  dropped {res.dropped} relocs to out-of-range targets (zeroed in slop)")
 
-    # Build remap: original offset -> new offset within concatenated data.
-    # Layout:
-    #   new_data[+0x00 .. +0x0F] : ModelSection (only [+0x04] populated)
-    #   new_data[+0x10 .. +0x23] : pp slot (JOBJDesc*, motion=NULL, ...)
-    #   new_data[+0x24 ..      ] : kept ranges concatenated (4-byte aligned)
-    PP_OFFSET = 0x10
-    PP_SIZE = 0x14
-    PREFIX = PP_OFFSET + PP_SIZE  # 0x24
-
-    remap = {}  # old_offset -> new_offset
-    cursor = PREFIX
-    new_data = bytearray(PREFIX)
-    for s, e in intervals:
-        # GX requires 32-byte (cache-line) alignment for textures,
-        # display lists, and vertex arrays. The source archive lays
-        # those at 32-byte-aligned offsets inside its data section.
-        # Preserve their relative alignment by making cursor mod 32
-        # match s mod 32 - so every byte inside the interval keeps
-        # its source-relative alignment after the shift.
-        target_mod = s & 31
-        cur_mod = cursor & 31
-        pad = (target_mod - cur_mod) & 31
-        if pad:
-            new_data.extend(b"\0" * pad)
-            cursor += pad
-        for o in range(s, e):
-            remap[o] = cursor + (o - s)
-        new_data.extend(arc.data[s:e])
-        cursor += e - s
-
-    # ModelSection: ms[1] = pp slot offset (relocated)
+    new_data = res.data
+    # ms[1] -> pp slot; pp slot[+0x00] -> JOBJDesc root (both relocated via
+    # base_relocs). pp[+0x04..+0x13] stays zero (no animation).
     struct.pack_into(">I", new_data, 0x04, PP_OFFSET)
-    # pp slot[+0x00] = JOBJDesc * (relocated, in carved coordinates)
-    struct.pack_into(">I", new_data, PP_OFFSET, remap[root_jobj])
-    # pp slot[+0x04..+0x13] left as zeros (no animation)
+    struct.pack_into(">I", new_data, PP_OFFSET, res.remap[root_jobj])
 
-    new_relocs = [0x04, PP_OFFSET]
-    dropped = 0
-    for src in arc.relocs:
-        if src not in remap:
-            continue
-        tgt = u32(arc.data, src)
-        new_src = remap[src]
-        if tgt in remap:
-            new_tgt = remap[tgt]
-            struct.pack_into(">I", new_data, new_src, new_tgt)
-            new_relocs.append(new_src)
-        else:
-            # Pointer target outside any kept range. This should only
-            # happen for relocs in slop bytes (unreachable data that
-            # squeaked into a kept range during merging). Zero the
-            # source dword so the loader doesn't relocate junk.
-            struct.pack_into(">I", new_data, new_src, 0)
-            dropped += 1
-    new_relocs.sort()
-    if dropped:
-        print(f"  dropped {dropped} relocs to out-of-range targets (zeroed in slop)")
-
-    name_bytes = new_symbol.encode("ascii") + b"\0"
-    public_entries = [(0, 0)]
-
-    data_bytes = bytes(new_data)
-    reloc_bytes = b"".join(struct.pack(">I", r) for r in new_relocs)
-    public_bytes = b"".join(struct.pack(">II", do, no) for do, no in public_entries)
-    string_bytes = name_bytes
-    file_size = (
-        HSD_HEADER
-        + len(data_bytes)
-        + len(reloc_bytes)
-        + len(public_bytes)
-        + len(string_bytes)
-    )
-    header = struct.pack(
-        ">IIIII4s8x",
-        file_size,
-        len(data_bytes),
-        len(new_relocs),
-        len(public_entries),
-        0,
-        arc.version,
-    )
-    out = header + data_bytes + reloc_bytes + public_bytes + string_bytes
+    out = build_archive(new_data, res.relocs, [(new_symbol, 0)], arc.version)
     with open(output_path, "wb") as f:
         f.write(out)
     print(
@@ -151,14 +102,17 @@ def carve(input_path, src_symbol, slot_index, output_path, new_symbol):
 
 
 def main(argv):
-    if len(argv) != 6:
+    if len(argv) not in (6, 7):
         print(__doc__)
+        print("usage: carve_backdrop.py <in.dat> <symbol> <slot> <out.dat> "
+              "<new_symbol> [target_radius]")
         return 1
-    _, in_path, sym, slot_s, out_path, new_sym = argv
+    in_path, sym, slot_s, out_path, new_sym = argv[1:6]
+    target = float(argv[6]) if len(argv) == 7 else None
     print("Carving backdrop:")
     print(f"  in  = {in_path}")
     print(f"  out = {out_path}")
-    carve(in_path, sym, int(slot_s), out_path, new_sym)
+    carve(in_path, sym, int(slot_s), out_path, new_sym, target_radius=target)
     return 0
 
 

@@ -1,3 +1,5 @@
+<img src="art/karchipelago-logo.png" alt="karchipelago logo" width="400"/>
+
 # karchipelago-mod
 
 This is the mod portion of the [Kirby Air Ride APWorld (KARchipelago)](https://github.com/DeDeDeK/KARchipelago) for [Archipelago](https://archipelago.gg/).
@@ -84,21 +86,23 @@ make deploy
 make deploy DOLPHIN_RIIVOLUTION_DIR=/path/to/Load/Riivolution
 ```
 
-### Excluding mods
+### Selecting mods
 
-By default the WIP mods are left out of the build. This is controlled by `EXCLUDE_MODS` (comma- or space-separated mod folder names):
-
-```bash
-# default - drops the WIP mods
-EXCLUDE_MODS ?= custom_events,custom_weather
-```
-
-Override it on the command line:
+Nothing is built by default. Choose which mod folders to build with `INCLUDE_MODS` (comma- or space-separated mod folder names):
 
 ```bash
-make package EXCLUDE_MODS=                      # build everything, including WIP mods
-make package EXCLUDE_MODS=custom_events,textbox # drop additional mods
+# default - builds nothing
+INCLUDE_MODS ?=
 ```
+
+Set it on the command line:
+
+```bash
+make package INCLUDE_MODS=archipelago,textbox  # build just these two
+make package INCLUDE_MODS=archipelago,textbox,hypernova,custom_items,custom_checklist,custom_ai
+```
+
+Names not present under `mods/` are ignored.
 
 ### One-off ISO patch
 
@@ -109,6 +113,12 @@ make patch
 ```
 
 The patch is written to `out/patch.xdelta`.
+
+
+## Credits
+
+- Swiggity - karchipelago logo design
+- Taco - KAR Deluxe logo + font design
 
 ---
 

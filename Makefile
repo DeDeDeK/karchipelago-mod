@@ -20,6 +20,7 @@ OUT_DIR 		= out
 MODS_OUT_DIR 	= $(OUT_DIR)/files/mods
 MODS_ROOT_DIR = mods
 DOLPHIN_RIIVOLUTION_DIR ?= $(HOME)/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Load/Riivolution
+DOLPHIN_GC_DIR ?= $(HOME)/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC
 
 # --- File Paths ---
 ISO_PATH		?= kar.iso
@@ -37,7 +38,7 @@ CFLAGS = -O1 -mcpu=750 -meabi -msdata=none -mhard-float -ffreestanding \
 
 LDFLAGS  ?= -r -T$(PACKTOOL_DIR)/link.ld
 
-# Helpers for the EXCLUDE_MODS comma-to-space substitution below.
+# Helpers for the INCLUDE_MODS comma-to-space substitution below.
 comma := ,
 empty :=
 space := $(empty) $(empty)
@@ -47,7 +48,10 @@ space := $(empty) $(empty)
 INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) \
            -I$(MODS_ROOT_DIR)/custom_events/include \
            -I$(MODS_ROOT_DIR)/textbox/include \
-           -I$(MODS_ROOT_DIR)/archipelago/include
+           -I$(MODS_ROOT_DIR)/archipelago/include \
+           -I$(MODS_ROOT_DIR)/hypernova/include \
+           -I$(MODS_ROOT_DIR)/custom_items/include \
+           -I$(MODS_ROOT_DIR)/custom_checklist/include
 
 # --- Source File Discovery ---
 
@@ -55,13 +59,12 @@ INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) \
 LIB_SOURCES := $(shell find $(LIB_ROOT_DIR) -name "*.c")
 
 # 2. Mods: Find all mods in the mod folder
-# EXCLUDE_MODS lists mod folders to drop from the build (comma- or
-# space-separated). Override on the command line: `make package EXCLUDE_MODS=`
-# to include everything, or `EXCLUDE_MODS=foo,bar` to drop additional mods.
-# custom_events and custom_weather are excluded by default while they remain
-# WIP and not wired up to the archipelago mod.
-EXCLUDE_MODS ?= custom_events,custom_weather,archipelago_debug
-MOD_NAMES ?= $(filter-out $(subst $(comma),$(space),$(EXCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
+# INCLUDE_MODS lists the mod folders to build (comma- or space-separated).
+# Nothing is built by default; pass the mods you want on the command line,
+# e.g. `make package INCLUDE_MODS=archipelago,textbox`. Names not present under
+# mods/ are ignored.
+INCLUDE_MODS ?=
+MOD_NAMES ?= $(filter $(subst $(comma),$(space),$(INCLUDE_MODS)),$(notdir $(wildcard $(MODS_ROOT_DIR)/*)))
 
 # 3. Mods Source: For each mod, find its specific source files within its 'src' subdirectory.
 MOD_C_SOURCES := $(foreach mod,$(MOD_NAMES),\
@@ -201,4 +204,6 @@ clean:
 	@echo "Cleaning Dolphin Riivolution dir..."
 	trash-put -f "$(DOLPHIN_RIIVOLUTION_DIR)/"*
 	@echo "Cleaning Dolphin KAR memory cards..."
-	trash-put -f "${HOME}/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC/USA/Card A/01-GKYE-"*
+	@# Raw single-file cards (Dolphin's default format) plus the GCI-folder layout, which is
+	@# only populated when Dolphin is set to GCI-folder mode.
+	trash-put -f "$(DOLPHIN_GC_DIR)/MemoryCard"?".USA.raw" "$(DOLPHIN_GC_DIR)/USA/Card A/01-GKYE-"*

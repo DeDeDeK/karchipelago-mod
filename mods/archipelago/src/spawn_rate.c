@@ -7,29 +7,16 @@
 #include "os.h"
 #include "textbox_api.h"
 
-// Returns the effective spawn rate scale factor.
-//
-// scale = min_pct / 100  +  level * 0.1, capped at 3.0
-//
-// `spawn_rate_min` (percent, 10-100) is the AP slot option for the rate the
-// player starts at before any items are received; values below 100 suppress
-// spawns below vanilla. Each Spawn Rate Up item adds +10% on top. A stored 0
-// means options have not been received yet (memset save default), so we fall
-// back to 100 (vanilla baseline).
-//
-// The 3.0 cap matches the AP `spawn_rate_max` option ceiling (300%): the world
-// never seeds enough Spawn Rate Up items to push scale past 3x, so this is the
-// backstop that keeps item density bounded if a malformed save ever reports a
-// higher level. Keeping spawns at or below 3x avoids the excessive-item flood
-// the higher rates produced.
+// Effective spawn rate scale = min_pct/100 + level * 0.1. spawn_rate_min is the
+// AP starting rate in percent; each Spawn Rate Up adds +10%. The cap backstops
+// item density against a malformed save.
 #define SPAWN_RATE_SCALE_MAX 3.0f
 
 static float SpawnRate_GetScale()
 {
     u32 min_pct = ap_save->options.spawn_rate_min;
-    // 0 = options not yet received -> vanilla baseline. Otherwise honor the AP
-    // option down to its 10% minimum; the < 10 guard also keeps the scale
-    // strictly positive so the divisions below never divide by zero.
+    // 0 = options not yet received, so fall back to vanilla. The 10% floor keeps
+    // scale positive so the timer divisions never divide by zero.
     if (min_pct == 0)
         min_pct = 100;
     else if (min_pct < 10)
@@ -40,15 +27,8 @@ static float SpawnRate_GetScale()
     return scale;
 }
 
-// City Trial: Scale the spawn timer down when it is reset.
-//
-// The vanilla spawn system picks a random timer in [spawn_time_min, spawn_time_max]
-// and counts it down by 1 each frame. When it reaches 0, an item spawns.
-// We hook right before the timer is stored and divide it by the scale factor,
-// making items spawn faster.
-
-// Called from HOOKCREATE prologue with the timer value.
-// Returns the scaled timer value.
+// City Trial counts a random timer down to 0 to spawn an item. Divide it by the
+// scale before the store, floored at 4 frames.
 int SpawnRate_ScaleCTTimer(int timer)
 {
     float scaled = (float)timer / SpawnRate_GetScale();
@@ -58,9 +38,9 @@ int SpawnRate_ScaleCTTimer(int timer)
     return result;
 }
 
-// Hook at 0x800ea8b0: first timer store site in CityItemSpawn_UpdateAndCheckToSpawn.
-// At this point r0 = new timer value, next instruction is stw r0, 44(r3).
-// Clobbered: lwz r3, 1552(r13)   (reloads grBoxGeneInfo* - exactly what we need)
+// First timer store site in CityItemSpawn_UpdateAndCheckToSpawn. r0 = new timer
+// value, next instruction is stw r0, 44(r3).
+// Clobbered: lwz r3, 1552(r13), which reloads grBoxGeneInfo*.
 CODEPATCH_HOOKCREATE(0x800ea8b0,
     "mr 3, 0\n\t",
     SpawnRate_ScaleCTTimer,
@@ -68,8 +48,7 @@ CODEPATCH_HOOKCREATE(0x800ea8b0,
     0
 )
 
-// Hook at 0x800ea990: second timer store site (same function, different path).
-// Same register state as above.
+// Second timer store site in the same function, same register state.
 CODEPATCH_HOOKCREATE(0x800ea990,
     "mr 3, 0\n\t",
     SpawnRate_ScaleCTTimer,
@@ -77,32 +56,14 @@ CODEPATCH_HOOKCREATE(0x800ea990,
     0
 )
 
-// City Trial: Scale the simultaneous-item cap up.
-//
-// Without this, faster spawning is throttled once the item count reaches the
-// vanilla cap - items just churn faster, density doesn't grow. The vanilla cap
-// is `ItemFallDesc.item_max`, compared against `grBoxGeneInfo.cur_num_items`
-// in CityItemSpawn_UpdateAndCheckToSpawn:
-//
-//   800eaa84: lwz  r3, 32(r5)   ; cur_num_items
-//   800eaa88: lwz  r0,  4(r30)  ; ItemFallDesc.item_max
-//   800eaa8c: cmpw r3, r0
-//   800eaa90: bge  0x800eab4c   ; skip-spawn when cur >= cap
-//
-// We replace the comparison with a conditional hook at the cmpw. Returns 1
-// (skip) if cur_num >= scaled_cap, else 0 (continue spawn). The original cmpw
-// runs harmlessly on the 0-return path; we then jump past the bge.
-//
-// Register state at 0x800eaa8c: r3 = cur_num_items, r0 = item_max,
-// r5 = grBoxGeneInfo (needed at the spawn-success branch target 0x800eaa94),
-// r30 = ItemFallDesc* (preserved across the bl, non-volatile).
-
+// Scale the simultaneous-item cap (ItemFallDesc.item_max) up too, or faster
+// spawning just churns items without growing density. Replaces the cmpw of
+// cur_num_items vs item_max: 1 skips the spawn, 0 continues.
 int SpawnRate_CTCapReached(int cur_num, int cap)
 {
     int scaled_cap = (int)((float)cap * SpawnRate_GetScale());
-    // Only ever scale the cap up: it exists so faster spawning can build density.
-    // For sub-vanilla rates (scale < 1) the slower timer already suppresses spawns,
-    // and a down-scaled cap could truncate to 0 and block spawning entirely.
+    // Only scale up: for sub-vanilla rates the slower timer already suppresses
+    // spawns, and a down-scaled cap could truncate to 0 and block them entirely.
     if (scaled_cap < cap)
         scaled_cap = cap;
     return cur_num >= scaled_cap;
@@ -116,12 +77,8 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x800eaa8c,
     0x800eab4c                         // 1-return: jump to skip-spawn
 )
 
-// Top Ride: Scale the per-frame spawn probability up.
-//
-// TopRideItem_SpawnTimed computes a spawn probability in f30, then calls
-// HSD_Randf() and spawns if random < probability. We replace the HSD_Randf
-// call with our wrapper that divides the random result by the scale factor,
-// effectively increasing the spawn probability.
+// TopRideItem_SpawnTimed spawns if HSD_Randf() < probability, so dividing the
+// random result by the scale effectively raises that probability.
 float SpawnRate_ScaledRandf()
 {
     return HSD_Randf() / SpawnRate_GetScale();
@@ -131,8 +88,8 @@ void SpawnRate_Increment()
 {
     if (ap_save->spawn_rate_level < 255)
         ap_save->spawn_rate_level++;
-    // Display the absolute effective rate (post-min, post-cap) so the textbox
-    // tells the player where they are now, not just the delta from vanilla.
+    // Show the absolute effective rate, post-min and post-cap, rather than the
+    // delta from vanilla.
     float pct = SpawnRate_GetScale() * 100.0f;
     OSReport("[SpawnRate] Level %d, effective rate %.0f%%.\n",
              ap_save->spawn_rate_level, pct);

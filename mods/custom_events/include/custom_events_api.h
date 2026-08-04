@@ -3,13 +3,16 @@
 
 #include "event.h"
 
-// API version: bump major on breaking changes, minor on additions.
+// Pass to Hoshi_ImportMod with the version macros below to resolve this API.
+#define CUSTOM_EVENTS_MOD_NAME "custom_events"
+
+// Bump major on breaking changes, minor on additions.
 #define CUSTOM_EVENTS_API_MAJOR 1
 #define CUSTOM_EVENTS_API_MINOR 0
 
-// Custom event kinds start after vanilla EVKIND_NUM (16).
-// These values are stored in ev_chk->cur_kind but never index into
-// vanilla fixed-size arrays (EventFunction, occurrence_count, etc.).
+// Custom kinds start after vanilla EVKIND_NUM (16). They are stored in
+// ev_chk->cur_kind but must never index a vanilla 16-entry per-kind array
+// (EventFunction, occurrence_count, ...).
 typedef enum CustomEventKind
 {
     CUSTOM_EVKIND_WADDLE_DEE_SWARM = EVKIND_NUM, // 16
@@ -32,23 +35,19 @@ typedef struct CustomEventParam
     const char *hud_text; // HUD popup text ("Waddle Dee swarm incoming!")
 } CustomEventParam;
 
-// Weight filter callback for gating custom events during the extended roll.
-// Receives: event index (0-based into custom event array), default weight.
-// Returns: filtered weight (0 = disabled, >0 = enabled with that weight).
-// If no filter is installed, default weights are used (standalone mode).
+// Gates custom events during the extended roll: given a 0-based event index and
+// its default weight, returns the weight to use (0 = disabled).
 typedef int (*CustomEventWeightFilter)(int event_index, int default_weight);
 
 typedef struct CustomEventsAPI
 {
-    // Trigger a custom event by kind. Returns 1 on success, 0 on failure.
+    // Returns 1 on success, 0 on failure.
     int (*Do)(int kind);
 
-    // Read-only access to event parameters.
-    const CustomEventParam *params;  // array of CUSTOM_EVENT_COUNT
+    const CustomEventParam *params;  // read-only, CUSTOM_EVENT_COUNT entries
     int event_count;
 
-    // Install a weight filter for gating. Only one filter at a time.
-    // Pass NULL to remove.
+    // One filter at a time; NULL removes it and restores default weights.
     void (*SetWeightFilter)(CustomEventWeightFilter filter);
 } CustomEventsAPI;
 

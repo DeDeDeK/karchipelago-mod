@@ -13,16 +13,22 @@
 #include "city_trial_event.h"
 #include "ap_item_handler.h"
 #include "kirby_scale.h"
+#include "drop_ability.h"
 #include "energylink.h"
 #include "traplink.h"
 #include "fake_patches.h"
 #include "patch_item.h"
 #include "checklist_rewards.h"
 #include "check_detection.h"
+#include "ap_checklist.h"
+#include "ap_check_detect.h"
 #include "gate_stadiums.h"
 #include "patch_cap.h"
 #include "gate_events.h"
 #include "gate_abilities.h"
+#include "gate_base_abilities.h"
+#include "air_quick_spin.h"
+#include "onfoot_zoom.h"
 #include "gate_boxes.h"
 #include "gate_items.h"
 #include "gate_machines.h"
@@ -36,19 +42,40 @@
 #include "main_menu.h"
 #include "goal_max_stats_ct.h"
 
-// Define global variables.
 APData *ap_data;
 APSave *ap_save;
 const TextBoxAPI *tb_api = 0;
 
+// The AP client hardcodes an offset for every APData field and reads them by
+// address, so a silent layout shift desyncs it with no error anywhere. These pin
+// the block boundaries and both edges of every per-checklist-mode array; they and
+// the client's offset table move together, never one alone.
+_Static_assert(offsetof(APData, options) == 0x030, "APSlotOptions block moved");
+_Static_assert(offsetof(APData, options.goal) == 0x040, "OPTION_GOAL_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal[AP_CHECKLIST_ROW]) == 0x04C, "OPTION_GOAL_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.checklist_amount) == 0x050, "OPTION_CHECKLIST_AMOUNT_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal_checks) == 0x070, "OPTION_GOAL_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal_checks[AP_CHECKLIST_ROW]) == 0x0A0, "OPTION_GOAL_CHECKS_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B0, "gating block moved");
+_Static_assert(offsetof(APData, location_data_valid) == 0x0E8, "LOCATION_DATA_VALID");
+_Static_assert(offsetof(APData, locations) == 0x0EC, "LOCATIONS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks) == 0x200, "SENT_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x230, "SENT_CHECKS_ARCHIPELAGO");
+_Static_assert(offsetof(APData, client_backfill) == 0x240, "CLIENT_BACKFILL_AIRRIDE");
+_Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x270, "CLIENT_BACKFILL_ARCHIPELAGO");
+_Static_assert(offsetof(APData, goal_complete) == 0x280, "GOAL_COMPLETE");
+_Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x284, "DEATHLINK_MENU_ENABLED");
+
+int ap_checklist_mode = GMMODE_NUM;
+
 ModDesc mod_desc = {
-    .name = "KARchipelago",                     // Name of the mod.
-    .author = "DeDeDK",                         // Creator of the mod.
-    .version.major = 1,                         // Version of the mod.
+    .name = "KARchipelago",
+    .author = "DeDeDK",
+    .version.major = 1,
     .version.minor = 0,
-    .save_size = sizeof(struct APSave),         // Size of the save data your mod uses.
-    .save_ptr = 0,                              // Updated by hoshi at runtime. read-only!
-    .option_desc = &ModSettings,                // Link to the settings menu
+    .save_size = sizeof(struct APSave),
+    .save_ptr = 0,                              // Updated by hoshi at runtime, read-only
+    .option_desc = &ModSettings,
     .OnBoot = OnBoot,
     .OnSaveInit = OnSaveInit,
     .OnSaveLoaded = OnSaveLoaded,
@@ -66,86 +93,57 @@ ModDesc mod_desc = {
 };
 
 
-// Runs immediately after the mod file is loaded.
-// Calls to HSD_MemAlloc in THIS function specifically will persist throughout the entire runtime of the game.
-// All calls to HSD_MemAlloc from elsewhere will return an allocation that exists only within the current scene.
+// Runs immediately after the mod file is loaded. HSD_MemAlloc calls made here
+// persist for the whole runtime; anywhere else they last only the current scene.
 void OnBoot()
 {
     OSReport("[Main] Running OnBoot for %s\n", mod_desc.name);
 
-    // Persistent allocation of ap_data
     ap_data = HSD_MemAlloc(sizeof(APData));
     memset(ap_data, 0, sizeof(APData));
     OSReport("[Main] APData at 0x%08x (%d bytes)\n", (uint)ap_data, sizeof(APData));
 
-    // Place pointer to this allocation at a static address so the Python client can find it
+    // Static address the Python client polls to find the struct.
     APData **static_ptr = (APData **)0x805d52d4;
     (*static_ptr) = ap_data;
 
-    // Replace ClearChecker_CheckUnlocked with AP bitfield hook
+    // Give the shared hoshi memory-card file an Archipelago tile. The art is loaded
+    // from disc when the save is created, so no image is baked into this mod. Banner
+    // after icon: the icon call clears the tile.
+    Hoshi_SetSaveIconFile("KARchipelago", "Save Data", "ApIcon", 1, CARD_STAT_SPEED_MIDDLE);
+    Hoshi_SetSaveBannerFile("ApBanner");
+
     ChecklistRewards_OnBoot();
 
-    // Replace ClearChecker_SetNewUnlock with the check-detection wrapper.
-    // Must run after ChecklistRewards_OnBoot since they touch related code.
+    // After ChecklistRewards_OnBoot - they patch related code.
     CheckDetection_OnBoot();
 
-    // Patches for stadium unlocks
+    APCheckDetect_OnBoot();
     GateStadiums_OnBoot();
-
-    // Patches for patch cap
     PatchCap_OnBoot();
-
-    // Patches for deathlink
     DeathLink_OnBoot();
-
-    // Patches for city trial event gating
     GateEvents_OnBoot();
-
-    // Patches for copy ability gating
     GateAbilities_OnBoot();
-
-    // Item category gating (all-ups, food, stat items, legendary pieces, etc.)
+    GateBaseAbilities_OnBoot();
+    AirQuickSpin_OnBoot();
+    OnFootZoom_OnBoot();
     GateItems_OnBoot();
-
-    // Patches for box type gating
     GateBoxes_OnBoot();
-
-    // Patches for machine spawn gating
     GateMachines_OnBoot();
-
-    // Patches for Air Ride stage gating
     GateAirRideStages_OnBoot();
-
-    // Patches for Top Ride stage gating
     GateTopRideStages_OnBoot();
-
-    // Patches for Top Ride item gating
     GateTopRideItems_OnBoot();
-
-    // Patches for fake item effects outside fake items event
     FakePatches_OnBoot();
-
-    // Patches for Kirby color gating
     GateColors_OnBoot();
-
-    // Traplink send hooks
     TrapLink_OnBoot();
-
-    // Item spawn rate scaling hooks (City Trial + Top Ride)
     SpawnRate_OnBoot();
-
-    // Item spawn table filtering hooks (covers all gate categories)
     ItemSpawnFilter_OnBoot();
-
-    // Replace main-menu demo rider/machine (Kirby on Warp Star -> Dedede on Wheelie)
     MainMenu_OnBoot();
 
-    // Publish the public API so external mods can import it.
     ArchipelagoAPI_Export();
 }
 
 // Runs on boot when hoshi creates save data for the mod.
-// Initialize default save file values here.
 void OnSaveInit()
 {
     ap_save = (APSave *)mod_desc.save_ptr;
@@ -155,14 +153,12 @@ void OnSaveInit()
     ChecklistRewards_OnSaveInit();
 }
 
-// Runs on startup after any save data is loaded into memory.
-// This callback is executed regardless of if a memory card is inserted or contained existing save data.
+// Runs on startup after any save data is loaded, whether or not a memory card is
+// inserted or held existing save data.
 void OnSaveLoaded()
 {
-    // Resolve the textbox API (separate mod). Deferred to OnSaveLoaded because
-    // mods are booted in alphabetical order; "archipelago" boots before
-    // "textbox", so Hoshi_ImportMod would return NULL during our own OnBoot.
-    // By OnSaveLoaded all mods have exported their APIs.
+    // Deferred here because mods boot alphabetically and textbox boots after us,
+    // so Hoshi_ImportMod would return NULL during our own OnBoot.
     if (!tb_api)
     {
         tb_api = (const TextBoxAPI *)Hoshi_ImportMod(
@@ -178,30 +174,36 @@ void OnSaveLoaded()
              ap_save->boot_num, ap_save->item_received_count,
              ap_save->options_received ? "loaded" : "pending");
 
-    // Sync received count to ap_data so the AP client can read it
     ap_data->item_received_index = ap_save->item_received_count;
 
-    // Restore reward tables and received checklist rewards from save
     ChecklistRewards_OnSaveLoaded();
 
-    // Mirror sent_checks/goal_complete into shared memory and run initial
+    // Mirrors sent_checks/goal_complete into shared memory and runs the initial
     // goal evaluation.
     CheckDetection_OnSaveLoaded();
 
-    // Publish restored link-toggle state. Hoshi's Mod_CopyFromSave has run
-    // by now, so ap_menu_settings reflects the player's persisted choices.
+    // Also deferred past OnBoot: the custom_checklist framework mod boots after
+    // us, so its API only resolves once every mod has exported.
+    APChecklist_Register();
+
+    // Re-applied every boot, not just at option transfer: the vanilla modes' reveal
+    // rides along in the game's own clear data, but the AP tab's cells live in RAM
+    // and come up blank.
+    if (ap_save->options_received && ap_save->options.reveal_checklists)
+        RevealAllChecklists();
+
+    // Hoshi's Mod_CopyFromSave has run by now, so ap_menu_settings reflects the
+    // player's persisted toggle choices.
     SyncLinkMenuStateToAPData();
 
-    // Signal to the AP client that the mod is fully initialized
     ap_data->game_ready = 1;
     OSReport("[Main] game_ready set - waiting for AP client connection\n");
 }
 
 // For any category whose slot option marks gating as disabled, pre-fill the
-// corresponding unlock mask with all-1s. The AP world ships no unlock items
-// for ungated categories, so the mod has to deliver "everything unlocked"
-// itself. Per-bit reads in gate_*.c are unchanged. Skips the textbox/log
-// path in GateX_UnlockY to avoid a connect-time popup flood.
+// unlock mask with all-1s: the AP world ships no unlock items for ungated
+// categories. Bypasses the GateX_UnlockY textbox/log path so connecting doesn't
+// flood the screen with popups.
 static void APOptions_ApplyUngatedCategories(void)
 {
     const APSlotOptions *opts = &ap_save->options;
@@ -216,27 +218,16 @@ static void APOptions_ApplyUngatedCategories(void)
     if (!opts->topride_item_gating_enabled)  Unlock_SetMask(AP_UNLOCK_TOPRIDE_ITEM,  (1u << TRITEM_NUM) - 1);
     if (!opts->color_gating_enabled)         Unlock_SetMask(AP_UNLOCK_COLOR,         (1u << KIRBYCOLOR_NUM) - 1);
     if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       (1u << STKIND_NUM) - 1);
+    if (!opts->base_ability_gating_enabled)  Unlock_SetMask(AP_UNLOCK_BASE_ABILITY,  (1u << BASEABILITY_NUM) - 1);
 
-    // The three Top Ride "New Item" types (Chickie/Who? Paint/Lantern, enabled-
-    // mask bits 20/18/15) need a second nudge. Unlike every other category, the
-    // mask-all above can't enable them: TopRideItem_MgrInit only enables those
-    // slots when GameData.topride_extra_unlocks is set, and that is fed by
-    // TopRide_OnCourseSelect / TopRide_PreGameThink calling ClearChecker_CheckUnlocked
-    // (mod-replaced to read received_checklist_rewards) for TR reward indices
-    // 8/9/10 - and GateTopRideItems_ApplyMask only ANDs (clears, never sets).
-    // So mark those three rewards received here, exactly as
-    // ChecklistRewards_GrantAllCosmetic does for ungated cosmetics, so
-    // CheckUnlocked returns true and the engine enables the types at course init.
-    // Setting only the received bit drives the enable without touching is_unlocked
-    // (no spurious outbound check) and without any clear[] write (the old code set
-    // has_reward via GetClearKindFromRewardIndex, which for these unplaced rewards
-    // resolves to the clear_kind=0 sentinel and wrongly badged that cell).
+    // The three TR "New Item" types (Chickie/Who? Paint/Lantern) aren't reachable
+    // via the mask - the engine enables them only when their checklist reward is
+    // received. Mark TR reward indices 8-10 received so an ungated world gets them.
     if (!opts->topride_item_gating_enabled)
         for (u8 ri = 8; ri <= 10; ri++)
             ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= (1ULL << ri);
 
-    // Non-progression checklist rewards: unlock the whole cosmetic set at connect when ungated. Not a
-    // mask category - these unlock via the received_checklist_rewards bitfield (see checklist_rewards.c).
+    // Cosmetic rewards are tracked by received_checklist_rewards, not a mask.
     if (!opts->checklist_rewards_gating_enabled)
         ChecklistRewards_GrantAllCosmetic();
 
@@ -247,36 +238,33 @@ static void APOptions_ApplyUngatedCategories(void)
              opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
              opts->topride_item_gating_enabled, opts->color_gating_enabled,
              opts->stadium_gating_enabled);
+    OSReport("[Main] Gating - base abilities:%d\n", opts->base_ability_gating_enabled);
 }
 
-// Check if the AP client has written slot options to APData.
-// On first detection, copy them to save data (one-time transfer).
-// Options are immutable per AP slot, so this only runs once per save file.
+// Copy the client's slot options into save data on first detection. Options are
+// immutable per AP slot, so this runs once per save file.
 static void APOptions_TransferToSave()
 {
-    // Already received options for this slot
     if (ap_save->options_received)
         return;
-    // Client hasn't written options yet
     if (!ap_data->options_valid)
         return;
 
-    // One-time transfer: copy options to save data
     OSReport("[Main] AP client connected - transferring slot options to save data\n");
     memcpy(&ap_save->options, &ap_data->options, sizeof(APSlotOptions));
     ap_save->options_received = 1;
 
-    // Set initial menu toggle values from AP slot options
     ap_menu_settings.deathlink_enabled = ap_save->options.death_link_enabled;
     ap_menu_settings.energylink_enabled = ap_save->options.energy_link_enabled;
     ap_menu_settings.traplink_enabled = ap_save->options.trap_link_enabled;
     SyncLinkMenuStateToAPData();
     OSReport("[Main] Menu toggles set - DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
              ap_save->options.death_link_enabled, ap_save->options.energy_link_enabled, ap_save->options.trap_link_enabled);
-    OSReport("[Main] Goals - AirRide: %d, TopRide: %d, CityTrial: %d\n",
+    OSReport("[Main] Goals - AirRide: %d, TopRide: %d, CityTrial: %d, Archipelago: %d\n",
              ap_save->options.goal[GMMODE_AIRRIDE],
              ap_save->options.goal[GMMODE_TOPRIDE],
-             ap_save->options.goal[GMMODE_CITYTRIAL]);
+             ap_save->options.goal[GMMODE_CITYTRIAL],
+             ap_save->options.goal[AP_CHECKLIST_ROW]);
     OSReport("[Main] CityTrial - PatchCap min: %d, max: %d\n",
              ap_save->options.city_trial_patch_cap_min,
              ap_save->options.city_trial_patch_cap_max);
@@ -291,7 +279,6 @@ static void APOptions_TransferToSave()
     OSReport("[Main] AP slot options saved to memory card\n");
 }
 
-// Runs when entering the main menu.
 void OnMainMenuLoad()
 {
     OSReport("[Main] Entering the main menu.\n");
@@ -302,10 +289,8 @@ void OnPlayerSelectLoad()
 {
     OSReport("[Main] Entering player select (minor %d).\n", Scene_GetCurrentMinor());
 
-    // City Trial colors persist from prior sessions (no init block to hook
-    // like AR/TR), so we validate here on every CSS load. Machine filtering
-    // is handled inside CitySelect_CreateMachineIcons / CitySelect_InitPlayerMachines
-    // via the gate_machines hooks - no extra pass needed here.
+    // City Trial colors persist from prior sessions and have no init block to
+    // hook like AR/TR, so validate on every CSS load.
     if (Scene_GetCurrentMinor() == MNRKIND_CITYPLYSELECT)
         GateColors_ValidateCityTrialColors();
 }
@@ -333,7 +318,7 @@ void On3DLoadEnd()
             StadiumKind sk = Gm_GetCurrentStadiumKind();
             const char *sk_name = ((unsigned)sk < STKIND_NUM) ? StadiumKind_Names[sk] : "?";
             OSReport("[Main] Starting City Trial: Stadium (%s) Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                     sk_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                     sk_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
                      Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
                      Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
         }
@@ -341,7 +326,7 @@ void On3DLoadEnd()
         {
             const char *cm_name = ((unsigned)cm < 3) ? city_mode_names[cm] : "?";
             OSReport("[Main] Starting City Trial: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                     cm_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                     cm_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
                      Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
                      Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
         }
@@ -351,7 +336,7 @@ void On3DLoadEnd()
         AirRideMode ar_mode = Gm_GetAirRideMode();
         const char *ar_mode_name = ((unsigned)ar_mode < 3) ? ar_mode_names[ar_mode] : "?";
         OSReport("[Main] Starting Air Ride: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                 ar_mode_name, Gm_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+                 ar_mode_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
                  Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
                  Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
     }
@@ -368,16 +353,9 @@ void On3DLoadEnd()
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
-    // Reset the per-scene legendary-assembly one-shot guard (piece archives are
-    // preloaded fresh on each scene load).
     GateMachines_On3DLoadEnd();
-
-    // Enemy spawn filtering for ability gating
     GateAbilities_On3DLoadEnd();
-
-    // Item spawn table filtering for non-CT modes (stadium, Air Ride)
     ItemSpawnFilter_On3DLoadEnd();
-
     PermanentPatch_On3DLoadEnd();
 
     if (ap_menu_settings.deathlink_enabled)
@@ -390,13 +368,12 @@ void On3DLoadEnd()
         TrapLink_On3DLoadEnd();
 
     GoalMaxStatsCT_On3DLoadEnd();
-
-    // Big / Small Kirby model scaling (always available - not an optional link).
+    APCheckDetect_On3DLoadEnd();
     KirbyScale_On3DLoadEnd();
+    DropAbility_On3DLoadEnd();
 }
 
-// Runs after Top Ride gameplay is fully initialized.
-// Top Ride uses minor 19 (not 18), so On3DLoadEnd does not fire.
+// Top Ride uses minor 19 (not 18), so On3DLoadEnd does not fire for it.
 void OnTopRideLoadEnd()
 {
     static const char *const tr_mode_names[] = { "Race", "Time Attack", "Free Run" };
@@ -413,61 +390,52 @@ void OnTopRideLoadEnd()
     if (ap_menu_settings.deathlink_enabled)
         DeathLink_OnTopRideLoadEnd();
 
-    // Big / Small Kirby model scaling (always available - not an optional link).
     KirbyScale_OnTopRideLoadEnd();
+    DropAbility_OnTopRideLoadEnd();
 }
 
-// Runs when pausing the match. The index of the pausing player is passed in as an argument.
 void On3DPause(int pause_ply)
 {
     OSReport("[Main] Pausing 3D (player %d).\n", pause_ply);
 }
 
-// Runs when unpausing the match.
 void On3DUnpause(int pause_ply)
 {
     OSReport("[Main] Unpausing 3D (player %d).\n", pause_ply);
 }
 
-// Runs when exiting a match.
 void On3DExit()
 {
     OSReport("[Main] Exiting 3D.\n");
+
+    // Stadium_ExitMinor has finished latching GameData.stadium_results by this
+    // point, so the round's placements and times are final and readable here.
+    APCheckDetect_On3DExit();
 }
 
-// Runs every scene change.
-// The memory heap is destroyed and recreated every scene change, meaning HSD objects
-// such as CObj's (camera) and JObj's (models) will not persist across them.
-// This hook can be used to recreate processes/objects that should always be running.
+// The memory heap is destroyed and recreated every scene change, so HSD objects
+// (CObjs, JObjs) do not persist across it. Recreate always-running procs here.
 void OnSceneChange()
 {
     OSReport("[Main] We are now entering major %d / minor %d\n",
              Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
     APItems_OnSceneChange();
-
-    // Drop Kirby model scaling back to neutral - each scene recreates the Kirby
-    // objects at model_scale 1.0, so Big / Small Kirby lasts only until here.
     KirbyScale_OnSceneChange();
 }
 
 void OnFrameStart()
 {
-    // Poll for AP client connection (one-time options transfer)
     APOptions_TransferToSave();
 
-    // Apply the AP location assignment when the client signals new data.
-    // ChecklistRewards_ApplyLocations clears location_data_valid and persists,
-    // so this fires once per client write (every (re)connection).
+    // ChecklistRewards_ApplyLocations clears location_data_valid and persists, so
+    // this fires once per client write, i.e. on every (re)connection.
     if (ap_data->location_data_valid)
         ChecklistRewards_ApplyLocations();
 
-    // Process client backfill writes and poll meta auto-unlocks.
     CheckDetection_OnFrameStart();
 }
 
-// Runs every game tick after the frame has been processed.
 void OnFrameEnd()
 {
-    
 }
