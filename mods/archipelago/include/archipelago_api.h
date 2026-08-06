@@ -5,10 +5,14 @@
 
 // Bump major on breaking changes, minor on additions.
 #define ARCHIPELAGO_API_MAJOR 3
-#define ARCHIPELAGO_API_MINOR 0
+#define ARCHIPELAGO_API_MINOR 1
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
+
+// Checklist-mode rows: the three vanilla GameModes plus the AP tab at the row past them.
+#define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
+#define AP_CHECKLIST_ROW   GMMODE_NUM
 
 // AP item IDs - must match the IDs defined in the APWorld Python code.
 // ID 0 is reserved as the "empty" sentinel for the mailbox.
@@ -640,6 +644,10 @@ typedef struct ArchipelagoAPI
     void (*DebugWriteIncomingItem)(int ap_item_id);
     void (*DebugTriggerDeathlinkReceive)(void);
     void (*DebugTriggerTraplinkReceive)(void);
+
+    // Reveal every checkbox on one checklist-mode row (visual-only). Rows 0..2 are
+    // the vanilla GameModes; row 3 is the AP tab.
+    void (*DebugRevealChecklist)(int mode);
 } ArchipelagoAPI;
 
 #endif // ARCHIPELAGO_API_H

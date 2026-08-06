@@ -1048,20 +1048,33 @@ void ChecklistRewards_DebugClearAll(void)
     OSReport("[Checklist] Debug: cleared ALL checklist data (flags, sent_checks, rewards, shuffle)\n");
 }
 
-// Reveal every checkbox across all modes. Sets is_visible only - unlock state is left
-// to the AP flow. The AP tab's grid is mostly empty, so it reveals only its own cells.
+// Reveal every checkbox on one checklist-mode row. Sets is_visible only - unlock state
+// is left to the AP flow. The AP tab's grid is mostly empty, so it reveals only its own
+// cells.
+void RevealChecklist(int mode)
+{
+    if (mode == AP_CHECKLIST_ROW)
+    {
+        APChecklist_RevealAll();
+        return;
+    }
+    if (mode < 0 || mode >= GMMODE_NUM)
+        return;
+
+    GameClearData *clear_data = gmGetClearcheckerTypeP((GameMode)mode);
+    if (!clear_data)
+        return;
+    for (int i = 0; i < CLEAR_KIND_NUM; i++)
+        clear_data->clear[i].is_visible = 1;
+}
+
 void RevealAllChecklists(void)
 {
-    for (int mode = 0; mode < GMMODE_NUM; mode++)
-    {
-        GameClearData *clear_data = gmGetClearcheckerTypeP(mode);
-        for (int i = 0; i < CLEAR_KIND_NUM; i++)
-            clear_data->clear[i].is_visible = 1;
-    }
-    OSReport("[Checklist] All checklist squares revealed (%d modes x %d squares)\n",
-             GMMODE_NUM, CLEAR_KIND_NUM);
+    for (int mode = 0; mode < CHECKLIST_MODE_NUM; mode++)
+        RevealChecklist(mode);
 
-    APChecklist_RevealAll();
+    OSReport("[Checklist] All checklist squares revealed (%d rows x %d squares)\n",
+             CHECKLIST_MODE_NUM, CLEAR_KIND_NUM);
 }
 
 void ChecklistRewards_OnBoot()

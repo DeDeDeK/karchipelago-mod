@@ -51,20 +51,22 @@ const TextBoxAPI *tb_api = 0;
 // the block boundaries and both edges of every per-checklist-mode array; they and
 // the client's offset table move together, never one alone.
 _Static_assert(offsetof(APData, options) == 0x030, "APSlotOptions block moved");
-_Static_assert(offsetof(APData, options.goal) == 0x040, "OPTION_GOAL_AIRRIDE");
-_Static_assert(offsetof(APData, options.goal[AP_CHECKLIST_ROW]) == 0x04C, "OPTION_GOAL_ARCHIPELAGO");
-_Static_assert(offsetof(APData, options.checklist_amount) == 0x050, "OPTION_CHECKLIST_AMOUNT_AIRRIDE");
-_Static_assert(offsetof(APData, options.goal_checks) == 0x070, "OPTION_GOAL_CHECKS_AIRRIDE");
-_Static_assert(offsetof(APData, options.goal_checks[AP_CHECKLIST_ROW]) == 0x0A0, "OPTION_GOAL_CHECKS_ARCHIPELAGO");
-_Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B0, "gating block moved");
-_Static_assert(offsetof(APData, location_data_valid) == 0x0E8, "LOCATION_DATA_VALID");
-_Static_assert(offsetof(APData, locations) == 0x0EC, "LOCATIONS_AIRRIDE");
-_Static_assert(offsetof(APData, sent_checks) == 0x200, "SENT_CHECKS_AIRRIDE");
-_Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x230, "SENT_CHECKS_ARCHIPELAGO");
-_Static_assert(offsetof(APData, client_backfill) == 0x240, "CLIENT_BACKFILL_AIRRIDE");
-_Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x270, "CLIENT_BACKFILL_ARCHIPELAGO");
-_Static_assert(offsetof(APData, goal_complete) == 0x280, "GOAL_COMPLETE");
-_Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x284, "DEATHLINK_MENU_ENABLED");
+_Static_assert(offsetof(APData, options.reveal_checklists) == 0x03C, "OPTION_REVEAL_CHECKLIST_AIRRIDE");
+_Static_assert(offsetof(APData, options.reveal_checklists[AP_CHECKLIST_ROW]) == 0x048, "OPTION_REVEAL_CHECKLIST_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.goal) == 0x04C, "OPTION_GOAL_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal[AP_CHECKLIST_ROW]) == 0x058, "OPTION_GOAL_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.checklist_amount) == 0x05C, "OPTION_CHECKLIST_AMOUNT_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal_checks) == 0x078, "OPTION_GOAL_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, options.goal_checks[AP_CHECKLIST_ROW]) == 0x0A8, "OPTION_GOAL_CHECKS_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B8, "gating block moved");
+_Static_assert(offsetof(APData, location_data_valid) == 0x0F0, "LOCATION_DATA_VALID");
+_Static_assert(offsetof(APData, locations) == 0x0F4, "LOCATIONS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks) == 0x208, "SENT_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x238, "SENT_CHECKS_ARCHIPELAGO");
+_Static_assert(offsetof(APData, client_backfill) == 0x248, "CLIENT_BACKFILL_AIRRIDE");
+_Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x278, "CLIENT_BACKFILL_ARCHIPELAGO");
+_Static_assert(offsetof(APData, goal_complete) == 0x288, "GOAL_COMPLETE");
+_Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x28C, "DEATHLINK_MENU_ENABLED");
 
 int ap_checklist_mode = GMMODE_NUM;
 
@@ -153,6 +155,14 @@ void OnSaveInit()
     ChecklistRewards_OnSaveInit();
 }
 
+// Open the checklists whose slot option asks for it, one row at a time.
+static void APOptions_ApplyRevealChecklists(void)
+{
+    for (int row = 0; row < CHECKLIST_MODE_NUM; row++)
+        if (ap_save->options.reveal_checklists[row])
+            RevealChecklist(row);
+}
+
 // Runs on startup after any save data is loaded, whether or not a memory card is
 // inserted or held existing save data.
 void OnSaveLoaded()
@@ -189,8 +199,8 @@ void OnSaveLoaded()
     // Re-applied every boot, not just at option transfer: the vanilla modes' reveal
     // rides along in the game's own clear data, but the AP tab's cells live in RAM
     // and come up blank.
-    if (ap_save->options_received && ap_save->options.reveal_checklists)
-        RevealAllChecklists();
+    if (ap_save->options_received)
+        APOptions_ApplyRevealChecklists();
 
     // Hoshi's Mod_CopyFromSave has run by now, so ap_menu_settings reflects the
     // player's persisted toggle choices.
@@ -268,10 +278,13 @@ static void APOptions_TransferToSave()
     OSReport("[Main] CityTrial - PatchCap min: %d, max: %d\n",
              ap_save->options.city_trial_patch_cap_min,
              ap_save->options.city_trial_patch_cap_max);
-    OSReport("[Main] RevealChecklists: %d\n", ap_save->options.reveal_checklists);
+    OSReport("[Main] RevealChecklists - AirRide: %d, TopRide: %d, CityTrial: %d, Archipelago: %d\n",
+             ap_save->options.reveal_checklists[GMMODE_AIRRIDE],
+             ap_save->options.reveal_checklists[GMMODE_TOPRIDE],
+             ap_save->options.reveal_checklists[GMMODE_CITYTRIAL],
+             ap_save->options.reveal_checklists[AP_CHECKLIST_ROW]);
 
-    if (ap_save->options.reveal_checklists)
-        RevealAllChecklists();
+    APOptions_ApplyRevealChecklists();
 
     APOptions_ApplyUngatedCategories();
 

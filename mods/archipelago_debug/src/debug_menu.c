@@ -321,6 +321,38 @@ static int CheckDbgRevealAll(OptionDesc *self)
     return 1;
 }
 
+static int RevealChecklistRow(int row, const char *msg)
+{
+    if (!ap_api) return 1;
+    ap_api->DebugRevealChecklist(row);
+    ap_api->Textbox(msg);
+    return 1;
+}
+
+static int CheckDbgRevealAirRide(OptionDesc *self)
+{
+    (void)self;
+    return RevealChecklistRow(GMMODE_AIRRIDE, "Air Ride checklist revealed");
+}
+
+static int CheckDbgRevealTopRide(OptionDesc *self)
+{
+    (void)self;
+    return RevealChecklistRow(GMMODE_TOPRIDE, "Top Ride checklist revealed");
+}
+
+static int CheckDbgRevealCityTrial(OptionDesc *self)
+{
+    (void)self;
+    return RevealChecklistRow(GMMODE_CITYTRIAL, "City Trial checklist revealed");
+}
+
+static int CheckDbgRevealArchipelago(OptionDesc *self)
+{
+    (void)self;
+    return RevealChecklistRow(AP_CHECKLIST_ROW, "Archipelago checklist revealed");
+}
+
 static int CheckDbgSimulateLocationData(OptionDesc *self)
 {
     (void)self;
@@ -816,6 +848,17 @@ static MenuDesc give_items_menu = {
     },
 };
 
+static MenuDesc reveal_menu = {
+    .option_num = 5,
+    .options = {
+        A("All Checklists", "Reveal every checkbox on every checklist", CheckDbgRevealAll),
+        A("Air Ride",       "Reveal the Air Ride checklist",            CheckDbgRevealAirRide),
+        A("Top Ride",       "Reveal the Top Ride checklist",            CheckDbgRevealTopRide),
+        A("City Trial",     "Reveal the City Trial checklist",          CheckDbgRevealCityTrial),
+        A("Archipelago",    "Reveal the Archipelago checklist",         CheckDbgRevealArchipelago),
+    },
+};
+
 static MenuDesc checks_menu = {
     .option_num = 7,
     .options = {
@@ -831,7 +874,7 @@ static MenuDesc checks_menu = {
         A("Clear All sent_checks",   "Wipe sent_checks bitmask and goal_complete", CheckDbgClearAll),
         A("Force-Mark All",          "Set every sent_checks bit and goal_complete", CheckDbgForceMarkAll),
         A("Trigger goal_complete",   "Set only goal_complete (sent_checks unchanged)", CheckDbgTriggerGoal),
-        A("Reveal All Checklists",   "Make every checkbox visible (visual only)",   CheckDbgRevealAll),
+        S("Reveal Checklists",       "Make checkboxes visible (visual only)",       reveal_menu),
         A("Simulate Location Data",  "Fill location arrays with a random shuffle",  CheckDbgSimulateLocationData),
         A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, and location shuffle", CheckDbgClearAllChecklistData),
     },

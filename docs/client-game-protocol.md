@@ -39,8 +39,8 @@ All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64
 
 | Offset | Type        | Field                 | Writer | Reader            | Description |
 |--------|-------------|-----------------------|--------|-------------------|-------------|
-| 0x0E8  | u32         | `location_data_valid` | Client | Game (clear to 0) | 1 after client has written `locations` |
-| 0x0EC  | u16[3][46]  | `locations`           | Client | Game              | `locations[source_mode][source_reward_index]` = destination cell for this slot's checklist reward. Padded to 46 per mode. Indexed by the 3 real game modes only — the AP checklist tab has no native rewards. |
+| 0x0F0  | u32         | `location_data_valid` | Client | Game (clear to 0) | 1 after client has written `locations` |
+| 0x0F4  | u16[3][46]  | `locations`           | Client | Game              | `locations[source_mode][source_reward_index]` = destination cell for this slot's checklist reward. Padded to 46 per mode. Indexed by the 3 real game modes only — the AP checklist tab has no native rewards. |
 
 `locations` is indexed by **source reward** — the entry at `[m][i]` tells the game where in the checklist grid this slot's reward `i` of mode `m` lives. Per-mode meaningful entry counts: AR=46, TR=33, CT=44. Unused trailing entries (e.g. TR indices 33-45) should be `0xFFFF`.
 
@@ -57,9 +57,9 @@ This carries only vanilla checklist rewards (AP item IDs `500..649`); non-vanill
 
 | Offset | Type | Field | Writer | Reader | Description |
 |--------|------|-------|--------|--------|-------------|
-| 0x200 | u64[4][2] | `sent_checks`     | Game   | Client | Bitmask of checkboxes the player has completed in gameplay or via filler. Bit `(k % 64)` of word `(k / 64)` for clear_kind `k` in the mode at row `m`. Mirror of `APSave.sent_checks`. |
-| 0x240 | u64[4][2] | `client_backfill` | Client | Game (clears) | Additive backfill: client writes bits for checks the AP server already knows about (e.g., fresh save / slot takeover). Mod ORs new bits into `sent_checks`, also sets `clear[].is_unlocked` and `has_reward` where applicable, re-evaluates goal, then clears this field. |
-| 0x280 | u8        | `goal_complete`   | Game   | Client | Sticky once set. 1 when the active goal condition is satisfied. Mod evaluates per-frame after every check transition; client reads on connect and on poll, forwards victory to AP server. Persisted to `APSave.goal_complete`. |
+| 0x208 | u64[4][2] | `sent_checks`     | Game   | Client | Bitmask of checkboxes the player has completed in gameplay or via filler. Bit `(k % 64)` of word `(k / 64)` for clear_kind `k` in the mode at row `m`. Mirror of `APSave.sent_checks`. |
+| 0x248 | u64[4][2] | `client_backfill` | Client | Game (clears) | Additive backfill: client writes bits for checks the AP server already knows about (e.g., fresh save / slot takeover). Mod ORs new bits into `sent_checks`, also sets `clear[].is_unlocked` and `has_reward` where applicable, re-evaluates goal, then clears this field. |
+| 0x288 | u8        | `goal_complete`   | Game   | Client | Sticky once set. 1 when the active goal condition is satisfied. Mod evaluates per-frame after every check transition; client reads on connect and on poll, forwards victory to AP server. Persisted to `APSave.goal_complete`. |
 
 Both bitmasks are `CHECKLIST_MODE_NUM` (4) rows: rows 0-2 are Air Ride / Top Ride / City Trial, and row 3 is the synthetic AP checklist tab.
 
@@ -120,26 +120,26 @@ Per-mode arrays are `CHECKLIST_MODE_NUM` (4) wide, indexed by **checklist-mode r
 | 0x030 | `death_link_enabled`              | 0 or 1 | Sets initial deathlink menu toggle |
 | 0x034 | `energy_link_enabled`             | 0 or 1 | Sets initial energylink menu toggle |
 | 0x038 | `trap_link_enabled`               | 0 or 1 | Sets initial traplink menu toggle |
-| 0x03C | `reveal_checklists`               | 0 or 1 | Reveal all checklist squares |
-| 0x040 | `goal[4]`                         | GoalKind | Completion condition per checklist-mode row |
-| 0x050 | `checklist_amount[4]`             | 1-120  | N for GOAL_N_CHECKLIST per checklist-mode row |
-| 0x060 | `city_trial_patch_cap_min`        | 1-127  | Per-stat patch cap the player starts at. Each Patch Cap Increase item adds +1. 0 is treated as the max. |
-| 0x064 | `city_trial_patch_cap_max`        | 1-127  | Patch cap ceiling (also the threshold for GOAL_MAX_STATS_CT). AP world ships `max - min` Patch Cap Increase items so collecting all reaches it. `min == max` is a flat cap. 0 is treated as `PATCH_STAT_MAX` (127). |
-| 0x068 | `spawn_rate_min`                  | 10-100 (percent) | Spawn rate floor for CT/TR items. 100 = vanilla, below 100 suppresses spawns. Each Spawn Rate Up item adds +10% on top, capped at 300. AP world ships `(max - min) / 10` items so collecting all reaches the configured max. 0 is treated as 100. |
-| 0x070 | `goal_checks[4][2]`              | u64 bitmask | Required checkboxes per checklist-mode row for GOAL_CHECKLIST_LIST (64 bytes, see below) |
-| 0x0B0 | `machine_gating_enabled`         | 0 or 1 | 1 = gated (default). 0 = all machine unlocks pre-applied at connect; AP world ships no machine unlock items. |
-| 0x0B4 | `ability_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all copy abilities unlocked at connect; AP world ships no ability unlock items. |
-| 0x0B8 | `event_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all CT events unlocked at connect; AP world ships no event unlock items. |
-| 0x0BC | `patch_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all patch types unlocked at connect; AP world ships no patch unlock items. |
-| 0x0C0 | `item_gating_enabled`            | 0 or 1 | 1 = gated. 0 = all item-category unlocks (All-Up, food, fireworks, etc.) applied at connect; AP world ships no item unlock items. |
-| 0x0C4 | `box_gating_enabled`             | 0 or 1 | 1 = gated. 0 = all box types unlocked at connect; AP world ships no box unlock items. |
-| 0x0C8 | `airride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Air Ride stages unlocked at connect; AP world ships no AR stage unlock items. |
-| 0x0CC | `topride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Top Ride courses unlocked at connect; AP world ships no TR stage unlock items. |
-| 0x0D0 | `topride_item_gating_enabled`    | 0 or 1 | 1 = gated. 0 = all Top Ride items unlocked at connect; AP world ships no TR item unlock items. (Ability-gated TR items remain gated by `ability_gating_enabled`.) |
-| 0x0D4 | `color_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all Kirby colors unlocked at connect; AP world ships no color unlock items. |
-| 0x0D8 | `stadium_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all stadiums unlocked at connect; AP world ships no stadium unlock items. (The KAROptions toggle `city_trial_stadiums_gated` maps directly to this.) |
-| 0x0DC | `base_ability_gating_enabled`    | 0 or 1 | 1 = gated. 0 = inhale / quick spin / charge unlocked at connect; AP world ships no base ability unlock items. |
-| 0x0E0 | `checklist_rewards_gating_enabled` | 0 or 1 | 1 = gated (default): each non-progression checklist reward (music, sound test, extra rules, endings, filler boxes, …) is an AP item the player finds. 0 = ungated: the mod marks every such reward received at connect (`ChecklistRewards_GrantAllCosmetic`, tracked via `received_checklist_rewards` — **not** a mask), and the AP world ships none. The 6 Dragoon/Hydra part markers are progression and are **not** affected by this flag. |
+| 0x03C | `reveal_checklists[4]`            | 0 or 1 | Per checklist-mode row: reveal every square of that checklist from the start (visual only) |
+| 0x04C | `goal[4]`                         | GoalKind | Completion condition per checklist-mode row |
+| 0x05C | `checklist_amount[4]`             | 1-120  | N for GOAL_N_CHECKLIST per checklist-mode row |
+| 0x06C | `city_trial_patch_cap_min`        | 1-127  | Per-stat patch cap the player starts at. Each Patch Cap Increase item adds +1. 0 is treated as the max. |
+| 0x070 | `city_trial_patch_cap_max`        | 1-127  | Patch cap ceiling (also the threshold for GOAL_MAX_STATS_CT). AP world ships `max - min` Patch Cap Increase items so collecting all reaches it. `min == max` is a flat cap. 0 is treated as `PATCH_STAT_MAX` (127). |
+| 0x074 | `spawn_rate_min`                  | 10-100 (percent) | Spawn rate floor for CT/TR items. 100 = vanilla, below 100 suppresses spawns. Each Spawn Rate Up item adds +10% on top, capped at 300. AP world ships `(max - min) / 10` items so collecting all reaches the configured max. 0 is treated as 100. |
+| 0x078 | `goal_checks[4][2]`              | u64 bitmask | Required checkboxes per checklist-mode row for GOAL_CHECKLIST_LIST (64 bytes, see below) |
+| 0x0B8 | `machine_gating_enabled`         | 0 or 1 | 1 = gated (default). 0 = all machine unlocks pre-applied at connect; AP world ships no machine unlock items. |
+| 0x0BC | `ability_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all copy abilities unlocked at connect; AP world ships no ability unlock items. |
+| 0x0C0 | `event_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all CT events unlocked at connect; AP world ships no event unlock items. |
+| 0x0C4 | `patch_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all patch types unlocked at connect; AP world ships no patch unlock items. |
+| 0x0C8 | `item_gating_enabled`            | 0 or 1 | 1 = gated. 0 = all item-category unlocks (All-Up, food, fireworks, etc.) applied at connect; AP world ships no item unlock items. |
+| 0x0CC | `box_gating_enabled`             | 0 or 1 | 1 = gated. 0 = all box types unlocked at connect; AP world ships no box unlock items. |
+| 0x0D0 | `airride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Air Ride stages unlocked at connect; AP world ships no AR stage unlock items. |
+| 0x0D4 | `topride_stage_gating_enabled`   | 0 or 1 | 1 = gated. 0 = all Top Ride courses unlocked at connect; AP world ships no TR stage unlock items. |
+| 0x0D8 | `topride_item_gating_enabled`    | 0 or 1 | 1 = gated. 0 = all Top Ride items unlocked at connect; AP world ships no TR item unlock items. (Ability-gated TR items remain gated by `ability_gating_enabled`.) |
+| 0x0DC | `color_gating_enabled`           | 0 or 1 | 1 = gated. 0 = all Kirby colors unlocked at connect; AP world ships no color unlock items. |
+| 0x0E0 | `stadium_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all stadiums unlocked at connect; AP world ships no stadium unlock items. (The KAROptions toggle `city_trial_stadiums_gated` maps directly to this.) |
+| 0x0E4 | `base_ability_gating_enabled`    | 0 or 1 | 1 = gated. 0 = inhale / quick spin / charge unlocked at connect; AP world ships no base ability unlock items. |
+| 0x0E8 | `checklist_rewards_gating_enabled` | 0 or 1 | 1 = gated (default): each non-progression checklist reward (music, sound test, extra rules, endings, filler boxes, …) is an AP item the player finds. 0 = ungated: the mod marks every such reward received at connect (`ChecklistRewards_GrantAllCosmetic`, tracked via `received_checklist_rewards` — **not** a mask), and the AP world ships none. The 6 Dragoon/Hydra part markers are progression and are **not** affected by this flag. |
 
 ### GoalKind Enum
 
@@ -161,10 +161,10 @@ Offsets relative to `APData` struct base:
 
 | Offset | Field | Description |
 |--------|-------|-------------|
-| 0x070  | `goal_checks[0][0..1]` | Air Ride required checkboxes (2 × u64, clear_kinds 0-119) |
-| 0x080  | `goal_checks[1][0..1]` | Top Ride required checkboxes (2 × u64, clear_kinds 0-119) |
-| 0x090  | `goal_checks[2][0..1]` | City Trial required checkboxes (2 × u64, clear_kinds 0-119) |
-| 0x0A0  | `goal_checks[3][0..1]` | AP checklist tab required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x078  | `goal_checks[0][0..1]` | Air Ride required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x088  | `goal_checks[1][0..1]` | Top Ride required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x098  | `goal_checks[2][0..1]` | City Trial required checkboxes (2 × u64, clear_kinds 0-119) |
+| 0x0A8  | `goal_checks[3][0..1]` | AP checklist tab required checkboxes (2 × u64, clear_kinds 0-119) |
 
 Client writes big-endian u64s (dolphin-memory-engine handles byte order). Zero-fill any row that does not use `GOAL_CHECKLIST_LIST`. Fillers are blocked on goal-list checkboxes to prevent cheesing.
 
@@ -177,9 +177,9 @@ The client reads slot options from the AP server (as defined in `KAROptions.py`)
 | `death_link` (DeathLinkMixin) | `death_link_enabled` | Toggle, direct value |
 | `energy_link` | `energy_link_enabled` | Toggle, direct value |
 | `trap_link` | `trap_link_enabled` | Toggle, direct value |
-| `reveal_checklists` | `reveal_checklists` | Toggle, direct value |
 | `city_trial_goal` | `goal[GMMODE_CITYTRIAL]` | **TextChoice -> GoalKind conversion** (see enum table) |
 | `city_trial_checklist_amount` | `checklist_amount[GMMODE_CITYTRIAL]` | Range, direct value |
+| `city_trial_reveal_checklist` | `reveal_checklists[GMMODE_CITYTRIAL]` | Toggle, direct value |
 | `city_trial_patch_cap_min` | `city_trial_patch_cap_min` | Range, direct value |
 | `city_trial_patch_cap_max` | `city_trial_patch_cap_max` | Range, direct value |
 | `city_trial_stadiums_gated` | `stadium_gating_enabled` | Same semantic (1 = gated/items-required, 0 = ungated/all unlocked). |
@@ -187,8 +187,11 @@ The client reads slot options from the AP server (as defined in `KAROptions.py`)
 | `spawn_rate_min` | `spawn_rate_min` | Range (percent), direct value. AP world also has `spawn_rate_max` for item-count generation but does not write it to the mod. |
 | `air_ride_goal` | `goal[GMMODE_AIRRIDE]` | **TextChoice -> GoalKind conversion** |
 | `air_ride_checklist_amount` | `checklist_amount[GMMODE_AIRRIDE]` | Range, direct value |
+| `air_ride_reveal_checklist` | `reveal_checklists[GMMODE_AIRRIDE]` | Toggle, direct value |
 | `top_ride_goal` | `goal[GMMODE_TOPRIDE]` | **TextChoice -> GoalKind conversion** |
 | `top_ride_checklist_amount` | `checklist_amount[GMMODE_TOPRIDE]` | Range, direct value |
+| `top_ride_reveal_checklist` | `reveal_checklists[GMMODE_TOPRIDE]` | Toggle, direct value |
+| `archipelago_reveal_checklist` | `reveal_checklists[AP_CHECKLIST_ROW]` | Toggle, direct value |
 | `*_goal_locations` | `goal_checks[mode][]` | **List of checkbox names → u64[2] bitmask.** Client converts each location name to `(mode, clear_kind)` via checklist-mappings.csv, then sets bit `(k % 64)` in word `(k / 64)`. |
 
 Per-category gating toggles (one slot option per `APUnlockCategory`). Each KAROptions.py progression toggle (true = gated, false = ungated) maps to the matching `*_gating_enabled` field. When `0`, the mod pre-fills that category's unlock mask at connect and the AP world must not generate unlock items for it.
