@@ -1,5 +1,6 @@
 #include "game.h"
 #include "os.h"
+#include "audio.h"
 #include "scene.h"
 #include "hsd.h"
 #include "obj.h"
@@ -8,10 +9,15 @@
 #include "machine.h"
 #include "code_patch/code_patch.h"
 #include "hoshi/mod.h"
+#include "hoshi/func.h"
 
 #include "main_menu.h"
 
 static HSD_Archive *menu_archive = 0;
+static void (*title_exit_vanilla)(void *data) = 0;
+static void (*title_think_vanilla)(void) = 0;
+static float wagon_idle_floor = 0.0f;
+static int wagon_idle_floor_saved = 0;
 
 // Title file load (0x8000d2b4). Gm_LoadGameFile appends ".dat" and reads it from the
 // disc overlay.
@@ -46,8 +52,93 @@ void MainMenu_OnTitleCreate(void)
 }
 CODEPATCH_HOOKCREATE(0x8017b5d8, "", MainMenu_OnTitleCreate, "", 0)
 
+// The title demo machine is never registered in PlayerData, so it is reached through the
+// machine GObj list.
+static GOBJ *MainMenu_GetMachines(void)
+{
+    return (*stc_gobj_lookup)[GAMEPLINK_MACHINE];
+}
+
+// The Wagon Star's engine loop holds an idle volume floor of 20.0, which clamps to full
+// volume, so the demo machine hums constantly where the vanilla Warp Star is silent. The
+// two kinds share an engine_volume_coef of 0.1, so zeroing the floor makes the Wagon's
+// volume arithmetic identical to the Warp Star's. Machine_UpdateEngineLoop re-reads the
+// record every frame, and the loop is only ever created at volume 0.0 and ramped up from
+// there, so this never lets an audible frame through.
+static MachineAudioParams *MainMenu_GetWagonAudioParams(void)
+{
+    if (*stc_machineAudioParams == 0)
+        return 0;
+
+    return &(*stc_machineAudioParams)->params[0][VCKIND_WAGON];
+}
+
+// Title minor cb_ThinkPreGObjProc, wrapped around the vanilla one. vcLoadCommon runs partway
+// through the title cb_Load, so the record is only guaranteed resident once the scene is
+// running; the demo machine existing at all proves it is.
+static void MainMenu_TitleThink(void)
+{
+    if (!wagon_idle_floor_saved)
+    {
+        MachineAudioParams *params = MainMenu_GetWagonAudioParams();
+
+        if (params != 0)
+        {
+            wagon_idle_floor = params->engine_idle_floor;
+            params->engine_idle_floor = 0.0f;
+            wagon_idle_floor_saved = 1;
+        }
+    }
+
+    title_think_vanilla();
+}
+
+// Title minor cb_Exit, wrapped around the vanilla one. The record is shared game data, so it
+// goes back before any other scene reads it. Scene teardown then reclaims the demo machine as
+// raw memory without running Machine_Destroy, leaving its two silent loops holding FGM
+// instances and its tracks and emitter holding static Audio3D slots; vanilla leaks all of
+// these, and this is the last point at which the machine is still alive enough to return them.
+static void MainMenu_TitleExit(void *data)
+{
+    GOBJ *gobj = MainMenu_GetMachines();
+    MachineAudioParams *params = MainMenu_GetWagonAudioParams();
+
+    if (wagon_idle_floor_saved && params != 0)
+    {
+        params->engine_idle_floor = wagon_idle_floor;
+        wagon_idle_floor_saved = 0;
+    }
+
+    while (gobj != 0)
+    {
+        MachineData *md = gobj->userdata;
+
+        if (md != 0)
+        {
+            if (md->audio.x860 != -1)
+                FGM_Stop(md->audio.x860);
+            if (md->audio.x87c_fgm_instance != -1)
+                FGM_Stop(md->audio.x87c_fgm_instance);
+
+            Machine_FreeAudioEmitter(md);
+        }
+
+        gobj = gobj->next;
+    }
+
+    title_exit_vanilla(data);
+}
+
 void MainMenu_OnBoot(void)
 {
+    MinorSceneDesc *minor_descs = Hoshi_GetMinorScenes();
+
+    title_exit_vanilla = minor_descs[MNRKIND_TITLESCREEN].cb_Exit;
+    minor_descs[MNRKIND_TITLESCREEN].cb_Exit = MainMenu_TitleExit;
+
+    title_think_vanilla = minor_descs[MNRKIND_TITLESCREEN].cb_ThinkPreGObjProc;
+    minor_descs[MNRKIND_TITLESCREEN].cb_ThinkPreGObjProc = MainMenu_TitleThink;
+
     // The demo-player setup at 0x8000d300 picks the idle slot-0 rider's ride via three
     // `li r4` operands (RiderKind, IsBike, MachineKind). Must stay star-class
     // (is_bike=0) - the demo init uses hardcoded star-only state ids, so a wheel-class
