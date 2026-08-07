@@ -22,10 +22,8 @@ extern const TextBoxAPI *tb_api;
 #define CLEAR_KIND_NUM 120
 
 // GMMODE_NUM (3) stays "the three real game modes" and sizes the reward tables.
-// Per-checklist-mode recorded state is one row wider, with the AP tab at the
-// fixed row AP_CHECKLIST_ROW.
-#define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
-#define AP_CHECKLIST_ROW   GMMODE_NUM
+// Per-checklist-mode recorded state is one row wider (CHECKLIST_MODE_NUM), with the
+// AP tab at the fixed row AP_CHECKLIST_ROW.
 
 // Runtime checklist mode the custom_checklist framework assigned to the AP tab.
 // Always >= GMMODE_NUM but not necessarily AP_CHECKLIST_ROW - another custom tab
@@ -58,7 +56,8 @@ typedef struct APSlotOptions
     u32 death_link_enabled;                // 0 or 1 - initial deathlink menu toggle
     u32 energy_link_enabled;               // 0 or 1 - initial energylink menu toggle
     u32 trap_link_enabled;                 // 0 or 1 - initial traplink menu toggle
-    u32 reveal_checklists;                 // 0 or 1 - reveal all checklist squares
+
+    u32 reveal_checklists[CHECKLIST_MODE_NUM]; // Per checklist-mode row: 1 = every square starts revealed
 
     u32 goal[CHECKLIST_MODE_NUM];             // APGoalKind per checklist-mode row
     u32 checklist_amount[CHECKLIST_MODE_NUM]; // 1-120 - threshold for GOAL_N_CHECKLIST per row

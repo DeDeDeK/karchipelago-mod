@@ -26,7 +26,11 @@ void Checklist_AnnounceFiller(GameMode mode);
 // Apply the AP location assignment from APData.
 void ChecklistRewards_ApplyLocations(void);
 
-// Reveal and unlock all checklist squares across all modes (debug/option).
+// Reveal every checklist square on one checklist-mode row (0..GMMODE_NUM-1 for the
+// vanilla modes, AP_CHECKLIST_ROW for the AP tab). Visual only.
+void RevealChecklist(int mode);
+
+// Reveal every checklist square on every row (debug).
 void RevealAllChecklists(void);
 
 // checklist_rewards_gated off: mark every non-progression (cosmetic, no-gate-mask)

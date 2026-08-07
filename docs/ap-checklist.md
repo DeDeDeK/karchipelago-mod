@@ -104,28 +104,30 @@ will surface boxes that have no objective behind them, and cells whose only neig
 undefined stay dark until their own check fires. That resolves itself as the tab fills out
 toward 120.
 
-`APChecklist_RevealAll` is the exception: the `reveal_checklists` slot option and the debug
-menu's "Reveal All Checklists" both route through `RevealAllChecklists`, which reveals all
-120 cells of each vanilla mode and then calls into the AP tab. The AP tab reveals only the
-cells in `ap_checks[]` — the other 70 have no objective behind them, so revealing them would
-show boxes that can never be checked. It sets `is_visible` only, leaving `is_unlocked` to the
-normal completion path, and no-ops when the framework never registered the tab.
+`APChecklist_RevealAll` is the exception. Reveal is per checklist-mode row: the
+`reveal_checklists[row]` slot option asks for one row at a time, and `RevealChecklist(row)`
+opens either a vanilla mode's 120 cells or, for `AP_CHECKLIST_ROW`, the AP tab.
+`RevealAllChecklists` (the debug menu's "All Checklists") is that call over every row. The AP
+tab reveals only the cells in `ap_checks[]` — the other 70 have no objective behind them, so
+revealing them would show boxes that can never be checked. It sets `is_visible` only, leaving
+`is_unlocked` to the normal completion path, and no-ops when the framework never registered
+the tab.
 
 The AP cells are opened through the framework's `RevealAll(mode)` rather than by writing
 `is_visible` from here, because the framework latches the request per tab and re-applies it
 after its layout shuffle drops every `is_visible` bit. Reveal state is also **re-applied on
 every boot**, from `OnSaveLoaded` right after `APChecklist_Register`, gated on
-`options_received && reveal_checklists`: the option transfer runs once per save file, and the
-vanilla modes' reveal survives in the game's own clear data, but a custom tab's cells live in
-RAM and come up blank. Without the re-apply the AP tab would be revealed only during the
-session the client first connected in.
+`options_received`: the option transfer runs once per save file, and the vanilla modes'
+reveal survives in the game's own clear data, but a custom tab's cells live in RAM and come
+up blank. Without the re-apply the AP tab would be revealed only during the session the
+client first connected in.
 
 ## Wire Layout
 
 `APData` is read by the Python client *by field offset*, so its layout is a contract. Every
 per-checklist-mode array in `APData` / `APSlotOptions` / `APSave` is `CHECKLIST_MODE_NUM`
-wide (`goal`, `checklist_amount`, `goal_checks`, `sent_checks`, `client_backfill`,
-`goal_announced`), with the AP tab's entry at `AP_CHECKLIST_ROW` — a regular row, not an
+wide (`reveal_checklists`, `goal`, `checklist_amount`, `goal_checks`, `sent_checks`,
+`client_backfill`, `goal_announced`), with the AP tab's entry at `AP_CHECKLIST_ROW` — a regular row, not an
 appended tail field. The client never sees the framework-assigned mode number; it indexes
 the AP row directly, which is why the runtime mode can move freely.
 

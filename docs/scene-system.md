@@ -209,6 +209,26 @@ The active major's list is selected at major entry. At runtime the live table si
 
 The transition contract (`scene.h`): a **MinorThink** calls `Scene_ExitMinor()` to trigger the decide step; a **SceneDecide** calls either `Scene_SetNextMinor()` to enter another minor, or `Scene_SetNextMajor()` followed by `Scene_ExitMajor()` to enter another major.
 
+### Teardown Reclaims Memory Without Running Destructors
+
+`Gm_Minor()` calls `SceneChange_InitHeaps()` -> `Preload_ResetHeaps()` before the incoming minor's
+`cb_Load`. This resets the scene heaps wholesale: every GObj and every heap-allocated struct from
+the outgoing scene is reclaimed **without its destructor running**. A minor's `cb_Exit` only tears
+down what it explicitly destroys - anything it leaves behind is reclaimed as memory, but its
+teardown code never executes.
+
+The practical consequence is that heap memory is safe while **non-heap resources leak**. Anything
+an object registered in a static global array or fixed pool - audio tracks and sound generators in
+`Audio3D`, entries in the 256-slot FGM instance pool, `AudioEmitterData` slots - survives the heap
+reset because the destructor that would have released it never ran. A sound still playing is the
+case that matters most, because it stays audible into the next scene.
+
+Vanilla does very little about this. No `cb_Exit` in the table destroys a machine, and the only
+scene-exit audio hygiene anywhere is `BGM_Stop(); FGM_StopAll();`, in `Stadium_ExitMinor`
+(`0x80014d88`) and minor 17's `cb_Exit` (`0x800462b4`). So a scene that creates objects holding
+non-heap resources must release them in `cb_Exit` while the objects are still alive - the
+destructor will not run.
+
 ## Static Data & Runtime Tables
 
 | Pointer | Address | Contents |

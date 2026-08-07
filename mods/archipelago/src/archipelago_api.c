@@ -96,6 +96,11 @@ static void ApiDebugRevealAllChecklists(void)
     RevealAllChecklists();
 }
 
+static void ApiDebugRevealChecklist(int mode)
+{
+    RevealChecklist(mode);
+}
+
 static void ApiDebugSimulateLocationData(void)
 {
     ChecklistRewards_DebugSimulateLocationData();
@@ -156,6 +161,7 @@ static const ArchipelagoAPI api = {
     .DebugWriteIncomingItem       = ApiDebugWriteIncomingItem,
     .DebugTriggerDeathlinkReceive = ApiDebugTriggerDeathlinkReceive,
     .DebugTriggerTraplinkReceive  = ApiDebugTriggerTraplinkReceive,
+    .DebugRevealChecklist         = ApiDebugRevealChecklist,
 };
 
 void ArchipelagoAPI_Export(void)
