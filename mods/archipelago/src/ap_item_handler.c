@@ -351,6 +351,18 @@ int APItems_HandleItem(uint ap_item_id)
         return 0;
     if (Gm_GetIntroState() != GMINTRO_END)
         return 0;
+
+    // Copy ability ITKIND items, above the Free Run / stadium gate below. They
+    // grant through the rider API rather than the item spawn pipeline, so the
+    // missing item data tables don't apply. Copy items also bypass the ability
+    // gate - AP grants apply regardless of unlock state.
+    if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
+    {
+        CopyKind copy_kind = Ability_ItKindToCopyKind(ap_item_id - AP_ITKIND_BASE);
+        if (copy_kind != COPYKIND_NONE)
+            return Ability_GiveItem(copy_kind);
+    }
+
     // CT Free Run and stadiums don't load item data tables, so any spawn-pipeline
     // handler below would crash in Item_GetItDataPtr. Queue for a real game mode.
     if (major == MJRKIND_CITY &&
@@ -367,16 +379,13 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
-    // Direct ITKIND items (AP_ITKIND_BASE + ItemKind). Copy items bypass the
-    // ability gate - AP grants apply regardless of unlock state. "+1" stat patches
-    // apply in City Trial and Air Ride; everything else spawns a real pickup in
-    // City Trial only, where the item data tables are loaded.
+    // Direct ITKIND items (AP_ITKIND_BASE + ItemKind), minus the copy items
+    // handled above. "+1" stat patches apply in City Trial and Air Ride;
+    // everything else spawns a real pickup in City Trial only, where the item
+    // data tables are loaded.
     if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
         ItemKind it_kind = ap_item_id - AP_ITKIND_BASE;
-        CopyKind copy_kind = Ability_ItKindToCopyKind(it_kind);
-        if (copy_kind != COPYKIND_NONE)
-            return Ability_GiveItem(copy_kind);
 
         // Patch_GiveItem spawns the pickup in CT and applies directly via
         // Machine_GivePatch in AR. Top Ride has no MachineData, so defer there.

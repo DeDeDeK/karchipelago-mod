@@ -191,6 +191,8 @@ The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_ABILITY`. When the sl
 
 **Enemy spawn weight zeroing over spawn-time rejection:** Substituting `enemy_id = -1` at spawn time causes low enemy density because the spawner repeatedly selects locked enemies, gets rejected, and cycles through respawn delays. Weight zeroing preserves density because the spawner never selects locked enemies.
 
-**AP ability bypass:** `Ability_GiveItem` calls `Rider_GiveAbility` directly rather than through the hooked `Rider_CheckAndGiveAbility`. AP-granted abilities are never blocked by the gate.
+**AP ability bypass:** `Ability_GiveItem` calls `Rider_GiveAbility` directly rather than through the hooked `Rider_CheckAndGiveAbility`. AP-granted abilities are never blocked by the gate, so an ability bought with EnergyLink applies whether or not its unlock item has been received.
+
+**AP grants spawn no pickup:** the grant reaches the rider through `Rider_GiveAbility`, which only indexes the static `stc_ability_init_table` (0x804af4f0). Nothing in the path touches the per-kind item data, so `APItems_HandleItem` runs the copy-ability branch above its Free Run / stadium gate and the grants land in every 3D mode - the open city, Free Run, Air Ride and all stadiums. The trade-off is no pickup visual.
 
 **Wheel substitution over wheel suppression:** A locked wheel result becomes a random unlocked ability rather than nothing, so inhaling an enemy stays worthwhile as soon as any ability is unlocked.

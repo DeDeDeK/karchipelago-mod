@@ -260,7 +260,9 @@ Item receipt and application are decoupled. When the game reads an item from the
    - **Exception — queue full:** if `unprocessed_items` is already at capacity (`MAX_RECEIVED_ITEMS`), the game does **not** clear the mailbox and does **not** increment `item_received_count`. It leaves `incoming_item_id` set so the same item is retried each frame as the list drains. This is the protocol's backpressure: because the client gates its next write on `incoming_item_id == 0` and only advances its send cursor after a successful write, holding the value stalls the client safely. Clearing it would lose the item permanently — the client has already advanced past it and `item_received_count` was never bumped for it.
 2. **Every frame**: Scan the `unprocessed_items` list and attempt to apply the first item whose conditions are met (`APItems_HandleItem` in `ap_item_handler.c`):
    - Scene-independent items apply immediately: checkbox fillers, patch cap increase, spawn rate up, checklist rewards, permanent patches, every `*_UNLOCK_` category, the Top Ride item gives, and the cosmetic scale items. (The last two run their own scene checks and return retry until Top Ride / a Kirby model exists.)
-   - Everything else requires major `MJRKIND_CITY` / `MJRKIND_AIR` / `MJRKIND_TOP`, minor `MNRKIND_3D`, and `Gm_GetIntroState() == GMINTRO_END`. The minor check matters: the CSS shares the major, and `intro_state` reads `GMINTRO_END` outside 3D. City Trial Free Run and stadiums are excluded too — they don't load the item data tables, so the spawn pipeline would fault in `Item_GetItDataPtr`.
+   - Everything else requires major `MJRKIND_CITY` / `MJRKIND_AIR` / `MJRKIND_TOP`, minor `MNRKIND_3D`, and `Gm_GetIntroState() == GMINTRO_END`. The minor check matters: the CSS shares the major, and `intro_state` reads `GMINTRO_END` outside 3D.
+   - Copy ability gives (IDs 328-338) clear those three checks and nothing more. They grant through the rider API (`Ability_GiveItem` -> `Rider_GiveAbility`), which only indexes the static `stc_ability_init_table`, so they apply in every 3D mode including the stadiums and City Trial Free Run.
+   - The rest of the spawn-pipeline items additionally exclude City Trial Free Run and stadiums — those don't load the item data tables, so the spawn pipeline would fault in `Item_GetItDataPtr`.
    - If an item can't apply (e.g., event blocked), it is skipped and the next item is tried.
 3. **On resolution**: remove the item from `unprocessed_items` (swap-with-last). Both "applied" and "dropped" (unrecognized or out-of-range ID) remove it; only "retry" keeps it queued, so a malformed ID can't wedge the queue.
 
@@ -323,7 +325,7 @@ These IDs must match between the APWorld Python code and the game mod (defined a
 
 **Direct game items (300+, aligned to ItemKind):**
 
-AP item ID = `300 + ItemKind` value. The game spawns the item at all human players' locations via `SpawnItemHumans` (which loops human players and calls `SpawnItemPlayer`, in `externals/hoshi/include/inline.h`). For non-`*FAKE` kinds, `Machine_OnTouchItem` is invoked immediately so the pickup applies the same frame. `ITKIND_*FAKE` kinds (`ITKIND_ACCELFAKE`–`ITKIND_WEIGHTFAKE`) are left for next-frame natural collision instead — manually invoking `Machine_OnTouchItem` outside the per-frame collision pipeline would write a hit-coll log entry that the next `HitColl_Init` clears before `HitColl_ActOnCollision` runs, so the fake-patch effect would silently drop.
+AP item ID = `300 + ItemKind` value. The game spawns the item at all human players' locations via `SpawnItemHumans` (which loops human players and calls `SpawnItemPlayer`, in `externals/hoshi/include/inline.h`). For non-`*FAKE` kinds, `Machine_OnTouchItem` is invoked immediately so the pickup applies the same frame. The copy abilities (328-338) are the exception: they never spawn a pickup, granting straight to each human Kirby rider through `Ability_GiveItem` instead. `ITKIND_*FAKE` kinds (`ITKIND_ACCELFAKE`–`ITKIND_WEIGHTFAKE`) are left for next-frame natural collision instead — manually invoking `Machine_OnTouchItem` outside the per-frame collision pipeline would write a hit-coll log entry that the next `HitColl_Init` clears before `HitColl_ActOnCollision` runs, so the fake-patch effect would silently drop.
 
 | ID Range | Items |
 |----------|-------|
@@ -332,7 +334,7 @@ AP item ID = `300 + ItemKind` value. The game spawns the item at all human playe
 | 319-320  | HP, All Up |
 | 321-326  | Speed Max/Min, Offense Max, Defense Max, Charge Max/None |
 | 327      | Candy |
-| 328-338  | Copy abilities (Bomb, Fire, Freeze, Sleep, Tire, Bird, Plasma, Tornado, Sword, Spike, Mic) |
+| 328-338  | Copy abilities (Bomb, Fire, Freeze, Sleep, Tire, Bird, Plasma, Tornado, Sword, Spike, Mic) — granted via the rider API, no pickup spawned |
 | 339-350  | Food items |
 | 351      | Fireworks |
 | 352-354  | Panic Spin, Sensor Bomb, Gordo |
