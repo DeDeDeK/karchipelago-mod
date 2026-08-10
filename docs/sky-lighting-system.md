@@ -1199,13 +1199,13 @@ the world camera's gx_link 0, XLU sub-pass (`pass == 1`), at gx_pri 0.
 
 ### WeatherKind presets
 
-`WEATHER_VANILLA_NUM = 17`, `WEATHER_CUSTOM_NUM = 9`, `WEATHER_TOTAL = 26`
-(`custom_weather.h`). Custom presets occupy indices **17-25**:
+`WEATHER_VANILLA_NUM = 17`, `WEATHER_CUSTOM_NUM = 10`, `WEATHER_TOTAL = 27`
+(`custom_weather.h`). Custom presets occupy indices **17-26**:
 
 | Idx | WeatherKind | Name | base_preset | Effect layers |
 |-----|-------------|------|-------------|---------------|
 | 17 | `WEATHER_BLOOD_RAIN`   | Blood Rain   | Red Vignette (15)  | `rain` + `lightning` (+`screen_tint`) |
-| 18 | `WEATHER_STORM`        | Storm        | Dark Vignette (5)  | `lightning` + `rain` + `wind` + `clouds` (+`screen_tint`) |
+| 18 | `WEATHER_STORM`        | Storm        | Dark Vignette (5)  | `lightning` + `rain` + `wind` + `clouds` + `volcano` (plasma) (+`screen_tint`) |
 | 19 | `WEATHER_RAIN`         | Rain         | Gray Sky (13)      | `rain` + `wind` + `puddles` |
 | 20 | `WEATHER_HAILSTORM`    | Hailstorm    | Gray Sky (13)      | `rain` + `hail` + `wind` + `clouds` (+`screen_tint`) |
 | 21 | `WEATHER_SNOWSTORM`    | Snowstorm    | Dense Fog (9)      | `snow` + `wind` + `clouds` (+`fog_curve` exp2) |
@@ -1213,6 +1213,7 @@ the world camera's gx_link 0, XLU sub-pass (`pass == 1`), at gx_pri 0.
 | 23 | `WEATHER_COTTON_CANDY` | Cotton Candy | Pink Sky (8)       | `clouds` |
 | 24 | `WEATHER_TOXIC`        | Toxic        | Dark Vignette (5)  | `rain` (light) + `wind` + `puddles` (+`screen_tint`) |
 | 25 | `WEATHER_BUBBLEGUM`    | Bubblegum    | Pink Sky (8)       | `clouds` |
+| 26 | `WEATHER_VOLCANIC`     | Volcanic     | Dark Vignette (5)  | `volcano` (fire) + `snow` (ashfall) + `wind` + `clouds` (+`screen_tint`) |
 
 ### CustomPresetDef fields
 
@@ -1238,6 +1239,7 @@ base preset" for the optional fields.
 | `clouds` | CloudDef | `enabled`, `color`, `count`, `height`, `height_var`, `size`, `size_var`, `puff_var` |
 | `moon` | MoonDef | `enabled`, `color`, `size`, `phase` (`MoonPhase`), `arc_height`, `rise_bearing`, `light`, `light_color` |
 | `stars` | StarDef | `enabled`, `color`, `density`, `twinkle`, `luminosity`, `size`, `size_var`, `shoot` (`ShootFreq`) |
+| `volcano` | VolcanoDef | `enabled`, `theme` (`VolcanoTheme`), `eruptions` (per round), `duration`, `interval`, `burst`, `power`, `spread` |
 
 In every nested def, `enabled = 0` disables that layer for the preset and a 0 numeric
 field takes the owning module's default. The global **Fog Distance** menu setting is
@@ -1697,6 +1699,78 @@ Trees carry no per-preset config: they are a global menu effect gated on the win
 **Trees** menu is **Bend in Wind** (Preset / Off / On, Preset = on) and **Sway Strength**
 (Preset / Subtle / Normal / Strong).
 
+### Volcano (`volcano.c`)
+
+A preset with `volcano.enabled` (or the Volcano menu forcing it on) makes the City Trial volcano
+erupt a set number of times over the round, each eruption throwing volleys of themed copy-ability
+projectiles out of the crater on ballistic arcs. The projectiles are real
+`GAMEPLINK_PROJECTILE` actors with live hitboxes, so an eruption genuinely threatens riders,
+machines and boxes.
+
+**Scheduling against the round.** `Volcano_Tick` reads `grBoxGeneInfo.match_progress` (0 -> 1 over
+the match, held at -1 during the intro), so "3 eruptions per game" means exactly 3.
+`SeedSchedule` divides progress into `n` equal slices and rolls one start point inside each
+(`(i + 0.15 + 0.70*rand) / n`), so eruptions are spread but never land on the same beat twice.
+Changing the count mid-round re-plans from the current progress and skips entries already behind
+it, so no eruption replays. An eruption holds for `duration` frames and fires `burst` projectiles
+every `interval` frames.
+
+**Launch geometry.** The crater mouth is `(-366.19, 114.97, -575.42)`, surveyed at the rim -
+left-and-back of the map center in the `+/-1300` X/Z play box. Shots start exactly there,
+jittered by `VOLC_MOUTH_JIT` (18) in X/Z. Each goes out along a random upward cone ray: azimuth
+uniform over the circle, tilt rolled in `[VOLC_MIN_TILT_F, 1]` (0.4..1) of `VOLC_MAX_TILT`
+(70 degrees) x the preset's `spread`. Speed is `VOLC_BASE_SPEED` (5.5) x `power` x
+`1 +/- VOLC_SPEED_VAR` (0.3). Every shot also rolls a size uniformly over
+`[VOLC_SCALE_MIN, VOLC_SCALE_MAX]` (0.5 to 3.5) into `desc.velocity_scale`, which despite the name
+is a size scale - it drives the model and the hitbox together, so a big one is genuinely more
+dangerous. Size and speed are rolled independently, so a boulder is no slower than a pebble.
+Ballistic range is roughly `speed^2 / gravity` ~= 1380 units, which
+from that mouth reaches the -X and -Z map edges comfortably and blankets a wide radius around the
+volcano without covering the far corners. Speed and `VOLC_GRAVITY` are tuned as a pair: gravity
+scales with the square of the speed, so changing how fast an arc plays out leaves where shots
+land alone. Flight is around 8 seconds at the steepest tilt, hence the generous
+`VOLC_LIFETIME` (1680) backstop. `desc.up` is built as the unit vector perpendicular to the launch ray in the
+same vertical plane rather than world up, because `Projectile_Create` crosses forward with up to
+build the orientation basis and a near-vertical launch would make those parallel.
+
+**Ownerless projectiles.** Volcano shots end up with `owner_gobj` NULL, which
+`HitColl_CheckIfSamePlayer` reads as "never the same player" - so the volcano is excluded from
+nobody and threatens everyone, with no damage misattributed to a player. That constrains the
+usable kinds: both plain sword stars and plasma C/D dereference the owner inside
+`Projectile_Create` and additionally home, and all three auras re-snap to the owner's hand bone
+every frame. The themes draw from plasma A/B and the two spread shots, bomb, sensor bomb, the
+charged sword star, and the Fire ability's bullet. Bomb and sensor bomb are transitioned to
+their thrown state in the same call as the spawn, before their hand-snapping state-0 slot can
+run. Fire bullet is the one kind that cannot be created with a null owner - its `init` and
+`post_init` read rider fields through it - so `LaunchOne` lends it the first live rider it finds
+in `stc_playerdata` for the duration of `Projectile_Create` and clears `proj->owner_gobj`
+immediately after; nothing in its per-frame slots reads the owner again. It also seeds the fire
+bullet's charge scratch, because the borrowed rider is never holding a charged Fire ability and its
+`init` would otherwise cache a zero there - which the kind later turns into a zero-radius hitbox and
+a zero-scale model on impact. `proj+0x1b8` (the hitbox-radius multiplier) gets 1.0, vanilla's
+full-charge ceiling; `proj+0x1bc` gets the shot's rolled size, since the kind assigns it to
+`cur_scale` on impact and the burst would otherwise snap back to 1.0. Every launch guards on
+`((void **)0x8055a9a8)[kind] != NULL`, since that table is empty until the first rider is created
+and `Projectile_Create` does not check it.
+
+**Arcs.** Nothing in the projectile pipeline applies gravity, and prio 0 zeroes the accel vector
+every frame, so every shot gets `VolcanoGravity` installed on `proj->user_hook_0` - invoked at the
+tail of prio 0, right after the zeroing and before prio 4 integrates. It goes on every kind, not
+just the plasma and sword-star ones whose pre-physics slot is all `blr`: bomb, firecracker and
+sensor bomb only ever **add** the stage air current to accel in their flying state, so a
+hook-written value survives on them and all themes arc identically. Lifetime is overwritten to
+`VOLC_LIFETIME` (1680) on every shot because the per-kind defaults are unusable here: plasma A/B
+expire in 6-9 frames, and bomb and sensor bomb never expire at all. The Fire theme fires the Fire
+ability's bullet rather than the firecracker for the same reason - the firecracker carries its own
+fuse in kind scratch that bursts it mid-flight no matter what `lifetime` says, while fire bullet's
+state-0 `fn0` is a stub and it flies until it hits something.
+
+Per preset via `VolcanoDef`: `enabled`, `theme`, `eruptions`, `duration`, `interval`, `burst`,
+`power`, `spread`. The volcano is authored on **Volcanic** (fire, 4 eruptions) and **Storm**
+(plasma, 2). The global **Volcano** menu layers Volcano on/off, Eruptions, Duration, Intensity
+(volley size and cadence), Power, and Projectiles (theme override, including Chaos which rerolls
+per shot) over the preset.
+
 ### Event sky suppression (`event_sky.c`)
 
 A standalone toggle (not a per-preset layer and not driven from the runtime tick) that stops
@@ -1714,7 +1788,7 @@ debug preset-cycler.
 
 ### Settings menu
 
-`main.c` registers the mod settings menu ("City Trial Sky") with twelve entries.
+`main.c` registers the mod settings menu ("City Trial Sky") with thirteen entries.
 
 Every layer setting defaults to **Preset** (index 0), the pass-through value: a scaling knob
 resolves it to 1.0x (the preset's authored value shows through unchanged), and a categorical
@@ -1730,7 +1804,7 @@ instead, with Off / On as hard overrides.
 
 - **Weather Presets** (`weather_menu`, `custom_weather.c`) - a **Fog Distance** value
   (**Preset** = 1.0x, then 50-200% overrides of the global `HSD_Fog.scale` multiplier), an
-  Enable-All / Disable-All pair, then one Enabled/Disabled toggle per preset (all 26), backing
+  Enable-All / Disable-All pair, then one Enabled/Disabled toggle per preset (all 27), backing
   the `weather_enabled[WEATHER_TOTAL]` array that `CustomWeather_OverrideSky` filters its random
   pick against. The per-preset pool toggles are the user's pool selection, not layer overrides,
   so they stay plain Enabled/Disabled.
@@ -1763,6 +1837,10 @@ instead, with Off / On as hard overrides.
   **Luminosity**, **Size Variance**, **Color**, and a **Shooting Stars** submenu (**Frequency** -
   Preset / Off / Rare / Occasional / Frequent, where **Preset** resolves to the active preset's
   `stars.shoot` cadence - plus Size / Speed / Brightness / Color).
+- **Volcano** (`volcano_menu`, `volcano.c`) - **Volcano** (Preset / Off / On), **Eruptions**
+  (Preset / Off / 1 / 2 / 3 / 5 / 8 per round), **Duration**, **Intensity** (scales the volley
+  size and tightens the gap between volleys), **Power** (launch speed, and so how far shots
+  land), and **Projectiles** (Preset / Fire / Plasma / Bombs / Stars / Chaos).
 - **Event Sky Changes** (`event_sky_option`, `event_sky.c`) - On (vanilla) / Off (keep the
   weather through events).
 

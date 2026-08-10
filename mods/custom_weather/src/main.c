@@ -16,6 +16,7 @@ extern MenuDesc tree_menu;
 extern MenuDesc clouds_menu;
 extern MenuDesc moon_menu;
 extern MenuDesc stars_menu;
+extern MenuDesc volcano_menu;
 extern OptionDesc event_sky_option;
 
 static void OnBoot(void)
@@ -27,7 +28,7 @@ static void OnBoot(void)
 }
 
 static MenuDesc top_menu = {
-    .option_num = 12,
+    .option_num = 13,
     .options = {
         &(OptionDesc){
             .name = "Weather Presets",
@@ -94,6 +95,12 @@ static MenuDesc top_menu = {
             .description = "Starfield density, twinkle, luminosity, size variance, and tint for City Trial presets",
             .kind = OPTKIND_MENU,
             .menu_ptr = &stars_menu,
+        },
+        &(OptionDesc){
+            .name = "Volcano",
+            .description = "How often the City Trial volcano erupts, how long it lasts, and what it flings",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &volcano_menu,
         },
         &event_sky_option,
     },

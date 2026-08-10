@@ -45,7 +45,7 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
     ProjectileDesc desc;
     memset(&desc, 0, sizeof(desc));
     desc.kind = kind;
-    desc.owner_unk1 = owner;
+    desc.owner_gobj = (void *)owner;
     desc.owner_unk2 = owner;
     desc.owner_byte = 0;
     desc.position = throw_pos;

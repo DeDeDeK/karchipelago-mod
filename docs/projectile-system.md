@@ -221,9 +221,9 @@ used by other actor types.
 
 | Prio | Addr | Name | What it does |
 |-----:|------|------|--------------|
-| 0 | `0x8021f9b4` | `Projectile_Proc0_FrameStart` | `proj+0x110++` (frame counter), zero accel, `HurtData_ResetFrame`, tick the `proj+0x134` intang timer, call the `proj+0x160` user hook. |
+| 0 | `0x8021f9b4` | `Projectile_Proc0_FrameStart` | `proj+0x110++` (frame counter), zero accel (via `0x80220350`), `HurtData_ResetFrame`, tick the `proj+0x134` intang timer, call the `proj+0x160` user hook. The hook runs **after** the accel zeroing and before prio 4 integrates, which is what makes it the place to write a custom accel. |
 | 1 | `0x8021fa18` | `Projectile_Proc1_RunStateFn0` | `HurtData_UpdatePerFrame`, call `state_fn0` at `proj+0x150`, then tick `proj+0x10c` lifetime and despawn at zero. |
-| 4 | `0x8021faa4` | `Projectile_Proc4_Physics` | Call `state_fn1` at `proj+0x154`; integrate `vel += accel`, `pos += vel`, `pos_prev += vel`. |
+| 4 | `0x8021faa4` | `Projectile_Proc4_Physics` | Call `state_fn1` at `proj+0x154`; integrate `vel += accel` then `pos += vel`. It does **not** touch `pos_prev` - prio 21 does that. |
 | 5 | `0x8021fb44` | `Projectile_Proc5_RunStateFn2` | Clear the env-coll flag, call `state_fn2` at `proj+0x158`. |
 | 6 | `0x8021fb88` | `Projectile_Proc6_RunStateFn3` | Call `state_fn3` at `proj+0x15c`, then `0x80220310` (mpColl pos sync), then a per-kind sub-cleanup. |
 | 7 | `0x8021fbec` | `Projectile_Proc7_PostState` | Call the `proj+0x164` user hook. If `pos.y < floor_threshold`, `GObj_Destroy`; else update HurtData radius/position from `proj+0x74`/`0x78`. |
@@ -268,19 +268,28 @@ Victims also scan the projectile global list:
 | `Machine_CheckProjectileCollision` | `0x801d7118` |
 | `Box_CheckProjectileCollision` | `0x80252334` |
 
-Each reads `Projectile_GetOwnerGObj(proj) = *(projGObj+0x2c+0x08)` (3-instruction accessor at
-`0x8022312c`) for owner exclusion: if `proj->owner_gobj == victim_gobj`, skip the hit unless bit 0
-of `proj+0x1b4` (the inbound "allow self-hit" flag, default off) is set.
+The rider and machine scans read `Projectile_GetOwnerGObj(proj) = *(projGObj+0x2c+0x08)`
+(3-instruction accessor at `0x8022312c`) for owner exclusion: if `proj->owner_gobj == victim_gobj`,
+skip the hit unless bit 0 of `proj+0x1b4` (the inbound "allow self-hit" flag, default off) is set.
+The owner pointer is only ever **compared**, never dereferenced, on these paths. The box scan does
+no owner check at all.
 
 A fourth reader, the enemy-side inbound check at `0x802020d4`, fetches a projectile's HurtData via
 the accessor at `0x80223120` (`gobj->userdata` then `+0x108`).
 
 ### Damage values
 
-Per-region params (damage, knockback, radius) live in the projectile's HurtData, populated at init
-from `kind_data+0x10` (the `hurt_region_spec`: `+0x00` is the region-descriptor array base, `+0x04`
-the region count). Regions are built by `HurtData_Create` (`0x8018c1c8`) plus `HurtData_InitRegion`
-(`0x8018c598`) at a 0x18-byte stride.
+`Projectile_InitHurtData` (`0x80221440`) calls `HurtData_Create(gobj, 5, 2, count, 0)`. The `2` is
+hardcoded, so **every projectile gets exactly two attack regions** (at `hurt+0x0c`, 200-byte stride,
+count at `hurt+0x08`) - that pair is what `HitColl_SetDamageLog` iterates. Their damage is driven by
+the current state's animation spec (`proj+0x38 = kind_data[+0x0c] + state_id*16`), so a projectile
+put into its real flying state with valid `kind_data` deals vanilla damage with no extra setup.
+
+`kind_data+0x10` supplies only the *vulnerable*-region list (`hurt+0x14`, 0x44-byte stride) and is
+NULL for every kind except `FIRE_BULLET` and `SENSORBOMB`.
+
+`HurtData_Create` also stores the **projectile's own GObj** as the attacker identity at `hurt+0x04`
+(`stw r25,4(r3)`), not the owner - which is why an ownerless projectile still logs damage normally.
 
 Explosion-class projectiles cache a handful of scalars at `proj+0x1d0..0x1ec` on the EXPLODING ->
 FADE transition, but those come from **per-projectile** blocks, not `kind_data`: `proj+0x1e4`/`0x1e0`
@@ -302,8 +311,16 @@ different bytes of `ProjectileData`:
 
 | Scan side | Flag bit | Used by | Set by vanilla? |
 |-----------|----------|---------|-----------------|
-| Inbound (rider/machine/box walks the projectile list) | `proj+0x1b4` bit 0 | `Rider_CheckProjectileHit` / `Machine_CheckProjectileCollision` / `Box_CheckProjectileCollision` | Sensor bomb's `post_init` (`0x80228d8c`) sets it. Bomb and gordo do not. |
-| Outbound (`Projectile_CheckRiderCollision` walks the rider list) | `proj+0x1b5` bit 4 | `0x802215a4` | Never set at create time on bomb / sensor bomb / gordo - vanilla throws target *other* players, so the default exclusion is what they want. |
+| Inbound (rider/machine walks the projectile list) | `proj+0x1b4` bit 0 (`0x01`) | `Rider_CheckProjectileHit` / `Machine_CheckProjectileCollision` | Sensor bomb's `post_init` (`0x80228d8c`) sets it. Bomb and gordo do not. |
+| Outbound (`Projectile_CheckRiderCollision` walks the rider list) | `proj+0x1b5` bit 5 (`0x20`) | `0x802215a4`, `0x80221660` | Never set at create time on bomb / sensor bomb / gordo - vanilla throws target *other* players, so the default exclusion is what they want. |
+
+The outbound mask is **`0x20`, not `0x10`**: the test at `0x802215e8` is `rlwinm. r0,r0,27,31,31`,
+rotating bit 5 down to the LSB, and `Projectile_Reset` clears the same bit with
+`rlwimi r0,r3,5,26,26`. A second exclusion at `0x80221620` uses bit 3 (`0x08`).
+
+`Box_CheckProjectileCollision` (`0x80252334`) does **no owner check at all** - it goes straight from
+`Projectile_GetHurtData` (`0x80223120`) to `HitColl_CheckCollision`, so boxes are hit by any
+projectile regardless of these flags.
 
 **A projectile that must damage its own owner-player has to set both.** Custom-spawned trap
 projectiles, where `owner_gobj` is the trapped player, are the canonical case:
@@ -548,7 +565,7 @@ when one is present (`owner = *(int *)rg->userdata`, i.e. `rd->x0`) and defaults
 ```c
 ProjectileDesc desc = {0};
 desc.kind = PROJKIND_BOMB;       // or SENSORBOMB / any kind whose state 1 is "flying"
-desc.owner_unk1 = owner;         // rd->x0 if a rider GObj exists, else 0; required
+desc.owner_gobj = owner;         // the rider GObj (rd->x0), else NULL; required
 desc.owner_unk2 = owner;         // for kinds whose state code reads owner_gobj (gordo)
 desc.position   = md_pos + md_forward * distance;   // somewhere out front
 
@@ -630,14 +647,94 @@ The outer GObj is always `r3` at `Projectile_Create`'s return; the inner `Projec
 `*(gobj+0x2c)`. Use `Projectile_GetOwnerGObj` (`0x8022312c`) when you only have a proj and need the
 owner.
 
-## Known Limitations
+## Ownerless Spawns
 
-**Contents of `kind_data+0x14..0x30`.** The structural fields of the per-kind data table are mapped
-(`ProjKindData` in `projectile.h`): `+0x00 state_table`, `+0x04 NULL`, `+0x08 model descriptor`
-(word0 feeds `HSD_JObjLoadJoint`; NULL falls back to a global default model), `+0x0c
-state_anim_spec_array`, `+0x10 hurt_region_spec`. Whether anything lives at `+0x14..0x30` is unknown.
-No bomb state function dereferences `kind_data` at all - its damage comes from the HurtData built at
-create (from `+0x10`) and its fade params from the per-projectile `proj+0x104` block - so
-`+0x14..0x30` may simply be unused by the kinds covered so far. Pinning it down needs a mid-stage
-runtime dump, since the per-stage loader writes the `0x8055a9a8` table from data rather than code and
-the values only exist while a stage is loaded.
+A projectile spawned by the world rather than by a player - a stage hazard, a volcano - wants
+`desc.owner_gobj = NULL, desc.owner_unk2 = 0`, leaving `proj->owner_gobj` NULL. That is safe for the
+**shared pipeline** and is in fact the cleanest way to make a projectile threaten everybody:
+`HitColl_CheckIfSamePlayer` (`0x8000b024`) NULL-checks `r3` before its first dereference and returns
+0, so a NULL owner reads as "never the same player" and no victim is ever excluded. The inbound
+scans only compare the pointer, and `HitColl_SetDamageLog` / `Projectile_Proc10_HitReact` never
+touch it.
+
+It is **not** safe per *kind*. The rider accessors `Rider_GetHandPos` (`0x80191ffc`),
+`Rider_GetUp` (`0x80191f18`) and `Rider_GetForward` (`0x80191ef8`) all open with an unguarded
+`lwz r5,0x2c(r3)`, so any kind whose `init` / `post_init` / state callbacks route the owner into one
+of them takes a DSI on a NULL owner.
+
+| Kind | Ownerless? | Why |
+|------|-----------|-----|
+| 7/8 `PLASMA_SPREAD_MID`/`_SIDE` | **Yes** | Single state; `fn0`/`fn1`/`fn3` are all `blr`. Best default. |
+| 5/6 `PLASMA_A`/`_B` | **Yes** | Same, but lifetime is only 6 / 9 frames - override it. |
+| 11 `SWORD_STAR_CHARGED` | **Yes** | `init` is a bare `blr`; `post_init` overwrites velocity with `forward * 3.465`. |
+| 14 `FIRECRACKER` | **Yes** | `post_init` copies `desc.velocity` verbatim. Detonates on any surface, and self-destructs on a fuse - see Lifetime. |
+| 4 `BOMB`, 15 `SENSORBOMB` | **Yes, if transitioned immediately** | Create is clean, but state 0's `fn3` hand-snaps, so `Projectile_SetState(proj, 1, ...)` must happen before any proc runs. |
+| 2 `FIRE_BULLET` | **Yes, with a borrowed owner** | `init` (`0x80224cc8`) and `post_init` (`0x80224d4c`) read rider fields through the owner *during* `Projectile_Create`, so `desc.owner_gobj` must be a live rider GObj for that call. Nothing afterwards touches it - `fn0`/`fn3` are `blr`, `fn1` only adds the down vector, `fn2` only tests env collision - so setting `proj->owner_gobj = NULL` right after create restores full ownerless behaviour. `post_init` copies `desc.velocity` verbatim into `proj+0x94`. **Also seed the charge scratch** - see below. |
+| 0/1 `SWORD_STAR_A`/`_B`, 9 `PLASMA_C`, 10 `PLASMA_D` | No | Same crash in `init`; and their `fn1` homing helper (`0x80223298`) rewrites `proj->velocity` every frame, so they cannot hold a ballistic arc even with a real owner. |
+| 3 `FIRE_AURA`, 12 `SPIKE_AURA`, 13 `ICE_AURA` | No | Every state's `fn3` re-snaps position to the owner's hand bone each frame. ICE_AURA state 1's `fn3` (`0x8022868c`) is byte-identical to the bomb's hand-snap. **The auras cannot fly at all** - there is no thrown ice kind in the game. |
+| 16 `GORDO` | No | `Gordo_EnterThrownState` reads the owner's rider fields for the throw basis. |
+
+### Gravity
+
+Nothing in the pipeline applies gravity. `proj+0x7c..0x84` (accel) is zeroed every frame by prio 0
+and integrated into velocity by prio 4, so a one-shot accel write never survives. To arc a
+projectile, write the accel from a per-frame hook:
+
+```c
+static void Gravity(void *p) { ((ProjectileData *)p)->accel.Y = -0.35f; }
+...
+proj->user_hook_0 = Gravity;   // set AFTER any Projectile_SetState - it clears 0x160..0x178
+```
+
+`user_hook_0` is invoked at the tail of prio 0, immediately after the zeroing and before prio 4
+integrates. The flying-state `fn1` of `BOMB` / `FIRECRACKER` / `SENSORBOMB` / `FIRE_BULLET` samples
+a stage air current (`0x800ceb18`) and **adds** it to accel, so it never clobbers a hook-written
+value; the plasma and sword-star kinds have an all-`blr` `fn1` and are pure ballistic hosts.
+
+### Lifetime
+
+`proj->lifetime` is seeded automatically - `Projectile_Reset` copies `proj+0x100` (from
+`kind_data` `params[3]`) into `proj+0x10c`. Prio 1 treats **0 as infinite**. Defaults by kind:
+
+| Kind | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 |
+|------|--|--|--|--|--|--|--|--|--|--|--|--|--|--|--|--|--|
+| frames | 240 | 480 | 120 | 0 | 0 | 6 | 9 | 120 | 120 | 200 | 360 | 90 | 0 | 0 | 240 | 0 | 540 |
+
+Plasma A/B's 6-9 frames are far too short for a long flight, and bomb / sensor bomb never expire on
+their own. Overwrite `proj->lifetime` after create (and after any `SetState`); it is a plain frame
+counter with no other consumer.
+
+### Owner-derived scratch
+
+A kind's `init` may cache values read off the owner and consume them much later, so a projectile
+can spawn and fly correctly and only misbehave on impact. `FIRE_BULLET` is the case that matters:
+`FireBullet_Init` (`0x80224cc8`) writes the owner's Fire-ability charge into kind scratch as
+`proj+0x1b8 = charge / max` and `proj+0x1bc = charge`. On environment collision,
+`FireBullet_ApplyChargeScale` (`0x80224ef8`) assigns `proj+0x1bc` to `cur_scale` (`proj+0x74`) and
+multiplies every HurtData region's radius (`region+0x24`, `0xC8` stride) by `proj+0x1b8` and by
+`render_state` word0.
+
+An owner who is not holding a charged Fire ability has `rd+0xa0c == 0`, so both land at zero and
+the impact burst gets a zero-radius hitbox and a zero-scale model. The model's matrix scale
+collapses to 0, which makes the effect system print
+`Warning: effect request scale is zero. (kind=240006)` - the scale is read out of the parent JObj's
+matrix at `+0x44` by `0x8023d0b8`, not from its `scale` field, and is clamped to an epsilon.
+A custom spawner must seed both words itself (`1.0` = full charge) after `Projectile_Create`.
+
+### Lifetime is not the only self-destruct
+
+`proj->lifetime` is **not the only way a projectile ends itself**. `FIRECRACKER` carries an
+independent fuse: its state-0 `fn0` (`0x8022888c`) counts down the two-word pair at `proj+0x1b8` /
+`proj+0x1bc` in kind scratch, and bursts via `0x80228b3c` when both reach zero - regardless of what
+`lifetime` holds. A kind whose state `fn0` is a `blr` (`FIRE_BULLET`, plasma, sword star) has no
+such timer and honours `lifetime` alone.
+
+### Kind-data availability
+
+`0x8055a9a8` is filled **all at once by rider creation**, not per stage and not per copy ability.
+`Rider_Create` (`0x8018e37c`) hands `rdData->rdDataKirby+0x20` - a `(count, entries[])` list that
+`Rider_LoadMotionFile` (`0x801a5a8c`) copies out of `RdKirbyAbility.dat` - to
+`Projectile_RegisterKindDataList` (`0x802201e0`). That list covers all 17 kinds, so every kind is
+spawnable once any rider exists. `Projectile_ClearKindDataTable` (`0x8022011c`) zeroes the table at
+system init, and `Projectile_Create` dereferences the slot unguarded (`0x8021f5c4`), so custom
+spawners must check `((void **)0x8055a9a8)[kind] != NULL`.

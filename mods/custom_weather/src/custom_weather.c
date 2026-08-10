@@ -79,6 +79,11 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .puff_var = 0.9f,
           .height_var = 120.0f,
       },
+      .volcano = {
+          .enabled = 1,
+          .theme = VOLC_THEME_PLASMA,
+          .eruptions = 2,
+      },
     },
     // Rain
     { .base_preset = WEATHER_GRAY_SKY,
@@ -289,6 +294,52 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .size_var = 0.4f,
       },
     },
+    // Volcanic
+    { .base_preset = WEATHER_DARK_VIGNETTE,
+      .fog_color = RGBA(58, 30, 22, 255),
+      .fog_start = 120.0f,
+      .fog_end = 620.0f,
+      .sky_color = RGBA(74, 34, 24, 195),
+      .terrain_diffuse = RGBA(120, 78, 58, 255),
+      .terrain_specular = RGBA(150, 80, 45, 255),
+      .char_diffuse = RGBA(210, 140, 95, 255),
+      .char_specular = RGBA(240, 130, 70, 255),
+      .char_dir = { -0.25f, 0.75f, 0.45f },
+      .char_dir_lit = 1,
+      .char_ambient = RGBA(80, 45, 35, 255),
+      .char_ambient_specular = RGBA(70, 38, 28, 255),
+      .screen_tint = RGBA(30, 8, 2, 70),
+      // Ashfall, drawn by the snow layer in soot grey.
+      .snow = {
+          .enabled = 1,
+          .color = RGBA(96, 86, 80, 190),
+          .density = 500,
+          .fall_speed = 2.2f,
+          .flutter = 1.4f,
+          .size = 3.5f,
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 3.5f,
+          .heading = 120.0f,
+          .gustiness = 0.4f,
+          .chaos = 0.35f,
+      },
+      .clouds = {
+          .enabled = 1,
+          .color = RGBA(64, 44, 38, 215),
+          .count = 14,
+          .size = 72.0f,
+          .size_var = 0.45f,
+          .puff_var = 0.85f,
+          .height_var = 110.0f,
+      },
+      .volcano = {
+          .enabled = 1,
+          .theme = VOLC_THEME_FIRE,
+          .eruptions = 4,
+      },
+    },
 };
 
 const CustomPresetDef *CustomWeather_GetPresetDef(int weather_kind)
@@ -304,7 +355,7 @@ static const char *preset_names[WEATHER_TOTAL] = {
     "Foggy", "Dusk", "Night", "Gray Sky", "Dark Purple",
     "Red Vignette", "Dark Low Vis",
     "Blood Rain", "Storm", "Rain", "Hailstorm", "Snowstorm",
-    "Moonlight", "Cotton Candy", "Toxic", "Bubblegum",
+    "Moonlight", "Cotton Candy", "Toxic", "Bubblegum", "Volcanic",
 };
 
 const char *CustomWeather_GetPresetName(int weather_kind)
@@ -321,7 +372,7 @@ static SkyPresetEntry extended_presets[WEATHER_TOTAL];
 static int weather_enabled[WEATHER_TOTAL] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1,
 };
 _Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_TOTAL,
                "weather_enabled init must match WEATHER_TOTAL");
@@ -507,5 +558,6 @@ MenuDesc weather_menu = {
         WEATHER_TOGGLE(WEATHER_COTTON_CANDY,   "Cotton Candy"),
         WEATHER_TOGGLE(WEATHER_TOXIC,          "Toxic"),
         WEATHER_TOGGLE(WEATHER_BUBBLEGUM,      "Bubblegum"),
+        WEATHER_TOGGLE(WEATHER_VOLCANIC,       "Volcanic"),
     },
 };
