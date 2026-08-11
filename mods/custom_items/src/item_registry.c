@@ -96,14 +96,13 @@ static int ResolveBaseKind(int kind)
     return ITKIND_ACCEL;
 }
 
-// Rewrite the instance kind at ItemData+0x1c to the base kind, keeping the
-// state-class table (0x804b6088) and threshold table (0x804b5f18), both indexed
-// by this field, in bounds.
-static void ClampInstanceKind(void *item_data)
+// Rewrite the instance kind to the base kind, keeping the state-class table
+// (0x804b6088) and threshold table (0x804b5f18), both indexed by this field, in
+// bounds.
+static void ClampInstanceKind(ItemData *item_data)
 {
-    int *kindp = (int *)((u8 *)item_data + 0x1c);
-    if (*kindp >= ITKIND_NUM)
-        *kindp = ResolveBaseKind(*kindp);
+    if (item_data->kind >= ITKIND_NUM)
+        item_data->kind = ResolveBaseKind(item_data->kind);
 }
 
 // Append (kind, weight) to one box pool's parallel arrays, or update the weight

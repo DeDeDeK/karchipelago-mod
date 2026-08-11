@@ -115,7 +115,7 @@ The four **ability-themed** items — Fire (11), Freeze Fan (9), Bomb (13), Walk
 | Bomb | 13 | `TopRide_KirbyItemBombSetter` (0x80303a98) | `0x804db088` |
 | Walky | 16 | `TopRide_KirbyItemWalkySetter` (0x8030668c) | `0x804dc150` |
 
-So a held ability power is detected by comparing `*(void**)kirby->state_handler` against these vtables (`TopRide_KirbyHasStateVtable`). `active_item_kind` is *not* reset on natural expiry, so it is not a reliable "currently active" indicator — use the state vtable.
+So a held ability power is detected by comparing `TopRide_KirbyStateVtable(kirby)` against these vtables. `active_item_kind` is *not* reset on natural expiry, so it is not a reliable "currently active" indicator — use the state vtable.
 
 **Reverting (drop):** `TopRide_KirbyNormalMethod` (`0x802da0f4`, Kirby `vtable[50]` / +0xC8, wrapped as `TopRide_KirbyNormal`) exits the current state via its `vt[2]` teardown — removing the power's aura/model/effects — then installs `KirbyNormal`. This is the engine's own revert when one power replaces another or a power times out. The AP "drop ability" control (`drop_ability.c`, gated by `ap_menu_settings.drop_ability_enabled`) reuses it: on the owning player's Z-press it calls `TopRide_KirbyNormal` and clears `active_item_kind`.
 

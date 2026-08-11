@@ -135,7 +135,7 @@ static void KirbyScale_TopRidePerFrame(GOBJ *g)
             continue;
         if (TopRide_GetPlayerKind(kirby->player_slot) != TR_PKIND_HMN)
             continue;
-        *TopRide_KirbyModelScalePtr(kirby) = s;
+        kirby->charge.model_scale = s;
     }
 }
 

@@ -159,7 +159,7 @@ int GateStadiums_UnlockStadium(StadiumKind kind, int announce)
     ap_save->stadium_unlocked_mask |= (1 << kind);
     // Gm_StadiumCheckNewLabel is not replaced, so the checklist UI still reads the
     // vanilla "NEW" bitfield for the badge.
-    Gm_StadiumSetNewLabelDirect(kind);
+    *stc_stadium_new_label |= (1 << kind);
     OSReport("[GateStadiums] Stadium %d (%s) unlocked (mask = %s)\n",
              kind, StadiumKind_Names[kind], MaskBits(ap_save->stadium_unlocked_mask, STKIND_NUM));
     if (announce)

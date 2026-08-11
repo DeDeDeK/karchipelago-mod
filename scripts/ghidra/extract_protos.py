@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Extract documented function prototypes from the hoshi headers.
 
-A "documented" prototype is a single-line C prototype that ends in `);`
-immediately followed by a `// 0xADDR` comment, e.g.
+A "documented" prototype is a C prototype that ends in `);` immediately followed
+by a `// 0xADDR` comment, e.g.
 
     void Rider_StartInhale(RiderData *rd); // 0x801ad2c4, force action-state ...
+
+The parameter list may wrap across lines; the return type and name must share a
+line with the opening paren.
 
 Those address comments are the authoritative map from a hoshi function name +
 signature to its runtime address, so they can be applied verbatim to the Ghidra
@@ -18,9 +21,11 @@ import os
 import re
 import sys
 
-# RET ... NAME ( PARAMS ) ; // 0xADDR
+# RET ... NAME ( PARAMS ) ; // 0xADDR - PARAMS may span lines.
 PROTO_RE = re.compile(
-    r'^\s*(?P<sig>[A-Za-z_].*?\b(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\))\s*;\s*//\s*(?P<addr>0x[0-9a-fA-F]{6,8})'
+    r'^[ \t]*(?P<sig>[A-Za-z_][^;{}\n]*?\b(?P<name>[A-Za-z_]\w*)[ \t]*'
+    r'\((?P<params>[^;{}]*?)\))[ \t]*;[ \t]*//[ \t]*(?P<addr>0x[0-9a-fA-F]{6,8})',
+    re.MULTILINE,
 )
 
 _NON_FUNC = {'if', 'while', 'for', 'switch', 'sizeof', 'return', 'else'}
@@ -37,20 +42,21 @@ def extract(root):
                 continue
             path = os.path.join(dirpath, fn)
             with open(path, errors='replace') as f:
-                for lineno, line in enumerate(f, 1):
-                    m = PROTO_RE.match(line)
-                    if not m:
-                        continue
-                    name = m.group('name')
-                    if name in _NON_FUNC:
-                        continue
-                    addr = m.group('addr').lower()
-                    if addr in seen:
-                        continue
-                    seen.add(addr)
-                    sig = ' '.join(m.group('sig').split())
-                    loc = f'{os.path.relpath(path, root)}:{lineno}'
-                    rows.append((addr, name, sig, loc))
+                text = f.read()
+            for m in PROTO_RE.finditer(text):
+                name = m.group('name')
+                if name in _NON_FUNC:
+                    continue
+                if '//' in m.group('params'):
+                    continue  # a comment inside the params means we over-matched
+                addr = m.group('addr').lower()
+                if addr in seen:
+                    continue
+                seen.add(addr)
+                sig = ' '.join(m.group('sig').split())
+                lineno = text.count('\n', 0, m.start()) + 1
+                loc = f'{os.path.relpath(path, root)}:{lineno}'
+                rows.append((addr, name, sig, loc))
     return rows
 
 

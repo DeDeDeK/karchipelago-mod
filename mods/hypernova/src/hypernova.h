@@ -53,10 +53,9 @@
 #define HYPERNOVA_INHALE_LOOP       0x30
 #define HYPERNOVA_INHALE_END        0x31
 
-// Inhale LOOP self-terminate countdown (RiderData+0x93C), topped up each frame to keep the suck
-// alive; HOLD must be >= 2. It aliases copy_wheel_result, so the suck is ended explicitly via
-// Rider_EndInhale rather than by letting this lapse.
-#define HYPERNOVA_INHALE_TIMER_OFF  0x93C
+// Value RiderData.inhale_timer is topped up to each frame to keep the suck alive; must be >= 2.
+// It aliases copy_wheel_result, so the suck is ended explicitly via Rider_EndInhale rather than
+// by letting this lapse.
 #define HYPERNOVA_INHALE_TIMER_HOLD 8
 
 // Rainbow body overlay: candy ColAnim 3 driven through the ColAnim slot at RiderData+0x5c.

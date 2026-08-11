@@ -80,7 +80,7 @@ static void DropAbility_TopRidePerFrame(GOBJ *g)
         if (TopRide_GetPlayerKind(k->player_slot) != TR_PKIND_HMN)
             continue;
 
-        const char *power = DropAbility_TopRidePowerName(*(void **)k->state_handler);
+        const char *power = DropAbility_TopRidePowerName(TopRide_KirbyStateVtable(k));
         if (!power)
             continue;
 

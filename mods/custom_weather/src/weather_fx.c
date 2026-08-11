@@ -2,12 +2,26 @@
 #include "hsd.h"
 #include "obj.h"
 #include "gx.h"
+#include "game.h"
 
 #include "weather_fx.h"
 
 float Weather_Randf2(void)
 {
     return HSD_Randf() * 2.0f - 1.0f;
+}
+
+float Weather_RoundProgress(void)
+{
+    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
+    if (!info)
+        return -1.0f;
+    if (info->flags_x2a8 & 0x40) // is_match_intro
+        return -1.0f;
+    float p = info->match_progress;
+    if (p < 0.0f) p = 0.0f;
+    if (p > 1.0f) p = 1.0f;
+    return p;
 }
 
 void WeatherGX_BeginXlu(COBJ *cam, int additive, int line_width)

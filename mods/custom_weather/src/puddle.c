@@ -151,7 +151,7 @@ static int PickSpot(Puddle *p)
         Vec3 start = {x, top_y, z};
         Vec3 end = {x, bot_y, z};
         Vec3 hit;
-        int tri = EnvColl_Raycast(&start, &end, &hit);
+        int tri = Raycast_Ground(&start, &end, &hit);
         if (tri < 0)
             continue; // no ground below this XZ (void / off the plaza)
 

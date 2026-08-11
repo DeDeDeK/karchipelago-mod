@@ -37,8 +37,8 @@ static HSD_Archive *s_grmachine2_archive = NULL;
 
 static int ReadCount(void)
 {
-    int *p = Yaku_GetCountPtr();
-    return p ? *p : -1;
+    GrObj *gr = *stc_grobj;
+    return gr ? gr->yaku_num : -1;
 }
 
 // Dump annotation: game code/data range, HSD heap range, or small-float shape.
