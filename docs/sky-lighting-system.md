@@ -1199,8 +1199,8 @@ the world camera's gx_link 0, XLU sub-pass (`pass == 1`), at gx_pri 0.
 
 ### WeatherKind presets
 
-`WEATHER_VANILLA_NUM = 17`, `WEATHER_CUSTOM_NUM = 10`, `WEATHER_TOTAL = 27`
-(`custom_weather.h`). Custom presets occupy indices **17-26**:
+`WEATHER_VANILLA_NUM = 17`, `WEATHER_CUSTOM_NUM = 11`, `WEATHER_TOTAL = 28`
+(`custom_weather.h`). Custom presets occupy indices **17-27**:
 
 | Idx | WeatherKind | Name | base_preset | Effect layers |
 |-----|-------------|------|-------------|---------------|
@@ -1214,6 +1214,7 @@ the world camera's gx_link 0, XLU sub-pass (`pass == 1`), at gx_pri 0.
 | 24 | `WEATHER_TOXIC`        | Toxic        | Dark Vignette (5)  | `rain` (light) + `wind` + `puddles` (+`screen_tint`) |
 | 25 | `WEATHER_BUBBLEGUM`    | Bubblegum    | Pink Sky (8)       | `clouds` |
 | 26 | `WEATHER_VOLCANIC`     | Volcanic     | Dark Vignette (5)  | `volcano` (fire) + `snow` (ashfall) + `wind` + `clouds` (+`screen_tint`) |
+| 27 | `WEATHER_TORNADO`      | Tornado      | Gray Sky (13)      | `tornado` + `rain` + `lightning` + strong `wind` + low `clouds` (+`screen_tint`); a green supercell sky |
 
 ### CustomPresetDef fields
 
@@ -1371,8 +1372,8 @@ they apply on the next preset change / CT re-entry), Flutter and Wind Slant are 
 A single global horizontal vector that several systems read each frame so they all blow the
 same way: `rain.c`/`snow.c`/`hail.c` slant their streaks/flakes/stones to it, `clouds.c`
 drifts with it, `tree.c` leans to it, airborne City Trial items are nudged sideways
-(`Wind_ApplyToItems`, items whose grounded bit 0x10 is clear), and gliding machines are
-pushed (`Wind_ApplyToMachines`, airborne machines only, scaled by their glide stat). The
+(`Wind_ApplyToItems`), and gliding machines are pushed (`Wind_ApplyToMachines`, airborne
+machines only, scaled by their glide stat). The
 vector is not static - its speed pulses (gustiness) and its heading wanders (chaos), each a
 smoothed random walk around the preset's base: a fresh target is rolled every period
 (`WIND_GUST_PERIOD` 40 / `WIND_HEAD_PERIOD` 90 frames) and eased toward each frame
@@ -1387,6 +1388,19 @@ item's velocity per frame, `WIND_MACHINE_FACTOR` 0.012 at full glide with a
 installs no hook; it exposes `Wind_GetVector` for the other layers. The global **Wind** menu
 layers a strength multiplier, a **Randomize Direction** toggle (rolls the base heading per
 activation), and per-consumer **Affect Machines** / **Affect Items** gates.
+
+The vector is computed every frame, but the two physics pushes are held until the round
+timer starts (`Weather_RoundProgress()` is negative through the intro): riders are still
+boarding then and read as airborne, so a push would shove them off the start line, and the
+opening item drop would be blown across the city before play begins. Precipitation slant,
+cloud drift and tree lean run throughout, so the weather still looks alive during the
+countdown.
+
+An item counts as airborne when `ItemData.is_airborne != 0` - the engine writes 0 at every
+land transition and 1 (or -1, meaning airborne with the ground raycast suppressed) whenever
+the item leaves a surface. The `x35a` bit 0x10 is not usable for this: it latches the first
+time the envcoll raycast finds ground beneath the item, which on a sky drop happens on its
+first frame hundreds of units up, and it is never cleared afterwards.
 
 ### Hail (`hail.c`)
 
@@ -1771,6 +1785,145 @@ Per preset via `VolcanoDef`: `enabled`, `theme`, `eruptions`, `duration`, `inter
 (volley size and cadence), Power, and Projectiles (theme override, including Chaos which rerolls
 per shot) over the preset.
 
+### Tornado (`tornado.c`)
+
+A funnel that wanders City Trial on a random path, drawing loose items, breakable props and parked
+machines into an orbit around its core, dragging at riders who stray inside, and shaking the camera
+of anyone nearby. Appearances are spread across the round by the match timer, the same way volcano
+eruptions are.
+
+**Two entry points, deliberately.** `Tornado_Tick` runs from the weather runtime (inside the stage
+think, GObj proc priority 1) and decides *where the funnel is*: schedule, touchdown, wander, model
+placement and target claiming. `Tornado_OnFrameEnd` runs from the mod's `ModDesc.OnFrameEnd` hook and
+decides *what the funnel does to the world*: the orbit's position writes, the rider push and the
+camera shake. The split is forced - item physics (`CityItem_PhysicsThink`, priority 4), the item
+ground snap (priority 5), `Machine_PhysicsThink` (priority 4) and `PlyCam_Think` (priority 13) all
+run after the priority-1 weather tick, so a position written there is recomputed before render.
+`OnFrameEnd` is the only place those overrides survive.
+
+**Schedule and path.** `Weather_RoundProgress()` (shared with the volcano) gives normalized match
+progress; `SeedSchedule` spreads N touchdowns over equal slices with jitter inside each. A live
+funnel carries a frame countdown.
+
+The funnel roams a **disc** centered on the out-of-bounds box, its radius the shorter of the two
+half-extents times `TORN_PLAY_FRACTION` (0.68) - `884` units on City Trial, whose box is
+`+-1300` on X and Z. Motion is **waypoint-driven**: a waypoint is drawn uniformly over the disc's
+*area* (`r * sqrt(u)`, so the middle of the city is as likely as the rim), the heading is blended
+toward it by `TORN_STEER` each frame, a small random rotation jitters the track, and a fresh
+waypoint is drawn on arrival. The heading is carried as a **unit direction vector** rotated by
+`cosf`/`sinf`, never an angle plus `atan2f` - the freestanding libm here has no `atan2f`. Nothing in
+the path reads the wind; it is the funnel's own random walk.
+
+Waypoints are what keep the funnel off the rim. A heading walk that only turns when it *would* leave
+the box grazes the boundary and then curves straight back out, so the funnel spends the whole
+tornado sliding around the perimeter; steering toward interior waypoints makes it cross the city
+instead. The radial clamp at the end of the wander only ever catches jitter nudging it a little past
+the rim. The base height follows the ground via `Raycast_Ground` each frame, falling back to the
+previous height where the cast finds nothing.
+
+**The funnel model is the Kirby inhale whirlwind (`Effect 0x3a982`), spawned detached.**
+`Effect_SpawnSync` is called with a NULL parent and **anchor mode 1**, which takes a single vararg: a
+post-spawn callback handed the spawn node. That mode skips the joint-attach path entirely, so no
+follow proc is installed and the model root belongs to the mod. The `efgroup` argument asserts on -1
+and is borrowed from a live rider (`RiderData+0x440`) - the group the inhale itself spawns into.
+
+The model is authored **along its local +Z**: narrow mouth end at the origin, flaring to radius
+`8.07` at `z = 9.95`. Mode 1 applies no orientation, so a raw spawn renders lying flat.
+`TornadoPlaceModel` therefore writes the root's **world matrix** (`JObj+0x44`) with
+`JOBJ_USER_DEFINED_MTX` set rather than its SRT: the matrix maps local +Z onto world +Y, scales the
+length to the funnel height and the cross section to `TORN_MODEL_WIDTH` of the capture reach
+independently, and rolls the whole thing about its axis by `TORN_MODEL_SPIN` radians/frame in the
+same sense as the orbit. Writing the matrix keeps euler order out of it and overrides whatever the
+effect's own animation does to the root joint.
+
+Two more consequences of mode 1: the effect's one-shot init never runs, so looping is armed by hand
+(`JObj_SetAllAOBJLoopByFlags(root, ALL_ANIM)`) and the tick calls `JObj_AnimAll(root)` itself,
+because no proc advances a detached effect's animation; and the effect **must not be destroyed by
+hand**. The spawn node still points at the GObj, and the engine's per-node kill destroys it again
+when the group is retired - a double free that corrupts the GObj free list and asserts out of an
+unrelated `GObj_AddUserData` seconds later. A lifting tornado hides the model tree
+(`JObj_SetFlagsAll(root, JOBJ_HIDDEN)`) and the same model is reused for the rest of the stage,
+re-validated against the p_link-16 bucket each frame and respawned if a group kill took it.
+
+**The funnel forms and ropes out** over `TORN_FADE_FRAMES` (120, 2s) at each end of its life instead
+of popping. The ramp does two things. It **narrows the column** - the matrix's radial scale is
+multiplied by the ramp (floored at `TORN_FADE_MIN_WIDTH` so the matrix never goes degenerate) while
+the height stays put, so the funnel thins to a thread and vanishes rather than blinking out. And it
+**scales each material's authored opacity**: `MObjLoad` (`0x803f9f04`) allocates an `HSD_Material`
+per MObj and memcpys the desc into it, so writing `MObj.mat->alpha` dims this funnel alone and never
+a player's inhale whirlwind sharing the same model.
+
+The width ramp is the load-bearing half. Material alpha reaches the screen only through the
+rasterized alpha, and this model's TEV alpha stage is `alpha_a..d = ZERO/ZERO/ZERO/GX_CA_TEXA` - it
+takes the texture's alpha and discards `RASA`, so the material write may never be visible. Both are
+applied because the opacity write costs nothing when it is inert.
+
+Authored alphas are captured with the rest of the one-time model setup, which is deferred to the
+first frame the root JObj is reachable rather than done in the spawn callback - a root not yet
+attached there would silently leave both the swirl unanimated and the fade with nothing to scale.
+The scaled values are written *after* the frame's `JObj_AnimAll`, which is the only thing that would
+put them back. A tornado shorter than two ramps simply never reaches full width.
+
+**Orbit.** A claimed target's polar position is re-derived from its live world position every frame
+(so anything nudged by another system self-corrects rather than drifting out of the swirl), rotated
+about the axis, pulled inward by a fraction of the distance to its ring, and lifted. Angular speed
+comes from a constant *tangential* speed (`TORN_TANGENT / r`, capped at `TORN_SPIN_MAX`) so the outer
+edge does not whip round faster than the core.
+
+Because that is a pure function of position, every target at the same radius would lap at the same
+rate and converge on the same ring - one rigid spiral. So each claim also draws a fixed **orbit
+variation**: a multiplier on angular speed (and on its cap, or everything resynchronizes near the
+core), the ring radius it settles into as a multiple of the core radius, a multiplier on climb rate,
+and a slow radial breathing with a random phase. The draw happens once at claim time and is stored
+with the claim, since re-rolling per frame would read as jitter rather than as different debris.
+
+**What gets caught, and how:**
+
+| Target | Mechanism |
+|---|---|
+| Items | Claimed by `ItemData` pointer (boxes skipped via `item_category == 0`), position overridden, `vel` zeroed, `is_airborne = -1` and the grounded bit cleared so the ground snap stops fighting it. Re-validated against the item bucket each frame, so a collected item self-heals out of the claim set. |
+| Yakumono | Claimed per **scene-instance record**, not per GObj (the break families are one GObj to N props). Collision is retired at claim time so nobody runs into an airborne prop, `JOBJ_USER_DEFINED_MTX` is set so the skeleton families stop rebuilding from their authored SRT, and the record's world matrix translation is orbited. After `TORN_YAKU_HOLD` (110) frames the prop is **destroyed** through its own family `coll_func`. |
+| Unridden machines | Claimed by `MachineData` pointer (`rider_gobj == NULL`), position overridden with `accel` and `velocity` zeroed - `Machine_PhysicsThink` integrates both into `pos` every frame. |
+| Ridden machines | **Pushed, never possessed.** An inward + tangential + upward acceleration is *added* to `MachineData.velocity` with linear falloff to nothing at the reach. Velocity is a persistent accumulator that the movement controllers only ever read-modify-write and drag down, so an impulse decays naturally and a fast machine can drive or boost its way back out. |
+
+Nothing takes damage - the tornado is purely kinetic.
+
+**The prop break is synthesized**, using the same recipe as the Hypernova vacuum: a zeroed `CollData`
+with `radius` cranked to `1.0e9` (force is `radius * impactSpeed^2`, so any prop's HP falls in one
+hit) and `pos_delta` set to `-normalize(region normal) * 100` - the delta *must* point into the
+surface, because `grScene_GetImpactSpeed` negates the projection onto the outward normal and clamps a
+non-positive result to zero. The record's collision is re-armed just before the call so the family
+tail's "still collidable?" guard passes, the target region's refine bit is cleared for the duration
+so the geometry-refined path cannot rewrite the synthetic delta, and `coll.g` is left NULL so the
+break is credited to nobody. On a successful break the weak families (coral/trees/rocks) get
+`JOBJ_USER_DEFINED_MTX` cleared, since they never hide their dragged mesh inline and would otherwise
+leave a whole tree frozen in mid-air. Weak-family debris still spawns at the prop's baked ground
+spot rather than at altitude - that anchor node is per-family and is not relocated here.
+
+**Camera shake drives the engine's own per-view shake record** rather than patching the camera solve.
+`CamData.eye_pos` / `interest_pos` are *not* in the render path (the param that reaches the COBJ is
+`CamData.x14`, snapshotted into a stack local inside `PlyCam_Think`), so writing them does nothing.
+The record hangs off `PlayerCamData+0x74`, past the end of the declared struct, and `PlyCam_Think`
+applies it after building the camera basis, gated on `rec+0x44` being positive:
+
+```
+eye += right * rec[+0x28] * rec[+0x20]  +  up * rec[+0x2c] * rec[+0x24]
+```
+
+Both scale fields initialise to 1.0, so writing `+0x28`/`+0x2c` in world units and raising `+0x44` is
+the whole mechanism - no code patch, and therefore no conflict with `custom_events`, which already
+replaces the `HSD_CObjSetEyePosition` call at `0x800b3900`. The pointer is sanity-checked as an
+aligned MEM1 address before anything is written through it, distance is measured from the view's own
+aim point, and the gate is sticky so it is explicitly lowered when the funnel lifts.
+
+**TornadoDef fields:** `enabled`, `count` (touchdowns per round), `duration` (frames), `size` (funnel
+scale, which also scales core radius, reach and height), `strength` (spin/pull/drag scalar), `speed`
+(wander speed). Zero means module default on every numeric field.
+Authored on its own **Tornado** preset (index 27) - a green supercell sky with strong wind, a low
+cloud deck, rain and lightning - with `count = 3` so a test round always has one in reach. The
+**Tornado** menu layers Tornado on/off, Appearances, Duration, Size, Strength and Screen Shake over
+the preset, and its On value forces a funnel onto every CT preset.
+
 ### Event sky suppression (`event_sky.c`)
 
 A standalone toggle (not a per-preset layer and not driven from the runtime tick) that stops
@@ -1788,7 +1941,7 @@ debug preset-cycler.
 
 ### Settings menu
 
-`main.c` registers the mod settings menu ("City Trial Sky") with thirteen entries.
+`main.c` registers the mod settings menu ("City Trial Sky") with fourteen entries.
 
 Every layer setting defaults to **Preset** (index 0), the pass-through value: a scaling knob
 resolves it to 1.0x (the preset's authored value shows through unchanged), and a categorical

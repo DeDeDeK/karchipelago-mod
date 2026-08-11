@@ -47,6 +47,7 @@ static void ResetPerStage(GrObj *grobj)
     Moon_Reset();
     Star_Reset();
     Volcano_Reset();
+    Tornado_Reset();
 }
 
 static void ApplyTerrainTint(const CustomPresetDef *def)
@@ -156,6 +157,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         Moon_SetActive(s_active_def ? &s_active_def->moon : 0);
         Star_SetActive(s_active_def ? &s_active_def->stars : 0);
         Volcano_SetActive(s_active_def ? &s_active_def->volcano : 0);
+        Tornado_SetActive(s_active_def ? &s_active_def->tornado : 0);
 
         // Sky_BeginFade lerps the lbfade slot-3 overlay to the tint over 30
         // frames, then holds it.
@@ -165,7 +167,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
             Sky_BeginFade(grobj, &tint, 30);
         }
 
-        OSReport("[WeatherRuntime] Preset %d (%s) active, terrain=%s, char_ambient=%s, tint=%s, fog_curve=%d, rain=%s, snow=%s, hail=%s, lightning=%s, wind=%s, puddles=%s, clouds=%s, moon=%s, stars=%s, volcano=%s\n",
+        OSReport("[WeatherRuntime] Preset %d (%s) active, terrain=%s, char_ambient=%s, tint=%s, fog_curve=%d, rain=%s, snow=%s, hail=%s, lightning=%s, wind=%s, puddles=%s, clouds=%s, moon=%s, stars=%s, volcano=%s, tornado=%s\n",
                  idx,
                  CustomWeather_GetPresetName(idx),
                  (s_active_def && s_active_def->terrain_diffuse) ? "tinted" : "vanilla",
@@ -181,7 +183,8 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
                  (s_active_def && s_active_def->clouds.enabled) ? "on" : "off",
                  (s_active_def && s_active_def->moon.enabled) ? "on" : "off",
                  (s_active_def && s_active_def->stars.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->volcano.enabled) ? "on" : "off");
+                 (s_active_def && s_active_def->volcano.enabled) ? "on" : "off",
+                 (s_active_def && s_active_def->tornado.enabled) ? "on" : "off");
     }
     else if (s_active_def && s_active_def->char_ambient && !s_ambient_lobj)
     {
@@ -207,6 +210,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     Moon_Tick();
     Star_Tick();
     Volcano_Tick();
+    Tornado_Tick();
 }
 
 // Immediately after `bl Sky_Update`; r31 = grobj, callee-saved across the bl.

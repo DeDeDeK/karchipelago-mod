@@ -9,7 +9,7 @@
 
 #include "custom_weather.h"
 
-// Custom presets in enum order, WEATHER_BLOOD_RAIN .. WEATHER_BUBBLEGUM.
+// Custom presets in enum order, WEATHER_BLOOD_RAIN .. WEATHER_TORNADO.
 const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
     // Blood Rain
     { .base_preset = WEATHER_RED_VIGNETTE,
@@ -340,6 +340,54 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .eruptions = 4,
       },
     },
+    // Tornado - the sickly green supercell sky that goes with a funnel on the ground.
+    { .base_preset = WEATHER_GRAY_SKY,
+      .fog_color = RGBA(98, 106, 78, 255),
+      .fog_start = 90.0f,
+      .fog_end = 700.0f,
+      .sky_color = RGBA(122, 132, 92, 205),
+      .terrain_diffuse = RGBA(118, 124, 96, 255),
+      .terrain_specular = RGBA(98, 106, 82, 255),
+      .char_diffuse = RGBA(172, 180, 145, 255),
+      .char_specular = RGBA(150, 160, 124, 255),
+      .char_dir = { 0.00f, 1.00f, 0.00f },
+      .char_dir_lit = 0,
+      .char_ambient = RGBA(88, 94, 74, 255),
+      .char_ambient_specular = RGBA(74, 80, 62, 255),
+      .screen_tint = RGBA(26, 30, 10, 70),
+      .rain = {
+          .enabled = 1,
+          .color = RGBA(180, 190, 170, 130),
+          .density = 800,
+          .fall_speed = 32.0f,
+      },
+      .lightning = {
+          .enabled = 1,
+          .flash_color = RGBA(255, 250, 225, 255),
+          .bolt = LTNG_BOLT_AUGMENT,
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 11.0f,
+          .heading = 200.0f,
+          .gustiness = 0.75f,
+          .chaos = 0.6f,
+      },
+      .clouds = {
+          .enabled = 1,
+          .color = RGBA(74, 80, 62, 230),
+          .count = 18,
+          .size = 80.0f,
+          .size_var = 0.5f,
+          .puff_var = 0.9f,
+          .height_var = 100.0f,
+      },
+      // Tuned for testing: several touchdowns per round so one is never far off.
+      .tornado = {
+          .enabled = 1,
+          .count = 3,
+      },
+    },
 };
 
 const CustomPresetDef *CustomWeather_GetPresetDef(int weather_kind)
@@ -356,6 +404,7 @@ static const char *preset_names[WEATHER_TOTAL] = {
     "Red Vignette", "Dark Low Vis",
     "Blood Rain", "Storm", "Rain", "Hailstorm", "Snowstorm",
     "Moonlight", "Cotton Candy", "Toxic", "Bubblegum", "Volcanic",
+    "Tornado",
 };
 
 const char *CustomWeather_GetPresetName(int weather_kind)
@@ -372,7 +421,7 @@ static SkyPresetEntry extended_presets[WEATHER_TOTAL];
 static int weather_enabled[WEATHER_TOTAL] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
 };
 _Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_TOTAL,
                "weather_enabled init must match WEATHER_TOTAL");
@@ -559,5 +608,6 @@ MenuDesc weather_menu = {
         WEATHER_TOGGLE(WEATHER_TOXIC,          "Toxic"),
         WEATHER_TOGGLE(WEATHER_BUBBLEGUM,      "Bubblegum"),
         WEATHER_TOGGLE(WEATHER_VOLCANIC,       "Volcanic"),
+        WEATHER_TOGGLE(WEATHER_TORNADO,        "Tornado"),
     },
 };

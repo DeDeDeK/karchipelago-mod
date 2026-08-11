@@ -5,7 +5,7 @@
 #include "structs.h"
 
 #define WEATHER_VANILLA_NUM  17
-#define WEATHER_CUSTOM_NUM   10
+#define WEATHER_CUSTOM_NUM   11
 #define WEATHER_TOTAL        (WEATHER_VANILLA_NUM + WEATHER_CUSTOM_NUM)
 
 // Preset indices: 0-16 = vanilla (from stage file), 17+ = custom (appended at runtime)
@@ -38,6 +38,7 @@ typedef enum WeatherKind
     WEATHER_TOXIC,
     WEATHER_BUBBLEGUM,
     WEATHER_VOLCANIC,
+    WEATHER_TORNADO,
 } WeatherKind;
 
 // Per-preset rain (CustomPresetDef.rain). Numeric fields take 0 = module default;
@@ -217,6 +218,20 @@ typedef struct VolcanoDef
     float spread;     // 0..1 cone width off vertical (0 = module default)
 } VolcanoDef;
 
+// Per-preset tornado (CustomPresetDef.tornado): a funnel that wanders the city on a
+// random path, drawing loose items, breakable props and parked machines into an
+// orbit around its core, and dragging at riders who stray too close. Appearances are
+// spread across the round by the match timer. Numeric fields take 0 = default.
+typedef struct TornadoDef
+{
+    int   enabled;   // 0 = no tornado for this preset
+    int   count;     // tornadoes per round, spread over the match timer
+    int   duration;  // frames one tornado lasts
+    float size;      // funnel radius scalar (1.0 = module default)
+    float strength;  // pull/spin scalar; also how hard a caught rider is dragged
+    float speed;     // how fast the funnel wanders, world units/frame
+} TornadoDef;
+
 // Per-custom-preset config. Color fields are RGBA8888 packed u32 (high byte = R).
 typedef struct CustomPresetDef
 {
@@ -258,6 +273,7 @@ typedef struct CustomPresetDef
     MoonDef moon;
     StarDef stars;
     VolcanoDef volcano;
+    TornadoDef tornado;
 } CustomPresetDef;
 
 // Per-preset fog density curve, applied to HSD_Fog.type as a GXFogType.
@@ -339,5 +355,14 @@ void Star_Reset(void);
 void Volcano_SetActive(const VolcanoDef *def);
 void Volcano_Tick(void);
 void Volcano_Reset(void);
+
+// A tornado wanders the city on a random path, orbiting everything loose it passes
+// and shaking the camera of any player it gets close to.
+void Tornado_SetActive(const TornadoDef *def);
+void Tornado_Tick(void);
+void Tornado_Reset(void);
+// The orbit's position writes have to land after the frame's game procs, or item
+// physics, machine physics and the ground snap overwrite them.
+void Tornado_OnFrameEnd(void);
 
 #endif // CUSTOM_WEATHER_H

@@ -177,21 +177,6 @@ static void VolcanoGravity(void *p)
     ((ProjectileData *)p)->accel.Y = -VOLC_GRAVITY;
 }
 
-// Normalized round progress 0 (start) .. 1 (end) from the CT match timer, or -1
-// when there is no live round (menus, match intro).
-static float RoundProgress(void)
-{
-    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (!info)
-        return -1.0f;
-    if (info->flags_x2a8 & 0x40) // is_match_intro
-        return -1.0f;
-    float p = info->match_progress;
-    if (p < 0.0f) p = 0.0f;
-    if (p > 1.0f) p = 1.0f;
-    return p;
-}
-
 // Spread the round's eruptions over the match, one per equal slice with jitter
 // inside the slice so they never land on the same beat twice. Entries already
 // behind `p` are skipped so re-planning mid-round does not replay them.
@@ -394,7 +379,7 @@ void Volcano_Tick(void)
         return;
     }
 
-    float p = RoundProgress();
+    float p = Weather_RoundProgress();
     if (p < 0.0f)
         return;
 
