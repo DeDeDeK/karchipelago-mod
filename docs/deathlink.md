@@ -96,16 +96,15 @@ The game has two death zone systems:
 
 | System | Type | Scope | Data Location |
 |--------|------|-------|---------------|
-| Local dead zones | Type 0x19 in ground entries | Per-boundary, specific areas | `*(GrObj+0x74) + handle*0x140 + 0x24` |
+| Local dead zones | Type 0x19 in a collision zone | Per-boundary, specific areas | `GrObj.coll.zone + handle*0x140 + 0x24` |
 | Global dead zones | Y-height threshold | Stage-wide | `GrData → +0x20 → +0x24` |
 
-**GrObj layout** (fields beyond what's in `stage.h`):
-- `+0x74`: `int*` — base pointer to ground entries array (0x140 bytes per entry)
-- `+0x78`: `int` — number of ground entries
+**GrObj fields used here** — the collision zones are `GrObj.coll.zone` (0x140 bytes per zone
+record) and `GrObj.coll.zone_num`. Two more sit inside the unmapped tail:
 - `+0x454`: `void*` — rail validation data (`rail_all`)
 - `+0x458`: `void*` — rail entries table (8 bytes per entry: JObj*, transform*)
 
-**Ground entry** (0x140 bytes):
+**Zone record** (0x140 bytes):
 - `+0x24`: `int` — zone type. Lower 25 bits are the type kind. `0x19` = local dead zone.
 - `+0x138`: `void*` — pointer to local dead position data
 

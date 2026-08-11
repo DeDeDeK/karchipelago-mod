@@ -110,7 +110,7 @@ Other vtable slots (queries, getters, list ops, RTTI helpers) are not relevant t
 
 State ID 13 is a sentinel shared by **both** `KirbyDoodlebugOut` (`0x802fc60c`) and the self-state `KirbyDoodlebug` (`0x802da550`) — their distinct get_state_id functions both `return 13`. Group B wrappers (Numb / Elec / Confuse) explicitly bail when state ID == 13, so a kirby that is riding/inside the Doodlebug item (either form) is immune to those status effects.
 
-`TopRide_KirbyGetStateId` is therefore reliable for the damage states but ambiguous for "running normally": to distinguish `KirbyNormal` from the abstract `KirbyDamage` base, compare `state_handler->vtable` against `0x804d6f5c` directly (`TR_KSTATE_VT_NORMAL`).
+Reading `state_handler->vt[+0x0C]()` is therefore reliable for the damage states but ambiguous for "running normally". Identify a state by its vtable instead: compare `TopRide_KirbyStateVtable(kirby)` against `0x804d6f5c` (`TR_KSTATE_VT_NORMAL`).
 
 ## State Wrapper Patterns
 
@@ -136,6 +136,10 @@ void KirbyXxxMethod(TopRideKirby *kirby, /* state-specific args */)
 Variants:
 - **KirbyBurn** also blocks when currently in `KirbyElec` (double dynamic_cast).
 - **KirbyCrush** has an `else` branch: when the dynamic_cast *succeeds* (already in Crush) it re-applies the knockback via the helper `0x802f53dc` (PSVECNormalizes the Vec3 arg) instead of re-installing the state.
+
+Pointer args are dereferenced by the setters, so a caller synthesising a transition must pass real addresses, not literal zeroes:
+- **KirbyBurn**'s `u32*` arg is dereferenced unconditionally — a literal `0` faults with a DSI.
+- **KirbyCrush** / **KirbyExplode** / **KirbyStrike** / **KirbySpin** take the magnitude of their `Vec3*` to size the knockback. The pointer must be valid; an all-zero vector is legal and simply skips the knockback, giving a stun-in-place transition.
 
 ### Group A2 — dynamic_cast + extra guard, no invincibility
 

@@ -268,10 +268,10 @@ static void LaunchOne(void)
     desc.type_flag = 1;
     desc.charge = 1.0f;
 
-    void *handle = Projectile_Create(&desc);
+    GOBJ *handle = Projectile_Create(&desc);
     if (!handle)
         return;
-    ProjectileData *proj = Projectile_GetData(handle);
+    ProjectileData *proj = (ProjectileData *)handle->userdata;
     if (!proj)
         return;
 

@@ -39,7 +39,6 @@
 // model root's SRT is ours to drive.
 #define TORN_EFFECT_ID     0x3a982
 #define TORN_EFFECT_ANCHOR 1
-#define TORN_RIDER_EFGROUP_OFF 0x440  // RiderData -> the EfGroup the inhale spawns into
 
 // Defaults applied when a preset leaves the matching TornadoDef field 0.
 #define TORN_DEF_COUNT     2
@@ -112,16 +111,6 @@
 #define TORN_SHAKE_AMP     2.4f    // world units of camera offset at the center
 
 // The engine's own per-view shake, driven instead of patching the camera solve.
-// PlyCam_Think builds the camera's right/up basis and then, gated on rec+0x44 being
-// positive, offsets the eye it hands the COBJ by
-//   eye += right * rec[+0x28] * rec[+0x20] + up * rec[+0x2c] * rec[+0x24]
-// with the two scale fields initialised to 1.0, so writing the offsets in world units
-// and raising the gate is the whole mechanism. CamData.eye_pos/interest_pos are NOT
-// in the render path - the param that reaches the COBJ is CamData.x14.
-#define TORN_SHAKE_REC_OFF 0x74    // PlayerCamData -> shake record (past the header's decl)
-#define TORN_SHAKE_EYE_R   0x28    // offset along the camera's right axis
-#define TORN_SHAKE_EYE_U   0x2c    // offset along the camera's up axis
-#define TORN_SHAKE_GATE    0x44    // > 0 enables the offset
 
 // Wander: the funnel crosses a disc of play area between random waypoints. Waypoints
 // rather than a free heading walk, because a walk that only turns when it would leave
@@ -208,9 +197,9 @@ typedef struct MachineClaim
 
 typedef struct YakuClaim
 {
-    void     *record;
-    int       held;    // frames it has been carried
-    OrbitVary vary;
+    GrCollRecord *record;
+    int           held;   // frames it has been carried
+    OrbitVary     vary;
 } YakuClaim;
 
 static ItemClaim    stc_items[TORN_MAX_ITEMS];
@@ -365,8 +354,8 @@ static void TornadoSpawnModel(void)
     if (!rider_gobj || !rider_gobj->userdata)
         return;
 
-    int efgroup = *(int *)((char *)rider_gobj->userdata + TORN_RIDER_EFGROUP_OFF);
-    Effect_SpawnSync(NULL, TORN_EFFECT_ID, efgroup, TORN_EFFECT_ANCHOR,
+    RiderData *rd = (RiderData *)rider_gobj->userdata;
+    Effect_SpawnSync(NULL, TORN_EFFECT_ID, rd->efgroup, TORN_EFFECT_ANCHOR,
                      TornadoAdoptEffect);
 }
 
@@ -445,15 +434,14 @@ static void TornadoHideModel(void)
     JObj_SetFlagsAll((JOBJ *)stc_model->hsd_object, JOBJ_HIDDEN);
 }
 
-// Global index of the region the synthesized break should be attributed to: the
-// record's regions are a contiguous slice of the global array.
-static int TornadoRecordRegionIndex(void *record)
+// Global index of the triangle the synthesized break is attributed to: a record's
+// triangles are a contiguous slice of the global array.
+static int TornadoRecordTriIndex(GrCollRecord *record)
 {
-    YakuCollRegion *base = Yaku_GetRegionArray();
-    YakuCollRegion *regions = Yaku_InstanceRegions(record);
-    if (!base || !regions)
+    GrCollTri *base = Gr_GetCollTris();
+    if (!base || !record->tri_begin)
         return -1;
-    int idx = (int)(regions - base);
+    int idx = (int)(record->tri_begin - base);
     return (idx >= 0) ? idx : -1;
 }
 
@@ -470,74 +458,73 @@ static int TornadoIsWeakFamily(GOBJ *yaku_gobj)
 // collider is synthesized: a huge radius clears any prop's HP in one hit, and the
 // frame delta has to point INTO the contacted region's outward normal or the engine
 // clamps the impact speed to zero and nothing breaks.
-static int TornadoBreakInstance(void *record)
+static int TornadoBreakInstance(GrCollRecord *record)
 {
-    void *holder = Yaku_GetCollHolder();
-    GOBJ *yaku_gobj = Yaku_InstanceParent(record);
-    if (!holder || !yaku_gobj)
+    GrCollParam *gcp = Gr_GetCollParam();
+    GOBJ *yaku_gobj = record->yaku_gobj;
+    if (!gcp || !yaku_gobj)
         return 0;
 
-    int base_idx = TornadoRecordRegionIndex(record);
+    int base_idx = TornadoRecordTriIndex(record);
     if (base_idx < 0)
         return 0;
 
-    YakuCollRegion *regions = Yaku_GetRegionArray();
-    int region_count = Yaku_InstanceRegionCount(record);
-    if (region_count <= 0)
-        region_count = 1;
+    GrCollTri *tris = Gr_GetCollTris();
+    int tri_count = record->tri_num;
+    if (tri_count <= 0)
+        tri_count = 1;
 
-    int region_idx = -1;
+    int tri_idx = -1;
     Vec3 n_unit = {0.0f, 0.0f, 0.0f};
-    for (int k = 0; k < region_count; k++)
+    for (int k = 0; k < tri_count; k++)
     {
-        Vec3 n = regions[base_idx + k].normal;
+        Vec3 n = tris[base_idx + k].normal;
         if (VECSquareMag(&n) > 1.0e-6f)
         {
             VECNormalize(&n, &n_unit);
-            region_idx = base_idx + k;
+            tri_idx = base_idx + k;
             break;
         }
     }
-    if (region_idx < 0)
+    if (tri_idx < 0)
         return 0; // degenerate prop (no usable normal)
 
     // The family tail's "still collidable?" guard has to pass, and the flight retired
     // this record's collision.
     grScene_SetInstanceColl(record, 1);
 
-    // mpCollInfo+0x1d0 = -1 marks "no BigStar region", so destroyBigStar returns 0
+    // contact_tri_id = -1 marks "no BigStar contact", so destroyBigStar returns 0
     // and the break proceeds.
-    u8 coll_info[0x200];
+    mpCollInfo coll_info;
     CollData coll;
-    memset(coll_info, 0, sizeof(coll_info));
+    memset(&coll_info, 0, sizeof(coll_info));
     memset(&coll, 0, sizeof(coll));
-    *(int *)(coll_info + 0x1d0) = -1;
+    coll_info.contact_tri_id = -1;
     coll.g = NULL;  // ownerless: the tornado credits the break to nobody
-    coll.coll_info = (mpCollInfo *)coll_info;
+    coll.coll_info = &coll_info;
     coll.radius = TORN_BREAK_RADIUS;
     VECScale(&n_unit, &coll.pos_delta, -TORN_BREAK_DELTA);
 
-    // Skip the geometry-refined impact path; it can rewrite a synthetic delta from
-    // the prop's own matrices.
-    YakuCollRegion *region = &regions[region_idx];
-    u32 saved = region->refine_flags;
-    region->refine_flags = saved & ~(u32)YAKU_REGION_REFINE;
+    // Skip the moving-record impact path; it can rewrite a synthetic delta from the
+    // prop's own matrices.
+    GrCollTri *tri = &tris[tri_idx];
+    u32 saved = tri->flags;
+    tri->flags = saved & ~(u32)GRCOLL_FLAG_MOVING;
 
     Vec3 contact;
-    Yaku_InstanceCachedPos(record, &contact);
+    Mtx_GetTrans(record->world, &contact);
 
-    collideWithObject(yaku_gobj, &coll, holder, region_idx, &contact);
+    collideWithObject(yaku_gobj, &coll, gcp, tri_idx, &contact);
 
-    region->refine_flags = saved;
+    tri->flags = saved;
 
     if (!grScene_IsInstanceCollAll(record, 1))
     {
         // The weak families never hide the dragged intact mesh inline, so clearing
         // USER_DEF_MTX drops the joint back to its degenerate SRT instead of leaving
         // a whole tree frozen in mid-air.
-        void *jobj = Yaku_InstanceJObj(record);
-        if (jobj && TornadoIsWeakFamily(yaku_gobj))
-            JObj_ClearFlags((JOBJ *)jobj, JOBJ_USER_DEFINED_MTX);
+        if (record->jobj && TornadoIsWeakFamily(yaku_gobj))
+            JObj_ClearFlags(record->jobj, JOBJ_USER_DEFINED_MTX);
         return 1;
     }
 
@@ -634,7 +621,7 @@ static int TornadoMachineClaimed(MachineData *md)
     return 0;
 }
 
-static int TornadoYakuClaimed(void *record)
+static int TornadoYakuClaimed(GrCollRecord *record)
 {
     for (int i = 0; i < stc_yaku_count; i++)
         if (stc_yaku[i].record == record)
@@ -726,7 +713,7 @@ static int TornadoCollectBreakParents(GOBJ **out, int max)
 static void TornadoClaimYakumono(void)
 {
     int count = 0;
-    void *pool = Yaku_GetInstancePool(&count);
+    GrCollRecord *pool = Gr_GetCollRecords(&count);
     if (!pool)
         return;
 
@@ -737,8 +724,8 @@ static void TornadoClaimYakumono(void)
 
     for (int i = 0; i < count && stc_yaku_count < TORN_MAX_YAKU; i++)
     {
-        void *record = Yaku_GetInstance(pool, i);
-        GOBJ *owner = Yaku_InstanceParent(record);
+        GrCollRecord *record = &pool[i];
+        GOBJ *owner = record->yaku_gobj;
         if (!owner)
             continue;
 
@@ -757,11 +744,11 @@ static void TornadoClaimYakumono(void)
             continue;
 
         Vec3 pos;
-        Yaku_InstanceCachedPos(record, &pos);
+        Mtx_GetTrans(record->world, &pos);
         if (!TornadoInReach(&pos, NULL))
             continue;
 
-        JOBJ *j = (JOBJ *)Yaku_InstanceJObj(record);
+        JOBJ *j = record->jobj;
         if (!j)
             continue;
 
@@ -852,10 +839,9 @@ static void TornadoProcessMachines(void)
         TornadoOrbit(&md->pos, &stc_machines[i].vary);
 
         // Machine_PhysicsThink integrates accel and velocity into pos every frame.
-        float *accel = (float *)((char *)md + 0x318);
-        accel[0] = 0.0f;
-        accel[1] = 0.0f;
-        accel[2] = 0.0f;
+        md->accel.X = 0.0f;
+        md->accel.Y = 0.0f;
+        md->accel.Z = 0.0f;
         md->velocity.X = 0.0f;
         md->velocity.Y = 0.0f;
         md->velocity.Z = 0.0f;
@@ -866,26 +852,23 @@ static void TornadoProcessYakumono(int force_break)
 {
     for (int i = stc_yaku_count - 1; i >= 0; i--)
     {
-        void *record = stc_yaku[i].record;
-        JOBJ *j = (JOBJ *)Yaku_InstanceJObj(record);
+        GrCollRecord *record = stc_yaku[i].record;
+        JOBJ *j = record->jobj;
         if (!j)
         {
             stc_yaku[i] = stc_yaku[--stc_yaku_count];
             continue;
         }
 
-        // The prop's real transform is its JObj world matrix; the cached copy at
-        // record+0x2c is what the break reads back for its contact point.
-        float *m = (float *)&j->rotMtx;
-        Vec3 pos = {m[3], m[7], m[11]};
+        // The prop's real transform is its JObj world matrix; record->world is what
+        // the break reads back for its contact point.
+        Vec3 pos;
+        Mtx_GetTrans(j->rotMtx, &pos);
 
         stc_yaku[i].held++;
         if (force_break || stc_yaku[i].held >= TORN_YAKU_HOLD)
         {
-            float *cached = (float *)((char *)record + YAKU_INST_MATRIX);
-            cached[3] = pos.X;
-            cached[7] = pos.Y;
-            cached[11] = pos.Z;
+            Mtx_SetTrans(record->world, &pos);
             TornadoBreakInstance(record);
             stc_yaku[i] = stc_yaku[--stc_yaku_count];
             continue;
@@ -893,9 +876,7 @@ static void TornadoProcessYakumono(int force_break)
 
         TornadoOrbit(&pos, &stc_yaku[i].vary);
         JObj_SetFlags(j, JOBJ_USER_DEFINED_MTX);
-        m[3] = pos.X;
-        m[7] = pos.Y;
-        m[11] = pos.Z;
+        Mtx_SetTrans(j->rotMtx, &pos);
         grScene_SetInstanceColl(record, 0); // keep it retired for the whole flight
     }
 }
@@ -940,7 +921,7 @@ static void TornadoPushRiders(void)
     }
 }
 
-// The shake record sits past the end of the declared PlayerCamData, so it is
+// A view that has not been solved yet can carry a stale shake pointer, so it is
 // sanity-checked as an aligned MEM1 pointer before anything is written through it.
 static int TornadoValidPtr(void *p)
 {
@@ -948,19 +929,19 @@ static int TornadoValidPtr(void *p)
     return p != NULL && (a & 3) == 0 && a >= 0x80000000 && a < 0x81800000;
 }
 
-static void *TornadoShakeRecord(GOBJ *cam_gobj)
+static CamShakeRec *TornadoShakeRecord(GOBJ *cam_gobj)
 {
     if (!cam_gobj || !cam_gobj->userdata)
         return NULL;
-    void *rec = *(void **)((char *)cam_gobj->userdata + TORN_SHAKE_REC_OFF);
+    CamShakeRec *rec = ((PlayerCamData *)cam_gobj->userdata)->shake;
     return TornadoValidPtr(rec) ? rec : NULL;
 }
 
-static void TornadoWriteShake(void *rec, float right, float up, float gate)
+static void TornadoWriteShake(CamShakeRec *rec, float right, float up, float gate)
 {
-    *(float *)((char *)rec + TORN_SHAKE_EYE_R) = right;
-    *(float *)((char *)rec + TORN_SHAKE_EYE_U) = up;
-    *(float *)((char *)rec + TORN_SHAKE_GATE) = gate;
+    rec->eye_right = right;
+    rec->eye_up = up;
+    rec->gate = gate;
 }
 
 // A light shake on the cameras of players near the funnel, falling off to nothing at
@@ -978,7 +959,7 @@ static void TornadoShakeCameras(void)
     for (int i = 0; i < CM_CAMERA_MAX; i++)
     {
         GOBJ *cg = lookup->cam_gobjs[i];
-        void *rec = TornadoShakeRecord(cg);
+        CamShakeRec *rec = TornadoShakeRecord(cg);
         if (!rec)
             continue;
         CamData *cam = ((PlayerCamData *)cg->userdata)->cam_data;
@@ -1010,7 +991,7 @@ static void TornadoStopShake(void)
         return;
     for (int i = 0; i < CM_CAMERA_MAX; i++)
     {
-        void *rec = TornadoShakeRecord(lookup->cam_gobjs[i]);
+        CamShakeRec *rec = TornadoShakeRecord(lookup->cam_gobjs[i]);
         if (rec)
             TornadoWriteShake(rec, 0.0f, 0.0f, 0.0f);
     }

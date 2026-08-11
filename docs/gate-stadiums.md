@@ -33,7 +33,7 @@ The 24 `StadiumKind` values (`stadium.h`), one bit each in `stadium_unlocked_mas
 | `Gm_StadiumCheckUnlocked` | game | 0x80007EE4 | Runtime unlock-bitfield read (replaced). |
 | `CityTrial_DecideStadium` | game | 0x8003F808 | Per-round stadium selector (replaced). |
 | `CityTrial_BuildStadiumList` | game | 0x80046DF0 | Builds the stadium selection UI list (instruction-patched twice). |
-| `Gm_StadiumSetNewLabelDirect` | game (inline) | `stadium.h` | Sets the "NEW" badge bit; used on unlock. |
+| `stc_stadium_new_label` | game (bitfield) | 0x80536EEC | "NEW" badge bits, set directly on unlock. |
 
 Names follow `externals/hoshi/include/stadium.h` / `link.ld`; the symbol map names two of them differently — `0x8000C148` = `CityTrial_CheckIfStadiumIsDefaultUnlocked`, `0x8000C17C` = `CityTrial_CheckStadiumIsUnlocked` — but the mod and headers use the `Gm_Stadium*` names.
 
@@ -92,7 +92,7 @@ All four must be replaced because `Gm_StadiumIsAvailable` inlines the `IsDefault
 
 **NULL guard:** `ap_save` is NULL before `OnSaveLoaded` runs, but `Gm_StadiumCheckUnlocked` is called during early game init. The replacement returns 0 in that window.
 
-The runtime bitfield at `0x80536EE8`, its checklist cache layer, and `Gm_StadiumSetUnlockedDirect` / `Gm_StadiumClearUnlockedDirect` are all dead code with respect to availability checks. The save mask is the single source of truth, read live at every check, so mid-session changes (debug menu, AP item arrival) take effect immediately.
+The runtime unlock bitfield at `0x80536EE8` (`stc_stadium_unlocked`) and its checklist cache layer are both dead with respect to availability checks. The save mask is the single source of truth, read live at every check, so mid-session changes (debug menu, AP item arrival) take effect immediately.
 
 ### Stadium selection
 
@@ -119,13 +119,13 @@ The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_STADIUM`. When the sl
 
 ## AP Items
 
-24 AP items, `AP_STADIUM_UNLOCK_BASE` (400, `archipelago_api.h`) + `StadiumKind` index → IDs 400–423. `ap_item_handler.c` routes IDs in `[400, 400 + STKIND_NUM)` to `GateStadiums_UnlockStadium(id - AP_STADIUM_UNLOCK_BASE, /*announce=*/1)`, which sets the mask bit, calls `Gm_StadiumSetNewLabelDirect` so the checklist UI shows the "NEW" badge, logs, and enqueues `"Unlocked Stadium: <name>"` with `tb_api->StadiumColor`.
+24 AP items, `AP_STADIUM_UNLOCK_BASE` (400, `archipelago_api.h`) + `StadiumKind` index → IDs 400–423. `ap_item_handler.c` routes IDs in `[400, 400 + STKIND_NUM)` to `GateStadiums_UnlockStadium(id - AP_STADIUM_UNLOCK_BASE, /*announce=*/1)`, which sets the mask bit, ORs the kind's bit into `stc_stadium_new_label` so the checklist UI shows the "NEW" badge, logs, and enqueues `"Unlocked Stadium: <name>"` with `tb_api->StadiumColor`.
 
 ## Design Decisions
 
-**Bypassing the game's bitfield entirely.** The mask is read directly at check time rather than synced into the game's bitfield at `0x80536EE8` (via `Gm_StadiumSetUnlockedDirect` / `ClearUnlockedDirect` during `OnSaveLoaded`). Syncing would create two problems: mid-session mask changes (debug menu, late AP delivery) would need an extra sync step, and the checklist cache layer could shadow writes. Reading directly avoids both — and matches every other `gate_*` system.
+**Bypassing the game's bitfield entirely.** The mask is read directly at check time rather than synced into the game's bitfield at `0x80536EE8` (`stc_stadium_unlocked`) during `OnSaveLoaded`. Syncing would create two problems: mid-session mask changes (debug menu, late AP delivery) would need an extra sync step, and the checklist cache layer could shadow writes. Reading directly avoids both — and matches every other `gate_*` system.
 
-**Setting the "NEW" bitfield on unlock.** `Gm_StadiumCheckNewLabel` (0x80008038) is *not* replaced — the checklist UI still consults the vanilla bitfield to decide which stadiums get a "NEW" badge — so `GateStadiums_UnlockStadium` calls `Gm_StadiumSetNewLabelDirect`.
+**Setting the "NEW" bitfield on unlock.** `Gm_StadiumCheckNewLabel` (0x80008038) is *not* replaced — the checklist UI still consults the vanilla bitfield to decide which stadiums get a "NEW" badge — so `GateStadiums_UnlockStadium` sets the kind's bit in `stc_stadium_new_label` itself.
 
 **Dynamic history sizing.** With N unlocked stadiums, history size is `min(N-1, 4)`. This prevents the vanilla `HSD_Randi(0)` crash without sacrificing variety once enough stadiums are available.
 

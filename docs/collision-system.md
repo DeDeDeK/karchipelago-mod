@@ -371,7 +371,7 @@ Consequences for mod code:
 Every query runs two passes; there is no linear scan of the whole triangle array anywhere in gameplay code.
 
 - **Moving pass** — a brute-force walk of `GrCollParam.moving_record`, each record AABB-tested and then its whole triangle slice scanned. Moving geometry is deliberately absent from the KD-tree and reachable only this way.
-- **Static pass** — a walk of the KD-tree baked into the stage archive (`GrObj+0x700`, from `GrData+0x48`), whose leaves hold 16-bit indices into `GrCollParam.tri`.
+- **Static pass** — a walk of the KD-tree baked into the stage archive (`GrObj.coll_tree`, from `GrData+0x48`), whose leaves hold 16-bit indices into `GrCollParam.tri`.
 
 Both funnel into the two narrowphase primitives, `grColl_RayVsTri` (`0x800d95dc`) and `grColl_SweptSphereVsTri` (`0x802448b0`), which take a triangle **index** — derived in the moving pass as `(tri_ptr - GrCollParam.tri) >> 6`. Triangles must therefore live in that one contiguous array whichever way they are found. Both passes accumulate the nearest hit into a single triangle index that starts at `-1` and comes back in `r3`, with the caller's `out_pos` receiving that hit's point.
 

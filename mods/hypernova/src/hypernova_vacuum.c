@@ -6,6 +6,7 @@
 #include "rider.h"
 #include "machine.h"
 #include "item.h"
+#include "stage.h"
 #include "yakumono.h"
 #include "collision.h"
 
@@ -158,14 +159,6 @@ static int Hypernova_IsBreakableYaku(int desc)
     }
 }
 
-// Write the translation column of a 3x4 row-major world matrix (float indices 3,7,11).
-static void Hypernova_SetMtxTranslation(float *mtx, Vec3 *t)
-{
-    mtx[3]  = t->X;
-    mtx[7]  = t->Y;
-    mtx[11] = t->Z;
-}
-
 // Scale the 3x3 rotation/scale block of a 3x4 row-major matrix in place (translation untouched).
 static void Hypernova_ScaleMtx3x3(float *mtx, float s)
 {
@@ -180,18 +173,17 @@ static float Hypernova_Mtx3x3Row0Mag2(float *mtx)
     return mtx[0] * mtx[0] + mtx[1] * mtx[1] + mtx[2] * mtx[2];
 }
 
-// Global index of a record's first region within Yaku_GetRegionArray() - what
-// collideWithObject takes as regionIdx. -1 if the regions aren't a clean strided slice.
-static int Hypernova_RecordRegionIndex(void *record)
+// Global index of a record's first triangle - what collideWithObject takes as
+// tri_idx. -1 if the slice isn't a clean stride off the global array.
+static int Hypernova_RecordTriIndex(GrCollRecord *record)
 {
-    YakuCollRegion *base    = Yaku_GetRegionArray();
-    YakuCollRegion *regions = Yaku_InstanceRegions(record);
-    if (base == NULL || regions < base)
+    GrCollTri *base = Gr_GetCollTris();
+    if (base == NULL || record->tri_begin < base)
         return -1;
-    u32 off = (u32)((char *)regions - (char *)base);
-    if ((off % YAKU_REGION_SIZE) != 0)
+    u32 off = (u32)((char *)record->tri_begin - (char *)base);
+    if ((off % sizeof(GrCollTri)) != 0)
         return -1;
-    return (int)(off / YAKU_REGION_SIZE);
+    return (int)(off / sizeof(GrCollTri));
 }
 
 // True if this prop's family breaks through hitWeakObject (coral 33 / trees 34 / rocks 35),
@@ -207,25 +199,20 @@ static int Hypernova_IsWeakBreakFamily(GOBJ *yaku_gobj)
 // Resolve the weak break's debris-anchor JObj, mirroring hitWeakObject's own lookup: family
 // break data (yd->data_ptr) -> per-instance entry table (stride 0x10) -> node id at entry+0x08
 // -> grobj node registry. NULL if any link can't be resolved.
-static void *Hypernova_WeakDebrisNode(GOBJ *yaku_gobj, void *record)
+static JOBJ *Hypernova_WeakDebrisNode(GOBJ *yaku_gobj, GrCollRecord *record)
 {
     YakumonoData *yd = Yaku_GetData(yaku_gobj);
     if (yd == NULL)
         return NULL;
-    void *bc = yd->data_ptr;                    // family break-coll data
-    if (bc == NULL)
+    if (yd->data_ptr == NULL || yd->data_ptr->break_family == NULL)
         return NULL;
-    void *desc = *(void **)bc;                  // -> {entry table, instance count}
-    if (desc == NULL)
-        return NULL;
-    char *entry_base = *(char **)desc;          // *desc -> per-instance entry table
-    int   count = *(int *)((char *)desc + 4);   // desc[1] = instance count
-    void **rec_arr = (void **)yd->region_audio_arr; // family's per-prop record array
-    if (entry_base == NULL || rec_arr == NULL || count <= 0)
+    YakuBreakPlacement *pl = yd->data_ptr->break_family->placement;
+    GrCollRecord **rec_arr = (GrCollRecord **)yd->region_audio_arr; // family's per-prop record array
+    if (pl == NULL || pl->entries == NULL || rec_arr == NULL || pl->count <= 0)
         return NULL;
 
     int inst = -1;
-    for (int k = 0; k < count; k++)
+    for (int k = 0; k < pl->count; k++)
     {
         if (rec_arr[k] == record)
         {
@@ -236,8 +223,7 @@ static void *Hypernova_WeakDebrisNode(GOBJ *yaku_gobj, void *record)
     if (inst < 0)
         return NULL;
 
-    int node_id = *(int *)(entry_base + inst * 0x10 + 0x08);
-    void *node = Yaku_GetSceneNodeJObj(node_id);
+    JOBJ *node = Gr_GetJoint(pl->entries[inst].node_id);
     if (node == NULL)
         return NULL;
 
@@ -251,101 +237,99 @@ static void *Hypernova_WeakDebrisNode(GOBJ *yaku_gobj, void *record)
 // Break a drawn-in prop by handing collideWithObject a fabricated high-force collider, so it
 // breaks in one hit through the genuine family path (retire, hide/debris, item drops, SFX,
 // break-count credit). Returns 1 if the break fired.
-static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
+static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, GrCollRecord *record)
 {
-    void *holder = Yaku_GetCollHolder();
-    if (holder == NULL)
+    GrCollParam *gcp = Gr_GetCollParam();
+    if (gcp == NULL)
         return 0;
 
-    GOBJ *yaku_gobj = Yaku_InstanceParent(record);
+    GOBJ *yaku_gobj = record->yaku_gobj;
     if (yaku_gobj == NULL)
         return 0;
 
-    int base_idx = Hypernova_RecordRegionIndex(record);
+    int base_idx = Hypernova_RecordTriIndex(record);
     if (base_idx < 0)
         return 0;
 
-    YakuCollRegion *regions = Yaku_GetRegionArray();
-    int region_count = Yaku_InstanceRegionCount(record);
-    if (region_count <= 0)
-        region_count = 1;
+    GrCollTri *tris = Gr_GetCollTris();
+    int tri_count = record->tri_num;
+    if (tri_count <= 0)
+        tri_count = 1;
 
-    // The impact-speed calc projects the delta onto the region's outward normal, so a real
-    // normal is needed to aim the delta against.
-    int region_idx = -1;
+    // The impact-speed calc projects the delta onto the triangle's outward normal, so a
+    // real normal is needed to aim the delta against.
+    int tri_idx = -1;
     Vec3 n_unit;
     n_unit.X = 0.0f; n_unit.Y = 0.0f; n_unit.Z = 0.0f;
-    for (int k = 0; k < region_count; k++)
+    for (int k = 0; k < tri_count; k++)
     {
-        Vec3 n = regions[base_idx + k].normal;
+        Vec3 n = tris[base_idx + k].normal;
         if (VECSquareMag(&n) > 1.0e-6f)
         {
             VECNormalize(&n, &n_unit);
-            region_idx = base_idx + k;
+            tri_idx = base_idx + k;
             break;
         }
     }
-    if (region_idx < 0)
+    if (tri_idx < 0)
         return 0; // degenerate prop (no usable normal)
 
     // Re-arm the collision retired for the flight so the family coll_func's "still collidable?"
-    // guard passes; the tail retires it (and every region) again on a successful break.
+    // guard passes; the tail retires it (and every triangle) again on a successful break.
     grScene_SetInstanceColl(record, 1);
 
-    // mpCollInfo+0x1d0 = -1 marks "no BigStar region", so destroyBigStar returns 0 and the
+    // contact_tri_id = -1 marks "no BigStar contact", so destroyBigStar returns 0 and the
     // break proceeds.
-    u8 coll_info[0x200];
+    mpCollInfo coll_info;
     CollData coll;
-    memset(coll_info, 0, sizeof(coll_info));
+    memset(&coll_info, 0, sizeof(coll_info));
     memset(&coll, 0, sizeof(coll));
-    *(int *)(coll_info + 0x1d0) = -1;
+    coll_info.contact_tri_id = -1;
     coll.g         = rider_gobj;               // break credited to this rider
-    coll.coll_info = (mpCollInfo *)coll_info;
+    coll.coll_info = &coll_info;
     coll.radius    = HYPERNOVA_BREAK_FORCE_RADIUS;
 
     // The delta must point INTO the surface: the engine negates the normalized delta before
     // projecting it onto the outward normal, and clamps a non-positive result to zero impact.
     VECScale(&n_unit, &coll.pos_delta, -HYPERNOVA_BREAK_FORCE_DELTA);
 
-    // Skip the geometry-refined impact path; it can rewrite the delta from the prop's matrices.
-    YakuCollRegion *region = &regions[region_idx];
-    u32 saved = region->refine_flags;
-    region->refine_flags = saved & ~(u32)YAKU_REGION_REFINE;
+    // Skip the moving-record impact path; it can rewrite the delta from the prop's matrices.
+    GrCollTri *tri = &tris[tri_idx];
+    u32 saved = tri->flags;
+    tri->flags = saved & ~(u32)GRCOLL_FLAG_MOVING;
 
     // The prop's current (pulled-in) world position.
     Vec3 contact;
-    Yaku_InstanceCachedPos(record, &contact);
+    Mtx_GetTrans(record->world, &contact);
 
     // Weak families pin break debris to a separate grobj node at the prop's baked spot, so it is
     // relocated onto the contact point (USER_DEF_MTX makes Gr_GetNodeWorldPos read the written
     // matrix). The effects spawn synchronously, so they capture it before the restore below.
-    int   weak = Hypernova_IsWeakBreakFamily(yaku_gobj);
-    void *jobj = Yaku_InstanceJObj(record);
-    void *dnode = weak ? Hypernova_WeakDebrisNode(yaku_gobj, record) : NULL;
+    int   weak  = Hypernova_IsWeakBreakFamily(yaku_gobj);
+    JOBJ *jobj  = record->jobj;
+    JOBJ *dnode = weak ? Hypernova_WeakDebrisNode(yaku_gobj, record) : NULL;
     float dsave[12];
     u32   dflags = 0;
     if (dnode != NULL)
     {
-        float *nm = (float *)((char *)dnode + 0x44);
+        float *nm = (float *)dnode->rotMtx;
         for (int i = 0; i < 12; i++)
             dsave[i] = nm[i];
-        dflags = *(u32 *)((char *)dnode + 0x14);
-        nm[3]  = contact.X;
-        nm[7]  = contact.Y;
-        nm[11] = contact.Z;
-        JObj_SetFlags((JOBJ *)dnode, JOBJ_USER_DEFINED_MTX);
+        dflags = dnode->flags;
+        Mtx_SetTrans(dnode->rotMtx, &contact);
+        JObj_SetFlags(dnode, JOBJ_USER_DEFINED_MTX);
     }
 
-    collideWithObject(yaku_gobj, &coll, holder, region_idx, &contact);
+    collideWithObject(yaku_gobj, &coll, gcp, tri_idx, &contact);
 
-    region->refine_flags = saved;
+    tri->flags = saved;
 
     if (dnode != NULL)
     {
-        float *nm = (float *)((char *)dnode + 0x44);
+        float *nm = (float *)dnode->rotMtx;
         for (int i = 0; i < 12; i++)
             nm[i] = dsave[i];
-        *(u32 *)((char *)dnode + 0x14) = dflags;
+        dnode->flags = dflags;
     }
 
     // The break tail retires collision on success.
@@ -354,7 +338,7 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
         // The weak break never hides the dragged intact mesh; clearing USER_DEF_MTX collapses
         // the joint to its degenerate SRT.
         if (weak && jobj != NULL)
-            JObj_ClearFlags((JOBJ *)jobj, JOBJ_USER_DEFINED_MTX);
+            JObj_ClearFlags(jobj, JOBJ_USER_DEFINED_MTX);
         return 1;
     }
 
@@ -365,9 +349,9 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, void *record)
 
 // Advance one claimed prop a frame: pull it toward the rider, shrink it once close, and break it
 // on arrival or once shrunk enough. Returns 1 once it is destroyed.
-static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, void *record)
+static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, GrCollRecord *record)
 {
-    void *jobj = Yaku_InstanceJObj(record);
+    JOBJ *jobj = record->jobj;
     if (jobj == NULL)
         return 1; // nothing to drive; drop the claim
 
@@ -377,28 +361,26 @@ static int Hypernova_PullInstance(GOBJ *rider_gobj, RiderData *rd, void *record)
 
     // USER_DEF_MTX makes the per-frame SRT rebuild honor the matrix written below (weak families
     // are JOBJ_SKELETON joints; idempotent for the static ones).
-    JObj_SetFlags((JOBJ *)jobj, JOBJ_USER_DEFINED_MTX);
+    JObj_SetFlags(jobj, JOBJ_USER_DEFINED_MTX);
 
-    float *jmtx = (float *)((char *)jobj + 0x44);                 // 3x4 row-major world matrix
-    float *cached = (float *)((char *)record + YAKU_INST_MATRIX); // load-time copy (orig 3x3 scale)
+    float *jmtx   = (float *)jobj->rotMtx;
+    float *cached = (float *)record->world; // load-time copy (orig 3x3 scale)
     Vec3 pos;
-    pos.X = jmtx[3];
-    pos.Y = jmtx[7];
-    pos.Z = jmtx[11];
+    Mtx_GetTrans(jobj->rotMtx, &pos);
 
     float dist2 = VECSquareDistance(&rd->pos, &pos);
 
     // Arrived: snap onto the rider and break.
     if (dist2 <= HYPERNOVA_YAKU_BREAK_RADIUS * HYPERNOVA_YAKU_BREAK_RADIUS)
     {
-        Hypernova_SetMtxTranslation(jmtx, &rd->pos);
-        Hypernova_SetMtxTranslation(cached, &rd->pos);
+        Mtx_SetTrans(jobj->rotMtx, &rd->pos);
+        Mtx_SetTrans(record->world, &rd->pos);
         return Hypernova_BreakInstanceNative(rider_gobj, record);
     }
 
     Hypernova_StepToward(&pos, &rd->pos);
-    Hypernova_SetMtxTranslation(jmtx, &pos);
-    Hypernova_SetMtxTranslation(cached, &pos);
+    Mtx_SetTrans(jobj->rotMtx, &pos);
+    Mtx_SetTrans(record->world, &pos);
 
     // Tumble the live matrix only; the cached copy keeps the load-time scale as the shrink
     // baseline.
@@ -529,21 +511,21 @@ static int Hypernova_CollectBreakParents(GOBJ **out)
 }
 
 // A swept breakable is claimed here and pulled to destruction every frame regardless of cone
-// membership, keyed by scene-instance record. Sized above CT's ~130 breakables so a wide cone
+// membership, keyed by placed-instance record. Sized above CT's ~130 breakables so a wide cone
 // can't starve later props.
 #define HYPERNOVA_MAX_CLAIMS 200
 
 typedef struct
 {
-    void *record; // scene-instance record being drawn in
-    int   owner;  // player slot that claimed it (pull target / break attribution)
-    int   age;    // frames since claimed
+    GrCollRecord *record; // placed instance being drawn in
+    int           owner;  // player slot that claimed it (pull target / break attribution)
+    int           age;    // frames since claimed
 } HnClaim;
 
 static HnClaim hn_claims[HYPERNOVA_MAX_CLAIMS];
 static int     hn_claim_count;
 
-static int Hypernova_IsClaimed(void *record)
+static int Hypernova_IsClaimed(GrCollRecord *record)
 {
     for (int k = 0; k < hn_claim_count; k++)
         if (hn_claims[k].record == record)
@@ -552,7 +534,7 @@ static int Hypernova_IsClaimed(void *record)
 }
 
 // 1 if newly claimed, 0 if already claimed or the claim set is full.
-static int Hypernova_AddClaim(void *record, int owner)
+static int Hypernova_AddClaim(GrCollRecord *record, int owner)
 {
     if (hn_claim_count >= HYPERNOVA_MAX_CLAIMS || Hypernova_IsClaimed(record))
         return 0;
@@ -573,7 +555,7 @@ static void Hypernova_RemoveClaimAt(int k)
 static void Hypernova_ClaimYakumono(int player, RiderData *rd, Vec3 *aim)
 {
     int count;
-    void *pool = Yaku_GetInstancePool(&count);
+    GrCollRecord *pool = Gr_GetCollRecords(&count);
     if (pool == NULL || count <= 0)
         return;
 
@@ -584,8 +566,8 @@ static void Hypernova_ClaimYakumono(int player, RiderData *rd, Vec3 *aim)
 
     for (int i = 0; i < count; i++)
     {
-        void *record = Yaku_GetInstance(pool, i);
-        GOBJ *owner = Yaku_InstanceParent(record);
+        GrCollRecord *record = &pool[i];
+        GOBJ *owner = record->yaku_gobj;
         if (owner == NULL)
             continue;
 
@@ -606,14 +588,11 @@ static void Hypernova_ClaimYakumono(int player, RiderData *rd, Vec3 *aim)
             continue; // already in flight
         if (!grScene_IsInstanceCollAll(record, 1))
             continue; // already broken / retired
-        void *jobj = Yaku_InstanceJObj(record);
+        JOBJ *jobj = record->jobj;
         if (jobj == NULL)
             continue;
-        float *jmtx = (float *)((char *)jobj + 0x44);
         Vec3 ppos;
-        ppos.X = jmtx[3];
-        ppos.Y = jmtx[7];
-        ppos.Z = jmtx[11];
+        Mtx_GetTrans(jobj->rotMtx, &ppos);
         if (!Hypernova_InCone(&rd->pos, aim, &ppos))
             continue;
 
@@ -628,7 +607,7 @@ void Hypernova_VacuumProcessClaimed(void)
 {
     for (int k = hn_claim_count - 1; k >= 0; k--)
     {
-        void *record = hn_claims[k].record;
+        GrCollRecord *record = hn_claims[k].record;
         if (record == NULL)
         {
             Hypernova_RemoveClaimAt(k);
@@ -794,7 +773,7 @@ void Hypernova_VacuumFinishClaimedPlayer(int player)
     {
         if (hn_claims[k].owner != player)
             continue;
-        void *record = hn_claims[k].record;
+        GrCollRecord *record = hn_claims[k].record;
         if (record != NULL)
         {
             if (rg == NULL || !Hypernova_BreakInstanceNative(rg, record))

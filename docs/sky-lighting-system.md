@@ -1692,8 +1692,8 @@ from the joint SRT every frame by `HSD_JObjSetupMatrixSub`, so a small tilt writ
 joint's Euler rotation each frame is honored automatically - no user matrix, no dirty flag, no
 vertex work. Only the visual model is touched; collision is never moved.
 
-The tree joints are enumerated once per stage. `Tree_Enumerate` walks the ground scene-instance
-pool (`Yaku_GetInstancePool`) and keeps the records whose owner (`record+0x90`) is one of the
+The tree joints are enumerated once per stage. `Tree_Enumerate` walks the stage's placed-instance
+pool (`Gr_GetCollRecords`) and keeps the records whose `yaku_gobj` owner is one of the
 tree-family yakumono GObjs - those are gathered by walking the `GAMEPLINK_YAKUMONO` GObj list
 for `desc_id` 34. The owner slot is matched by pointer only and never dereferenced (it is
 meaningless for non-break instances), and each kept joint's authored base rotation is cached so

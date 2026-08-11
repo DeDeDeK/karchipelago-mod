@@ -326,7 +326,7 @@ projectile regardless of these flags.
 projectiles, where `owner_gobj` is the trapped player, are the canonical case:
 
 ```c
-ProjectileData *proj = Projectile_GetData(handle);
+ProjectileData *proj = (ProjectileData *)handle->userdata;
 proj->flag_a |= PROJ_ALLOW_SELF_HIT_INBOUND;   // proj+0x1b4 bit 0
 proj->flag_b |= PROJ_ALLOW_SELF_HIT_OUTBOUND;  // proj+0x1b5 bit 4
 ```
@@ -583,13 +583,13 @@ desc.velocity.Z = md->velocity.Z + md->forward.Z * THROW_SPEED;
 desc.type_flag  = 1;
 desc.charge     = 1.0f;
 
-void *handle = Projectile_Create(&desc);
+GOBJ *handle = Projectile_Create(&desc);
 if (!handle) return;
 
 // After postInit, PROJKIND_BOMB / SENSORBOMB sit in state 0 (HELD), pinned to a
 // nonexistent rider hand and never detonating. Advance to state 1 manually,
 // mirroring vanilla throwBomb.
-ProjectileData *proj = Projectile_GetData(handle);   // *(handle + 0x2c)
+ProjectileData *proj = (ProjectileData *)handle->userdata;
 if (!proj) return;
 
 // The trapped player IS the owner, so vanilla owner-exclusion would drop the

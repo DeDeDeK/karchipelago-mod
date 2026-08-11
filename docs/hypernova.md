@@ -213,9 +213,9 @@ CT breakables are **multi-instance**: one `YakumonoData` GObj manages N placed p
 parent itself has no usable transform - `pos` (`+0x1c`), `hsd_object` (`+0x28`), `model_jobj`
 (`+0x64`), and `xform_jobj` (`+0x70`) are all NULL/zero (`GrYaku_Create` NULLs `+0x70` at
 creation). The visible geometry lives in the **ground scene-instance pool**: each placed prop is
-a `0x98`-byte record (`Yaku_GetInstancePool`, array at `grobj+0x64`, count at `grobj+0x68`)
-carrying its own JObj (world matrix at `JObj+0x44`) and a back-pointer to its owning parent GObj
-at `record+0x90`. The vacuum therefore moves the per-prop **records**, not the GObj, sidestepping
+a `GrCollRecord` (`Gr_GetCollRecords`, which returns `(*stc_grobj)->coll.record` and its count)
+carrying its own `jobj` (world matrix `JOBJ.rotMtx`) and a `yaku_gobj` back-pointer to its owning
+parent GObj. The vacuum therefore moves the per-prop **records**, not the GObj, sidestepping
 the per-family `+0x130` layout differences. `on_damage` (`+0x100`) is NULL for these families, so
 the break is collision-force driven, not damage-driven.
 
@@ -858,13 +858,14 @@ accumulator `0xac`, HurtData `0xec` (hit-gate `+0x24`, damage `+0x28`), proc slo
 hoshi's struct; for break families it is the per-prop scene-instance record array). The "Move =
 JObj local-T (`JObj+0x10`) + set `+0x12c` bit 7; visual scale = JObj local scale; hurtbox scale =
 `+0xa4`" recipe is for **single-instance** yakumono; for break families operate on each child
-record's JObj instead. `stc_grobj+0x6fc` is the live **GObj** count (~31 in CT), not the prop
+record's JObj instead. `GrObj.yaku_num` is the live **GObj** count (~31 in CT), not the prop
 count.
 
-Scene-instance record (`0x98` bytes, `YAKU_INSTANCE_SIZE`): JObj `+0x00` (world matrix at
-`JObj+0x44`), region array `+0x0c`, region count `+0x10`, cached load-time 3x4 matrix `+0x2c`,
-owning parent GObj `+0x90`. Region entry is `0x40` bytes: normal `+0x0c`, refine flags `+0x34`
-(bit `0x20`), coll flags `+0x3c` (bit `0x40` = collidable).
+Placed-instance record (`GrCollRecord`, `0x98` bytes): `jobj` `+0x00` (world matrix
+`JOBJ.rotMtx`), triangle slice `tri_begin` `+0x0c` / `tri_num` `+0x10`, cached load-time 3x4
+matrix `world` `+0x2c`, owning parent GObj `yaku_gobj` `+0x90`. A `GrCollTri` is `0x40` bytes:
+`normal` `+0x0c`, `flags` `+0x34` (bit `0x20` = `GRCOLL_FLAG_MOVING`), `state` `+0x3c` (bit
+`0x40` = `GRCOLL_STATE_COLLIDABLE`).
 
 **City Trial target inventory** (desc_id -> object; full table + identity sourcing in
 `yakumono-system.md`): 29 = **star pole**, 32 = **forest pitfall**, 33 = **coral**, 34 =
