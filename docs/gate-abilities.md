@@ -43,6 +43,9 @@ The 11 `CopyKind`s (`rider.h`), one bit each in `ability_unlocked_mask`. Each ha
 | `stc_ability_init_table` | game | 0x804af4f0 | 11 per-`CopyKind` init function pointers (e.g. `ability_Fire` at `0x801af474`); the replacement calls it directly. |
 | `Rider_RecordCopyAbility(ply, kind)` | game | 0x8022ee00 | Records ability history, checks checklist sequences. |
 | `Rider_MarkCopyAbilityObtained(ply, kind)` | game | 0x8022f150 | Sets the bit in the per-player obtained-abilities mask. |
+| `Rider_ResolveQueuedAbility` | game | 0x801a8454 | Grants a pending queued ability/power-up, else runs the IASA fallback chain to `AS_StarWait`. |
+| `AS_StarWait` | game | 0x801ab1a0 | Neutral state (`RiderStateChange` 0x21); last resort of that chain. |
+| `Enemy_SpawnerDecideMode2` | game | 0x800f0efc | Kirby Melee 1's two-stage spawn picker. |
 
 ## Game System
 
@@ -110,7 +113,9 @@ Gates item/enemy copy ability pickups. Checks `rd->kind == RDKIND_KIRBY`, then t
 
 **2. `CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility)`**
 
-Gates the copy chance wheel. If the wheel lands on a locked ability, `RandomUnlockedAbility()` picks a random unlocked one instead; if no abilities are unlocked at all, nothing is given. The replacement reproduces the vanilla sequence (`Rider_AbilityRemoveModel` → `Rider_AbilityClearQueued` → `Rider_RecordCopyAbility` → `stc_ability_init_table[kind](rd)`) and additionally calls `Rider_MarkCopyAbilityObtained` itself with the possibly-substituted kind. `GateAbilities_OnBoot` therefore NOPs the callers' own calls with `CODEPATCH_REPLACEINSTRUCTION(addr, 0x60000000)` at `0x801ae874` (`randomAbility_aPress`) and `0x801ae910` (`randomAbility_autoSelect`), so the obtained-abilities bitmask tracks the ability actually given.
+Gates the copy chance wheel. If the wheel lands on a locked ability, `RandomUnlockedAbility()` picks a random unlocked one instead.
+
+If no abilities are unlocked at all there is no substitute, and the replacement must still resolve the rider's state: it calls `Rider_AbilityRemoveModel` → `Rider_AbilityClearQueued` → `Rider_ResolveQueuedAbility` (0x801a8454) before returning 0. Both callers reach this function from an action-state that has no other exit — the post-swallow state entered at 0x801b9a54 runs `randomAbility_queuedGive` every frame until the grant transitions the rider out, and the wheel commit (`randomAbility_aPress` / `randomAbility_autoSelect`) has already torn down the wheel model and cleared `cb_copy_input` by the time it calls the grant. Returning without a transition leaves the rider stuck for the rest of the match with no inhale and no quick spin. `Rider_ResolveQueuedAbility` is the engine's own "nothing to give" step (the tail of `Rider_StartCopyWheel` and the exit of the inhale START state): it grants a pending queued ability if there is one, else runs the IASA fallback chain and settles on `AS_StarWait`. The replacement reproduces the vanilla sequence (`Rider_AbilityRemoveModel` → `Rider_AbilityClearQueued` → `Rider_RecordCopyAbility` → `stc_ability_init_table[kind](rd)`) and additionally calls `Rider_MarkCopyAbilityObtained` itself with the possibly-substituted kind. `GateAbilities_OnBoot` therefore NOPs the callers' own calls with `CODEPATCH_REPLACEINSTRUCTION(addr, 0x60000000)` at `0x801ae874` (`randomAbility_aPress`) and `0x801ae910` (`randomAbility_autoSelect`), so the obtained-abilities bitmask tracks the ability actually given.
 
 **3. Spawn table filter chain (owned by `item_spawn_filter.c`)**
 
@@ -160,10 +165,19 @@ Enemies themed around locked copy abilities are prevented from spawning by zeroi
 2. Meta-enemy IDs (0x50–0x5E): filter the secondary sub-table by zeroing weights for locked-ability enemies. If no entry with positive weight remains, zero the meta-enemy's primary weight too.
 3. Each meta-enemy sub-table is filtered only once (tracked via the `meta_valid[]` array).
 
-**Mode 2 filtering** (`FilterMode2`) — Kirby Melee 1 uses a two-stage selection: stage 1 picks a meta-enemy category from the `secondary_table[0]` sub-table (weighted random), stage 2 picks an individual enemy from that category's weight column in the spawn entries. Entry layout: `enemy_id` at +0x06, weight columns at +0x08 (one short per category). Filtering:
+**Mode 2 filtering** (`FilterMode2`) — Kirby Melee 1 uses a two-stage selection: stage 1 picks a meta-enemy category from the `secondary_table[0]` sub-table, stage 2 picks an individual enemy from that category's weight column in the spawn entries. Entry layout: `enemy_id` at +0x06, weight columns at +0x08.
 
-1. Zero all weight columns for entries whose `enemy_id` has a locked copy ability.
-2. For each category in `secondary_table[0]`, check whether any entry still has positive weight in that column. If not, zero the category's weight in the sub-table to prevent empty selections.
+Two details of `Enemy_SpawnerDecideMode2` (0x800f0efc) drive the filter:
+
+- The **column index is the category's meta id − 0x50**, not its position in the sub-table (`addi r0,r3,-80` at `0x800f0fdc`, then `slwi r31,r0,1` at `0x800f1020` as the byte offset into the columns). Vanilla `GrPasture1` lists ids 0x50–0x59 in order so the two coincide there, but the filter derives the column from the id.
+- The sub-table's second short per pair is an **ascending threshold**, not a weight: stage 1 walks the pairs and takes the first whose value exceeds `total * (1 - EnemyMgr.time_progress)`. A threshold of 0 is therefore never selected.
+
+Filtering:
+
+1. Zero the weight column of every category for entries whose `enemy_id` has a locked copy ability.
+2. For each category, check whether any entry still has positive weight in its column. If not, zero the category's threshold in the sub-table to prevent empty selections.
+
+`EnemySpawnEntry.mode2.weight_columns` is declared with the full width the entry has room for (20 shorts, +0x08..+0x2F) rather than the stage's category count. A shorter declaration lets the compiler assume every index is 0 and fold the zeroing loop down to a single store, which leaves all columns but the first live and locked-ability enemies spawning.
 
 **Enemy ID → CopyKind mapping:** `enemy_slot_copykind[24]` is a per-tier-slot table (`ACTORID_ENEMIES_PER_TIER` = 0x18). T0/T1/T2 share the same slot mapping because the copy ability is tied to the archive, not the tier flags — e.g. T1 Heat Phan-Phan is visually distinct but uses Phan-Phan's Fire archive. `EnemyIDToCopyKind(enemy_id)` mods into the slot table for IDs in `[ACTORID_TIER0_START, ACTORID_SPECIAL_START)` (0x00–0x47) and special-cases `ACTORID_SP_SWORD_KNIGHT` (0x49) → SWORD. All other special IDs (TAC, Dyna Blade, Meteor, etc.) are NONE.
 
@@ -191,6 +205,8 @@ The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_ABILITY`. When the sl
 
 **Enemy spawn weight zeroing over spawn-time rejection:** Substituting `enemy_id = -1` at spawn time causes low enemy density because the spawner repeatedly selects locked enemies, gets rejected, and cycles through respawn delays. Weight zeroing preserves density because the spawner never selects locked enemies.
 
-**AP ability bypass:** `Ability_GiveItem` calls `Rider_GiveAbility` directly rather than through the hooked `Rider_CheckAndGiveAbility`. AP-granted abilities are never blocked by the gate.
+**AP ability bypass:** `Ability_GiveItem` calls `Rider_GiveAbility` directly rather than through the hooked `Rider_CheckAndGiveAbility`. AP-granted abilities are never blocked by the gate, so an ability bought with EnergyLink applies whether or not its unlock item has been received.
 
-**Wheel substitution over wheel suppression:** A locked wheel result becomes a random unlocked ability rather than nothing, so inhaling an enemy stays worthwhile as soon as any ability is unlocked.
+**AP grants spawn no pickup:** the grant reaches the rider through `Rider_GiveAbility`, which only indexes the static `stc_ability_init_table` (0x804af4f0). Nothing in the path touches the per-kind item data, so `APItems_HandleItem` runs the copy-ability branch above its Free Run / stadium gate and the grants land in every 3D mode - the open city, Free Run, Air Ride and all stadiums. The trade-off is no pickup visual.
+
+**Wheel substitution over wheel suppression:** A locked wheel result becomes a random unlocked ability rather than nothing, so inhaling an enemy stays worthwhile as soon as any ability is unlocked. With nothing unlocked the grant is declined, but the rider's state is always resolved on the way out — the engine offers no "grant failed" path of its own.

@@ -16,6 +16,8 @@ extern MenuDesc tree_menu;
 extern MenuDesc clouds_menu;
 extern MenuDesc moon_menu;
 extern MenuDesc stars_menu;
+extern MenuDesc volcano_menu;
+extern MenuDesc tornado_menu;
 extern OptionDesc event_sky_option;
 
 static void OnBoot(void)
@@ -26,8 +28,13 @@ static void OnBoot(void)
     EventSky_OnBoot();
 }
 
+static void OnFrameEnd(void)
+{
+    Tornado_OnFrameEnd();
+}
+
 static MenuDesc top_menu = {
-    .option_num = 12,
+    .option_num = 14,
     .options = {
         &(OptionDesc){
             .name = "Weather Presets",
@@ -95,6 +102,18 @@ static MenuDesc top_menu = {
             .kind = OPTKIND_MENU,
             .menu_ptr = &stars_menu,
         },
+        &(OptionDesc){
+            .name = "Volcano",
+            .description = "How often the City Trial volcano erupts, how long it lasts, and what it flings",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &volcano_menu,
+        },
+        &(OptionDesc){
+            .name = "Tornado",
+            .description = "How often a tornado sweeps City Trial, how long it lasts, and how big and strong it is",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &tornado_menu,
+        },
         &event_sky_option,
     },
 };
@@ -113,4 +132,5 @@ ModDesc mod_desc = {
     .version.minor = 0,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
+    .OnFrameEnd = OnFrameEnd,
 };

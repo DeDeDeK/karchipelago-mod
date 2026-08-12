@@ -133,14 +133,20 @@ static int RandomUnlockedAbility()
 // substituted kind, so the callers' own calls are NOPed in OnBoot.
 int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 {
-    if (kind < 0 || kind >= COPYKIND_NUM)
-        return 0;
-
-    if (!IsAbilityUnlocked(kind))
+    if (kind >= 0 && kind < COPYKIND_NUM && !IsAbilityUnlocked(kind))
         kind = RandomUnlockedAbility();
 
-    if (kind == -1)
+    // With nothing unlocked there is no substitute to grant. The post-swallow
+    // action-state only leaves through the grant, so returning without resolving
+    // strands the rider there for the rest of the match - no inhale, no quick spin.
+    // Rider_ResolveQueuedAbility is the engine's own "nothing to give" exit.
+    if (kind < 0 || kind >= COPYKIND_NUM)
+    {
+        Rider_AbilityRemoveModel(rd);
+        Rider_AbilityClearQueued(rd);
+        Rider_ResolveQueuedAbility(rd);
         return 0;
+    }
 
     Rider_AbilityRemoveModel(rd);
     Rider_AbilityClearQueued(rd);
@@ -217,8 +223,8 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
         return;
 
     // 1 = has valid enemies, 0 = all zeroed, -1 = not yet processed
-    s8 meta_valid[15];
-    for (int m = 0; m < 15; m++)
+    s8 meta_valid[ENEMY_META_NUM];
+    for (int m = 0; m < ENEMY_META_NUM; m++)
         meta_valid[m] = -1;
 
     for (int i = 0; i < data->spawn_count; i++)
@@ -237,9 +243,9 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
                 continue;
 
             // Meta-enemy IDs select from a secondary sub-table.
-            if (enemy_id >= 0x50 && enemy_id <= 0x5E)
+            if (enemy_id >= ENEMY_META_ID_BASE && enemy_id < ENEMY_META_ID_BASE + ENEMY_META_NUM)
             {
-                int meta = enemy_id - 0x50;
+                int meta = enemy_id - ENEMY_META_ID_BASE;
                 if (meta_valid[meta] == -1)
                 {
                     short *sub_table = data->secondary_table
@@ -260,7 +266,8 @@ static void FilterMode1Or3(EnemySpawnData *data, int ids_offset, int weights_off
 
 // Mode 2 (STKIND_MELEE1): two-stage selection - a meta-enemy category from
 // secondary_table[0], then an enemy from that category's weight column (entry +0x06
-// enemy_id, +0x08 weight columns).
+// enemy_id, +0x08 weight columns). Enemy_SpawnerDecideMode2 indexes the column by the
+// category's meta id - 0x50, not by its position in the sub-table.
 static void FilterMode2(EnemySpawnData *data)
 {
     if (!data->spawn_entries || data->spawn_count <= 0 || !data->secondary_table)
@@ -270,9 +277,16 @@ static void FilterMode2(EnemySpawnData *data)
     if (!sub_table)
         return;
 
+    const int max_columns = sizeof(data->spawn_entries->mode2.weight_columns) / sizeof(short);
+
+    int columns[ENEMY_META_NUM];
     int num_categories = 0;
-    while (sub_table[num_categories * 2] != -1)
+    while (num_categories < ENEMY_META_NUM && sub_table[num_categories * 2] != -1)
+    {
+        int col = sub_table[num_categories * 2] - ENEMY_META_ID_BASE;
+        columns[num_categories] = (col >= 0 && col < max_columns) ? col : -1;
         num_categories++;
+    }
 
     if (num_categories == 0)
         return;
@@ -283,25 +297,29 @@ static void FilterMode2(EnemySpawnData *data)
         EnemySpawnEntry *entry = &data->spawn_entries[i];
         int enemy_id = entry->mode2.enemy_id;
 
-        if (enemy_id < 0)
+        if (enemy_id < 0 || !IsEnemyAbilityLocked(enemy_id))
             continue;
 
-        if (IsEnemyAbilityLocked(enemy_id))
+        for (int cat = 0; cat < num_categories; cat++)
         {
-            for (int col = 0; col < num_categories; col++)
-                entry->mode2.weight_columns[col] = 0;
-            zeroed_entries++;
+            if (columns[cat] >= 0)
+                entry->mode2.weight_columns[columns[cat]] = 0;
         }
+        zeroed_entries++;
     }
 
-    // Drop a category once every entry in its column has been zeroed.
+    // Drop a category once every entry in its column has been zeroed. The sub-table
+    // weights are ascending thresholds, so a 0 is simply never selected.
     int zeroed_categories = 0;
     for (int cat = 0; cat < num_categories; cat++)
     {
+        if (columns[cat] < 0)
+            continue;
+
         int has_valid = 0;
         for (int i = 0; i < data->spawn_count; i++)
         {
-            if (data->spawn_entries[i].mode2.weight_columns[cat] > 0)
+            if (data->spawn_entries[i].mode2.weight_columns[columns[cat]] > 0)
             {
                 has_valid = 1;
                 break;

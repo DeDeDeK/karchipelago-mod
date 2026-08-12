@@ -109,8 +109,11 @@ void Wind_GetVector(Vec3 *out)
     out->Z = stc_vz;
 }
 
-// Blow every airborne item sideways; settled items (grounded bit 0x10) are left
-// alone so wind never drags a resting item across the ground.
+// Blow every airborne item sideways - dropping from the sky, tossed out of a box,
+// bouncing - and leave resting ones alone so wind never drags an item across the ground.
+// is_airborne is 0 only while the item sits on a surface; the x35a grounded bit is no use
+// here, since it latches the moment an item acquires a ground reference, which on a sky
+// drop is its first frame hundreds of units up.
 static void Wind_ApplyToItems(float wx, float wz)
 {
     float ax = wx * WIND_ITEM_FACTOR;
@@ -122,7 +125,7 @@ static void Wind_ApplyToItems(float wx, float wz)
         ItemData *id = (ItemData *)g->userdata;
         if (id == NULL)
             continue;
-        if (id->x35a & 0x10) // grounded -> not falling
+        if (id->is_airborne == 0) // resting on the ground
             continue;
         id->vel.X += ax;
         id->vel.Z += az;
@@ -186,6 +189,12 @@ void Wind_Tick(void)
     float rad = (stc_base_heading + stc_head_cur) * WIND_DEG2RAD;
     stc_vx = speed * sinf(rad);
     stc_vz = speed * cosf(rad);
+
+    // Visual-only until the round timer starts. Riders are still boarding through the
+    // intro and count as airborne, so a push there shoves them off the start line, and the
+    // opening item drop would be blown across the city before anyone can play.
+    if (Weather_RoundProgress() < 0.0f)
+        return;
 
     if (WeatherToggle(wind_affect_items, 1))
         Wind_ApplyToItems(stc_vx, stc_vz);

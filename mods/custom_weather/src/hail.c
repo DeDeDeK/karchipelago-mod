@@ -222,7 +222,7 @@ static int MachineSheltered(const MachineData *md)
     Vec3 start = {md->pos.X, sky_y, md->pos.Z};
     Vec3 end = {md->pos.X, floor_y, md->pos.Z};
     Vec3 hit;
-    return EnvColl_Raycast(&start, &end, &hit) >= 0;
+    return Raycast_Ground(&start, &end, &hit) >= 0;
 }
 
 // Latch the active preset's hail amount, which the Hail menu's Preset index

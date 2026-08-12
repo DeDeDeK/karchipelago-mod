@@ -67,9 +67,10 @@ on-foot path writes them, so a mid-round toggle-off snaps straight back to vanil
 
 ## Scope
 
-The on-foot camera kind only exists where the rider can leave a machine, which is City Trial;
-Air Ride never dismounts and Top Ride uses a separate camera system entirely. Kind 1 and 9
-already zoom in vanilla and are untouched.
+The on-foot camera kind only exists where the rider can leave a machine, which is the open
+City Trial map. Riders never dismount in the stadiums (Kirby Melee included) or in Air Ride,
+and Top Ride uses a separate camera system entirely. Kind 1 and 9 already zoom in vanilla and
+are untouched.
 
 `PlyCam_MachineZoomAdjust` writes the per-player zoom back to
 `PlayerCamLookup.ply_distance[ply]` only for kinds 1 and 9, so on-foot zoom is never saved and

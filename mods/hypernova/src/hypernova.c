@@ -245,7 +245,7 @@ static int DriveInhale(RiderData *rd, int player, int held)
             if (st == HYPERNOVA_INHALE_LOOP)
             {
                 // Keep the suck from timing out while held.
-                *(s32 *)((char *)rd + HYPERNOVA_INHALE_TIMER_OFF) = HYPERNOVA_INHALE_TIMER_HOLD;
+                rd->inhale_timer = HYPERNOVA_INHALE_TIMER_HOLD;
             }
             else if (st != HYPERNOVA_INHALE_END && st != HYPERNOVA_INHALE_START)
             {

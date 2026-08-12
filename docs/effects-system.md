@@ -61,37 +61,71 @@ label inside the per-ID `switch`, not a second entry point.
 ```c
 typedef struct { u32 lo, hi; } EffectHandle;   // returned in {r3, r4}
 
-EffectHandle Effect_SpawnSync(HSD_GObj *parent,  // owner GObj (rider / event actor / machine)
-                              int       id,       // group*10000 + entry
-                              void     *owner,    // owner-data ptr, passed to the per-ID helper
-                              int       joint,    // joint index / anchor-mode selector
-                              ...);               // position vec / matrix ptrs; optional f1.. floats
+EffectHandle Effect_SpawnSync(HSD_GObj *parent,      // owner GObj - MAY BE NULL
+                              int       id,          // group*10000 + entry
+                              int       efgroup,     // EfGroup bucket - asserts on -1
+                              int       anchor_mode, // selects which varargs are read
+                              ...);                  // anchor-mode-specific args
 ```
+
+The third argument is the **EfGroup**, not an owner pointer, and the fourth is an **anchor mode**,
+not a joint index. Both are load-bearing: `efgroup == -1` trips
+`__assert("efrequest.c", 75, "group!=EfGroup_None")` after an
+`OSReport("efgroup is none!! kind=%d")`, and the anchor mode decides how many varargs the placement
+resolver consumes and what they mean.
 
 Behaviour:
 
+- **NULL parent is legal.** The owner-player index preseeds to `5` ("none") at `0x80236ccc` and the
+  whole owner block (`0x80236d5c`-`0x80236d98`) is skipped, so an effect can be spawned with no
+  owning object at all. The parent is only stored into the spawn node at `node+0x08`.
 - **Global suppress gate.** If `*(u32*)0x805DD8B8` (`r13 + 2008`) is nonzero, the call returns
   `{0,0}` immediately - effects are globally suppressed during pause / non-gameplay scenes.
-- **Create gate.** `Effect_CheckToCreate` (`0x802410d4`) returns 0/1 from a scene/mode byte plus two
-  `r13` globals; 0 returns `{0,0}`.
-- **Anchor resolve.** The `joint` argument selects an anchor mode (0, 1, 100-112, 200-220). A
-  resolver (`0x80240284`) fills a local 52-byte placement descriptor (position default 0, scale
-  fields) from the parent's JObj/model so the effect attaches at the right bone.
+- **Create gate.** `Effect_CheckToCreate` (`0x802410d4`) is a split-screen dedup (`Gm_GetPlyViewNum`
+  plus two id globals at `0x805D7328`/`0x805D732C`); it returns 1 in 1P. 0 returns `{0,0}`.
+- **Anchor resolve.** `0x80240284(mode, va_list*, desc, ply)` zero-fills a 52-byte (13-word)
+  placement descriptor and then `va_arg`s mode-specific arguments into it. It fills the descriptor
+  **purely from the varargs - it never reads `parent`**.
 - **Per-ID construction.** A hand-rolled `switch (id)` builds the specific effect (model vs particle,
-  sub-models, scale, color). Each case calls the spawn helper that ultimately reaches
-  `EffectModel_CreateGObj` for model effects.
-- **Return.** A 64-bit **fire-and-forget handle** `{Effect+0x10, Effect+0x14}` (a packed generation
-  counter plus pool index), or `{0,0}` on failure. A single call can fan out into up to **5**
-  sub-effects; only the primary handle is returned. Most callers (including the inhale) **discard the
-  handle** - nothing points back at the spawned effect.
+  sub-models, scale, color). Ids >= `0x3A980` branch to a per-**id** switch at `0x8023731c`. Each
+  case calls the spawn helper that ultimately reaches `EffectModel_CreateGObj` for model effects.
+- **Return.** A 64-bit **fire-and-forget handle** `{node+0x10, node+0x14}`, or `{0,0}` on failure. A
+  single call can fan out into up to **5** sub-effects; only the primary handle is returned. Most
+  callers (including the inhale) **discard the handle** - nothing points back at the spawned effect.
 
-Three call sites pin the signature:
+### Anchor modes
 
-| Caller | parent | id | joint | Notes |
-|--------|--------|----|-------|-------|
-| `Rider_StartInhale` (`0x801ad2c4`) | rider GObj | `0x3a982` | 218 (mouth) | call site `0x801ad374`; handle discarded |
-| `EventActor_SpawnEffect` (`0x8020d30c`) | actor GObj | `0x5a59f`..`0x5a5a1` by kind arg | 510 | call site `0x8020d3ac`; stores handle at actor +0xA70/+0xA74 |
-| `Machine_SpawnHitEffect` (`0x8018dba0`) | machine GObj | caller arg, else fixed `0x5a592` | 215 | two mutually exclusive call sites (`0x8018dc44` arg-id, `0x8018dc6c` fallback), not two effects |
+| Mode | Varargs consumed | Descriptor slots | Meaning |
+|---|---|---|---|
+| 0 | none | - | no placement |
+| **1** | **1** | `desc[0]` | **a `void (*)(void *node)` post-spawn callback**, invoked with the spawn node once the effect exists. Also **skips the joint-attach path entirely** |
+| 100-112 | varies | `desc[4]` | `JOBJ *` follow target |
+| 200-220 | varies | `desc[5]` (+`desc[6]`/`desc[7]` for 218) | `JOBJ *` follow target; 218 is the rider mouth anchor |
+
+Mode 1 is the **world-anchored spawn path**. There is no variant taking a raw `Vec3 *` world
+position: you spawn with mode 1, receive the spawn node in the callback, and take the model root
+from `node+0x5c` (the effect GObj) to write its SRT yourself. The epilogue at `0x8023b794` is what
+invokes it:
+
+```c
+lwz r12, desc[0]; cmplwi r12,0; beq skip; mtctr r12; bctrl   // desc[0](node)
+```
+
+Because mode 1 takes the `bne 0x8023b758` branch at `0x802378dc`, `EffectModel_AttachToJObj`
+(`0x8023d9b0`) is never called - so `Effect+0x1e` (anchor flags) stays 0, `Effect+0x20` (follow
+joint) stays NULL, **no follow proc is installed**, and the one-shot init `0x8023e684` never runs.
+That last part means a mode-1 effect never arms its own animation looping; the spawner must do
+`JObj_SetAllAOBJLoopByFlags(root, 0xffff)` and set `Effect.life = 1` or the animation stalls on the
+intro's final frame.
+
+Four call sites pin the signature:
+
+| Caller | parent | id | efgroup | mode | Notes |
+|--------|--------|----|---------|------|-------|
+| `Rider_StartInhale` (`0x801ad2c4`) | rider GObj | `0x3a982` | `RiderData+0x440` | 218 (mouth) | call site `0x801ad374`, args `(rd->gobj, 0x3a982, rd->x440, 218, hatJObj, hatJObj, ply)`; handle discarded |
+| `EventActor_SpawnEffect` (`0x8020d30c`) | actor GObj | `0x5a59f`..`0x5a5a1` by kind arg | - | 510 | call site `0x8020d3ac`; stores handle at actor +0xA70/+0xA74 |
+| `Machine_SpawnHitEffect` (`0x8018dba0`) | machine GObj | caller arg, else fixed `0x5a592` | - | 215 | two mutually exclusive call sites (`0x8018dc44` arg-id, `0x8018dc6c` fallback), not two effects |
+| `Tornado_SpawnModel` (custom_weather) | NULL | `0x3a982` | borrowed from a rider | **1** | the world-anchored case: a detached, scaled-up whirlwind driven as a tornado funnel |
 
 A float-vararg convention (`f1..f8` for x/y/z/scale) exists but is **dead for all known callers** -
 they pass geometry through the pointer args and clear the FP-arg condition bit.
@@ -99,6 +133,41 @@ they pass geometry through the pointer args and clear the FP-arg condition bit.
 Because the handle is discarded, mod code that wants to reach a live effect must find it by walking
 the p_link-16 GObj list, filtering on `entity_class == 25` and `Effect->kind == <id>`. That is how
 the hypernova mod locates active inhale whirlwinds.
+
+### Never destroy a spawned effect by hand
+
+The spawn node outlives the caller's interest in it and keeps pointing at the effect GObj at
+`node+0x5c`. The per-node kill **`0x80234a8c`** - reached from the efgroup kill `0x80236358`, which
+sweeps all 32 node buckets and matches `node+0x1c` against the group - calls
+`GObj_Destroy(node+0x5c)` unconditionally. So an effect that mod code already destroyed is destroyed
+a *second* time whenever its group is next retired.
+
+The second destroy pushes a still-live GObj onto the free list. Nothing faults at that moment; the
+next `GObj_Create` hands the same GObj out again and the failure surfaces far away, as
+
+```
+assertion "gobj->user_data_kind == HSD_GOBJ_USER_DATA_NONE" failed in gobjuserdata.c on line 40
+  GObj_AddUserData <- UnkGOBJ_Create (0x800e7108) <- ... <- Machine_HitThink
+```
+
+in whichever unrelated system happened to allocate next. To retire a mode-1 effect, **hide the model
+tree** (`JObj_SetFlagsAll(root, JOBJ_HIDDEN)`) and leave the lifetime to the engine, re-validating
+the GObj against the p_link-16 bucket before each use in case a group kill already took it.
+
+### The whirlwind model's local axes
+
+`0x3a982`'s joint tree (`efModelData[2]` in `EfCommon.dat`) is authored **along its local +Z**: the
+narrow mouth end sits at the origin and the swirl flares out to a radius of `8.07` at `z = 9.95`
+(the cross section pinches to `r ~ 1.3` around `z = 3` and there is a wide `r ~ 7.4` ring at
+`z ~ 1`). Local X/Y are the cross-section plane. A detached spawn that wants it standing upright
+has to map local +Z onto world +Y itself - mode 1 applies no orientation of its own, so the model
+renders lying flat.
+
+Driving the root's **world matrix** (`JOBJ+0x44`, with `JOBJ_USER_DEFINED_MTX` set) rather than its
+SRT is the practical way to do that: it sidesteps the euler-order question, allows an independent
+axial and radial scale, and overrides whatever the effect's own animation writes to the root joint.
+Mode 1 also installs no proc to advance the animation, so the spawner has to call `JObj_AnimAll` on
+the root every frame or the swirl is frozen even with looping armed.
 
 ## The EffectModel Object
 
@@ -144,16 +213,34 @@ entity-class-25 defaults plus the manually-installed gx_cb.
 `Effect+0x90` (`HSD_Free`) and returns the `Effect` slot to its pool (`HSD_ObjFree`). The JObj tree
 itself is owned by the GObj and torn down by `GObj_Destroy`.
 
-**Lifetime / animation.** There is **no per-GObj think callback**. All live effects are advanced by
-the global updater `Effect_UpdateAll` (`0x804324ec`), entered each frame via two thunks:
+**Lifetime / animation.** `EffectModel_CreateGObj` installs no proc of its own (it only sets the
+gx_cb at `GObj+0x1c`), but `Effect_SpawnSync`'s per-id case installs up to two, both at **proc
+priority 11**, when the anchor mode attaches to a joint:
 
-- `Ptcl_Think` (`0x80233b74`) - category mask `0`.
-- `Ptcl_Think2` (`0x80233ba0`) - category mask `0xFFFD0000`.
+| Address | Installed by | Role |
+|---|---|---|
+| `0x8023ce1c` | `EffectModel_AttachToJObj` (`0x8023d9b0`), only if `mode & 7` | the per-frame joint re-anchor |
+| `0x8023e6bc` | `0x8023e570` | anim loop-start watcher |
 
-The two masks select the two object pools the manager allocates from. The updater ticks each effect's
-JObj material/texture animation (`HSD_JObjAnimAll` - this is what scrolls the spiral) and its lifetime
-counter. **Position-follow-joint is done externally by the spawner**, not by the effect's own think:
-the inhale code rewrites the whirlwind's world matrix to track the mouth bone every frame.
+`0x804324ec` is **not** an effect updater - it is `psUpdateGenerators`, the point-particle generator
+tick, reached through `Ptcl_Think` (`0x80233b74`) and `Ptcl_Think2` (`0x80233ba0`). It never touches
+model effects.
+
+**Position-follow-joint is done by the effect module itself**, not by the spawner. `0x8023ce1c`
+reads the anchor flags at `Effect+0x1e` and the target joint at `Effect+0x20`, then rewrites the
+model root's **SRT** (not its world matrix) from the target's world matrix each frame:
+
+```c
+if (flags & 1) root->trans = translate(tgt->mtx) [+ Effect+0x28 offset if flags & 0x100];
+if (flags & 2) root->rot   = rotation(tgt->mtx);
+if (flags & 4) root->scale = scale(tgt->mtx) * Effect.scale;   // else scale = Effect.scale
+```
+
+The inhale attaches with flags `7`, so all three are driven. Mod code has three ways past it, best
+first: spawn with **anchor mode 1** so the proc is never installed; drive `Effect.scale` (`+0x34`)
+and `Effect+0x28` instead of the JObj if the follow is wanted; or, on an already-spawned engine
+effect, zero the whole `Effect+0x1e` u16 (every branch is gated on it - but note the `else` still
+stomps scale from `Effect+0x34`, so set that too).
 
 ## The EffectModelDesc
 
@@ -185,15 +272,17 @@ Two related runtime structs. The **GObj-userdata effect state** (written by `Eff
 | 0x00 | `gobj` | owning GObj |
 | 0x04 | `kind` | effect kind/ID; the match key when scanning the p_link-16 list |
 | 0x08 | `list_node` | per-group list node (set during registration) |
-| 0x0C | `life` | lifetime/frame counter, init `-1` (unset/infinite). Also drives animation playback, so pinning it every frame freezes the anim rather than extending a finite effect - re-spawn instead |
+| 0x0C | `life` | **not a countdown** - a tri-state anim-loop flag, init `-1` (untouched), `0` = the one-shot intro is playing, `1` = looping. Nothing decrements it and nothing destroys an effect from it. The only writer is `Effect_SetAnimLoop` (`0x8023ff80`); the loop watcher `0x8023e6bc` flips `0` -> `1` once the intro anim ends and enables AOBJ looping. Writing a nonzero value before the intro finishes is what freezes the anim: the watcher then never arms looping |
 | 0x18 | flags byte | state bits; a bit is set when scene mode is in `[7,11)` |
 | 0x28-0x30 | `Vec3` | position/velocity offset, init `{0,0,0}` |
 | 0x34 | `f32` | scale/rate, init `1.0` |
 | 0x90 | `aux` | optional heap block freed by the destructor |
 
 The **spawn list-node** (allocated by `0x8023475c`, the SpawnSync path) carries the returned handle
-and owner pointers: `+0x00` list link, `+0x10`/`+0x14` handle, `+0x18` owner GObj, `+0x1C` attach
-context, `+0x28` kind/state (init 5), `+0x5C` descriptor pointer.
+and the back-pointers: `+0x00` list link, `+0x08` **parent GObj** (stored at `0x8023b76c`),
+`+0x10`/`+0x14` handle, `+0x18` **kind**, `+0x1C` **efgroup** (what the group-kill `0x80236358`
+matches on), `+0x28` state (init 5), `+0x5C` **the effect GObj**. `+0x5c` is the field an anchor-mode-1
+post-spawn callback dereferences to reach the model.
 
 ## Manager And Registry Globals
 
@@ -320,8 +409,23 @@ All four materials of the inhale model (group 24 / entry 2, read from `EfCommon.
 a texture-weighted blend of **two** registers - `constant` (near-white cyan) where the spiral texture
 is bright, `tev0` (muted blue-grey) where it is dark. **`tev1` is unused** (no selector references it;
 its value is zero). To recolor uniformly, set the RGB of **both `constant` and `tev0`** - setting one
-alone leaves a two-tone artifact. The alpha equation routes through `constant.a` (`alpha_b=0x43`),
-which feeds the XLU opacity, so **preserve each register's alpha** and change only RGB.
+alone leaves a two-tone artifact. **Preserve each register's alpha** and change only RGB.
+
+Opacity is *not* in these registers, and it is not readily drivable at all on this model. The tev's
+alpha selectors are `alpha_a..d = 0x07 0x07 0x07 0x04`, i.e. `ZERO/ZERO/ZERO/GX_CA_TEXA`: the stage
+takes the texture's alpha and never references `RASA`, which is where the material and vertex alpha
+that `MObj.rendermode`'s `RENDER_ALPHA_BOTH` (`3 << 13`) folds in would arrive. So the obvious knob,
+`MObj.mat->alpha` - what `HSD_MObjSetAlpha` (`0x803fad80`) writes and what the vanilla item-box
+spawn fade (`Box_ApplyAlpha`, `0x80257da0`, which ORs `RENDER_XLU` into `rendermode` first) uses to
+fade an ordinary model - has no path to the pixel here.
+
+Fading a *whirlwind* therefore means either scaling its geometry, or rewriting the alpha selectors
+(e.g. `a=ZERO, b=TEXA, c=0x43` for `constant.a`) and recompiling the TExp tree, since the selectors
+are compiled at load and the raw bytes have no effect on their own. Writing `mat->alpha` is still
+safe and per-instance - `MObjLoad` (`0x803f9f04`) allocates an `HSD_Material` per MObj and memcpys
+the desc's 0x14 bytes into it, so it can never touch another copy of the same model - it just may not
+be visible. Write it *after* the frame's `JObj_AnimAll`, which would otherwise restore the authored
+value.
 
 Practical notes:
 
@@ -358,7 +462,11 @@ bank.
 | `0x80233ddc` | `EffectModel_Destructor` | GObj+0x30 dtor |
 | `0x80233e24` | `Effect_Init` (instance) | writes the `Effect` state struct |
 | `0x8023475c` | spawn list-node alloc | allocates the SpawnSync handle/owner node |
-| `0x804324ec` | `Effect_UpdateAll` | per-frame effect/anim/lifetime updater |
+| `0x804324ec` | `psUpdateGenerators` | per-frame **point-particle generator** tick - not an effect updater |
+| `0x8023ce1c` | `EffectModel_FollowJointProc` | priority-11 proc: re-anchors the model root's SRT to `Effect.follow_jobj` |
+| `0x8023e6bc` | effect anim-loop watcher | priority-11 proc: arms AOBJ looping once the intro anim ends |
+| `0x8023d9b0` | `EffectModel_AttachToJObj` | sets `Effect+0x1e`/`+0x20` and installs the follow proc |
+| `0x8023ff80` | `Effect_SetAnimLoop` | the only writer of `Effect.life` |
 | `0x80233b74` / `0x80233ba0` | `Ptcl_Think` / `Ptcl_Think2` | updater thunks (pool masks 0 / 0xFFFD0000) |
 | `0x80233908` | `Effect_Init` (boot) | boot init |
 | `0x802332c4` | `Effect_InitObjAllocs` | build `gEffectMgr` |

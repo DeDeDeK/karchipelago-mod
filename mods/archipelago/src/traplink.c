@@ -183,8 +183,8 @@ static void TrapLink_PerFrame(GOBJ *g)
     {
         case MJRKIND_CITY:
             // Free Run and stadiums don't load item data, so most CT traps would
-            // crash inside SpawnItem / enemy / fake-patch spawn. Stadiums still
-            // have rider GOBJs, so they fall back to the AR sleep trap.
+            // crash inside SpawnItem / enemy / fake-patch spawn. Stadium riders
+            // are always mounted, so they fall back to the AR sleep trap.
             if (Gm_GetCityMode() == CITYMODE_FREERUN)
             {
                 OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded).\n");

@@ -5,6 +5,7 @@
 #include "os.h"
 #include "game.h"
 #include "obj.h"
+#include "stage.h"
 #include "yakumono.h"
 #include "hoshi/settings.h"
 
@@ -25,8 +26,8 @@
 
 typedef struct TreeEntry
 {
-    JOBJ *jobj;      // the skeleton joint we tilt (record+0x00)
-    void *record;    // scene-instance record, for the intact/broken gate
+    JOBJ *jobj;            // the skeleton joint we tilt
+    GrCollRecord *record;  // placed instance, for the intact/broken gate
     Vec4  base_rot;  // authored rotation, restored under it each frame
 } TreeEntry;
 
@@ -71,7 +72,7 @@ static void Tree_Enumerate(void)
     stc_tree_count = 0;
 
     int count = 0;
-    void *pool = Yaku_GetInstancePool(&count);
+    GrCollRecord *pool = Gr_GetCollRecords(&count);
     if (pool == NULL)
         return; // scene not built yet; retry next frame
 
@@ -85,8 +86,8 @@ static void Tree_Enumerate(void)
 
     for (int i = 0; i < count && stc_tree_count < TREE_MAX; i++)
     {
-        void *record = Yaku_GetInstance(pool, i);
-        GOBJ *owner = Yaku_InstanceParent(record);
+        GrCollRecord *record = &pool[i];
+        GOBJ *owner = record->yaku_gobj;
         if (owner == NULL)
             continue;
 
@@ -103,7 +104,7 @@ static void Tree_Enumerate(void)
         if (!is_tree)
             continue;
 
-        JOBJ *j = (JOBJ *)Yaku_InstanceJObj(record);
+        JOBJ *j = record->jobj;
         if (j == NULL)
             continue;
 

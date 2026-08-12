@@ -44,7 +44,7 @@ m->scale = { s, s, s };          // JOBJ +0x2c/+0x30/+0x34
 HSD_JObjSetMtxDirtySub(m);
 ```
 
-Accessed from mod code via `TopRide_KirbyModelScalePtr` (see `topride.h`).
+Accessed from mod code as `kirby->charge.model_scale`.
 
 Unlike City Trial / Air Ride — where the rider (`RiderData`) and machine
 (`MachineData`) are separate objects and `RiderData.model_scale` touches only the

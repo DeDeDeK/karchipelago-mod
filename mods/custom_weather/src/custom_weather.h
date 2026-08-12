@@ -5,7 +5,7 @@
 #include "structs.h"
 
 #define WEATHER_VANILLA_NUM  17
-#define WEATHER_CUSTOM_NUM   9
+#define WEATHER_CUSTOM_NUM   11
 #define WEATHER_TOTAL        (WEATHER_VANILLA_NUM + WEATHER_CUSTOM_NUM)
 
 // Preset indices: 0-16 = vanilla (from stage file), 17+ = custom (appended at runtime)
@@ -37,6 +37,8 @@ typedef enum WeatherKind
     WEATHER_COTTON_CANDY,
     WEATHER_TOXIC,
     WEATHER_BUBBLEGUM,
+    WEATHER_VOLCANIC,
+    WEATHER_TORNADO,
 } WeatherKind;
 
 // Per-preset rain (CustomPresetDef.rain). Numeric fields take 0 = module default;
@@ -183,6 +185,53 @@ typedef struct MoonDef
     u32   light_color;  // RGBA8888 moonlight color
 } MoonDef;
 
+// Which copy-ability projectiles an eruption flings (VolcanoDef.theme). Chaos rolls
+// a fresh theme for every projectile.
+//
+// The roster is limited to the kinds that survive an ownerless spawn. A volcano
+// projectile has no owner rider, and the kinds left out here dereference that owner:
+// fire bullet, both sword stars and plasma C/D crash inside Projectile_Create, and
+// all three auras (fire/spike/ice) re-snap their position to the owner's hand bone
+// every frame, so they cannot fly at all.
+typedef enum VolcanoTheme
+{
+    VOLC_THEME_DEFAULT = 0,  // resolves to Fire
+    VOLC_THEME_FIRE,         // Fire ability bullets - burst on any surface
+    VOLC_THEME_PLASMA,       // plasma shots and spread shots
+    VOLC_THEME_BOMB,         // bombs and sensor mines
+    VOLC_THEME_STAR,         // charged sword stars
+    VOLC_THEME_CHAOS,
+} VolcanoTheme;
+
+// Per-preset volcano (CustomPresetDef.volcano): the City Trial volcano periodically
+// erupts, launching themed projectiles on ballistic arcs from its mouth. Eruptions
+// are spread across the round by the match timer. Numeric fields take 0 = default.
+typedef struct VolcanoDef
+{
+    int   enabled;    // 0 = the volcano stays dormant for this preset
+    int   theme;      // VolcanoTheme. 0 = Default (Fire)
+    int   eruptions;  // eruptions per round, spread over the match timer
+    int   duration;   // frames one eruption lasts
+    int   interval;   // frames between volleys during an eruption
+    int   burst;      // projectiles launched per volley
+    float power;      // launch speed scalar (1.0 = module default)
+    float spread;     // 0..1 cone width off vertical (0 = module default)
+} VolcanoDef;
+
+// Per-preset tornado (CustomPresetDef.tornado): a funnel that wanders the city on a
+// random path, drawing loose items, breakable props and parked machines into an
+// orbit around its core, and dragging at riders who stray too close. Appearances are
+// spread across the round by the match timer. Numeric fields take 0 = default.
+typedef struct TornadoDef
+{
+    int   enabled;   // 0 = no tornado for this preset
+    int   count;     // tornadoes per round, spread over the match timer
+    int   duration;  // frames one tornado lasts
+    float size;      // funnel radius scalar (1.0 = module default)
+    float strength;  // pull/spin scalar; also how hard a caught rider is dragged
+    float speed;     // how fast the funnel wanders, world units/frame
+} TornadoDef;
+
 // Per-custom-preset config. Color fields are RGBA8888 packed u32 (high byte = R).
 typedef struct CustomPresetDef
 {
@@ -223,6 +272,8 @@ typedef struct CustomPresetDef
     CloudDef clouds;
     MoonDef moon;
     StarDef stars;
+    VolcanoDef volcano;
+    TornadoDef tornado;
 } CustomPresetDef;
 
 // Per-preset fog density curve, applied to HSD_Fog.type as a GXFogType.
@@ -298,5 +349,20 @@ void Moon_Reset(void);
 void Star_SetActive(const StarDef *def);
 void Star_Tick(void);
 void Star_Reset(void);
+
+// The volcano erupts on a schedule spread across the round, flinging themed
+// copy-ability projectiles from its mouth on ballistic arcs.
+void Volcano_SetActive(const VolcanoDef *def);
+void Volcano_Tick(void);
+void Volcano_Reset(void);
+
+// A tornado wanders the city on a random path, orbiting everything loose it passes
+// and shaking the camera of any player it gets close to.
+void Tornado_SetActive(const TornadoDef *def);
+void Tornado_Tick(void);
+void Tornado_Reset(void);
+// The orbit's position writes have to land after the frame's game procs, or item
+// physics, machine physics and the ground snap overwrite them.
+void Tornado_OnFrameEnd(void);
 
 #endif // CUSTOM_WEATHER_H

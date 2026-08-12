@@ -90,7 +90,7 @@ The kind-to-name strings (`"Bad Patch"`, `"Sleep"`, `"Speed Down"`) follow the c
 |------|--------|
 | City Trial — normal | `ApplyCityTrialTrap`: builds a candidate list from `trap_items[]` minus any whose corresponding event is locked (`IsTrapItemLocked`), Fisher–Yates shuffles it, then tries each candidate via `APItems_HandleItem` **in one tick** until one applies. (Trying all eligible traps in a single frame avoids the slow path where a single random pick keeps failing and the receive flag lingers for many frames.) |
 | City Trial — Free Run | Dropped — treated as handled so the flag clears (item data tables aren't loaded; CT trap effects would crash). |
-| City Trial — stadium | Falls back to the Air Ride sleep trap (stadiums still have rider GOBJs). |
+| City Trial — stadium | Falls back to the Air Ride sleep trap. Stadium riders are always mounted, so the sleep trap's on-machine requirement always holds there. |
 | Air Ride | `ApplyAirRideTrap`: calls `Rider_GiveAbility(rd, COPYKIND_SLEEP)` directly on every human Kirby rider that is on a machine (off-vehicle riders crash in the sleep anim's MObj callback). Uses the raw rider API, not `Rider_CheckAndGiveAbility`, so the gate + sleep-send hook in `gate_abilities.c` does not re-trigger. |
 | Top Ride | `ApplyTopRideTrap`: picks a random kind from `tr_trap_items[]` (currently only `TRITEM_SPEED_DOWN`) and calls `GateTopRideItems_GiveItem`, which — gated on `kirby_mgr->round_state == 2` — calls `TopRide_KirbyApplyItem(k, kind)` directly on each human Kirby. That dispatcher installs the self-debuff state on the Kirby itself; no collectible item is spawned. |
 
