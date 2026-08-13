@@ -241,6 +241,20 @@ ghidra script java CODE [--project P] [--program PROG]
 ghidra script list
 ```
 
+**In bridge mode most of this does not work.** `script python` and `script java`
+are rejected outright ("Inline Java execution not supported in bridge mode"), and
+`script run` is far pickier than it looks:
+
+| Constraint | Consequence |
+|------------|-------------|
+| The client only accepts a path that exists relative to the **bridge's** working directory | a copy of the script must sit there, whatever your own cwd is |
+| The bridge resolves the **bare filename** against its script path (`~/.config/ghidra-cli/scripts`), never an absolute or relative path | a second copy must sit there, and the argument must be just `Name.java` |
+| `println` output is not returned - you only get `{"status":"executed"}` | the script has to write results to a file |
+| `-- ARGS` are not forwarded to `getScriptArgs()` | configuration has to come from a file at a fixed path |
+
+`scripts/ghidra/sync.py` already encapsulates all four; drive a new `.java`
+through its `run_bridge_script()` rather than rebuilding the plumbing.
+
 ### Batch
 
 ```bash

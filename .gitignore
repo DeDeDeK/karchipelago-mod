@@ -11,3 +11,7 @@ notes.txt
 kar.iso
 out.iso
 patch.xdelta
+
+# scripts/ghidra/sync.py stages a copy of its bridge script here for the
+# duration of a run; only a crash mid-run leaves one behind.
+/HoshiSync.java
