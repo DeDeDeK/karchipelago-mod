@@ -303,7 +303,7 @@ bind matrices, raw blobs).
 ## What this skill does NOT do
 
 - Runtime memory access - use `dolphin-memory`.
-- Disassembly of code segments in a .dat - use `scripts/disasm.sh`.
+- Disassembly of code segments in a .dat - use `uv run python scripts/kar.py disasm`.
 - Editing/rewriting archives in place. The carve workflow rebuilds a minimal
   archive from scratch; for arbitrary edits, consult HSDLib directly (its
   `HSDRawFile` writer is what would need porting).

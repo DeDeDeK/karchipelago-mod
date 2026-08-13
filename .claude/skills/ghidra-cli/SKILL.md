@@ -124,6 +124,10 @@ ghidra disasm TARGET [-n COUNT] [QUERY_OPTS]   # TARGET = name or 0xADDRESS; ali
 `--with-params` includes parameter details (name, type, storage) in the response.
 Both flags add structured data alongside the decompiled C code; use `--json` to see the full output.
 
+`decompile` emits JSON at every `-o` format, so the C arrives as one escaped
+string. To just read the code, use `uv run python scripts/kar.py decomp TARGET...`,
+which unwraps it (and accepts several targets per call).
+
 ### String Operations
 
 ```bash

@@ -27,8 +27,8 @@ ISO_PATH		?= kar.iso
 MOD_NAME		?= KARchipelago
 
 # --- Script Paths ---
-ISOPATCH_SCRIPT		= $(SCRIPT_DIR)/iso.py
-DOLEXTRACT_SCRIPT	= $(SCRIPT_DIR)/dol.py
+ISOPATCH_SCRIPT		= $(SCRIPT_DIR)/utility/iso.py
+DOLEXTRACT_SCRIPT	= $(SCRIPT_DIR)/utility/dol.py
 
 # User-defined CFLAGS.
 CFLAGS = -O1 -mcpu=750 -meabi -msdata=none -mhard-float -ffreestanding \

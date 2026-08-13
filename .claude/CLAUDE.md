@@ -11,7 +11,7 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 - `mods/` - the individual mods that make up the package, one per subdirectory (C/asm sources in `src/`, public API header in `include/<mod>_api.h` imported by other mods via `Hoshi_ImportMod`); the build auto-discovers all of them.
 - `externals/hoshi/` - the hoshi modding framework (submodule): headers, linker script, symbol map (`GKYE01.map`), framework source.
 - `docs/` - per-system reference docs and data files; one doc per system, found by filename.
-- `scripts/` - build helpers, RE tools (`disasm.sh`, `findptr.sh`, `mem1.raw`), the Ghidra type pipeline (`scripts/ghidra/`), and the HSD `.dat` toolchain (`scripts/hsd/`).
+- `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), the Ghidra type pipeline (`scripts/ghidra/`), the HSD `.dat` toolchain (`scripts/hsd/`), the devkitPPC toolchain build (`scripts/devkitpro/`), and Makefile/asset helpers (`scripts/utility/`).
 - `out/` - build output; `out/Riivolution/` is the deployable package. Do not hand-edit.
 - `iso/` - extracted contents of `kar.iso` - original game assets for inspection.
 
@@ -34,7 +34,7 @@ make deploy
 Never attempt to read ISO files, memory dumps, or other large binary/text files directly. Always use appropriate tools or scripts.
 
 - **`externals/hoshi/GKYE01.map`** - Symbol map file (~20k lines). Never read the full file. Search for specific symbols with grep when needed.
-- **`scripts/mem1.raw`** - Dolphin memory dump (~24MB) captured at the **main menu** (no gameplay/mod runtime state). Taken with hoshi loaded, so hoshi-rebuilt regions (e.g. the scene-desc table at `0x80495058`) are modded, not vanilla - when RE'ing a region hoshi patches/rebuilds, **verify against the source headers (`externals/hoshi/include/`), not this snapshot**. Bulk vanilla code/rodata/vtables are intact. Never read directly; use `scripts/disasm.sh` (disassembly) and `scripts/findptr.sh` (pointer search).
+- **`scripts/mem1.raw`** - Dolphin memory dump (~24MB) captured at the **main menu** (no gameplay/mod runtime state). Taken with hoshi loaded, so hoshi-rebuilt regions (e.g. the scene-desc table at `0x80495058`) are modded, not vanilla - when RE'ing a region hoshi patches/rebuilds, **verify against the source headers (`externals/hoshi/include/`), not this snapshot**. Bulk vanilla code/rodata/vtables are intact. Never read it directly - go through `scripts/kar.py`.
 - **`*.iso`** - ISO files are large binaries. Never read directly; use the provided scripts in `scripts/` or appropriate tools.
 - **`iso/`** - Extracted ISO contents. Individual `.dat`, `.dol`, etc. files can be read or hex-dumped as needed, but avoid reading the directory wholesale.
 
@@ -43,17 +43,20 @@ Never attempt to read ISO files, memory dumps, or other large binary/text files 
 When reverse engineering game functions and discovering their purpose, **always** update the following files with findings before finishing:
 
 1. **`externals/hoshi/include/`** - Add/update function declarations and data structure definitions in the appropriate header files (typically `game.h`). Include the address in a comment.
-2. **`externals/hoshi/packtool/link.ld`** - Add symbol addresses for newly identified functions so they can be called from mod code. Data globals (r13-relative/SDA addresses) do not go here - declare them as `static` pointer casts in headers instead (see `event.h` or `game.h` for examples).
-3. **`externals/hoshi/GKYE01.map`** - Rename unnamed symbols (`zz_XXXXXXXX_`) at their addresses to the discovered names.
-4. **Ghidra:** Use the `ghidra-cli` skill to keep the Ghidra project in sync - rename the function to the discovered name, set its signature (`function set-signature`) using the hoshi types, and type any relevant local vars (`function set-var-type`). Once the headers carry the finding, push it with **`uv run python scripts/ghidra/sync.py`**, which parses hoshi's structs/enums into Ghidra, applies every prototype documented with a `// 0xADDR` comment, types and labels every fixed-address global (`static TYPE *name = (TYPE*)0xADDR;`, cast macros, r13-relative decls), and saves. Name a phase (`types`, `protos`, `globals`) to run just that one, `--dry-run` to preview; all phases are safe to re-run. For edits you make through `ghidra-cli` directly, persist them yourself with `ghidra program close --program kar.dol` (then `ghidra program open --program kar.dol` to keep working) - the bridge never auto-saves, and `ghidra analyze` does **not** reliably write freshly-created data back to disk.
+2. **`externals/hoshi/packtool/link.ld` + `GKYE01.map`** - `uv run python scripts/kar.py rename 0xADDR Name` does both: it renames the `zz_XXXXXXXX_` map symbol and adds the `link.ld` entry that lets mod code call the function. Data globals (r13-relative/SDA addresses) do not belong in `link.ld` - declare them as `static` pointer casts in headers instead (see `event.h` or `game.h` for examples). When you are done, `uv run python scripts/kar.py check` lists any prototype still missing from either file.
+3. **Ghidra:** Use the `ghidra-cli` skill to keep the Ghidra project in sync - rename the function to the discovered name, set its signature (`function set-signature`) using the hoshi types, and type any relevant local vars (`function set-var-type`). Once the headers carry the finding, push it with **`uv run python scripts/ghidra/sync.py`**, which parses hoshi's structs/enums into Ghidra, applies every prototype documented with a `// 0xADDR` comment, types and labels every fixed-address global (`static TYPE *name = (TYPE*)0xADDR;`, cast macros, r13-relative decls), and saves. Name a phase (`types`, `protos`, `globals`) to run just that one, `--dry-run` to preview; all phases are safe to re-run. For edits you make through `ghidra-cli` directly, persist them yourself with `ghidra program close --program kar.dol` (then `ghidra program open --program kar.dol` to keep working) - the bridge never auto-saves, and `ghidra analyze` does **not** reliably write freshly-created data back to disk.
 
 ## Tooling
 
 - **Python:** run repo scripts with `uv run python`, never bare `python`/`python3` (e.g. `uv run python scripts/hsd/explore.py ls iso/files/GrSpace2Model.dat`) - uses the project's managed environment.
-- **Disassembly:** `scripts/disasm.sh <symbol | addr [len]>` for code - never `xxd`/`objdump`.
-- **Hex/data:** `xxd -s $((ADDR - 0x80000000)) -l <len> scripts/mem1.raw` for raw *data* regions only, never code.
-- **Pointer search:** `scripts/findptr.sh <value> [start end]` finds 4-byte-aligned 32-bit values (vtables, pointer tables).
-- **Symbol lookup:** grep `externals/hoshi/GKYE01.map` (address, size, name per line).
+- **Static game image:** `uv run python scripts/kar.py <cmd>` answers anything that comes from `mem1.raw`, `GKYE01.map`, or `link.ld`. Reach for it instead of `xxd`/`objdump` on the dump or hand-grepping the map; every subcommand takes a symbol name or a `0xADDR`, and `--help` has the details.
+  - `sym <0xADDR | NAME | substring | 0xLO-0xHI>` - symbol lookup; the `[ld hdr]` flags say whether `link.ld` and a hoshi header already carry it.
+  - `disasm <target> [len]` - length comes from the map when omitted. Call targets, `lis` pairs, and r13/r2 accesses are annotated with the address and symbol they resolve to.
+  - `read <target> [len] [-f hex|words|floats|halfs|string]` - `words` names any value that points at a known symbol.
+  - `find <value> [start] [end]` - 4-byte-aligned 32-bit search (vtables, pointer tables).
+  - `decomp <target>...` - Ghidra decompilation as plain C; `ghidra decompile` itself only emits JSON.
+  - `rename <0xADDR> <NAME>` - names an unnamed symbol in `GKYE01.map` and `link.ld` at once.
+  - `check` - hoshi prototypes missing from `link.ld` or the map, and `link.ld` names whose map row is still `zz_`.
 - **Live memory:** `dolphin-memory` skill for real-time reads/writes while Dolphin runs, vs the stale `scripts/mem1.raw` snapshot.
 - **Ghidra:** `ghidra-cli` skill for decompilation, xrefs, call graphs, and symbol/type management. Use the pre-configured project/program only - never `ghidra setup`/`config` or load another binary. Inline `ghidra script python`/`script java` are unavailable in bridge mode, and `script run` needs the copy-and-report plumbing in `scripts/ghidra/sync.py` - drive new `.java` scripts through that rather than rebuilding it.
 
