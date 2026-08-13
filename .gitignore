@@ -6,7 +6,7 @@
 /.claude/settings.local.json
 /mods/custom_weather/assets/
 __pycache__/
-mem1.raw
+*.raw
 notes.txt
 kar.iso
 out.iso
