@@ -123,9 +123,9 @@ source archive (most cluster ~150-230 KB; the two outliers, Space2 at 61% / ~1.2
 Dedede1 at 75% / ~1.2 MB, carry far more backdrop geometry).
 
 `scripts/hsd/carve_all_backdrops.py` batch-runs the carve over every `Gr*Model.dat` that
-has a non-NULL `ms[1]`. `scripts/hsd/probe_backdrops.py` reports which archives have
-backdrops; `scripts/hsd/verify_carved.py` walks a carved file and confirms every reachable
-pointer lands inside its data section.
+has a non-NULL `ms[1]`; `--dry-run` reports which archives have backdrops without carving.
+`scripts/hsd/verify_carved.py` walks a carved file and confirms every reachable pointer
+lands inside its data section.
 
 ### Size normalization
 

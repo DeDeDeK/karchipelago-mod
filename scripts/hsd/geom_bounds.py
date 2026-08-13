@@ -191,7 +191,7 @@ def pos_records(data, dl_off, dl_size, attrs):
     return pos_attr, recs
 
 
-def _iter_pobjs(arc, off):
+def iter_pobjs(arc, off):
     """Yield each POBJ offset hung off the JObj at `off` (via its DObj list)."""
     data = arc.data
     flags = u32(data, off + 0x04)
@@ -206,7 +206,7 @@ def _iter_pobjs(arc, off):
         dobj = u32(data, dobj + 0x04) if (dobj + 0x04) in arc.reloc_set else 0
 
 
-def _pobj_pos_records(arc, pobj):
+def pobj_pos_records(arc, pobj):
     """(pos_attr, [rec_off,...]) for one POBJ."""
     data = arc.data
     attrs = parse_vtxdesc(data, u32(data, pobj + 0x08))
@@ -215,6 +215,24 @@ def _pobj_pos_records(arc, pobj):
     if not (dl and attrs):
         return None, []
     return pos_records(data, dl, dlsz, attrs)
+
+
+def joint_world_positions(arc, off, world):
+    """Yield the world-space (x, y, z) of every vertex the JObj at `off`
+    draws, transformed by `world`."""
+    for pobj in iter_pobjs(arc, off):
+        pa, recs = pobj_pos_records(arc, pobj)
+        if pa is None:
+            continue
+        ncomp = 3 if pa["ccnt"] == 1 else 2
+        ctype, frac = pa["ctype"], pa["frac"]
+        csz = CTYPE_SIZE.get(ctype, 2)
+        for rec in recs:
+            comps = [read_comp(arc.data, rec + k * csz, ctype, frac)
+                     for k in range(ncomp)]
+            if ncomp == 2:
+                comps.append(0.0)
+            yield mat_apply(world, *comps)
 
 
 def measure_root(arc, root):
@@ -234,26 +252,13 @@ def measure_root(arc, root):
             continue
         seen.add(off)
         world = mat_mul(parent_m, jobj_local_mtx(data, off, force_scale_one=is_root))
-        for pobj in _iter_pobjs(arc, off):
-            npobj += 1
-            pa, recs = _pobj_pos_records(arc, pobj)
-            if pa is None:
-                continue
-            ncomp = 3 if pa["ccnt"] == 1 else 2
-            ctype, frac = pa["ctype"], pa["frac"]
-            csz = CTYPE_SIZE.get(ctype, 2)
-            for rec in recs:
-                comps = [read_comp(data, rec + k * csz, ctype, frac) for k in range(ncomp)]
-                if ncomp == 2:
-                    comps.append(0.0)
-                wx, wy, wz = mat_apply(world, *comps)
-                minv[0] = min(minv[0], wx); maxv[0] = max(maxv[0], wx)
-                minv[1] = min(minv[1], wy); maxv[1] = max(maxv[1], wy)
-                minv[2] = min(minv[2], wz); maxv[2] = max(maxv[2], wz)
-                r = math.sqrt(wx * wx + wy * wy + wz * wz)
-                if r > maxr:
-                    maxr = r
-                nverts += 1
+        npobj += sum(1 for _ in iter_pobjs(arc, off))
+        for wx, wy, wz in joint_world_positions(arc, off, world):
+            minv[0] = min(minv[0], wx); maxv[0] = max(maxv[0], wx)
+            minv[1] = min(minv[1], wy); maxv[1] = max(maxv[1], wy)
+            minv[2] = min(minv[2], wz); maxv[2] = max(maxv[2], wz)
+            maxr = max(maxr, math.sqrt(wx * wx + wy * wy + wz * wz))
+            nverts += 1
         nxt = u32(data, off + 0x0C) if (off + 0x0C) in arc.reloc_set else 0
         if nxt and not is_root:  # root pp slot holds a single joint, no siblings
             stack.append((nxt, parent_m, False))
@@ -298,8 +303,8 @@ def scale_geometry(arc, root, f):
         for toff in (off + 0x2C, off + 0x30, off + 0x34):  # translation X/Y/Z
             v = struct.unpack_from(">f", data, toff)[0]
             struct.pack_into(">f", data, toff, v * f)
-        for pobj in _iter_pobjs(arc, off):
-            pa, recs = _pobj_pos_records(arc, pobj)
+        for pobj in iter_pobjs(arc, off):
+            pa, recs = pobj_pos_records(arc, pobj)
             if pa is None:
                 continue
             if pa["ctype"] != 4:

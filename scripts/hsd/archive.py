@@ -29,7 +29,9 @@ HSD_HEADER = 0x20
 
 
 def u32(b, o): return struct.unpack(">I", b[o:o+4])[0]
+def s32(b, o): return struct.unpack(">i", b[o:o+4])[0]
 def u16(b, o): return struct.unpack(">H", b[o:o+2])[0]
+def s16(b, o): return struct.unpack(">h", b[o:o+2])[0]
 def f32(b, o): return struct.unpack(">f", b[o:o+4])[0]
 def cstr(b, o):
     end = b.find(b'\0', o)
@@ -56,11 +58,11 @@ class Archive:
         # menu/audio packs, etc.) use formats that aren't HSDRawFile and would
         # otherwise silently produce garbage publics/externs.
         disk_size = len(self.blob)
-        expected_tail = (HSD_HEADER + self.data_size
-                         + self.nb_reloc * 4
-                         + self.nb_public * 8
-                         + self.nb_extern * 8)
-        if self.file_size == 0 or self.file_size != disk_size or expected_tail > disk_size:
+        rel_off = HSD_HEADER + self.data_size
+        pub_off = rel_off + self.nb_reloc * 4
+        ext_off = pub_off + self.nb_public * 8
+        str_off = ext_off + self.nb_extern * 8
+        if self.file_size == 0 or self.file_size != disk_size or str_off > disk_size:
             raise NotAnHSDArchive(
                 f"{path}: header is not a valid HSD archive "
                 f"(file_size={self.file_size:#x}, on-disk={disk_size:#x}, "
@@ -68,26 +70,34 @@ class Archive:
                 f"nb_public={self.nb_public}, nb_extern={self.nb_extern})")
 
         self.data = self.blob[HSD_HEADER:HSD_HEADER + self.data_size]
-
-        rel_off = HSD_HEADER + self.data_size
         self.relocs = [u32(self.blob, rel_off + i*4) for i in range(self.nb_reloc)]
         self.reloc_set = set(self.relocs)
 
-        pub_off = rel_off + self.nb_reloc * 4
-        ext_off = pub_off + self.nb_public * 8
-        str_off = ext_off + self.nb_extern * 8
+        # Symbol-table entries must resolve inside the data and string
+        # sections. A file whose header happens to be self-consistent but
+        # isn't HSDRawFile (A2Window_new.dat) fails here rather than
+        # yielding thousands of binary-garbage symbol names.
+        str_size = disk_size - str_off
+
+        def sym_at(entry_off):
+            doff = u32(self.blob, entry_off)
+            noff = u32(self.blob, entry_off + 4)
+            if doff >= self.data_size or noff >= str_size:
+                raise NotAnHSDArchive(
+                    f"{path}: symbol entry at {entry_off:#x} is out of range "
+                    f"(data_off={doff:#x}/{self.data_size:#x}, "
+                    f"name_off={noff:#x}/{str_size:#x})")
+            return doff, cstr(self.blob, str_off + noff)
 
         self.publics = OrderedDict()
         for i in range(self.nb_public):
-            doff = u32(self.blob, pub_off + i*8)
-            noff = u32(self.blob, pub_off + i*8 + 4)
-            self.publics[cstr(self.blob, str_off + noff)] = doff
+            doff, name = sym_at(pub_off + i*8)
+            self.publics[name] = doff
 
         self.externs = []
         for i in range(self.nb_extern):
-            doff = u32(self.blob, ext_off + i*8)
-            noff = u32(self.blob, ext_off + i*8 + 4)
-            self.externs.append((doff, cstr(self.blob, str_off + noff)))
+            doff, name = sym_at(ext_off + i*8)
+            self.externs.append((doff, name))
 
     def deref(self, off):
         """Read the pointer-as-offset stored at data[off]. Returns 0 if the
