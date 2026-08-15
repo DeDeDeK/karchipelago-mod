@@ -10,6 +10,7 @@
 
 const ArchipelagoAPI *ap_api = 0;
 static const CustomEventsAPI *ce_api = 0;
+static const CustomMachinesAPI *cm_api = 0;
 
 static void TryImportApi(void)
 {
@@ -21,6 +22,13 @@ static void TryImportApi(void)
         ce_api = (const CustomEventsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_EVENTS_MOD_NAME,
             CUSTOM_EVENTS_API_MAJOR, CUSTOM_EVENTS_API_MINOR);
+    if (!cm_api)
+    {
+        cm_api = (const CustomMachinesAPI *)Hoshi_ImportMod(
+            (char *)CUSTOM_MACHINES_MOD_NAME,
+            CUSTOM_MACHINES_API_MAJOR, CUSTOM_MACHINES_API_MINOR);
+        DebugMenu_BindCustomMachines(cm_api);
+    }
 }
 
 static void OnSaveLoaded(void)
@@ -75,7 +83,7 @@ static void OnFrameStart(void)
     {
         // Uniform pick across every AP unlock pool plus the persistent progression
         // items. Each entry is a contiguous { base, count } block, singletons count 1.
-        static const struct
+        const struct
         {
             int base;
             int count;
@@ -87,6 +95,8 @@ static void OnFrameStart(void)
             { AP_ITEM_UNLOCK_BASE,          ITUNLOCK_NUM   },
             // VCKIND_WHEELVSDEDEDE is the last enum value and is not an AP unlock.
             { AP_MACHINE_UNLOCK_BASE,       VCKIND_NUM - 1 },
+            // Custom machine kinds resume the alignment past the gap at 855.
+            { AP_MACHINE_UNLOCK_BASE + VCKIND_NUM, cm_api ? cm_api->GetCount() : 0 },
             { AP_BOX_UNLOCK_BASE,           BOXKIND_NUM    },
             { AP_STAGE_UNLOCK_AIRRIDE_BASE, AIRRIDE_NUM    },
             { AP_COLOR_UNLOCK_BASE,         KIRBYCOLOR_NUM },

@@ -11,6 +11,35 @@
 #include "textbox_api.h"
 extern const TextBoxAPI *tb_api;
 
+// NULL when custom_machines is not built, in which case no machine or character
+// exists past the vanilla ceilings and every caller falls back to them.
+#include "custom_machines_api.h"
+extern const CustomMachinesAPI *cm_api;
+
+// Import the registry if it has not resolved yet. Idempotent; safe from any scene.
+void AP_ResolveCustomMachines(void);
+
+// CustomMachineDesc.name of the machine the Archipelago goal awards. The registry is
+// generic, so this string is the only thing that ties a drop-in .dat to the AP wiring.
+#define AP_STAR_MACHINE_NAME "Archipelago Star"
+
+// Ceilings that include whatever custom_machines registered this boot.
+static inline int MachineKind_Num(void)
+{
+    return cm_api ? cm_api->GetKindCeiling() : VCKIND_NUM;
+}
+static inline int CharacterKind_Num(void)
+{
+    return cm_api ? cm_api->GetCharacterKindCeiling() : CKIND_NUM;
+}
+// Absolute MachineKind for a (is_bike, class slot) pair, custom slots included.
+static inline MachineKind MachineKind_Resolve(int is_bike, int class_index)
+{
+    if (cm_api)
+        return (MachineKind)cm_api->KindFromClassIndex(is_bike, class_index);
+    return MachineKind_FromClassIndex(is_bike, class_index);
+}
+
 #define MAX_RECEIVED_ITEMS 512
 
 #define REWARD_COUNT_AIRRIDE   46

@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-KARchipelago is a collection of mods for Kirby Air Ride (GameCube, GKYE01), built on top of **hoshi**, a GameCube modding framework (in `externals/hoshi/`). The build produces a single Riivolution package containing every mod found under `mods/` (the Makefile auto-discovers them).
+KARchipelago is a collection of mods for Kirby Air Ride (GameCube, GKYE01), built on top of **hoshi**, a GameCube modding framework (in `externals/hoshi/`). The build produces a single Riivolution package containing the mods named by `INCLUDE_MODS`.
 
 The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 
 ## Project Structure
 
-- `mods/` - the individual mods that make up the package, one per subdirectory (C/asm sources in `src/`, public API header in `include/<mod>_api.h` imported by other mods via `Hoshi_ImportMod`); the build auto-discovers all of them.
+- `mods/` - the individual mods that make up the package, one per subdirectory (C/asm sources in `src/`, public API header in `include/<mod>_api.h` imported by other mods via `Hoshi_ImportMod`); which of them a build contains is chosen with `INCLUDE_MODS`.
 - `externals/hoshi/` - the hoshi modding framework (submodule): headers, linker script, symbol map (`GKYE01.map`), framework source.
 - `docs/` - per-system reference docs and data files; one doc per system, found by filename.
 - `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), the Ghidra type pipeline (`scripts/ghidra/`), the HSD `.dat` toolchain (`scripts/hsd/`), the devkitPPC toolchain build (`scripts/devkitpro/`), and Makefile/asset helpers (`scripts/utility/`).
@@ -18,16 +18,18 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 ## Build
 
 ```bash
-make deploy
+make deploy INCLUDE_MODS=archipelago,custom_machines
 ```
 
 `make deploy` runs `make package` (compile, link against hoshi, pack `.bin`s, copy assets, build `out/Riivolution/`) then copies it into Dolphin's `Load/Riivolution/`. It's the standard dev command; `make package` alone builds without touching Dolphin (use it to verify a compile). Run `make clean` first only when needed (linker script / header / build-config changes) - incremental rebuilds are the norm.
+
+**`INCLUDE_MODS` decides what gets built, and there is no default** - without it the build silently produces a package with no mods in it. Names are comma- or space-separated, must match folder names under `mods/`, and anything else is ignored without a warning. It gates each mod's `assets/` copy as well as its code, so build the same set you intend to run. When working on one mod, pass just that one; ask which set to build when it matters and the user has not said.
 
 **Never run bare `make`** - always `make deploy` (or `make package`). The default target does not produce the deployable Riivolution mod and leaves the build incomplete.
 
 **A successful `make deploy` (or `make package`) is sufficient verification.** The build fails on any compile or link error, so if it completes you do **not** need to grep its output for "error" or "warning". Pre-existing warnings in hoshi/devkitPPC headers are noise - don't re-run the build to inspect them.
 
-**Source files are auto-discovered.** The Makefile globs all `*.c`/`*.s` under each `mods/*/src/`, so adding a source file (or a whole new mod folder with a `src/`) needs no manual registration - don't grep the Makefile for it. One exception: a new mod's **public** `include/` dir must be added to the Makefile's `INCLUDES` list (those are explicit, not globbed).
+**Source files are auto-discovered.** The Makefile globs all `*.c`/`*.s` under each included mod's `src/`, so adding a source file (or a whole new mod folder with a `src/`) needs no manual registration - don't grep the Makefile for it. One exception: a new mod's **public** `include/` dir must be added to the Makefile's `INCLUDES` list (those are explicit, not globbed).
 
 ## Important Files - Do NOT Read Directly
 

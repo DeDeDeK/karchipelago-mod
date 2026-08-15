@@ -377,6 +377,8 @@ What's possible right now without engine changes:
 
 Entry counts include 2 data pointer entries (image + kerning) at indices 0–1. Text entries start at index 2.
 
+`SisSelply.dat` and `SisSelplyCt.dat` share a layout: entries 2–7 are screen furniture, 8–27 the 20 machine names and 28–47 their descriptions. Both load into slot 0, and both screens turn a `CharacterKind` into that index pair through a table of words read as signed bytes — `0x804aa3d8` / `0x804aa428` read by `AirRideSelect_SetMachineText` (`0x80153d2c`), `0x804aa598` / `0x804aa5e8` read by `CitySelect_SetMachineText` (`0x8015e740`). An index of -1 in either suppresses both texts.
+
 ## Scene → SIS Slot Map (Loaders)
 
 `Text_LoadSisFile` callers, by function-band:

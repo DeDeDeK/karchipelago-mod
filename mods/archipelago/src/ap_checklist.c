@@ -97,6 +97,10 @@ static const CustomCheck ap_checks[] = {
     { APCK_BOX_RED_10,         "City Trial: In one game,\nbreak 10 or more red boxes!",   APCheckDetect_IsSet },
 
     { APCK_MEADOWS_SHORTCUT,   "Air Ride: FANTASY MEADOWS\nTake the shortcut!",      APCheckDetect_IsSet },
+
+    // Completes off the sticky goal_complete bit, so it also fills in on the load
+    // after victory rather than only in the session that reached it.
+    { APCK_GOAL_COMPLETE,      "Complete your Archipelago goal!",                    APCheckDetect_IsSet },
 };
 
 #define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))

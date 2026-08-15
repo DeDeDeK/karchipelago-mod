@@ -6,6 +6,8 @@ Every machine can be individually locked behind an Archipelago unlock item. One 
 
 The 26 `MachineKind`/`VCKIND` values (`VCKIND_NUM` = 26, `machine.h`), one bit each in `machine_unlocked_mask`. AP item ID = 830 + VCKIND for the 25 in-range IDs 830–854; VCKIND 25 (`WHEELVSDEDEDE`) is outside the handler's range entirely.
 
+When the `custom_machines` mod is built, machines it registers take `MachineKind`s past 26 and are gated the same way, on `machine_unlocked_mask` bits 26 and up with item IDs resuming at 856. Every ceiling in `gate_machines.c` is the runtime `MachineKind_Num()` / `CharacterKind_Num()` rather than `VCKIND_NUM` / `CKIND_NUM`, and every `(is_bike, class slot)` to `MachineKind` conversion goes through `MachineKind_Resolve()`, because a custom machine is the only kind whose class slot and `MachineKind` differ. All three fall back to the vanilla values when that mod is absent. A custom kind has no row in `VcCommon.dat`'s spawn-chance table, so `GateMachines_SelectSpawn` reads that table only for kinds below 26 and takes the registered spawn weight for the rest.
+
 Six VCKINDs have no `CharacterKind` and are city-spawn or transformation only: FREE, STEER, WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE. Character-to-machine resolution goes through `CharacterDesc_GetMachineKind` (`menu.h`), which un-does the bike-relative encoding of `CharacterDesc.machine_kind`; the full CharacterKind ↔ MachineKind table is in `css-system.md`.
 
 **`CT_SPAWN_EXCLUDED_MASK`** force-zeros the non-field machines in the CT spawn pipeline regardless of unlock state: `VCKIND_FREE` / `VCKIND_STEER` (Top Ride-only forms), `VCKIND_WINGKIRBY` / `VCKIND_WHEELNORMAL` / `VCKIND_WHEELKIRBY` (Kirby transformation forms reached through the copy-ability item path, not a field machine spawn), and `VCKIND_WINGMETAKNIGHT` / `VCKIND_WHEELDEDEDE` / `VCKIND_WHEELVSDEDEDE` (the Meta Knight / King Dedede character forms). The two character forms matter because unlocking Meta Knight or King Dedede sets the corresponding bit; both have a 0 base spawn chance in vanilla, so without the exclusion the unlocked-but-zero-chance fallback (weight 10, below) would leak the Wing Meta Knight / Dedede Wheelie machine onto the City Trial field as a rideable star.
@@ -19,8 +21,7 @@ Six VCKINDs have no `CharacterKind` and are city-spawn or transformation only: F
 | `GateMachines_OnBoot()` | mod | gate_machines.c | Applies all hooks (called from `main.c`). |
 | `GateMachines_On3DLoadEnd(void)` | mod | gate_machines.c | Clears `legendary_assembled_mask` at scene load. |
 | `GateMachines_SelectSpawn(MachineSpawnData*, float)` | mod | gate_machines.c | Full replacement for the CT field spawn selection. |
-| `GateMachines_CountCTSelectAvailable()` | mod | gate_machines.c | Counting pass for the CT machine-select grid. |
-| `GateMachines_BuildCTSelectArray(u8*, u8*)` | mod | gate_machines.c | Array-building pass for the CT machine-select grid. |
+| `GateMachines_FilterSelectCharacter(int, int)` | mod | gate_machines.c | Availability filter for the select screens' icon packing. |
 | `GateMachines_FinalizeCTMachine(int slot)` | mod | gate_machines.c | Commits the CT starting machine and CPU color per slot. |
 | `GateMachines_NoteManualMachinePick(int slot)` | mod | gate_machines.c | Records a player-driven grid pick for `slot`. |
 | `GateMachines_ResetStartingMachine(RiderData*)` | mod | gate_machines.c | Respawn machine selection. |
@@ -29,7 +30,6 @@ Six VCKINDs have no `CharacterKind` and are city-spawn or transformation only: F
 | `GateMachines_TRLobbyCanStart(void)` | mod | gate_machines.c | Blocks Start when no TR machine is unlocked. |
 | `GateMachines_CheckAirRideCharacterAvailable(CharacterKind)` | mod | gate_machines.c | Replacement for `AirRide_CheckCharacterAvailable`. |
 | `GateMachines_CheckTitleDemoMachineUnlocked(s8, s8)` | mod | gate_machines.c | Replacement for `TitleScreen_CheckMachineUnlocked`. |
-| `GateMachines_ClearAirRideList(u8 *base)` | mod | gate_machines.c | Zeroes the AR CSS available-machine list each frame. |
 | `GateMachines_GiveLegendaryMachine(int)` | mod | gate_machines.c | Delivery for the AP "give legendary" items (not a gate). |
 | `GateMachines_UnlockMachine(MachineKind, int announce)` | mod | gate_machines.c | Sets the unlock bit and posts a textbox. Called from `ap_item_handler.c` and `checklist_rewards.c`. |
 | `IsCKindUnlocked` / `GetFirstUnlockedCTMachine` / `RandomUnlockedKirbyCKind` / `IsTRMachineUnlocked` / `GetFirstUnlockedTRMachine` / `GetRandomUnlockedTRMachine` | mod (static) | gate_machines.c | Mask query helpers. |
@@ -41,7 +41,7 @@ Six VCKINDs have no `CharacterKind` and are city-spawn or transformation only: F
 | `Rider_ResetStartingMachine` | game | 0x80195288 | Respawn machine assignment. |
 | `AirRide_CheckCharacterAvailable` | game | 0x8002090c | AR select screen availability (replaced). |
 | `TitleScreen_CheckMachineUnlocked` | game | 0x8000c364 | Title-screen demo machine availability (replaced). |
-| `AirRide_PopulateSelectIcons` | game | 0x80020a08 | Rebuilds the AR available-machine list every CSS frame. |
+| `AirRide_PopulateSelectIcons` | game | 0x80020a08 | Rebuilds the AR available-machine list every CSS frame (replaced by `custom_machines`). |
 | `TopRide_CSS_PanelThink` / `TopRide_SoloPanelThink` | game | 0x8002b8a8 / 0x8002ca80 | TR panel think, race and solo. |
 | `TopRide_PreGameThink` / `TopRide_OnCourseSelect` | game | 0x8002c06c / 0x8002cc30 | TR start-match bodies, race and solo. |
 | `TopRide_InitSelectData` / `TopRide_RaceInit` / `TopRide_SoloInit` | game | 0x8002cfd8 / 0x8002d0ec / 0x8002d9e8 | TR lobby init paths. |
@@ -117,22 +117,19 @@ Both modes have a **counting pass** (total available count → r27) and an **arr
 
 ### Implementation
 
-Both passes are replaced in both modes:
+Neither pass is patched here. The `custom_machines` registry owns the packing of both character select screens - it widens the character grid they are packed from, and vanilla's loops are a hard 10 columns into two 10-byte stack rows, so an 11th column has nowhere to land. It replaces `AirRide_PopulateSelectIcons` and takes over City Trial's counting and array-building passes, then asks an availability predicate per `CharacterKind`.
 
-| Mode | Pass | Hook address | Skip target | C function |
-|------|------|-------------|-------------|------------|
-| 1 (Stadium) | Counting | 0x8002e4d0 | 0x8002e670 | `GateMachines_CountCTSelectAvailable` |
-| 1 (Stadium) | Array-building | 0x8002e67c | 0x8002f0b8 | `GateMachines_BuildCTSelectArray` |
-| 2 (Free Run) | Counting | 0x8002e5c0 | 0x8002e670 | `GateMachines_CountCTSelectAvailable` |
-| 2 (Free Run) | Array-building | 0x8002e738 | 0x8002f0b8 | `GateMachines_BuildCTSelectArray` |
+Gating is a filter over that predicate, registered once the registry resolves:
 
-`GateMachines_CountCTSelectAvailable()` iterates `ckind` over `CKIND_NUM` (20) and returns the count of `IsCKindUnlocked(ckind)`; the epilogue moves it into r27. `GateMachines_BuildCTSelectArray(char_arr, row_counts)` walks the 2×10 icon grid via `SelIcon_GetCKind(row, col)` (0x8000b9bc) and **packs** the unlocked ckinds into the two per-row stack arrays (`char_arr` = r29, 20 bytes, row0 at +0 / row1 at +10; `row_counts` = r28), left-aligning each row with no gaps.
+```c
+cm_api->SetAvailabilityFilter(GateMachines_FilterSelectCharacter);
+```
 
-`IsCKindUnlocked` resolves the ckind's `CharacterDesc` (`Character_GetDesc`, 0x8000b9dc) → VCKIND via `CharacterDesc_GetMachineKind` and tests `machine_unlocked_mask`.
+`GateMachines_FilterSelectCharacter(ckind, default_available)` discards the engine's own answer and returns `IsCKindUnlocked(ckind)`, which resolves the ckind's `CharacterDesc` (`Character_GetDesc`, 0x8000b9dc) → VCKIND via `CharacterDesc_GetMachineKind` and tests `machine_unlocked_mask`. Discarding the default is deliberate: the mask is the only rule, so an owned machine is selectable in every mode whose select screen offers it, including the four specials Stadium hardcodes out and the appended characters a drop-in machine brings.
 
-The array-building hooks skip all the way to the **flat-copy at `0x8002f0b8`** (`stb r27, 101(r30)` → `machine_select.num`, then the layout thunk), bypassing the vanilla reorder/balance block in between. That reorder was written around vanilla's grid iteration (special characters at fixed col 0/9 positions); packed arrays violate that assumption and triggered a duplicate-icon bug when only DEDEDE/METAKNIGHT were unlocked. The flat-copy reads `row_counts` + `char_arr` directly, so no reorder is needed.
+Registration happens in `AP_ResolveCustomMachines`, not `GateMachines_OnBoot` - mods boot alphabetically and the registry boots after us. It is idempotent and re-tried per call, so the filter is attached well before any select screen builds a list. When `custom_machines` is not built there is no filter and no packing to gate; the roster stays the vanilla 20 characters and 26 machines.
 
-These hooks fire during `CitySelect_CreateMachineIcons` (before `OnPlayerSelectLoad`), so `machine_select.c_kind_arr` (`GameData+0x236`) is already filtered by the time the player select scene is up.
+The packing runs during `CitySelect_CreateMachineIcons` (before `OnPlayerSelectLoad`), so `machine_select.c_kind_arr` (`GameData+0x236`) is already filtered by the time the player select scene is up.
 
 ### Navigation off-by-one fix
 
@@ -143,7 +140,7 @@ The CT machine-select grid has **two independent row-layout authorities** that o
 
 So at exactly `num==10` the renderer draws one line of 10 while the cursor splits it **5+5** and up/down jumps between the halves. Vanilla CT only ever produces counts **15–20** (Free Run: ckinds 0–14+17 always available, 15/16/18/19 checklist-gated; Stadium: 0–14 = 15), so the off-by-one was never exercised. AP machine gating can land on exactly 10 unlocked machines, exposing it.
 
-Fix: `CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a)` patches the threshold to `cmpwi r3, 10` so `num<=10` is single-row, matching the renderer. The same nav function serves Stadium and Free Run, so one patch covers both. Air Ride uses a separate code path — `AirRide_PopulateSelectIcons` switches linear ↔ grid at `count < 10`, the same `<10` boundary as its nav, so it is internally consistent and does **not** share this off-by-one.
+Fix: the threshold is patched to `cmpwi r3, 10` (`0x2c03000a`) so `num<=10` is single-row, matching the renderer. The same nav function serves Stadium and Free Run, so one patch covers both. It is applied by `custom_machines` alongside the packing it owns, since any filtered roster can reach a count of 10 — not only a gated one. Air Ride uses a separate code path: `AirRide_PopulateSelectIcons` switches linear ↔ grid at `count < 10`, the same `<10` boundary as its nav, so it is internally consistent and does **not** share this off-by-one.
 
 ## City Trial — Starting Machine and Respawn
 
@@ -216,12 +213,12 @@ The vanilla select screen system, grid layout, icon animation pipeline, `Charact
 
 Two `CODEPATCH_REPLACEFUNC`s:
 
-1. **`AirRide_CheckCharacterAvailable` (0x8002090c) → `GateMachines_CheckAirRideCharacterAvailable`** — gates the select screen icon grid. Takes a CharacterKind, returns 1/0, and defers to the same `IsCKindUnlocked` rule the City Trial passes use: `Character_GetDesc` + `CharacterDesc_GetMachineKind()` to the actual VCKIND, then `machine_unlocked_mask`. Vanilla instead maps each ckind to a checklist reward index, makes only Warp Star available by default, and hardcodes four ckinds unavailable whatever the save holds — its jump table at 0x80496e10 sends 0 (Compact Star), 15 (Dragoon), 16 (Hydra) and 17 (Flight Warp Star) to a bare `li r3, 0` with no reward query. Dropping those four exclusions is what makes an owned City Trial machine rideable in Air Ride, mirroring what the CT Stadium / Free Run passes above already do with their own hardcoded 15–19 exclusion. Nothing else has to move: the 2x10 icon grid at 0x80495800 places Dragoon and Hydra at row 0 columns 0 and 9, `AirRide_PopulateSelectIcons`'s reorder block already treats ckinds 15/16/18/19 as the row-end special characters, and the `MnSelplyAll` icon TexAnim carries 20 distinct 64x64 CMPR images, one per ckind.
+1. **`AirRide_CheckCharacterAvailable` (0x8002090c) → `GateMachines_CheckAirRideCharacterAvailable`** — gates the select screen icon grid. Takes a CharacterKind, returns 1/0, and defers to the same `IsCKindUnlocked` rule the City Trial passes use: `Character_GetDesc` + `CharacterDesc_GetMachineKind()` to the actual VCKIND, then `machine_unlocked_mask`. Vanilla instead maps each ckind to a checklist reward index, makes only Warp Star available by default, and hardcodes four ckinds unavailable whatever the save holds — its jump table at 0x80496e10 sends 0 (Compact Star), 15 (Dragoon), 16 (Hydra) and 17 (Flight Warp Star) to a bare `li r3, 0` with no reward query. Dropping those four exclusions is what makes an owned City Trial machine rideable in Air Ride, mirroring what the CT Stadium / Free Run passes above already do with their own hardcoded 15–19 exclusion. Nothing else has to move here: the icon grid at 0x80495800 places Dragoon and Hydra at row 0 columns 0 and 9, and the `MnSelplyAll` icon TexAnim carries 20 distinct 64x64 CMPR images, one per ckind. The vanilla reorder block that treated ckinds 15/16/18/19 as row-end specials does not run at all — `custom_machines` replaces `AirRide_PopulateSelectIcons` and packs the list left-aligned with no reorder, because that block assumes the grid's fixed positions and duplicates icons on a packed list.
 2. **`TitleScreen_CheckMachineUnlocked` (0x8000c364) → `GateMachines_CheckTitleDemoMachineUnlocked`** — gates the **title-screen attract-demo** machine pick (`TitleScreen_SelectRandomMachine` 0x8000daa0, reachable only via `TitleScreen_MinorExit` → `TitleScreen_SetupDemoMachines`). Takes `machine_class` (= `CharacterDesc.is_bike`) and `machine_id` (= `CharacterDesc.machine_kind`, a bike-relative index for bikes, not the absolute VCKIND), converts to the actual VCKIND (`VCKIND_WHEELNORMAL + machine_id` when `machine_class` is set), range-checks it, then tests the mask. This does **not** run for CPUs in real Air Ride races.
 
 **Real in-game CPU machine pick.** The actual Air Ride CPU machine is chosen in `loadCPU` (0x80023600) and its sibling setup paths, which index a random entry out of the available-character list that `AirRide_PopulateSelectIcons` builds through the replaced `AirRide_CheckCharacterAvailable`. CPUs therefore already draw a random **unlocked** machine with no separate machine-pick hook. CPU color is gated on an independent path (`gate-colors.md`).
 
-**Stale-list clear (`GateMachines_ClearAirRideList`).** The select struct caches its available-machine list at `airride_select_ply +0x66` (the 2×10 = 20-entry icon grid). `AirRide_PopulateSelectIcons` (0x80020a08) runs **every CSS frame** (called unconditionally at 0x8002896c in `CSS_airRide_RaceUpdate` and 0x80029c74 in `CSS_airRide_FreeTimeUpdate`), but it only (re)writes the first `count` entries and never clears the tail — only the once-per-entry `CSS_airRide_InitSelectData` memset zeroes the whole region. So when `machine_unlocked_mask` is narrowed mid-session (e.g. the debug menu locks machines while sitting in the CSS), `count` drops but stale entries from an earlier fill linger past the new count. Every slot's icon index (+0x2d) defaults to 0 and the CSS resolves the displayed **and committed** machine as `list[icon]`, so a stale `list[0]` drives the whole lobby — and the subsequent race — onto a vehicle that is no longer unlocked. Fix: a `CODEPATCH_HOOKCREATE` at 0x80020a88 (`lbz r0, 123(r31)`, just after `r31 = airride_select_ply` is set up and before the rebuild) zeroes `list[0..19]` each frame, so populate refills `[0..count-1]` and the tail stays 0 (→ `CKIND_COMPACT`); the epilogue restores `r4 = 0` for the following `stb r4,9(r1)`. Because populate runs per-frame, the lobby self-heals the next frame rather than needing a full CSS re-entry. `ply_icon_ckind +0x61` is **not** the rendered/committed field — `list[icon]` is — so clearing the list, not clamping +0x61, is the correct fix.
+**Stale-list clear.** The select struct caches its available-machine list at `airride_select_ply +0x66`. `AirRide_PopulateSelectIcons` (0x80020a08) runs **every CSS frame** (called unconditionally at 0x8002896c in `CSS_airRide_RaceUpdate` and 0x80029c74 in `CSS_airRide_FreeTimeUpdate`), and vanilla only (re)writes the first `count` entries, never clearing the tail — only the once-per-entry `CSS_airRide_InitSelectData` memset zeroes the whole region. So when `machine_unlocked_mask` is narrowed mid-session (e.g. the debug menu locks machines while sitting in the CSS), `count` drops but stale entries from an earlier fill linger past the new count. Every slot's icon index (+0x2d) defaults to 0 and the CSS resolves the displayed **and committed** machine as `list[icon]`, so a stale `list[0]` drives the whole lobby — and the subsequent race — onto a vehicle that is no longer unlocked. `ply_icon_ckind +0x61` is **not** the rendered/committed field — `list[icon]` is — so clearing the list, not clamping +0x61, is the correct fix. The replacement that `custom_machines` installs zeroes the whole list before every rebuild, so the tail stays 0 (→ `CKIND_COMPACT`) and the lobby self-heals on the next frame rather than needing a full CSS re-entry.
 
 ## Legendary Machine Delivery
 

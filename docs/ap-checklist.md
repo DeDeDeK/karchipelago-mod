@@ -36,7 +36,7 @@ exactly mode 3.
 `APChecklist_Register` (called from `OnSaveLoaded`, after the framework mod has exported
 its API) imports `CustomChecklistAPI` and hands it a descriptor with:
 
-- **Checks** — a static `{ clear_kind, label, predicate }` table covering all 50
+- **Checks** — a static `{ clear_kind, label, predicate }` table covering all 51
   objectives, pinned to `APCK_NUM` by a `_Static_assert`. A label is the in-game cell text
   and is also the box's AP location name minus the leading `Archipelago: ` — the same
   relationship the three vanilla tabs have to their location names, so the wording is
@@ -52,7 +52,8 @@ its API) imports `CustomChecklistAPI` and hands it a descriptor with:
   objective is too long for that (`KIRBY MELEE 1`, both photo finishes) the break moves to
   wherever balances the two lines, since the cell holds only two and the engine squeezes an
   over-wide one. Most lines run 18–35 characters, above the ~25 that renders at full size and
-  below vanilla's widest *unsqueezed* line of 37; the one single-line label is 29 characters.
+  below vanilla's widest *unsqueezed* line of 37; the two single-line labels are 29 and 31
+  characters.
   The two Destruction Derby labels reach 41 on their second line: the first restates vanilla's
   own DD cell verbatim, breaks included, and the second matches its shape. Every printable
   ASCII character in the labels maps through `Text_CharToCommand`, including `!`, `:` and the
@@ -99,7 +100,7 @@ same block.
 
 The tab's board starts blank and reveals outward, exactly as the vanilla checklists do: a
 cell draws only once it is completed, or once a completed orthogonal neighbour has revealed
-it. The reveal is positional, so with only 50 of the 120 clear_kinds carrying a check it
+it. The reveal is positional, so with only 51 of the 120 clear_kinds carrying a check it
 will surface boxes that have no objective behind them, and cells whose only neighbours are
 undefined stay dark until their own check fires. That resolves itself as the tab fills out
 toward 120.
@@ -185,7 +186,7 @@ banner/emblem TObjs onto these descriptors.
 
 ## Objectives and Detection
 
-There are 50 objectives, `clear_kind` 0–49, enumerated as `APCheckKind` in
+There are 51 objectives, `clear_kind` 0–50, enumerated as `APCheckKind` in
 `ap_check_detect.h`. The numbering is a cross-repo wire contract — the AP location code is
 `361 + clear_kind`, and `APLocation` in the apworld's `KARLocations.py` restates the same
 order and the same label text by hand, with nothing mechanically catching a desync. An AP box
@@ -196,7 +197,7 @@ Every objective is an in-game achievement. There is no box for booting the game 
 receiving a multiworld item — those complete without playing, so as AP locations they were
 free checks the fill could hide progression behind.
 
-Predicates never sample. The framework polls all 50 every frame, in every scene, including
+Predicates never sample. The framework polls all 51 every frame, in every scene, including
 menus and loads — so each one is a single read of state latched elsewhere, and the sampling
 lives in five seams in `ap_check_detect.c`.
 
@@ -331,6 +332,19 @@ vanilla's `TA:` and `FR:` cells, so Race, Time Attack and Free Run all count.
 |---|---|---|
 | 49 | FANTASY MEADOWS take the shortcut | `rd->pos` within 25 units of `(249.7, 120.0, 19.2)`. Riders are always on a machine in Air Ride, so unlike the city visits there is no on-foot test |
 
+### The goal box
+
+| clear_kind | Objective | Detection |
+|---|---|---|
+| 50 | Complete your Archipelago goal! | A read of the sticky `ap_save->goal_complete` bit |
+
+The tab's own terminal objective, and the only cell whose predicate is not about play. The
+framework polls every cell every frame, so it also fills in on the load after victory rather
+than only in the session that reached it — `goal_complete` is written before the cell can
+record, so there is no ordering hazard, and the re-evaluation `RecordCheck` fires afterwards
+short-circuits on the same bit. A row whose goal counts or lists this cell can never be
+satisfied, so generation must not place it in one.
+
 The shortcut is an elevated arc over the normal racing line, peaking near `(255, 135, 6)`;
 it is the lap's only route divergence. The sphere sits on the arc's descent rather than at
 its apex because one ball has to cover two things 16 units apart: the surface a machine can
@@ -399,10 +413,10 @@ region while the mod's sampler accepts either stadium.
 
 ### The apworld's location range
 
-Every one of the 50 clear_kinds latches, and every one backs an AP location. The apworld's
-codes run contiguously from 361 to 410, and `ArchipelagoChecklistAmount` has `range_end` 50
-to match — a data-integrity test pins that option to the table's real size, so both move
-together when a box is added.
+Every one of the 51 clear_kinds latches, and every one backs an AP location. The apworld's
+codes run contiguously from 361 to 411. `ArchipelagoChecklistAmount` stops one short of that
+at `range_end` 50: the goal box is the 51st cell and cannot complete before the goal it
+counts toward, so requiring all 51 would be unsatisfiable.
 
 Each box takes the region where its activity happens rather than a flat Archipelago region,
 so it inherits that region's entrance chain (stadium unlocks, course unlocks, the DD/KM/DR

@@ -85,6 +85,52 @@ CharacterKind (20 entries, `menu.h`) maps to MachineKind/VCKIND (26 entries) thr
 
 Six VCKINDs have no CharacterKind and are city-spawn or transformation only: FREE, STEER, WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE.
 
+The `CharacterDesc` table, the grid table at `0x80495800` and the linear strip at `0x804957ec` sit back to back with no slack, so a 21st CharacterKind cannot be appended in place. The `custom_machines` mod relocates all three into wider mod-owned copies by rewriting the `lis`/`addi` pair inside each of the three accessors, and writes the grid's runtime column count into `Icon_GetCKind`'s `mulli r5, r0, cols` at `0x8000b9c4` (10 in vanilla, one more column per two appended characters).
+
+### The packed icon list
+
+Each screen keeps the icons it is offering in its own block of `GameData`, at the same shape off a base of `0x10a` (Air Ride) or `0x1d0` (City Trial): an icon count at `+0x65` and one `CharacterKind` per icon from `+0x66`. Every access is a `+101` / `+102` displacement off that base. Air Ride's block runs `0x10a`..`0x196` (`CSS_airRide_InitSelectData` memsets 0x8d bytes) and City Trial's `0x1d0`..`0x25b` (0x8c bytes).
+
+The byte right after each 20-entry list is live: Air Ride's row-layout flag - 1 when the icons wrap to two rows, read by the input grabbers and the race/free-time updates - and City Trial's debug-grid flag. `+0x7d` is untouched on both screens and inside both memsets, so `custom_machines` relocates each flag there by rewriting the displacement of its nine (Air Ride) and six (City Trial) `lbz`/`stb` sites, freeing the 21st list slot.
+
+`AirRide_PopulateSelectIcons` (0x80020a08) and the tail of `CitySelect_CreateMachineIcons` (from 0x8002f0b8) fill their list, call the layout pass, then create one icon GObj per entry. Both pack into two 10-byte stack rows first and cannot carry an 11th column, so a mod offering 21 characters has to replace them rather than widen a bound.
+
+#### Icon anchors
+
+Both screens position their icons against a strip of 20 sibling `JOBJDesc` in a dedicated model — `ScMenSelplyIpos_scene_models` (`MnSelplyAll.dat`, `0x78740`..`0x78c00` at 0x40 stride) and `ScMenSelplyIposCt_scene_models` (`MnSelplyctAll.dat`) — posed by an animation whose **frame is the icon count**. `AirRideSelect_LayoutIcons` (0x80133f68 → 0x80151258) and `CitySelect_LayoutMachineIcons` (0x801355f4 → 0x8015bd14) set the frame to the count, then call `JOBJ_GetWorldPosition` on each of the 20 anchors into the ipos GObj's userdata.
+
+Each anchor's `AOBJ` carries a TRAX and a TRAY track of CON keys, one per frame. At frame N the first `ceil(N/2)` anchors take the top row and the rest the bottom; anchors from N onward park offscreen at X = -55.799. Counts of 9 and below use a single row at Y 0.700; from 10 up the rows sit at Y 5.212 and Y -0.885 (Air Ride) or 4.300 and -0.700 (City Trial), the bottom offset by half a column so the two interleave. Spacing shrinks as the count grows to keep both rows inside a fixed half-width `H` — 30.62 on Air Ride, 25.20 on City Trial:
+
+```
+top = ceil(N/2)            spacing = 2H / max(top - 1, (N - top) - 0.5)
+top row    x = -H + i * spacing               y = top row
+bottom row x = -H + spacing/2 + i * spacing   y = bottom row
+```
+
+At 20 icons that is 10 + 10 at 6.445 apart, at 19 it is 10 + 9 at 6.811, and at 21 it would be 11 + 10 at 6.124. The anchors have no key past frame 20 and there is no 21st anchor to pose, so `custom_machines` replaces the two layout wrappers: up to 20 icons the engine's own pass runs untouched, and past that the same arithmetic is redone in mod code straight into the userdata, with the shared icon scale multiplied by the spacing ratio so the tiles still fit their columns. The icon that has no anchor is kept in the mod rather than in the userdata, where its `Vec3` would land on the trailing fields, and `AirRideSelect_GetIconPos` / `CitySelect_GetIconPos` are replaced to hand it out.
+
+Icon index maps to joint index through a byte table read by the creator: `0x804ab048` for Air Ride and `0x804ab728` for City Trial, both `02 03 ... 15` (joint 1 is the model root).
+
+The ipos userdata is laid out the same way on both screens up to the positions and differently after them: 20 anchor `JObj` pointers at `+0x10`, one `Vec3` per icon at `+0x60`, then Air Ride's shared icon scale at `+0x150` and count at `+0x15c` against City Trial's count at `+0x150` and scale at `+0x154`.
+
+Icon GObjs go into a 20-entry array in `ScMenuCommon` (`0x80558788`): `airride_select.sicon_gobj[20]` at `+0x520` and City Trial's at `+0x80c`. Each is written by one unguarded store and read nowhere, so a 21st icon overwrites the `JOBJSet` pointer that follows (`+0x570` and `+0x85c`); `custom_machines` puts that pointer back right after the store lands.
+
+#### Cursor rows
+
+`AirRideSelect_Cursor1InputThink` (0x80023b68) and `CitySelect_Cursor1InputThink` (0x800312fc) carry the same code. Below 10 icons they take a single-row path that handles only left and right, wrapping at the ends; from 10 up they split the list at `ceil(N/2)` — the same split the anchors use — and add up/down between the rows.
+
+#### Character name plates
+
+The 80x48 name plate is drawn from a TexAnim bank shared in shape by the two select screens and all four results screens, and its frame is *not* simply the CharacterKind. `AirRideSelect_SetSIcon2Character` (0x80151b78) and its siblings compute:
+
+```
+frame = (ckind == CKIND_DEDEDE)     ? color + 20
+      : (ckind == CKIND_METAKNIGHT) ? color + 30
+      : ckind
+```
+
+The bank answers with CON keys at frames 0..17 (entries 0..17), 20 (entry 18) and 30 (entry 19), so every King Dedede color resolves to one plate and every Meta Knight color to another. Six functions carry a copy of that arithmetic: the color and character setters for each select screen (0x80151ab4 / 0x80151b78 for Air Ride, 0x8015c574 / 0x8015c638 for City Trial) and one element creator per results screen (0x80167250, 0x8016aff4, 0x8016e924, 0x80177ae8).
+
 #### Bike-relative indexing
 
 For non-bikes (`is_bike = 0`), `CharacterDesc.machine_kind` **is** the VCKIND. For bikes (`is_bike = 1`), `machine_kind` is a **bike-relative index** and the real VCKIND is `VCKIND_WHEELNORMAL (19) + machine_kind`. Use `CharacterDesc_GetMachineKind()` (inline in `menu.h`) rather than reading the field directly.

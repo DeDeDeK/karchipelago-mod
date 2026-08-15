@@ -27,14 +27,22 @@
      (1u << VCKIND_WHEELDEDEDE)  | \
      (1u << VCKIND_WHEELVSDEDEDE))
 
+// Sizes the spawn-chance scratch array; the runtime ceiling is MachineKind_Num().
+#define MACHINE_KIND_CEILING (VCKIND_NUM + CUSTOM_MACHINE_MAX)
+
 // Weight handed to an unlocked machine the vanilla table gives 0 chance, so it can
-// still appear on the field. Only these four reach it - every other VCKIND either
-// carries a real weight in all three table windows or sits in CT_SPAWN_EXCLUDED_MASK.
+// still appear on the field. Only these four vanilla kinds reach it - every other
+// VCKIND either carries a real weight in all three table windows or sits in
+// CT_SPAWN_EXCLUDED_MASK - plus every registered custom machine, which has no row
+// in the table at all and brings its own weight from its descriptor.
 // Vanilla per-machine weights run 6-10 out of a ~111-119 table total, so these land
 // well under the machines the table actually wants: Compact ~4% of spawns, Flight
 // ~1.7%, each legendary ~0.8%.
 static float ZeroChanceSpawnWeight(int vckind)
 {
+    if (vckind >= VCKIND_NUM)
+        return cm_api ? cm_api->GetSpawnWeight(vckind) : 0.0f;
+
     switch (vckind)
     {
     case VCKIND_COMPACT: return 5.0f;
@@ -45,10 +53,12 @@ static float ZeroChanceSpawnWeight(int vckind)
 
 static int IsCKindUnlocked(CharacterKind ckind)
 {
+    if (ckind < 0 || ckind >= CharacterKind_Num())
+        return 0;
     CharacterDesc *desc = Character_GetDesc(ckind);
     if (!desc)
         return 0;
-    MachineKind vckind = CharacterDesc_GetMachineKind(desc);
+    MachineKind vckind = MachineKind_Resolve(desc->is_bike, desc->machine_kind);
     return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
 
@@ -56,9 +66,9 @@ static int IsCKindUnlocked(CharacterKind ckind)
 static MachineKind GetFirstUnlockedCTMachine()
 {
     u32 mask = ap_save->machine_unlocked_mask;
-    for (int i = 0; i < VCKIND_NUM; i++)
+    for (int i = 0; i < MachineKind_Num(); i++)
     {
-        if (CT_SPAWN_EXCLUDED_MASK & (1u << i))
+        if (i < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << i)))
             continue;
         if (mask & (1 << i))
             return i;
@@ -73,7 +83,7 @@ static MachineKind GetFirstUnlockedCTMachine()
 static CharacterKind RandomUnlockedKirbyCKind(void)
 {
     int unlocked_count = 0;
-    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
+    for (int ckind = 0; ckind < CharacterKind_Num(); ckind++)
     {
         if (ckind == CKIND_DEDEDE || ckind == CKIND_METAKNIGHT)
             continue;
@@ -85,7 +95,7 @@ static CharacterKind RandomUnlockedKirbyCKind(void)
         return CKIND_COMPACT;
 
     int pick = HSD_Randi(unlocked_count);
-    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
+    for (int ckind = 0; ckind < CharacterKind_Num(); ckind++)
     {
         if (ckind == CKIND_DEDEDE || ckind == CKIND_METAKNIGHT)
             continue;
@@ -279,18 +289,24 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
 {
     u32 unlocked_mask = ap_save->machine_unlocked_mask;
     vcDataCommon *vc_data_common = (*stc_vcDataCommon);
+    int kind_num = MachineKind_Num();
 
     int spawn_table_idx = 0;
     while (match_progress > vc_data_common->spawn_data->spawn_desc[spawn_table_idx].match_progress)
         spawn_table_idx++;
 
-    float spawn_chances[VCKIND_NUM];
-    for (int i = 0; i < VCKIND_NUM; i++)
-        spawn_chances[i] = vc_data_common->spawn_data->spawn_desc[spawn_table_idx].chance[i];
+    // VcCommon.dat's chance row is authored with exactly VCKIND_NUM columns, so
+    // registered custom kinds are never read from it - they start at 0 and pick up
+    // their descriptor weight below.
+    float spawn_chances[MACHINE_KIND_CEILING];
+    for (int i = 0; i < kind_num; i++)
+        spawn_chances[i] = (i < VCKIND_NUM)
+                               ? vc_data_common->spawn_data->spawn_desc[spawn_table_idx].chance[i]
+                               : 0.0f;
 
-    for (int i = 0; i < VCKIND_NUM; i++)
+    for (int i = 0; i < kind_num; i++)
     {
-        if (CT_SPAWN_EXCLUDED_MASK & (1u << i))
+        if (i < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << i)))
             spawn_chances[i] = 0;
         else if (!(unlocked_mask & (1u << i)))
             spawn_chances[i] = 0;
@@ -299,7 +315,7 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
     }
 
     int spawnable_count = 0;
-    for (int i = 0; i < VCKIND_NUM; i++)
+    for (int i = 0; i < kind_num; i++)
     {
         if (spawn_chances[i] > 0)
             spawnable_count++;
@@ -311,7 +327,7 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
     // Shrink history when few machines are spawnable so the only candidate can't be
     // excluded by its own history.
     int history_size = (spawnable_count <= 4) ? (spawnable_count - 1) : 4;
-    for (int i = 0; i < VCKIND_NUM; i++)
+    for (int i = 0; i < kind_num; i++)
     {
         for (int j = 0; j < history_size; j++)
         {
@@ -322,12 +338,12 @@ int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
 
     int machine_kind = VCKIND_COMPACT;
     float chance_total = 0;
-    for (int i = 0; i < VCKIND_NUM; i++)
+    for (int i = 0; i < kind_num; i++)
         chance_total += spawn_chances[i];
 
     float random_chance = HSD_Randf() * chance_total;
     chance_total = 0;
-    for (int i = 0; i < VCKIND_NUM; i++)
+    for (int i = 0; i < kind_num; i++)
     {
         chance_total += spawn_chances[i];
         if (random_chance < chance_total)
@@ -361,81 +377,15 @@ CODEPATCH_HOOKCREATE(0x801df44c,
     0x801df630
 )
 
-// Replaces the mode 1 (Stadium) and mode 2 (Free Run) counting passes in
-// CitySelect_CreateMachineIcons.
-int GateMachines_CountCTSelectAvailable()
+// Availability filter handed to custom_machines, which owns both select screens'
+// packing. The mask is the only rule here, so the engine's own checklist answer in
+// `default_available` is discarded - including for appended characters, which are
+// unconditional there but gated like anything else once AP hands them out.
+int GateMachines_FilterSelectCharacter(int ckind, int default_available)
 {
-    int count = 0;
-    for (int ckind = 0; ckind < CKIND_NUM; ckind++)
-    {
-        if (IsCKindUnlocked(ckind))
-            count++;
-    }
-    return count;
+    (void)default_available;
+    return IsCKindUnlocked(ckind);
 }
-
-// Replaces the array-building passes in CitySelect_CreateMachineIcons, packing the
-// unlocked characters of the 2x10 icon grid into the two-row locals:
-//   char_arr = 20-byte array (row0 at +0, row1 at +10); row_counts = per-row count.
-void GateMachines_BuildCTSelectArray(u8 *char_arr, u8 *row_counts)
-{
-    row_counts[0] = 0;
-    row_counts[1] = 0;
-
-    for (int row = 0; row < 2; row++)
-    {
-        for (int col = 0; col < 10; col++)
-        {
-            CharacterKind ckind = SelIcon_GetCKind(row, col);
-            if (IsCKindUnlocked(ckind))
-            {
-                char_arr[row * 10 + row_counts[row]] = (u8)ckind;
-                row_counts[row]++;
-            }
-        }
-    }
-}
-
-// Mode 1 (Stadium) counting pass. Result -> r27 (total count); exit to 0x8002e670,
-// past the loop where mode is rechecked before the array-building pass.
-CODEPATCH_HOOKCREATE(0x8002e4d0,
-    "",
-    GateMachines_CountCTSelectAvailable,
-    "mr 27, 3\n\t",
-    0x8002e670
-)
-
-// Mode 1 (Stadium) array-building pass. r29 = char array, r28 = row counts. Exit to
-// the flat-copy at 0x8002f0b8, past the vanilla reorder/balance block: that reorder
-// assumes vanilla's grid iteration (special chars at fixed col 0/9), and packed arrays
-// trigger a duplicate-icon bug when only DEDEDE/METAKNIGHT are unlocked.
-CODEPATCH_HOOKCREATE(0x8002e67c,
-    "mr 3, 29\n\t"
-    "mr 4, 28\n\t",
-    GateMachines_BuildCTSelectArray,
-    "",
-    0x8002f0b8
-)
-
-// Mode 2 (Free Run) counting pass. Result -> r27; clobbered `li r24, 0` is harmless
-// (r24 is unused after the skipped loop). Same exit as the mode 1 counting pass.
-CODEPATCH_HOOKCREATE(0x8002e5c0,
-    "",
-    GateMachines_CountCTSelectAvailable,
-    "mr 27, 3\n\t",
-    0x8002e670
-)
-
-// Mode 2 (Free Run) array-building pass. r29 = char array, r28 = row counts. Clobbered
-// `mr r26, r29` is harmless (the reorder reads from stack). Bypasses the reorder as
-// in the mode 1 hook.
-CODEPATCH_HOOKCREATE(0x8002e738,
-    "mr 3, 29\n\t"
-    "mr 4, 28\n\t",
-    GateMachines_BuildCTSelectArray,
-    "",
-    0x8002f0b8
-)
 
 // Replaces the respawn machine assignment in Rider_ResetStartingMachine, which
 // hardcodes VCKIND_COMPACT.
@@ -560,38 +510,14 @@ int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
 int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
 {
     // machine_class = CharacterDesc.is_bike, machine_id = CharacterDesc.machine_kind,
-    // which for bikes is a bike-relative index rather than the VCKIND.
-    int vckind;
-    if (machine_class)
-        vckind = VCKIND_WHEELNORMAL + machine_id;
-    else
-        vckind = machine_id;
+    // a class-relative slot rather than the VCKIND.
+    int vckind = MachineKind_Resolve(machine_class, machine_id);
 
-    if (vckind < 0 || vckind >= VCKIND_NUM)
+    if (vckind < 0 || vckind >= MachineKind_Num())
         return 0;
 
     return (ap_save->machine_unlocked_mask & (1 << vckind)) ? 1 : 0;
 }
-
-// Zero the Air Ride CSS available-machine list (airride_select_ply +0x66, a 2x10
-// icon grid). AirRide_PopulateSelectIcons rewrites only the first `count` entries each
-// frame and never clears the tail, so a mid-session narrowing of machine_unlocked_mask
-// leaves stale entries past the new count that the CSS still resolves and commits.
-void GateMachines_ClearAirRideList(u8 *base)
-{
-    for (int i = 0; i < 20; i++)
-        base[0x66 + i] = 0;
-}
-
-// Hook at 0x80020a88 in AirRide_PopulateSelectIcons (`lbz r0, 123(r31)`), after
-// r31 = airride_select_ply is established and before the list is rebuilt. The epilogue
-// restores r4 = 0, the function's persistent zero used by the following `stb r4,9(r1)`.
-CODEPATCH_HOOKCREATE(0x80020a88,
-    "mr 3, 31\n\t",
-    GateMachines_ClearAirRideList,
-    "li 4, 0\n\t",
-    0
-)
 
 void GateMachines_OnBoot()
 {
@@ -601,18 +527,9 @@ void GateMachines_OnBoot()
     CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
     CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
 
-    CODEPATCH_HOOKAPPLY(0x80020a88);  // Air Ride CSS available-machine list clear
-
-    CODEPATCH_HOOKAPPLY(0x8002e4d0);  // CT Stadium (mode 1) counting pass
-    CODEPATCH_HOOKAPPLY(0x8002e67c);  // CT Stadium (mode 1) array-building pass
-    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // CT Free Run (mode 2) counting pass
-    CODEPATCH_HOOKAPPLY(0x8002e738);  // CT Free Run (mode 2) array-building pass
-
-    // CitySelect_Cursor1InputThink splits cursor rows at num>=10 (`cmpwi r3, 9; ble`),
-    // but the 2x10 grid renderer keeps up to 10 icons on one line and only wraps at 11,
-    // so at num==10 the cursor splits 5+5 across a single drawn row. Vanilla CT only
-    // produces counts 15-20; AP gating can land on exactly 10.
-    CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a);  // cmpwi r3, 10
+    // Both select screens are packed by custom_machines, which widened the grid they
+    // are packed from; gating is a filter over that rather than a second packing.
+    // Deferred to OnSaveLoaded because the registry boots after us.
 
     CODEPATCH_HOOKAPPLY(0x8002dea0);  // CT starting-machine finalize
     CODEPATCH_HOOKAPPLY(0x801952c8);  // CT respawn machine validation
@@ -630,20 +547,29 @@ void GateMachines_OnBoot()
     OSReport("[GateMachines] Hooks installed\n");
 }
 
+// Display name for any MachineKind, vanilla or registered custom.
+const char *GateMachines_GetName(MachineKind kind)
+{
+    if (kind >= 0 && kind < VCKIND_NUM)
+        return MachineKind_Names[kind];
+    const char *custom = cm_api ? cm_api->GetName(kind) : NULL;
+    return custom ? custom : "Unknown Machine";
+}
+
 int GateMachines_UnlockMachine(MachineKind kind, int announce)
 {
-    if (kind >= VCKIND_NUM)
+    if (kind < 0 || kind >= MachineKind_Num())
         return 0;
 
     ap_save->machine_unlocked_mask |= (1 << kind);
     OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n",
-             kind, MachineKind_Names[kind], MaskBits(ap_save->machine_unlocked_mask, 32));
+             kind, GateMachines_GetName(kind), MaskBits(ap_save->machine_unlocked_mask, 32));
     if (announce)
     {
         // VCKIND_WHEELDEDEDE / VCKIND_WINGMETAKNIGHT are the player-facing King Dedede
         // / Meta Knight unlocks, announced to match the checklist reward path.
         const char *prefix = "Unlocked Machine: ";
-        const char *name   = MachineKind_Names[kind];
+        const char *name   = GateMachines_GetName(kind);
         if (kind == VCKIND_WHEELDEDEDE)
         {
             prefix = "Unlocked Character: ";

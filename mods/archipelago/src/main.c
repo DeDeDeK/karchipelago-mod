@@ -9,6 +9,7 @@
 #include "stadium.h"
 
 #include "main.h"
+#include "gate_machines.h"
 #include "deathlink.h"
 #include "city_trial_event.h"
 #include "ap_item_handler.h"
@@ -45,6 +46,7 @@
 APData *ap_data;
 APSave *ap_save;
 const TextBoxAPI *tb_api = 0;
+const CustomMachinesAPI *cm_api = 0;
 
 // The AP client hardcodes an offset for every APData field and reads them by
 // address, so a silent layout shift desyncs it with no error anywhere. These pin
@@ -163,6 +165,28 @@ static void APOptions_ApplyRevealChecklists(void)
             RevealChecklist(row);
 }
 
+// Optional: absent when custom_machines is not built, leaving the roster at the vanilla
+// 26 machines and 20 characters. Deferred past OnBoot because mods boot alphabetically
+// and the registry boots after us, and re-tried per call because the title screen asks
+// for it before the first save load.
+void AP_ResolveCustomMachines(void)
+{
+    if (cm_api)
+        return;
+
+    cm_api = (const CustomMachinesAPI *)Hoshi_ImportMod(
+        (char *)CUSTOM_MACHINES_MOD_NAME, CUSTOM_MACHINES_API_MAJOR, CUSTOM_MACHINES_API_MINOR);
+    if (cm_api)
+    {
+        // The registry owns both select screens' packing; this is what makes it
+        // offer the unlocked roster rather than the engine's own.
+        cm_api->SetAvailabilityFilter(GateMachines_FilterSelectCharacter);
+        OSReport("[Main] custom_machines: %d machine(s), %d kinds, %d characters\n",
+                 cm_api->GetCount(), cm_api->GetKindCeiling(),
+                 cm_api->GetCharacterKindCeiling());
+    }
+}
+
 // Runs on startup after any save data is loaded, whether or not a memory card is
 // inserted or held existing save data.
 void OnSaveLoaded()
@@ -176,6 +200,8 @@ void OnSaveLoaded()
         if (!tb_api)
             OSReport("[Main] failed to import textbox API\n");
     }
+
+    AP_ResolveCustomMachines();
 
     ap_save = (APSave *)mod_desc.save_ptr;
     ap_save->boot_num++;
@@ -217,7 +243,7 @@ void OnSaveLoaded()
 static void APOptions_ApplyUngatedCategories(void)
 {
     const APSlotOptions *opts = &ap_save->options;
-    if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       (1u << VCKIND_NUM) - 1);
+    if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       (1u << MachineKind_Num()) - 1);
     if (!opts->ability_gating_enabled)       Unlock_SetMask(AP_UNLOCK_ABILITY,       (1u << COPYKIND_NUM) - 1);
     if (!opts->event_gating_enabled)         Unlock_SetMask(AP_UNLOCK_EVENT,         (1u << EVKIND_NUM) - 1);
     if (!opts->patch_gating_enabled)         Unlock_SetMask(AP_UNLOCK_PATCH,         (1u << PATCHKIND_NUM) - 1);

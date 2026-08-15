@@ -238,10 +238,12 @@ int APItems_HandleItem(uint ap_item_id)
         return GateItems_UnlockItem(kind);
     }
 
-    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854).
-    // The bound stops before WHEELVSDEDEDE (25), the stadium CPU-only Dedede
-    // machine, so a stray ID 855 falls through to the unknown-item path.
-    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
+    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854
+    // for the vanilla machines and 856 up for registered custom ones). ID 855 is
+    // WHEELVSDEDEDE (25), the stadium CPU-only Dedede machine, which is not
+    // exposed and falls through to the unknown-item path.
+    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + MachineKind_Num() &&
+        ap_item_id != AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
     {
         MachineKind kind = ap_item_id - AP_MACHINE_UNLOCK_BASE;
         return GateMachines_UnlockMachine(kind, /*announce=*/1);

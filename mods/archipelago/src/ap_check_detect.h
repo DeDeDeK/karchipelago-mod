@@ -77,6 +77,11 @@ typedef enum APCheckKind
     // The one course feature vanilla writes no cell about.
     APCK_MEADOWS_SHORTCUT,    // 49
 
+    // The tab's own terminal objective, satisfied by ap_save->goal_complete. A row
+    // whose goal counts or lists this cell can never be satisfied, so generation must
+    // not place it in one.
+    APCK_GOAL_COMPLETE,       // 50
+
     APCK_NUM,
 } APCheckKind;
 

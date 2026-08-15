@@ -4,6 +4,9 @@
 #include "machine.h"
 
 void GateMachines_OnBoot();
+// Availability filter for custom_machines' select-screen packing; registered once
+// the registry resolves.
+int GateMachines_FilterSelectCharacter(int ckind, int default_available);
 int GateMachines_UnlockMachine(MachineKind kind, int announce);
 int GateMachines_GiveLegendaryMachine(int machine_index);
 void GateMachines_On3DLoadEnd(void);

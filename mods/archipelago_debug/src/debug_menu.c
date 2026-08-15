@@ -9,11 +9,21 @@
 #include "stadium.h"
 
 #include "archipelago_api.h"
+#include "custom_machines_api.h"
 #include "debug_menu.h"
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
 
-static int machine_state[VCKIND_NUM];
+static const CustomMachinesAPI *cm_api = 0;
+
+// Unlock-mask width for machines. Custom kinds occupy VCKIND_NUM and up, so the
+// vanilla ceiling only holds until the registry reports in.
+static int MachineNum(void)
+{
+    return cm_api ? cm_api->GetKindCeiling() : VCKIND_NUM;
+}
+
+static int machine_state[VCKIND_NUM + CUSTOM_MACHINE_MAX];
 static int ability_state[COPYKIND_NUM];
 static int event_state[EVKIND_NUM];
 static int patch_state[PATCHKIND_NUM];
@@ -38,7 +48,7 @@ static int base_ability_state[BASEABILITY_NUM];
         ap_api->SetUnlockMask(cat, m); \
     }
 
-DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  VCKIND_NUM)
+DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  MachineNum())
 DEF_SYNC(SyncAbilities, AP_UNLOCK_ABILITY,         ability_state,  COPYKIND_NUM)
 DEF_SYNC(SyncEvents,    AP_UNLOCK_EVENT,           event_state,    EVKIND_NUM)
 DEF_SYNC(SyncPatches,   AP_UNLOCK_PATCH,           patch_state,    PATCHKIND_NUM)
@@ -58,7 +68,7 @@ DEF_SYNC(SyncBaseAbil,  AP_UNLOCK_BASE_ABILITY,    base_ability_state, BASEABILI
             arr[i] = (m & ((u32)1 << i)) ? 1 : 0; \
     }
 
-DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  VCKIND_NUM)
+DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  MachineNum())
 DEF_REFRESH(RefreshAbilities, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM)
 DEF_REFRESH(RefreshEvents,    AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM)
 DEF_REFRESH(RefreshPatches,   AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM)
@@ -108,7 +118,7 @@ void DebugMenu_RefreshStateFromMasks(void)
         return 1; \
     }
 
-DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  VCKIND_NUM,       "machines")
+DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  MachineNum(),     "machines")
 DEF_ALL(Abl, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM,     "abilities")
 DEF_ALL(Evt, AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM,       "events")
 DEF_ALL(Pch, AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM,    "patch types")
@@ -428,8 +438,33 @@ static MenuDesc machines_menu = {
         G("Rex Wheelie",       machine_state, VCKIND_REXWHEELIE,     SyncMachines),
         G("Wheelie Scooter",   machine_state, VCKIND_WHEELIESCOOTER, SyncMachines),
         G("Dedede Wheelie",    machine_state, VCKIND_WHEELDEDEDE,    SyncMachines),
+        // Trailing rows for whatever custom_machines registered. option_num hides
+        // them until DebugMenu_BindCustomMachines names the ones that exist.
+        G("Custom Machine 1",  machine_state, VCKIND_NUM + 0,        SyncMachines),
+        G("Custom Machine 2",  machine_state, VCKIND_NUM + 1,        SyncMachines),
+        G("Custom Machine 3",  machine_state, VCKIND_NUM + 2,        SyncMachines),
+        G("Custom Machine 4",  machine_state, VCKIND_NUM + 3,        SyncMachines),
     },
 };
+
+#define MACHINES_MENU_VANILLA_OPTIONS 24
+
+_Static_assert(CUSTOM_MACHINE_MAX == 4, "machines_menu needs one trailing row per custom slot");
+
+void DebugMenu_BindCustomMachines(const CustomMachinesAPI *api)
+{
+    if (!api || cm_api)
+        return;
+    cm_api = api;
+
+    int count = api->GetCount();
+    if (count > CUSTOM_MACHINE_MAX)
+        count = CUSTOM_MACHINE_MAX;
+    for (int i = 0; i < count; i++)
+        machines_menu.options[MACHINES_MENU_VANILLA_OPTIONS + i]->name =
+            (char *)api->GetName(VCKIND_NUM + i);
+    machines_menu.option_num = MACHINES_MENU_VANILLA_OPTIONS + count;
+}
 
 static MenuDesc abilities_menu = {
     .option_num = 13,

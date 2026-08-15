@@ -101,6 +101,51 @@ def encode_rgba8(im):
     return bytes(out)
 
 
+def colorize(r, g, b, tint):
+    """Map one RGB triple onto `tint`, preserving its luminance: dark texels
+    scale the tint toward black, bright ones toward white. Keeps the source's
+    shading and contrast while forcing its hue."""
+    lum = (299 * r + 587 * g + 114 * b) // 1000
+    tr, tg, tb = tint
+    if lum <= 128:
+        f = lum / 128.0
+        return int(tr * f), int(tg * f), int(tb * f)
+    f = (lum - 128) / 127.0
+    return (int(tr + (255 - tr) * f),
+            int(tg + (255 - tg) * f),
+            int(tb + (255 - tb) * f))
+
+
+def tint_cmpr(blob, tint):
+    """Recolor a CMPR texture by rewriting the two RGB565 endpoints of each
+    8-byte sub-block, leaving the 2-bit index words untouched.
+
+    A sub-block whose first endpoint compares greater than its second is
+    opaque; otherwise its index 3 is transparent. Colorizing is monotonic in
+    luminance, so that ordering almost always survives - the clamps below
+    restore it in the corner cases where quantization collapses the two
+    endpoints onto each other."""
+    out = bytearray(blob)
+    for off in range(0, len(out) - 7, 8):
+        c0, c1 = struct.unpack_from(">HH", out, off)
+        n0 = _tint565(c0, tint)
+        n1 = _tint565(c1, tint)
+        if c0 > c1 and n0 <= n1:
+            n0 = min(0xFFFF, n1 + 1)
+        elif c0 <= c1 and n0 > n1:
+            n0 = n1
+        struct.pack_into(">HH", out, off, n0, n1)
+    return bytes(out)
+
+
+def _tint565(v, tint):
+    r = ((v >> 11) & 0x1F) << 3
+    g = ((v >> 5) & 0x3F) << 2
+    b = (v & 0x1F) << 3
+    r, g, b = colorize(r, g, b, tint)
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+
+
 def encode_i4_alpha(im):
     """Encode the alpha channel of an RGBA PIL image to GX_TF_I4 (4bpp, 8x8
     tiles, 2px/byte). Intensity acts as alpha at runtime, so the shape comes

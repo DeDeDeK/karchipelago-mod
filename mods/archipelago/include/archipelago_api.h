@@ -387,6 +387,8 @@ typedef enum APItemId
     // Machine unlock items (830-854, aligned to MachineKind).
     // VCKIND_WHEELVSDEDEDE (would be 855) is not exposed: it is the Vs. King
     // Dedede stadium's CPU-only machine and no game code reads its unlock bit.
+    // 856 and up continue the alignment into the MachineKinds custom_machines
+    // registers, in the order it discovers them.
     AP_MACHINE_UNLOCK_BASE = 830,
     AP_MACHINE_UNLOCK_WARP = 830,          // VCKIND_WARP
     AP_MACHINE_UNLOCK_COMPACT,             // VCKIND_COMPACT
