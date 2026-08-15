@@ -117,6 +117,8 @@ The runtime unlock bitfield at `0x80536EE8` (`stc_stadium_unlocked`) and its che
 
 The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_STADIUM`. When the slot option `stadium_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` in `main.c` pre-fills the mask with `(1u << STKIND_NUM) - 1` at connect.
 
+**`STKIND_VSKINGDEDEDE` is the one exception to that pre-fill.** KOing King Dedede there is a City Trial goal, and with stadiums ungated his stadium comes up in the rotation from the first match, so the seed would be winnable before a single AP item arrived. When the AP world sets that goal it keeps the Vs. King Dedede unlock in the pool despite the gate being off and sets `GOALGATE_VS_KING_DEDEDE` in the `goal_forced_gates` slot option; the pre-fill then clears that one bit and the other 23 stadiums are still handed over at connect. The unlock item arrives through the normal `GateStadiums_UnlockStadium` path, which never consults the gate flag.
+
 ## AP Items
 
 24 AP items, `AP_STADIUM_UNLOCK_BASE` (400, `archipelago_api.h`) + `StadiumKind` index → IDs 400–423. `ap_item_handler.c` routes IDs in `[400, 400 + STKIND_NUM)` to `GateStadiums_UnlockStadium(id - AP_STADIUM_UNLOCK_BASE, /*announce=*/1)`, which sets the mask bit, ORs the kind's bit into `stc_stadium_new_label` so the checklist UI shows the "NEW" badge, logs, and enqueues `"Unlocked Stadium: <name>"` with `tb_api->StadiumColor`.

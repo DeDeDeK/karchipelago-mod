@@ -9,24 +9,56 @@
 #include "deathlink.h"
 #include "textbox_api.h"
 
-// Stops the send hooks echoing when the receive path calls Machine_SetFallDead
-// or Ply_SetHP.
-static int applying_deathlink = 0;
+#define DEATHLINK_PLY_MAX 5
+
+// Stops the send hooks echoing the receive path's own kills back out. This is a
+// countdown rather than a guard around the kill call because the HP-death path
+// is asynchronous: Ply_SetHP only zeroes HP, the machine is not flagged dead
+// until a later machine-think frame sets is_dead, and the send hook inside
+// Rider_CheckToDieOnMachine only trips after that. 60 frames is far short of the
+// 150-frame respawn timer, so it cannot swallow a genuine death.
+#define DEATHLINK_SUPPRESS_FRAMES 60
+
+static u8 deathlink_suppress[DEATHLINK_PLY_MAX];
+
+static void SuppressSend(int ply)
+{
+    if ((u32)ply < DEATHLINK_PLY_MAX)
+        deathlink_suppress[ply] = DEATHLINK_SUPPRESS_FRAMES;
+}
+
+static void TickSuppress(void)
+{
+    for (int i = 0; i < DEATHLINK_PLY_MAX; i++)
+    {
+        if (deathlink_suppress[i])
+            deathlink_suppress[i]--;
+    }
+}
+
+static void ClearSuppress(void)
+{
+    for (int i = 0; i < DEATHLINK_PLY_MAX; i++)
+        deathlink_suppress[i] = 0;
+}
 
 // The human-vs-CPU check is mode-specific and stays at the call site
 // (3D: Ply_CheckIfCPU, TR: TopRide_GetPlayerKind).
-static int DeathLinkSendAllowed(void)
+static int DeathLinkSendAllowed(int ply)
 {
-    if (applying_deathlink)
-        return 0;
     if (!ap_menu_settings.deathlink_enabled)
         return 0;
+    if ((u32)ply < DEATHLINK_PLY_MAX && deathlink_suppress[ply])
+    {
+        deathlink_suppress[ply] = 0;
+        return 0;
+    }
     return 1;
 }
 
 static void SendDeathLink(int ply)
 {
-    if (!DeathLinkSendAllowed())
+    if (!DeathLinkSendAllowed(ply))
         return;
     if (Ply_CheckIfCPU(ply))
         return;
@@ -100,6 +132,8 @@ static void DeathLink_PerFrame(GOBJ *g)
     if (Gm_GetIntroState() != GMINTRO_END)
         return;
 
+    TickSuppress();
+
     if (ap_data->deathlink_receive != 1)
         return;
 
@@ -121,9 +155,8 @@ static void DeathLink_PerFrame(GOBJ *g)
             continue;
         MachineData *md = mg->userdata;
 
-        applying_deathlink = 1;
+        SuppressSend(i);
         KillPlayer(rd, md);
-        applying_deathlink = 0;
     }
 
     tb_api->EnqueueColoredNoun(NULL, "Deathlink", tb_api->DeathColor, " received!");
@@ -132,6 +165,7 @@ static void DeathLink_PerFrame(GOBJ *g)
 
 void DeathLink_On3DLoadEnd()
 {
+    ClearSuppress();
     OSReport("[DeathLink] Active\n");
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_PerFrame, 0, 0, 0, 0);
 }
@@ -142,7 +176,7 @@ void DeathLink_On3DLoadEnd()
 // 0x802e2804). r31 = kirby.
 static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
 {
-    if (!DeathLinkSendAllowed())
+    if (!DeathLinkSendAllowed(kirby->player_slot))
         return;
     if (TopRide_GetPlayerKind(kirby->player_slot) != TR_PKIND_HMN)
         return;
@@ -185,6 +219,8 @@ static const char *const deathlink_state_names[] = {
 
 static void DeathLink_TopRidePerFrame(GOBJ *g)
 {
+    TickSuppress();
+
     if (ap_data->deathlink_receive != 1)
         return;
 
@@ -203,6 +239,8 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
             continue;
         if (TopRide_GetPlayerKind(kirby->player_slot) != TR_PKIND_HMN)
             continue;
+
+        SuppressSend(kirby->player_slot);
 
         // Zero charge.velocity before AND after apply() so the state produces a
         // static stun with no knockback: pre-zero pre-empts setters that scale
@@ -223,6 +261,7 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
 
 void DeathLink_OnTopRideLoadEnd()
 {
+    ClearSuppress();
     OSReport("[DeathLink] Active (Top Ride)\n");
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_TopRidePerFrame, 0, 0, 0, 0);
 }

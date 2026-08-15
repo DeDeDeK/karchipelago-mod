@@ -123,6 +123,8 @@ Only rows whose ITKIND is a +1 patch (`ITKIND_WEIGHT`/`ACCEL`/`TOPSPEED`/`TURN`/
 
 The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_ITEM`. When the slot option `item_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` in `main.c` pre-fills the mask with `(1u << ITUNLOCK_NUM) - 1` at connect.
 
+**The six legendary piece bits are the one exception to that pre-fill.** Assembling both machines is a City Trial goal, and with items ungated it is a feat the player can pull off in the first match with nothing from the item pool needed - the seed would be winnable before a single AP item arrived. When the AP world sets that goal it keeps `ITUNLOCK_HYDRA1-3` / `ITUNLOCK_DRAGOON1-3` in the pool despite the gate being off and sets `GOALGATE_LEGENDARY_PIECES` in the `goal_forced_gates` slot option; the pre-fill then clears exactly those six bits and everything else in the category is still handed over at connect. The unlock items arrive through the normal `GateItems_UnlockItem` path, which never consults the gate flag.
+
 ## AP Items
 
 30 AP items, `AP_ITEM_UNLOCK_BASE` (790, `archipelago_api.h`) + `ItemUnlockKind` index → IDs 790–819. `ap_item_handler.c` routes IDs in `[790, 790 + ITUNLOCK_NUM)` to `GateItems_UnlockItem(id - AP_ITEM_UNLOCK_BASE)`, which sets the bit, logs, and enqueues `"Unlocked Item: <name>"` via `tb_api->EnqueueColoredNoun` in `tb_api->ItemColor`.

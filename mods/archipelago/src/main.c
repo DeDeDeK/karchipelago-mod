@@ -61,6 +61,7 @@ _Static_assert(offsetof(APData, options.checklist_amount) == 0x05C, "OPTION_CHEC
 _Static_assert(offsetof(APData, options.goal_checks) == 0x078, "OPTION_GOAL_CHECKS_AIRRIDE");
 _Static_assert(offsetof(APData, options.goal_checks[AP_CHECKLIST_ROW]) == 0x0A8, "OPTION_GOAL_CHECKS_ARCHIPELAGO");
 _Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B8, "gating block moved");
+_Static_assert(offsetof(APData, options.goal_forced_gates) == 0x0EC, "OPTION_GOAL_FORCED_GATES");
 _Static_assert(offsetof(APData, location_data_valid) == 0x0F0, "LOCATION_DATA_VALID");
 _Static_assert(offsetof(APData, locations) == 0x0F4, "LOCATIONS_AIRRIDE");
 _Static_assert(offsetof(APData, sent_checks) == 0x208, "SENT_CHECKS_AIRRIDE");
@@ -184,7 +185,12 @@ void AP_ResolveCustomMachines(void)
         OSReport("[Main] custom_machines: %d machine(s), %d kinds, %d characters\n",
                  cm_api->GetCount(), cm_api->GetKindCeiling(),
                  cm_api->GetCharacterKindCeiling());
+        return;
     }
+
+    // Every mod has booted by the first call, so a failed import means the registry
+    // is not in this build and the City Trial select screen has no packing to filter.
+    GateMachines_OnCustomMachinesAbsent();
 }
 
 // Runs on startup after any save data is loaded, whether or not a memory card is
@@ -243,17 +249,28 @@ void OnSaveLoaded()
 static void APOptions_ApplyUngatedCategories(void)
 {
     const APSlotOptions *opts = &ap_save->options;
+
+    // A goal whose win condition is one in-game feat is free at connect when the
+    // category holding that feat is ungated, so the AP world keeps its unlocks in
+    // the pool and marks them here. They stay locked until their item arrives.
+    u32 item_mask = (1u << ITUNLOCK_NUM) - 1;
+    if (opts->goal_forced_gates & GOALGATE_LEGENDARY_PIECES)
+        item_mask &= ~LEGENDARY_PIECE_ITEM_BITS;
+    u32 stadium_mask = (1u << STKIND_NUM) - 1;
+    if (opts->goal_forced_gates & GOALGATE_VS_KING_DEDEDE)
+        stadium_mask &= ~(1u << STKIND_VSKINGDEDEDE);
+
     if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       (1u << MachineKind_Num()) - 1);
     if (!opts->ability_gating_enabled)       Unlock_SetMask(AP_UNLOCK_ABILITY,       (1u << COPYKIND_NUM) - 1);
     if (!opts->event_gating_enabled)         Unlock_SetMask(AP_UNLOCK_EVENT,         (1u << EVKIND_NUM) - 1);
     if (!opts->patch_gating_enabled)         Unlock_SetMask(AP_UNLOCK_PATCH,         (1u << PATCHKIND_NUM) - 1);
-    if (!opts->item_gating_enabled)          Unlock_SetMask(AP_UNLOCK_ITEM,          (1u << ITUNLOCK_NUM) - 1);
+    if (!opts->item_gating_enabled)          Unlock_SetMask(AP_UNLOCK_ITEM,          item_mask);
     if (!opts->box_gating_enabled)           Unlock_SetMask(AP_UNLOCK_BOX,           (1u << BOXKIND_NUM) - 1);
     if (!opts->airride_stage_gating_enabled) Unlock_SetMask(AP_UNLOCK_AIRRIDE_STAGE, (1u << AIRRIDE_NUM) - 1);
     if (!opts->topride_stage_gating_enabled) Unlock_SetMask(AP_UNLOCK_TOPRIDE_STAGE, (1u << TOPRIDE_NUM) - 1);
     if (!opts->topride_item_gating_enabled)  Unlock_SetMask(AP_UNLOCK_TOPRIDE_ITEM,  (1u << TRITEM_NUM) - 1);
     if (!opts->color_gating_enabled)         Unlock_SetMask(AP_UNLOCK_COLOR,         (1u << KIRBYCOLOR_NUM) - 1);
-    if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       (1u << STKIND_NUM) - 1);
+    if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       stadium_mask);
     if (!opts->base_ability_gating_enabled)  Unlock_SetMask(AP_UNLOCK_BASE_ABILITY,  (1u << BASEABILITY_NUM) - 1);
 
     // The three TR "New Item" types (Chickie/Who? Paint/Lantern) aren't reachable
@@ -274,7 +291,10 @@ static void APOptions_ApplyUngatedCategories(void)
              opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
              opts->topride_item_gating_enabled, opts->color_gating_enabled,
              opts->stadium_gating_enabled);
-    OSReport("[Main] Gating - base abilities:%d\n", opts->base_ability_gating_enabled);
+    OSReport("[Main] Gating - base abilities:%d goal-forced legendary pieces:%d Vs. King Dedede:%d\n",
+             opts->base_ability_gating_enabled,
+             (opts->goal_forced_gates & GOALGATE_LEGENDARY_PIECES) ? 1 : 0,
+             (opts->goal_forced_gates & GOALGATE_VS_KING_DEDEDE) ? 1 : 0);
 }
 
 // Copy the client's slot options into save data on first detection. Options are

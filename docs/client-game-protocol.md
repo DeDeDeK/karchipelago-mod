@@ -140,6 +140,13 @@ Per-mode arrays are `CHECKLIST_MODE_NUM` (4) wide, indexed by **checklist-mode r
 | 0x0E0 | `stadium_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all stadiums unlocked at connect; AP world ships no stadium unlock items. (The KAROptions toggle `city_trial_stadiums_gated` maps directly to this.) |
 | 0x0E4 | `base_ability_gating_enabled`    | 0 or 1 | 1 = gated. 0 = inhale / quick spin / charge unlocked at connect; AP world ships no base ability unlock items. |
 | 0x0E8 | `checklist_rewards_gating_enabled` | 0 or 1 | 1 = gated (default): each non-progression checklist reward (music, sound test, extra rules, endings, filler boxes, …) is an AP item the player finds. 0 = ungated: the mod marks every such reward received at connect (`ChecklistRewards_GrantAllCosmetic`, tracked via `received_checklist_rewards` — **not** a mask), and the AP world ships none. The 6 Dragoon/Hydra part markers are progression and are **not** affected by this flag. |
+| 0x0EC | `goal_forced_gates`              | bitmask | Unlock bits an ungated category's pre-fill must leave locked, because this seed's goal is what they gate and the AP world kept them in the pool. Bit 0 `GOALGATE_LEGENDARY_PIECES` = `ITUNLOCK_HYDRA1-3` / `ITUNLOCK_DRAGOON1-3`, bit 1 `GOALGATE_VS_KING_DEDEDE` = `STKIND_VSKINGDEDEDE`. Only read in the ungated branch: a bit is 0 when its own category is gated, since that flag already keeps every bit locked. |
+
+`APSlotOptions` is 8-byte aligned, so `goal_forced_gates` sits in what was the block's tail padding and the block still ends at 0x0F0.
+
+### Goal-Forced Gates
+
+Two City Trial goals are a single in-game feat rather than a checklist count, and each rests on one thing the category pre-fill would otherwise hand over at connect: `GOAL_HYDRA_AND_DRAGOON` needs the six legendary pieces to spawn, and `GOAL_BEAT_KING_DEDEDE` needs the Vs. King Dedede stadium to come up in the rotation. With `item_gating_enabled` / `stadium_gating_enabled` at 0 the seed would be winnable in the first match before a single item arrived, so the AP world keeps just those unlocks in the pool and sets the matching bit here. The rest of the category stays ungated. The unlock items themselves are delivered through the normal handler path, which never consults a gating flag.
 
 ### GoalKind Enum
 
@@ -211,6 +218,8 @@ Per-category gating toggles (one slot option per `APUnlockCategory`). Each KAROp
 | `city_trial_stadiums_gated`       | `stadium_gating_enabled` |
 
 `checklist_rewards_gated` → `checklist_rewards_gating_enabled` follows the same true=gated convention, but is **not** a mask-backed `APUnlockCategory`: when ungated the mod pre-grants the cosmetic rewards via `ChecklistRewards_GrantAllCosmetic` rather than filling a bitmask.
+
+Two more `slot_data` keys are derived rather than raw toggles, and the client packs them into `goal_forced_gates`: `legendary_pieces_goal_gated` → bit 0, `vs_king_dedede_goal_gated` → bit 1. Each is 1 only when its category ships ungated *and* the seed's goal is gated on those unlocks.
 
 Options **not written to the mod** (used at AP generation time, or carried only in `slot_data` for the client's own logic): `trap_chance`, `spawn_rate_max`, `city_trial_permanent_patches` (gen-time only — controls whether permanent-patch items enter the pool; the mod has no corresponding slot field and always treats permanent patches as an active item category), and the per-mode `air_ride_checkbox_fillers` / `top_ride_checkbox_fillers` / `city_trial_checkbox_fillers` fields. (`trap_chance` is present in `slot_data` for the client's trap-roll logic but is not written into `APSlotOptions`.)
 

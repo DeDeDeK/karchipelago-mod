@@ -14,7 +14,19 @@ Three hooks detect player deaths, all applied from `DeathLink_OnBoot`:
 | `0x801e6540` | `Machine_SetFallDead` | Fall death — machine went out of bounds |
 | `0x80331a94` | per-frame TR-stage function at `0x8033158c` | Top Ride sand pit ejected a swallowed kirby |
 
-All three funnel through `DeathLinkSendAllowed()`, which requires (a) the reentrancy guard `applying_deathlink` to be clear — so the receive path's own `Machine_SetFallDead` / `Ply_SetHP` calls don't echo a death back out — and (b) `ap_menu_settings.deathlink_enabled` to be set. Each hook then applies its own human-vs-CPU filter before setting the flag, because the two engines discriminate differently: the 3D path (`SendDeathLink`) uses `Ply_CheckIfCPU`, the TR path uses `TopRide_GetPlayerKind == TR_PKIND_HMN`.
+All three funnel through `DeathLinkSendAllowed(ply)`, which requires `ap_menu_settings.deathlink_enabled` to be set and the player's echo-suppression slot to be clear. Each hook then applies its own human-vs-CPU filter before setting the flag, because the two engines discriminate differently: the 3D path (`SendDeathLink`) uses `Ply_CheckIfCPU`, the TR path uses `TopRide_GetPlayerKind == TR_PKIND_HMN`.
+
+### Echo Suppression
+
+The receive path kills the local player through the same mechanisms the send hooks watch, so its own kills must not bounce back out as a send. This cannot be a guard around the kill call, because the HP-death path is **asynchronous**:
+
+1. `Ply_SetHP(ply, 0)` (0x8022CA38) writes the HP float and forwards to `MachineGObj_SetHP` (0x801C841C), which writes `md+0xA18`. Neither touches the dead flag.
+2. `Machine_IsDead` (0x801C856C) reads `md->is_dead` (0xC35 bit 0x20), set only by `Machine_OnKO` (0x801E568C) once a later machine-think frame observes HP <= 0.
+3. `RiderThink_DmgApply` (0x8018FA20) polls `Rider_CheckToDieOnMachine` on a later frame still, and that is where the send hook sits.
+
+So `deathlink_suppress[5]` is a per-player frame countdown (`DEATHLINK_SUPPRESS_FRAMES` = 60), armed by `SuppressSend(ply)` immediately before each `KillPlayer` call, decremented once per frame by `TickSuppress()` at the top of both receive procs, and consumed (zeroed) by the first send attempt it blocks. `ClearSuppress()` zeroes it in `DeathLink_On3DLoadEnd` / `DeathLink_OnTopRideLoadEnd` so nothing carries across scenes.
+
+60 frames covers the multi-frame HP-death detection chain with margin while staying far short of the 150-frame respawn timer, so a genuine death can never land inside the window — the player is mid-respawn for its entire duration. The fall-death path trips its hook synchronously inside `Machine_SetFallDead` and is covered by the same arm.
 
 ### `Machine_SetFallDead` hook register preservation
 
@@ -28,7 +40,7 @@ The hook's prologue saves r4/r5 to the stack and the epilogue restores all three
 
 ## Receiving Deaths
 
-`DeathLink_PerFrame` runs as a GObj update function created in `DeathLink_On3DLoadEnd`, called from `On3DLoadEnd` for the 3D modes (Air Ride, City Trial, the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `ap_data->deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) currently on a machine (`Rider_IsOnMachine`), calls `KillPlayer(rd, md)` under the `applying_deathlink` reentrancy guard. After killing everyone it enqueues a "Deathlink received!" textbox and clears `deathlink_receive`.
+`DeathLink_PerFrame` runs as a GObj update function created in `DeathLink_On3DLoadEnd`, called from `On3DLoadEnd` for the 3D modes (Air Ride, City Trial, the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `ap_data->deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) currently on a machine (`Rider_IsOnMachine`), arms that slot's echo suppression and calls `KillPlayer(rd, md)`. After killing everyone it enqueues a "Deathlink received!" textbox and clears `deathlink_receive`.
 
 ### Kill Mechanism by Mode
 
@@ -157,7 +169,7 @@ Checkpoint density varies by course. On sparse courses a fall-death respawn can 
 
 ## Top Ride Send
 
-The sand-pit enemy on the SAND course is the death proxy: `DeathLink_OnTopRideSandPit(kirby)` sets `deathlink_send = 1` when the pit spits a swallowed human kirby back out. It checks `applying_deathlink` clear, `deathlink_enabled` set, `TR_PKIND_HMN`, and `round_state == 2`. The pit's eject is a discrete event, not a per-frame tick, so no rising-edge gate is needed.
+The sand-pit enemy on the SAND course is the death proxy: `DeathLink_OnTopRideSandPit(kirby)` sets `deathlink_send = 1` when the pit spits a swallowed human kirby back out. It checks `deathlink_enabled` set, the slot's echo suppression clear, `TR_PKIND_HMN`, and `round_state == 2`. The pit's eject is a discrete event, not a per-frame tick, so no rising-edge gate is needed.
 
 The hook site is `0x80331a94`, inside the per-frame TR-stage function at `0x8033158c` that loops all 4 kirby slots and dispatches the eject knockback. Kirby is in r31. The clobbered instruction is `lwz r12, 0xd0(r12)` — vt+0xD0 is the `KirbyDoodlebugOut` wrapper; the other vt+0xD0 call site (`0x802e2804`, the Doodlebug item) is deliberately **not** hooked. The epilogue rebuilds r3 (=kirby), r4 (=stack+0x90), r5 (=stack+0x84), r6 (=30), r7 (=60) and r12 from r31 / r1 / immediates so the imminent vtable `bctrl` still has its arguments.
 
@@ -174,7 +186,7 @@ Several other terrain-driven damage states are excluded:
 
 ## Top Ride Receive
 
-`DeathLink_TopRidePerFrame` runs as a GObj update function created by `DeathLink_OnTopRideLoadEnd` (called from `main.c::OnTopRideLoadEnd`). On `deathlink_receive == 1` (and once `round_state == 2`), it picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)`, then applies that **same** state to every human kirby — it iterates `mgr->kirbys[0..3]`, filters humans via `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`, and calls the chosen state wrapper on each. It finishes by enqueuing a "Deathlink received!" textbox and clearing `deathlink_receive`.
+`DeathLink_TopRidePerFrame` runs as a GObj update function created by `DeathLink_OnTopRideLoadEnd` (called from `main.c::OnTopRideLoadEnd`). On `deathlink_receive == 1` (and once `round_state == 2`), it picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)`, then applies that **same** state to every human kirby — it iterates `mgr->kirbys[0..3]`, filters humans via `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`, arms each slot's echo suppression, and calls the chosen state wrapper on each. It finishes by enqueuing a "Deathlink received!" textbox and clearing `deathlink_receive`.
 
 This replaces the AR/CT kill path entirely: Top Ride has no rider/machine/HP/fall-death system, so there is nothing to zero or to fall off of. A damage state is the closest analog to "death".
 

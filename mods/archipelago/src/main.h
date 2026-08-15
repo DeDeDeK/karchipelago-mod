@@ -118,7 +118,20 @@ typedef struct APSlotOptions
     // pre-grants them all at connect. The 6 Dragoon/Hydra part markers are
     // progression and are not affected.
     u32 checklist_rewards_gating_enabled;
+
+    // GOALGATE_* bits. Unlocks the AP world shipped as items even though their
+    // category's gate is off, because this seed's goal is the thing they gate;
+    // an ungated pre-fill has to leave exactly these bits locked.
+    u32 goal_forced_gates;
 } APSlotOptions;
+
+// goal_forced_gates bits.
+#define GOALGATE_LEGENDARY_PIECES 0x1 // ITUNLOCK_HYDRA1-3 / ITUNLOCK_DRAGOON1-3
+#define GOALGATE_VS_KING_DEDEDE   0x2 // STKIND_VSKINGDEDEDE
+
+#define LEGENDARY_PIECE_ITEM_BITS                                                  \
+    ((1u << ITUNLOCK_HYDRA1) | (1u << ITUNLOCK_HYDRA2) | (1u << ITUNLOCK_HYDRA3) | \
+     (1u << ITUNLOCK_DRAGOON1) | (1u << ITUNLOCK_DRAGOON2) | (1u << ITUNLOCK_DRAGOON3))
 
 // Cross-boot progress for AP checklist objectives whose predicate counts over
 // more than one session.

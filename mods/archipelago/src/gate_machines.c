@@ -30,6 +30,20 @@
 // Sizes the spawn-chance scratch array; the runtime ceiling is MachineKind_Num().
 #define MACHINE_KIND_CEILING (VCKIND_NUM + CUSTOM_MACHINE_MAX)
 
+// The Air Ride select screen keeps the icons it offers at its own base in GameData:
+// a count, then one CharacterKind per icon. The row-split flag sits one byte past the
+// list, so the list can never carry more than SELECT_ICON_MAX entries.
+#define AIRRIDE_SELECT_BASE 0x10a
+#define SELECT_COUNT        0x65
+#define SELECT_LIST         0x66
+#define SELECT_ROW_SPLIT    0x7a
+#define SELECT_DEBUG_GRID   0x7b
+#define SELECT_ICON_MAX     20
+
+// Columns per grid row, and so also the count at which a drawn row is full and the
+// icons wrap to two rows.
+#define SELECT_GRID_COLS    10
+
 // Weight handed to an unlocked machine the vanilla table gives 0 chance, so it can
 // still appear on the field. Only these four vanilla kinds reach it - every other
 // VCKIND either carries a real weight in all three table windows or sits in
@@ -387,6 +401,110 @@ int GateMachines_FilterSelectCharacter(int ckind, int default_available)
     return IsCKindUnlocked(ckind);
 }
 
+static int CountUnlockedCharacters(void)
+{
+    int n = 0;
+
+    for (int ckind = 0; ckind < CharacterKind_Num(); ckind++)
+    {
+        if (IsCKindUnlocked(ckind))
+            n++;
+    }
+    return n;
+}
+
+int GateMachines_CountCTSelectAvailable(void)
+{
+    return CountUnlockedCharacters();
+}
+
+// Packs the unlocked characters of the 2x10 icon grid into the City Trial select
+// screen's list, then lays the result out. Replaces the vanilla array-building pass
+// and the reorder that follows it, which assumes vanilla's grid iteration (special
+// characters at fixed col 0/9) and duplicates icons on a packed list.
+int GateMachines_FillCityIcons(u8 *base)
+{
+    int n = 0;
+
+    for (int i = 0; i < SELECT_ICON_MAX; i++)
+        base[SELECT_LIST + i] = 0;
+
+    for (int row = 0; row < 2; row++)
+    {
+        for (int col = 0; col < SELECT_GRID_COLS && n < SELECT_ICON_MAX; col++)
+        {
+            CharacterKind ckind = SelIcon_GetCKind(row, col);
+            if (IsCKindUnlocked(ckind))
+                base[SELECT_LIST + n++] = (u8)ckind;
+        }
+    }
+
+    base[SELECT_COUNT] = (u8)n;
+
+    CitySelect_LayoutMachineIcons((s8)n);
+    for (int i = 0; i < n; i++)
+        CitySelect_CreateMachineIcon((s8)base[SELECT_LIST + i], (s8)i);
+    return n;
+}
+
+// Mode 1 (Stadium) and mode 2 (Free Run) counting passes of
+// CitySelect_CreateMachineIcons. Result -> r27; exit past the loop where the mode is
+// rechecked before the array-building pass. The clobbered `li r24, 0` at the mode 2
+// site is harmless - r24 is unused after the loop this skips.
+CODEPATCH_HOOKCREATE(0x8002e4d0,
+    "",
+    GateMachines_CountCTSelectAvailable,
+    "mr 27, 3\n\t",
+    0x8002e670
+)
+
+CODEPATCH_HOOKCREATE(0x8002e5c0,
+    "",
+    GateMachines_CountCTSelectAvailable,
+    "mr 27, 3\n\t",
+    0x8002e670
+)
+
+// Tail of CitySelect_CreateMachineIcons. r30 = the City Trial select base; the
+// clobbered `stb r27, 101(r30)` stores the count the epilogue puts back in r27, and
+// the exit skips the layout call and icon loop this replaces.
+CODEPATCH_HOOKCREATE(0x8002f0b8,
+    "mr 3, 30\n\t",
+    GateMachines_FillCityIcons,
+    "mr 27, 3\n\t",
+    0x8002f220
+)
+
+// custom_machines owns the City Trial select screen's packing when it is built, and
+// gating rides on the availability filter it takes. Without it nothing patches that
+// screen at all, so the same gating is applied directly here. Idempotent, since the
+// import that decides this is re-tried per call.
+void GateMachines_OnCustomMachinesAbsent(void)
+{
+    static int applied;
+
+    if (applied)
+        return;
+    applied = 1;
+
+    CODEPATCH_HOOKAPPLY(0x8002e4d0);  // CT Stadium (mode 1) counting pass
+    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // CT Free Run (mode 2) counting pass
+    CODEPATCH_HOOKAPPLY(0x8002f0b8);  // CT select list, layout and icons
+
+    // The two array-building passes now have nothing to build: skip each straight to
+    // the tail above, which also skips the reorder between them.
+    CODEPATCH_REPLACEINSTRUCTION(0x8002e67c, 0x48000a3c);  // b 0x8002f0b8
+    CODEPATCH_REPLACEINSTRUCTION(0x8002e738, 0x48000980);  // b 0x8002f0b8
+
+    // CitySelect_Cursor1InputThink splits cursor rows at num>=10 (`cmpwi r3, 9; ble`),
+    // but the grid renderer keeps up to 10 icons on one drawn row and only wraps at 11,
+    // so at num==10 the cursor splits 5+5 across a single row. Vanilla CT only produces
+    // counts 15-20; a gated roster can land on exactly 10.
+    CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a);  // cmpwi r3, 10
+
+    OSReport("[GateMachines] CT select screen gated standalone\n");
+}
+
 // Replaces the respawn machine assignment in Rider_ResetStartingMachine, which
 // hardcodes VCKIND_COMPACT.
 void GateMachines_ResetStartingMachine(RiderData *rd)
@@ -496,11 +614,68 @@ CODEPATCH_HOOKCREATE(0x801952c8,
 // the Air Ride character select screen from checklist reward indices. Vanilla also
 // hardcodes Compact Star, Dragoon, Hydra and Flight Warp Star out of Air Ride whatever
 // the save holds; the mask is the only rule here, so an owned machine is selectable in
-// every mode whose select screen offers it. The icon archive backs all 20 characters,
-// and the CSS reorder already places Dragoon and Hydra at the row ends.
+// every mode whose select screen offers it. The icon archive backs all 20 characters.
 int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
 {
     return IsCKindUnlocked(ckind);
+}
+
+// Replaces AirRide_PopulateSelectIcons (0x80020a08). Vanilla packs the grid into two
+// rows and then rebalances them, and that rebalance hangs the console whenever row 0
+// ends up more than three icons ahead of row 1: its row0-heavy half-step re-reads the
+// counts and undoes the move it just made instead of mirroring the other branch, so
+// the rows oscillate forever. Vanilla can never reach that gap, because Compact Star,
+// Dragoon, Hydra and Flight Warp Star are hardcoded out of Air Ride and all four sit
+// in row 0, capping it at six of ten - but handing them back on the mask lets row 0
+// reach ten. Packing in grid order and laying the result out directly skips the
+// rebalance, which only ever reordered icons for looks.
+void GateMachines_PopulateAirRideIcons(void)
+{
+    u8 *base = (u8 *)Gm_GetGameData() + AIRRIDE_SELECT_BASE;
+    int n = 0;
+
+    for (int i = 0; i < SELECT_ICON_MAX; i++)
+        base[SELECT_LIST + i] = 0;
+
+    if (base[SELECT_DEBUG_GRID] && *stc_dblevel > DB_DEBUG_DEVELOP)
+    {
+        // The debug grid shows every character, gated or not.
+        for (int row = 0; row < 2; row++)
+        {
+            for (int col = 0; col < SELECT_GRID_COLS && n < SELECT_ICON_MAX; col++)
+                base[SELECT_LIST + n++] = (u8)SelIcon_GetCKind(row, col);
+        }
+    }
+    else if (CountUnlockedCharacters() < SELECT_GRID_COLS)
+    {
+        // Icons that fit on one drawn row take their order from the one-row strip.
+        for (int i = 0; i < CharacterKind_Num() && n < SELECT_ICON_MAX; i++)
+        {
+            CharacterKind ckind = SelIcon_GetCKindLinear(i);
+            if (IsCKindUnlocked(ckind))
+                base[SELECT_LIST + n++] = (u8)ckind;
+        }
+    }
+    else
+    {
+        for (int row = 0; row < 2; row++)
+        {
+            for (int col = 0; col < SELECT_GRID_COLS && n < SELECT_ICON_MAX; col++)
+            {
+                CharacterKind ckind = SelIcon_GetCKind(row, col);
+                if (IsCKindUnlocked(ckind))
+                    base[SELECT_LIST + n++] = (u8)ckind;
+            }
+        }
+    }
+
+    base[SELECT_COUNT] = (u8)n;
+    // AirRideSelect_Cursor1InputThink splits its cursor rows on the same threshold.
+    base[SELECT_ROW_SPLIT] = (n >= SELECT_GRID_COLS) ? 1 : 0;
+
+    AirRideSelect_LayoutIcons((s8)n);
+    for (int i = 0; i < n; i++)
+        AirRideSelect_CreateSIcon((s8)base[SELECT_LIST + i], (s8)i);
 }
 
 // Replaces TitleScreen_CheckMachineUnlocked (0x8000c364), the unlock query for the
@@ -527,9 +702,15 @@ void GateMachines_OnBoot()
     CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
     CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
 
-    // Both select screens are packed by custom_machines, which widened the grid they
-    // are packed from; gating is a filter over that rather than a second packing.
-    // Deferred to OnSaveLoaded because the registry boots after us.
+    // custom_machines boots after us and replaces this again with the packing its
+    // widened grid needs; the later patch wins and both pack the same list below 21
+    // icons.
+    CODEPATCH_REPLACEFUNC(AirRide_PopulateSelectIcons, GateMachines_PopulateAirRideIcons);
+
+    // City Trial's select screen is packed by custom_machines when that mod is built,
+    // and gated through the availability filter main.c hands it; otherwise
+    // GateMachines_OnCustomMachinesAbsent patches the screen here. Both are decided
+    // past OnBoot, because the registry boots after us.
 
     CODEPATCH_HOOKAPPLY(0x8002dea0);  // CT starting-machine finalize
     CODEPATCH_HOOKAPPLY(0x801952c8);  // CT respawn machine validation
