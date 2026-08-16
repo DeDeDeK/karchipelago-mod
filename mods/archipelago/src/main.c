@@ -23,6 +23,7 @@
 #include "check_detection.h"
 #include "ap_checklist.h"
 #include "ap_check_detect.h"
+#include "ap_star_pieces.h"
 #include "gate_stadiums.h"
 #include "patch_cap.h"
 #include "gate_events.h"
@@ -124,6 +125,7 @@ void OnBoot()
     CheckDetection_OnBoot();
 
     APCheckDetect_OnBoot();
+    ApStarPieces_OnBoot();
     GateStadiums_OnBoot();
     PatchCap_OnBoot();
     DeathLink_OnBoot();
@@ -168,8 +170,9 @@ static void APOptions_ApplyRevealChecklists(void)
 
 // Optional: absent when custom_machines is not built, leaving the roster at the vanilla
 // 26 machines and 20 characters. Deferred past OnBoot because mods boot alphabetically
-// and the registry boots after us, and re-tried per call because the title screen asks
-// for it before the first save load.
+// and the registry boots after us, and re-tried per call because our own OnBoot asks
+// for it while setting up the title demo. A failed import says nothing on its own -
+// only OnSaveLoaded is past every mod's OnBoot, so that is where absence is decided.
 void AP_ResolveCustomMachines(void)
 {
     if (cm_api)
@@ -177,20 +180,15 @@ void AP_ResolveCustomMachines(void)
 
     cm_api = (const CustomMachinesAPI *)Hoshi_ImportMod(
         (char *)CUSTOM_MACHINES_MOD_NAME, CUSTOM_MACHINES_API_MAJOR, CUSTOM_MACHINES_API_MINOR);
-    if (cm_api)
-    {
-        // The registry owns both select screens' packing; this is what makes it
-        // offer the unlocked roster rather than the engine's own.
-        cm_api->SetAvailabilityFilter(GateMachines_FilterSelectCharacter);
-        OSReport("[Main] custom_machines: %d machine(s), %d kinds, %d characters\n",
-                 cm_api->GetCount(), cm_api->GetKindCeiling(),
-                 cm_api->GetCharacterKindCeiling());
+    if (!cm_api)
         return;
-    }
 
-    // Every mod has booted by the first call, so a failed import means the registry
-    // is not in this build and the City Trial select screen has no packing to filter.
-    GateMachines_OnCustomMachinesAbsent();
+    // The registry owns both select screens' packing; this is what makes it
+    // offer the unlocked roster rather than the engine's own.
+    cm_api->SetAvailabilityFilter(GateMachines_FilterSelectCharacter);
+    OSReport("[Main] custom_machines: %d machine(s), %d kinds, %d characters\n",
+             cm_api->GetCount(), cm_api->GetKindCeiling(),
+             cm_api->GetCharacterKindCeiling());
 }
 
 // Runs on startup after any save data is loaded, whether or not a memory card is
@@ -208,6 +206,13 @@ void OnSaveLoaded()
     }
 
     AP_ResolveCustomMachines();
+
+    // First point past every mod's OnBoot, so a still-unresolved import here really
+    // does mean the registry is not in this build. Deciding it any earlier patches
+    // both select screens underneath the registry's own patches, and since a hook
+    // stub ends with the instruction it displaced, the two chain and both packers run.
+    if (!cm_api)
+        GateMachines_OnCustomMachinesAbsent();
 
     ap_save = (APSave *)mod_desc.save_ptr;
     ap_save->boot_num++;
@@ -259,12 +264,16 @@ static void APOptions_ApplyUngatedCategories(void)
     u32 stadium_mask = (1u << STKIND_NUM) - 1;
     if (opts->goal_forced_gates & GOALGATE_VS_KING_DEDEDE)
         stadium_mask &= ~(1u << STKIND_VSKINGDEDEDE);
+    u32 star_piece_mask = AP_STAR_PIECE_ITEM_BITS;
+    if (opts->goal_forced_gates & GOALGATE_AP_STAR_PIECES)
+        star_piece_mask = 0;
 
     if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       (1u << MachineKind_Num()) - 1);
     if (!opts->ability_gating_enabled)       Unlock_SetMask(AP_UNLOCK_ABILITY,       (1u << COPYKIND_NUM) - 1);
     if (!opts->event_gating_enabled)         Unlock_SetMask(AP_UNLOCK_EVENT,         (1u << EVKIND_NUM) - 1);
     if (!opts->patch_gating_enabled)         Unlock_SetMask(AP_UNLOCK_PATCH,         (1u << PATCHKIND_NUM) - 1);
     if (!opts->item_gating_enabled)          Unlock_SetMask(AP_UNLOCK_ITEM,          item_mask);
+    if (!opts->item_gating_enabled)          Unlock_SetMask(AP_UNLOCK_AP_STAR_PIECE, star_piece_mask);
     if (!opts->box_gating_enabled)           Unlock_SetMask(AP_UNLOCK_BOX,           (1u << BOXKIND_NUM) - 1);
     if (!opts->airride_stage_gating_enabled) Unlock_SetMask(AP_UNLOCK_AIRRIDE_STAGE, (1u << AIRRIDE_NUM) - 1);
     if (!opts->topride_stage_gating_enabled) Unlock_SetMask(AP_UNLOCK_TOPRIDE_STAGE, (1u << TOPRIDE_NUM) - 1);
@@ -291,10 +300,11 @@ static void APOptions_ApplyUngatedCategories(void)
              opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
              opts->topride_item_gating_enabled, opts->color_gating_enabled,
              opts->stadium_gating_enabled);
-    OSReport("[Main] Gating - base abilities:%d goal-forced legendary pieces:%d Vs. King Dedede:%d\n",
+    OSReport("[Main] Gating - base abilities:%d goal-forced legendary pieces:%d Vs. King Dedede:%d AP Star spheres:%d\n",
              opts->base_ability_gating_enabled,
              (opts->goal_forced_gates & GOALGATE_LEGENDARY_PIECES) ? 1 : 0,
-             (opts->goal_forced_gates & GOALGATE_VS_KING_DEDEDE) ? 1 : 0);
+             (opts->goal_forced_gates & GOALGATE_VS_KING_DEDEDE) ? 1 : 0,
+             (opts->goal_forced_gates & GOALGATE_AP_STAR_PIECES) ? 1 : 0);
 }
 
 // Copy the client's slot options into save data on first detection. Options are
@@ -357,7 +367,7 @@ void OnPlayerSelectLoad()
 // Runs before the game is initialized.
 void On3DLoadStart()
 {
-
+    ApStarPieces_On3DLoadStart();
 }
 
 // Runs upon entering a 3D game (Air Ride, Top Ride, or City Trial).
@@ -428,6 +438,7 @@ void On3DLoadEnd()
 
     GoalMaxStatsCT_On3DLoadEnd();
     APCheckDetect_On3DLoadEnd();
+    ApStarPieces_On3DLoadEnd();
     KirbyScale_On3DLoadEnd();
     DropAbility_On3DLoadEnd();
 }
@@ -493,6 +504,8 @@ void OnFrameStart()
         ChecklistRewards_ApplyLocations();
 
     CheckDetection_OnFrameStart();
+    ApStarPieces_OnFrameStart();
+    APCheckDetect_OnFrameStart();
 }
 
 void OnFrameEnd()

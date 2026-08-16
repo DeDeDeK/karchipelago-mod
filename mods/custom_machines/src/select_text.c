@@ -119,7 +119,7 @@ static void ComposeDescription(u8 *buf, const char *description)
 // Re-point SIS slot 0 at a copy of the archive's pointer array with the appended
 // entries after it. The array lives in the scene's heap, so this runs on every
 // load of either screen's SIS file.
-void CustomMachineText_ExtendSis(void)
+static void CustomMachineText_ExtendSis(void)
 {
     void **loaded = (void **)stc_sis_data[0];
 

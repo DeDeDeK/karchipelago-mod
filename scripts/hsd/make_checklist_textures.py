@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Author the AP checklist textures into a loadable HSD archive.
 
-Builds two GX textures from mods/archipelago/assets/ap-icon.png and packs them,
+Builds two GX textures from art/ap-icon.png and packs them,
 with their image descriptors, into a minimal standalone .dat that exports two
 publics:
 
@@ -62,7 +62,7 @@ EMBLEM_SYMBOL = "apEmblemImg"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-SRC = os.path.join(ROOT, "mods", "archipelago", "assets", "ap-icon.png")
+SRC = os.path.join(ROOT, "art", "ap-icon.png")
 OUT_DAT = os.path.join(ROOT, "mods", "archipelago", "assets", "ApChecklistTex.dat")
 
 

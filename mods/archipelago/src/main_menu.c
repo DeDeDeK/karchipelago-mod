@@ -32,7 +32,7 @@ static int demo_rider = RDKIND_DEDEDE;
 // Re-applied per title entry because the registry only resolves after every mod boots.
 static void MainMenu_SelectDemoMachine(void)
 {
-    int kind = cm_api ? cm_api->FindKindByName(AP_STAR_MACHINE_NAME) : -1;
+    int kind = ApStarMachineKind();
 
     if (kind >= 0)
     {
@@ -54,7 +54,6 @@ static void MainMenu_SelectDemoMachine(void)
 // disc overlay.
 void MainMenu_OnTitleLoad(void)
 {
-    AP_ResolveCustomMachines();
     MainMenu_SelectDemoMachine();
     Gm_LoadGameFile(&menu_archive, "MnTitleKarchi");
 }

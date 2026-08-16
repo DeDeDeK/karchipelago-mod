@@ -25,7 +25,7 @@ other format fall back to reusing the `--source` frame's descriptor unchanged.
 Run from the repo root:
     uv run --with pillow python scripts/hsd/add_ui_frame.py iso/files/Mn*.dat \
         --out-dir mods/custom_machines/assets \
-        --image mods/archipelago/assets/ap-icon.png
+        --image art/ap-icon.png
 """
 
 import argparse
@@ -155,8 +155,8 @@ def ramp_keys(data, fobj):
                   data[fobj + FOBJ_VALUE_FLAG], data[fobj + FOBJ_TAN_FLAG])
 
 
-def extend_ramp(data, fobj, n, new_frame):
-    """Give the ramp a key selecting entry n at `new_frame`.
+def extended_keys(data, fobj, n, new_frame):
+    """The ramp's keys with one added selecting entry n at `new_frame`.
 
     Portrait banks index frame by frame, so `new_frame` is free and the key goes
     on the end - the trailing hold key follows it onto the new entry. Banks that
@@ -164,8 +164,6 @@ def extend_ramp(data, fobj, n, new_frame):
     a colour apiece on the picture banks. That whole run slides one frame later,
     which the mod matches by patching the engine's `+ 20` to `+ 21`. Meta Knight's
     run starts after the gap the slide runs into, so it stays where it is."""
-    value_flag = data[fobj + FOBJ_VALUE_FLAG]
-    tan_flag = data[fobj + FOBJ_TAN_FLAG]
     keys = ramp_keys(data, fobj)
 
     frames = [k.frame for k in keys]
@@ -184,8 +182,19 @@ def extend_ramp(data, fobj, n, new_frame):
     # last real entry, which the new frame becomes when it lands on the end.
     if i == len(keys) - 2:
         keys[-1] = Key(keys[-1].frame, float(n), keys[-1].tan, keys[-1].op)
+    return keys
 
-    buf = encode(keys, value_flag, tan_flag)
+
+def encoded_ramp(data, fobj, n, new_frame):
+    """The extended ramp as an FObj keyframe buffer."""
+    return encode(extended_keys(data, fobj, n, new_frame),
+                  data[fobj + FOBJ_VALUE_FLAG], data[fobj + FOBJ_TAN_FLAG])
+
+
+def extend_ramp(data, fobj, n, new_frame):
+    """Give the ramp a key selecting entry n at `new_frame`, in place."""
+    keys = extended_keys(data, fobj, n, new_frame)
+    buf = encode(keys, data[fobj + FOBJ_VALUE_FLAG], data[fobj + FOBJ_TAN_FLAG])
     struct.pack_into(">I", data, fobj + FOBJ_LENGTH, len(buf))
     struct.pack_into(">I", data, fobj + FOBJ_BUFFER, append(data, buf))
     return [f"{int(k.frame)}:{k.value:g}" for k in keys]

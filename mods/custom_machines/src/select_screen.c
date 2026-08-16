@@ -5,7 +5,7 @@
 // the frame an appended character needs. The packed icon list in GameData is a
 // 20-byte field with a live neighbour. And the icon positions come from a strip of
 // 20 anchor joints posed by an animation whose frame is the icon count, with no
-// key past 20 and no 21st anchor to pose. The art banks in assets/ carry the
+// key past 20 and no 21st anchor to pose. ui_frames.c gives the art banks their
 // appended entry; the rest is here.
 //
 // Packing is here too, because both screens build their lists by walking the
@@ -25,14 +25,13 @@
 
 #include "custom_machines.h"
 
-// The `addi rD, rS, 20` that forms King Dedede's name-plate frame, in the Air Ride
-// and City Trial CSS plate setters and then the four results screens. Each screen
-// has a set and an update path carrying its own copy.
+// Every `addi rD, rS, 20` that forms King Dedede's name-plate frame: the color and
+// character setters of each CSS, then the Siconbig creator of each results screen.
 static const u32 stc_plate_frame_sites[] = {
-    0x80151b08, 0x80151bd4,
-    0x8015c5c8, 0x8015c694,
-    0x801672bc, 0x8016b064,
-    0x8016e9bc, 0x80177b5c,
+    0x80151b08, 0x80151bd4, // AirRideSelect_SetSIcon2Color / _SetSIcon2Character
+    0x8015c5c8, 0x8015c694, // CitySelect_SetSIcon2Color / _SetSIcon2Character
+    0x801672bc, 0x8016b064, // MnResult_CreateSiconBig / MnResult2_
+    0x8016e9bc, 0x80177b5c, // MnResult4_CreateSiconBig / MnResultCt_
 };
 
 #define PLATE_DEDEDE_FRAME 21
@@ -261,18 +260,20 @@ static int CountAvailable(int is_city)
 
 // Fill a screen's packed list. Air Ride takes its order from the one-row strip when
 // the icons fit on one drawn row and from the grid otherwise; City Trial always uses
-// the grid. Returns the count.
-static int PackSelectList(u8 *base, int is_city, int allow_single_row)
+// the grid. `show_all` is Air Ride's debug grid, which offers every character, gated
+// or not - but still not the sentinel, which has no icon frame. Returns the count.
+static int PackSelectList(u8 *base, int is_city, int allow_single_row, int show_all)
 {
     int cols = CustomMachineCharacter_GetGridCols();
+    int ceiling = CustomMachines_GetCharacterKindCeiling();
     int n = 0;
 
     for (int i = 0; i < SELECT_ICON_MAX; i++)
         base[SELECT_LIST + i] = 0;
 
-    if (allow_single_row && CountAvailable(is_city) < VANILLA_GRID_COLS)
+    if (!show_all && allow_single_row && CountAvailable(is_city) < VANILLA_GRID_COLS)
     {
-        for (int i = 0; i < CustomMachines_GetCharacterKindCeiling() && n < SELECT_ICON_MAX; i++)
+        for (int i = 0; i < ceiling && n < SELECT_ICON_MAX; i++)
         {
             CharacterKind ckind = SelIcon_GetCKindLinear(i);
             if (IsAvailable(ckind, is_city))
@@ -286,7 +287,9 @@ static int PackSelectList(u8 *base, int is_city, int allow_single_row)
             for (int col = 0; col < cols && n < SELECT_ICON_MAX; col++)
             {
                 CharacterKind ckind = SelIcon_GetCKind(row, col);
-                if (IsAvailable(ckind, is_city))
+                int take = show_all ? (ckind >= 0 && ckind < ceiling)
+                                    : IsAvailable(ckind, is_city);
+                if (take)
                     base[SELECT_LIST + n++] = (u8)ckind;
             }
         }
@@ -299,9 +302,9 @@ static int PackSelectList(u8 *base, int is_city, int allow_single_row)
 // Replaces the count store that opens the tail of CitySelect_CreateMachineIcons,
 // which flat-copies two 10-byte packing rows into the screen's list. The count goes
 // back in r27 for the store this hook displaced.
-int CustomMachineSelect_FillCityIcons(u8 *base)
+static int FillCityIcons(u8 *base)
 {
-    int n = PackSelectList(base, 1, 0);
+    int n = PackSelectList(base, 1, 0, 0);
 
     CitySelect_LayoutMachineIcons((s8)n);
     for (int i = 0; i < n; i++)
@@ -309,7 +312,7 @@ int CustomMachineSelect_FillCityIcons(u8 *base)
     return n;
 }
 
-int CustomMachineSelect_CountCityAvailable(void)
+static int CountCityAvailable(void)
 {
     return CountAvailable(1);
 }
@@ -317,34 +320,11 @@ int CustomMachineSelect_CountCityAvailable(void)
 // Replaces AirRide_PopulateSelectIcons, whose grid pass packs into two 10-byte stack
 // rows and then rebalances them assuming the vanilla grid's fixed positions for the
 // legendary machines - neither of which survives an 11th column.
-void CustomMachineSelect_PopulateAirRideIcons(void)
+static void PopulateAirRideIcons(void)
 {
     u8 *base = (u8 *)Gm_GetGameData() + AIRRIDE_SELECT_BASE;
-    int n;
-
-    if (base[SELECT_DEBUG_GRID] && *stc_dblevel > DB_DEBUG_DEVELOP)
-    {
-        // The debug grid shows every character, gated or not - but still not the
-        // sentinel, which has no icon frame.
-        int cols = CustomMachineCharacter_GetGridCols();
-        n = 0;
-        for (int i = 0; i < SELECT_ICON_MAX; i++)
-            base[SELECT_LIST + i] = 0;
-        for (int row = 0; row < 2 && n < SELECT_ICON_MAX; row++)
-        {
-            for (int col = 0; col < cols && n < SELECT_ICON_MAX; col++)
-            {
-                CharacterKind ckind = SelIcon_GetCKind(row, col);
-                if (ckind >= 0 && ckind < CustomMachines_GetCharacterKindCeiling())
-                    base[SELECT_LIST + n++] = (u8)ckind;
-            }
-        }
-        base[SELECT_COUNT] = (u8)n;
-    }
-    else
-    {
-        n = PackSelectList(base, 0, 1);
-    }
+    int debug_grid = base[SELECT_DEBUG_GRID] && *stc_dblevel > DB_DEBUG_DEVELOP;
+    int n = PackSelectList(base, 0, 1, debug_grid);
 
     CustomMachineSelect_SetAirRideRowSplit(base, n >= VANILLA_GRID_COLS);
 
@@ -359,14 +339,14 @@ void CustomMachineSelect_PopulateAirRideIcons(void)
 // site is harmless - r24 is unused after the loop this skips.
 CODEPATCH_HOOKCREATE(0x8002e4d0,
     "",
-    CustomMachineSelect_CountCityAvailable,
+    CountCityAvailable,
     "mr 27, 3\n\t",
     0x8002e670
 )
 
 CODEPATCH_HOOKCREATE(0x8002e5c0,
     "",
-    CustomMachineSelect_CountCityAvailable,
+    CountCityAvailable,
     "mr 27, 3\n\t",
     0x8002e670
 )
@@ -375,7 +355,7 @@ CODEPATCH_HOOKCREATE(0x8002e5c0,
 // the flat copy and the icon loop, both of which this replaces.
 CODEPATCH_HOOKCREATE(0x8002f0b8,
     "mr 3, 30\n\t",
-    CustomMachineSelect_FillCityIcons,
+    FillCityIcons,
     "mr 27, 3\n\t",
     0x8002f220
 )
@@ -420,7 +400,7 @@ void CustomMachineSelect_OnBoot(void)
     CODEPATCH_REPLACEFUNC(CitySelect_GetIconPos, CityGetIconPos);
     CODEPATCH_REPLACEFUNC(CitySelect_CreateMachineIcon, CityCreateMachineIcon);
 
-    CODEPATCH_REPLACEFUNC(AirRide_PopulateSelectIcons, CustomMachineSelect_PopulateAirRideIcons);
+    CODEPATCH_REPLACEFUNC(AirRide_PopulateSelectIcons, PopulateAirRideIcons);
 
     CODEPATCH_HOOKAPPLY(0x8002e4d0);  // CT Stadium (mode 1) counting pass
     CODEPATCH_HOOKAPPLY(0x8002e5c0);  // CT Free Run (mode 2) counting pass

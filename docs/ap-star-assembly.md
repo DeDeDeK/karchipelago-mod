@@ -1,0 +1,274 @@
+# Archipelago Star Assembly
+
+The Archipelago Star is assembled in City Trial out of six colored spheres, the way
+Hydra and Dragoon are assembled from their three parts. The spheres are custom items
+delivered by the same forced-content red box the vanilla pieces ride in on, tracked on
+a HUD row of their own, and collecting all six mounts the player on the star and
+completes an Archipelago checklist box.
+
+Assembly is one of two ways to get the star. The other is finding one already built on the
+field: the machine's `CustomMachineDesc` carries a City Trial spawn weight of 1.0, the same
+token weight `gate_machines.c` hands Hydra and Dragoon, so once the Archipelago Star machine
+item is in it turns up loose at roughly 0.8% of field spawns. That machine item and the six
+sphere items are independent of each other.
+
+The whole feature lives in `mods/archipelago/src/ap_star_pieces.c`. It needs
+`custom_items` for the sphere items and `custom_machines` for the machine; with either
+missing it resolves nothing and installs no schedule, and City Trial is untouched.
+
+## The Six Spheres
+
+`mods/archipelago/assets/items/ApSphere*.dat` are six `customItem` archives, one per
+color of the Archipelago logo, ordered the way the logo reads - rose at twelve
+o'clock, then clockwise:
+
+| Piece | Color | Item name | File |
+|---|---|---|---|
+| 0 | `#C97682` rose | `AP Sphere Rose` | `ApSphereRose.dat` |
+| 1 | `#75C275` green | `AP Sphere Green` | `ApSphereGreen.dat` |
+| 2 | `#CA94C2` violet | `AP Sphere Violet` | `ApSphereViolet.dat` |
+| 3 | `#D9A07D` tan | `AP Sphere Tan` | `ApSphereTan.dat` |
+| 4 | `#767EBD` blue | `AP Sphere Blue` | `ApSphereBlue.dat` |
+| 5 | `#EEE391` yellow | `AP Sphere Yellow` | `ApSphereYellow.dat` |
+
+The display name is the handle: mod code matches a pickup to its piece index by
+`CustomItemDesc.name`, so renaming a sphere in the archive unbinds it from the set.
+`custom_items` reads that name out of each archive during boot discovery, so the six
+hashes resolve before the first round - a sphere held disabled by the gate below is
+never registered, and would otherwise never be named.
+
+Each descriptor clones `ITKIND_HYDRA1` for behavior - a legendary piece's physics,
+state class and threshold category - and overrides three things:
+
+- **the model**, a generated UV sphere rather than anything carved out of `Item.dat`,
+  which holds no sphere, at `scale` 0.7. A Hydra piece's half-extent belongs to a flat,
+  hollow shape; a solid sphere of the same extent reads as much bulkier, so it is
+  brought down from there;
+- **the effect record**, a `PatchEffectInfo` with `count = 0`. That is what keeps the
+  clone from crediting a real Hydra piece: `Machine_OnTouchItem` (`0x801db34c`)
+  dispatches on the *effect type*, not on `ItemKind`, and types 27-32 are the arms that
+  OR a bit into a player's Dragoon or Hydra mask. With no entries the loop never runs,
+  the sphere grants no stat, and collection is driven entirely by the `custom_items`
+  pickup handler;
+- **the material animation**, dropped with the descriptor's `NO_MAT_ANIM` flag. Hydra's
+  piece animation drives diffuse R/G/B over a looping 240-frame track, and bound to a
+  solid-colored sphere it cycles the piece through colors that are not its own - which
+  is exactly the thing a player has to read to know which sphere they are picking up.
+  The joint animation and the state script still come from kind 55.
+
+All three box weights and all six event weights are zero, so a sphere never enters a
+spawn pool - `PoolAppend` skips a zero weight outright. The only way one reaches the
+field is the schedule below.
+
+Two consequences of cloning kind 55 are worth knowing. `Ply_IncrementItemCollectNum`
+is called with the clamped instance kind, so a sphere pickup bumps
+`PlayerStats.item_collect[55]`, the Hydra Part X counter - no checklist cell reads it.
+And the spawn-position reservation released on destroy is looked up by the same clamped
+kind, so a sphere's destruction can free a real Hydra piece's reserved position; the
+only effect is that a position may be reused sooner.
+
+## Delivery
+
+Vanilla legendary pieces are in no box pool at all. `CityItemSpawn_UpdateAndCheckToSpawn`
+(`0x800ea6e0`) asks `CityItemSpawn_CheckToSpawnLegendaryPiece` (`0x800ed2f0`) whether a
+piece is due, and a `2` back makes `CityItemSpawn_Think` (`0x800eb108`) spawn a red box
+of the largest size and hand it to `CityItemSpawn_SpawnLegendaryPiece` (`0x800ed384`),
+which writes the piece's `ItemKind` into that box's `forced_item` (`ItemData + 0x35c`).
+The box then holds exactly that item. The Archipelago set rides the same two seams,
+each taken with a `CODEPATCH_REPLACECALL`:
+
+| Site | Replacement |
+|---|---|
+| `0x800ea7e0`, the `bl` into `CityItemSpawn_CheckToSpawnLegendaryPiece` | runs the vanilla check first; only if it returned `3` (neither vanilla set wants this carrier) and the AP set's next threshold has passed does it claim the carrier and return `2` |
+| `0x800eb27c`, the `bl` into `CityItemSpawn_SpawnLegendaryPiece` | forwards to vanilla unless the AP set claimed this carrier, in which case it writes the sphere's kind with `LegendaryPiece_MarkAsSpawned` and clears the request itself |
+
+Vanilla keeps priority at every step, so a round that rolls Hydra or Dragoon on still
+delivers their parts on schedule; the AP spheres take the carriers left over.
+
+The schedule is rolled per round in `On3DLoadEnd`, mirroring `LegendaryPieces_Init`
+(`0x800ecfac`): the unlocked pieces are shuffled into a delivery order, and each step draws
+a match-progress threshold out of its own window.
+
+| Step | Window (percent of the round elapsed) |
+|---|---|
+| 1 | 10-20 |
+| 2 | 20-32 |
+| 3 | 32-45 |
+| 4 | 45-58 |
+| 5 | 58-70 |
+| 6 | 70-85 |
+
+Vanilla spreads three parts over 15-30 / 25-50 / 50-80 and rolls a flat 30% per machine
+for whether that machine's set appears at all. The AP set divides the same span into six
+and is always armed, so a full round always offers every sphere the player owns - a
+six-piece set behind a per-round coin flip would rarely finish.
+
+Nothing has to be done about three legendary sets competing for carriers.
+`CityItemSpawn_Think` (`0x800eb108`) runs every frame and a due piece short-circuits the
+ordinary spawn timer, so three sets due at once take three carriers on three consecutive
+frames rather than starving each other. A box carries exactly one piece either way:
+`forced_item` (`ItemData + 0x35c`) is a single `ItemKind` and `Box_OutcomeLogic`
+(`0x80250ae8`) spawns one item from it.
+
+The set arms only in `CITYMODE_TRIAL`. Free Run and the stadiums leave it disabled.
+
+## Gating
+
+Each sphere has its own Archipelago item - IDs 820-825, one per `APStarPieceKind` - and is
+held out of the item registry entirely until that item arrives.
+`ApStarPieces_On3DLoadStart` calls `CustomItemsAPI.SetEnabled` on each sphere with its bit
+of `APSave.ap_star_piece_unlocked_mask`, which is early enough: `custom_items` registers
+its items at `CityItemSpawn_Init`'s epilogue, and a gated item is skipped there, so it
+never gets an `ItemKind` and no path can spawn it. A round arms only the spheres that are
+in, taking the first rows of the delivery schedule, so a partial set still delivers - it
+just cannot complete.
+
+That call writes the consumer gate, which is a field of its own alongside the per-item
+settings-menu toggle rather than the same one - so driving it on every scene load never
+overwrites the player's saved menu choice. Both gates have to be open for a sphere to
+reach the field, which means an unlocked sphere still stays out of the round if its
+`custom_items` menu toggle is off.
+
+The mask is its own `APSave` field rather than six more bits of `item_unlocked_mask`, which
+`ITUNLOCK_NUM` has all but filled, and it is reached through the ordinary
+`AP_UNLOCK_AP_STAR_PIECE` category. It follows the City Trial item gate: with that gate off
+the mod pre-fills all six at connect, unless `GOALGATE_AP_STAR_PIECES` says the seed's goal
+is the assembly, in which case the six stay locked and the apworld ships them as items.
+
+The Archipelago Star's **machine** item (856) is a separate thing. It decides whether the
+assembled star spawns loose on the City Trial field and whether it is selectable, the same
+split Hydra and Dragoon have between their piece items and their machine items. Assembling
+the star mounts the player on it whatever that bit says, exactly as assembling Hydra from
+three parts hands over Hydra.
+
+## Collection
+
+`custom_items` fires the mod's pickup handler from its hook on `Machine_OnTouchItem`,
+naming the item and the collecting player. The handler ORs a bit into a per-player
+six-bit mask held in the mod (`PlayerData + 0x908` has room for three bits per vanilla
+set and two spare, nowhere near six) and cleared on every 3D scene load, so a stadium
+trip mid-trial restarts the collection - the same scope the vanilla sets have.
+
+Each pickup climbs `Ply_OnLegendaryPieceCollect` (`0x8027a4e8`), whose ladder is written
+for a three-piece set: counts 1, 2 and 3 play rising tones, and 4 plays the pair of
+sounds the assembly cinematic uses on completion. Six pieces climb the same three rungs
+two at a time, and the sixth plays the completion pair.
+
+Losing a piece is the one vanilla behavior the set does not have.
+`Rider_TickDropAllUp` (`0x8019d55c`) builds its candidate list from the two vanilla
+masks, so a hard enough hit can knock a Hydra part loose but never a sphere.
+
+## The Tracker
+
+The vanilla piece HUD is a position model, `ScInfSpPos{N}_scene_models` out of
+`IfAll21/22/24.dat`, that is nothing but a root plus six geometry-less anchor joints in
+one horizontal row - joints 1-3 for the Hydra icons, 4-6 for the Dragoon ones. An icon
+is a separate HUD element created when a piece is picked up and placed on the first free
+anchor of its half, so a slot says how many pieces are held rather than which. Nothing
+is drawn for a piece the player does not have.
+
+The Archipelago row is a second row of the same shape rather than a share of that one,
+because all six of its anchors are already spoken for. Anchor positions are read
+straight off the position model's `JOBJDesc` - the anchors are children of the root with
+no rotation and unit scale, so a world position is the sum of two translations - and the
+AP row is that set shifted 3.4 HUD units down. Reading the descriptor rather than an
+instance means the AP row needs no position-model element of its own, and it picks up
+the per-player-count spacing (2.5 / 2.4 / 2.1 units) for free.
+
+An icon is created exactly the way a vanilla one is: `HUD_CreateElement` on the
+collecting player, relinked to `GAMEPLINK_PAUSEHUD` with `GObj_SetPLink`, given element
+data of kind `0x3b`, and positioned at its anchor. They are destroyed on assembly, which
+is also when the vanilla mount clears its own masks and the vanilla icons vanish.
+
+The art is `mods/archipelago/assets/ApPieceIcons.dat`, one alpha-cut textured quad per
+color under a single `apPieceIcons_scene_models` public, each a 32x32 RGB5A3 shaded ball
+on a 2.0-unit quad, inside the 2.5-unit anchor spacing it is hung on.
+
+## Assembly
+
+Collecting the sixth sphere clears the player's mask and their icon row, plays the
+completion pair, latches the checklist objective and mounts the star.
+
+The mount is the tail of the vanilla assembly rather than the whole of it.
+`LegendaryMachine_StartAssembly` (`0x80283cf0`) runs a cinematic that loads
+`VsDragoon.dat` or `VsHydra.dat`, flies the parts together, and finishes by putting the
+rider on the machine - and every step of it is a two-way branch over
+`machine_index`, down to the rider mount at `0x801bda34` whose motion-state substate is
+`0x220 + machine_index`. A third machine cannot be threaded through it without new
+piece models and a new substate. What the cinematic ends with, though, is general:
+`Rider_RespawnFullRecreate` (`0x80193900`) on the `(is_bike, class slot)` pair the mount
+staged into `RiderData + 0x944` / `+ 0x948`. Calling that directly recreates the rider on
+the Archipelago Star with no presentation around it, and the star's class slot comes from
+`CustomMachinesAPI.ClassIndexFromKind` rather than a literal, since it is whatever the
+registry handed the machine this boot. The player's `starting_machine_idx` is set to the
+star as well, so a later respawn keeps it.
+
+A player already riding the star is left alone: the recreate would tear that machine down
+and rebuild the same one, and the patches on it are lost in the teardown. With the star
+the only unlocked machine in a run, that is the common case rather than a corner.
+
+A custom cinematic would slot in ahead of that call and change nothing else.
+
+## The Checklist Boxes
+
+`APCK_ASSEMBLE_AP_STAR` is `clear_kind` 50 on the Archipelago checklist tab, which makes
+it AP location 411. Its predicate is a read of a boot-sticky flag the assembly sets, so
+the cell also fills in on a later load rather than only in the session that earned it. On
+the apworld side the location takes the City Trial region and requires all six sphere
+items whenever City Trial items are gated.
+
+Every cell on the tab is an in-game achievement, so a goal row may list or count this one
+like any other and `ArchipelagoChecklistAmount` covers the full 52.
+
+`APCK_ASSEMBLE_ALL_LEGENDARY` is `clear_kind` 51 (AP location 412): Dragoon, Hydra and the
+Archipelago Star all assembled by one player in one round. Its three inputs are per-round -
+`PlayerStats.flags_84d` bits `0x04` and `0x08`, which `Ply_MarkLegendaryMachineAssembled`
+(`0x80231198`) sets and which are zeroed with the rest of `PlayerStats` on scene load, plus
+the star's own assembly mask, cleared at the same point. It is polled out of
+`ApStarPieces`'s sibling frame callback rather than the per-rider sampler the other City
+Trial objectives use, because the mount below rebuilds the rider that sampler hangs off.
+
+## Goals
+
+Two `APGoalKind` values are backed by these cells, both on the Archipelago checklist row:
+`GOAL_ASSEMBLE_AP_STAR` reads the row's `APCK_ASSEMBLE_AP_STAR` bit and
+`GOAL_ALL_LEGENDARIES_CT` reads `APCK_ASSEMBLE_ALL_LEGENDARY`. Like the other feat goals
+they are a `sent_checks` read, so a goal is satisfied by the same latch that sends the
+location. Each also protects its own cell from a checkbox filler, since spending one there
+would win the seed without the objective.
+
+## Authoring the Assets
+
+`scripts/hsd/make_ap_star_pieces.py` writes all seven archives - the six sphere items
+and the icon set - from the palette held at the top of the file:
+
+```
+uv run --with pillow python scripts/hsd/make_ap_star_pieces.py
+```
+
+The sphere is generated, not carved: a UV sphere of radius 2.08 (a Hydra piece's
+half-extent, which the descriptor's `scale` then trims) at
+12 segments by 8 rings, 86 vertices and 168 triangles, with per-vertex normals and a
+`CONSTANT | DIFFUSE` untextured material carrying the color as its diffuse and a
+darkened copy as its ambient. That is how the vanilla piece parts are lit, minus their
+texture. Culling is off: a closed sphere reads the same either way, and it removes any
+dependence on the winding the display list happens to emit.
+
+The icons are rendered with a fixed light from the upper left, supersampled four times
+and downsampled so the rim gets a soft alpha edge instead of a stair-step, then encoded
+RGB5A3 - the format costs 2 KB per icon and carries the alpha the quad's cutout needs.
+
+## Files
+
+- `mods/archipelago/src/ap_star_pieces.c` / `.h` - the whole feature: registry import,
+  gating, the two spawn-path replacements, the pickup handler, the tracker and the mount.
+- `mods/archipelago/src/ap_check_detect.c` / `.h` - `APCK_ASSEMBLE_AP_STAR` and its
+  predicate, `APCK_ASSEMBLE_ALL_LEGENDARY` and its per-frame poll; `APCheckDetect_Observe`
+  is the latch the assembly calls.
+- `mods/custom_machines/assets/machines/VcStarAp.dat` - the machine, carrying the spawn
+  weight that puts an assembled star on the field.
+- `mods/archipelago/src/ap_checklist.c` - the cell's label.
+- `mods/archipelago/assets/items/ApSphere*.dat` - the six sphere items, staged to the
+  FST `items/` folder where `custom_items` discovers them.
+- `mods/archipelago/assets/ApPieceIcons.dat` - the tracker art.
+- `scripts/hsd/make_ap_star_pieces.py` - authors the six spheres and the tracker art.

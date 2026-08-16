@@ -23,7 +23,7 @@ Every `.dat` under the FST folder `machines/` is a candidate. An archive qualifi
 | 0x14 | `wants_character` | also take a `CharacterKind` and a select-grid cell |
 | 0x18 | `rider_kind` | `RiderKind` for the appended `CharacterDesc` row |
 | 0x1c | `clone_kind` | star `MachineKind` whose per-kind engine rows it inherits |
-| 0x20 | `spawn_weight` | City Trial loose-spawn weight; 0 never spawns |
+| 0x20 | `spawn_weight` | City Trial loose-spawn weight; 0 never spawns. Weighed against a vanilla table whose per-machine weights run 6-10 out of a ~111-119 total, so 1.0 is roughly 0.8% of field spawns |
 | 0x24 | `description` | select-screen blurb, v2 and up; `\n` breaks the line |
 
 A descriptor is rejected when its version is newer than the mod supports, so the field it does not know about is never read. A v1 descriptor ends where `description` starts and is still accepted; the machine gets an empty blurb.
@@ -43,12 +43,15 @@ uv run python scripts/hsd/clone_machine.py iso/files/VcStarSlick.dat \
   mods/custom_machines/assets/machines/VcStarAp.dat vcDataStarAp \
   --name "Archipelago Star" \
   --description "A gift from another world.\nRides like a Slick Star." \
-  --recolor ap
+  --recolor ap \
+  --spawn-weight 1.0
 ```
 
 It renames the source archive's single public, appends a `CustomMachineDesc` under a second `customMachine` public (with a relocation per string pointer), and optionally recolors the model. Recoloring rewrites the two RGB565 endpoints of every DXT1 sub-block in each distinct CMPR texture, preserving the per-block index bytes and the `c0 > c1` relation that selects opaque versus 1-bit-alpha mode. It has to work on the textures rather than the materials: a machine's MObjs are `CONSTANT|TEX0` with a white diffuse color, so nothing about them is tinted.
 
 `mods/*/assets/` is copied to the disc root by the ordinary asset step, so `mods/custom_machines/assets/machines/*.dat` lands at `machines/` on disc with no packaging change.
+
+The three assets that carry data cloned out of the disc - `VcStarAp.dat`, `VcStarAp.ssm` and `ApUiFrames.dat` - are `.gitignore`d rather than committed, so no vanilla data lives in the repo. Each is written once by the script below, out of an `iso/` extraction of the retail disc, and from then on the ordinary asset step picks it up like any other file in `assets/`.
 
 ## What a machine archive holds
 
@@ -209,18 +212,23 @@ Every place the game draws a character - the select-screen portrait, name plate 
 
 Image dimensions vary frame to frame within a bank; the column is the one the appended frame is cloned from. The machine drawn beside a cursor is two layers of the same art at the same size, always posed together: a colored C8 picture over an I4 silhouette. Only the picture needs a variant per character color, which is why the two banks hold different numbers of images for the same 20 characters.
 
-`scripts/hsd/add_ui_frame.py` grows all of them at once, writing the rewritten archives into `assets/` where the ordinary asset step drops them over the disc originals:
+Each bank grows by an appended `ImageDesc` (plus a TLUT entry when a TLUT track indexes one), rebuilt image and TLUT pointer arrays, bumped counts in the TexAnim header at `+0x14`/`+0x16`, and a key on the AObj's image-index (track 1) and TLUT-index (track 10) ramps.
+
+That growth is applied to the loaded archives rather than shipped as rewritten copies of them. Rewriting on disc would mean carrying 3.9 MB of vanilla archive to deliver 86 KB of additions, so the additions ride alone in `ApUiFrames.dat` and `ui_frames.c` splices them in. Only two of the four edits are position-independent and can be baked: the appended `ImageDesc` with its texels, and a replacement keyframe buffer for each ramp. The pointer arrays hold the donor's own descriptors, which move with every load, so they are rebuilt at runtime into a static pool with a fixed slot per bank. Sixteen banks need only five distinct textures between them and most of their ramps encode to the same bytes, so both are interned and the side-car comes to 23 KB.
+
+`scripts/hsd/make_ui_frames.py` builds it, reading the eight donors out of `iso/files/`:
 
 ```
-uv run --with pillow python scripts/hsd/add_ui_frame.py iso/files/Mn*.dat \
-  --out-dir mods/custom_machines/assets --image mods/archipelago/assets/ap-icon.png
+uv run --with pillow python scripts/hsd/make_ui_frames.py
 ```
 
-Each bank grows by an appended `ImageDesc` (plus a TLUT entry when a TLUT track indexes one), rebuilt image and TLUT pointer arrays, bumped counts in the TexAnim header at `+0x14`/`+0x16`, and a key on the AObj's image-index (track 1) and TLUT-index (track 10) ramps. The new frame's art is the given PNG re-encoded to suit the bank: RGB5A3 in a picture bank and I4 in a text bank. Format is per frame and `HSD_TObjSetup` (`0x803f7158`) reads the CI-ness of the one frame it is drawing, so an RGB5A3 frame in a CMPR, C4 or C8 bank leaves every other frame alone and needs neither a CMPR encoder nor a quantizer. Its TLUT slot is filled with the donor's and never consulted.
+A bank names its donor by data-section offset, which is fixed for GKYE01, and the mod adds the loaded archive's `data` base to reach the live `TexAnim`. All eight archives load through `Gm_LoadGameFile` (`0x80059818`) and are rebuilt on every entry into their scene - the shared menu teardown at `0x80131928` frees them on the way out - so the splice hangs off two hooks in that loader rather than running once. The first, at `0x80059834`, stashes the basename while it is still in a register; the preload-hit and cold-read paths both clobber it before the tail. The second, at `0x800599f8` where those paths converge with the archive in `r30`, matches the name and patches. The engine passes the name with a trailing `.` and does not always match the disc's case (`MnSelplyCtAll` against `MnSelplyctAll.dat`, which `DVDConvertPathToEntrynum` accepts), so the match is case-insensitive and stops at the dot.
+
+`scripts/hsd/verify_ui_frames.py` is the check on all of it: it splices the side-car into the vanilla donors the way the mod does, rewrites the same donors with `add_ui_frame.py`, and compares what the engine would read out of both - every bank's image count, TLUT count, appended image and decoded ramps. The new frame's art is the given PNG re-encoded to suit the bank: RGB5A3 in a picture bank and I4 in a text bank. Format is per frame and `HSD_TObjSetup` (`0x803f7158`) reads the CI-ness of the one frame it is drawing, so an RGB5A3 frame in a CMPR, C4 or C8 bank leaves every other frame alone and needs neither a CMPR encoder nor a quantizer. Its TLUT slot is filled with the donor's and never consulted.
 
 Two shapes of bank qualify, and the script has to tell them apart from the many other TexAnims in these archives. Most hold one image per character, so an image count of 20 identifies them. The picture banks hold one per character *color* and are wider than the roster, so they are matched on the shape the diverts leave on their ramp instead: a key on every frame `0` to `17`, none on King Dedede's kind 18 or Meta Knight's 19, and one on each of the frames they are diverted to. Matching only on frames 20 and 30 is not enough - `MnAll.dat`, `MnClCheckAll.dat` and `MnSelplym2dAll.dat` all key those frames for unrelated banks.
 
-The portrait, board and rule banks index frame for frame. The silhouette and picture banks do not: the engine diverts King Dedede to frame `20 + color` and Meta Knight to `30 + color`, so frame 20 - where the 21st character lands - is already Dedede's. The rewritten banks put the appended entry on frame 20 and slide Dedede's run one frame later, one key on the silhouettes and a color apiece on the pictures. Meta Knight's run begins after the gap that slide runs into, so it stays put. `select_screen.c` patches the eight `addi rD, rS, 20` sites that form Dedede's frame to add 21 instead: `AirRideSelect_SetSIcon2Color` (`0x80151b08`), `AirRideSelect_SetSIcon2Character` (`0x80151bd4`), `CitySelect_SetSIcon2Color` (`0x8015c5c8`), `CitySelect_SetSIcon2Character` (`0x8015c694`), and one per results screen at `0x801672bc`, `0x8016b064`, `0x8016e9bc` and `0x80177b5c`. Those patches apply whether or not a drop-in machine was found, because the widened archives ship either way - and they are why every bank a patched site drives has to be grown together with the rest.
+The portrait, board and rule banks index frame for frame. The silhouette and picture banks do not: the engine diverts King Dedede to frame `20 + color` and Meta Knight to `30 + color`, so frame 20 - where the 21st character lands - is already Dedede's. The appended entry goes on frame 20 and Dedede's run slides one frame later, one key on the silhouettes and a color apiece on the pictures. Meta Knight's run begins after the gap that slide runs into, so it stays put. `select_screen.c` patches the eight `addi rD, rS, 20` sites that form Dedede's frame to add 21 instead: `AirRideSelect_SetSIcon2Color` (`0x80151b08`), `AirRideSelect_SetSIcon2Character` (`0x80151bd4`), `CitySelect_SetSIcon2Color` (`0x8015c5c8`), `CitySelect_SetSIcon2Character` (`0x8015c694`), and one per results screen at `0x801672bc`, `0x8016b064`, `0x8016e9bc` and `0x80177b5c`. Those patches apply whether or not a drop-in machine was found, because the splice runs either way - and they are why every bank a patched site drives has to be grown together with the rest.
 
 ## Consuming the registry
 
@@ -256,13 +264,19 @@ The only machine registered today, and what the registry was built for. It is a 
 | Save bit | `machine_unlocked_mask` bit 26 |
 | Logo colors | `#C97682` rose, `#75C275` green, `#CA94C2` violet, `#D9A07D` tan, `#767EBD` blue, `#EEE391` yellow |
 
+Once the AP item has unlocked it, the machine is also assembled in City Trial the way the
+two vanilla legendaries are: six colored spheres, one per logo color, dropped in the
+forced-content red boxes across a round. That side of it is the archipelago mod's, not the
+registry's - all this mod supplies is the machine and the API the assembly resolves its
+class slot through.
+
 None of those kind numbers is hardcoded anywhere. They are what a single registered machine happens to get, not constants anyone depends on: `mods/archipelago/src/main.h` holds the one link between the generic registry and the Archipelago feature wiring,
 
 ```c
 #define AP_STAR_MACHINE_NAME "Archipelago Star"
 ```
 
-and everything downstream resolves through `MachineKind_Num()`, `CharacterKind_Num()` and `MachineKind_Resolve()`, which fall back to the vanilla ceilings when this mod is not built. `AP_ResolveCustomMachines()` imports the API - deferred past `OnBoot`, because mods boot alphabetically and the registry boots after the archipelago mod, and retried on each call because the title screen asks for it before the first save load.
+and everything downstream resolves through `MachineKind_Num()`, `CharacterKind_Num()` and `MachineKind_Resolve()`, which fall back to the vanilla ceilings when this mod is not built. `AP_ResolveCustomMachines()` imports the API - deferred past `OnBoot`, because mods boot alphabetically and the registry boots after the archipelago mod, and retried on each call because the archipelago mod's own `OnBoot` asks for it while pointing the title demo at the star. A failed import therefore proves nothing on its own, and the archipelago mod only concludes the registry is absent in `OnSaveLoaded`, the first point past every mod's `OnBoot`. Concluding it any earlier makes that mod patch the select screens underneath the registry's own patches, and since a hoshi hook stub ends with the instruction it displaced, the two chain and both packers run - the second one wins, and the 10-column fallback cannot see an appended character in column 10.
 
 **Title screen.** The title scene's demo player is set up at `0x8000d300` from three `li r4` operands: `RiderKind` at `0x8000d340`, `is_bike` at `0x8000d34c`, class slot at `0x8000d358`. `main_menu.c` rewrites all three on each title entry, since the registry only resolves after every mod has booted, pointing them at Kirby on the Archipelago Star and falling back to King Dedede on the Wagon Star when no such machine is registered. The ride must stay star-class: the demo init uses hardcoded star-only state ids and a wheel-class machine crashes there. The Wagon Star's idle volume floor of 20.0 is why the title think and exit callbacks zero the floor for whichever kind the demo uses and put it back on the way out; a kind whose floor is already 0.0 passes through unchanged, and machine loops are only ever created at volume 0.0 and ramped up, so this never lets an audible frame through.
 

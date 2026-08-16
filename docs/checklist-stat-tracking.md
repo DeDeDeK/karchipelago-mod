@@ -88,7 +88,7 @@ Known fields (offsets relative to `base`):
 | `+0x840` | int | Min consecutive-frame run during which **all** human players were simultaneously off-machine (init −1; live counter `+0x83c`; updater `Ply_UpdateAllOffMachines` (`0x8022df1c`), 2+ humans only). `!= -1 && <= 60` ⇒ unlock. | `0x8022de74` | 0x4a |
 | `+0x848` | int | King Dedede KO timestamp (frame of first KO of the KD boss = victim slot 4). 0 = not yet. | `0x8022f568` | 0x2f |
 | `+0x84c` | u8 bits | bit0 = damaged Dyna Blade, bit1 = trampled by Dyna Blade, bit7 = damaged a rival within 10 s (`ClearChecker_CheckJustUnlocked_CityTrial_RivalDamage10Sec`, `0x8022ebdc`). | bit7 via `0x8022ebdc` | 0x30 / 0x31 / 0x49 |
-| `+0x84d` | u8 bits | bit1 = reached sky garden, bit2 = Hydra assembled, bit3 = Dragoon assembled, bit4 = entered castle chamber, bit5 = used a restoration area. bits2/3 written by `Ply_MarkLegendaryMachineAssembled` (`0x80231198`). | inline | 0x3e/0x77/0x38/0x36 |
+| `+0x84d` | u8 bits | bit1 = reached sky garden, bit2 = Dragoon assembled, bit3 = Hydra assembled, bit4 = entered castle chamber, bit5 = used a restoration area. bits2/3 written by `Ply_MarkLegendaryMachineAssembled` (`0x80231198`), whose `machine_index` 0 (Dragoon) sets bit2. | inline | 0x3e/0x77/0x38/0x36 |
 | `+0x850` | int | Grind-rail-into-crater flag (`!= 0` ⇒ unlock) | `0x80230240` | 0x42 |
 | `+0x854` | u8 bits | bit3 = off machine at timeout, bit4 = on rails at timeout. (`+0x855` bit6 = suppress-yakumono-increment.) | inline | 0x4b / 0x4c |
 
@@ -439,7 +439,7 @@ table[i].field0 && Ply_GetMachineKind(killer) == table[i].field1` it sets bit
 
 Table entries 8/9 (Dragoon↔Hydra mutual busts) are written but **never read** by
 the getter (idx only 0..7) — likely vestigial. **Legendary-machine assembly** is
-a *separate* mechanism: `+0x84d` bit2 (Hydra) / bit3 (Dragoon), written by
+a *separate* mechanism: `+0x84d` bit2 (Dragoon) / bit3 (Hydra), written by
 `Ply_MarkLegendaryMachineAssembled` (`0x80231198`), which drives cell 0x77.
 
 ## Distance to Miles Math (cells 0x00 / 0x01)

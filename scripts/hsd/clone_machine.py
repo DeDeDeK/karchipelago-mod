@@ -54,7 +54,7 @@ CUSTOM_MACHINE_MAGIC = 0x434D4348  # 'CMCH'
 CUSTOM_MACHINE_DESC_VERSION = 2
 DESC_SIZE = 0x28
 
-# Sampled from mods/archipelago/assets/ap-icon.png.
+# Sampled from art/ap-icon.png.
 PALETTES = {
     "ap": [
         (0xC9, 0x76, 0x82),  # rose

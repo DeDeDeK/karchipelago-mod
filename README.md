@@ -26,7 +26,7 @@ This project is written in **C** and uses `make`. It outputs `.bin` (code) and `
 
 1. **[devkitPPC](https://devkitpro.org/wiki/Getting_Started)** - the PowerPC cross-compiler. Install devkitPro and place (or symlink) it at `externals/devkitpro/` so the Makefile finds it automatically, or set the `DEVKITPPC` environment variable to point at your installation.
 2. **[uv](https://docs.astral.sh/uv/getting-started/installation/)** - manages the Python build dependencies (`pyelftools`, `pyisotools`). Scripts are invoked via `uv run`, so no manual dependency install is needed.
-3. **Original NTSC Kirby Air Ride ISO** - place your unmodified disc image in the repo root, named `kar.iso`. (The build extracts the original DOL from it.)
+3. **Original NTSC Kirby Air Ride ISO** - place your unmodified disc image in the repo root, named `kar.iso`.
 4. **[trash-cli](https://github.com/andreafrancia/trash-cli)** *(Linux only, optional)* - `make clean` uses `trash-put` to move Dolphin Riivolution/memory-card files to the trash instead of deleting them.
 
 ### Building
@@ -91,6 +91,7 @@ The patch is written to `out/patch.xdelta`.
 
 - Swiggity - karchipelago logo design
 - Taco - KAR Deluxe logo + font design
+- JC - miracle fruit art
 
 ---
 

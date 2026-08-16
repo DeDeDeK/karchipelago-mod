@@ -39,6 +39,23 @@ static inline MachineKind MachineKind_Resolve(int is_bike, int class_index)
         return (MachineKind)cm_api->KindFromClassIndex(is_bike, class_index);
     return MachineKind_FromClassIndex(is_bike, class_index);
 }
+// The (is_bike, class slot) pair the engine addresses a MachineKind by, custom kinds
+// included - the inverse of MachineKind_Resolve. A custom machine is the only kind
+// whose class slot and MachineKind differ, so hoshi's MachineKind_ClassIndex answers
+// for vanilla only and hands back the kind itself for one of these.
+static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
+{
+    if (cm_api)
+        return cm_api->ClassIndexFromKind(kind, is_bike);
+    *is_bike = MachineKind_IsBike(kind);
+    return MachineKind_ClassIndex(kind);
+}
+// MachineKind of the Archipelago Star, or -1 while nothing has registered it.
+static inline int ApStarMachineKind(void)
+{
+    AP_ResolveCustomMachines();
+    return cm_api ? cm_api->FindKindByName(AP_STAR_MACHINE_NAME) : -1;
+}
 
 #define MAX_RECEIVED_ITEMS 512
 
@@ -78,6 +95,8 @@ typedef enum APGoalKind
     GOAL_NONE,                  // No goal for this mode
     GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
     GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
+    GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
+    GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
 } APGoalKind;
 
 typedef struct APSlotOptions
@@ -128,10 +147,13 @@ typedef struct APSlotOptions
 // goal_forced_gates bits.
 #define GOALGATE_LEGENDARY_PIECES 0x1 // ITUNLOCK_HYDRA1-3 / ITUNLOCK_DRAGOON1-3
 #define GOALGATE_VS_KING_DEDEDE   0x2 // STKIND_VSKINGDEDEDE
+#define GOALGATE_AP_STAR_PIECES   0x4 // APSTARPIECE_ROSE..YELLOW
 
 #define LEGENDARY_PIECE_ITEM_BITS                                                  \
     ((1u << ITUNLOCK_HYDRA1) | (1u << ITUNLOCK_HYDRA2) | (1u << ITUNLOCK_HYDRA3) | \
      (1u << ITUNLOCK_DRAGOON1) | (1u << ITUNLOCK_DRAGOON2) | (1u << ITUNLOCK_DRAGOON3))
+
+#define AP_STAR_PIECE_ITEM_BITS ((1u << APSTARPIECE_NUM) - 1)
 
 // Cross-boot progress for AP checklist objectives whose predicate counts over
 // more than one session.
@@ -159,6 +181,7 @@ typedef struct APSave
     u32 topride_item_unlocked_mask;                     // Bit N = TopRideItemKind N unlocked
     u8 color_unlocked_mask;                             // Bit N = KirbyColor N unlocked
     u8 base_ability_unlocked_mask;                      // Bit N = BaseAbilityKind N unlocked
+    u8 ap_star_piece_unlocked_mask;                     // Bit N = APStarPieceKind N unlocked
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
     u8 spawn_rate_level;                                // Number of Spawn Rate Up items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-PATCH_STAT_MAX)

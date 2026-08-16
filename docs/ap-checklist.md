@@ -36,7 +36,7 @@ exactly mode 3.
 `APChecklist_Register` (called from `OnSaveLoaded`, after the framework mod has exported
 its API) imports `CustomChecklistAPI` and hands it a descriptor with:
 
-- **Checks** — a static `{ clear_kind, label, predicate }` table covering all 51
+- **Checks** — a static `{ clear_kind, label, predicate }` table covering all 52
   objectives, pinned to `APCK_NUM` by a `_Static_assert`. A label is the in-game cell text
   and is also the box's AP location name minus the leading `Archipelago: ` — the same
   relationship the three vanilla tabs have to their location names, so the wording is
@@ -100,7 +100,7 @@ same block.
 
 The tab's board starts blank and reveals outward, exactly as the vanilla checklists do: a
 cell draws only once it is completed, or once a completed orthogonal neighbour has revealed
-it. The reveal is positional, so with only 51 of the 120 clear_kinds carrying a check it
+it. The reveal is positional, so with only 52 of the 120 clear_kinds carrying a check it
 will surface boxes that have no objective behind them, and cells whose only neighbours are
 undefined stay dark until their own check fires. That resolves itself as the tab fills out
 toward 120.
@@ -149,7 +149,7 @@ another loose scalar in `APSave`. An objective satisfiable within one run needs 
 — it latches in `ap_check_detect.c`'s transient `ap_observed` bitmask and records through
 `sent_checks`.
 
-Only clear_kinds 0–49 back an AP location, but the tab's grid is 120 cells and the
+Only clear_kinds 0–51 back an AP location, but the tab's grid is 120 cells and the
 checkbox-filler cursor can reach the blank ones. `RecordCheck` rejects `clear_kind >=
 APCK_NUM` on the AP row so a spent filler can't send a location code the multiworld has
 never heard of.
@@ -179,14 +179,14 @@ root) exporting two `_HSD_ImageDesc` publics:
   replacement's own size is unconstrained.)
 
 `scripts/hsd/make_checklist_textures.py` authors the archive from
-`mods/archipelago/assets/ap-icon.png`
+`art/ap-icon.png`
 (`uv run --with pillow python scripts/hsd/make_checklist_textures.py`). The framework loads
 it by name (`tex_file = "ApChecklistTex"`) per tab build and swaps the checklist's
 banner/emblem TObjs onto these descriptors.
 
 ## Objectives and Detection
 
-There are 51 objectives, `clear_kind` 0–50, enumerated as `APCheckKind` in
+There are 52 objectives, `clear_kind` 0–51, enumerated as `APCheckKind` in
 `ap_check_detect.h`. The numbering is a cross-repo wire contract — the AP location code is
 `361 + clear_kind`, and `APLocation` in the apworld's `KARLocations.py` restates the same
 order and the same label text by hand, with nothing mechanically catching a desync. An AP box
@@ -197,7 +197,7 @@ Every objective is an in-game achievement. There is no box for booting the game 
 receiving a multiworld item — those complete without playing, so as AP locations they were
 free checks the fill could hide progression behind.
 
-Predicates never sample. The framework polls all 51 every frame, in every scene, including
+Predicates never sample. The framework polls all 52 every frame, in every scene, including
 menus and loads — so each one is a single read of state latched elsewhere, and the sampling
 lives in five seams in `ap_check_detect.c`.
 
@@ -332,19 +332,6 @@ vanilla's `TA:` and `FR:` cells, so Race, Time Attack and Free Run all count.
 |---|---|---|
 | 49 | FANTASY MEADOWS take the shortcut | `rd->pos` within 25 units of `(249.7, 120.0, 19.2)`. Riders are always on a machine in Air Ride, so unlike the city visits there is no on-foot test |
 
-### The goal box
-
-| clear_kind | Objective | Detection |
-|---|---|---|
-| 50 | Complete your Archipelago goal! | A read of the sticky `ap_save->goal_complete` bit |
-
-The tab's own terminal objective, and the only cell whose predicate is not about play. The
-framework polls every cell every frame, so it also fills in on the load after victory rather
-than only in the session that reached it — `goal_complete` is written before the cell can
-record, so there is no ordering hazard, and the re-evaluation `RecordCheck` fires afterwards
-short-circuits on the same bit. A row whose goal counts or lists this cell can never be
-satisfied, so generation must not place it in one.
-
 The shortcut is an elevated arc over the normal racing line, peaking near `(255, 135, 6)`;
 it is the lap's only route divergence. The sphere sits on the arc's descent rather than at
 its apex because one ball has to cover two things 16 units apart: the surface a machine can
@@ -353,6 +340,25 @@ The 25-unit radius covers both and still leaves 26 units of clearance to the clo
 the normal racing line, which passes 51 units away and 40 below. A machine crosses the sphere
 at roughly 3 units per frame and so spends about fifteen frames inside it, far too many to
 skip between frames.
+
+### The Archipelago Star
+
+| clear_kind | Objective | Detection |
+|---|---|---|
+| 50 | City Trial: Collect all 6 spheres and assemble the Archipelago Star! | A read of the boot-sticky flag `ap_star_pieces.c` sets when a human player collects the sixth sphere |
+| 51 | City Trial: In one game, assemble Dragoon, Hydra and Archipelago Star! | A per-frame poll over the human players: `PlayerStats.flags_84d` bits `0x04` and `0x08`, the per-round flags `Ply_MarkLegendaryMachineAssembled` (`0x80231198`) sets, plus `ApStarPieces_AssembledThisRound` |
+
+The six spheres are custom items scheduled into City Trial's forced-content red boxes
+against match progress, the way the Hydra and Dragoon parts are, and each enters the pool
+only once its own sphere item has arrived. The flag survives the round, so the cell also
+fills in on a later load rather than only in the session that earned it.
+
+Cell 51 is scoped to one round because all three of its inputs are: `flags_84d` lives in
+`PlayerStats`, which is zeroed on every 3D scene load, and the star's assembly mask is
+cleared at the same point. It is polled from `APCheckDetect_OnFrameStart` rather than the
+per-rider sampler the other City Trial objectives use, because assembling the star ends in
+`Rider_RespawnFullRecreate` (`0x80193900`) — the rider the sampler proc hangs off is torn
+down and rebuilt under it, and a poll keyed to the mod's own frame callback is unaffected.
 
 **The rival KO recorder — the Destruction Derby box.** `APCheckDetect_OnBoot` repoints the
 single `bl Ply_AddDeath` inside `Machine_GiveDamage` (`0x801e1f74`) at a wrapper that runs the
@@ -413,10 +419,8 @@ region while the mod's sampler accepts either stadium.
 
 ### The apworld's location range
 
-Every one of the 51 clear_kinds latches, and every one backs an AP location. The apworld's
-codes run contiguously from 361 to 411. `ArchipelagoChecklistAmount` stops one short of that
-at `range_end` 50: the goal box is the 51st cell and cannot complete before the goal it
-counts toward, so requiring all 51 would be unsatisfiable.
+Every one of the 52 clear_kinds latches, and every one backs an AP location. The apworld's
+codes run contiguously from 361 to 412, and `ArchipelagoChecklistAmount` covers all 52.
 
 Each box takes the region where its activity happens rather than a flat Archipelago region,
 so it inherits that region's entrance chain (stadium unlocks, course unlocks, the DD/KM/DR

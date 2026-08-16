@@ -21,8 +21,8 @@
 
 #define VANILLA_GRID_COLS 10
 
-// One row past the last real character; see the file comment.
-#define SENTINEL_CKIND (CUSTOM_CKIND_NUM)
+// One row past the last real character, so every availability predicate rejects it.
+#define SENTINEL_CKIND CUSTOM_CKIND_NUM
 
 #define MAX_GRID_COLS (VANILLA_GRID_COLS + (CUSTOM_MACHINE_MAX + 1) / 2)
 

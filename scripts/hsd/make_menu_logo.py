@@ -46,6 +46,7 @@ from hsd.archive import build_archive
 from hsd.gx import GX_TF_RGBA8, align32, encode_rgba8
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ART = os.path.join(ROOT, "art")
 ASSETS = os.path.join(ROOT, "mods", "archipelago", "assets")
 OUT_DAT = os.path.join(ASSETS, "MnTitleKarchi.dat")
 
@@ -265,7 +266,7 @@ def main():
     total_tex = 0
     for cfg in PIECES:
         cx, cy, w = map_to_world(cfg["px"])
-        src = Image.open(os.path.join(ASSETS, cfg["src"])).convert("RGBA")
+        src = Image.open(os.path.join(ART, cfg["src"])).convert("RGBA")
         box = src.getbbox()  # opaque content box; drop the transparent margin
         if box:
             src = src.crop(box)

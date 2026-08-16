@@ -1,27 +1,18 @@
 // A drop-in machine's sounds, and the star class's per-kind audio parameter row.
 //
-// The row array is authored in VcCommon.dat and sized to the 19 vanilla star
-// slots, so a widened slot would read past its end the moment its machine
-// spawns. VcCommon.dat is reloaded per scene, so the array is re-copied and
-// repointed every time vcLoadCommon runs. Each registered machine's row starts
-// as a copy of the vanilla kind named by its descriptor's clone_kind.
+// The row array is authored in VcCommon.dat, sized to the 19 vanilla star slots
+// and reloaded per scene, so it is re-copied wider and repointed on every
+// vcLoadCommon. Each registered machine's row starts as a copy of its
+// descriptor's clone_kind.
 //
-// A machine that ships a companion .ssm next to its .dat then takes its own
-// samples over that row. Three things have to line up for one FGM id to reach
-// one of those samples:
-//
-//   - the samples must be in ARAM, which means an SSM slot of their own and a
-//     range of global sound indices no vanilla bank claims;
-//   - a script must exist that plays them, which is a copy of the script the
-//     clone kind uses for that sound with its sound index rewritten, so the
-//     drop-in sound keeps the donor's volume and pitch envelope;
-//   - the script map has to be wide enough to hold those scripts, which is one
-//     SEM bank appended past the vanilla 20.
-//
-// The samples and the script copies are set up once, on the first vcLoadCommon,
-// by which point the audio system is running and the DVD is available. The
-// script map is installed again after every FGM_InitSEM, which reloads
-// airride.sem and puts the four globals that describe the map back.
+// A companion .ssm beside the .dat then takes its own samples over that row.
+// Reaching one needs three things, all set up on the first vcLoadCommon, by which
+// point the audio system is running and the DVD is available: an SSM slot holding
+// the samples, a range of global sound indices no vanilla bank claims, and a
+// script per sound - a copy of the clone kind's, with its sound index rewritten so
+// the drop-in keeps the donor's volume and pitch envelope - in one SEM bank
+// appended past the vanilla 20. That bank is installed again after every
+// FGM_InitSEM, which reloads airride.sem and puts the vanilla map back.
 
 #include "os.h"
 #include "audio.h"
@@ -30,8 +21,8 @@
 
 #include "custom_machines.h"
 
-// The MachineAudioParams sound slots a bank can fill, which are the leading int
-// block of that struct in order. A bank holds one entry per slot and marks the
+// The named FGM id slots of MachineAudioParams, which open the struct in order and
+// are the whole of a machine's voice. A bank holds one entry per slot and marks the
 // ones it does not supply with a sample rate of 0.
 #define SOUND_ROLE_NUM 13
 
@@ -56,7 +47,6 @@ static MachineAudioParams stc_star_audio[CUSTOM_VCSTAR_NUM];
 typedef struct DropinBank
 {
     int found;                   // a companion .ssm exists and is worth loading
-    int size;                    // its file size, rounded to the ARAM carve
     int sound[SOUND_ROLE_NUM];   // global sound index per role, -1 where the bank has none
     u32 *script[SOUND_ROLE_NUM]; // the cloned script that plays it
     int sfx[SOUND_ROLE_NUM];     // its FGM id once the script map carries it
@@ -88,6 +78,15 @@ CODEPATCH_HOOKCREATE(0x80447eb8,
     "",
     0
 )
+
+// The vanilla star slot a machine's rows and donor scripts come from. A descriptor
+// naming a bike or an out-of-range kind falls back to the Slick Star.
+static int CloneKind(const CustomMachineEntry *e)
+{
+    if (e->clone_kind < 0 || e->clone_kind >= VCSTAR_NUM)
+        return VCKIND_SLICK;
+    return e->clone_kind;
+}
 
 static SSMSound *ChunkSound(SSMChunk *chunk, int index)
 {
@@ -143,8 +142,7 @@ static void LoadDropinBanks(void)
             continue;
 
         b->found = 1;
-        b->size = OSRoundUp32B(size);
-        total += b->size;
+        total += OSRoundUp32B(size);
     }
 
     if (total == 0)
@@ -236,9 +234,7 @@ static void CloneDropinScripts(void)
     {
         DropinBank *b = &stc_bank[i];
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
-        int clone = e->clone_kind;
-        if (clone < 0 || clone >= VCSTAR_NUM)
-            clone = VCKIND_SLICK;
+        int clone = CloneKind(e);
         const int *donor_row = (const int *)&stc_star_audio[clone];
 
         for (int r = 0; r < SOUND_ROLE_NUM; r++)
@@ -353,10 +349,7 @@ static void SpliceStarAudioParams(void)
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
-        int clone = e->clone_kind;
-        if (clone < 0 || clone >= VCSTAR_NUM)
-            clone = VCKIND_SLICK;
-        stc_star_audio[e->star_slot] = stc_star_audio[clone];
+        stc_star_audio[e->star_slot] = stc_star_audio[CloneKind(e)];
 
         int *row = (int *)&stc_star_audio[e->star_slot];
         for (int r = 0; r < SOUND_ROLE_NUM; r++)

@@ -4,8 +4,15 @@
 /externals/devkitpro/
 /iso/
 /.claude/settings.local.json
-/mods/custom_weather/assets/
 __pycache__/
+
+# Assets carrying data carved or cloned out of the retail disc. Each is
+# rebuilt from iso/ by the script its doc names, so none of it is committed.
+/mods/custom_weather/assets/
+/mods/custom_machines/assets/ApUiFrames.dat
+/mods/custom_machines/assets/machines/VcStarAp.dat
+/mods/custom_machines/assets/machines/VcStarAp.ssm
+
 *.raw
 notes.txt
 kar.iso

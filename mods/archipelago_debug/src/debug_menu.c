@@ -35,6 +35,7 @@ static int tr_item_state[TRITEM_NUM];
 static int color_state[KIRBYCOLOR_NUM];
 static int stadium_state[STKIND_NUM];
 static int base_ability_state[BASEABILITY_NUM];
+static int star_piece_state[APSTARPIECE_NUM];
 
 #define DEF_SYNC(name, cat, arr, count) \
     static void name(int v) { \
@@ -60,6 +61,7 @@ DEF_SYNC(SyncTRItems,   AP_UNLOCK_TOPRIDE_ITEM,    tr_item_state,  TRITEM_NUM)
 DEF_SYNC(SyncColors,    AP_UNLOCK_COLOR,           color_state,    KIRBYCOLOR_NUM)
 DEF_SYNC(SyncStadiums,  AP_UNLOCK_STADIUM,         stadium_state,  STKIND_NUM)
 DEF_SYNC(SyncBaseAbil,  AP_UNLOCK_BASE_ABILITY,    base_ability_state, BASEABILITY_NUM)
+DEF_SYNC(SyncStarPiece, AP_UNLOCK_AP_STAR_PIECE,   star_piece_state,   APSTARPIECE_NUM)
 
 #define DEF_REFRESH(name, cat, arr, count) \
     static void name(void) { \
@@ -80,6 +82,7 @@ DEF_REFRESH(RefreshTRItems,   AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_N
 DEF_REFRESH(RefreshColors,    AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM)
 DEF_REFRESH(RefreshStadiums,  AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM)
 DEF_REFRESH(RefreshBaseAbil,  AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM)
+DEF_REFRESH(RefreshStarPiece, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   APSTARPIECE_NUM)
 
 void DebugMenu_RefreshStateFromMasks(void)
 {
@@ -95,6 +98,7 @@ void DebugMenu_RefreshStateFromMasks(void)
     RefreshColors();
     RefreshStadiums();
     RefreshBaseAbil();
+    RefreshStarPiece();
 }
 
 #define DEF_ALL(prefix, cat, arr, count, label) \
@@ -130,6 +134,7 @@ DEF_ALL(Tri, AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_NUM,       "TR ite
 DEF_ALL(Clr, AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM,   "colors")
 DEF_ALL(Std, AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM,       "stadiums")
 DEF_ALL(Bab, AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM, "base abilities")
+DEF_ALL(Sph, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   APSTARPIECE_NUM, "AP Star spheres")
 
 #define GIVE_FN(name, id) \
     static int name(OptionDesc *self) { \
@@ -179,6 +184,13 @@ GIVE_FN(GiveCopyMike,    AP_ITKIND_COPYMIC)
 GIVE_FN(GiveUnlockInhale,    AP_BASE_ABILITY_UNLOCK_INHALE)
 GIVE_FN(GiveUnlockQuickSpin, AP_BASE_ABILITY_UNLOCK_QUICKSPIN)
 GIVE_FN(GiveUnlockCharge,    AP_BASE_ABILITY_UNLOCK_CHARGE)
+
+GIVE_FN(GiveSphereRose,   AP_STAR_PIECE_UNLOCK_ROSE)
+GIVE_FN(GiveSphereGreen,  AP_STAR_PIECE_UNLOCK_GREEN)
+GIVE_FN(GiveSphereViolet, AP_STAR_PIECE_UNLOCK_VIOLET)
+GIVE_FN(GiveSphereTan,    AP_STAR_PIECE_UNLOCK_TAN)
+GIVE_FN(GiveSphereBlue,   AP_STAR_PIECE_UNLOCK_BLUE)
+GIVE_FN(GiveSphereYellow, AP_STAR_PIECE_UNLOCK_YELLOW)
 
 GIVE_FN(GiveMaximTomato,  AP_ITKIND_FOODMAXIMTOMATO)
 GIVE_FN(GiveEnergyDrink,  AP_ITKIND_FOODENERGYDRINK)
@@ -586,6 +598,22 @@ static MenuDesc boxes_menu = {
     },
 };
 
+// A sphere held locked here is kept out of the custom_items registry entirely, so
+// it takes no delivery step and no carrier box can hold it.
+static MenuDesc star_pieces_menu = {
+    .option_num = 8,
+    .options = {
+        A("Unlock All", "Unlock all AP Star spheres", SphUnlockAll),
+        A("Lock All",   "Lock all AP Star spheres",   SphLockAll),
+        G("Rose Sphere",   star_piece_state, APSTARPIECE_ROSE,   SyncStarPiece),
+        G("Green Sphere",  star_piece_state, APSTARPIECE_GREEN,  SyncStarPiece),
+        G("Violet Sphere", star_piece_state, APSTARPIECE_VIOLET, SyncStarPiece),
+        G("Tan Sphere",    star_piece_state, APSTARPIECE_TAN,    SyncStarPiece),
+        G("Blue Sphere",   star_piece_state, APSTARPIECE_BLUE,   SyncStarPiece),
+        G("Yellow Sphere", star_piece_state, APSTARPIECE_YELLOW, SyncStarPiece),
+    },
+};
+
 static MenuDesc ar_stages_menu = {
     .option_num = 11,
     .options = {
@@ -749,6 +777,18 @@ static MenuDesc give_base_abilities_menu = {
     },
 };
 
+static MenuDesc give_spheres_menu = {
+    .option_num = 6,
+    .options = {
+        A("Rose Sphere",   "Grant the Rose sphere unlock item",   GiveSphereRose),
+        A("Green Sphere",  "Grant the Green sphere unlock item",  GiveSphereGreen),
+        A("Violet Sphere", "Grant the Violet sphere unlock item", GiveSphereViolet),
+        A("Tan Sphere",    "Grant the Tan sphere unlock item",    GiveSphereTan),
+        A("Blue Sphere",   "Grant the Blue sphere unlock item",   GiveSphereBlue),
+        A("Yellow Sphere", "Grant the Yellow sphere unlock item", GiveSphereYellow),
+    },
+};
+
 static MenuDesc give_food_menu = {
     .option_num = 12,
     .options = {
@@ -867,12 +907,13 @@ static MenuDesc give_topride_items_menu = {
 };
 
 static MenuDesc give_items_menu = {
-    .option_num = 11,
+    .option_num = 12,
     .options = {
         S("Stat Patches",      "Temporary stat patches",          give_stat_patches_menu),
         S("Permanent Patches", "Permanent stat boosts",           give_perm_patches_menu),
         S("Copy Abilities",    "Give Kirby a copy ability",       give_abilities_menu),
         S("Base Ability Unlocks", "Grant a base-ability unlock",  give_base_abilities_menu),
+        S("AP Star Spheres",   "Grant a sphere unlock item",      give_spheres_menu),
         S("Food",              "Healing items",                   give_food_menu),
         S("Special Items",     "Powerful one-use items",          give_special_menu),
         S("Legendary Pieces",  "Dragoon and Hydra parts",        give_legendary_menu),
@@ -916,7 +957,7 @@ static MenuDesc checks_menu = {
 };
 
 static MenuDesc debug_menu = {
-    .option_num = 14,
+    .option_num = 15,
     .options = {
         S("Machines",        "Toggle machine unlock gates",     machines_menu),
         S("Copy Abilities",  "Toggle ability unlock gates",     abilities_menu),
@@ -925,6 +966,7 @@ static MenuDesc debug_menu = {
         S("Patch Types",     "Toggle patch type unlock gates",  patches_menu),
         S("CT Items",        "Toggle CT item unlock gates",     items_menu),
         S("Box Types",       "Toggle box type unlock gates",    boxes_menu),
+        S("AP Star Spheres", "Toggle AP Star sphere gates",     star_pieces_menu),
         S("AR Stages",       "Toggle Air Ride stage gates",     ar_stages_menu),
         S("TR Stages",       "Toggle Top Ride stage gates",     tr_stages_menu),
         S("TR Items",        "Toggle Top Ride item gates",      tr_items_menu),

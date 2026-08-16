@@ -81,20 +81,6 @@ void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
     CODEPATCH_REPLACEINSTRUCTION(addi_addr, (*(u32 *)addi_addr & 0xFFFF0000) | lo);
 }
 
-// FNV-1a 32-bit; a per-file identity independent of registry order.
-u32 CustomMachines_HashPath(const char *path)
-{
-    u32 h = 0x811c9dc5u;
-    if (path == NULL)
-        return 0;
-    while (*path != '\0')
-    {
-        h ^= (u8)*path++;
-        h *= 0x01000193u;
-    }
-    return h;
-}
-
 static void FileLoadCallback(int result, void *arg)
 {
     (void)result;
@@ -104,7 +90,9 @@ static void FileLoadCallback(int result, void *arg)
 // Boot-safe archive load. The buffer and HSD_Archive are never freed: the
 // registry holds only strings copied out of them, but the descriptor is read
 // before the copy and freeing here would need a heap the boot path lacks.
-static HSD_Archive *LoadArchiveAtBoot(char *path)
+// ui_frames.c relies on that for the whole run - the menu archives it patches
+// point into its side-car.
+HSD_Archive *CustomMachines_LoadArchiveAtBoot(char *path)
 {
     int entrynum = DVDConvertPathToEntrynum(path);
     if (entrynum == -1)
@@ -146,7 +134,7 @@ static void IndexCb(int entrynum, void *args)
     if (path == NULL)
         return;
 
-    HSD_Archive *arc = LoadArchiveAtBoot(path);
+    HSD_Archive *arc = CustomMachines_LoadArchiveAtBoot(path);
     if (arc == NULL)
     {
         OSReport("[CustomMachines] %s failed to load\n", path);
@@ -183,8 +171,6 @@ static void IndexCb(int entrynum, void *args)
     }
 
     CustomMachineEntry *e = &stc_entries[stc_count];
-    e->file_entrynum = entrynum;
-    e->id_hash = CustomMachines_HashPath(path);
     CustomMachines_CopyStr(e->path, path, CUSTOM_MACHINE_PATH_MAX);
     CustomMachines_CopyStr(e->symbol, desc->symbol, CUSTOM_MACHINE_NAME_MAX);
     CustomMachines_CopyStr(e->name, desc->name != NULL ? desc->name
@@ -231,19 +217,9 @@ int CustomMachines_Discover(void)
     return stc_count;
 }
 
-static int Api_GetCount(void)
-{
-    return stc_count;
-}
-
 static int Api_GetKindCeiling(void)
 {
     return VCKIND_NUM + stc_count;
-}
-
-static int Api_GetCharacterKindCeiling(void)
-{
-    return CustomMachines_GetCharacterKindCeiling();
 }
 
 static int Api_KindFromClassIndex(int is_bike, int class_index)
@@ -310,9 +286,9 @@ static const CustomMachinesAPI stc_api = {
     .GetSelectIconMax = CustomMachineSelect_GetIconMax,
     .SetAirRideRowSplit = CustomMachineSelect_SetAirRideRowSplit,
     .SetAvailabilityFilter = CustomMachineSelect_SetAvailabilityFilter,
-    .GetCount = Api_GetCount,
+    .GetCount = CustomMachines_GetCount,
     .GetKindCeiling = Api_GetKindCeiling,
-    .GetCharacterKindCeiling = Api_GetCharacterKindCeiling,
+    .GetCharacterKindCeiling = CustomMachines_GetCharacterKindCeiling,
     .KindFromClassIndex = Api_KindFromClassIndex,
     .ClassIndexFromKind = Api_ClassIndexFromKind,
     .GetName = Api_GetName,
@@ -326,6 +302,7 @@ void CustomMachines_OnBoot(void)
     // a drop-in machine is present, and the engine has to agree with them either way.
     // This also takes over both select screens' packing, which stays the engine's own
     // roster until a consumer sets an availability filter.
+    CustomMachineUiFrames_OnBoot();
     CustomMachineSelect_OnBoot();
 
     if (CustomMachines_Discover() == 0)

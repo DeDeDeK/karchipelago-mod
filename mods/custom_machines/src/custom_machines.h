@@ -21,9 +21,7 @@
 
 typedef struct CustomMachineEntry
 {
-    int file_entrynum;                     // FST entry of the .dat
-    u32 id_hash;                           // stable identity = hash of the full FST path
-    char name[CUSTOM_MACHINE_NAME_MAX];    // descriptor name; filename until loaded
+    char name[CUSTOM_MACHINE_NAME_MAX];    // descriptor name, or the filename if it has none
     char path[CUSTOM_MACHINE_PATH_MAX];    // full FST path, handed to the engine loader
     char symbol[CUSTOM_MACHINE_NAME_MAX];  // the archive's vcData public
     char description[CUSTOM_MACHINE_DESCRIPTION_MAX]; // select-screen blurb, empty if none
@@ -43,10 +41,13 @@ CustomMachineEntry *CustomMachines_GetEntry(int index);
 CustomMachineEntry *CustomMachines_FindByKind(int machine_kind);
 CustomMachineEntry *CustomMachines_FindByCharacterKind(int character_kind);
 void                CustomMachines_CopyStr(char *dst, const char *src, int max);
-u32                 CustomMachines_HashPath(const char *path);
 
 // Point an accessor's `lis` / `addi` pair at a relocated copy of its table.
 void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table);
+
+// Read an archive off the disc during OnBoot, before any scene heap exists. The
+// buffer is never freed, so the archive stays resident for the run of the game.
+HSD_Archive *CustomMachines_LoadArchiveAtBoot(char *path);
 
 // FST scan of machines/, validating each descriptor. Returns the count.
 int CustomMachines_Discover(void);
@@ -64,6 +65,9 @@ void CustomMachineText_OnBoot(void);
 
 // machine_audio.c - the star class's audio parameter array and drop-in banks.
 void CustomMachineAudio_OnBoot(void);
+
+// ui_frames.c - the 21st frame spliced into each character-indexed art bank.
+void CustomMachineUiFrames_OnBoot(void);
 
 // select_screen.c - the widened UI art banks, icon grids and icon-list packing.
 void CustomMachineSelect_OnBoot(void);

@@ -24,6 +24,7 @@
 #include "gate_colors.h"
 #include "gate_stadiums.h"
 #include "spawn_rate.h"
+#include "ap_star_pieces.h"
 #include "main.h"
 
 // Bump the received counter, append to the unprocessed list, and acknowledge.
@@ -236,6 +237,14 @@ int APItems_HandleItem(uint ap_item_id)
     {
         ItemUnlockKind kind = ap_item_id - AP_ITEM_UNLOCK_BASE;
         return GateItems_UnlockItem(kind);
+    }
+
+    // Archipelago Star sphere unlock items (AP_STAR_PIECE_UNLOCK_BASE + APStarPieceKind)
+    if (ap_item_id >= AP_STAR_PIECE_UNLOCK_BASE &&
+        ap_item_id < AP_STAR_PIECE_UNLOCK_BASE + APSTARPIECE_NUM)
+    {
+        int piece = ap_item_id - AP_STAR_PIECE_UNLOCK_BASE;
+        return ApStarPieces_UnlockPiece(piece);
     }
 
     // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854

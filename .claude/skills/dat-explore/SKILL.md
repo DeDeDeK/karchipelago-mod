@@ -15,8 +15,8 @@ description: >
     - Author a texture or model .dat from PNGs
     Wraps `scripts/hsd/explore.py` (general explorer), the carve/author
     scripts (`carve_backdrop.py`, `carve_all_backdrops.py`,
-    `carve_custom_item.py`, `make_checklist_textures.py`,
-    `make_menu_logo.py`) and the measuring/checking tools
+    `carve_custom_item.py`, `make_ap_star_pieces.py`,
+    `make_checklist_textures.py`, `make_menu_logo.py`) and the measuring/checking tools
     (`verify_carved.py`, `geom_bounds.py`, `menu_logo_bounds.py`, all under
     `scripts/hsd/`). Reads files directly from disc - does not require
     Dolphin to be running.
@@ -198,8 +198,11 @@ reloc table into carved coordinates) -> `build_archive` (serialize).
       mods/custom_items/assets/items/MegaHydra.dat "Mega Hydra" \
       --base-kind 3 --scale 1.2 --weight-blue 40 --ev-destructible 80
   ```
+- `scripts/hsd/make_ap_star_pieces.py` - author the Archipelago Star's six
+  sphere items (generated UV-sphere `customItem` archives, one per logo color)
+  plus `ApPieceIcons.dat`, their HUD tracker art.
 - `scripts/hsd/make_checklist_textures.py` - author `ApChecklistTex.dat`
-  (banner RGB5A3 + emblem I4) from `mods/archipelago/assets/ap-icon.png`.
+  (banner RGB5A3 + emblem I4) from `art/ap-icon.png`.
 - `scripts/hsd/make_menu_logo.py` - author `MnTitleKarchi.dat`, a
   `_scene_models` model archive of textured quads for the title screen.
 

@@ -13,9 +13,15 @@
 // address is a CustomItemDesc. Magic is big-endian ASCII "CITM".
 #define CUSTOM_ITEM_SYMBOL        "customItem"
 #define CUSTOM_ITEM_MAGIC         0x4349544Du
-// v2 adds model_flag, v3 adds scale; older descriptors stay supported (the
-// loader rejects only versions newer than this one).
-#define CUSTOM_ITEM_DESC_VERSION  3
+// v2 adds model_flag, v3 adds scale, v4 adds flags; older descriptors stay
+// supported (the loader rejects only versions newer than this one).
+#define CUSTOM_ITEM_DESC_VERSION  4
+
+// CustomItemDesc.flags (v4+).
+// NO_MAT_ANIM: the model is not the base kind's, so the base kind's material
+// animation - authored against its materials - must not be bound to it. The
+// joint animation and state script still come from the base kind.
+#define CUSTOM_ITEM_FLAG_NO_MAT_ANIM 0x00000001u
 
 // Folder (relative to FST root) and extension scanned for drop-in items.
 #define CUSTOM_ITEM_DROPIN_DIR    "items"
@@ -45,10 +51,11 @@ typedef struct CustomItemDesc
     const char *name;   // 0x08 display name (NUL-terminated)
 
     int base_kind;      // 0x0c ItemKind to clone behavior from (0..ITKIND_NUM-1)
-    int reserved_group; // 0x10 unused; the BAD/GOOD/FAKE group comes from PatchEffectInfo.group
+    u32 flags;          // 0x10 (v4+) CUSTOM_ITEM_FLAG_*; 0 in older descriptors
 
     void *model;        // 0x14 optional JOBJDesc* model override (NULL = inherit base_kind)
-    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit)
+    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit);
+                        //      its group field is the kind's BAD/GOOD/FAKE group
 
     // The sky picker draws from the union of the three box pools, so weight_box
     // covers sky drops too and weight_free is unused. Box chances are u8 in the
@@ -77,10 +84,13 @@ typedef struct CustomItemsAPI
     // Display name of the index-th item (NULL if out of range).
     const char *(*GetName)(int index);
 
-    // 1 if enabled for spawning (master toggle AND per-item gate).
+    // 1 if enabled for spawning: master toggle AND the player's per-item menu
+    // toggle AND the consumer gate below.
     int (*IsEnabled)(u32 id_hash);
 
-    // Enable/disable an item for spawning.
+    // Set this consumer's gate on an item. Independent of the player's menu
+    // toggle, which stays theirs - either one off keeps the item out of the
+    // round. Gates default open, so an item nobody calls this on spawns freely.
     void (*SetEnabled)(u32 id_hash, int enabled);
 
     // ItemKind assigned this round, or -1 if not registered yet this scene.

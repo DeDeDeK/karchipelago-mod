@@ -6,8 +6,8 @@
 // wider copy. The loaded-archive table stc_vcDataLookup is a fixed array whose
 // bike row starts right after its star row, so it is relocated wholesale into
 // stc_vc_lookup; every read of the original goes through this file. The two
-// machine-specific handler tables are relocated through their readers' address
-// arithmetic, as the character tables are.
+// machine-specific handler tables are relocated by rewriting the lis/addi pair
+// inside their one reader.
 
 #include "os.h"
 #include "hsd.h"
@@ -100,18 +100,12 @@ CODEPATCH_HOOKCREATE(0x801c8d8c,
 )
 
 // Repoint Machine_StoreVcDataPtr's inline `stc_vcDataLookup[is_bike][kind]` read
-// at stc_vc_lookup, by rewriting the three instructions that build it: the
-// lis/addi pair that forms the base and the class-stride multiply. Patching the
-// arithmetic rather than hooking keeps the caller-saved registers the
-// surrounding code still needs (r0, r4, r5) untouched.
+// at stc_vc_lookup: the lis/addi pair that forms the base, plus the class-stride
+// multiply. Patching the arithmetic rather than hooking keeps the caller-saved
+// registers the surrounding code still needs (r0, r4, r5) untouched.
 static void PatchLookupBase(void)
 {
-    u32 addr = (u32)&stc_vc_lookup[0][0];
-    u32 lo = addr & 0xFFFF;
-    u32 hi = (addr >> 16) + ((lo & 0x8000) ? 1 : 0); // addi sign-extends its immediate
-
-    CODEPATCH_REPLACEINSTRUCTION(0x801c4fd0, 0x3CA00000 | hi); // lis r5, hi
-    CODEPATCH_REPLACEINSTRUCTION(0x801c4fe8, 0x38C50000 | lo); // addi r6, r5, lo
+    CustomMachines_RepointTable(0x801c4fd0, 0x801c4fe8, stc_vc_lookup);
     CODEPATCH_REPLACEINSTRUCTION(0x801c5034, 0x1CE70000 | (CUSTOM_VCSTAR_NUM * 4)); // mulli r7, r7, N
 }
 

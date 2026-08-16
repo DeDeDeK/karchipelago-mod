@@ -55,7 +55,7 @@ The generated XML (`out/Riivolution/riivolution/KARchipelago.xml`, copied verbat
 `external` paths resolve under `Load/Riivolution/` (so `/KARchipelago/...` is
 `Load/Riivolution/KARchipelago/...`, where `make deploy` stages them). `disc` paths are
 relative to the game's FST root - `/KARchipelago/mods/archipelago.bin` lands at
-`/mods/archipelago.bin`, `/KARchipelago/ap-icon.png` at `/ap-icon.png`, etc.
+`/mods/archipelago.bin`, `/KARchipelago/ApIcon.dat` at `/ApIcon.dat`, etc.
 
 To make mods pluggable, split that one `files` patch into a mandatory **core** patch plus one
 patch per mod, each behind its own option.
@@ -92,7 +92,7 @@ patch per mod, each behind its own option.
 
   <patch id="mod-archipelago">
     <file external="/KARchipelago/mods/archipelago.bin" disc="/mods/archipelago.bin" create="true"/>
-    <file external="/KARchipelago/ap-icon.png"          disc="/ap-icon.png"          create="true"/>
+    <file external="/KARchipelago/ApIcon.dat"           disc="/ApIcon.dat"           create="true"/>
   </patch>
   <patch id="mod-textbox">
     <file external="/KARchipelago/mods/textbox.bin" disc="/mods/textbox.bin" create="true"/>
@@ -147,7 +147,7 @@ API headers are the real coupling surface between split repos.
    - **Harden the consumer** to NULL-guard `tb_api` / `ce_api` so the dependency becomes
      genuinely optional. More work, but then the mods are truly independent plugins.
 
-3. **Assets travel with their mod, not core.** `ap-icon.png` belongs to the `archipelago` patch.
+3. **Assets travel with their mod, not core.** `ApIcon.dat` belongs to the `archipelago` patch.
    Giving each mod its own asset subfolder lets the per-mod patch map a single `<folder>`
    instead of enumerating files.
 

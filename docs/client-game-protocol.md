@@ -140,7 +140,7 @@ Per-mode arrays are `CHECKLIST_MODE_NUM` (4) wide, indexed by **checklist-mode r
 | 0x0E0 | `stadium_gating_enabled`         | 0 or 1 | 1 = gated. 0 = all stadiums unlocked at connect; AP world ships no stadium unlock items. (The KAROptions toggle `city_trial_stadiums_gated` maps directly to this.) |
 | 0x0E4 | `base_ability_gating_enabled`    | 0 or 1 | 1 = gated. 0 = inhale / quick spin / charge unlocked at connect; AP world ships no base ability unlock items. |
 | 0x0E8 | `checklist_rewards_gating_enabled` | 0 or 1 | 1 = gated (default): each non-progression checklist reward (music, sound test, extra rules, endings, filler boxes, …) is an AP item the player finds. 0 = ungated: the mod marks every such reward received at connect (`ChecklistRewards_GrantAllCosmetic`, tracked via `received_checklist_rewards` — **not** a mask), and the AP world ships none. The 6 Dragoon/Hydra part markers are progression and are **not** affected by this flag. |
-| 0x0EC | `goal_forced_gates`              | bitmask | Unlock bits an ungated category's pre-fill must leave locked, because this seed's goal is what they gate and the AP world kept them in the pool. Bit 0 `GOALGATE_LEGENDARY_PIECES` = `ITUNLOCK_HYDRA1-3` / `ITUNLOCK_DRAGOON1-3`, bit 1 `GOALGATE_VS_KING_DEDEDE` = `STKIND_VSKINGDEDEDE`. Only read in the ungated branch: a bit is 0 when its own category is gated, since that flag already keeps every bit locked. |
+| 0x0EC | `goal_forced_gates`              | bitmask | Unlock bits an ungated category's pre-fill must leave locked, because this seed's goal is what they gate and the AP world kept them in the pool. Bit 0 `GOALGATE_LEGENDARY_PIECES` = `ITUNLOCK_HYDRA1-3` / `ITUNLOCK_DRAGOON1-3`, bit 1 `GOALGATE_VS_KING_DEDEDE` = `STKIND_VSKINGDEDEDE`, bit 2 `GOALGATE_AP_STAR_PIECES` = every `APStarPieceKind`. Only read in the ungated branch: a bit is 0 when its own category is gated, since that flag already keeps every bit locked. |
 
 `APSlotOptions` is 8-byte aligned, so `goal_forced_gates` sits in what was the block's tail padding and the block still ends at 0x0F0.
 
@@ -159,6 +159,8 @@ Two City Trial goals are a single in-game feat rather than a checklist count, an
 | 4     | `GOAL_NONE`           | `none`                 | All   |
 | 5     | `GOAL_CHECKLIST_LIST` | `checklist_list`       | All   |
 | 6     | `GOAL_MAX_STATS_CT`   | `max_stats_ct`         | City Trial only |
+| 7     | `GOAL_ASSEMBLE_AP_STAR` | `assemble_archipelago_star` | Archipelago row only |
+| 8     | `GOAL_ALL_LEGENDARIES_CT` | `all_three_legendaries_in_one_run` | Archipelago row only |
 
 ### goal_checks Layout (GOAL_CHECKLIST_LIST)
 
@@ -219,7 +221,7 @@ Per-category gating toggles (one slot option per `APUnlockCategory`). Each KAROp
 
 `checklist_rewards_gated` → `checklist_rewards_gating_enabled` follows the same true=gated convention, but is **not** a mask-backed `APUnlockCategory`: when ungated the mod pre-grants the cosmetic rewards via `ChecklistRewards_GrantAllCosmetic` rather than filling a bitmask.
 
-Two more `slot_data` keys are derived rather than raw toggles, and the client packs them into `goal_forced_gates`: `legendary_pieces_goal_gated` → bit 0, `vs_king_dedede_goal_gated` → bit 1. Each is 1 only when its category ships ungated *and* the seed's goal is gated on those unlocks.
+Three more `slot_data` keys are derived rather than raw toggles, and the client packs them into `goal_forced_gates`: `legendary_pieces_goal_gated` → bit 0, `vs_king_dedede_goal_gated` → bit 1, `ap_star_pieces_goal_gated` → bit 2. Each is 1 only when its category ships ungated *and* the seed's goal is gated on those unlocks.
 
 Options **not written to the mod** (used at AP generation time, or carried only in `slot_data` for the client's own logic): `trap_chance`, `spawn_rate_max`, `city_trial_permanent_patches` (gen-time only — controls whether permanent-patch items enter the pool; the mod has no corresponding slot field and always treats permanent patches as an active item category), and the per-mode `air_ride_checkbox_fillers` / `top_ride_checkbox_fillers` / `city_trial_checkbox_fillers` fields. (`trap_chance` is present in `slot_data` for the client's trap-roll logic but is not written into `APSlotOptions`.)
 
@@ -388,6 +390,7 @@ These items unlock gated game features. Each category uses a bitmask in save dat
 | 771-773 | 771 | `AP_BASE_ABILITY_UNLOCK_` | Kirby's base moves — inhale, quick spin, charge (aligned to `BaseAbilityKind`) | 3 | `base_ability_unlocked_mask` |
 | 780-788 | 780 | `AP_PATCH_UNLOCK_` | Patch types (aligned to PatchKind) | 9 | `patch_unlocked_mask` |
 | 790-819 | 790 | `AP_ITEM_UNLOCK_` | Item groups (aligned to ItemUnlockKind, `ITUNLOCK_NUM` = 30) | 30 | `item_unlocked_mask` |
+| 820-825 | 820 | `AP_STAR_PIECE_UNLOCK_` | Archipelago Star assembly spheres (aligned to `APStarPieceKind`) | 6 | `ap_star_piece_unlocked_mask` |
 | 830-854 | 830 | `AP_MACHINE_UNLOCK_` | Machines (aligned to VCKIND, contiguous — see note) | 25 | `machine_unlocked_mask` |
 | 860-862 | 860 | `AP_BOX_UNLOCK_` | Box types (Blue, Green, Red) | 3 | `box_unlocked_mask` |
 | 870-878 | 870 | `AP_STAGE_UNLOCK_AIRRIDE_` | Air Ride stages | 9 | `airride_stage_unlocked_mask` |
@@ -528,6 +531,8 @@ The mod evaluates the goal condition mod-side using `ap_save->options` (the slot
 | `GOAL_HYDRA_AND_DRAGOON` | Single bit `0x77` set in `sent_checks[CT]` (the native "complete both Dragoon and Hydra in one match" cell). **Not** bits `0x6D`/`0x6E` — those are the separate part-unlock cells. |
 | `GOAL_BEAT_KING_DEDEDE` | Bit `0x2F` set in `sent_checks[CT]` |
 | `GOAL_CHECKLIST_LIST` | `(sent_checks[mode] & goal_checks[mode]) == goal_checks[mode]` — all required bits set |
+| `GOAL_ASSEMBLE_AP_STAR` | The Archipelago row's `sent_checks` bit for `APCK_ASSEMBLE_AP_STAR` (clear_kind 50), set when a human collects all six Archipelago spheres in one `CITYMODE_TRIAL` round. Each sphere needs its own unlock item (820-825) to spawn at all. |
+| `GOAL_ALL_LEGENDARIES_CT` | The Archipelago row's `sent_checks` bit for `APCK_ASSEMBLE_ALL_LEGENDARY` (clear_kind 51), set when one human assembles Dragoon, Hydra and the Archipelago Star inside a single `CITYMODE_TRIAL` round. |
 | `GOAL_MAX_STATS_CT` | Sticky save bit `max_stats_ct_achieved`; set when any human player's 9 CT stats simultaneously reach the patch-cap ceiling (`city_trial_patch_cap_max`, 1–127 — **not** `PATCH_STAT_MAX`, which is the absolute clamp ceiling of 127) during a `CITYMODE_TRIAL` round. Stadium and Free Run do not count. When `min < max`, the player must first receive every Patch Cap Increase item to make the ceiling reachable. |
 
 Victory fires only if at least one mode has a non-NONE goal AND every mode's goal is satisfied. Mode goals are independent — set `*_goal = GOAL_NONE` for modes that should not contribute to victory.

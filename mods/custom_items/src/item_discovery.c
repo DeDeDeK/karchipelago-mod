@@ -1,7 +1,18 @@
 // Drop-in discovery is two-pass (count, then index) so the cap warning is
 // reported once before any entries are added.
+//
+// Each descriptor is read once here for its display name, which is the handle
+// consumer mods bind an item by: it has to be known before the first round
+// registers anything, and for an item held disabled it is never registered at all.
+// Discovery runs at boot, before any scene exists, so the archive is read with a
+// self-contained loader (DVD read into an HSD_MemAlloc buffer, then Archive_Init)
+// rather than Archive_LoadFile, which allocates from a per-scene heap. Only the
+// name is kept, but neither allocation is freed: the read's completion callback is
+// not a barrier the buffer can be reused behind, and a later landing write into a
+// reallocated block corrupts the heap's block headers.
 
 #include "os.h"
+#include "hsd.h"
 
 #include "fst/fst.h"
 
@@ -21,6 +32,53 @@ u32 CustomItems_HashPath(const char *path)
     return h;
 }
 
+static void FileLoadCallback(int result, void *arg)
+{
+    (void)result;
+    *(volatile int *)arg = 1;
+}
+
+static HSD_Archive *LoadArchiveAtBoot(char *path)
+{
+    int entrynum = DVDConvertPathToEntrynum(path);
+    if (entrynum == -1)
+        return NULL;
+
+    int size = File_GetSize(path);
+    if (size <= 0)
+        return NULL;
+
+    void *buffer = HSD_MemAlloc(OSRoundUp32B(size));
+    if (buffer == NULL)
+        return NULL;
+
+    volatile int loaded = 0;
+    File_Read(entrynum, 0, buffer, OSRoundUp32B(size), 0x21, 1, FileLoadCallback, (void *)&loaded);
+    while (!loaded)
+        ;
+
+    HSD_Archive *archive = HSD_MemAlloc(sizeof(HSD_Archive));
+    if (archive == NULL)
+        return NULL;
+    Archive_Init(archive, buffer, size);
+    return archive;
+}
+
+// Leaves the provisional filename in place if the archive or its descriptor is
+// unusable; the per-round registration reports why.
+static void ReadDescriptorName(CustomItemEntry *e, char *path)
+{
+    HSD_Archive *arc = LoadArchiveAtBoot(path);
+    if (arc == NULL)
+        return;
+
+    const CustomItemDesc *desc =
+        (const CustomItemDesc *)Archive_GetPublicAddress(arc, CUSTOM_ITEM_SYMBOL);
+    if (desc != NULL && desc->magic == CUSTOM_ITEM_MAGIC &&
+        desc->version <= CUSTOM_ITEM_DESC_VERSION && desc->name != NULL)
+        CustomItems_CopyName(e->name, desc->name);
+}
+
 static void CountCb(int entrynum, void *args)
 {
     (void)entrynum;
@@ -36,10 +94,12 @@ static void IndexCb(int entrynum, void *args)
     if (e == NULL) // registry full - already reported
         return;
 
-    e->file_entrynum = entrynum;
-    e->id_hash = CustomItems_HashPath(FST_GetFilePathFromEntrynum(entrynum));
+    char *path = FST_GetFilePathFromEntrynum(entrynum);
 
-    // Provisional name; the descriptor's own name supersedes it once loaded.
+    e->file_entrynum = entrynum;
+    e->id_hash = CustomItems_HashPath(path);
+
+    // Provisional name; the descriptor's own name supersedes it below.
     char *filename = FST_GetFilenameFromEntrynum(entrynum);
     CustomItems_CopyName(e->name, filename);
 
@@ -54,6 +114,10 @@ static void IndexCb(int entrynum, void *args)
     }
     if (dot > 0) // keep a leading-dot name intact; strip only a real extension
         e->menu_label[dot] = '\0';
+
+    if (path != NULL)
+        ReadDescriptorName(e, path);
+    OSReport("[CustomItems] %s -> '%s'\n", path, e->name);
 }
 
 int CustomItems_Discover(void)

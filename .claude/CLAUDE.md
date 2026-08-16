@@ -8,7 +8,8 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 
 ## Project Structure
 
-- `mods/` - the individual mods that make up the package, one per subdirectory (C/asm sources in `src/`, public API header in `include/<mod>_api.h` imported by other mods via `Hoshi_ImportMod`); which of them a build contains is chosen with `INCLUDE_MODS`.
+- `mods/` - the individual mods that make up the package, one per subdirectory (C/asm sources in `src/`, public API header in `include/<mod>_api.h` imported by other mods via `Hoshi_ImportMod`); which of them a build contains is chosen with `INCLUDE_MODS`. A mod's `assets/` is the **disc staging folder** - every file in it is copied to the FST root, so only things the game loads belong there.
+- `art/` - source art (PNGs) the `.dat` authoring scripts read. Kept out of `mods/*/assets/` because nothing on disc reads a PNG and staging one just pads the package.
 - `externals/hoshi/` - the hoshi modding framework (submodule): headers, linker script, symbol map (`GKYE01.map`), framework source.
 - `docs/` - per-system reference docs and data files; one doc per system, found by filename.
 - `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), the Ghidra type pipeline (`scripts/ghidra/`), the HSD `.dat` toolchain (`scripts/hsd/`), the devkitPPC toolchain build (`scripts/devkitpro/`), and Makefile/asset helpers (`scripts/utility/`).

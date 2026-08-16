@@ -122,8 +122,10 @@ hazard, and hoshi relocates the minor table (`Gm_Minor`'s seven lookup sites are
 
 ## Asset Pipeline
 
-`scripts/hsd/make_menu_logo.py` authors `mods/archipelago/assets/MnTitleKarchi.dat` from the
-two piece PNGs in the same directory (`AirRide_Archipelago.png`, `Archipelago_Kirbs-05.png`):
+`scripts/hsd/make_menu_logo.py` authors `mods/archipelago/assets/MnTitleKarchi.dat` from two
+piece PNGs in `art/` (`AirRide_Archipelago.png`, `Archipelago_Kirbs-05.png`). Source art lives
+there rather than beside the archive because `assets/` is the disc staging folder - everything
+in it ships:
 
     uv run --with pillow python scripts/hsd/make_menu_logo.py
 

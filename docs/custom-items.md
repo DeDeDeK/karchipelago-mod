@@ -57,10 +57,24 @@ mirroring KAR Deluxe's custom-song loader. Each `.dat` becomes a
 - `id_hash` — FNV-1a over the full FST path. Stable identity independent of
   registry order, so per-item enable state (menu / AP gating) survives reboots
   and folder changes.
-- `name` — the filename at discovery, superseded by the descriptor's own name
-  once the archive is loaded.
-- `enabled` / `assigned_kind` — per-item spawn gate, and the `ItemKind` assigned
-  in the extended tables for the current round (`-1` until registered).
+- `name` — the descriptor's display name. Discovery reads each archive once for
+  it (a DVD read into an `HSD_MemAlloc` buffer parsed with `Archive_Init`; boot
+  has no scene heap for `Archive_LoadFile`), so the name a consumer mod binds by
+  is known before any round registers anything and for items held disabled, which
+  are never registered at all. Falls back to the filename if the archive or its
+  descriptor is unusable. Neither allocation is freed — the read's completion
+  callback is no barrier to reusing the buffer, and a write landing in a
+  reallocated block corrupts the heap block headers (`OSFreeToHeap` then faults on
+  a link word holding archive bytes) — so boot holds one `.dat`-sized block per
+  drop-in item.
+- `enabled` / `api_enabled` — the two independent spawn gates, both of which must
+  be open for the item to be registered. `enabled` is the player's settings-menu
+  toggle, which hoshi persists; `api_enabled` is the consumer-mod gate written by
+  `SetEnabled` and defaults open. They are separate fields because a consumer that
+  drives its gate every scene load would otherwise rewrite the player's saved
+  choice and leave the menu showing a value they never picked.
+- `assigned_kind` — the `ItemKind` assigned in the extended tables for the current
+  round (`-1` until registered).
 
 The registry is a fixed `CUSTOM_ITEM_MAX` (16) array — the practical ceiling
 imposed by the 68-entry weight arrays, not an arbitrary limit.
@@ -76,15 +90,29 @@ and render `scale`, plus per-source spawn weights (`weight_box[3]`,
 compatibility: v2 adds `model_flag`, the model's itData render flag - `0x02000000`
 for flat panels, `0x03/0x05/0x0b000000` for the legendary pieces - so skinned
 models render correctly; v3 adds `scale`, a render-scale multiplier over the base
-kind's native size (0 or 1.0 = inherit). Older descriptors stay supported; the
-loader rejects only versions newer than it knows. `weight_free` is reserved: the
+kind's native size (0 or 1.0 = inherit); v4 adds `flags`, in the slot v1-v3 left
+zeroed. Older descriptors stay supported; the loader rejects only versions newer
+than it knows.
+
+One flag is defined. `CUSTOM_ITEM_FLAG_NO_MAT_ANIM` says the supplied `model` is
+not the base kind's, so the base kind's material animation must not be bound to
+it. A material animation drives the diffuse/ambient/alpha tracks of the materials
+it was authored against; pointed at a foreign model it repaints whatever material
+sits in the same tree position. The legendary pieces are the sharp case - Hydra's
+animates diffuse R/G/B over a 240-frame loop, which cycles a solid-colored
+replacement model through colors that are not its own. Set the flag whenever the
+model comes from somewhere other than `base_kind`; leave it clear when the model
+was carved from the base kind itself, where the animation is the one it belongs
+to. The joint animation and the state script still come from the base kind either
+way - the script drives the item's hurtbox and effect timing, so dropping it
+would change behavior, not just looks. `weight_free` is reserved: the
 sky/free-fall picker draws from the union of the three box pools, so `weight_box`
 already governs sky drops too. The engine's box/sky pools store the chance as a
 `u8`, so `weight_box` values saturate at 255 (weights are relative - typical
 values are well under 255); `weight_event` is `u16` and used unclamped. The
 BAD/GOOD/FAKE group is not a standalone field: it is read from the effect record
 (`PatchEffectInfo.group`), so it follows `base_kind` (or the `effect_info`
-override), and the descriptor's `reserved_group` slot is unused.
+override).
 
 `CustomItems_LoadDescriptor` (`item_registry.c`) performs the load + validate:
 `Archive_LoadFile` → `Archive_GetPublicAddress(arc, "customItem")` → magic/version
@@ -115,7 +143,12 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    `{ JOBJ *j; int flag; … }` (`stc_model_pair`) with only `j` and `flag` written —
    an 8-byte pair would let `+0x8` read into the next array element and trip the
    assert. `flag` carries the model's itData render flag (`model_flag`, v2+;
-   `0x02000000` flat for v1 descriptors).
+   `0x02000000` flat for v1 descriptors). A `NO_MAT_ANIM` kind also gets its own
+   `anim_data`: the base kind's slots copied with `mat_anim` nulled, so
+   `CityItem_StateChange` (`0x8024f488`) binds only the joint animation through
+   `CityItem_BindStateAnim` (`0x80251894`). Two slots are copied — the widest anim
+   array any vanilla kind has, since a state selects its slot by index and nothing
+   records how many exist.
 2. **Lift the ceiling** — `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
    is patched to `cmpwi r4, ITKIND_NUM + CUSTOM_ITEM_MAX` once at boot.
 3. **Clamp behavior** — the state-handler table (`0x804b6088`, 69 entries) and the
@@ -190,6 +223,11 @@ on a multi-texture model add `--texture-index N` to choose which slot, and
 instead of stretching it. Dropping the output in `assets/items/` stages it to the
 FST `items/` folder, where it is discovered at boot.
 
+A model `Item.dat` does not hold has to be generated instead of carved, and the
+descriptor is the same either way - `scripts/hsd/make_ap_star_pieces.py` builds the
+Archipelago Star's six spheres that way, emitting the `CustomItemDesc`, a generated
+JOBJ tree and its own zero-entry `PatchEffectInfo` into one archive.
+
 ## API
 
 Exported via `Hoshi_ExportMod` for other mods (e.g. archipelago gating/granting
@@ -199,8 +237,8 @@ custom items). Items are addressed by `id_hash`:
 int  GetCount(void);
 u32  GetIdHash(int index);
 const char *GetName(int index);
-int  IsEnabled(u32 id_hash);             // master toggle AND per-item gate
-void SetEnabled(u32 id_hash, int enabled);
+int  IsEnabled(u32 id_hash);             // master AND menu toggle AND consumer gate
+void SetEnabled(u32 id_hash, int enabled); // the consumer gate only
 int  GetAssignedKind(u32 id_hash);       // ItemKind this round, or -1
 void SetPickupHandler(CustomItemPickupFn h);    // legacy single-handler setter
 void AddPickupHandler(CustomItemPickupFn h);    // subscribe (multiple allowed)
@@ -226,7 +264,9 @@ matches.
 - `src/main.c` — `ModDesc` and the settings menu, built at boot: a master enable
   toggle plus one enable toggle per discovered item, each bound to its registry
   entry's `enabled` flag and labeled by the stable `menu_label` (so the saved
-  per-item state, hashed on the option name, survives reboots).
+  per-item state, hashed on the option name, survives reboots). `enabled` is the
+  only field the menu writes; a consumer mod's gate is `api_enabled`, so exiting
+  the settings menu never persists a gate decision as if it were the player's.
 - `src/custom_items.c` — boot, registry storage, exported API.
 - `src/item_discovery.c` — FST scan + path hashing.
 - `src/item_registry.c` — descriptor load/validate, the per-round itData /

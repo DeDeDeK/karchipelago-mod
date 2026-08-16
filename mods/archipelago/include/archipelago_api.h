@@ -384,6 +384,19 @@ typedef enum APItemId
     AP_ITEM_UNLOCK_DRAGOON2,               // ITUNLOCK_DRAGOON2
     AP_ITEM_UNLOCK_DRAGOON3,               // ITUNLOCK_DRAGOON3
 
+    // Archipelago Star sphere unlock items (820-825, aligned to APStarPieceKind).
+    // Their own mask rather than a bit in item_unlocked_mask, which ITUNLOCK_NUM
+    // has all but filled. Separate from AP_MACHINE_UNLOCK_ARCHIPELAGO_STAR: the
+    // spheres gate the assembly, the machine item gates the assembled star
+    // spawning loose in the city, the same split Hydra and Dragoon have.
+    AP_STAR_PIECE_UNLOCK_BASE = 820,
+    AP_STAR_PIECE_UNLOCK_ROSE = 820,       // APSTARPIECE_ROSE
+    AP_STAR_PIECE_UNLOCK_GREEN,            // APSTARPIECE_GREEN
+    AP_STAR_PIECE_UNLOCK_VIOLET,           // APSTARPIECE_VIOLET
+    AP_STAR_PIECE_UNLOCK_TAN,              // APSTARPIECE_TAN
+    AP_STAR_PIECE_UNLOCK_BLUE,             // APSTARPIECE_BLUE
+    AP_STAR_PIECE_UNLOCK_YELLOW,           // APSTARPIECE_YELLOW
+
     // Machine unlock items (830-854, aligned to MachineKind).
     // VCKIND_WHEELVSDEDEDE (would be 855) is not exposed: it is the Vs. King
     // Dedede stadium's CPU-only machine and no game code reads its unlock bit.
@@ -553,6 +566,20 @@ typedef enum ItemUnlockKind
     ITUNLOCK_NUM,
 } ItemUnlockKind;
 
+// The six Archipelago Star spheres, in the logo's ring order - rose at twelve
+// o'clock, then clockwise. Index N = bit N in ap_star_piece_unlocked_mask, and
+// the same index the assembly code addresses a sphere by.
+typedef enum APStarPieceKind
+{
+    APSTARPIECE_ROSE,
+    APSTARPIECE_GREEN,
+    APSTARPIECE_VIOLET,
+    APSTARPIECE_TAN,
+    APSTARPIECE_BLUE,
+    APSTARPIECE_YELLOW,
+    APSTARPIECE_NUM,
+} APStarPieceKind;
+
 // Archipelago-defined base-ability kinds - Kirby's fundamental moves gated
 // behind AP items. Not a vanilla game enum; index N = bit N in
 // base_ability_unlocked_mask.
@@ -581,6 +608,7 @@ typedef enum APUnlockCategory
     AP_UNLOCK_COLOR,           // u8  - KIRBYCOLOR_*
     AP_UNLOCK_STADIUM,         // u32 - STKIND_*
     AP_UNLOCK_BASE_ABILITY,    // u8  - BaseAbilityKind (inhale / quick spin / charge)
+    AP_UNLOCK_AP_STAR_PIECE,   // u8  - APStarPieceKind
     AP_UNLOCK_NUM,
 } APUnlockCategory;
 

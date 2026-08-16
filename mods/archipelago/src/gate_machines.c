@@ -299,6 +299,19 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002cc80,
     0x8002cddc
 )
 
+// Replaces the bl CityTrial_CheckLegendaryMachineUnlocked inside
+// CityMachineSpawn_PickFreeRunKind (0x801de41c), Free Run's "place one of every
+// machine" picker. Vanilla asks the checklist there, which AP never writes, so an
+// owned Hydra or Dragoon would never appear on that screen however the mask reads.
+// Only kinds 4 and 8 reach this call; every other kind is taken unconditionally,
+// which is Free Run's own sandbox rule and is left alone.
+int GateMachines_CheckFreeRunLegendaryUnlocked(MachineKind kind)
+{
+    if (kind < 0 || kind >= MachineKind_Num())
+        return 0;
+    return (ap_save->machine_unlocked_mask & (1u << kind)) ? 1 : 0;
+}
+
 int GateMachines_SelectSpawn(MachineSpawnData *msd, float match_progress)
 {
     u32 unlocked_mask = ap_save->machine_unlocked_mask;
@@ -475,56 +488,21 @@ CODEPATCH_HOOKCREATE(0x8002f0b8,
     0x8002f220
 )
 
-// custom_machines owns the City Trial select screen's packing when it is built, and
-// gating rides on the availability filter it takes. Without it nothing patches that
-// screen at all, so the same gating is applied directly here. Idempotent, since the
-// import that decides this is re-tried per call.
-void GateMachines_OnCustomMachinesAbsent(void)
-{
-    static int applied;
-
-    if (applied)
-        return;
-    applied = 1;
-
-    CODEPATCH_HOOKAPPLY(0x8002e4d0);  // CT Stadium (mode 1) counting pass
-    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // CT Free Run (mode 2) counting pass
-    CODEPATCH_HOOKAPPLY(0x8002f0b8);  // CT select list, layout and icons
-
-    // The two array-building passes now have nothing to build: skip each straight to
-    // the tail above, which also skips the reorder between them.
-    CODEPATCH_REPLACEINSTRUCTION(0x8002e67c, 0x48000a3c);  // b 0x8002f0b8
-    CODEPATCH_REPLACEINSTRUCTION(0x8002e738, 0x48000980);  // b 0x8002f0b8
-
-    // CitySelect_Cursor1InputThink splits cursor rows at num>=10 (`cmpwi r3, 9; ble`),
-    // but the grid renderer keeps up to 10 icons on one drawn row and only wraps at 11,
-    // so at num==10 the cursor splits 5+5 across a single row. Vanilla CT only produces
-    // counts 15-20; a gated roster can land on exactly 10.
-    CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a);  // cmpwi r3, 10
-
-    OSReport("[GateMachines] CT select screen gated standalone\n");
-}
-
 // Replaces the respawn machine assignment in Rider_ResetStartingMachine, which
 // hardcodes VCKIND_COMPACT.
 void GateMachines_ResetStartingMachine(RiderData *rd)
 {
     u8 ply = rd->ply;
     MachineKind vckind = rd->starting_machine_idx;
+    int is_bike;
+    int class_index;
 
     if (!(ap_save->machine_unlocked_mask & (1 << vckind)))
         vckind = GetFirstUnlockedCTMachine();
 
-    if (vckind >= VCKIND_WHEELNORMAL)
-    {
-        Ply_SetMachineIsBike(ply, 1);
-        Ply_SetMachineKind(ply, vckind - VCKIND_WHEELNORMAL);
-    }
-    else
-    {
-        Ply_SetMachineIsBike(ply, 0);
-        Ply_SetMachineKind(ply, vckind);
-    }
+    class_index = MachineKind_ClassIndexOf(vckind, &is_bike);
+    Ply_SetMachineIsBike(ply, is_bike);
+    Ply_SetMachineKind(ply, class_index);
 }
 
 // CT machine-select slots the player explicitly picked on the grid this session
@@ -678,6 +656,40 @@ void GateMachines_PopulateAirRideIcons(void)
         AirRideSelect_CreateSIcon((s8)base[SELECT_LIST + i], (s8)i);
 }
 
+// custom_machines owns both select screens' packing when it is built, and gating
+// rides on the availability filter it takes. Without it nothing patches either
+// screen, so the same gating is applied directly here. These patch the same sites
+// the registry does, so this must only ever run when the registry really is absent:
+// OnSaveLoaded is the one call site, being the first point past every mod's OnBoot.
+// Neither screen can be reached before it.
+void GateMachines_OnCustomMachinesAbsent(void)
+{
+    static int applied;
+
+    if (applied)
+        return;
+    applied = 1;
+
+    CODEPATCH_REPLACEFUNC(AirRide_PopulateSelectIcons, GateMachines_PopulateAirRideIcons);
+
+    CODEPATCH_HOOKAPPLY(0x8002e4d0);  // CT Stadium (mode 1) counting pass
+    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // CT Free Run (mode 2) counting pass
+    CODEPATCH_HOOKAPPLY(0x8002f0b8);  // CT select list, layout and icons
+
+    // The two array-building passes now have nothing to build: skip each straight to
+    // the tail above, which also skips the reorder between them.
+    CODEPATCH_REPLACEINSTRUCTION(0x8002e67c, 0x48000a3c);  // b 0x8002f0b8
+    CODEPATCH_REPLACEINSTRUCTION(0x8002e738, 0x48000980);  // b 0x8002f0b8
+
+    // CitySelect_Cursor1InputThink splits cursor rows at num>=10 (`cmpwi r3, 9; ble`),
+    // but the grid renderer keeps up to 10 icons on one drawn row and only wraps at 11,
+    // so at num==10 the cursor splits 5+5 across a single row. Vanilla CT only produces
+    // counts 15-20; a gated roster can land on exactly 10.
+    CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a);  // cmpwi r3, 10
+
+    OSReport("[GateMachines] Select screens gated standalone\n");
+}
+
 // Replaces TitleScreen_CheckMachineUnlocked (0x8000c364), the unlock query for the
 // title-screen attract demo's random machine picker (TitleScreen_SelectRandomMachine,
 // 0x8000daa0). It does NOT run for CPUs in real Air Ride races, which draw from the
@@ -699,18 +711,16 @@ void GateMachines_OnBoot()
     CODEPATCH_HOOKAPPLY(0x801df00c);  // CityMachineSpawn_DecideAndSpawn selection
     CODEPATCH_HOOKAPPLY(0x801df44c);  // cityTrialSpawnFormationStar selection
 
+    // Free Run's picker asks the checklist whether the legendaries are unlocked.
+    CODEPATCH_REPLACECALL(0x801de528, GateMachines_CheckFreeRunLegendaryUnlocked);
+
     CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
     CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
 
-    // custom_machines boots after us and replaces this again with the packing its
-    // widened grid needs; the later patch wins and both pack the same list below 21
-    // icons.
-    CODEPATCH_REPLACEFUNC(AirRide_PopulateSelectIcons, GateMachines_PopulateAirRideIcons);
-
-    // City Trial's select screen is packed by custom_machines when that mod is built,
-    // and gated through the availability filter main.c hands it; otherwise
-    // GateMachines_OnCustomMachinesAbsent patches the screen here. Both are decided
-    // past OnBoot, because the registry boots after us.
+    // Both select screens are packed by custom_machines when that mod is built and
+    // gated through the availability filter main.c hands it; otherwise
+    // GateMachines_OnCustomMachinesAbsent patches them here. Decided past OnBoot,
+    // because the registry boots after us.
 
     CODEPATCH_HOOKAPPLY(0x8002dea0);  // CT starting-machine finalize
     CODEPATCH_HOOKAPPLY(0x801952c8);  // CT respawn machine validation

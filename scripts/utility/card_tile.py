@@ -24,9 +24,9 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hsd.gx import encode_rgb5a3
 
-ASSETS = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "mods", "archipelago", "assets")
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ART = os.path.join(ROOT, "art")
+ASSETS = os.path.join(ROOT, "mods", "archipelago", "assets")
 
 TILES = {
     "icon": ("ap-icon.png", "ApIcon.dat", 32, 32),
@@ -50,7 +50,7 @@ def main():
         sys.exit(f"usage: card_tile.py {{{'|'.join(TILES)}}}")
 
     src, out, width, height = TILES[which]
-    img = Image.open(os.path.join(ASSETS, src)).convert("RGBA")
+    img = Image.open(os.path.join(ART, src)).convert("RGBA")
     data = encode_rgb5a3(fit_centered(img, width, height))
     path = os.path.join(ASSETS, out)
     with open(path, "wb") as f:

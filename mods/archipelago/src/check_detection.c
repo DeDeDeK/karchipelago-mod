@@ -192,6 +192,10 @@ static int goal_satisfied(APGoalKind goal, int row, int count, int n)
     case GOAL_MAX_STATS_CT:
         // Mode-independent sticky save bit, latched during a City Trial round.
         return ap_save->max_stats_ct_achieved;
+    case GOAL_ASSEMBLE_AP_STAR:
+        return SENT_CHECK_BIT(AP_CHECKLIST_ROW, APCK_ASSEMBLE_AP_STAR);
+    case GOAL_ALL_LEGENDARIES_CT:
+        return SENT_CHECK_BIT(AP_CHECKLIST_ROW, APCK_ASSEMBLE_ALL_LEGENDARY);
     }
     return 0;
 }
@@ -417,6 +421,14 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
         if (row != GMMODE_CITYTRIAL)
             return 0;
         return cd->grid_mapping[KD_CLEAR_KIND] == phys_slot;
+    case GOAL_ASSEMBLE_AP_STAR:
+        if (row != AP_CHECKLIST_ROW)
+            return 0;
+        return cd->grid_mapping[APCK_ASSEMBLE_AP_STAR] == phys_slot;
+    case GOAL_ALL_LEGENDARIES_CT:
+        if (row != AP_CHECKLIST_ROW)
+            return 0;
+        return cd->grid_mapping[APCK_ASSEMBLE_ALL_LEGENDARY] == phys_slot;
     case GOAL_CHECKLIST_LIST:
     {
         u64 *gc = ap_save->options.goal_checks[row];

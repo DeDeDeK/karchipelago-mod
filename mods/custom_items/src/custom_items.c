@@ -48,6 +48,7 @@ CustomItemEntry *CustomItems_AppendEntry(void)
     e->name[0] = '\0';
     e->menu_label[0] = '\0';
     e->enabled = 1;
+    e->api_enabled = 1;
     e->assigned_kind = -1;
     return e;
 }
@@ -83,14 +84,17 @@ static const char *Api_GetName(int index)
 static int Api_IsEnabled(u32 id_hash)
 {
     CustomItemEntry *e = CustomItems_FindByHash(id_hash);
-    return (custom_items_enabled && e != NULL && e->enabled) ? 1 : 0;
+    return (custom_items_enabled && e != NULL && e->enabled && e->api_enabled) ? 1 : 0;
 }
 
+// Writes the consumer gate, not the menu toggle: the toggle is the player's and
+// hoshi persists it, so a mod driving this every scene load would rewrite their
+// saved choice and leave the menu showing a value they never picked.
 static void Api_SetEnabled(u32 id_hash, int enabled)
 {
     CustomItemEntry *e = CustomItems_FindByHash(id_hash);
     if (e != NULL)
-        e->enabled = enabled ? 1 : 0;
+        e->api_enabled = enabled ? 1 : 0;
 }
 
 static int Api_GetAssignedKind(u32 id_hash)

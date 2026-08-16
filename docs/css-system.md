@@ -129,7 +129,18 @@ frame = (ckind == CKIND_DEDEDE)     ? color + 20
       : ckind
 ```
 
-The bank answers with CON keys at frames 0..17 (entries 0..17), 20 (entry 18) and 30 (entry 19), so every King Dedede color resolves to one plate and every Meta Knight color to another. Six functions carry a copy of that arithmetic: the color and character setters for each select screen (0x80151ab4 / 0x80151b78 for Air Ride, 0x8015c574 / 0x8015c638 for City Trial) and one element creator per results screen (0x80167250, 0x8016aff4, 0x8016e924, 0x80177ae8).
+The bank answers with CON keys at frames 0..17 (entries 0..17), 20 (entry 18) and 30 (entry 19), so every King Dedede color resolves to one plate and every Meta Knight color to another. Eight functions carry a copy of that arithmetic - the color and character setters of each select screen, and the `Siconbig` creator of each results screen:
+
+| Function | Address | Screen |
+|---|---|---|
+| `AirRideSelect_SetSIcon2Color` | 0x80151ab4 | Air Ride select |
+| `AirRideSelect_SetSIcon2Character` | 0x80151b78 | Air Ride select |
+| `CitySelect_SetSIcon2Color` | 0x8015c574 | City Trial select |
+| `CitySelect_SetSIcon2Character` | 0x8015c638 | City Trial select |
+| `MnResult_CreateSiconBig` | 0x80167250 | race results, under two humans |
+| `MnResult2_CreateSiconBig` | 0x8016aff4 | race results, two humans |
+| `MnResult4_CreateSiconBig` | 0x8016e924 | race results, three or four humans |
+| `MnResultCt_CreateSiconBig` | 0x80177ae8 | City Trial results |
 
 #### Bike-relative indexing
 

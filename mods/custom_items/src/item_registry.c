@@ -26,6 +26,11 @@ static itData stc_ext_itdata[CUSTOM_KIND_CEILING];
 static struct ItemModelDesc { void *j; int flag; int rest[14]; } stc_model_pair[CUSTOM_ITEM_MAX];
 static ItemCommonAttr stc_custom_attr[CUSTOM_ITEM_MAX];
 
+// Anim slots for NO_MAT_ANIM items, copied from the base kind with the material
+// track dropped. Two slots is the widest anim array any vanilla kind has.
+#define CUSTOM_ITEM_ANIM_SLOTS 2
+static ItemAnimEntry stc_custom_anim[CUSTOM_ITEM_MAX][CUSTOM_ITEM_ANIM_SLOTS];
+
 // kind -> base_kind map for the clamp hook, indexed by (kind - ITKIND_NUM).
 static int stc_base_kind[CUSTOM_ITEM_MAX];
 static int stc_active_count;
@@ -179,7 +184,7 @@ int CustomItemRegistry_RegisterAll(void)
     for (int i = 0; i < count && n < CUSTOM_ITEM_MAX; i++)
     {
         CustomItemEntry *e = CustomItems_GetEntry(i);
-        if (e == NULL || !e->enabled)
+        if (e == NULL || !e->enabled || !e->api_enabled)
             continue;
 
         const CustomItemDesc *desc = CustomItems_LoadDescriptor(e->file_entrynum, NULL);
@@ -204,6 +209,17 @@ int CustomItemRegistry_RegisterAll(void)
             stc_model_pair[n].j = desc->model;
             stc_model_pair[n].flag = (int)flag;
             stc_ext_itdata[kind].model = (void *)&stc_model_pair[n];
+        }
+
+        u32 flags = (desc->version >= 4) ? desc->flags : 0;
+        if ((flags & CUSTOM_ITEM_FLAG_NO_MAT_ANIM) && stc_ext_itdata[base].anim_data != NULL)
+        {
+            for (int a = 0; a < CUSTOM_ITEM_ANIM_SLOTS; a++)
+            {
+                stc_custom_anim[n][a] = stc_ext_itdata[base].anim_data[a];
+                stc_custom_anim[n][a].mat_anim = NULL;
+            }
+            stc_ext_itdata[kind].anim_data = stc_custom_anim[n];
         }
 
         // Effect / scale overrides clone the base kind's attribute record.
