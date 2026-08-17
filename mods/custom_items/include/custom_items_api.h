@@ -13,14 +13,16 @@
 // address is a CustomItemDesc. Magic is big-endian ASCII "CITM".
 #define CUSTOM_ITEM_SYMBOL        "customItem"
 #define CUSTOM_ITEM_MAGIC         0x4349544Du
-// v2 adds model_flag, v3 adds scale, v4 adds flags; older descriptors stay
-// supported (the loader rejects only versions newer than this one).
-#define CUSTOM_ITEM_DESC_VERSION  4
+// v2 adds model_flag, v3 adds scale, v4 adds flags, v5 adds joint_anim; older
+// descriptors stay supported (the loader rejects only versions newer than this
+// one).
+#define CUSTOM_ITEM_DESC_VERSION  5
 
 // CustomItemDesc.flags (v4+).
 // NO_MAT_ANIM: the model is not the base kind's, so the base kind's material
 // animation - authored against its materials - must not be bound to it. The
-// joint animation and state script still come from the base kind.
+// state script still comes from the base kind, as does the joint animation
+// unless joint_anim overrides it.
 #define CUSTOM_ITEM_FLAG_NO_MAT_ANIM 0x00000001u
 
 // Folder (relative to FST root) and extension scanned for drop-in items.
@@ -66,6 +68,12 @@ typedef struct CustomItemDesc
 
     u32 model_flag;     // 0x30 (v2+) itData render flag (0x02000000 flat; 0x03/0x05/0x0b skinned)
     float scale;        // 0x34 (v3+) multiplier over the base kind's scale (0 or 1.0 = inherit)
+
+    // (v5+) optional AnimJointDesc* bound in place of the base kind's joint
+    // animation, in every anim slot. A joint animation is authored against one
+    // joint tree and binds by tree position, so the base kind's belongs to the
+    // base kind's model. NULL = inherit.
+    void *joint_anim;   // 0x38
 } CustomItemDesc;
 
 // Invoked when a rider collects a custom item; `player` is the 0..4 slot.

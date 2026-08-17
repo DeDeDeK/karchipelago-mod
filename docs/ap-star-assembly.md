@@ -38,10 +38,10 @@ hashes resolve before the first round - a sphere held disabled by the gate below
 never registered, and would otherwise never be named.
 
 Each descriptor clones `ITKIND_HYDRA1` for behavior - a legendary piece's physics,
-state class and threshold category - and overrides three things:
+state class and threshold category - and overrides four things:
 
 - **the model**, a generated UV sphere rather than anything carved out of `Item.dat`,
-  which holds no sphere, at `scale` 0.7. A Hydra piece's half-extent belongs to a flat,
+  which holds no sphere, at `scale` 0.525. A Hydra piece's half-extent belongs to a flat,
   hollow shape; a solid sphere of the same extent reads as much bulkier, so it is
   brought down from there;
 - **the effect record**, a `PatchEffectInfo` with `count = 0`. That is what keeps the
@@ -53,8 +53,14 @@ state class and threshold category - and overrides three things:
 - **the material animation**, dropped with the descriptor's `NO_MAT_ANIM` flag. Hydra's
   piece animation drives diffuse R/G/B over a looping 240-frame track, and bound to a
   solid-colored sphere it cycles the piece through colors that are not its own - which
-  is exactly the thing a player has to read to know which sphere they are picking up.
-  The joint animation and the state script still come from kind 55.
+  is exactly the thing a player has to read to know which sphere they are picking up;
+- **the joint animation**, replaced through the descriptor's `joint_anim` field. A joint
+  animation binds by tree position, so Hydra's - which squashes its second joint's X and
+  Y between 1.0 and 0.7 every 30 frames - lands on the sphere's geometry joint and
+  throbs the whole ball. The replacement holds the same 30-frame half period and
+  240-frame loop but breathes uniformly between 1.0 and 0.94.
+
+The state script still comes from kind 55.
 
 All three box weights and all six event weights are zero, so a sphere never enters a
 spawn pool - `PoolAppend` skips a zero weight outright. The only way one reaches the
@@ -248,11 +254,22 @@ uv run --with pillow python scripts/hsd/make_ap_star_pieces.py
 
 The sphere is generated, not carved: a UV sphere of radius 2.08 (a Hydra piece's
 half-extent, which the descriptor's `scale` then trims) at
-12 segments by 8 rings, 86 vertices and 168 triangles, with per-vertex normals and a
+16 segments by 12 rings, 178 vertices and 352 triangles, with per-vertex normals and a
 `CONSTANT | DIFFUSE` untextured material carrying the color as its diffuse and a
 darkened copy as its ambient. That is how the vanilla piece parts are lit, minus their
-texture. Culling is off: a closed sphere reads the same either way, and it removes any
-dependence on the winding the display list happens to emit.
+texture.
+
+It is back-culled: `HSD_PObjDisp` (`0x80407988`) maps `POBJ` flag `0x8000` to
+`GX_CULL_BACK`, and the engine's front face is the winding whose right-hand normal points
+away from the camera, so an outward-facing surface is wound clockwise. That depends on
+the mesh being wound consistently, which the script checks before it writes anything.
+
+The joint animation is authored alongside them: an `AnimJointDesc` pair mirroring the
+model's two joints, with the root bare and an `AObjDesc` on the geometry joint holding
+one keyframe stream shared by the SCAX/SCAY/SCAZ tracks. Its keys are raw floats
+(`value_flag` 0) rather than the packed integers the vanilla tracks use. Looping is not the
+animation's own: `CityItem_BindStateAnim` (`0x80251894`) reads bit 30 of the item's
+`ItemAnimEntry` flags, inherited from kind 55, and loops every bound `AObj` at runtime.
 
 The icons are rendered with a fixed light from the upper left, supersampled four times
 and downsampled so the rim gets a soft alpha edge instead of a stair-step, then encoded

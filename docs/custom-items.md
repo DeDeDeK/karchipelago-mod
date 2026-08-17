@@ -91,8 +91,8 @@ compatibility: v2 adds `model_flag`, the model's itData render flag - `0x0200000
 for flat panels, `0x03/0x05/0x0b000000` for the legendary pieces - so skinned
 models render correctly; v3 adds `scale`, a render-scale multiplier over the base
 kind's native size (0 or 1.0 = inherit); v4 adds `flags`, in the slot v1-v3 left
-zeroed. Older descriptors stay supported; the loader rejects only versions newer
-than it knows.
+zeroed; v5 adds `joint_anim`. Older descriptors stay supported; the loader rejects
+only versions newer than it knows.
 
 One flag is defined. `CUSTOM_ITEM_FLAG_NO_MAT_ANIM` says the supplied `model` is
 not the base kind's, so the base kind's material animation must not be bound to
@@ -103,9 +103,20 @@ animates diffuse R/G/B over a 240-frame loop, which cycles a solid-colored
 replacement model through colors that are not its own. Set the flag whenever the
 model comes from somewhere other than `base_kind`; leave it clear when the model
 was carved from the base kind itself, where the animation is the one it belongs
-to. The joint animation and the state script still come from the base kind either
-way - the script drives the item's hurtbox and effect timing, so dropping it
-would change behavior, not just looks. `weight_free` is reserved: the
+to.
+
+`joint_anim` is the same argument for the other half of the animation record: an
+`AnimJointDesc*` bound in place of the base kind's, in every anim slot. A joint
+animation binds by tree position too, so the base kind's drives whatever joint of
+a foreign model sits where its own animated joint did. Hydra's piece animation
+squashes its second joint's X and Y between 1.0 and 0.7 on a 30-frame half period,
+which on a replacement model with geometry at that position throbs the whole
+thing. Leave it NULL to inherit; supply a tree mirroring the model's joints to
+replace it. Looping is not the animation's to decide - `CityItem_BindStateAnim`
+(`0x80251894`) loops every bound `AObj` when bit 30 of the inherited
+`ItemAnimEntry` flags is set. The state script still comes from the base kind
+either way; it drives the item's hurtbox and effect timing, so dropping it would
+change behavior, not just looks. `weight_free` is reserved: the
 sky/free-fall picker draws from the union of the three box pools, so `weight_box`
 already governs sky drops too. The engine's box/sky pools store the chance as a
 `u8`, so `weight_box` values saturate at 255 (weights are relative - typical
@@ -143,12 +154,12 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    `{ JOBJ *j; int flag; … }` (`stc_model_pair`) with only `j` and `flag` written —
    an 8-byte pair would let `+0x8` read into the next array element and trip the
    assert. `flag` carries the model's itData render flag (`model_flag`, v2+;
-   `0x02000000` flat for v1 descriptors). A `NO_MAT_ANIM` kind also gets its own
-   `anim_data`: the base kind's slots copied with `mat_anim` nulled, so
-   `CityItem_StateChange` (`0x8024f488`) binds only the joint animation through
-   `CityItem_BindStateAnim` (`0x80251894`). Two slots are copied — the widest anim
-   array any vanilla kind has, since a state selects its slot by index and nothing
-   records how many exist.
+   `0x02000000` flat for v1 descriptors). A kind that sets `NO_MAT_ANIM` or supplies
+   a `joint_anim` also gets its own `anim_data`: the base kind's slots copied with
+   `mat_anim` nulled and/or `joint_anim` repointed, which is what
+   `CityItem_StateChange` (`0x8024f488`) hands to `CityItem_BindStateAnim`
+   (`0x80251894`). Two slots are copied — the widest anim array any vanilla kind
+   has, since a state selects its slot by index and nothing records how many exist.
 2. **Lift the ceiling** — `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
    is patched to `cmpwi r4, ITKIND_NUM + CUSTOM_ITEM_MAX` once at boot.
 3. **Clamp behavior** — the state-handler table (`0x804b6088`, 69 entries) and the

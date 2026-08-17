@@ -8,13 +8,14 @@ the model is generated here rather than carved out of Item.dat - Item.dat holds
 no sphere.
 
 A piece clones ITKIND_HYDRA1's behavior (a legendary machine piece: the physics,
-the state class, the threshold category) and overrides the model and the effect
-record. The effect record carries no entries, so touching a piece grants no stat
-and never reaches the type 27-32 arms in Machine_OnTouchItem that would credit a
-vanilla Hydra/Dragoon piece. Collection is driven entirely by the custom_items
-pickup handler the archipelago mod registers. The NO_MAT_ANIM flag keeps the
-Hydra piece's material animation off the sphere - it drives the diffuse color
-over a 240-frame loop, which would wash out the color that identifies the piece.
+the state class, the threshold category) and overrides the model, the effect
+record and the joint animation. The effect record carries no entries, so touching
+a piece grants no stat and never reaches the type 27-32 arms in
+Machine_OnTouchItem that would credit a vanilla Hydra/Dragoon piece. Collection
+is driven entirely by the custom_items pickup handler the archipelago mod
+registers. The NO_MAT_ANIM flag keeps the Hydra piece's material animation off
+the sphere - it drives the diffuse color over a 240-frame loop, which would wash
+out the color that identifies the piece.
 
 All three box weights and all six event weights are zero: pieces never enter a
 spawn pool. They arrive only through the forced-content red box the archipelago
@@ -24,8 +25,11 @@ The model is a UV sphere with per-vertex normals, lit the way the vanilla piece
 parts are (CONSTANT | DIFFUSE material, no texture). Its radius matches a Hydra
 piece's half-extent, and the descriptor's scale brings it down from there - a
 sphere reads as bulkier than the flat, hollow shapes of a vanilla piece at the
-same extent. Culling is off - a closed sphere reads identically either way and it
-removes any dependence on winding.
+same extent.
+
+The joint animation is authored here rather than inherited. The Hydra piece's
+squashes X and Y between 1.0 and 0.7 every 30 frames, which on a sphere reads as
+a heavy throb; this one breathes uniformly to PULSE_MIN on the same cadence.
 
 The same run writes ApPieceIcons.dat, the collection tracker's art: one alpha-cut
 textured quad per color under a single `apPieceIcons_scene_models` public, sized
@@ -53,9 +57,9 @@ PUBLIC = "customItem"
 
 # Must match mods/custom_items/include/custom_items_api.h.
 CUSTOM_ITEM_MAGIC = 0x4349544D  # 'CITM'
-CUSTOM_ITEM_DESC_VERSION = 4
+CUSTOM_ITEM_DESC_VERSION = 5
 CUSTOM_ITEM_FLAG_NO_MAT_ANIM = 0x1
-DESC_SIZE = 0x38
+DESC_SIZE = 0x3C
 
 ITKIND_HYDRA1 = 55
 ITGROUP_GOOD = 1
@@ -75,9 +79,15 @@ PIECES = [
 # A Hydra piece's model is 2.08 units across the half-extent and renders at a
 # scale factor of 2.8, so a sphere of this radius arrives at the same size.
 SPHERE_RADIUS = 2.08
-SPHERE_SEGMENTS = 12  # longitude divisions
-SPHERE_RINGS = 8      # latitude bands, poles included
-SPHERE_SCALE = 0.7    # descriptor scale over the Hydra piece's scale factor
+SPHERE_SEGMENTS = 16  # longitude divisions
+SPHERE_RINGS = 12     # latitude bands, poles included
+SPHERE_SCALE = 0.525  # descriptor scale over the Hydra piece's scale factor
+
+# The authored joint animation: a uniform breath between 1.0 and PULSE_MIN,
+# holding the base kind's 30-frame half period and 240-frame loop.
+PULSE_MIN = 0.94
+PULSE_HALF_PERIOD = 30
+PULSE_END_FRAME = 240
 
 # Struct sizes.
 SZ_JOBJ = 0x40
@@ -87,6 +97,9 @@ SZ_MAT = 0x14
 SZ_POBJ = 0x18
 SZ_VTX_ENTRY = 0x18
 SZ_EFFECT_INFO = 0x0C
+SZ_ANIMJOINT = 0x14
+SZ_AOBJDESC = 0x10
+SZ_FOBJDESC = 0x14
 
 # JOBJ flags.
 JOBJ_CLASSICAL_SCALING = 0x00000008
@@ -109,6 +122,18 @@ GX_F32 = 4
 GX_TRIANGLESTRIP = 0x98  # | VTXFMT0
 GX_TRIANGLEFAN = 0xA0
 
+# POBJ flag 0x8000 selects GX_CULL_BACK. Front-facing is the winding whose
+# right-hand normal points away from the camera, so an outward-facing surface is
+# wound clockwise and this drops the inside of a closed shape.
+POBJ_CULLBACK = 1 << 15
+
+# Joint animation track ids and the keyframe opcode for a spline with zero
+# tangents, which is what the vanilla piece animation uses.
+GX_TRACK_SCAX = 8
+GX_TRACK_SCAY = 9
+GX_TRACK_SCAZ = 10
+GX_ANIM_OP_SPL0 = 3
+
 # Ambient is the color darkened, so an unlit face keeps its hue instead of going
 # black.
 AMBIENT_SCALE = 0.55
@@ -126,14 +151,14 @@ GX_TEX_ST = 1
 JOBJ_XLU = 0x00080000
 JOBJ_ROOT_XLU = 0x20000000
 TOBJ_FLAGS = 0x00340010  # COORD_UV | LIGHTMAP_DIFFUSE | CM_MODULATE | AM_MODULATE
-POBJ_FLAGS_CULLFRONT = 0x8000
 SZ_JOBJSET = 0x10
 SZ_TOBJ = 0x5C
 SZ_IMG = 0x18
 
 
 def sphere_mesh(radius, segments, rings):
-    """A UV sphere about the origin. Returns (positions, normals, prims), where a
+    """A UV sphere about the origin, wound so every face points outward under the
+    engine's front-face convention. Returns (positions, normals, prims), where a
     prim is (gx_opcode, [vertex index, ...]) and positions/normals are parallel."""
     positions = [(0.0, radius, 0.0)]
     normals = [(0.0, 1.0, 0.0)]
@@ -160,12 +185,70 @@ def sphere_mesh(radius, segments, rings):
         strip = []
         for j in range(segments + 1):
             jj = j % segments
-            strip.extend((lower[jj], upper[jj]))
+            strip.extend((upper[jj], lower[jj]))
         prims.append((GX_TRIANGLESTRIP, strip))
     prims.append((GX_TRIANGLEFAN,
                   [south] + [band_rows[-1][(segments - j) % segments]
                              for j in range(segments + 1)]))
     return positions, normals, prims
+
+
+def outward_facing(positions, normals, prims):
+    """Count the triangles wound the way the engine calls front-facing, and the
+    triangles wound the other way. A mesh the cull flags can be trusted on has
+    all of its faces in the first bucket."""
+    front = back = 0
+    for opcode, indices in prims:
+        tris = []
+        if opcode == GX_TRIANGLESTRIP:
+            for i in range(len(indices) - 2):
+                tri = indices[i:i + 3]
+                tris.append(tri if i % 2 == 0 else [tri[1], tri[0], tri[2]])
+        elif opcode == GX_TRIANGLEFAN:
+            for i in range(1, len(indices) - 1):
+                tris.append([indices[0], indices[i], indices[i + 1]])
+        for a, b, c in tris:
+            pa, pb, pc = positions[a], positions[b], positions[c]
+            e1 = [pb[i] - pa[i] for i in range(3)]
+            e2 = [pc[i] - pa[i] for i in range(3)]
+            g = (e1[1] * e2[2] - e1[2] * e2[1],
+                 e1[2] * e2[0] - e1[0] * e2[2],
+                 e1[0] * e2[1] - e1[1] * e2[0])
+            n = [sum(normals[v][i] for v in (a, b, c)) for i in range(3)]
+            if sum(g[i] * n[i] for i in range(3)) < 0.0:
+                front += 1
+            else:
+                back += 1
+    return front, back
+
+
+def keyframe_stream(keys):
+    """The keyframe byte stream HSD_FObjInterpretAnim walks: one spline-with-
+    zero-tangents run of (value, frames until the next key) pairs, values as
+    little-endian floats and frame deltas as 7-bit varints."""
+    out = bytearray()
+    count = len(keys) - 1
+    out.append(((count & 7) << 4) | GX_ANIM_OP_SPL0 | (0x80 if count > 7 else 0))
+    count >>= 3
+    while count:
+        out.append((count & 0x7F) | (0x80 if count > 0x7F else 0))
+        count >>= 7
+    for value, delta in keys:
+        out.extend(struct.pack("<f", value))
+        while True:
+            byte = delta & 0x7F
+            delta >>= 7
+            out.append(byte | (0x80 if delta else 0))
+            if not delta:
+                break
+    return bytes(out)
+
+
+def pulse_keys():
+    """Alternating full-size and PULSE_MIN keys across the loop."""
+    steps = PULSE_END_FRAME // PULSE_HALF_PERIOD
+    return [(1.0 if i % 2 == 0 else PULSE_MIN,
+             PULSE_HALF_PERIOD if i < steps else 0) for i in range(steps + 1)]
 
 
 def display_list(prims):
@@ -224,13 +307,20 @@ def build_piece(name, color, positions, normals, prims):
     mat = reserve(SZ_MAT)
     pobj = reserve(SZ_POBJ)
     vtx = reserve(3 * SZ_VTX_ENTRY)
+    anim_root = reserve(SZ_ANIMJOINT)
+    anim_child = reserve(SZ_ANIMJOINT)
+    aobj = reserve(SZ_AOBJDESC)
+    fobj = reserve(3 * SZ_FOBJDESC)
 
     pos_off = blob(b"".join(struct.pack(">3f", *p) for p in positions))
     nrm_off = blob(b"".join(struct.pack(">3f", *n) for n in normals))
     dl = display_list(prims)
     dl_off = blob(dl)
+    keys = keyframe_stream(pulse_keys())
+    keys_off = blob(keys)
 
-    # CustomItemDesc: clone a legendary piece, override model and effect record.
+    # CustomItemDesc: clone a legendary piece, override model, effect record and
+    # joint animation.
     w32(desc + 0x00, CUSTOM_ITEM_MAGIC)
     struct.pack_into(">HH", data, desc + 0x04, CUSTOM_ITEM_DESC_VERSION, 0)
     ptr(desc + 0x08, name_off)
@@ -243,6 +333,7 @@ def build_piece(name, color, positions, normals, prims):
     struct.pack_into(">6H", data, desc + 0x24, 0, 0, 0, 0, 0, 0)  # weight_event
     w32(desc + 0x30, MODEL_FLAG_SIMPLE)
     wf32(desc + 0x34, SPHERE_SCALE)                            # scale
+    ptr(desc + 0x38, anim_root)                                # joint_anim
 
     # PatchEffectInfo: no entries, so pickup grants nothing and dispatches nowhere.
     w32(effect + 0x00, 0)  # entries
@@ -270,7 +361,7 @@ def build_piece(name, color, positions, normals, prims):
     wf32(mat + 0x10, 50.0)                       # shininess
 
     ptr(pobj + 0x08, vtx)
-    struct.pack_into(">HH", data, pobj + 0x0C, 0, len(dl) // 32)  # no culling
+    struct.pack_into(">HH", data, pobj + 0x0C, POBJ_CULLBACK, len(dl) // 32)
     ptr(pobj + 0x10, dl_off)
 
     def vtx_entry(base, attr, comp_cnt, stride, vptr):
@@ -285,6 +376,27 @@ def build_piece(name, color, positions, normals, prims):
     vtx_entry(vtx + 0 * SZ_VTX_ENTRY, GX_VA_POS, GX_POS_XYZ, 12, pos_off)
     vtx_entry(vtx + 1 * SZ_VTX_ENTRY, GX_VA_NRM, GX_NRM_XYZ, 12, nrm_off)
     w32(vtx + 2 * SZ_VTX_ENTRY + 0x00, 0xFF)  # terminator
+
+    # The animation tree mirrors the model's joints: nothing on the root, the
+    # breath on the joint that carries the geometry. Bit 0 of the trailing field
+    # is the joint's classical-scaling flag, which the model already sets.
+    ptr(anim_root + 0x00, anim_child)
+    w32(anim_root + 0x10, 1)
+    ptr(anim_child + 0x08, aobj)
+    w32(anim_child + 0x10, 1)
+
+    wf32(aobj + 0x04, float(PULSE_END_FRAME))
+    ptr(aobj + 0x08, fobj)
+
+    for i, track in enumerate((GX_TRACK_SCAX, GX_TRACK_SCAY, GX_TRACK_SCAZ)):
+        f = fobj + i * SZ_FOBJDESC
+        if i + 1 < 3:
+            ptr(f + 0x00, f + SZ_FOBJDESC)
+        w32(f + 0x04, len(keys))
+        data[f + 0x0C] = track
+        data[f + 0x0D] = 0  # value_flag 0: keys are raw floats
+        data[f + 0x0E] = 0
+        ptr(f + 0x10, keys_off)
 
     return build_archive(data, relocs, [(PUBLIC, desc)], ARCHIVE_VERSION)
 
@@ -407,7 +519,7 @@ def build_icon_archive(colors):
         w32(icon["img"] + 0x08, GX_TF_RGB5A3)
 
         ptr(icon["pobj"] + 0x08, icon["vtx"])
-        struct.pack_into(">HH", data, icon["pobj"] + 0x0C, POBJ_FLAGS_CULLFRONT, len(dl) // 32)
+        struct.pack_into(">HH", data, icon["pobj"] + 0x0C, POBJ_CULLBACK, len(dl) // 32)
         ptr(icon["pobj"] + 0x10, dl_off)
 
         vtx_entry(icon["vtx"] + 0 * SZ_VTX_ENTRY, GX_VA_POS, GX_POS_XYZ, 12, pos_off)
@@ -424,6 +536,12 @@ def main():
           f"{len(positions)} verts, {tris} triangles, {len(prims)} primitives")
     if len(positions) > 255:
         raise SystemExit("index8 vertex arrays hold 255 entries; lower the resolution")
+
+    # Backface culling is wrong if any face is wound the other way.
+    front, back = outward_facing(positions, normals, prims)
+    if back:
+        raise SystemExit(f"{back} of {front + back} triangles face inward")
+    print(f"  back-culled, breath 1.0 <-> {PULSE_MIN} every {PULSE_HALF_PERIOD} frames")
 
     os.makedirs(OUT_DIR, exist_ok=True)
     for color_name, color in PIECES:

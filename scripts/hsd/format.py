@@ -79,8 +79,8 @@ POBJ_FLAGS = [
     (1 << 3, "ANIM"),
     (1 << 12, "SHAPEANIM"),
     (1 << 13, "ENVELOPE"),
-    (1 << 14, "CULLBACK"),
-    (1 << 15, "CULLFRONT"),
+    (1 << 14, "CULLFRONT"),
+    (1 << 15, "CULLBACK"),
 ]
 
 TOBJ_FLAGS_SINGLE = [

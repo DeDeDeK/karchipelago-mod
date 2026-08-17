@@ -212,12 +212,17 @@ int CustomItemRegistry_RegisterAll(void)
         }
 
         u32 flags = (desc->version >= 4) ? desc->flags : 0;
-        if ((flags & CUSTOM_ITEM_FLAG_NO_MAT_ANIM) && stc_ext_itdata[base].anim_data != NULL)
+        void *joint_anim = (desc->version >= 5) ? desc->joint_anim : NULL;
+        int drop_mat_anim = (flags & CUSTOM_ITEM_FLAG_NO_MAT_ANIM) != 0;
+        if ((drop_mat_anim || joint_anim != NULL) && stc_ext_itdata[base].anim_data != NULL)
         {
             for (int a = 0; a < CUSTOM_ITEM_ANIM_SLOTS; a++)
             {
                 stc_custom_anim[n][a] = stc_ext_itdata[base].anim_data[a];
-                stc_custom_anim[n][a].mat_anim = NULL;
+                if (drop_mat_anim)
+                    stc_custom_anim[n][a].mat_anim = NULL;
+                if (joint_anim != NULL)
+                    stc_custom_anim[n][a].joint_anim = (AnimJointDesc *)joint_anim;
             }
             stc_ext_itdata[kind].anim_data = stc_custom_anim[n];
         }
