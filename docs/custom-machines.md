@@ -11,12 +11,12 @@ Every `.dat` under the FST folder `machines/` is a candidate. An archive qualifi
 | the machine's own `vcData` symbol | the ordinary engine machine archive, exactly as `VcStarSlick.dat` and friends ship it |
 | `customMachine` | a `CustomMachineDesc` describing how to register the archive |
 
-`CustomMachineDesc` is 0x28 bytes and is declared in `mods/custom_machines/include/custom_machines_api.h`:
+`CustomMachineDesc` is 0x38 bytes and is declared in `mods/custom_machines/include/custom_machines_api.h`:
 
 | off | field | notes |
 |---|---|---|
 | 0x00 | `magic` | `0x434D4348`, big-endian ASCII `CMCH` |
-| 0x04 | `version` | 2 |
+| 0x04 | `version` | 3 |
 | 0x08 | `name` | display name, e.g. `"Archipelago Star"` |
 | 0x0c | `symbol` | the `vcData` public in this same archive |
 | 0x10 | `is_bike` | machine class; only the star class (0) is supported |
@@ -25,8 +25,12 @@ Every `.dat` under the FST folder `machines/` is a candidate. An archive qualifi
 | 0x1c | `clone_kind` | star `MachineKind` whose per-kind engine rows it inherits |
 | 0x20 | `spawn_weight` | City Trial loose-spawn weight; 0 never spawns. Weighed against a vanilla table whose per-machine weights run 6-10 out of a ~111-119 total, so 1.0 is roughly 0.8% of field spawns |
 | 0x24 | `description` | select-screen blurb, v2 and up; `\n` breaks the line |
+| 0x28 | `palette_joint` | v3 and up: depth-first index of the joint whose materials cycle through `palette`, or -1 for none |
+| 0x2c | `palette_period` | seconds for one full pass |
+| 0x30 | `palette_count` | |
+| 0x34 | `palette` | one `0x00RRGGBB` per entry, in this same archive |
 
-A descriptor is rejected when its version is newer than the mod supports, so the field it does not know about is never read. A v1 descriptor ends where `description` starts and is still accepted; the machine gets an empty blurb.
+A descriptor is rejected when its version is newer than the mod supports, so the field it does not know about is never read. A v1 descriptor ends where `description` starts and is still accepted; the machine gets an empty blurb, and a v2 one gets no material cycle.
 
 Registration order is FST scan order, and it decides the appended kinds: the *n*-th machine found takes star slot `19 + n`, `MachineKind` `VCKIND_NUM + n` and, if it asked for one, `CharacterKind` `CKIND_NUM + n`. `CUSTOM_MACHINE_MAX` caps the registry at 4, because each extra character costs a select-screen icon anchor and those are authored art.
 
@@ -39,19 +43,19 @@ A machine may also drop a `.ssm` sound bank of the same basename next to its `.d
 `scripts/hsd/clone_machine.py` produces one from a vanilla machine:
 
 ```
-uv run python scripts/hsd/clone_machine.py iso/files/VcStarSlick.dat \
-  mods/custom_machines/assets/machines/VcStarAp.dat vcDataStarAp \
-  --name "Archipelago Star" \
-  --description "A gift from another world.\nRides like a Slick Star." \
-  --recolor ap \
+uv run python scripts/hsd/clone_machine.py iso/files/VcStarWing.dat \
+  mods/custom_machines/assets/machines/VcStarMine.dat vcDataStarMine \
+  --name "Mine Star" \
+  --description "Borrowed wings." \
+  --clone-kind 2 \
   --spawn-weight 1.0
 ```
 
-It renames the source archive's single public, appends a `CustomMachineDesc` under a second `customMachine` public (with a relocation per string pointer), and optionally recolors the model. Recoloring rewrites the two RGB565 endpoints of every DXT1 sub-block in each distinct CMPR texture, preserving the per-block index bytes and the `c0 > c1` relation that selects opaque versus 1-bit-alpha mode. It has to work on the textures rather than the materials: a machine's MObjs are `CONSTANT|TEX0` with a white diffuse color, so nothing about them is tinted.
+It renames the source archive's single public and appends a `CustomMachineDesc` under a second `customMachine` public, with a relocation per string pointer. Nothing inside the donor's own seven slots is touched, so the result is its donor under a new name; a machine that wants its own shape or paint edits the archive itself, the way `scripts/hsd/make_ap_star.py` does for the Archipelago Star.
 
 `mods/*/assets/` is copied to the disc root by the ordinary asset step, so `mods/custom_machines/assets/machines/*.dat` lands at `machines/` on disc with no packaging change.
 
-The three assets that carry data cloned out of the disc - `VcStarAp.dat`, `VcStarAp.ssm` and `ApUiFrames.dat` - are `.gitignore`d rather than committed, so no vanilla data lives in the repo. Each is written once by the script below, out of an `iso/` extraction of the retail disc, and from then on the ordinary asset step picks it up like any other file in `assets/`.
+The three assets that carry data taken out of the disc - `VcStarAp.dat`, `VcStarAp.ssm` and `ApUiFrames.dat` - are `.gitignore`d rather than committed, so no vanilla data lives in the repo. Each is written once by its own script, out of an `iso/` extraction of the retail disc, and from then on the ordinary asset step picks it up like any other file in `assets/`.
 
 ## What a machine archive holds
 
@@ -230,6 +234,16 @@ Two shapes of bank qualify, and the script has to tell them apart from the many 
 
 The portrait, board and rule banks index frame for frame. The silhouette and picture banks do not: the engine diverts King Dedede to frame `20 + color` and Meta Knight to `30 + color`, so frame 20 - where the 21st character lands - is already Dedede's. The appended entry goes on frame 20 and Dedede's run slides one frame later, one key on the silhouettes and a color apiece on the pictures. Meta Knight's run begins after the gap that slide runs into, so it stays put. `select_screen.c` patches the eight `addi rD, rS, 20` sites that form Dedede's frame to add 21 instead: `AirRideSelect_SetSIcon2Color` (`0x80151b08`), `AirRideSelect_SetSIcon2Character` (`0x80151bd4`), `CitySelect_SetSIcon2Color` (`0x8015c5c8`), `CitySelect_SetSIcon2Character` (`0x8015c694`), and one per results screen at `0x801672bc`, `0x8016b064`, `0x8016e9bc` and `0x80177b5c`. Those patches apply whether or not a drop-in machine was found, because the splice runs either way - and they are why every bank a patched site drives has to be grown together with the rest.
 
+## The material cycle
+
+A descriptor may name one joint and a palette, and `machine_palette.c` walks every material hanging off that joint through those colors on a wall clock.
+
+Nothing in an archive can do this on its own. A `MatAnim`'s frame is the machine's state, not elapsed time: `vcAnimationStar` pairs each joint animation with the material animation played alongside it, the moving animation's rate rides on velocity, the charge animation's frame is the 0-100 charge gauge, and both restart when the state changes. The Slick Star's three material animations run 50, 104 and 3 frames. So the colors travel in the descriptor instead and are written into the live materials each frame.
+
+The write goes to `HSD_Material.diffuse`, and it reaches a pixel only where the pipeline lets it. `MObjMakeTExp` (`0x803fa0b4`) builds the first TEV stage from the material's diffuse only when the MObj renders with `RENDER_CONSTANT` and without `RENDER_DIFFUSE`; every texture on the MObj then runs through `TObjMakeTExp` (`0x803f6860`) in lightmap groups - diffuse and ambient first, then specular, then ext - and a stage whose colormap is `REPLACE`, or `BLEND` with a `blending` of 1.0, discards whatever came before it. A material color under such a stage is invisible no matter what is written to it. `PASS` leaves it alone and `MODULATE` shades it, which is the shape a cycling joint's textures have to be in.
+
+`MObjLoad` (`0x803f9f04`) gives every model instance its own `HSD_Material` copy, so each machine on the field is written separately rather than through the archive. The hook is `Machine_AnimThink`'s last call, `Machine_ColAnimThink` at `0x801c6274`, which runs once per machine per frame after the ColAnim overlays and before the draw. The descriptor's joint index is resolved against the archive's `JObjDesc` tree and the live joint found through the back-pointer `JObjLoad` (`0x8040add4`) leaves at `JOBJ+0x84`, so it does not depend on how the engine roots the instance. Phase advances on the time-base delta, so the period holds through slowdown; a gap of a whole cycle or more - no machine of that kind on the field, or the 32-bit tick counter wrapping at about 106 seconds - resumes where it left off instead of jumping.
+
 ## Consuming the registry
 
 `Hoshi_ImportMod(CUSTOM_MACHINES_MOD_NAME, ...)` returns a `CustomMachinesAPI`. Import it after `OnBoot` - mods boot alphabetically and most consumers boot first - and treat a NULL result as "no custom machine exists", falling back to the vanilla ceilings.
@@ -288,19 +302,38 @@ uv run python scripts/audio/machine_audio.py clone slick \
   --roles engine,surface,engine-start,surface-start --pitch 0.82
 ```
 
-**The model.** `VcStarAp.dat` today is a recolored clone of `VcStarSlick.dat` standing in until the real model exists. It already proves the whole registration path: a new kind that loads, drives, animates, casts a shadow, has its own samples and its own select-screen art. The real model's joint layout, against the donor armature exported from `VcStarSlick.dat`:
+**The model.** `VcStarAp.dat` is built out of `VcStarSlick.dat` by `scripts/hsd/make_ap_star.py`, which turns the Slick Star's three engine pods into six on an even ring, one per logo color, over a repainted platform:
+
+```
+uv run python scripts/hsd/make_ap_star.py iso/files/VcStarSlick.dat \
+  mods/custom_machines/assets/machines/VcStarAp.dat vcDataStarAp \
+  --name "Archipelago Star" \
+  --description "A gift from another world.\nRides like a Slick Star."
+```
+
+`--ring-radius`, `--ring-height` and `--pod-scale` are the shape knobs, `--platform-color`, `--platform-gloss` and `--palette-period` the paint ones; the defaults pull the ring in to 2.20 from the donor's 2.45, raise it to 1.05 from 0.875, scale each pod to 1.25, rest the platform at `#BFF5BF` shaded no darker than 0.75 of it, and walk it around the pod palette every 12 seconds.
+
+Nothing is remodelled. The three new pods are new JObjs hung off the same ring pivot whose DObjs point at the donor's own POBJs, so the archive carries 27 DObjs over 15 pieces of geometry and every donor animation still plays. The joint layout it produces:
 
 | Joint | Role |
 |---|---|
-| 0-5 | donor chain; must carry no animation keys |
-| 6 | body root |
-| 7 | seat hub disc; the rider sit bone index is 7 |
-| 8 | ring pivot - a single ROTY track drives the idle spin of all six spheres |
-| 9-14 | the six spheres, children of joint 8, one per logo color |
+| 0-5 | donor chain, no animation keys |
+| 6 | body root, the platform disc as three LOD DObjs |
+| 7 | seat hub |
+| 8 | ring pivot - the Moving FigaTree's only animated node, three ROT tracks driving the idle spin of all six pods |
+| 9-14 | the six pods, children of joint 8, four DObjs each: three LODs plus an always-drawn XLU glow sprite |
 | 15 | boost/exhaust particle joint |
-| 16 | charge-glow billboard, needs `PBILLBOARD` in its JObj flags |
+| 16 | rider seat joint |
 
-Bone count is 17. Budget is around 650 triangles - six spheres at ~80 each plus a ~60-triangle seat. The quick-spin deformation is a per-frame scale of the sphere joints' translation, driven from mod code because the animation bank has no slot for it. The model, its animations and the sound mix are the remaining art work; everything the engine needs around them is in place.
+Bone count is 17. Four things outside the JObj tree are keyed to that numbering and the builder repatches all of them: `ModelData.BoneCount`; the three main LOD tables, whose bytes are flat DObj indices in JObj preorder; the Moving FigaTree's per-node track-count table; and the three MatAnimJoint trees, which are walked in lockstep with the JObj tree and so grow the same three nodes. Because the new pods precede the particle and seat joints in preorder, `VehicleAttributes+0x00` (the rider sit bone) and `AnimationBank+0x4c` (the particle spawn bone) shift up by three.
+
+A pod's color is animated rather than static: each of the Moving, Charge and Stop MatAnims drives its material's DIFFUSE_R/G/B, black under the body texture and magenta on the glow sprite, ramping warm and then white while charging. Recoloring therefore rewrites those keyframes as well as the material color and the pod's own tinted copy of the 64x64 body texture, keeping each key's intensity and how white it was and swapping only the hue - so the charge ramp still ends on a white flash. A track whose fixed-point exponent cannot hold the brighter value has its exponent lowered rather than its format changed, which keeps every keyframe buffer the same length.
+
+The six colors and their ring order are the assembly pieces' own list in `scripts/hsd/make_ap_star_pieces.py`, imported rather than restated, so a pod and the sphere the player collects for it can never drift apart. Slot 0 sits on +Z, the machine's front, and the rest run clockwise seen from above. The same list is written into the archive as the descriptor's palette, which is what the platform cycles through.
+
+The platform disc is repainted the other way around, so that its color can be animated at all. The donor drives it entirely from textures: a striped 256x256 map `REPLACE`s the color and contributes the 1-bit alpha that cuts the disc into a grate, and a magenta sphere map then `BLEND`s over that at full strength, so the material color never survives to a pixel. The builder cuts the first stage down to a single opaque texel with both channels set to `PASS` - which retires the Slick Star's stripes, and with them the cutout, leaving a solid disc - and turns the sphere map into gray with its luminance range stretched onto `[--platform-gloss, 1.0]`, `MODULATE`d over the material. The material renders with `RENDER_CONSTANT` and no lighting, so its diffuse is the disc's whole color and the gloss is all the shading it has. The 32 KB the stripes occupied holds the 32-byte replacement and is otherwise zeroed, so the retirement costs no file size.
+
+The quick-spin deformation is a per-frame scale of the pod joints' translation, driven from mod code because the animation bank has no slot for it. Modelled spheres and the real sound mix are the remaining art work; everything the engine needs around them is in place.
 
 ## Known gaps
 

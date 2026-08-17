@@ -31,6 +31,10 @@ typedef struct CustomMachineEntry
     int rider_kind;                        // RiderKind for the CharacterDesc row
     int clone_kind;                        // star kind whose per-kind engine rows it inherits
     float spawn_weight;                    // City Trial spawn weight
+    int palette_joint;                     // joint whose materials cycle, -1 if none
+    float palette_period;                  // seconds for one pass through the palette
+    int palette_count;
+    const u32 *palette;                    // into the boot-time archive, which is never freed
 } CustomMachineEntry;
 
 void CustomMachines_OnBoot(void);
@@ -65,6 +69,9 @@ void CustomMachineText_OnBoot(void);
 
 // machine_audio.c - the star class's audio parameter array and drop-in banks.
 void CustomMachineAudio_OnBoot(void);
+
+// machine_palette.c - the wall-clock material cycle a descriptor may ask for.
+void CustomMachinePalette_OnBoot(void);
 
 // ui_frames.c - the 21st frame spliced into each character-indexed art bank.
 void CustomMachineUiFrames_OnBoot(void);

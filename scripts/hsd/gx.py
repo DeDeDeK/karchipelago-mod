@@ -37,6 +37,7 @@ FORMAT_NAME = {
 GX_TF_I4 = 0
 GX_TF_RGB5A3 = 5
 GX_TF_RGBA8 = 6
+GX_TF_CMPR = 14
 
 # Alpha >= this encodes as opaque (RGB555 with the top bit set); below it,
 # the ARGB3444 form is used.
@@ -144,6 +145,49 @@ def _tint565(v, tint):
     b = (v & 0x1F) << 3
     r, g, b = colorize(r, g, b, tint)
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+
+
+def gray_cmpr(blob, floor):
+    """Flatten a CMPR texture to gray, its own luminance range stretched onto
+    [floor, 1.0]. A map rewritten this way shades a surface without tinting it,
+    so a TEV stage can modulate a material color by it and keep the hue; the
+    stretch is what lets the brightest texel still reach the material's full
+    color however dark the source was."""
+    out = bytearray(blob)
+    lums = [_lum565(v) for off in range(0, len(out) - 7, 8)
+            for v in struct.unpack_from(">HH", out, off)]
+    lo, hi = (min(lums), max(lums)) if lums else (0, 0)
+    for off in range(0, len(out) - 7, 8):
+        c0, c1 = struct.unpack_from(">HH", out, off)
+        n0, n1 = _gray565(c0, floor, lo, hi), _gray565(c1, floor, lo, hi)
+        if c0 > c1 and n0 <= n1:
+            n0 = min(0xFFFF, n1 + 1)
+        elif c0 <= c1 and n0 > n1:
+            n0 = n1
+        struct.pack_into(">HH", out, off, n0, n1)
+    return bytes(out)
+
+
+def _lum565(v):
+    r = ((v >> 11) & 0x1F) << 3
+    g = ((v >> 5) & 0x3F) << 2
+    b = (v & 0x1F) << 3
+    return (299 * r + 587 * g + 114 * b) // 1000
+
+
+def _gray565(v, floor, lo, hi):
+    t = (_lum565(v) - lo) / (hi - lo) if hi > lo else 1.0
+    y = min(255, max(0, int(255.0 * (floor + (1.0 - floor) * t))))
+    return ((y >> 3) << 11) | ((y >> 2) << 5) | (y >> 3)
+
+
+def solid_cmpr(width, height, color):
+    """A flat, fully opaque CMPR image. Every 2-bit index selects the first
+    endpoint, which is opaque under both of CMPR's block modes, so the second
+    can stay black and the block decodes to one color at alpha 1."""
+    r, g, b = color
+    c0 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+    return struct.pack(">HHI", c0, 0, 0) * (image_size(width, height, GX_TF_CMPR) // 8)
 
 
 def encode_i4_alpha(im):

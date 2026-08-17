@@ -23,6 +23,7 @@ Sister scripts (all inside this package):
 - `carve_backdrop.py` - single-backdrop carve CLI.
 - `carve_all_backdrops.py` - bulk carve over iso/files/Gr*Model.dat.
 - `carve_custom_item.py` - carve an Item.dat model into a customItem .dat.
+- `make_ap_star.py` - build the AP Star machine archive out of the Slick Star.
 - `make_ap_star_pieces.py` - author the AP Star's six sphere items and HUD icons.
 - `make_checklist_textures.py` - author the AP checklist texture .dat.
 - `make_menu_logo.py` - author the title-screen logo model .dat.

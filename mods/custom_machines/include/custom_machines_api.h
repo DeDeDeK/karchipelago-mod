@@ -44,12 +44,22 @@
 // descriptor's clone_kind uses. Build one with scripts/audio/machine_audio.py.
 #define CUSTOM_MACHINE_AUDIO_EXT ".ssm"
 
+// A machine may also ask for one of its joints to cycle through a color palette
+// on a wall clock. Nothing in an archive can do that on its own: a MatAnim's
+// frame is the machine's state, so the moving animation's rate rides on velocity
+// and the charge animation's frame is the charge gauge, and both restart when
+// the state changes. So the palette travels in the descriptor and this mod
+// writes it into the live materials each frame. It reaches a pixel only where
+// the joint's materials render with RENDER_CONSTANT and their texture stages
+// leave the color alone or modulate it - a stage set to REPLACE or to a
+// full-strength BLEND paints over the material and nothing will show.
+
 // Each custom machine .dat exports its engine vcData public plus one named
 // `customMachine` whose address is a CustomMachineDesc. Magic is big-endian
 // ASCII "CMCH".
 #define CUSTOM_MACHINE_SYMBOL       "customMachine"
 #define CUSTOM_MACHINE_MAGIC        0x434D4348u
-#define CUSTOM_MACHINE_DESC_VERSION 2
+#define CUSTOM_MACHINE_DESC_VERSION 3
 
 typedef struct CustomMachineDesc
 {
@@ -64,6 +74,14 @@ typedef struct CustomMachineDesc
     int clone_kind;         // 0x1c star MachineKind it inherits per-kind engine rows from
     float spawn_weight;     // 0x20 City Trial spawn weight (0 = never spawns loose)
     const char *description; // 0x24 select-screen blurb, v2 and up; '\n' breaks the line
+    // Wall-clock material cycle, v3 and up. Every material hanging off
+    // `palette_joint` - a depth-first index into the archive's own joint tree -
+    // walks `palette` on a `palette_period` second loop. -1 asks for none, which
+    // is what a machine without the field reads as.
+    int palette_joint;      // 0x28
+    float palette_period;   // 0x2c seconds for one full pass
+    int palette_count;      // 0x30
+    const u32 *palette;     // 0x34 one 0x00RRGGBB per entry
 } CustomMachineDesc;
 
 // Gates who gets packed into a select screen's icon list. `default_available` is

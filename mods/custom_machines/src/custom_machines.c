@@ -186,6 +186,18 @@ static void IndexCb(int entrynum, void *args)
     e->clone_kind = desc->clone_kind;
     e->spawn_weight = desc->spawn_weight;
 
+    // The material cycle arrived in v3, and its palette is read for the rest of
+    // the run out of this archive, which the boot loader never frees.
+    e->palette_joint = -1;
+    if (desc->version >= 3 && desc->palette_joint >= 0 && desc->palette_count > 0 &&
+        desc->palette != NULL && desc->palette_period > 0.0f)
+    {
+        e->palette_joint = desc->palette_joint;
+        e->palette_period = desc->palette_period;
+        e->palette_count = desc->palette_count;
+        e->palette = desc->palette;
+    }
+
     if (desc->wants_character)
     {
         if (CKIND_NUM + stc_character_count < CustomMachineSelect_GetIconMax())
@@ -313,6 +325,7 @@ void CustomMachines_OnBoot(void)
         CustomMachineCharacter_OnBoot();
         CustomMachineText_OnBoot();
         CustomMachineAudio_OnBoot();
+        CustomMachinePalette_OnBoot();
     }
 
     // Exported even with nothing registered: this mod owns the select-screen packing
