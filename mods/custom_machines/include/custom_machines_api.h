@@ -28,7 +28,10 @@
 
 #define CUSTOM_MACHINES_MOD_NAME  "custom_machines"
 #define CUSTOM_MACHINES_API_MAJOR 1
-#define CUSTOM_MACHINES_API_MINOR 4
+#define CUSTOM_MACHINES_API_MINOR 5
+
+struct JOBJ;
+struct MachineData;
 
 // Registry cap.
 #define CUSTOM_MACHINE_MAX 4
@@ -91,6 +94,10 @@ typedef struct CustomMachineDesc
 // to give the character an icon.
 typedef int (*CustomMachineAvailabilityFilter)(int character_kind, int default_available);
 
+// A per-kind handler on the star class. `Init` runs once as a machine of that
+// kind is created, `Think` once per frame for every one of them on the field.
+typedef void (*CustomMachineStarHandler)(struct MachineData *md);
+
 typedef struct CustomMachinesAPI
 {
     // Registered machines this boot.
@@ -132,6 +139,23 @@ typedef struct CustomMachinesAPI
     // One filter at a time; NULL removes it and restores the engine's own roster.
     // Safe to set from any scene - the screens ask per rebuild, not once at boot.
     void (*SetAvailabilityFilter)(CustomMachineAvailabilityFilter filter);
+
+    // Claim the engine's own per-kind extension slots on the star class, which
+    // Machine_Star_Init and Machine_Star_Think end by calling. The handler the
+    // machine's clone_kind inherited still runs first, so this layers on rather
+    // than replaces. One handler per slot; NULL clears it. Returns 1 if the kind
+    // is a registered custom machine.
+    int (*SetStarInitHandler)(int kind, CustomMachineStarHandler fn);
+    int (*SetStarThinkHandler)(int kind, CustomMachineStarHandler fn);
+
+    // The live joint for a depth-first index into the machine archive's own joint
+    // tree - the same numbering `palette_joint` uses. NULL if the machine has no
+    // model loaded or the index is past its tree.
+    struct JOBJ *(*GetMachineJoint)(struct MachineData *md, int joint_index);
+
+    // The descriptor's palette, or NULL if it asked for none. Points into the
+    // boot-time archive, which is never freed.
+    const u32 *(*GetPalette)(int kind, int *out_count);
 } CustomMachinesAPI;
 
 #endif

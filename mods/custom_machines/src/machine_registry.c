@@ -34,6 +34,45 @@ static const u32 stc_handler_tables[2][3] = {
 
 static void (*stc_handlers[2][CUSTOM_VCSTAR_NUM])(MachineData *);
 
+// A consumer's handler layers over the inherited one rather than replacing it.
+// One dispatcher stands in the slot and recovers the row from md->kind, which is
+// the star slot, so no per-slot trampoline is needed.
+static void (*stc_inherited[2][CUSTOM_VCSTAR_NUM])(MachineData *);
+static void (*stc_mod_handlers[2][CUSTOM_VCSTAR_NUM])(MachineData *);
+
+static void RunHandlers(int table, MachineData *md)
+{
+    int slot = md->kind;
+    if (slot < 0 || slot >= CUSTOM_VCSTAR_NUM)
+        return;
+    if (stc_inherited[table][slot] != NULL)
+        stc_inherited[table][slot](md);
+    if (stc_mod_handlers[table][slot] != NULL)
+        stc_mod_handlers[table][slot](md);
+}
+
+static void StarInitDispatch(MachineData *md)  { RunHandlers(0, md); }
+static void StarThinkDispatch(MachineData *md) { RunHandlers(1, md); }
+
+static void (*const stc_dispatch[2])(MachineData *) = { StarInitDispatch, StarThinkDispatch };
+
+int CustomMachineRegistry_SetStarHandler(int table, int machine_kind,
+                                         void (*fn)(MachineData *))
+{
+    CustomMachineEntry *e = CustomMachines_FindByKind(machine_kind);
+    if (e == NULL || table < 0 || table > 1)
+        return 0;
+
+    int slot = e->star_slot;
+    if (stc_handlers[table][slot] != stc_dispatch[table])
+    {
+        stc_inherited[table][slot] = stc_handlers[table][slot];
+        stc_handlers[table][slot] = stc_dispatch[table];
+    }
+    stc_mod_handlers[table][slot] = fn;
+    return 1;
+}
+
 // Replaces vcData_InitLookup (0x801c6c68), the scene-entry reset.
 static void InitLookup(void)
 {

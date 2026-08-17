@@ -24,6 +24,7 @@
 #include "ap_checklist.h"
 #include "ap_check_detect.h"
 #include "ap_star_pieces.h"
+#include "ap_star_shot.h"
 #include "gate_stadiums.h"
 #include "patch_cap.h"
 #include "gate_events.h"
@@ -126,6 +127,7 @@ void OnBoot()
 
     APCheckDetect_OnBoot();
     ApStarPieces_OnBoot();
+    ApStarShot_OnBoot();
     GateStadiums_OnBoot();
     PatchCap_OnBoot();
     DeathLink_OnBoot();
@@ -439,6 +441,7 @@ void On3DLoadEnd()
     GoalMaxStatsCT_On3DLoadEnd();
     APCheckDetect_On3DLoadEnd();
     ApStarPieces_On3DLoadEnd();
+    ApStarShot_On3DLoadEnd();
     KirbyScale_On3DLoadEnd();
     DropAbility_On3DLoadEnd();
 }

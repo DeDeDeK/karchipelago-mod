@@ -13,6 +13,7 @@ APMenuSettings ap_menu_settings = {
     .ar_permanent_patches_enabled         = 1,
     .energylink_autocharge_rate           = 1, // Medium, ~1.5s to fill
     .ct_random_start_machine              = 1,
+    .ap_star_shot_enabled                 = 1,
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
@@ -39,6 +40,7 @@ static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Sta
 static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
 static void OnToggleAirQuickSpin(int val)        { OSReport("[Main] Air Quick Spin toggled %s\n", stc_off_on[val]); }
 static void OnToggleOnFootZoom(int val)          { OSReport("[Main] On-Foot Zoom toggled %s\n", stc_off_on[val]); }
+static void OnToggleApStarShot(int val)          { OSReport("[Main] AP Star Shot toggled %s\n", stc_off_on[val]); }
 
 // Only round-start application is toggled here - receiving AP permanent-patch items
 // still increments the save counters either way.
@@ -89,7 +91,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 8,
+        .option_num = 9,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -221,6 +223,18 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleOnFootZoom,
+            },
+            &(OptionDesc){
+                .name = "AP Star Shot",
+                .description = "Archipelago Star fires one of its spheres on a full-charge release",
+                .kind = OPTKIND_VALUE,
+                .val = &ap_menu_settings.ap_star_shot_enabled,
+                .value_num = 2,
+                .value_names = (char *[]){
+                    "Off",
+                    "On",
+                },
+                .on_change = OnToggleApStarShot,
             },
         },
     },

@@ -101,51 +101,13 @@ static void PaletteColor(PaletteTarget *t, GXColor *out)
     out->a = 0xFF;
 }
 
-// The descriptor names a joint by its index in the archive's own tree, so the
-// index is resolved against the JObjDesc tree and the live joint found by the
-// back-pointer JObjLoad (0x8040add4) leaves at JOBJ+0x84. That holds however the
-// engine roots the instance, which a raw depth-first index into the GObj would
-// not.
-static JOBJDesc *DescAtIndex(JOBJDesc *desc, int *countdown)
-{
-    for (; desc != NULL; desc = desc->next)
-    {
-        if ((*countdown)-- == 0)
-            return desc;
-
-        JOBJDesc *hit = DescAtIndex(desc->child, countdown);
-        if (hit != NULL)
-            return hit;
-    }
-    return NULL;
-}
-
-static JOBJ *JointForDesc(JOBJ *jobj, JOBJDesc *desc)
-{
-    for (; jobj != NULL; jobj = jobj->sibling)
-    {
-        if (jobj->desc == desc)
-            return jobj;
-
-        JOBJ *hit = JointForDesc(jobj->child, desc);
-        if (hit != NULL)
-            return hit;
-    }
-    return NULL;
-}
-
 static void PaintMachine(MachineData *md)
 {
     PaletteTarget *t = TargetFor(md);
-    if (t == NULL || md->gobj == NULL || md->vcData == NULL || md->vcData->model == NULL)
+    if (t == NULL)
         return;
 
-    int countdown = t->joint;
-    JOBJDesc *desc = DescAtIndex(md->vcData->model->model_root, &countdown);
-    if (desc == NULL)
-        return;
-
-    JOBJ *joint = JointForDesc((JOBJ *)md->gobj->hsd_object, desc);
+    JOBJ *joint = CustomMachines_GetMachineJoint(md, t->joint);
     if (joint == NULL)
         return;
 

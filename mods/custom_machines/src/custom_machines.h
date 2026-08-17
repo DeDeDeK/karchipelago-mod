@@ -49,6 +49,12 @@ void                CustomMachines_CopyStr(char *dst, const char *src, int max);
 // Point an accessor's `lis` / `addi` pair at a relocated copy of its table.
 void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table);
 
+// The live joint for a depth-first index into the machine archive's own joint
+// tree. The index is resolved against the JObjDesc tree and the joint found by
+// the back-pointer JObjLoad (0x8040add4) leaves at JOBJ+0x84, which holds however
+// the engine roots the instance.
+JOBJ *CustomMachines_GetMachineJoint(MachineData *md, int joint_index);
+
 // Read an archive off the disc during OnBoot, before any scene heap exists. The
 // buffer is never freed, so the archive stays resident for the run of the game.
 HSD_Archive *CustomMachines_LoadArchiveAtBoot(char *path);
@@ -58,6 +64,10 @@ int CustomMachines_Discover(void);
 
 // machine_registry.c - the widened star class.
 void CustomMachineRegistry_OnBoot(void);
+// Layer a handler onto a custom kind's slot in one of the two per-kind tables the
+// star class dispatches through: 0 = Machine_Star_Init, 1 = Machine_Star_Think.
+int  CustomMachineRegistry_SetStarHandler(int table, int machine_kind,
+                                          void (*fn)(MachineData *));
 
 // character_registry.c - appended CharacterDesc rows and select-grid cells.
 void CustomMachineCharacter_OnBoot(void);

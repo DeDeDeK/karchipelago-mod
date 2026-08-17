@@ -8,6 +8,7 @@
 
 #include "os.h"
 #include "hsd.h"
+#include "obj.h"
 #include "menu.h"
 #include "hoshi/mod.h"
 #include "code_patch/code_patch.h"
@@ -55,6 +56,48 @@ CustomMachineEntry *CustomMachines_FindByCharacterKind(int character_kind)
             return &stc_entries[i];
     }
     return NULL;
+}
+
+static JOBJDesc *DescAtIndex(JOBJDesc *desc, int *countdown)
+{
+    for (; desc != NULL; desc = desc->next)
+    {
+        if ((*countdown)-- == 0)
+            return desc;
+
+        JOBJDesc *hit = DescAtIndex(desc->child, countdown);
+        if (hit != NULL)
+            return hit;
+    }
+    return NULL;
+}
+
+static JOBJ *JointForDesc(JOBJ *jobj, JOBJDesc *desc)
+{
+    for (; jobj != NULL; jobj = jobj->sibling)
+    {
+        if (jobj->desc == desc)
+            return jobj;
+
+        JOBJ *hit = JointForDesc(jobj->child, desc);
+        if (hit != NULL)
+            return hit;
+    }
+    return NULL;
+}
+
+JOBJ *CustomMachines_GetMachineJoint(MachineData *md, int joint_index)
+{
+    if (md == NULL || joint_index < 0 || md->gobj == NULL || md->vcData == NULL ||
+        md->vcData->model == NULL)
+        return NULL;
+
+    int countdown = joint_index;
+    JOBJDesc *desc = DescAtIndex(md->vcData->model->model_root, &countdown);
+    if (desc == NULL)
+        return NULL;
+
+    return JointForDesc((JOBJ *)md->gobj->hsd_object, desc);
 }
 
 void CustomMachines_CopyStr(char *dst, const char *src, int max)
@@ -292,6 +335,31 @@ static float Api_GetSpawnWeight(int kind)
     return e != NULL ? e->spawn_weight : 0.0f;
 }
 
+static int Api_SetStarInitHandler(int kind, CustomMachineStarHandler fn)
+{
+    return CustomMachineRegistry_SetStarHandler(0, kind, fn);
+}
+
+static int Api_SetStarThinkHandler(int kind, CustomMachineStarHandler fn)
+{
+    return CustomMachineRegistry_SetStarHandler(1, kind, fn);
+}
+
+static JOBJ *Api_GetMachineJoint(MachineData *md, int joint_index)
+{
+    return CustomMachines_GetMachineJoint(md, joint_index);
+}
+
+static const u32 *Api_GetPalette(int kind, int *out_count)
+{
+    CustomMachineEntry *e = CustomMachines_FindByKind(kind);
+    if (e == NULL || e->palette_joint < 0)
+        return NULL;
+    if (out_count != NULL)
+        *out_count = e->palette_count;
+    return e->palette;
+}
+
 static const CustomMachinesAPI stc_api = {
     .GetGridCols = CustomMachineCharacter_GetGridCols,
     .GetGridSentinel = CustomMachineCharacter_GetSentinel,
@@ -306,6 +374,10 @@ static const CustomMachinesAPI stc_api = {
     .GetName = Api_GetName,
     .FindKindByName = Api_FindKindByName,
     .GetSpawnWeight = Api_GetSpawnWeight,
+    .SetStarInitHandler = Api_SetStarInitHandler,
+    .SetStarThinkHandler = Api_SetStarThinkHandler,
+    .GetMachineJoint = Api_GetMachineJoint,
+    .GetPalette = Api_GetPalette,
 };
 
 void CustomMachines_OnBoot(void)
