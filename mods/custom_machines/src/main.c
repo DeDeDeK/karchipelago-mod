@@ -10,4 +10,5 @@ ModDesc mod_desc = {
     .version.minor = 0,
     .affects_gameplay = 1,
     .OnBoot = CustomMachines_OnBoot,
+    .On3DLoadStart = CustomMachines_On3DLoadStart,
 };

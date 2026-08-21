@@ -331,7 +331,7 @@ static void FilterMode2(EnemySpawnData *data)
             zeroed_categories++;
         }
     }
-    OSReport("[GateAbilities] Mode2: zeroed %d/%d entries, %d/%d categories\n",
+    OSReport("[GateAbilities] Mode 2: zeroed %d/%d entries, %d/%d categories\n",
              zeroed_entries, data->spawn_count, zeroed_categories, num_categories);
 }
 
@@ -367,7 +367,7 @@ void GateAbilities_OnBoot()
     // GateAbilities_RandomGiveAbility marks the substituted kind instead.
     CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
     CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained
-    OSReport("[GateAbilities] Copy ability gating hooks installed\n");
+    OSReport("[GateAbilities] Hooks installed\n");
 }
 
 int GateAbilities_UnlockAbility(CopyKind kind)

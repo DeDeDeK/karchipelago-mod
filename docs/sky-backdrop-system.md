@@ -5,23 +5,16 @@ mountains, sky dome, starfield. It lives in its own JObj sub-tree separate from 
 playable terrain mesh: Air Ride courses populate one, City Trial populates one
 (`grModelCity1[1]`, the city horizon beyond the streets), and some debug stages leave the
 slot NULL and just fog out. Fog color, ambient sky tint, the fade overlay, and area-light
-parameters are a *separate* system driven by `SkyPresetEntry` and `Sky_Update`; the
-backdrop is only geometry.
+parameters are a *separate* system driven by `SkyPresetEntry` and `Sky_Update`
+(`0x800dc640`); the backdrop is only geometry.
 
 ## Game System
 
 ### ModelSection - GrData + 0x0C
 
-Defined in `externals/hoshi/include/stage.h`:
-
-```c
-typedef struct ModelSection {
-    JOBJDesc **terrain;  // 0x00 - main playable geometry
-    JOBJDesc **backdrop; // 0x04 - secondary skybox/horizon mesh
-    void *unk_8;         // 0x08
-    void *unk_c;         // 0x0C
-} ModelSection;
-```
+`ModelSection` (`externals/hoshi/include/stage.h`) is four dwords: `terrain` at `+0x00`,
+`backdrop` at `+0x04`, and two unidentified model slots. A NULL slot is legal and just
+suppresses that subtree.
 
 `grModel<X>` (the public symbol exported by every `Gr<X>Model.dat` stage archive) **is**
 this struct - HSD's `KAR_grModel`. Its slots don't point straight at `JOBJDesc`s:
@@ -30,26 +23,19 @@ those *leads with* its root `JOBJDesc *` (the main model then carries jobj/dobj/
 counts + a bounding record; the skybox carries a model-motion joint). Because the root
 pointer is the first field, dereferencing a slot as a `JOBJDesc **` yields the root joint
 - which is all `3D_CreateStageModel` ever reads, so the loader can treat the whole thing
-as a `ModelSection` of `JOBJDesc **`s. `unk_8`/`unk_c` are two further model slots left
-unidentified. A NULL slot is legal and just suppresses that subtree.
+as a `ModelSection` of `JOBJDesc **`s.
 
 So loading a foreign stage's archive and taking `donor_ms.backdrop` gives you a backdrop
 you can graft into any other stage that respects `ModelSection`.
 
 ### 3D_CreateStageModel (0x800dcbf0) - the loader
 
-Reads `grdata->model_section`, then for each populated slot:
-
-```c
-JOBJDesc *desc = *ms.terrain;            // (or *ms.backdrop)
-JObj    *jobj = HSD_JObjLoadJoint(desc); // instantiate
-// terrain: GObj_AddObject(grobj_gobj, kind, jobj)
-// backdrop: grobj->backdrop_jobj_at_0xF4 = jobj
-// both: stamp grGetStageScale() into JObj scale at +0x2C/30/34
-```
-
-If `ms.backdrop == NULL`, slot `GrObj+0xF4` is set to NULL and the second
-`HSD_JObjLoadJoint` is skipped - no crash.
+Reads `grdata->model_section` and instantiates each populated slot with
+`HSD_JObjLoadJoint`. The terrain joint goes to `GObj_AddObject` on the ground GObj; the
+backdrop joint is parked in `GrObj.backdrop_jobj` (`+0xF4`) with no GObj of its own. Both
+get `grGetStageScale()` stamped into the root joint's scale at `JObj+0x2C/30/34`. If
+`ms.backdrop == NULL`, `GrObj+0xF4` is set to NULL and the second `HSD_JObjLoadJoint` is
+skipped - no crash.
 
 `grGetStageScale` (0x800d3058) returns `grdata->stage_node->StageScale` (`StageNode+0x08`)
 of the **current** stage. The loader writes that one float into all three of the
@@ -156,7 +142,7 @@ carved asset with `geom_bounds.py` reports the normalized radius as a built-in c
 
 ### gr_kind 5-tuple table (Table A) - 0x804a2ffc, stride 0x14, 28 entries
 
-Indexed by `gr_kind`; consumed by `grLoadStageArchive`. Per-row layout:
+Indexed by `gr_kind`; consumed by `grLoadStageArchive` (`0x800ce7a0`). Per-row layout:
 
 | Offset | Field |
 |------:|-------|
@@ -168,36 +154,22 @@ Indexed by `gr_kind`; consumed by `grLoadStageArchive`. Per-row layout:
 
 Decoded entries:
 
-| gr_kind | Filename / public | Notes |
-|--------:|-------------------|-------|
-|  0 | `GrPlants1`   | |
-|  1 | `GrHeat2`     | |
-|  2 | `GrDesert1`   | |
-|  3 | `GrCheck2`    | |
-|  4 | `GrValley2`   | |
-|  5 | `GrMachine2`  | |
-|  6 | `GrSpace2`    | space backdrop |
-|  7 | `GrSky2`      | |
-|  8 | `GrIce1`      | |
-|  9 | `GrCity1`     | **City Trial** |
-| 10 | `GrZeroyon1`  | |
-| 11 | `GrZeroyon3`  | |
-| 12 | `GrZeroyon4`  | |
-| 13 | `GrZeroyon5`  | |
-| 14 | `GrPasture1`  | |
-| 15 | `GrColosseum1`| |
-| 16 | `GrColosseum3`| |
-| 17 | `GrColosseum5`| |
-| 18 | `GrJump1`     | |
-| 19 | `GrJump2`     | |
-| 20 | `GrJump3`     | |
-| 21 | `GrDedede1`   | King Dedede arena |
-| 22 | (NULL - `param_9 == 0x16` special-case in `grLoadStageArchive`) |
-| 23 | `GrTest`      | debug, no backdrop |
-| 24 | `GrTest6`     | debug, no backdrop |
-| 25 | `GrTest7`     | debug, no backdrop |
-| 26 | `GrSimple`    | system archive (14 MB), backdrop is a 4 KB placeholder |
-| 27 | `GrSimple2`   | no backdrop |
+| gr_kind | Archive | gr_kind | Archive |
+|--------:|---------|--------:|---------|
+|  0 | `GrPlants1`    | 14 | `GrPasture1` |
+|  1 | `GrHeat2`      | 15 | `GrColosseum1` |
+|  2 | `GrDesert1`    | 16 | `GrColosseum3` |
+|  3 | `GrCheck2`     | 17 | `GrColosseum5` |
+|  4 | `GrValley2`    | 18 | `GrJump1` |
+|  5 | `GrMachine2`   | 19 | `GrJump2` |
+|  6 | `GrSpace2`     | 20 | `GrJump3` |
+|  7 | `GrSky2`       | 21 | `GrDedede1` (King Dedede arena) |
+| 8 | `GrIce1` | 22 | NULL - `param_9 == 0x16` special-case in `grLoadStageArchive` |
+|  9 | `GrCity1` (**City Trial**) | 23 | `GrTest` (debug, no backdrop) |
+| 10 | `GrZeroyon1`   | 24 | `GrTest6` (debug, no backdrop) |
+| 11 | `GrZeroyon3`   | 25 | `GrTest7` (debug, no backdrop) |
+| 12 | `GrZeroyon4`   | 26 | `GrSimple` (system archive, 14 MB; backdrop is a 4 KB placeholder) |
+| 13 | `GrZeroyon5`   | 27 | `GrSimple2` (no backdrop) |
 
 The indices above are `stage.h`'s `GroundKind` enum (`GR_*` members) - the file-table index
 decoded here: `GR_CITY1 = 9`, `GR_PASTURE1 = 14`, `GR_COLOSSEUM5 = 17`, `GR_DEDEDE1 = 21`.
@@ -210,8 +182,9 @@ only at 0/1/2 and City Trial (9) and diverge elsewhere. `custom_backdrops` keys 
 Separate 60-entry table at `*0x805dd8dc = 0x807ea0c8`, stride 0x58, loaded at runtime from
 `Stage.dat` (public symbol `stData`). First dword of each entry is a `gr_kind` that
 resolves into Table A. The field at `+0x30` is the "is City" flag - `Gm_IsGrKindCity`
-(0x80262574) bounds-checks the index against 60, then returns
-`stData[stage_kind * 0x58 + 0x30]` verbatim.
+(0x80262574) asserts unless `0 <= stage_kind < 0x3b`, then returns the dword at
+`stData[stage_kind * 0x58 + 0x30]` verbatim. Despite the name it is indexed by
+`StageKind`, not `gr_kind`.
 
 `StageKind` is the finer-grained UI/mode-level identifier (per-mode duplicates / variants);
 `gr_kind` is the underlying physical archive identity. Most code wants `gr_kind`.
@@ -219,23 +192,12 @@ resolves into Table A. The field at `+0x30` is the "is City" flag - `Gm_IsGrKind
 ## Pool Composition
 
 `carve_all_backdrops.py` produces 23 `Backdrop*.dat` files (one per `Gr*Model.dat` with a
-non-NULL `ms[1]`); the mod's `backdrop_defs[]` references only 21 of them (the two starred
-below are carved but intentionally not referenced). The runtime pool is those 21 donors plus
-a "Vanilla" no-op entry, for 22 total options in the menu:
-
-```
-BackdropCheck2     BackdropDesert1    BackdropJump3      BackdropSpace2
-BackdropCity1*     BackdropHeat2      BackdropMachine2   BackdropValley2
-BackdropColosseum1 BackdropIce1       BackdropPasture1   BackdropZeroyon1
-BackdropColosseum3 BackdropJump1      BackdropPlants1    BackdropZeroyon3
-BackdropColosseum5 BackdropJump2      BackdropSky2       BackdropZeroyon4
-BackdropDedede1                                          BackdropZeroyon5
-                                      BackdropSimple*
-```
-
-The pool excludes `City1` (would duplicate the Vanilla no-op option) and `Simple` (4 KB
-placeholder, almost certainly a dummy). The other 4 archives skipped during batch carving
-(`GrSimple2`, `GrTest`, `GrTest6`, `GrTest7`) all have `ms[1] == NULL`.
+non-NULL `ms[1]`), all staged in `mods/custom_weather/assets/`. `backdrop_defs[]` in
+`custom_backdrops.c` references 21 of them, plus a "Vanilla" no-op entry at index 0, for 22
+menu options. Two carved files are deliberately unreferenced: `City1` (it would duplicate
+the Vanilla option) and `Simple` (a 4 KB placeholder, almost certainly a dummy). The other
+4 archives skipped during batch carving (`GrSimple2`, `GrTest`, `GrTest6`, `GrTest7`) all
+have `ms[1] == NULL`.
 
 The **Backdrops** menu (`backdrop_menu` in `custom_backdrops.c`) carries the Backdrop
 Distance value, an Enable-All / Disable-All pair, and one Enabled/Disabled toggle per

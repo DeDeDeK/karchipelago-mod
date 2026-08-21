@@ -3,7 +3,7 @@
 
 #include "enemy.h"
 
-// Patches EventActor_GetParentScale and splArcLengthPoint to tolerate the null
+// Patches EventActor_GetParentAnimRate and splArcLengthPoint to tolerate the null
 // parent/spline pointers a standalone spawn has. Call once at boot.
 void SpawnEnemy_OnBoot(void);
 

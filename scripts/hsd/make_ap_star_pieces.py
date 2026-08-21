@@ -49,8 +49,8 @@ from hsd.archive import build_archive
 from hsd.gx import GX_TF_RGB5A3, align32, encode_rgb5a3
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-OUT_DIR = os.path.join(ROOT, "mods", "archipelago", "assets", "items")
-ICON_DAT = os.path.join(ROOT, "mods", "archipelago", "assets", "ApPieceIcons.dat")
+OUT_DIR = os.path.join(ROOT, "mods", "ap_star", "assets", "items")
+ICON_DAT = os.path.join(ROOT, "mods", "ap_star", "assets", "ApPieceIcons.dat")
 
 ARCHIVE_VERSION = b"001B"
 PUBLIC = "customItem"

@@ -6,8 +6,8 @@
 // New City Trial item kinds loaded from .dat archives in the FST items/ folder.
 
 #define CUSTOM_ITEMS_MOD_NAME  "custom_items"
-#define CUSTOM_ITEMS_API_MAJOR 1
-#define CUSTOM_ITEMS_API_MINOR 2
+#define CUSTOM_ITEMS_API_MAJOR 2
+#define CUSTOM_ITEMS_API_MINOR 0
 
 // Each custom-item .dat exports one public symbol named `customItem` whose
 // address is a CustomItemDesc. Magic is big-endian ASCII "CITM".
@@ -104,11 +104,8 @@ typedef struct CustomItemsAPI
     // ItemKind assigned this round, or -1 if not registered yet this scene.
     int (*GetAssignedKind)(u32 id_hash);
 
-    // Legacy (minor 1+): adds a handler (deduplicated); NULL clears all of them.
-    void (*SetPickupHandler)(CustomItemPickupFn handler);
-
-    // Subscribe/unsubscribe a pickup handler (minor 2+); every registered
-    // handler runs on each pickup. Add is a no-op if present or the list is full.
+    // Subscribe/unsubscribe a pickup handler; every registered handler runs on
+    // each pickup. Add is a no-op if present or the list is full.
     void (*AddPickupHandler)(CustomItemPickupFn handler);
     void (*RemovePickupHandler)(CustomItemPickupFn handler);
 } CustomItemsAPI;

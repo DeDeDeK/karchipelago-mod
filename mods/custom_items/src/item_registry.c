@@ -246,15 +246,18 @@ int CustomItemRegistry_RegisterAll(void)
         e->assigned_kind = kind;
 
         // The engine's pool chance is a u8, so PoolAppend saturates at 255.
+        int clamped = 0;
         for (int b = 0; b < BOXKIND_NUM; b++)
         {
             if (desc->weight_box[b] > 255)
-                OSReport("[CustomItems] %s box weight %d > 255, clamped (weights are relative)\n",
-                         e->name, desc->weight_box[b]);
+                clamped++;
             stc_box_weight[n][b] = desc->weight_box[b];
             if (g != NULL)
                 PoolAppend(g, b, kind, desc->weight_box[b]);
         }
+        if (clamped)
+            OSReport("[CustomItems] %s: %d box weight(s) over 255, clamped (weights are relative)\n",
+                     e->name, clamped);
 
         // One event-source row, kept only if some source is nonzero.
         if (ev_src != NULL && ev_num < CUSTOM_KIND_CEILING)

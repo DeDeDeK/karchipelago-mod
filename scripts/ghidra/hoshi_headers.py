@@ -15,7 +15,9 @@ import re
 # decl only encodes a single element). Guessing counts from prose comments risks
 # overrunning into an adjacent global, so this stays curated.
 ARRAY_SIZES = {
-    "stc_playerdata": 5,   # PlayerData[5] (slots 0-4); the headline indexed global
+    "stc_playerdata": 5,      # PlayerData[5] (slots 0-4); the headline indexed global
+    "psGeneratorCount": 64,   # one per particle bank; Ptcl_Alloc checks bank < 0x40
+    "psGeneratorDesc": 64,
 }
 
 # Exotic declarators a cast regex can't parse: a pointer-to-array and a
@@ -245,7 +247,7 @@ _ADDR = (r"(?:0x[0-9a-fA-F]+"
 _STATIC_RE = re.compile(
     r"^\s*static\s+"
     r"(?P<decl>[A-Za-z_][\w\s]*?)\s*"
-    r"(?P<stars>\*+)\s*"
+    r"(?P<stars>\*+)\s*(?:const\s+)?"
     r"(?P<name>[A-Za-z_]\w*)\s*=\s*"
     r"\(\s*[^)]*\*+\s*\)\s*"           # a pointer cast (no nested parens)
     r"(?P<addr>" + _ADDR + r")\s*;"

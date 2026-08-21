@@ -27,12 +27,9 @@ void TrapLink_Send(TrapLinkKind kind)
     if (kind == TRAPLINK_KIND_NONE)
         return;
     if (recv_suppress_frames > 0)
-    {
-        OSReport("[TrapLink] Suppressing send (kind %d) - within receive guard window\n", kind);
-        return;
-    }
+        return; // inside the receive guard window; a bounced trap is not ours to send
 
-    OSReport("[TrapLink] Traplink send triggered (kind %d)\n", kind);
+    OSReport("[TrapLink] Send triggered (kind %d)\n", kind);
     ap_data->traplink_send = (uint)kind;
 }
 
@@ -95,7 +92,7 @@ static int ApplyCityTrialTrap(void)
 
     if (count == 0)
     {
-        OSReport("[TrapLink] no eligible trap items, discarding\n");
+        OSReport("[TrapLink] No eligible trap items - discarding\n");
         return 1; // treat as handled so we clear the flag
     }
 
@@ -140,10 +137,12 @@ static int ApplyAirRideTrap(void)
         // calls Rider_CopyInputToMachine and derefs a null machine_gobj.
         if (!Rider_IsOnMachine(rd))
             continue;
-        OSReport("[TrapLink] giving sleep ability to ply %d\n", i);
         Rider_GiveAbility(rd, COPYKIND_SLEEP);
-        applied = 1;
+        applied++;
     }
+
+    if (applied)
+        OSReport("[TrapLink] Applied sleep-ability trap to %d player(s)\n", applied);
     return applied;
 }
 
@@ -187,12 +186,12 @@ static void TrapLink_PerFrame(GOBJ *g)
             // are always mounted, so they fall back to the AR sleep trap.
             if (Gm_GetCityMode() == CITYMODE_FREERUN)
             {
-                OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded).\n");
+                OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded)\n");
                 handled = 1;
             }
             else if (CityTrial_IsInStadium())
             {
-                OSReport("[TrapLink] Stadium - falling back to sleep ability trap.\n");
+                OSReport("[TrapLink] Stadium - falling back to the sleep-ability trap\n");
                 handled = ApplyAirRideTrap();
             }
             else
@@ -295,7 +294,6 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
     if (TopRide_GetPlayerKind(picker->player_slot) != TR_PKIND_HMN)
         return; // CPU picked it up - don't send
 
-    OSReport("[TrapLink] TR ply %d picked up bad item %d\n", closest, item_kind);
     TrapLink_Send(TRAPLINK_KIND_SPEED_DOWN);
 }
 

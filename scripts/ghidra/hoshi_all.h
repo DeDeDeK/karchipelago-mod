@@ -39,6 +39,7 @@
 
 /* Presentation helpers */
 #include "effect.h"
+#include "particle.h"
 #include "color.h"
 #include "devtext.h"
 #include "hud.h"

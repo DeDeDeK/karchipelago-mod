@@ -131,8 +131,23 @@ static void OnFrameStart(void)
 
     if (pad->down & PAD_BUTTON_DPAD_DOWN)
     {
-        ap_api->DebugTriggerDeathlinkReceive();
-        OSReport("[ApDebug] triggered deathlink_receive\n");
+        if (pad->held & PAD_TRIGGER_L)
+        {
+            ap_api->DebugTriggerDeathlinkReceive();
+            OSReport("[ApDebug] triggered deathlink_receive\n");
+        }
+        else
+        {
+            // Walk the six Archipelago Star spheres, one per press, dropping each
+            // in front of player 1 - six presses and six drive-overs is the whole
+            // assembly, without waiting on the round's delivery schedule. A locked
+            // sphere has no ItemKind and is skipped rather than stalling the cycle.
+            static int next_sphere = 0;
+            int spawned = ap_api->DebugSpawnApStarPiece(next_sphere, 0);
+            OSReport("[ApDebug] AP Star sphere %d %s\n", next_sphere,
+                     spawned ? "spawned" : "unavailable");
+            next_sphere = (next_sphere + 1) % AP_STAR_PIECE_NUM;
+        }
     }
 
     if (pad->down & PAD_BUTTON_DPAD_UP)

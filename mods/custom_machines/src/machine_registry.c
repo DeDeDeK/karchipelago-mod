@@ -1,13 +1,8 @@
 // Widens the engine's star machine class from 19 slots to 19 + CUSTOM_MACHINE_MAX
-// so registered machines can load archives of their own.
-//
-// Four engine tables are hard-sized at 19 star slots. The name table is reached
-// through a pointer (stc_vcNameTable[is_bike]), so it is simply repointed at a
-// wider copy. The loaded-archive table stc_vcDataLookup is a fixed array whose
-// bike row starts right after its star row, so it is relocated wholesale into
-// stc_vc_lookup; every read of the original goes through this file. The two
-// machine-specific handler tables are relocated by rewriting the lis/addi pair
-// inside their one reader.
+// so registered machines can load archives of their own. The name table is reached
+// through a pointer and simply repointed; stc_vcDataLookup is relocated wholesale
+// and every read of it goes through this file; the two machine-specific handler
+// tables are relocated by rewriting the lis/addi pair inside their one reader.
 
 #include "os.h"
 #include "hsd.h"
@@ -189,6 +184,6 @@ void CustomMachineRegistry_OnBoot(void)
     CODEPATCH_REPLACEFUNC(MachineDesc_SetKindAndIsBikeFromMachineKind, SplitKind);
     CODEPATCH_HOOKAPPLY(0x801c8d8c); // Machine_PreloadAll tail
 
-    OSReport("[CustomMachines] Star class widened to %d slots for %d machine(s)\n",
+    OSReport("[MachineRegistry] Star class widened to %d slots for %d machine(s)\n",
              CUSTOM_VCSTAR_NUM, CustomMachines_GetCount());
 }

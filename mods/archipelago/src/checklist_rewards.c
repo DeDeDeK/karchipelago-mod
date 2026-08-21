@@ -485,8 +485,9 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
     // reward_type survives cross-mode / shuffle remapping (only clear_kind is
     // overwritten), so this lookup is always valid.
     u8 reward_type = stc_reward_table_ptrs[mode][reward_index].reward_type;
-    OSReport("[Checklist] Granted mode=%d ri=%d type=%s (%d) announce=%d\n",
-             mode, reward_index, Reward_TypeName(reward_type), reward_type, announce);
+    if (!ap_regrant_quiet)
+        OSReport("[ChecklistRewards] Granted mode=%d ri=%d type=%s (%d)\n",
+                 mode, reward_index, Reward_TypeName(reward_type), reward_type);
     if (announce)
         AnnounceChecklistReward(mode, reward_index, reward_type);
     ApplyVanillaRewardUnlock(mode, reward_index, reward_type);
@@ -547,7 +548,7 @@ void ChecklistRewards_GrantAllCosmetic(void)
             }
         }
     }
-    OSReport("[Checklist] Checklist rewards ungated - auto-granted %d cosmetic reward(s)\n", total);
+    OSReport("[ChecklistRewards] Checklist rewards ungated - auto-granted %d cosmetic reward(s)\n", total);
 }
 
 // Filter for the reward loop in Checklist_SetRewardFlagOnUnlocks (0x8017DF5C).
@@ -843,6 +844,9 @@ CODEPATCH_HOOKCONDITIONALCREATE(
 // or a new location assignment.
 static void RegrantAllReceivedRewards(void)
 {
+    int total = 0;
+
+    ap_regrant_quiet = 1;
     for (int mode = 0; mode < GMMODE_NUM; mode++)
     {
         u64 received = ap_save->received_checklist_rewards[mode];
@@ -851,8 +855,12 @@ static void RegrantAllReceivedRewards(void)
             int idx = __builtin_ctzll(received);
             ChecklistRewards_Grant(mode, (u8)idx, /*announce=*/0);
             received &= received - 1;
+            total++;
         }
     }
+    ap_regrant_quiet = 0;
+
+    OSReport("[ChecklistRewards] Re-applied %d reward(s) from save\n", total);
 }
 
 
@@ -871,7 +879,6 @@ static void AllocateRewardTables(void)
     // While the copies still hold native clear_kinds - RebuildRewardTablesFromShuffle
     // clobbers them.
     BuildRewardIndexMaps();
-    OSReport("[Checklist] Reward tables allocated and pointers redirected\n");
 }
 
 // Rebuild stc_reward_table_ptrs[mode][i].clear_kind and cross_mode_slots. Call after
@@ -996,13 +1003,13 @@ void ChecklistRewards_DebugSimulateLocationData(void)
                 ap_data->locations[mode][i] = 0xFFFF;
             }
         }
-        OSReport("[Checklist]   Mode %d: %d same, %d cross, %d remote\n",
+        OSReport("[ChecklistRewards] Debug: mode %d - %d same, %d cross, %d remote\n",
                  mode, local_count, cross_count,
                  count - local_count - cross_count);
     }
 
     ap_data->location_data_valid = 1;
-    OSReport("[Checklist] Debug: simulated location data written\n");
+    OSReport("[ChecklistRewards] Debug: simulated location data written\n");
 
     ChecklistRewards_ApplyLocations();
 }
@@ -1045,7 +1052,7 @@ void ChecklistRewards_DebugClearAll(void)
     }
 
     Hoshi_WriteSave();
-    OSReport("[Checklist] Debug: cleared ALL checklist data (flags, sent_checks, rewards, shuffle)\n");
+    OSReport("[ChecklistRewards] Debug: cleared all checklist data (flags, sent_checks, rewards, shuffle)\n");
 }
 
 // Reveal every checkbox on one checklist-mode row. Sets is_visible only - unlock state
@@ -1073,7 +1080,7 @@ void RevealAllChecklists(void)
     for (int mode = 0; mode < CHECKLIST_MODE_NUM; mode++)
         RevealChecklist(mode);
 
-    OSReport("[Checklist] All checklist squares revealed (%d rows x %d squares)\n",
+    OSReport("[ChecklistRewards] Debug: revealed all squares (%d rows x %d)\n",
              CHECKLIST_MODE_NUM, CLEAR_KIND_NUM);
 }
 
@@ -1108,7 +1115,7 @@ void ChecklistRewards_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8018201c);  // Cross-mode reward text display
     CODEPATCH_HOOKAPPLY(0x80181f8c);  // Blank text sis_id fix
     CODEPATCH_HOOKAPPLY(0x80182170);  // Cross-mode reward type icon
-    OSReport("[Checklist] Hooks installed\n");
+    OSReport("[ChecklistRewards] Reward tables reallocated, hooks installed\n");
 
     ClearCrossModeSlots();
 }
@@ -1127,7 +1134,6 @@ void ChecklistRewards_OnSaveLoaded(void)
 {
     RebuildRewardTablesFromShuffle();
     RegrantAllReceivedRewards();
-    OSReport("[Checklist] Checklist rewards restored from save\n");
 }
 
 // Apply the AP location assignment written by the Python client to APData. Grants are
@@ -1149,5 +1155,5 @@ void ChecklistRewards_ApplyLocations()
 
     ap_data->location_data_valid = 0;
     Hoshi_WriteSave();
-    OSReport("[Checklist] AP location assignment applied to checklist reward tables\n");
+    OSReport("[ChecklistRewards] AP location assignment applied to checklist reward tables\n");
 }

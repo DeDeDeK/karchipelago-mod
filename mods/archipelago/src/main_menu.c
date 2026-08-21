@@ -13,6 +13,7 @@
 
 #include "main.h"
 #include "main_menu.h"
+#include "gate_ap_star.h"
 
 static HSD_Archive *menu_archive = 0;
 static void (*title_exit_vanilla)(void *data) = 0;
@@ -32,12 +33,12 @@ static int demo_rider = RDKIND_DEDEDE;
 // Re-applied per title entry because the registry only resolves after every mod boots.
 static void MainMenu_SelectDemoMachine(void)
 {
-    int kind = ApStarMachineKind();
+    int kind = GateApStar_MachineKind();
 
     if (kind >= 0)
     {
         int is_bike;
-        int slot = cm_api->ClassIndexFromKind(kind, &is_bike);
+        int slot = MachineKind_ClassIndexOf((MachineKind)kind, &is_bike);
         if (!is_bike)
         {
             demo_star_slot = slot;

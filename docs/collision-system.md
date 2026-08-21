@@ -1,352 +1,14 @@
 # Map Collision System (mpColl)
 
-The map collision system handles all entity-vs-environment interactions in Kirby Air Ride — ground detection, wall/ceiling collisions, raycasting, and surface response. This is distinct from the **HitColl** system (documented in `hurtdata-system.md`), which handles entity-vs-entity combat collisions.
+The map collision system handles entity-vs-environment interaction in Kirby Air Ride: ground detection, wall and ceiling pushback, raycasting, and surface response. Entity-vs-entity combat collision (hitboxes, damage, knockback) is an unrelated system with its own per-entity hurt data and its own per-frame pass.
 
-## Collision Approaches
+Two halves meet here. **`grColl`** owns the stage's triangle soup and the queries over it. **`mpColl`** owns the per-body collision object (`CollData`) that riders, machines, enemies and some items carry, runs the sweep each frame, and caches the results.
 
-Four strategies, picked per entity type:
+## Stage Collision Data (GrCollParam)
 
-| Approach | Used by | CollData allocated? | Description |
-|----------|---------|---------------------|-------------|
-| **Full mpColl** | Machines, Riders | Yes | Full 0x400-byte CollData with sphere collision, floor/wall/ceiling detection |
-| **Item mpColl (coll_kind=1)** | Boxes landing | Yes | CollData with bounce physics, transitions to point coll on landing |
-| **Point collision** | Most items (coll_kind>=2) | Optional | Simple downward raycast for ground detection |
-| **Raw raycast** | Items (coll_kind=0) | No | Initial spawn raycast, transitions to point coll (coll_kind=3) |
+`GrCollParam` at `GrObj+0x54` is the static triangle mesh a rider or machine is actually stopped by. One vertex pool and one triangle array per stage hold both the baked terrain and every placed prop's triangles; each prop owns a contiguous slice of the triangle array through its `GrCollRecord`. The structs (`GrCollParam`, `GrCollTri`, `GrCollRecord`, `GrCollVtx`) are in `externals/hoshi/include/collision.h`; `Gr_GetCollParam()` in `stage.h` fetches the live one.
 
-## CollData Struct (0x400 bytes)
-
-Defined in `collision.h`. Allocated by `mpColl_Create` (0x80245b4c) from a freelist pool at `0x8056dbc8`. All active CollData objects are linked via `next` into a global list headed at `r13+0x7E4` (`0x805DD8C4`).
-
-| Offset | Type | Name | Description |
-|--------|------|------|-------------|
-| 0x000 | CollData* | next | Linked list pointer (global list at 0x805DD8C4) |
-| 0x004 | GOBJ* | gobj | Owner GObj |
-| 0x008 | Vec3 | pos | Current world position |
-| 0x014 | Vec3 | pos_delta | Frame delta (pos - prev_pos), computed by mpColl_Update |
-| 0x020 | Vec3 | prev_pos | Previous frame position |
-| 0x02C-0x040 | | | Position backup / computed fields |
-| 0x044 | mpCollInfo* | coll_info | **Floor/wall/ceiling collision results**. Allocated by mpColl_Create |
-| 0x048 | mpCollInfo* | coll_info2 | Second collision info (alternative collision set). Freed in mpColl_Destroy |
-| 0x33C | CollShapeKind | coll_shape_kind | Collision shape type (0 = sphere) |
-| 0x340 | CollShapeData* | shape_data | Shape parameters. Allocated from pool at 0x8056dbf4 |
-| 0x344 | float | radius | Collision sphere radius (set during mpColl_Init) |
-| 0x348 | int | param | Mode/flag parameter from mpColl_Init |
-| 0x34C | u8 | flags | Bit flags. Bit 7 (0x80) set by mpColl_SetFlag (0x80247e2c) |
-
-### CollShapeData (at CollData+0x340)
-
-| Offset | Type | Name | Description |
-|--------|------|------|-------------|
-| 0x00-0x0B | | | Unknown |
-| 0x0C | Vec3 | direction | Direction/orientation vector |
-| 0x30 | float | radius | Sphere radius (lerp endpoint) |
-| 0x34 | float | radius2 | Second sphere radius; `mpColl_GetSphereRadius` lerps +0x30 <-> +0x34 |
-| 0x38 | Vec3 | scale | Scale vector, set during mpColl_Init |
-
-## mpCollInfo Sub-Struct (at CollData+0x44)
-
-Holds the results of floor/wall/ceiling collision checks. Allocated internally by `mpColl_Create` via `mpColl_AllocCollInfo` (0x802416cc). Three collision "slots" (floor, wall, ceiling), each with validity flags and result data.
-
-| Offset | Type | Name | Description |
-|--------|------|------|-------------|
-| 0x118 | int | floor_count | Number of floor collision entries found |
-| 0x11C | void* | floor_entry | Pointer to floor collision entry data |
-| 0x144 | int | floor_valid | Non-zero when a floor collision result is available |
-| 0x148 | void* | wall_entry | Pointer to wall collision entry data |
-| 0x170 | int | wall_valid | Non-zero when a wall collision result is available |
-| 0x174 | void* | ceil_entry | Pointer to ceiling collision entry data |
-| 0x19C | int | ceil_valid | Non-zero when a ceiling collision result is available |
-
-Each collision entry is 0x1C bytes:
-
-| Offset | Type | Description |
-|--------|------|-------------|
-| 0x00 | u8 | Flags |
-| 0x01 | u8 | Type flags (bit 0=floor, bit 1=wall, bit 2=ceiling) |
-| 0x04 | void* | Vertex data pointer (triangle ID at +0x00, normal Vec3 at +0x08) |
-| 0x08-0x18 | | Additional collision result data |
-
-## Item Collision: coll_kind Dispatch
-
-Items use the `coll_kind` field (3-bit field in ItemData+0x359, **bits 2-4, mask 0x1C**) to select their collision strategy. It is set during `Item_Create` from the `coll_kind` parameter of `Item_InitDesc` and stored by `CityItem_AllocCollData` (0x80254318) via `rlwimi r0,kind,2,27,29` (insert 3 bits at byte position 2). It is read back in `Item_GenericEnvColl` via `rlwinm. r0,byte,30,29,31` (rotate right 2, mask low 3 bits). The `item.h` bitfield models `coll_kind : 3` at the low 3 bits (mask 0x07); the `rlwimi`/`rlwinm` place it at bits 2-4 (mask 0x1C) — the header bitfield and its mask comment are a known discrepancy.
-
-| Value | CollData allocated? | Behavior | Used by |
-|-------|---------------------|----------|---------|
-| **0** | No | **Raw raycast / initial spawn.** Iterative ground search (up to 10 raycast iterations), then **transitions to 3** once grounded. Only valid during the first frame — requires `is_airborne != -1`. If CollData is NULL and code takes this path, the floor/wall/ceiling reads in `CityItem_GetGroundInfo` crash. |
-| **1** | **Yes** (via mpColl_Create) | **Full CollData collision.** Updates mpColl each frame, reads floor/wall/ceiling from mpCollInfo. On wall/ceiling hit: zeroes velocity. On floor hit: calls `ItemColl_BounceLand`. After the bounce settles: **destroys CollData, transitions to 3**. |
-| **2** | No | **Point collision with HandleLand.** Uses `ItemColl_HandleLand` (0x80255aa4) for ground detection via raycast. If CollData exists (optional), updates it but uses a different parameter function. |
-| **3** | No | Same as 2. Steady state for most items after landing. **Most items use this.** |
-| **4-7** | No | Same as 2/3. No behavioral distinction between values 2-7. |
-
-### Lifecycle: box-spawned item
-
-1. `Item_Create` -> `CityItem_AllocCollData(ItemData, 1)` -> allocates CollData, stores coll_kind=1
-2. Each frame: `Item_GenericEnvColl` -> coll_kind=1 path -> updates mpColl, checks floor/wall/ceiling
-3. On bounce: `ItemColl_BounceLand` handles the physics response
-4. When the bounce settles: **destroys CollData** (`mpColl_Destroy`), sets `coll_data = NULL`, writes coll_kind=3
-5. Steady state: coll_kind=3, no CollData, `ItemColl_HandleLand` for simple ground tracking
-
-### Lifecycle: sky-spawned / mod-spawned item
-
-1. `Item_Create` with `coll_kind=3, is_airborne=1` -> no CollData allocated
-2. Initial raycast at spawn to find ground (controlled by `is_airborne` / ItemDesc[0x50])
-3. Each frame: `Item_GenericEnvColl` -> coll_kind>=2 path -> `ItemColl_HandleLand`
-
-### The coll_kind=0 crash
-
-If `coll_kind` is 0 (either intentionally as initial spawn state, or from garbage stack data), `Item_GenericEnvColl` falls through to the raw raycast handler. That path:
-
-1. Checks `ItemData->is_airborne` — if -1, exits immediately (safe)
-2. Otherwise calls `ItemColl_GetGenericCollFlags` on `ItemData->point_coll.raycast_idx`
-3. If flags indicate no collision needed, attempts the raycast
-4. `CityItem_GetGroundInfo` (0x80254464) then unconditionally dereferences `ItemData->coll_data` (offset 0x1A4) to read `coll_info->floor_valid` at +0x44 -> +0x144. When `coll_data` is NULL — which it is whenever `CityItem_AllocCollData` was called with coll_kind=0 — this is a DSI at address 0x00000044.
-
-`coll_kind=0` is used by the game's debug item spawner (`3DDebug_CheckToSpawnItem`, 0x80081600), which either handles this case specially or always transitions before `Item_GenericEnvColl` runs.
-
-## Point Collision (ItemData Fields)
-
-Items using point collision (coll_kind >= 2) track their ground state in ItemData directly:
-
-| Offset | Type | Name | Description |
-|--------|------|------|-------------|
-| 0x1A4 | CollData* | coll_data | NULL for point-collision-only items |
-| 0x1A8 | int | point_coll.raycast_idx | Triangle ID from last raycast (-1 = no ground) |
-| 0x1AC | Vec3 | point_coll.land_pos | Ground position from last raycast |
-| 0x1C8 | Vec3 | fall_dir | Gravity/down direction for raycasting |
-| 0x1D4 | int | is_airborne | If not -1, a ground raycast is performed each frame |
-| 0x35A | u8 | flags | Bit 4 = grounded (set by Item_SetGroundedFlag) |
-
-## Raycast System
-
-| Function | Address | Description |
-|---|---|---|
-| `EnvColl_Raycast` | 0x800d1ac4 | Wrapper around `Raycast_Do`. Takes start position, end position, output buffer. Uses the global map collision data at `r13+0x5EC` (+0x54 sub-offset). |
-| `Item_Raycast` | 0x802546e4 | Iterative raycast for items: position + direction + iteration count, calls `EnvColl_Raycast` in a loop (up to N steps) accumulating position. Returns the final triangle ID. |
-| `CityItem_FindGroundBelow` | 0x802547cc | Raycasts downward from item position (offset along the stored ground normal at ItemData+0x1C8). Stores to `point_coll.raycast_idx` (+0x1A8) and `point_coll.land_pos` (+0x1AC). |
-| `PointCollision_EnsureIDValid` | 0x800d1838 | Validates a triangle ID against the global map collision manager. Returns 0 if valid, 1 if invalid/out-of-range. |
-| `PointCollision_GetNormalByID` | 0x800d1860 | Given a triangle ID and an output Vec3, looks up the triangle (stride 0x40 per entry in map data) and copies the 12-byte surface normal. |
-
-## Item_InitDesc Parameter List
-
-`Item_InitDesc` (0x802509a0) takes 13 parameters: 8 GPR (r3-r10) + 1 FPR (f1) + 4 stack. The GC EABI does **not** shadow floats in GPRs. The `GKYE01.map` symbol at this address is `CityItem_InitDesc`; `Item_InitDesc` is the `link.ld` export name mod code uses.
-
-```c
-void Item_InitDesc(
-    ItemDesc *desc,       // r3: output struct
-    ItemKind kind,        // r4: item kind
-    float scale,          // f1: item scale
-    int spawn_type,       // r5: spawn context (0 = default)
-    Vec3 *pos,            // r6: spawn position
-    Vec3 *up,             // r7: up vector (NULL for default)
-    Vec3 *forward,        // r8: forward vector (NULL for default)
-    int x40,              // r9: maps to ItemData[0x3C], usually -1
-    int x44,              // r10: maps to ItemData[0x40], usually -1
-    int is_airborne,      // stack: -1=skip raycast, other=do raycast
-    int coll_kind,        // stack: 0/1/2/3 (see table above), 3 for most items
-    int x38,              // stack: maps to ItemData[0x34], usually -1
-    int x3c               // stack: maps to ItemData[0x38], usually -1
-);
-```
-
-### Vanilla caller values
-
-| Caller | is_airborne | coll_kind | x38 | x3c |
-|--------|-------------|-----------|-----|-----|
-| 3DDebug_CheckToSpawnItem (0x80081600) | 1 | 0 | -1 | -1 |
-| PowerUp_SpawnFromSky | 1 | 0 | variable | variable |
-| Box_SpawnContents (0x80253378) | 1 | 1 or 2 | -1 | -1 |
-| zz_80253ad0_ (item spawn) | 1 | 1 | -1 | -1 |
-| **Mod code (recommended)** | **1** | **3** | **-1** | **-1** |
-
-## Item Environment Collision Pipeline
-
-```
-CityItem_EnvColl (0x8024f814)          — GObj proc callback
-  └─ ItemData->envcoll_callback()       — per-kind callback, usually:
-       └─ Item_GenericEnvColl (0x80255438, via wrapper)
-            ├─ Extract coll_kind from ItemData+0x359 bits 2-4
-            ├─ if coll_kind == 0: raw raycast path
-            │    ├─ iterative EnvColl_Raycast (up to 10 steps)
-            │    ├─ store triangle ID → ItemData+0x1A8
-            │    └─ transition coll_kind → 3
-            ├─ if coll_kind == 1: full CollData path
-            │    ├─ mpColl_Update (pos/direction/scale)
-            │    ├─ mpColl_SetDefaultParams
-            │    ├─ mpColl_UpdateShapeExtents
-            │    ├─ CityItem_GetGroundInfo → read floor/wall/ceiling
-            │    ├─ if wall/ceiling hit: zero velocity
-            │    ├─ if floor hit: ItemColl_BounceLand
-            │    └─ if settled: mpColl_Destroy, coll_kind → 3
-            └─ if coll_kind >= 2: point collision path
-                 ├─ (optional) mpColl_Update if coll_data exists
-                 ├─ ItemColl_HandleLand (raycast + surface response)
-                 └─ if landed: mpColl_Destroy (if exists), coll_kind stays
-```
-
-### Key item collision functions
-
-| Address | Size | Name | Description |
-|---------|------|------|-------------|
-| 0x8024F814 | 0x34 | CityItem_EnvColl | GObj proc: dispatches to envcoll_callback |
-| 0x80254318 | 0x6C | CityItem_AllocCollData | Allocates CollData if coll_kind==1; writes coll_kind bits |
-| 0x80254384 | 0x80 | CityItem_InitCollData | Sets up CollData with position/scale from ItemData |
-| 0x80254444 | 0x20 | CityItem_ValidatePointCollID | Wrapper: PointCollision_EnsureIDValid |
-| 0x80254464 | 0x1DC | CityItem_GetGroundInfo | Reads CollData->coll_info floor/wall/ceiling results. **Crashes if coll_data is NULL** |
-| 0x802546E4 | 0xE8 | Item_Raycast | Iterative raycast (N steps along direction) |
-| 0x802547CC | 0x24C | CityItem_FindGroundBelow | Downward raycast, stores to ItemData point_coll |
-| 0x80255438 | 0x370 | Item_GenericEnvColl | Main dispatch: coll_kind -> collision path |
-| 0x802557A8 | 0x14 | Item_SetGroundedFlag | Sets bit 4 of ItemData+0x35A |
-| 0x802557BC | 0x2E8 | ItemColl_BounceLand | Bounce/wall collision response for coll_kind=1 |
-| 0x80255AA4 | 0x4EC | ItemColl_HandleLand | Point-collision ground landing (coll_kind>=2) |
-
-### Core mpColl functions
-
-| Address | Size | Name | Description |
-|---------|------|------|-------------|
-| 0x80241228 | 0x5C | mpColl_Alloc | Allocates CollData from pool, links to global list |
-| 0x802412D8 | 0x74 | mpColl_InitSubsystems | Initializes coll_info entries |
-| 0x802414D4 | 0x08 | mpColl_GetFirstCollObj | Returns head of global CollData linked list |
-| 0x802415A8 | 0xF0 | mpColl_GetSphereRadius | Gets collision sphere radius |
-| 0x802416CC | 0x40 | mpColl_AllocCollInfo | Allocates mpCollInfo sub-struct |
-| 0x8024178C | 0x144 | mpColl_AllocCollInfoEntries | Allocates floor/wall/ceiling entry arrays |
-| 0x802418D0 | 0xE8 | mpColl_InitCollInfo | Zeros all collision result fields |
-| 0x802433C4 | 0xB8 | mpColl_GetUnkPos | Position computation helper |
-| 0x80245B4C | 0xC4 | mpColl_Create | Full creation: alloc + shape + init chain |
-| 0x80245C10 | 0x1A0 | mpColl_Init | Sets position/direction/scale, inits subsystems |
-| 0x80245DB0 | 0x120 | mpColl_Reinit | Re-initializes with new position/direction |
-| 0x80245ED0 | 0xA0 | mpColl_Destroy | Frees coll_info, coll_info2, shape_data, unlinks |
-| 0x80245F70 | 0x164 | mpColl_Update | Per-frame: update pos, compute delta, update shape |
-| 0x802460D4 | 0x38 | mpColl_SetDefaultParams | Sets default collision parameters |
-| 0x802461B4 | 0x38 | mpColl_SetDefaultParams2 | Alternative parameter set (for coll_kind>=2) |
-| 0x8024625C | 0xA4 | mpColl_UpdateShapeExtents | Updates shape extents from scale |
-| 0x80247E2C | 0x2C | mpColl_SetFlag | Sets/clears bit 7 of flags byte |
-| 0x80247FAC | 0xC4 | Machine_GetGroundHandle | Searches collision entries for ground type 0x19 |
-| 0x802485E0 | 0x5D4 | mpColl_UpdateCollision | Large collision processing update |
-
-### Map/ground functions
-
-| Address | Size | Name | Description |
-|---------|------|------|-------------|
-| 0x800CEC28 | 0x1C | grGetGroundTypeFromTriangleID | Returns ground type from triangle ID |
-| 0x800CECD4 | 0x98 | grGetUnkFromTriangleID | Returns float value for a triangle |
-| 0x800CEE08 | 0x1C | ItemColl_GetGenericCollFlags | Returns collision flags for an item |
-| 0x800D1838 | 0x28 | PointCollision_EnsureIDValid | Validates triangle ID against map data |
-| 0x800D1860 | 0x90 | PointCollision_GetNormalByID | Looks up triangle normal (stride 0x40 per entry) |
-| 0x800D1AC4 | 0x70 | EnvColl_Raycast | Wrapper around Raycast_Do |
-| 0x800D9958 | 0x4DC | Raycast_Do | Core raycast against map geometry |
-| 0x800D4F20 | 0x98 | calcDistanceFromOOB | Minimum signed clearance from the stage OoB death box |
-
-## Stage Out-of-Bounds Death Box
-
-The playfield is bounded by an axis-aligned box stored in the stage file, separate from the triangle-mesh collision above. It lives in the `StageNode` sub-block at `GrData+0x04` (`externals/hoshi/include/stage.h`):
-
-```
-StageNode.oob_min   // +0xCC  Vec3 (minX, minY, minZ)
-StageNode.oob_max   // +0xD8  Vec3 (maxX, maxY, maxZ)
-```
-
-For City Trial (`GrCity1.dat`) these are `(-1300, -300, -1300)` / `(1300, 1500, 1300)`.
-
-`calcDistanceFromOOB(Vec3 *pos)` (0x800d4f20) reads the box from `(*stc_grobj)->gr_data->stage_node` and returns the minimum signed distance to any of the six planes: positive while `pos` is inside the box, negative once it has crossed a wall. Out-of-bounds death/fall logic uses this clearance. The box is plain spatial data (not a JObj), so scaling the stage visuals does not move it — `event_scale_change.c` rescales `oob_min`/`oob_max` explicitly to keep the kill box matched to the resized stage.
-
-## Who Uses What
-
-### Machines (MachineData)
-
-- `Machine_EnvCollThink` (0x801c65a8) — GObj proc for environment collision
-- `Machine_ProcessEnvColl` (0x801e5108) — main collision processing
-- CollData at `MachineData+0x6F8` (`coll_data`): created at spawn, the `mpColl_Update` target in `Machine_InitialCollisionCheck` (radius source `MachineData+0x46C`), and passed to the mpColl query helpers each frame in `Machine_ProcessEnvColl`
-
-### Riders (RiderData)
-
-- `Rider_EnvColl` (0x8018f734) — GObj proc
-- `Rider_EnvColl_Grounded` (0x801b8ec4) — ground state handler
-- CollData at RiderData+0x670
-
-### Enemies (EnemyData)
-
-- `EventActor_EnvCollRaycastDown` (0x80204e24) / `EventActor_EnvCollRaycastUp` (0x80204e44) — directional raycasts
-- `EventActor_GroundSnap` (0x80204fac) — snap to ground surface
-- `EnemyActor_GroundFollowMovement` (0x80208bd4) — movement along ground
-- `Enemy_GroundPhysicsVelocity` (0x80209104) / `Enemy_GroundPhysicsSurface` (0x802096b4) — ground physics
-- `Enemy_GroundAttach` (0x8020a664) — ground attachment
-- Map collision object at EnemyData+0x594
-
-### Items (ItemData)
-
-- `CityItem_EnvColl` (0x8024f814) — GObj proc
-- `Item_GenericEnvColl` (0x80255438) — main dispatch
-- CollData at ItemData+0x1A4 (may be NULL for point-collision-only items)
-- coll_kind at ItemData+0x359 bits 2-4
-
-## Practical Guide for Mod Code
-
-Always pass all 13 parameters to `Item_InitDesc`. For most items:
-
-```c
-ItemDesc desc;
-Item_InitDesc(&desc, item_kind, scale, 0,
-              &pos, NULL, NULL, -1, -1,
-              1,    // is_airborne: 1 = do initial ground raycast
-              3,    // coll_kind: 3 = point collision (safe, no CollData needed)
-              -1,   // x38: default
-              -1);  // x3c: default
-GOBJ *item = Item_Create(&desc);
-// Item_Create returns NULL if raycast validation fails (coll_kind=3 + bad position)
-```
-
-| Scenario | coll_kind | is_airborne | Notes |
-|----------|-----------|-------------|-------|
-| Item at known good position | 3 | 1 | Standard. Raycast finds ground, point coll tracks it. |
-| Item that should bounce on landing | 1 | 1 | Allocates CollData. Bounces, then transitions to 3. |
-| Item placed exactly (no raycast) | 3 | -1 | Skips the initial ground raycast. Item stays at spawn pos. |
-| **AVOID** | 0 | any | Crashes if CollData is NULL (which it will be). |
-
-If you create an item with coll_kind=1 (has CollData), cleanup is automatic — when the bounce settles, `Item_GenericEnvColl` calls `mpColl_Destroy` and NULLs the pointer. Destroying the item GObj directly leaves the item's destructor to free CollData.
-
-## Scene-Object Collision (Breakable Stage Props)
-
-Distinct from the static triangle-mesh map collision above, the rider/machine `mpColl` query also tests against **scene objects** — the placed-instance records that City Trial breakable props (houses, trees, rocks, walls, holes, star pole, pitfall) bind to. This is the solid collision that stops you driving through a house *and* the path that breaks it. The yakumono side — records, `desc_id`s, the break tail — is in `yakumono-system.md`; this section is the collision-engine view.
-
-### The holder and the global region array
-
-The ground runtime object (`*stc_grobj`, at `*(r13+0x5ec)`) carries a **scene-collision holder at `stc_grobj+0x54`**:
-
-| Holder offset | Meaning |
-|---|---|
-| `+0x08` | base of the **global mpColl region array** (`0x40`-byte stride). For City Trial this is `*(stc_grobj+0x5c)` and holds ~14000 regions. |
-| `+0x10` | base of the **placed-instance record pool** (`0x98`-byte records; == `*(stc_grobj+0x64)`). |
-| `+0x14` | live record count (== `*(stc_grobj+0x68)`). |
-
-`stc_grobj+0x454` is a *different, unrelated* struct whose `+0x08` is **not** the region array — indexing regions against it yields negative indices and silently no-ops.
-
-Each `0x98` record owns a contiguous **slice** of the global region array: pointer at `record+0x0c`, count at `record+0x10`. A record's global region index is `(record+0x0c - *(holder+0x08)) / 0x40`. Each region:
-
-| Region offset | Meaning |
-|---|---|
-| `+0x0c` | outward surface normal (Vec3). |
-| `+0x34` | flags word; bit `0x20` selects a geometry-refined impact-speed path. |
-| `+0x38` | back-pointer to the owning `0x98` record (so a hit maps back to its prop; `record+0x90` is then the yakumono GObj). |
-| `+0x3c` | flags byte; **bit 6 (`0x40`) = collidable/intact**, bit 7 (`0x80`) asserted clear. |
-
-### Per-frame query and the bit-6 lever
-
-`mpColl_UpdateCollision` (`0x802485e0`) drives the rider/machine sphere each frame in two phases:
-
-1. **Sweep** (`mpColl_SphereSceneObjColl` `0x8024d414`): finds the geometrically nearest facing region **without checking bit 6**, then gates a `collideWithObject` break-test on `mpColl_SceneObjBreakGate` (`0x80241574`: collider `+0x34c` bit 2 set **and** `record+0x8c == 3`). If `collideWithObject` breaks the prop it recurses; otherwise it records the contact.
-2. **Response** (`mpResponse_DispatchSceneObjColl` `0x80248bb4`): walks the accumulated floor/wall/ceil contacts and, for each, **reads `region+0x3c` bit 6 — if clear, removes the contact** (`zz_80242508_`) so the rider is *not* pushed out of it.
-
-Clearing bit 6 on a record's regions (`grScene_SetInstanceColl(record, 0)`, `0x800d7ad0`) therefore makes the prop pass-through, because the response stops resolving its penetration. Only break/init code writes that bit — nothing re-arms it per frame — so the clear sticks until something re-arms it. This is what the vanilla break tail does on destruction, and what Hypernova uses to retire a vacuumed prop's collision so the moved model leaves no invisible wall behind.
-
-### Breaking a prop
-
-The break is reached only through the region's family `coll_func`, dispatched by `collideWithObject(yaku_gobj, collider, holder, regionIdx, contact)` (`0x800f5004`): it reads `stc_yaku_descs[record_desc_id]->+0x04` and calls it. The handler computes `force = collider.radius (CollData+0x344) * impactSpeed^2` and compares it to the prop's HP. `impactSpeed` comes from `grScene_GetImpactSpeed` (`0x800d8edc`), which **normalizes** the collider delta (`CollData+0x14`), scales by -1.0, and projects onto `region+0x0c` (clamping <=0 to 0) — so the delta must point *into* the surface and its magnitude is irrelevant. On `force > HP` the handler runs the full break tail (retire collision, hide mesh, debris, drops, SFX, break-count, broken-state). The tail and the recipe for synthesizing a no-contact break are in `yakumono-system.md`.
-
-## Map Collision (GrCollParam)
-
-The static triangle mesh a rider or machine is actually stopped by. One vertex pool and one triangle array per stage hold both the baked terrain and every placed prop's triangles; each prop owns a contiguous slice of the triangle array through its instance record. `grColl_Alloc` (`0x800d6dcc`) builds them exactly-sized into the HSD heap and `grColl_Free` (`0x800d7060`) releases them, so they are plain writable MEM1 for the life of the stage.
-
-`GrObj` carries three `GrCollParam` views of it:
+`GrObj` carries three views of the same arrays:
 
 | Field | Offset | Role |
 |---|---|---|
@@ -354,11 +16,11 @@ The static triangle mesh a rider or machine is actually stopped by. One vertex p
 | `coll` | `0x054` | The live arrays, passed to the query API as `gcp`. |
 | `coll_terrain` | `0x09C` | A window into `coll` owned by the terrain model; each prop gets its own at `yaku_data+0x1C`. |
 
-The arrays behind `coll` and `coll_terrain` are shared but their counts are separate words. The per-frame moving rebake walks the *windows*, while queries read `coll` — so a record reachable only through `coll.moving_record` is queried every frame and never rebaked.
+The arrays behind `coll` and `coll_terrain` are shared but their counts are separate words. The per-frame moving rebake walks the *windows*, while queries read `coll` - so a record reachable only through `coll.moving_record` is queried every frame and never rebaked.
 
 ### Allocation lifetime
 
-`grColl_Alloc` zeroes `coll_max`, runs `grColl_CountArrays` over the terrain node and both prop lists to accumulate counts, then makes **nine separate `HSD_MemAlloc` calls** (`0x800d6f7c` onward), one per array, each sized exactly `count * stride`. `grColl_Free` releases them the same way, field by field.
+`grColl_Alloc` (`0x800d6dcc`) zeroes `coll_max`, runs `grColl_CountArrays` over the terrain node and both prop lists to accumulate counts, then makes **nine separate `HSD_MemAlloc` calls** (`0x800d6f7c` onward), one per array, each sized exactly `count * stride`. `grColl_Free` (`0x800d7060`) releases them the same way, field by field. Everything is plain writable MEM1 for the life of the stage.
 
 Consequences for mod code:
 
@@ -370,10 +32,10 @@ Consequences for mod code:
 
 Every query runs two passes; there is no linear scan of the whole triangle array anywhere in gameplay code.
 
-- **Moving pass** — a brute-force walk of `GrCollParam.moving_record`, each record AABB-tested and then its whole triangle slice scanned. Moving geometry is deliberately absent from the KD-tree and reachable only this way.
-- **Static pass** — a walk of the KD-tree baked into the stage archive (`GrObj.coll_tree`, from `GrData+0x48`), whose leaves hold 16-bit indices into `GrCollParam.tri`.
+- **Moving pass** - a brute-force walk of `GrCollParam.moving_record`, each record AABB-tested and then its whole triangle slice scanned. Moving geometry is deliberately absent from the KD-tree and reachable only this way.
+- **Static pass** - a walk of the KD-tree baked into the stage archive (`GrObj.coll_tree`, from `GrData+0x48`), whose leaves hold 16-bit indices into `GrCollParam.tri`.
 
-Both funnel into the two narrowphase primitives, `grColl_RayVsTri` (`0x800d95dc`) and `grColl_SweptSphereVsTri` (`0x802448b0`), which take a triangle **index** — derived in the moving pass as `(tri_ptr - GrCollParam.tri) >> 6`. Triangles must therefore live in that one contiguous array whichever way they are found. Both passes accumulate the nearest hit into a single triangle index that starts at `-1` and comes back in `r3`, with the caller's `out_pos` receiving that hit's point.
+Both funnel into the two narrowphase primitives, `grColl_RayVsTri` (`0x800d95dc`) and `grColl_SweptSphereVsTri` (`0x802448b0`), which take a triangle **index** - derived in the moving pass as `(tri_ptr - GrCollParam.tri) >> 6`. Triangles must therefore live in that one contiguous array whichever way they are found. Both passes accumulate the nearest hit into a single triangle index that starts at `-1` and comes back in `r3`, with the caller's `out_pos` receiving that hit's point.
 
 Entry points above the primitives:
 
@@ -381,14 +43,25 @@ Entry points above the primitives:
 |---|---|---|
 | `grColl_SweptSphereQuery` | `0x800d9e34` | Moving sweep + tree walk; moving pass gated on arg 5. |
 | `Raycast_Do` | `0x800d9958` | Moving sweep + tree walk over a segment, moving pass always. Call it through the `Raycast_*` wrappers, which supply the mask. |
-| `mpColl_SweptSphereMapColl` | `0x802454f8` | Rider/machine wall and floor pushback under `mpColl_UpdateCollision` (`0x802485e0`). This is what actually stops a machine. |
-| `mpColl_InsertContact` | `0x80241ca8` | Caches the winning triangle id in the floor/wall/ceiling slot. |
+| `mpColl_SweptSphereMapColl` | `0x802454f8` | Rider/machine wall and floor pushback under `mpColl_UpdateCollision`. This is what actually stops a machine. |
+| `mpColl_InsertContact` | `0x80241ca8` | Caches the winning triangle id in the under/wall/top slot. |
+
+Four byte-identical raycast wrappers differ only in the kind mask and filter they pass to `Raycast_Do`. Each returns the nearest triangle id along the segment or `-1` and writes the hit point to `out_pos`:
+
+| Wrapper | Address | Mask / filter |
+|---|---|---|
+| `Raycast_Any` | `0x800d1a54` | mask 7, filter 0 - every surface |
+| `Raycast_Ground` | `0x800d1ac4` | mask 1, filter 0 - `GRCOLL_KIND_UNDER` only |
+| `Raycast_Wall` | `0x800d1b34` | mask 2, filter 0 - `GRCOLL_KIND_WALL` only |
+| `Raycast_AnyTagged` | `0x800d1ba4` | mask 7, filter 1 - additionally drops anything that is neither ground nor flagged `0x8000` |
+
+The mask decides which surfaces exist as far as the caller is concerned: `Raycast_Ground` cannot see a wall, and `Raycast_Wall` cannot see the floor in front of it.
 
 ### Gates: kind and state
 
-Both primitives gate first on `kind_mask & GrCollTri.kind`, then on `GrCollTri.state` — bit 6 (`GRCOLL_STATE_COLLIDABLE`) set and bit 7 (`GRCOLL_STATE_DEGENERATE`) clear. `grColl_SweptSphereVsTri` additionally gates on the record AABB and asserts if bit 7 is set once past those checks; it takes `GrCollTri.normal` as the plane normal, so that must be unit length.
+Both primitives gate first on `kind_mask & GrCollTri.kind`, then on `GrCollTri.state` - bit 6 (`GRCOLL_STATE_COLLIDABLE`) set and bit 7 (`GRCOLL_STATE_DEGENERATE`) clear. `grColl_SweptSphereVsTri` additionally gates on the record AABB and asserts if bit 7 is set once past those checks; it takes `GrCollTri.normal` as the plane normal, so that must be unit length.
 
-`GrCollTri.kind` bits 0..2 are the baked surface category (`GRCOLL_KIND_UNDER` / `WALL` / `TOP`), matching `mpCollRec.best_kind`. Every query ANDs its own mask against them before anything else, so **this** decides whether a triangle can be stood on, walled off, or hit at all — not a runtime normal test. A surface built at runtime must set them to match its own facing or the consumers it belongs to will never look at it.
+`GrCollTri.kind` bits 0..2 are the baked surface category (`GRCOLL_KIND_UNDER` / `WALL` / `TOP`), matching `mpCollRec.best_kind`. Every query ANDs its own mask against them before anything else, so **this** decides whether a triangle can be stood on, walled off, or hit at all - not a runtime normal test. A surface built at runtime must set them to match its own facing or the consumers it belongs to will never look at it.
 
 Clearing state bit 6 hides a triangle from every query, raycasts included. It does **not** reach entities holding a cached triangle id: `ItemData.point_coll` and the `grColl_GetTri*` / `grGetGroundTypeFromTriangleID` family do no such check and keep reading the retired triangle's fields until their next query.
 
@@ -396,18 +69,154 @@ A live City Trial triangle reads state `0x60` and most often flags `0x00008000`;
 
 ### Triangle id validation
 
-Triangle ids are cached at full 32 bits and range-checked in exactly one place: `PointCollision_EnsureIDValid` (`0x800d1838`) rejects anything outside `[0, GrCollParam.tri_num)`, and every ground / landing / shadow consumer runs it. The wall sweep and the surface-property lookups do not — they index `GrCollParam.tri` directly by whatever id they are handed.
+Triangle ids are cached at full 32 bits and range-checked in exactly one place: `PointCollision_EnsureIDValid` (`0x800d1838`) rejects anything outside `[0, GrCollParam.tri_num)`, and every ground / landing / shadow consumer runs it. The wall sweep and the surface-property lookups do not - they index `GrCollParam.tri` directly by whatever id they are handed.
+
+## Per-Body Collision (CollData)
+
+`CollData` is the 0x400-byte per-body collision object, declared in `collision.h`. `mpColl_Create` (`0x80245b4c`) takes one from a freelist pool at `0x8056dbc8`, allocates its shape data from a second pool at `0x8056dbf4` and its `mpCollInfo` via `mpColl_AllocCollInfo` (`0x802416cc`), and links it into a global list headed at `r13+0x7E4` (`0x805DD8C4`) that `mpColl_GetFirstCollObj` (`0x802414d4`) walks. `mpColl_Destroy` (`0x80245ed0`) frees the sub-allocations and unlinks.
+
+Only the shape kind `Mp_CollShapeKind_Sphere` exists. The sphere radius is lerped between two endpoints in the shape data by `mpColl_GetSphereRadius` (`0x802415a8`); the collider's own `radius` at `+0x344` is what the yakumono break force is computed from.
+
+Per frame the owner calls `mpColl_Update` (`0x80245f70`) with the new position, direction and extents; it computes `pos_delta = pos - prev_pos` (`+0x14`), which the rest of the system treats as the body's velocity. `mpColl_SetDefaultParams` (`0x802460d4`) then clears `coll_info` and drives `mpColl_UpdateCollision` (`0x802485e0`) for up to 10 pushback substeps.
+
+`mpCollInfo` (at `CollData+0x44`) holds one `mpCollRec` per substep plus three lists of pointers to the substeps that produced an under / wall / top contact. The useful test is the count: **a body is touching a wall this frame exactly when `wall_rec_num` is non-zero**, and `wall_recs[i]->wall` names the triangle it was stopped by and where. `contact_tri_id` at `+0x1d0` caches the last winning triangle id (`-1` = none).
+
+Owners:
+
+| Entity | CollData | Per-frame entry points |
+|---|---|---|
+| Machines | `MachineData+0x6F8` | `Machine_EnvCollThink` (`0x801c65a8`) GObj proc, `Machine_ProcessEnvColl` (`0x801e5108`). Radius source is `MachineData+0x46C`; `Machine_InitialCollisionCheck` (`0x801cc7a4`) seeds it at spawn. |
+| Riders | `RiderData+0x670` | `Rider_EnvColl` (`0x8018f734`) GObj proc, `Rider_EnvColl_Grounded` (`0x801b8ec4`). |
+| Enemies | `EnemyData+0x594` | `EventActor_EnvCollRaycastDown` / `Up` (`0x80204e24` / `0x80204e44`), `EventActor_GroundSnap` (`0x80204fac`), `Enemy_GroundPhysicsVelocity` (`0x80209104`), `Enemy_GroundAttach` (`0x8020a664`). |
+| Items | `ItemData+0x1A4`, often NULL | `CityItem_EnvColl` (`0x8024f814`) GObj proc into `Item_GenericEnvColl` (`0x80255438`). |
+
+`Machine_GetGroundHandle` (`0x80247fac`) searches a body's collision entries for ground type `0x19`.
+
+## Scene Objects and Breakable Props
+
+The same sweep that resolves map collision also drives City Trial's breakable props (houses, trees, rocks, walls, holes, star pole, pitfall). There is no separate geometry: a prop's triangles are an ordinary slice of `GrCollParam.tri`, owned by a `GrCollRecord` whose `yaku_gobj` (`+0x90`) points at the prop's GObj and whose `desc_kind` (`+0x8c`) is `3` for a breakable. This is the solid collision that stops you driving through a house *and* the path that breaks it.
+
+`mpColl_UpdateCollision` (`0x802485e0`) runs two phases:
+
+1. **Sweep** (`mpColl_SphereSceneObjColl`, `0x8024d414`) finds the geometrically nearest facing triangle **without checking the collidable bit**, then gates a `collideWithObject` break test on `mpColl_SceneObjBreakGate` (`0x80241574`: collider `+0x34c` bit 2 set **and** `record->desc_kind == 3`). If the break fires it recurses; otherwise it records the contact.
+2. **Response** (`mpResponse_DispatchSceneObjColl`, `0x80248bb4`) walks the accumulated under/wall/top contacts and, for each, **reads `GrCollTri.state` bit 6 - if clear, removes the contact** (`zz_80242508_`) so the body is *not* pushed out of it.
+
+That split is the lever. Clearing the collidable bit across a record's triangles - `grScene_SetInstanceColl(record, 0)` (`0x800d7ad0`) - makes the prop pass-through, because the response stops resolving its penetration. Only break and init code writes that bit; nothing re-arms it per frame, so the clear sticks until something sets it back. The vanilla break tail does this on destruction, `mods/hypernova/src/hypernova_vacuum.c` uses it to retire a vacuumed prop so the moved model leaves no invisible wall behind, and `mods/custom_weather/src/tornado.c` does the same for props it picks up.
+
+### Breaking a prop
+
+The break is reached only through the record's family `coll_func`, dispatched by `collideWithObject(yaku_gobj, collider, gcp, tri_idx, contact)` (`0x800f5004`), which reads the descriptor for `record->desc_id` and calls it. The handler computes
+
+```
+force = collider->radius (CollData+0x344) * impactSpeed^2
+```
+
+and compares it to the prop's HP. `impactSpeed` comes from `grScene_GetImpactSpeed` (`0x800d8edc`), which **normalizes** the collider delta (`CollData+0x14`), scales by `-1.0`, and projects onto the triangle's outward normal, clamping `<= 0` to `0`. So the delta must point *into* the surface to register at all, and **its magnitude is irrelevant** - only the direction and the collider radius scale the force.
+
+On `force > HP` the handler runs the full break tail: retires the record's collision, hides or state-swaps the mesh, spawns debris and drop items, plays SFX, credits the break to a player's checklist stat, and moves the prop to its broken state. Calling `collideWithObject` directly with a fabricated `CollData` synthesizes a break with all of those consequences and no real contact - that is exactly what the Hypernova vacuum does.
 
 ## Collision Zones
 
-A zone is an authored box carrying a per-face "CZK" tag: always 8 vertices and 12 triangles (`GrCollZone_VtxNum`, `GrCollZone_TriNum`) grouped into 6 faces that each carry their own kind. The kind is packed into `GrCollFace.kind_word` as `kind | (param_index << 28)`, with bits 0..24 the kind and bits 28..31 a per-kind parameter index bounded by the `index < GrDash*_Num` asserts.
+Alongside the triangle mesh, a stage carries up to 500 authored **collision zones**: boxes (8 vertices, 12 triangles grouped into 6 faces) whose faces each carry a kind tag - dash panel, super jump, area light, reverb, local death and so on. `grZone_BuildRecord` (`0x800dcf08`) expands each into a 0x140-byte runtime record hanging off `GrObj.x00c`, and `GrCollParam.zone` / `zone_num` are the live array. The mpColl sweep fills `CollData.zone_hit[20]` (`+0x48`) and `zone_hit_num` (`+0x98`) with the indices of every zone the body is inside this frame; the per-kind lookups at `0x80246584`-`0x802478c4` scan that list. Zones do not push a body around - they are pure triggers.
 
-`grZone_BuildRecord` (`0x800dcf08`) expands each authored `GrCollZone` into a `0x140`-byte runtime record. The runtime array base is `GrObj.x00c`, and each record holds its 6 face groups at `+0x08` with a `0x24` stride, so face group `g`'s kind word lands at `record + 0x24 + g * 0x24`.
+## Stage Out-of-Bounds Death Box
 
-`GrData.pos_data` (`+0x18`) points at a `GrCollisionNode`, a paired `{pointer, count}` mirror of the runtime `GrCollParam`. `grColl_Alloc` sizes every runtime array straight from these counts with no rounding or headroom, so `GrCollisionNode.tri_num` is exactly `GrCollParam.tri_num`.
+The playfield is bounded by an axis-aligned box stored in the stage file, separate from the triangle mesh above. It lives in the `StageNode` sub-block at `GrData+0x04` (`externals/hoshi/include/stage.h`) as `oob_min` (`+0xCC`) and `oob_max` (`+0xD8`). For City Trial (`GrCity1.dat`) these are `(-1300, -300, -1300)` / `(1300, 1500, 1300)`.
 
-`Dash*`, `Warp*`, `SuperJump`, `Jump` and `Spin` are the names `grlib.c` asserts on; the remaining `GrCollZoneKind` members have no source name and are named after the Japanese texture label `GrSimple` paints on the matching zone box. Every consumer in main.dol is an explicit compare — there is no table dispatch — so a kind no compare mentions can never fire.
+`calcDistanceFromOOB(Vec3 *pos)` (`0x800d4f20`) reads the box from `(*stc_grobj)->gr_data->stage_node` and returns the minimum signed distance to any of the six planes: positive while `pos` is inside the box, negative once it has crossed a wall. Out-of-bounds death and fall logic use this clearance. The box is plain spatial data, not a JObj, so scaling the stage visuals does not move it - anything that resizes a stage has to rewrite `oob_min`/`oob_max` itself. Mods also use it as a cheap stage-extent query: `mods/custom_weather/` scatters clouds, hail and puddles across it.
 
-`GrCZK_WarpIn` (5) and `GrCZK_WarpOut` (6) are dead. `GrSimple`, the collision test map, is the only file whose zone data uses them — two `WarpIn` boxes and two `WarpOut` boxes, texture-labelled "warp entrance" / "warp exit" — and no code in main.dol compares a zone kind against 5 or 6. The getter that would have read them was dropped; its assert string `grGetKindCZK(zoneKind) == GrCZK_WarpIn` survives at `0x804a3820` with zero references, sitting between the `DashRing` and `SuperJump` strings, which is what fixes `WarpIn` at 5.
+## Item Collision
 
-The per-kind zone-parameter getters in `grlib.c` each assert that the zone they are handed actually carries their kind, then fill the caller's out-params from the stage's per-kind parameter block: `grGetDashZoneParam` (`0x800d1ff0`), `grGetDashGateZoneParam` (`0x800d21f8`, kinds 2/3/4), `grGetSuperJumpZoneParam` (`0x800d24fc`, kind 7), `grGetJumpZoneParam` (`0x800d25a8`, kind 9), `grGetSpinZoneParam` (`0x800d2654`, kind 10), `grGetLocalDeadZoneParam` (`0x800d50f8`, kind 25).
+Items pick one of four strategies, selected by the `coll_kind` field:
+
+| Approach | Used by | CollData? | Behaviour |
+|---|---|---|---|
+| Full mpColl | Machines, riders | yes | Sphere collision with floor/wall/ceiling pushback |
+| Item mpColl (`coll_kind=1`) | Boxes landing | yes | Bounce physics, then transitions to point collision |
+| Point collision (`coll_kind>=2`) | Most items | optional | Downward raycast for ground detection |
+| Raw raycast (`coll_kind=0`) | Initial spawn only | no | Iterative ground search, transitions to 3 |
+
+### coll_kind dispatch
+
+`coll_kind` is a 3-bit field in `ItemData+0x359` at **bits 2-4 (mask `0x1C`)**. `CityItem_AllocCollData` (`0x80254318`) writes it with `rlwimi r0,kind,2,27,29`; `Item_GenericEnvColl` reads it back with `rlwinm. r0,byte,30,29,31`. The `item.h` bitfield models the byte MSB-first as `x359_hi:3 / coll_kind:3 / x359_lo:2`, which lands `coll_kind` on the same bits.
+
+| Value | CollData | Behaviour |
+|---|---|---|
+| **0** | no | Raw raycast, initial spawn only. Up to 10 raycast iterations, then **transitions to 3** once grounded. Requires `is_airborne != -1`. |
+| **1** | yes | Full CollData. Updates mpColl each frame and reads floor/wall/ceiling. Wall or ceiling hit zeroes velocity; floor hit calls `ItemColl_BounceLand`. When the bounce settles it **destroys the CollData and transitions to 3**. |
+| **2** | optional | Point collision via `ItemColl_HandleLand` (`0x80255aa4`). If a CollData exists it is still updated, with a different parameter function. |
+| **3** | no | Same as 2. Steady state, and what most items use. |
+| **4-7** | no | Same as 2/3; no behavioural distinction above 2. |
+
+### Lifecycles
+
+A box-spawned item is created with `coll_kind=1`, so `Item_Create` allocates a CollData. Each frame `Item_GenericEnvColl` updates mpColl and checks the three contact slots, running `ItemColl_BounceLand` on floor contact. When the bounce settles it calls `mpColl_Destroy`, NULLs `ItemData.coll_data`, and rewrites `coll_kind` to 3 - after which the item tracks the ground through `ItemColl_HandleLand` alone.
+
+A sky-spawned or mod-spawned item is created with `coll_kind=3, is_airborne=1`: no CollData is allocated, an initial raycast at spawn finds the ground, and every frame after that takes the point-collision path directly.
+
+### The coll_kind=0 crash
+
+If `coll_kind` is 0 - deliberately as an initial spawn state, or from uninitialised `ItemDesc` stack data - `Item_GenericEnvColl` takes the raw-raycast handler. That path checks `ItemData->is_airborne` and exits immediately if it is `-1` (safe), otherwise calls `ItemColl_GetGenericCollFlags` (`0x800cee08`) and attempts the raycast. `CityItem_GetGroundInfo` (`0x80254464`) then unconditionally dereferences `ItemData->coll_data` (`+0x1A4`) to reach `coll_info->under_rec_num`. When `coll_data` is NULL - which it always is when `CityItem_AllocCollData` was called with `coll_kind=0` - that is a DSI at address `0x00000044`.
+
+The only vanilla user of `coll_kind=0` is the debug item spawner at `0x80081600` (unnamed in the symbol map), which never reaches `Item_GenericEnvColl` in that state.
+
+### Point-collision state
+
+Items on the point-collision path keep their ground state in `ItemData` rather than in a CollData: `point_coll.raycast_idx` (`+0x1A8`, the triangle id from the last raycast, `-1` for no ground), `point_coll.land_pos` (`+0x1AC`), `fall_dir` (`+0x1C8`, the direction the ground raycast is cast along), and `is_airborne` (`+0x1D4`).
+
+`is_airborne` is the only reliable "is this item on the ground" test: `1` airborne, `0` resting, `-1` airborne with the ground raycast suppressed. The bit 4 flag in `ItemData+0x35A` set by `Item_SetGroundedFlag` (`0x802557a8`) is **not** that test - it means "a ground reference has been acquired", is set the first frame the raycast finds anything below (for a sky drop, while still hundreds of units up), and is never cleared.
+
+Raycast helpers on this path: `Item_Raycast` (`0x802546e4`) walks `Raycast_Ground` up to N steps along a direction, accumulating position and returning the final triangle id; `CityItem_FindGroundBelow` (`0x802547cc`) raycasts down along `fall_dir` and stores into `point_coll`; `CityItem_ValidatePointCollID` (`0x80254444`) wraps `PointCollision_EnsureIDValid`; `PointCollision_GetNormalByID` (`0x800d1860`) copies a triangle's surface normal.
+
+### Spawning items from mod code
+
+`Item_InitDesc` (`0x802509a0`, `CityItem_InitDesc` in the symbol map) takes **13 parameters**: 8 GPR (r3-r10), 1 FPR (f1, the scale), and 4 on the stack. The GC EABI does not shadow floats in GPRs, so the float argument does not consume a GPR slot and the last four arguments genuinely go on the stack. Pass all 13 - a short call leaves the stack four with garbage, and garbage in the `coll_kind` slot is the crash above.
+
+The prototype is in `externals/hoshi/include/item.h`. The four stack arguments are, in order, `is_airborne`, `coll_kind`, `x38` and `x3c` (the last two map to `ItemData[0x34]` / `[0x38]` and are `-1` in every vanilla caller).
+
+| Caller | is_airborne | coll_kind |
+|---|---|---|
+| debug item spawner (`0x80081600`) | 1 | 0 |
+| `PowerUp_SpawnFromSky` (`0x800ecdf4`) | 1 | 0 |
+| `Box_SpawnContents` (`0x80253378`) | 1 | 1 or 2 |
+| `zz_80253ad0_` (item spawn) | 1 | 1 |
+| **mod code (recommended)** | **1** | **3** |
+
+```c
+ItemDesc desc;
+Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &up, &forward, -1, -1,
+              1,    // is_airborne: 1 = do the initial ground raycast
+              3,    // coll_kind: point collision, no CollData needed
+              -1, -1);
+GOBJ *item = Item_Create(&desc);  // NULL if the spawn raycast fails
+```
+
+| Scenario | coll_kind | is_airborne |
+|---|---|---|
+| Item at a known good position | 3 | 1 |
+| Item that should bounce on landing | 1 | 1 |
+| Item placed exactly, no raycast | 3 | -1 |
+| Never | 0 | any |
+
+With `coll_kind=1` the cleanup is automatic: `Item_GenericEnvColl` destroys the CollData when the bounce settles, and destroying the item GObj early leaves the item destructor to free it.
+
+### Per-frame item pipeline
+
+```
+CityItem_EnvColl (0x8024f814)            GObj proc callback
+  ItemData->envcoll_callback()            per-kind callback, usually:
+    Item_GenericEnvColl (0x80255438)
+      coll_kind == 0: iterative Raycast_Ground (up to 10 steps),
+                      store triangle id -> point_coll.raycast_idx,
+                      transition coll_kind -> 3
+      coll_kind == 1: mpColl_Update -> mpColl_SetDefaultParams
+                      -> mpColl_UpdateShapeExtents
+                      -> CityItem_GetGroundInfo (read the contact slots)
+                      wall/ceiling: zero velocity
+                      floor:        ItemColl_BounceLand (0x802557bc)
+                      settled:      mpColl_Destroy, coll_kind -> 3
+      coll_kind >= 2: optional mpColl_Update if coll_data exists,
+                      then ItemColl_HandleLand (0x80255aa4)
+```
+
+`grGetGroundTypeFromTriangleID` (`0x800cec28`) turns a cached triangle id into its surface type, and `grGetUnkFromTriangleID` (`0x800cecd4`) returns a per-triangle float; both index `GrCollParam.tri` without validating the id.

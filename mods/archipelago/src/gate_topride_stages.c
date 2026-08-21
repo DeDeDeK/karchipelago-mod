@@ -141,8 +141,8 @@ static int GateTopRideStages_RandomPick(int unused)
         return 0;
 
     int pick = candidates[HSD_Randi(count)];
-    OSReport("[TopRideStages] RandomPick: unlock=%s, used=%s, candidates=%d, pick=%d\n",
-             MaskBits(unlock, 8), MaskBits(used, 8), count, pick);
+    OSReport("[GateTopRideStages] Random pick %d (%s) from %d candidates (unlocked = %s, used = %s)\n",
+             pick, TopRideCourse_Names[pick], count, MaskBits(unlock, 8), MaskBits(used, 8));
     return pick;
 }
 
@@ -154,7 +154,7 @@ void GateTopRideStages_OnBoot()
     CODEPATCH_REPLACECALL(0x8003c798, GateTopRideStages_RandomPick); // TopRide_CourseSelectRandomInit
     CODEPATCH_REPLACECALL(0x8003cac0, GateTopRideStages_RandomPick); // A on the random button
 
-    OSReport("[TopRideStages] Top Ride stage gating installed\n");
+    OSReport("[GateTopRideStages] Top Ride stage gating installed\n");
 }
 
 int GateTopRideStages_UnlockStage(int course)
@@ -163,7 +163,7 @@ int GateTopRideStages_UnlockStage(int course)
         return 0;
 
     ap_save->topride_stage_unlocked_mask |= (1 << course);
-    OSReport("[TopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
+    OSReport("[GateTopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
              course, TopRideCourse_Names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
     tb_api->EnqueueColoredNoun("Unlocked Course: ", TopRideCourse_Names[course], tb_api->StageColor, NULL);
     return 1;

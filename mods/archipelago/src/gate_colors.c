@@ -185,8 +185,9 @@ int GateColors_UnlockColor(int color_idx, int announce)
         return 0;
 
     ap_save->color_unlocked_mask |= (1 << color_idx);
-    OSReport("[GateColors] Color %d (%s) unlocked (mask = %s)\n",
-             color_idx, KirbyColor_Names[color_idx], MaskBits(ap_save->color_unlocked_mask, 8));
+    if (!ap_regrant_quiet)
+        OSReport("[GateColors] Color %d (%s) unlocked (mask = %s)\n",
+                 color_idx, KirbyColor_Names[color_idx], MaskBits(ap_save->color_unlocked_mask, 8));
     if (announce)
         tb_api->EnqueueColoredNoun("Unlocked Color: ", KirbyColor_Names[color_idx],
                                    tb_api->KirbyColors[color_idx], " Kirby");

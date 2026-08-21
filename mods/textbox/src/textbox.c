@@ -379,7 +379,6 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
         TextBoxMessage removed_text;
         TextBox_Dequeue(&removed_text);
         textbox_state.framecounter = 0;
-        OSReport("[TextBox] Visible cap reached, auto-dequeued oldest message.\n");
     }
 
     if (TextBoxQueue_IsEmpty())
@@ -411,7 +410,7 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
     entry.text = CreateTextBoxSegmented(local_segs, seg_count, entry.scale, entry.lifetime, entry.bg_alpha_target);
     if (!entry.text)
     {
-        OSReport("[TextBox] Failed to create Text object!\n");
+        OSReport("[TextBox] Failed to create the Text object\n");
         return 0;
     }
 

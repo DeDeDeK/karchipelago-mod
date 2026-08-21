@@ -19,7 +19,6 @@ typedef struct APMenuSettings
     int drop_ability_enabled;    // press Z to discard the copy ability (CT/AR) or ability-power item (TR)
     int air_quick_spin_enabled;  // allow the L/R-flick quick spin while airborne (CT/AR)
     int onfoot_zoom_enabled;     // allow C-Stick camera zoom while on foot (CT)
-    int ap_star_shot_enabled;    // Archipelago Star fires a sphere on every full-charge release
 } APMenuSettings;
 
 extern APMenuSettings ap_menu_settings;

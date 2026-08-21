@@ -133,18 +133,6 @@ static void Api_RemovePickupHandler(CustomItemPickupFn handler)
     }
 }
 
-// Legacy setter: NULL clears every subscriber, otherwise the handler is added.
-static void Api_SetPickupHandler(CustomItemPickupFn handler)
-{
-    if (handler == NULL)
-    {
-        for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
-            stc_pickup_handlers[i] = NULL;
-        return;
-    }
-    Api_AddPickupHandler(handler);
-}
-
 void CustomItems_FirePickup(u32 id_hash, const char *name, int player)
 {
     for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
@@ -161,7 +149,6 @@ static const CustomItemsAPI stc_api = {
     .IsEnabled        = Api_IsEnabled,
     .SetEnabled       = Api_SetEnabled,
     .GetAssignedKind  = Api_GetAssignedKind,
-    .SetPickupHandler = Api_SetPickupHandler,
     .AddPickupHandler = Api_AddPickupHandler,
     .RemovePickupHandler = Api_RemovePickupHandler,
 };

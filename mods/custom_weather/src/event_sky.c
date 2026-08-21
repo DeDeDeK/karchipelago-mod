@@ -37,7 +37,7 @@ void EventSky_OnBoot(void)
 
 OptionDesc event_sky_option = {
     .name = "Event Sky Changes",
-    .description = "Let City Trial events (Meteor, Fog, etc.) swap the sky for their duration (Off keeps the current weather through events)",
+    .description = "Let City Trial events swap the sky while they run (Off keeps the current weather through events)",
     .kind = OPTKIND_VALUE,
     .val = &event_sky_changes,
     .value_num = 2,

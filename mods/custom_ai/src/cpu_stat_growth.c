@@ -45,5 +45,4 @@ CODEPATCH_HOOKCREATE(0x80014ad4,
 void CpuStatGrowth_InstallHook(void)
 {
     CODEPATCH_HOOKAPPLY(0x80014ad4);
-    OSReport("[CustomAI] CT CPU stat-growth seed hook installed\n");
 }

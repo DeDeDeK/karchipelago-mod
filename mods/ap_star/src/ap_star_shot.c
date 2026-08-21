@@ -10,20 +10,15 @@
 #include "projectile.h"
 #include "code_patch/code_patch.h"
 
-#include "main.h"
-#include "settings_menu.h"
+#include "ap_star.h"
 #include "ap_star_shot.h"
 
 // The shot is a plasma spread projectile with its model swapped for a sphere at
-// spawn. That kind is the ownerless-safe one: its init is a bare blr, three of
-// its four state callbacks are blr, and it carries no per-kind scratch that a
-// custom spawn would have to seed. Its damage and hitbox come along untouched.
-//
-// Projectile_Create reaches the model through a two-word block at the kind's
-// ProjKindData+0x08 - the tree's root, then a count whose top byte is how many
-// joints it has, which the joint walker at 0x80221914 asserts on. Pointing that
-// field at a block of our own across the create call and putting it back after
-// is the whole swap; it is synchronous, so no other projectile can see it.
+// spawn. That kind is the ownerless-safe one: its init is a bare blr, three of its
+// four state callbacks are blr, and it carries no per-kind scratch a custom spawn
+// would have to seed. The swap points the kind's ProjKindData+0x08 model block at one
+// of ours across the create call and puts it back after; the call is synchronous, so
+// no other projectile can see it.
 
 #define AP_STAR_POD_NUM   6
 #define AP_STAR_POD_JOINT 9 // first pod; the six are consecutive in the archive's joint tree
@@ -35,17 +30,15 @@
 // The shot model's joint count, which has to match what the archive holds.
 #define AP_STAR_SHOT_JOINTS 2
 
-#define SHOT_SPEED      7.0f  // relative to the machine, so this is also its on-screen speed
-#define SHOT_LIFETIME   300   // frames; the kind's own default is 120
+#define SHOT_SPEED      6.3f  // relative to the machine, so this is also its on-screen speed
+#define SHOT_LIFETIME   233   // frames; the kind's own default is 120
 #define SHOT_GROW_FRAMES 30   // the shot swells to full size over the first of those
 #define SHOT_FADE_FRAMES 30   // ...and shrinks out over the last
 
-// A pod's geometry reaches this far from its own joint at joint scale 1, and the
-// shot model's sphere is authored at this radius with its joints at scale 1.
-// With the machine's model scale and the pod's joint scale they give the factor
-// that makes a launching shot read as the pod it came from.
-#define AP_STAR_POD_HALF   0.875f
-#define SHOT_SPHERE_RADIUS 3.0f
+// The size the grow starts from and the fade ends at. Not zero: the same field
+// drives the hitbox and the render cull, and a shot with no extent at all is a
+// degenerate one for a frame.
+#define SHOT_SEED_SCALE 0.05f
 #define SHOT_PROBE_UP   12.0f // ground probe starts this far above the shot
 #define SHOT_PROBE_DOWN 40.0f // ...and reaches this far below it
 #define SHOT_HOVER      3.5f  // ride height over the surface in ground-follow mode
@@ -86,7 +79,6 @@ static u32 stc_model_block[2];    // stands in for the kind's own model block
 
 static const u32 *stc_palette;
 static int stc_palette_count;
-static float stc_birth_scale = 1.0f; // shot scale at launch, the size of a pod
 static int stc_star_slot = -1;    // class slot, which is what MachineData.kind holds
 static int stc_handlers_installed;
 
@@ -363,23 +355,25 @@ static void SetShotScale(ProjectileData *proj, float f)
     JObj_SetMtxDirtySub(root->child);
 }
 
-// The shot leaves the ring at pod size and swells to full, then goes back to
-// nothing at the end of its life - the kind's despawn handler destroys the GObj
-// outright, so it would otherwise vanish between frames. Prio 0 runs ahead of
-// the lifetime decrement, so a shot with one frame left is already at zero.
+// The shot swells out of nothing and goes back to nothing at the end of its
+// life - the kind's despawn handler destroys the GObj outright, so it would
+// otherwise vanish between frames. Prio 0 runs ahead of the lifetime decrement,
+// so a shot with one frame left is already at zero.
 static void ShotScaleThink(void *p)
 {
     ProjectileData *proj = (ProjectileData *)p;
 
     if (proj->lifetime <= SHOT_FADE_FRAMES)
     {
-        float f = (float)(proj->lifetime - 1) / (float)SHOT_FADE_FRAMES;
-        SetShotScale(proj, f < 0.0f ? 0.0f : f);
+        float t = (float)(proj->lifetime - 1) / (float)SHOT_FADE_FRAMES;
+        if (t < 0.0f)
+            t = 0.0f;
+        SetShotScale(proj, SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t);
     }
     else if (proj->frame_counter <= SHOT_GROW_FRAMES)
     {
         float t = (float)proj->frame_counter / (float)SHOT_GROW_FRAMES;
-        SetShotScale(proj, stc_birth_scale + (1.0f - stc_birth_scale) * t);
+        SetShotScale(proj, SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t);
     }
 }
 
@@ -520,13 +514,9 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
     proj->lifetime = SHOT_LIFETIME;
     proj->user_hook_0 = ShotScaleThink;
 
-    // The machine bakes model_scale * model_scale_base into its model matrix, so
-    // that times the pod's joint scale is how big a pod reads in the world.
-    float pod_radius = md->model_scale * md->model_scale_base * r->pod_scale.X * AP_STAR_POD_HALF;
-    stc_birth_scale = pod_radius / SHOT_SPHERE_RADIUS;
-    if (stc_birth_scale < 0.05f || stc_birth_scale > 1.0f)
-        stc_birth_scale = 1.0f;
-    SetShotScale(proj, stc_birth_scale);
+    // The first prio-0 pass may already have gone by, so the seed size is
+    // written here rather than left to the ramp.
+    SetShotScale(proj, SHOT_SEED_SCALE);
 
     if (grounded)
     {
@@ -554,7 +544,6 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
             r->target[i] = 0.0f;
         }
         r->spread_mask = 0;
-        OSReport("[ApStarShot] Ring emptied, regrowing over %d frames\n", RING_REGROW_FRAMES);
     }
     else
     {
@@ -564,7 +553,7 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
 
 static void TryFire(RiderData *rd)
 {
-    if (!ap_menu_settings.ap_star_shot_enabled || stc_shot_model == NULL || stc_star_slot < 0)
+    if (!ap_star_settings.shot_enabled || stc_shot_model == NULL || stc_star_slot < 0)
         return;
 
     GOBJ *mg = rd->machine_gobj;
@@ -610,12 +599,24 @@ void ApStarShot_On3DLoadEnd(void)
     stc_shot_model = NULL;
     stc_star_slot = -1;
 
-    int kind = ApStarMachineKind();
-    if (kind < 0 || cm_api == NULL)
+    // Both paths repeat every round while they keep failing, so each says it once.
+    static int missing_reported;
+    static int install_reported;
+
+    int kind = ApStar_MachineKind();
+    if (kind < 0)
+    {
+        if (!missing_reported)
+        {
+            missing_reported = 1;
+            OSReport("[ApStarShot] %s is not registered, star shot is off\n",
+                     AP_STAR_MACHINE_NAME);
+        }
         return;
+    }
 
     int is_bike = 0;
-    stc_star_slot = cm_api->ClassIndexFromKind(kind, &is_bike);
+    stc_star_slot = ApStar_ClassIndex(&is_bike);
     stc_palette = cm_api->GetPalette(kind, &stc_palette_count);
 
     HSD_Archive *arc = NULL;
@@ -627,9 +628,13 @@ void ApStarShot_On3DLoadEnd(void)
     {
         stc_handlers_installed = cm_api->SetStarInitHandler(kind, OnStarInit) &&
                                  cm_api->SetStarThinkHandler(kind, OnStarThink);
-        OSReport("[ApStarShot] %s star slot %d, %d palette colors, model %s, handlers %s\n",
-                 AP_STAR_MACHINE_NAME, stc_star_slot, stc_palette_count,
-                 stc_shot_model != NULL ? "ready" : "unavailable",
-                 stc_handlers_installed ? "installed" : "unavailable");
+        if (!install_reported)
+        {
+            install_reported = 1;
+            OSReport("[ApStarShot] %s star slot %d, %d palette colors, model %s, handlers %s\n",
+                     AP_STAR_MACHINE_NAME, stc_star_slot, stc_palette_count,
+                     stc_shot_model != NULL ? "ready" : "unavailable",
+                     stc_handlers_installed ? "installed" : "unavailable");
+        }
     }
 }

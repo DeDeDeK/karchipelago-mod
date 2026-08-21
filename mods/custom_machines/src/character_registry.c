@@ -1,17 +1,10 @@
 // Appends a CharacterKind for each registered machine that asks for one.
 //
-// Three DOL tables describe the character roster, and all three sit back to back
-// with no slack: the select-screen linear strip (0x804957ec, 20 bytes), the
-// select-screen grid (0x80495800, 2x10) and CharacterDesc (0x80495814, 20x3).
-// Each is read by exactly one accessor that does nothing but form an address, so
-// all three are relocated by rewriting the lis/addi pair inside the accessor -
-// no hook, no register hazards.
-//
-// The grid grows a column per two appended characters, which leaves at most one
-// unused cell. That cell holds SENTINEL_CKIND, one past the last real character:
-// it indexes a zeroed CharacterDesc row, and every availability predicate treats
-// a ckind at or past the ceiling as unavailable, so it can never be packed into
-// a select list.
+// The four DOL roster tables sit back to back with no slack, and each is read by
+// exactly one accessor that does nothing but form an address, so all four are
+// relocated by rewriting the lis/addi pair inside the accessor. The grid grows a
+// column per two appended characters; the at most one leftover cell holds
+// SENTINEL_CKIND, which every availability predicate rejects.
 
 #include "os.h"
 #include "menu.h"
@@ -32,6 +25,12 @@ static u8 stc_icon_linear[CUSTOM_CKIND_NUM + 1];
 // patched to multiply by - not the compile-time maximum.
 static u8 stc_icon_grid[2 * MAX_GRID_COLS];
 
+// Machine_GetCKind's star half, which the results screens and the time-attack
+// board go through to reach a machine's art - the select screens hold the
+// CharacterKind already and never touch it. A slot with no CharacterKind behind
+// it takes the one vanilla parks its own art-less stars on.
+static u8 stc_star_ckind[CUSTOM_VCSTAR_NUM];
+
 static int stc_grid_cols = VANILLA_GRID_COLS;
 
 int CustomMachineCharacter_GetGridCols(void)
@@ -49,11 +48,16 @@ void CustomMachineCharacter_OnBoot(void)
     const u8 *v_desc = (const u8 *)0x80495814;
     const u8 *v_grid = (const u8 *)0x80495800;
     const u8 *v_linear = (const u8 *)0x804957ec;
+    const u8 *v_star_ckind = (const u8 *)0x80495850;
 
     for (int i = 0; i < CKIND_NUM * 3; i++)
         stc_char_desc[i] = v_desc[i];
     for (int i = 0; i < CKIND_NUM; i++)
         stc_icon_linear[i] = v_linear[i];
+    for (int i = 0; i < VCSTAR_NUM; i++)
+        stc_star_ckind[i] = v_star_ckind[i];
+    for (int i = VCSTAR_NUM; i < CUSTOM_VCSTAR_NUM; i++)
+        stc_star_ckind[i] = v_star_ckind[VCKIND_FREE];
 
     int appended = 0;
     for (int i = 0; i < CustomMachines_GetCount(); i++)
@@ -66,6 +70,7 @@ void CustomMachineCharacter_OnBoot(void)
         row[1] = 0;                  // star class
         row[2] = (u8)e->star_slot;   // class-relative, as every CharacterDesc is
         stc_icon_linear[e->character_kind] = (u8)e->character_kind;
+        stc_star_ckind[e->star_slot] = (u8)e->character_kind;
         appended++;
     }
 
@@ -102,8 +107,9 @@ void CustomMachineCharacter_OnBoot(void)
     CustomMachines_RepointTable(0x8000b9a8, 0x8000b9b0, stc_icon_linear);  // SelIcon_GetCKindLinear
     CustomMachines_RepointTable(0x8000b9c0, 0x8000b9cc, stc_icon_grid);    // Icon_GetCKind
     CustomMachines_RepointTable(0x8000b9e0, 0x8000b9e8, stc_char_desc);    // Character_GetDesc
+    CustomMachines_RepointTable(0x8000b9fc, 0x8000ba04, stc_star_ckind);   // Machine_GetCKind
     CODEPATCH_REPLACEINSTRUCTION(0x8000b9c4, 0x1CA00000 | stc_grid_cols); // mulli r5, r0, cols
 
-    OSReport("[CustomMachines] %d character(s) appended, grid is 2x%d\n",
+    OSReport("[CharacterRegistry] %d character(s) appended, grid is 2x%d\n",
              appended, stc_grid_cols);
 }

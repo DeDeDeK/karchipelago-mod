@@ -4,13 +4,12 @@
 #include "machine.h"
 
 void GateMachines_OnBoot();
-// Availability filter for custom_machines' select-screen packing; registered once
-// the registry resolves.
+// The filters custom_machines gates through, registered once the registry resolves:
+// who gets a select-screen icon, and what a kind weighs in the City Trial field
+// spawn roll.
 int GateMachines_FilterSelectCharacter(int ckind, int default_available);
-// Gates the City Trial select screen directly, for a build without custom_machines.
-void GateMachines_OnCustomMachinesAbsent(void);
+float GateMachines_SpawnWeight(int kind, float default_weight);
 int GateMachines_UnlockMachine(MachineKind kind, int announce);
 int GateMachines_GiveLegendaryMachine(int machine_index);
-void GateMachines_On3DLoadEnd(void);
 
 #endif

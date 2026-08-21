@@ -128,7 +128,6 @@
 
 // Weak break families pin their debris to a node at the prop's baked spot, so their
 // dragged mesh must be collapsed by hand after the break.
-#define TORN_HIT_WEAK_OBJECT ((void *)0x80107914)
 
 static int stc_active = 0;
 
@@ -450,7 +449,7 @@ static int TornadoIsWeakFamily(GOBJ *yaku_gobj)
     YakumonoData *yd = (YakumonoData *)yaku_gobj->userdata;
     if (!yd)
         return 0;
-    return Yaku_GetDescCollFunc(yd->desc_id) == TORN_HIT_WEAK_OBJECT;
+    return Yaku_GetDescCollFunc(yd->desc_id) == (void *)hitWeakObject;
 }
 
 // Break a carried prop through its own family coll_func so the break runs with every
@@ -1266,7 +1265,7 @@ MenuDesc tornado_menu = {
     .options = {
         &(OptionDesc){
             .name = "Tornado",
-            .description = "Let a tornado sweep City Trial: Preset = only presets that set it, Off = never, On = every CT preset",
+            .description = "Let a tornado sweep City Trial: Preset = only presets that set it, Off = never, On = all presets",
             .kind = OPTKIND_VALUE,
             .val = &show_index,
             .value_num = 3,

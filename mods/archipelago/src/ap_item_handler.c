@@ -24,7 +24,7 @@
 #include "gate_colors.h"
 #include "gate_stadiums.h"
 #include "spawn_rate.h"
-#include "ap_star_pieces.h"
+#include "gate_ap_star.h"
 #include "main.h"
 
 // Bump the received counter, append to the unprocessed list, and acknowledge.
@@ -45,7 +45,7 @@ int APItems_CheckMailbox()
         // has advanced past it and item_received_count was never bumped.
         if (!warned_full)
         {
-            OSReport("[APItems] unprocessed queue full (%d); holding item %d in mailbox\n",
+            OSReport("[APItems] Unprocessed queue full (%d) - holding item %d in the mailbox\n",
                      MAX_RECEIVED_ITEMS, incoming);
             warned_full = 1;
         }
@@ -61,7 +61,7 @@ int APItems_CheckMailbox()
 
     ap_data->item_received_index = ap_save->item_received_count;
 
-    OSReport("[APItems] AP item ID %d received (index %d).\n", incoming, idx);
+    OSReport("[APItems] AP item ID %d received (index %d)\n", incoming, idx);
 
     // Clear the mailbox so the client can write the next item
     ap_data->incoming_item_id = 0;
@@ -239,19 +239,20 @@ int APItems_HandleItem(uint ap_item_id)
         return GateItems_UnlockItem(kind);
     }
 
-    // Archipelago Star sphere unlock items (AP_STAR_PIECE_UNLOCK_BASE + APStarPieceKind)
+    // Archipelago Star sphere unlock items (AP_STAR_PIECE_UNLOCK_BASE + APStarPiece)
     if (ap_item_id >= AP_STAR_PIECE_UNLOCK_BASE &&
-        ap_item_id < AP_STAR_PIECE_UNLOCK_BASE + APSTARPIECE_NUM)
+        ap_item_id < AP_STAR_PIECE_UNLOCK_BASE + AP_STAR_PIECE_NUM)
     {
         int piece = ap_item_id - AP_STAR_PIECE_UNLOCK_BASE;
-        return ApStarPieces_UnlockPiece(piece);
+        return GateApStar_UnlockPiece(piece);
     }
 
     // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854
-    // for the vanilla machines and 856 up for registered custom ones). ID 855 is
-    // WHEELVSDEDEDE (25), the stadium CPU-only Dedede machine, which is not
-    // exposed and falls through to the unknown-item path.
-    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + MachineKind_Num() &&
+    // for the vanilla machines and 856 up for registered custom ones, capped at
+    // the end of the block so registered kinds can never reach another category's
+    // ids). ID 855 is WHEELVSDEDEDE (25), the stadium CPU-only Dedede machine,
+    // which is not exposed and falls through to the unknown-item path.
+    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + MachineUnlock_KindNum() &&
         ap_item_id != AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
     {
         MachineKind kind = ap_item_id - AP_MACHINE_UNLOCK_BASE;
@@ -513,7 +514,7 @@ void APItems_OnSceneChange()
 // skipped so items behind them still process; only RETRY items stay in the queue.
 void APItems_PerFrame(GOBJ *g)
 {
-    int item_received = APItems_CheckMailbox();
+    APItems_CheckMailbox();
 
     for (uint i = 0; i < ap_save->unprocessed_count; i++)
     {
@@ -521,11 +522,6 @@ void APItems_PerFrame(GOBJ *g)
         int result = APItems_HandleItem(item_id);
         if (result == AP_ITEM_RETRY)
             continue;
-
-        if (result == AP_ITEM_APPLIED)
-            OSReport("[APItems] AP item ID %d applied.\n", item_id);
-        else
-            OSReport("[APItems] AP item ID %d dropped.\n", item_id);
 
         // Remove by swapping with the last element.
         ap_save->unprocessed_count--;

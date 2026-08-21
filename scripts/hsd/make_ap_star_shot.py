@@ -35,7 +35,7 @@ from hsd.make_ap_star_pieces import (GX_F32, GX_INDEX8, GX_NRM_XYZ, GX_POS_XYZ,
                                      SZ_VTX_ENTRY, display_list, sphere_mesh)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-OUT = os.path.join(ROOT, "mods", "archipelago", "assets", "ApStarShot.dat")
+OUT = os.path.join(ROOT, "mods", "ap_star", "assets", "ApStarShot.dat")
 
 ARCHIVE_VERSION = b"001B"
 PUBLIC = "apStarShot_model"

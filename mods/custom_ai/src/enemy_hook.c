@@ -126,5 +126,4 @@ CODEPATCH_HOOKCREATE(0x801fd664,
 void EnemyAI_InstallHook(void)
 {
     CODEPATCH_HOOKAPPLY(0x801fd664);
-    OSReport("[CustomAI] Enemy param hook installed (Enemy_LoadCommonParams)\n");
 }

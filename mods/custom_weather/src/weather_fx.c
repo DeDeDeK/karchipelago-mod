@@ -49,9 +49,13 @@ GOBJ *WeatherGX_EnsureLayer(int entity_class, int p_link, void *cb,
 {
     GOBJ *g = GObj_Create(entity_class, p_link, 0);
     if (!g)
+    {
+        // Callers cache the NULL and retry every frame, so an exhausted GObj pool
+        // is otherwise a silent no-render.
+        if (log)
+            OSReport("%s: GObj_Create failed\n", log);
         return NULL;
+    }
     GObj_AddGXLink(g, cb, gx_link, gx_pri);
-    if (log)
-        OSReport("%s\n", log);
     return g;
 }

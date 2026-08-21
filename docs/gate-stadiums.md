@@ -1,134 +1,57 @@
 # Stadium Gating
 
-Each of the 24 City Trial stadiums can be individually locked behind an Archipelago unlock item. A locked stadium is excluded from both shuffle-mode and group-mode round selection and is hidden from the stadium-list UI. The vanilla unlock-check pipeline and the per-round selector are both replaced outright.
+Each of the 24 City Trial stadiums can be individually locked behind an Archipelago unlock item. AP items 400-423 (`AP_STADIUM_UNLOCK_BASE` + `StadiumKind`) route through `ap_item_handler.c` to `GateStadiums_UnlockStadium(kind, /*announce=*/1)`, which sets the bit in `APSave.stadium_unlocked_mask`, ORs the kind into the vanilla "NEW" badge bitfield, and posts an `"Unlocked Stadium: <name>"` textbox with `tb_api->StadiumColor`. A locked stadium is excluded from both shuffle-mode and group-mode round selection and hidden from the stadium-list UI. The vanilla unlock-check pipeline and the per-round selector are both replaced outright.
 
-## What Is Gated
-
-The 24 `StadiumKind` values (`stadium.h`), one bit each in `stadium_unlocked_mask`. AP item ID = 400 + `StadiumKind`.
+**File:** `mods/archipelago/src/gate_stadiums.c`. Function names follow `externals/hoshi/include/stadium.h` and `link.ld`; the symbol map names two of them differently - 0x8000C148 is `CityTrial_CheckIfStadiumIsDefaultUnlocked` and 0x8000C17C is `CityTrial_CheckStadiumIsUnlocked` there.
 
 | Group | Stadiums | AP items |
 |-------|----------|----------|
-| Drag Race | DRAG1, DRAG2, DRAG3, DRAG4 | 400–403 |
+| Drag Race | DRAG1, DRAG2, DRAG3, DRAG4 | 400-403 |
 | Air Glider | AIRGLIDER | 404 |
 | Target Flight | TARGETFLIGHT | 405 |
 | High Jump | HIGHJUMP | 406 |
-| Kirby Melee | MELEE1, MELEE2 | 407–408 |
-| Destruction Derby | DESTRUCTION1–5 | 409–413 |
-| Single Race | SINGLERACE1–9 | 414–422 |
+| Kirby Melee | MELEE1, MELEE2 | 407-408 |
+| Destruction Derby | DESTRUCTION1-5 | 409-413 |
+| Single Race | SINGLERACE1-9 | 414-422 |
 | VS King Dedede | VSKINGDEDEDE | 423 |
 
-## Entry Points
+## Vanilla Availability Pipeline
 
-**Files:** `mods/archipelago/src/gate_stadiums.c` / `gate_stadiums.h`
+Four functions report stadium availability, and all four are `CODEPATCH_REPLACEFUNC`ed onto the same one-line mask read, `GateStadiums_IsUnlocked(kind)`:
 
-| Symbol | Kind | Where | Role |
-|--------|------|-------|------|
-| `GateStadiums_OnBoot()` | mod | gate_stadiums.c | Installs five `REPLACEFUNC`s and two `REPLACEINSTRUCTION`s (called from `main.c`). |
-| `GateStadiums_IsUnlocked(StadiumKind)` | mod (static) | gate_stadiums.c | Single mask read replacing all four vanilla availability checks. |
-| `GateStadiums_DecideStadium()` | mod (static) | gate_stadiums.c | Replacement per-round selector. |
-| `GateStadiums_UnlockStadium(StadiumKind, int announce)` | mod | gate_stadiums.c | Sets the mask bit, sets the vanilla "NEW" badge bit, logs, posts a textbox. Called from `ap_item_handler.c`. |
-| `Gm_StadiumIsDefaultUnlocked` | game | 0x8000C148 | Default-unlock jump table (replaced). |
-| `Gm_StadiumIsUnlocked` | game | 0x8000C17C | Checklist-based check (replaced). |
-| `Gm_StadiumIsAvailable` | game | 0x8000C228 | Composite availability check (replaced). |
-| `Gm_StadiumCheckUnlocked` | game | 0x80007EE4 | Runtime unlock-bitfield read (replaced). |
-| `CityTrial_DecideStadium` | game | 0x8003F808 | Per-round stadium selector (replaced). |
-| `CityTrial_BuildStadiumList` | game | 0x80046DF0 | Builds the stadium selection UI list (instruction-patched twice). |
-| `stc_stadium_new_label` | game (bitfield) | 0x80536EEC | "NEW" badge bits, set directly on unlock. |
+| Function | Address | What vanilla does |
+|----------|---------|-------------------|
+| `Gm_StadiumIsDefaultUnlocked` | 0x8000C148 | Jump table of stadiums available by default: 1 for the low Drag Race kinds (0-2), else 0. |
+| `Gm_StadiumIsUnlocked` | 0x8000C17C | Maps kinds 3-22 (the checklist-gated stadiums) through a jump table to clear/reward indices, then consults `Checklist_CheckCachedUnlock_CityTrial` (0x80007E8C, menu open) or `ClearChecker_CheckUnlocked` (0x80049E24, mode 2). Returns 0 outside 3-22. |
+| `Gm_StadiumIsAvailable` | 0x8000C228 | Composite check that inlines its **own** copies of both jump tables and calls `Gm_StadiumCheckUnlocked` / the two checklist queries directly. It does not call the two standalone functions. |
+| `Gm_StadiumCheckUnlocked` | 0x80007EE4 | Reads the runtime unlock bitfield: the temporary cache at 0x80536738 while the checklist menu is open, otherwise the live bitfield at 0x80536EE8. Cache writes are discarded on menu close. |
 
-Names follow `externals/hoshi/include/stadium.h` / `link.ld`; the symbol map names two of them differently — `0x8000C148` = `CityTrial_CheckIfStadiumIsDefaultUnlocked`, `0x8000C17C` = `CityTrial_CheckStadiumIsUnlocked` — but the mod and headers use the `Gm_Stadium*` names.
+All four have to be replaced precisely because `Gm_StadiumIsAvailable` inlines the tables - replacing only the standalone functions would leave its callers reading them. `GateStadiums_IsUnlocked` returns 0 when `ap_save` is NULL, which matters because `Gm_StadiumCheckUnlocked` is called during early game init, before `OnSaveLoaded`.
 
-## Game System
+With those in place, the game's own unlock bitfield at 0x80536EE8 (`stc_stadium_unlocked`) and its checklist cache layer are dead with respect to availability. The save mask is the single source of truth and is read live at every check, so a mid-session change (debug menu, late AP delivery) takes effect immediately with no sync step and no risk of the cache layer shadowing a write. `Gm_StadiumCheckNewLabel` (0x80008038) is deliberately *not* replaced - the checklist UI still consults the vanilla `stc_stadium_new_label` bitfield at 0x80536EEC for the "NEW" badge, which is why the unlock path sets that bit itself.
 
-The vanilla game has four functions that report stadium availability, plus a per-round selector.
+## Per-Round Selection
 
-| Function | Address | Role |
-|----------|---------|------|
-| `Gm_StadiumIsDefaultUnlocked` | 0x8000C148 | Jump table of stadiums available by default. Returns 1 for the low Drag Race kinds (0–2), else 0. |
-| `Gm_StadiumIsUnlocked` | 0x8000C17C | Checklist-based check. Maps kinds 3–22 (the checklist-gated stadiums) through a jump table to clear/reward indices, then consults `Checklist_CheckCachedUnlock_CityTrial` (0x80007E8C, menu open) or `ClearChecker_CheckUnlocked` (0x80049E24, `mode=2`). Returns 0 for kinds outside 3–22 (the default low kinds and Vs. King Dedede, kind 23). |
-| `Gm_StadiumIsAvailable` | 0x8000C228 | Composite availability check. Inlines its **own** copies of the default-unlock and checklist-unlock jump tables and calls `Gm_StadiumCheckUnlocked` / `Checklist_CheckCachedUnlock_CityTrial` / `ClearChecker_CheckUnlocked` directly. It does **not** call the standalone `IsDefaultUnlocked` / `IsUnlocked`, so replacing only those would leave `IsAvailable` reading the inlined tables. |
-| `Gm_StadiumCheckUnlocked` | 0x80007EE4 | Reads the runtime unlock bitfield. With the checklist menu open it reads the temporary cache at `0x80536738`; otherwise the live bitfield at `0x80536EE8`. Cache writes are discarded on menu close. |
+`CityTrial_DecideStadium` (0x8003F808) picks the stadium for each City Trial round. Vanilla branches on `gd->city.menu_stadium_selection` (`GameData+0x396`, `u8`; 0 = shuffle, 1+ = `StadiumGroup` + 1):
 
-Per-round selection is handled by **`CityTrial_DecideStadium`** (0x8003F808). It branches on `gd->city.menu_stadium_selection`:
+- **Shuffle**: walks all 24 kinds, excludes the last 4 picks via the `prev_stadium_kind[5]` history (`GameData+0x45E`; only entries 0-3 are consulted), keeps any kind passing `IsDefaultUnlocked || IsUnlocked`, then rolls a weighted pick from `gda->stadium_weights->weights[]` (`stc_gmdataall` at r13+0x494, weights at +0x4) via `HSD_Randi(weight_total)`.
+- **Group**: skips the history exclusion and keeps only kinds whose `Gm_GetStadiumGroupFromKind` (0x8000BA20) equals `menu_stadium_selection - 1`.
 
-- **Shuffle mode** (`menu_stadium_selection == 0`): walks all 24 kinds, excludes the last 4 picks via the `prev_stadium_kind[5]` history (only entries 0–3 are consulted), keeps any kind passing `IsDefaultUnlocked` || `IsUnlocked`, then rolls a weighted pick from `gda->stadium_weights->weights[]` via `HSD_Randi(weight_total)`.
-- **Group mode** (`menu_stadium_selection >= 1`): skips the history exclusion and instead keeps only kinds whose `Gm_GetStadiumGroupFromKind` (0x8000BA20) equals `menu_stadium_selection - 1`.
+It then shifts the 4-entry history, writing the pick to `prev_stadium_kind[0]` and to `gd->city.stadium_kind` (`GameData+0x5AD`).
 
-After the loop it shifts the 4-entry history (`prev_stadium_kind[0..3]`) and writes the pick to `prev_stadium_kind[0]` and `gd->city.stadium_kind`.
+**The history exclusion is a latent vanilla bug under restricted availability.** It is hardcoded to 4 entries, so with fewer than 5 stadiums unlocked every available pick can fall inside the history, leaving zero candidates and `weight_total == 0` - and `HSD_Randi(weight_total)` is still called unconditionally at 0x8003F908, giving `HSD_Randi(0)`.
 
-### Vanilla history-buffer bug
+`GateStadiums_DecideStadium` replaces the function primarily to fix that; the unlock-check replacement alone would already make an unmodified vanilla selector respect the mask. It builds the candidate pool from the mask, honors `menu_stadium_selection` the same way, and then differs in two places: the history exclusion is sized `min(unlocked_count - 1, 4)` clamped at 0, which guarantees at least one candidate (with 1 unlocked stadium there is no exclusion, with 5+ it is the full vanilla 4), and a group with no unlocked entries falls back to all unlocked stadiums rather than soft-locking. The weighted roll and the history/`stadium_kind` writes are as vanilla.
 
-In shuffle mode the history exclusion is hardcoded to 4 entries. With fewer than 5 stadiums unlocked, every available pick can fall inside the 4-entry history, leaving zero candidates and `weight_total == 0` — yet `HSD_Randi(weight_total)` is still called unconditionally (at 0x8003F908), giving `HSD_Randi(0)` (undefined behavior). This is latent in the original game and only surfaces when stadium availability is artificially restricted.
+## Stadium List UI Side Channels
 
-### Data addresses
+`CityTrial_BuildStadiumList` (0x80046DF0) feeds the stadium selection UI. It calls the replaced `Gm_StadiumCheckUnlocked` per kind, so most of it already respects the mask, but two paths re-add locked stadiums and are patched out with `CODEPATCH_REPLACEINSTRUCTION`:
 
-| Symbol / field | Location | Notes |
-|----------------|----------|-------|
-| `gd->city.menu_stadium_selection` | GameData +0x396 (`u8`) | 0 = shuffle, 1+ = group (`StadiumGroup` + 1). |
-| `gd->city.prev_stadium_kind[5]` | GameData +0x45E (`u8[5]`) | History buffer; only entries 0–3 used. |
-| `gd->city.stadium_kind` | GameData +0x5AD (`u8`) | The decided stadium for the round. |
-| `stc_gmdataall` | r13 (0x805DD0E0) +0x494 | `gmDataAll **`; `->stadium_weights->weights[STKIND_NUM]` (weights at +0x4). |
-| Unlock bitfield | `0x80536EE8` | Live runtime bitfield. |
-| New-label bitfield | `0x80536EEC` | "NEW" badge bits. |
-| Checklist cache | `0x80536738` | Temporary unlock cache used while the checklist menu is open. |
-
-## Implementation
-
-`GateStadiums_OnBoot` installs five `CODEPATCH_REPLACEFUNC` patches and two `CODEPATCH_REPLACEINSTRUCTION` patches.
-
-### Unlock checks
-
-All four vanilla availability functions are replaced with the same one-line mask read:
-
-```c
-static int GateStadiums_IsUnlocked(StadiumKind kind)
-{
-    if (!ap_save || kind < 0 || kind >= STKIND_NUM)
-        return 0;
-    return (ap_save->stadium_unlocked_mask & (1 << kind)) != 0;
-}
-```
-
-All four must be replaced because `Gm_StadiumIsAvailable` inlines the `IsDefaultUnlocked` and `IsUnlocked` jump tables; replacing only the standalone functions would still leave its callers reading the inlined tables.
-
-**NULL guard:** `ap_save` is NULL before `OnSaveLoaded` runs, but `Gm_StadiumCheckUnlocked` is called during early game init. The replacement returns 0 in that window.
-
-The runtime unlock bitfield at `0x80536EE8` (`stc_stadium_unlocked`) and its checklist cache layer are both dead with respect to availability checks. The save mask is the single source of truth, read live at every check, so mid-session changes (debug menu, AP item arrival) take effect immediately.
-
-### Stadium selection
-
-`GateStadiums_DecideStadium` replaces `CityTrial_DecideStadium`. It exists primarily to fix the history-buffer bug; with the unlock-check replacement in place, an unmodified vanilla `DecideStadium` would already respect the mask. The replacement:
-
-- Builds the candidate pool by iterating `ap_save->stadium_unlocked_mask`.
-- Respects `menu_stadium_selection`: 0 = shuffle (all groups), 1+ = a specific group via `Gm_GetStadiumGroupFromKind`.
-- Sizes the history exclusion dynamically: `min(unlocked_count - 1, 4)`, clamped at 0. With 1 stadium unlocked the history is empty (no exclusion); with 5+ the full vanilla 4-entry exclusion is used. This guarantees at least one candidate.
-- Falls back to "all unlocked stadiums" if the chosen group has no unlocked entries, preventing a soft-lock.
-- Rolls a weighted pick from `gda->stadium_weights->weights[]`, then shifts the 4-entry history and writes `prev_stadium_kind[0]` and `gd->city.stadium_kind` as vanilla does.
-
-### `CityTrial_BuildStadiumList` side channels
-
-`CityTrial_BuildStadiumList` (0x80046DF0) feeds the stadium selection UI. It calls the (now-replaced) `Gm_StadiumCheckUnlocked` per kind, so most of it already respects the mask — but two paths re-add locked stadiums anyway:
-
-- **Phase 1 auto-unlock loop** — gated by `progress (r13+0x550) >= 3` (the `blt` at **0x80046E1C**) plus a flag check `(flags & 0x28) == 0x28`. When both pass, the loop body at **0x80046E34** walks every kind the mask reports as locked and calls `Gm_StadiumWriteUnlocked(kind, 1)` and `Gm_StadiumWriteNewLabel(kind, 1)`. The unlock write is harmless (that bitfield is ignored), but the new-label write would put a "NEW" badge on every locked stadium in the UI for late-game players. The patch overwrites the `blt 0x80046E6C` at 0x80046E1C with an unconditional `b 0x80046E6C` (encoding `0x48000050`), skipping the flag check and the loop entirely.
-- **Phase 2 checklist fallback** — in the main list-build loop (kind iterator starting at 0x80046EEC), when the replaced `Gm_StadiumCheckUnlocked` reports a stadium locked, the `beq` at **0x80046EF8** branches into a fallback (0x80046F44) that calls `Checklist_CheckCachedUnlock_CityTrial` and `ClearChecker_CheckUnlocked`. Either can re-add the stadium to the list. The patch retargets that `beq` from 0x80046F44 to the next loop iteration at 0x80046FC4 (encoding `0x418200CC`), skipping the fallback for locked stadiums.
+- **Phase 1 auto-unlock loop**, gated by `progress` (r13+0x550) `>= 3` (the `blt` at 0x80046E1C) plus a `(flags & 0x28) == 0x28` check. When both pass, the loop body at 0x80046E34 walks every kind the mask reports as locked and calls `Gm_StadiumWriteUnlocked(kind, 1)` and `Gm_StadiumWriteNewLabel(kind, 1)`. The unlock write is harmless (that bitfield is ignored now), but the new-label write would badge every locked stadium "NEW" for late-game players. The `blt` is overwritten with an unconditional `b 0x80046E6C` (`0x48000050`), skipping the flag check and the loop.
+- **Phase 2 checklist fallback**, in the main list-build loop (kind iterator from 0x80046EEC): when `Gm_StadiumCheckUnlocked` reports a stadium locked, the `beq` at 0x80046EF8 branches into a fallback at 0x80046F44 that calls `Checklist_CheckCachedUnlock_CityTrial` and `ClearChecker_CheckUnlocked`, either of which can re-add the stadium. That `beq` is retargeted to the next loop iteration at 0x80046FC4 (`0x418200CC`).
 
 ## Save Data
 
-`u32 stadium_unlocked_mask` in `APSave` (`main.h`, accessed via the global `ap_save`) — bit N = `StadiumKind` N.
+`u32 stadium_unlocked_mask` in `APSave` (`main.h`, via the global `ap_save`) - bit N = `StadiumKind` N. It is exposed through `ArchipelagoAPI` as `AP_UNLOCK_STADIUM`, and when the slot option `stadium_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` (`main.c`) pre-fills it with `(1u << STKIND_NUM) - 1` at connect.
 
-The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_STADIUM`. When the slot option `stadium_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` in `main.c` pre-fills the mask with `(1u << STKIND_NUM) - 1` at connect.
-
-**`STKIND_VSKINGDEDEDE` is the one exception to that pre-fill.** KOing King Dedede there is a City Trial goal, and with stadiums ungated his stadium comes up in the rotation from the first match, so the seed would be winnable before a single AP item arrived. When the AP world sets that goal it keeps the Vs. King Dedede unlock in the pool despite the gate being off and sets `GOALGATE_VS_KING_DEDEDE` in the `goal_forced_gates` slot option; the pre-fill then clears that one bit and the other 23 stadiums are still handed over at connect. The unlock item arrives through the normal `GateStadiums_UnlockStadium` path, which never consults the gate flag.
-
-## AP Items
-
-24 AP items, `AP_STADIUM_UNLOCK_BASE` (400, `archipelago_api.h`) + `StadiumKind` index → IDs 400–423. `ap_item_handler.c` routes IDs in `[400, 400 + STKIND_NUM)` to `GateStadiums_UnlockStadium(id - AP_STADIUM_UNLOCK_BASE, /*announce=*/1)`, which sets the mask bit, ORs the kind's bit into `stc_stadium_new_label` so the checklist UI shows the "NEW" badge, logs, and enqueues `"Unlocked Stadium: <name>"` with `tb_api->StadiumColor`.
-
-## Design Decisions
-
-**Bypassing the game's bitfield entirely.** The mask is read directly at check time rather than synced into the game's bitfield at `0x80536EE8` (`stc_stadium_unlocked`) during `OnSaveLoaded`. Syncing would create two problems: mid-session mask changes (debug menu, late AP delivery) would need an extra sync step, and the checklist cache layer could shadow writes. Reading directly avoids both — and matches every other `gate_*` system.
-
-**Setting the "NEW" bitfield on unlock.** `Gm_StadiumCheckNewLabel` (0x80008038) is *not* replaced — the checklist UI still consults the vanilla bitfield to decide which stadiums get a "NEW" badge — so `GateStadiums_UnlockStadium` sets the kind's bit in `stc_stadium_new_label` itself.
-
-**Dynamic history sizing.** With N unlocked stadiums, history size is `min(N-1, 4)`. This prevents the vanilla `HSD_Randi(0)` crash without sacrificing variety once enough stadiums are available.
-
-**Group fallback.** If the player picks a specific group (e.g. Destruction Derby) but no stadium in that group is unlocked, selection falls back to all unlocked stadiums regardless of group, avoiding a soft-lock.
+**`STKIND_VSKINGDEDEDE` is the one exception to that pre-fill.** KOing King Dedede there is a City Trial goal, and with stadiums ungated his stadium comes up in the rotation from the first match, so the seed would be winnable before a single AP item arrived. When the AP world sets that goal it keeps the Vs. King Dedede unlock in the pool despite the gate being off and sets `GOALGATE_VS_KING_DEDEDE` in the `goal_forced_gates` slot option; the pre-fill then clears that one bit and hands over the other 23. The unlock item arrives through the normal `GateStadiums_UnlockStadium` path, which never consults the gate flag.

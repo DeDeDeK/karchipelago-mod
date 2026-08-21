@@ -56,14 +56,14 @@ static int DeathLinkSendAllowed(int ply)
     return 1;
 }
 
-static void SendDeathLink(int ply)
+static void SendDeathLink(int ply, const char *cause)
 {
     if (!DeathLinkSendAllowed(ply))
         return;
     if (Ply_CheckIfCPU(ply))
         return;
 
-    OSReport("[DeathLink] Death detected for human player [%d]. Sending deathlink...\n", ply);
+    OSReport("[DeathLink] Player %d died (%s) - sending\n", ply + 1, cause);
     ap_data->deathlink_send = 1;
 }
 
@@ -72,7 +72,7 @@ static void SendDeathLink(int ply)
 // do not reach here.
 static void DeathLink_OnHpDeath(RiderData *rd)
 {
-    SendDeathLink(rd->ply);
+    SendDeathLink(rd->ply, "HP");
 }
 CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", DeathLink_OnHpDeath, "", 0)
 
@@ -81,9 +81,7 @@ CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", DeathLink_OnHpDeath, "", 0)
 // Clobbered: stw r4, 0x1b48(r31)
 static void DeathLink_OnFallDeath(MachineData *md)
 {
-    int ply = Machine_GetRiderPly(md);
-    OSReport("[DeathLink] Fall death detected for player [%d]\n", ply);
-    SendDeathLink(ply);
+    SendDeathLink(Machine_GetRiderPly(md), "fall");
 }
 CODEPATCH_HOOKCREATE(0x801e6540,
     "stwu 1, -16(1)\n\t"
@@ -102,8 +100,6 @@ CODEPATCH_HOOKCREATE(0x801e6540,
 // HP death; fall death there misbehaves (no out-of-bounds respawn spline).
 static void KillPlayer(RiderData *rd, MachineData *md)
 {
-    OSReport("[DeathLink] Deathlink received! Killing player %d\n", rd->ply);
-
     StadiumKind stadium = Gm_GetCurrentStadiumKind();
     int hp_death = Gm_IsInCity()
                 || Gm_IsDestructionDerby()
@@ -137,6 +133,7 @@ static void DeathLink_PerFrame(GOBJ *g)
     if (ap_data->deathlink_receive != 1)
         return;
 
+    int killed = 0;
     for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
@@ -157,8 +154,10 @@ static void DeathLink_PerFrame(GOBJ *g)
 
         SuppressSend(i);
         KillPlayer(rd, md);
+        killed++;
     }
 
+    OSReport("[DeathLink] Received - killed %d human(s)\n", killed);
     tb_api->EnqueueColoredNoun(NULL, "Deathlink", tb_api->DeathColor, " received!");
     ap_data->deathlink_receive = 0;
 }
@@ -184,8 +183,8 @@ static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
     if (!mgr || mgr->round_state != 2)
         return;
 
-    OSReport("[DeathLink] TR sand pit (slot %d). Sending deathlink...\n",
-             kirby->player_slot);
+    OSReport("[DeathLink] Player %d died (TR sand pit) - sending\n",
+             kirby->player_slot + 1);
     ap_data->deathlink_send = 1;
 }
 CODEPATCH_HOOKCREATE(0x80331a94,

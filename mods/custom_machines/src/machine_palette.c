@@ -1,26 +1,21 @@
-// Wall-clock material cycle for a drop-in machine whose descriptor asks for one.
-//
-// The archive cannot animate this itself. A MatAnim's frame is the machine's
-// state - the moving animation's rate rides on velocity, the charge animation's
-// frame is the charge gauge - and every one of them restarts when the state
-// changes, so nothing baked into the .dat advances with elapsed time. The
-// descriptor therefore ships the palette and the joint, and the color is written
-// into the live materials here.
-//
-// It reaches a pixel only where the joint's materials render with
-// RENDER_CONSTANT and their texture stages pass the color through or modulate
-// it; MObjMakeTExp (0x803fa0b4) hands the material's diffuse to the first TEV
-// stage only in that case, and TObjMakeTExp (0x803f6860) lets a REPLACE or a
-// full-strength BLEND stage overwrite it afterwards. MObjLoad copies the
-// material per instance, so every machine on the field is written separately.
+// Wall-clock material cycle for a machine whose descriptor asks for one, written
+// into the live materials from Machine_ColAnimThink each frame. An archive cannot
+// animate this itself: a MatAnim's frame is the machine's state, not elapsed time.
+// The same color is written over the exhaust generators' color operands, which
+// paints the particles born that frame and leaves those in flight alone.
 
 #include "os.h"
 #include "hsd.h"
 #include "obj.h"
+#include "particle.h"
 #include "machine.h"
 #include "code_patch/code_patch.h"
 
 #include "custom_machines.h"
+
+// The particle bank EfPtclVehicle.dat installs, which is what a machine's
+// animation bank names its exhaust out of.
+#define PTCL_BANK_VEHICLE 0
 
 typedef struct PaletteTarget
 {
@@ -32,6 +27,9 @@ typedef struct PaletteTarget
     float phase_per_tick;
     u32 last_tick;
     int running;
+    int trail_count;        // 0 if this machine tints no trail
+    u8 trail_gen[8];
+    u16 trail_rgb[8];
 } PaletteTarget;
 
 static PaletteTarget stc_targets[CUSTOM_MACHINE_MAX];
@@ -101,6 +99,63 @@ static void PaletteColor(PaletteTarget *t, GXColor *out)
     out->a = 0xFF;
 }
 
+// Particles blend additively, so where a trail overlaps itself the channels sum and
+// clamp and a pastel color reaches that sum as white. Stretching to full saturation
+// gives up the lightness the blend would have destroyed and keeps the channel ratio.
+static void Saturate(GXColor *c)
+{
+    u8 lo = c->r, hi = c->r;
+
+    if (c->g < lo) lo = c->g;
+    if (c->b < lo) lo = c->b;
+    if (c->g > hi) hi = c->g;
+    if (c->b > hi) hi = c->b;
+    if (hi == lo)
+        return;
+
+    c->r = (u8)((c->r - lo) * hi / (hi - lo));
+    c->g = (u8)((c->g - lo) * hi / (hi - lo));
+    c->b = (u8)((c->b - lo) * hi / (hi - lo));
+}
+
+// The bank is rebuilt on every 3D load, so descriptors are re-resolved rather than
+// cached. An offset is only written when the two bytes ahead of it are still a color
+// opcode and its duration operand, which keeps this off a stale table.
+static void TintTrail(const PaletteTarget *t, const GXColor *color)
+{
+    u8 **descs;
+    GXColor tint;
+
+    if (t->trail_count == 0)
+        return;
+
+    descs = psGeneratorDesc[PTCL_BANK_VEHICLE];
+    if (descs == NULL)
+        return;
+
+    tint = *color;
+    Saturate(&tint);
+
+    for (int i = 0; i < t->trail_count; i++)
+    {
+        u8 *desc;
+        u8 *rgb;
+
+        if ((u32)t->trail_gen[i] >= psGeneratorCount[PTCL_BANK_VEHICLE])
+            continue;
+        desc = descs[t->trail_gen[i]];
+        if (desc == NULL)
+            continue;
+
+        rgb = desc + t->trail_rgb[i];
+        if ((rgb[-2] & 0xF0) != 0xC0 && (rgb[-2] & 0xF0) != 0xD0)
+            continue;
+        rgb[0] = tint.r;
+        rgb[1] = tint.g;
+        rgb[2] = tint.b;
+    }
+}
+
 static void PaintMachine(MachineData *md)
 {
     PaletteTarget *t = TargetFor(md);
@@ -120,6 +175,7 @@ static void PaintMachine(MachineData *md)
         if (dobj->mobj != NULL && dobj->mobj->mat != NULL)
             dobj->mobj->mat->diffuse = color;
     }
+    TintTrail(t, &color);
 }
 
 // Tail of Machine_AnimThink, which runs once per machine per frame. Taking it
@@ -146,13 +202,19 @@ void CustomMachinePalette_OnBoot(void)
         t->count = e->palette_count;
         t->palette = e->palette;
         t->phase_per_tick = 1.0f / (e->palette_period * (float)ticks_per_second);
-        OSReport("[MachinePalette] %s: joint %d cycles %d colors every %.1fs\n",
-                 e->name, t->joint, t->count, e->palette_period);
+        t->trail_count = e->trail_count;
+        for (int k = 0; k < e->trail_count; k++)
+        {
+            t->trail_gen[k] = e->trail_gen[k];
+            t->trail_rgb[k] = e->trail_rgb[k];
+        }
+        OSReport("[MachinePalette] %s: joint %d cycles %d colors every %.1fs, %d trail tints\n",
+                 e->name, t->joint, t->count, e->palette_period, t->trail_count);
     }
 
     if (stc_target_count == 0)
         return;
 
     CODEPATCH_REPLACECALL(0x801c6274, MachinePalette_AnimThinkTail);
-    OSReport("[MachinePalette] Hooks installed\n");
+    OSReport("[MachinePalette] %d machine(s) cycling, hooks installed\n", stc_target_count);
 }

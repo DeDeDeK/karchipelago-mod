@@ -5,7 +5,7 @@
 
 // Bump major on breaking changes, minor on additions.
 #define ARCHIPELAGO_API_MAJOR 3
-#define ARCHIPELAGO_API_MINOR 1
+#define ARCHIPELAGO_API_MINOR 3
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
@@ -384,18 +384,18 @@ typedef enum APItemId
     AP_ITEM_UNLOCK_DRAGOON2,               // ITUNLOCK_DRAGOON2
     AP_ITEM_UNLOCK_DRAGOON3,               // ITUNLOCK_DRAGOON3
 
-    // Archipelago Star sphere unlock items (820-825, aligned to APStarPieceKind).
+    // Archipelago Star sphere unlock items (820-825, in APStarPiece order).
     // Their own mask rather than a bit in item_unlocked_mask, which ITUNLOCK_NUM
     // has all but filled. Separate from AP_MACHINE_UNLOCK_ARCHIPELAGO_STAR: the
     // spheres gate the assembly, the machine item gates the assembled star
     // spawning loose in the city, the same split Hydra and Dragoon have.
     AP_STAR_PIECE_UNLOCK_BASE = 820,
-    AP_STAR_PIECE_UNLOCK_ROSE = 820,       // APSTARPIECE_ROSE
-    AP_STAR_PIECE_UNLOCK_GREEN,            // APSTARPIECE_GREEN
-    AP_STAR_PIECE_UNLOCK_VIOLET,           // APSTARPIECE_VIOLET
-    AP_STAR_PIECE_UNLOCK_TAN,              // APSTARPIECE_TAN
-    AP_STAR_PIECE_UNLOCK_BLUE,             // APSTARPIECE_BLUE
-    AP_STAR_PIECE_UNLOCK_YELLOW,           // APSTARPIECE_YELLOW
+    AP_STAR_PIECE_UNLOCK_ROSE = 820,
+    AP_STAR_PIECE_UNLOCK_GREEN,
+    AP_STAR_PIECE_UNLOCK_VIOLET,
+    AP_STAR_PIECE_UNLOCK_TAN,
+    AP_STAR_PIECE_UNLOCK_BLUE,
+    AP_STAR_PIECE_UNLOCK_YELLOW,
 
     // Machine unlock items (830-854, aligned to MachineKind).
     // VCKIND_WHEELVSDEDEDE (would be 855) is not exposed: it is the Vs. King
@@ -566,20 +566,6 @@ typedef enum ItemUnlockKind
     ITUNLOCK_NUM,
 } ItemUnlockKind;
 
-// The six Archipelago Star spheres, in the logo's ring order - rose at twelve
-// o'clock, then clockwise. Index N = bit N in ap_star_piece_unlocked_mask, and
-// the same index the assembly code addresses a sphere by.
-typedef enum APStarPieceKind
-{
-    APSTARPIECE_ROSE,
-    APSTARPIECE_GREEN,
-    APSTARPIECE_VIOLET,
-    APSTARPIECE_TAN,
-    APSTARPIECE_BLUE,
-    APSTARPIECE_YELLOW,
-    APSTARPIECE_NUM,
-} APStarPieceKind;
-
 // Archipelago-defined base-ability kinds - Kirby's fundamental moves gated
 // behind AP items. Not a vanilla game enum; index N = bit N in
 // base_ability_unlocked_mask.
@@ -608,9 +594,24 @@ typedef enum APUnlockCategory
     AP_UNLOCK_COLOR,           // u8  - KIRBYCOLOR_*
     AP_UNLOCK_STADIUM,         // u32 - STKIND_*
     AP_UNLOCK_BASE_ABILITY,    // u8  - BaseAbilityKind (inhale / quick spin / charge)
-    AP_UNLOCK_AP_STAR_PIECE,   // u8  - APStarPieceKind
+    AP_UNLOCK_AP_STAR_PIECE,   // u8  - APStarPiece
     AP_UNLOCK_NUM,
 } APUnlockCategory;
+
+// Which sphere of the Archipelago Star's set a sphere unlock item addresses, in
+// the order the AP_STAR_PIECE_UNLOCK_* item IDs above are assigned. The ap_star
+// mod owns the spheres and numbers its own the same way; the two orders are a
+// contract, because a sphere unlock item is applied by index.
+typedef enum APStarPiece
+{
+    AP_STAR_PIECE_ROSE,
+    AP_STAR_PIECE_GREEN,
+    AP_STAR_PIECE_VIOLET,
+    AP_STAR_PIECE_TAN,
+    AP_STAR_PIECE_BLUE,
+    AP_STAR_PIECE_YELLOW,
+    AP_STAR_PIECE_NUM,
+} APStarPiece;
 
 // Public function-table API. Importer obtains a pointer via
 // `Hoshi_ImportMod(ARCHIPELAGO_MOD_NAME, ARCHIPELAGO_API_MAJOR, ARCHIPELAGO_API_MINOR)`.
@@ -678,6 +679,11 @@ typedef struct ArchipelagoAPI
     // Reveal every checkbox on one checklist-mode row (visual-only). Rows 0..2 are
     // the vanilla GameModes; row 3 is the AP tab.
     void (*DebugRevealChecklist)(int mode);
+
+    // (minor 2+) Drop one Archipelago Star sphere in front of a player's machine,
+    // bypassing the delivery schedule. `piece` is an APStarPiece. Returns 0 if
+    // the sphere was locked when this scene loaded, since it has no ItemKind then.
+    int (*DebugSpawnApStarPiece)(int piece, int ply);
 } ArchipelagoAPI;
 
 #endif // ARCHIPELAGO_API_H

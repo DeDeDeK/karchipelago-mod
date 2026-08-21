@@ -13,7 +13,6 @@ APMenuSettings ap_menu_settings = {
     .ar_permanent_patches_enabled         = 1,
     .energylink_autocharge_rate           = 1, // Medium, ~1.5s to fill
     .ct_random_start_machine              = 1,
-    .ap_star_shot_enabled                 = 1,
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
@@ -28,19 +27,18 @@ void SyncLinkMenuStateToAPData(void)
     ap_data->traplink_menu_enabled   = ap_menu_settings.traplink_enabled;
 }
 
-static void OnToggleDeathLink(int val)          { OSReport("[Main] DeathLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
-static void OnToggleEnergyLink(int val)         { OSReport("[Main] EnergyLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
-static void OnToggleAutoCharge(int val)         { OSReport("[Main] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
-static void OnChangeAutoChargeRate(int val)     { OSReport("[Main] EnergyLink AutoCharge rate set to %s\n", stc_slow_med_fast[val]); }
-static void OnToggleTrapLink(int val)           { OSReport("[Main] TrapLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
-static void OnToggleCTPermanent(int val)        { OSReport("[Main] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
-static void OnToggleCTStadiumPermanent(int val) { OSReport("[Main] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
-static void OnToggleARPermanent(int val)        { OSReport("[Main] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
-static void OnToggleRandomStartMachine(int val) { OSReport("[Main] CT Random Start Machine toggled %s\n", stc_off_on[val]); }
-static void OnToggleDropAbility(int val)         { OSReport("[Main] Drop Ability toggled %s\n", stc_off_on[val]); }
-static void OnToggleAirQuickSpin(int val)        { OSReport("[Main] Air Quick Spin toggled %s\n", stc_off_on[val]); }
-static void OnToggleOnFootZoom(int val)          { OSReport("[Main] On-Foot Zoom toggled %s\n", stc_off_on[val]); }
-static void OnToggleApStarShot(int val)          { OSReport("[Main] AP Star Shot toggled %s\n", stc_off_on[val]); }
+static void OnToggleDeathLink(int val)          { OSReport("[Settings] DeathLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
+static void OnToggleEnergyLink(int val)         { OSReport("[Settings] EnergyLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
+static void OnToggleAutoCharge(int val)         { OSReport("[Settings] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
+static void OnChangeAutoChargeRate(int val)     { OSReport("[Settings] EnergyLink AutoCharge rate set to %s\n", stc_slow_med_fast[val]); }
+static void OnToggleTrapLink(int val)           { OSReport("[Settings] TrapLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
+static void OnToggleCTPermanent(int val)        { OSReport("[Settings] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
+static void OnToggleCTStadiumPermanent(int val) { OSReport("[Settings] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
+static void OnToggleARPermanent(int val)        { OSReport("[Settings] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
+static void OnToggleRandomStartMachine(int val) { OSReport("[Settings] CT Random Start Machine toggled %s\n", stc_off_on[val]); }
+static void OnToggleDropAbility(int val)         { OSReport("[Settings] Drop Ability toggled %s\n", stc_off_on[val]); }
+static void OnToggleAirQuickSpin(int val)        { OSReport("[Settings] Air Quick Spin toggled %s\n", stc_off_on[val]); }
+static void OnToggleOnFootZoom(int val)          { OSReport("[Settings] On-Foot Zoom toggled %s\n", stc_off_on[val]); }
 
 // Only round-start application is toggled here - receiving AP permanent-patch items
 // still increments the save counters either way.
@@ -91,7 +89,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 9,
+        .option_num = 8,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -190,7 +188,7 @@ OptionDesc ModSettings = {
             },
             &(OptionDesc){
                 .name = "Drop Ability",
-                .description = "Press Z to discard your current copy ability (City Trial / Air Ride)",
+                .description = "Press Z to discard your copy ability, or your item power in Top Ride",
                 .kind = OPTKIND_VALUE,
                 .val = &ap_menu_settings.drop_ability_enabled,
                 .value_num = 2,
@@ -223,18 +221,6 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleOnFootZoom,
-            },
-            &(OptionDesc){
-                .name = "AP Star Shot",
-                .description = "Archipelago Star fires one of its spheres on a full-charge release",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.ap_star_shot_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleApStarShot,
             },
         },
     },

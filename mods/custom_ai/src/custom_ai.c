@@ -15,15 +15,14 @@ int CustomAI_RollRandom(int count)
 
 void CustomAI_OnBoot(void)
 {
-    // Top Ride CPUs are a separate AI and still have no hook.
+    // Top Ride CPUs are a separate AI with no hook.
     CpuAI_InstallHook();
     EnemyAI_InstallHook();
     CpuStatGrowth_InstallHook();
 
-    OSReport("[CustomAI] Initialized (CT cpu=%s enemy=%s | AR cpu=%s enemy=%s | TR cpu=%s)\n",
+    OSReport("[CustomAI] Hooks installed (CT cpu=%s enemy=%s | AR cpu=%s enemy=%s)\n",
              CpuAI_GetSelectionName(cpu_ai_preset_ct),
              EnemyAI_GetSelectionName(enemy_ai_preset_ct),
              CpuAI_GetSelectionName(cpu_ai_preset_ar),
-             EnemyAI_GetSelectionName(enemy_ai_preset_ar),
-             CpuAI_GetSelectionName(cpu_ai_preset_tr));
+             EnemyAI_GetSelectionName(enemy_ai_preset_ar));
 }

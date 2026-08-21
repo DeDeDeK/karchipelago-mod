@@ -1,16 +1,9 @@
-// Machine name and description text on both select screens.
-//
-// Each screen turns a CharacterKind into a pair of SIS text indices through two
-// 20-entry tables, read by exactly one function per screen -
-// AirRideSelect_SetMachineText and CitySelect_SetMachineText. Both screens' SIS
-// files hold exactly 48 entries with none to spare, so an appended CharacterKind
-// reads an index past the end of its table and then dereferences whatever lies
-// past the end of the entry array.
-//
-// All four tables are relocated widened, and each appended character gets a name
-// and a description entry composed here from its descriptor and appended to the
-// loaded SIS pointer array. A machine with no description text still gets an
-// entry, empty: the screen draws neither text unless both indices are valid.
+// Machine name and description text on both select screens. Each screen turns a
+// CharacterKind into a pair of SIS text indices through two 20-entry tables with
+// no spare entry, so all four are relocated widened and each appended character
+// gets a name and a description entry composed here and appended to the loaded SIS
+// pointer array. A machine with no description still gets one, empty: the screen
+// draws neither text unless both indices are valid.
 
 #include "os.h"
 #include "hsd.h"
@@ -187,6 +180,6 @@ void CustomMachineText_OnBoot(void)
     CODEPATCH_HOOKAPPLY(0x8013baf0);  // Air Ride select SIS load
     CODEPATCH_HOOKAPPLY(0x8013c4cc);  // City Trial select SIS load
 
-    OSReport("[CustomMachines] %d machine name/description pair(s) spliced in at SIS entry %d\n",
+    OSReport("[SelectText] %d machine name/description pair(s) spliced in at SIS entry %d\n",
              appended, SIS_SELPLY_ENTRY_NUM);
 }

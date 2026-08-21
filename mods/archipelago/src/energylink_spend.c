@@ -4,6 +4,7 @@
 #include "hoshi/settings.h"
 
 #include "main.h"
+#include "settings_menu.h"
 #include "textbox_api.h"
 #include "ap_item_handler.h"
 #include "energylink.h"
@@ -19,6 +20,15 @@ static int Buy(OptionDesc *self)
 {
     SpendEntry *entry = self->user_data;
 
+    if (!ap_menu_settings.energylink_enabled)
+    {
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: Energy Link is off\n",
+                 self->name, entry->item_id);
+        tb_api->EnqueueColoredNoun("Turn on ", "Energy Link", tb_api->EnergyColor,
+                                   " to spend energy");
+        return 0;
+    }
+
     // Event-trigger items are gated by the event-unlock mask so energy can't fire
     // an event out of logic.
     if (entry->item_id >= AP_EVENT_BASE && entry->item_id < AP_EVENT_BASE + EVKIND_NUM)
@@ -26,7 +36,7 @@ static int Buy(OptionDesc *self)
         int kind = entry->item_id - AP_EVENT_BASE;
         if (!(ap_save->event_unlocked_mask & (1 << kind)))
         {
-            OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: event not unlocked (mask = %s)\n",
+            OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: event not unlocked (mask = %s)\n",
                      self->name, entry->item_id, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
             tb_api->EnqueueColoredNoun("Event not unlocked: ", self->name, tb_api->EventColor, NULL);
             return 0;
@@ -35,7 +45,7 @@ static int Buy(OptionDesc *self)
 
     if (ap_data->energy_balance < entry->cost)
     {
-        OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: need %lld, have %lld\n",
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: need %lld, have %lld\n",
                  self->name, entry->item_id, entry->cost, ap_data->energy_balance);
         tb_api->EnqueueColoredNounFmt("Not enough ", "energy", tb_api->EnergyColor,
                                       "! Need %lld, have %lld", entry->cost, ap_data->energy_balance);
@@ -46,7 +56,7 @@ static int Buy(OptionDesc *self)
     // the same path as items received from AP.
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
-        OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: queue full\n",
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: queue full\n",
                  self->name, entry->item_id);
         tb_api->Enqueue("Queue full - try again later");
         return 0;
@@ -59,7 +69,7 @@ static int Buy(OptionDesc *self)
     ap_data->energy_sent_total -= entry->cost;
     ap_data->energy_balance    -= entry->cost;
 
-    OSReport("[EnergyLink] Bought '%s' (id=%d) for %lld, balance %lld\n",
+    OSReport("[EnergyLinkSpend] Bought '%s' (id=%d) for %lld, balance %lld\n",
              self->name, entry->item_id, entry->cost, ap_data->energy_balance);
     tb_api->EnqueueColoredNounFmt("Bought ", self->name, tb_api->ShopColor,
                                   " for %lld energy", entry->cost);

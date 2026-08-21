@@ -7,16 +7,27 @@ CON key per frame whose value is the frame number, so frame N selects image N,
 and a hold key at frame 300 pins the last one. The frame count is baked into the
 TexAnim header, so a 21st character has no art until every such bank grows.
 
-Two shapes of bank qualify. Most hold one image per character, so `--frames`
-finds them by image count. The rest hold one image per character *colour* - the
-engine diverts King Dedede to frame 20 + colour and Meta Knight to 30 + colour -
-so they are wider than the roster and are found by those diverts sitting on their
-ramp instead.
+Three shapes of bank qualify. Most hold one image per character, so `--frames`
+finds them by image count. Some hold one image per character *colour* - the engine
+diverts King Dedede to frame 20 + colour and Meta Knight to 30 + colour - so they
+are wider than the roster and are found by those diverts sitting on their ramp
+instead. The last shape stops two short of the roster: the small machine icon on
+the results screens and the stadium select is reached through an accessor that
+never hands back King Dedede's kind or Meta Knight's, so those banks cover only
+the eighteen kinds with a machine of their own.
 
-Either way this appends one image (and one TLUT entry when a TLUT track indexes
-them), bumps the header counts and adds a key to each ramp track.
+Either way this appends `--appended` images (and as many TLUT entries when a TLUT
+track indexes them), bumps the header counts and adds that many keys to each ramp
+track, starting at frame 20 where the roster ends. The colour diverts already
+keyed there slide the same distance.
 
-The new frame's art comes from `--image`, encoded to suit the bank it lands in:
+The Sicon models size their quad per character - the pictures are not all the same
+shape, King Dedede's being 56x80 and Meta Knight's 104x52 against Slick Star's
+80x48 - through a pair of AnimJoint scale tracks on the same timeline. Those grow
+with the image ramps, their new keys holding the `--source` frame's scale, which is
+the shape every appended frame is encoded at.
+
+The new frames' art comes from `--image`, encoded to suit the bank it lands in:
 picture banks take an RGB5A3 copy (format is per frame, so the existing CMPR and
 paletted frames are left alone and neither a CMPR encoder nor a quantizer is
 needed) and I4 text banks take an I4 intensity map of its alpha. Banks in any
@@ -36,7 +47,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hsd.archive import Archive, NotAnHSDArchive, build_archive, u16, u32
-from hsd.fobj import Key, OP_CON, decode, encode
+from hsd.fobj import (FMT_S8, FMT_S16, FMT_U8, FMT_U16, FObjError, Key, OP_CON,
+                      decode, encode)
 from hsd.gx import (FORMAT_NAME, GX_TF_I4, GX_TF_RGB5A3, align32,
                     encode_i4_alpha, encode_rgb5a3)
 from hsd.schema import array_length, root_for
@@ -54,6 +66,13 @@ METAKNIGHT_KIND = 19
 DEDEDE_FRAME = 20
 METAKNIGHT_FRAME = 30
 
+# The roster's own frames run 0..ROSTER_FRAME-1. An appended CharacterKind's frame
+# is the kind itself, so appended frames start here and the diverts move up.
+ROSTER_FRAME = 20
+
+# The CharacterKinds with a machine of their own, which run up to King Dedede's.
+MACHINE_KIND_NUM = DEDEDE_KIND
+
 TEXANIM_AOBJ = 0x08
 TEXANIM_IMAGES = 0x0C
 TEXANIM_TLUTS = 0x10
@@ -61,6 +80,7 @@ TEXANIM_N_IMAGES = 0x14
 TEXANIM_N_TLUTS = 0x16
 
 AOBJ_TRACKS = 0x08
+ANIMJOINT_AOBJ = 0x08
 
 FOBJ_NEXT = 0x00
 FOBJ_LENGTH = 0x04
@@ -74,27 +94,73 @@ TRACK_TIMG = 1
 TRACK_TCLT = 10
 
 
+def has_divert_shape(data, fobj):
+    """Whether the ramp is keyed by CharacterKind through the colour diverts: a key
+    for each character up to King Dedede, none on his kind or Meta Knight's, and one
+    on each of the frames they are diverted to. Plenty of ramps key frames 20 and 30
+    without being anyone's, so the whole shape has to match."""
+    frames = {int(k.frame) for k in ramp_keys(data, fobj)}
+    return (frames.issuperset(range(DEDEDE_KIND))
+            and frames.isdisjoint((DEDEDE_KIND, METAKNIGHT_KIND))
+            and frames.issuperset((DEDEDE_FRAME, METAKNIGHT_FRAME)))
+
+
+def has_prefix_shape(data, fobj, n_images):
+    """Whether the ramp is one key per image, each selecting the image its own frame
+    number names. On its own this fits any strip animation, so the caller pairs it
+    with an image count that only a machine icon bank holds."""
+    real = ramp_keys(data, fobj)[:-1]
+    return (len(real) == n_images
+            and all(int(k.frame) == i and int(k.value) == i for i, k in enumerate(real)))
+
+
 def is_character_bank(data, tex, n_frames):
     """Whether the bank is indexed by CharacterKind. Either it holds one image per
-    character, or it holds one per character colour, which makes it wider than the
-    roster and leaves the diverts' shape on its image-index ramp: a key for each
-    character up to King Dedede, none on his kind or Meta Knight's, and one on each
-    of the frames they are diverted to. Plenty of other banks key frames 20 and 30
-    without being anyone's, so the whole shape has to match."""
-    if u16(data, tex + TEXANIM_N_IMAGES) == n_frames:
+    character, or one per character colour - which makes it wider than the roster and
+    leaves the diverts' shape on its image-index ramp - or one per kind with a machine
+    of its own, which is what the small machine icon banks hold."""
+    n_images = u16(data, tex + TEXANIM_N_IMAGES)
+    if n_images == n_frames:
         return True
     for fobj in track_chain(data, u32(data, tex + TEXANIM_AOBJ)):
-        if data[fobj + FOBJ_TRACK] != TRACK_TIMG:
-            continue
-        frames = {int(k.frame) for k in ramp_keys(data, fobj)}
-        return (frames.issuperset(range(DEDEDE_KIND))
-                and frames.isdisjoint((DEDEDE_KIND, METAKNIGHT_KIND))
-                and frames.issuperset((DEDEDE_FRAME, METAKNIGHT_FRAME)))
+        if data[fobj + FOBJ_TRACK] == TRACK_TIMG:
+            return (has_divert_shape(data, fobj)
+                    or (n_images == MACHINE_KIND_NUM
+                        and has_prefix_shape(data, fobj, n_images)))
     return False
 
 
-def texanim_offsets(arc, n_frames):
-    """Every character-indexed TexAnim reachable from a public."""
+def joint_ramp_offsets(arc):
+    """Every joint ramp keyed by CharacterKind.
+
+    The Sicon models scale their quad per character, because the pictures are not
+    all the same shape - King Dedede's is 56x80 and Meta Knight's 104x52 against
+    Slick Star's 80x48 - and that scale is a pair of AnimJoint tracks sharing the
+    image ramp's timeline. They have to grow with it or an appended character draws
+    at whatever shape the frame it displaced used to hold."""
+    out = []
+    for off, (kind, _) in reachable(arc).items():
+        if kind != "AnimJoint":
+            continue
+        for fobj in track_chain(arc.data, u32(arc.data, off + ANIMJOINT_AOBJ)):
+            try:
+                if has_divert_shape(arc.data, fobj):
+                    out.append(fobj)
+            except FObjError:
+                continue
+    return sorted(set(out))
+
+
+def ramp_value_at(data, fobj, frame):
+    """The ramp's value on `frame`, which has to be one of its own keys."""
+    for k in ramp_keys(data, fobj):
+        if int(k.frame) == frame:
+            return k.value
+    raise SystemExit(f"  ramp @ {fobj:#x}: no key on frame {frame}")
+
+
+def reachable(arc):
+    """Every typed offset reachable from any of the archive's publics."""
     walker = Walker(arc)
     for sym, off in arc.publics.items():
         root_type, is_array = root_for(classify_symbol(sym))
@@ -106,7 +172,12 @@ def texanim_offsets(arc, n_frames):
                 walker.walk(off, root_type)
         except (struct.error, IndexError, RecursionError, KeyError):
             continue
-    return sorted(off for off, (t, _) in walker.visited.items()
+    return walker.visited
+
+
+def texanim_offsets(arc, n_frames):
+    """Every character-indexed TexAnim reachable from a public."""
+    return sorted(off for off, (t, _) in reachable(arc).items()
                   if t == "TexAnim" and is_character_bank(arc.data, off, n_frames))
 
 
@@ -128,9 +199,22 @@ def append_ptr_array(data, relocs, entries):
     return off
 
 
+def fit(im, w, h):
+    """`im` scaled to fit (w, h) with its aspect kept, centred on a clear canvas."""
+    from PIL import Image
+
+    if im.size == (w, h):
+        return im
+    scale = min(w / im.width, h / im.height)
+    size = (max(1, round(im.width * scale)), max(1, round(im.height * scale)))
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    out.paste(im.resize(size, Image.LANCZOS), ((w - size[0]) // 2, (h - size[1]) // 2))
+    return out
+
+
 def encode_art(im, w, h, fmt):
     """The new frame's pixels, or None when the bank's format has no encoder."""
-    scaled = im.resize((w, h))
+    scaled = fit(im, w, h)
     if fmt in (GX_TF_CMPR, GX_TF_C4, GX_TF_C8):
         return GX_TF_RGB5A3, encode_rgb5a3(scaled)
     if fmt == GX_TF_I4:
@@ -155,52 +239,77 @@ def ramp_keys(data, fobj):
                   data[fobj + FOBJ_VALUE_FLAG], data[fobj + FOBJ_TAN_FLAG])
 
 
-def extended_keys(data, fobj, n, new_frame):
-    """The ramp's keys with one added selecting entry n at `new_frame`.
+def extended_keys(data, fobj, values):
+    """The ramp's keys with one key per entry of `values` added at frame ROSTER_FRAME.
 
-    Portrait banks index frame by frame, so `new_frame` is free and the key goes
-    on the end - the trailing hold key follows it onto the new entry. Banks that
-    divert King Dedede have him on `new_frame` already: one key on the name plates,
-    a colour apiece on the picture banks. That whole run slides one frame later,
-    which the mod matches by patching the engine's `+ 20` to `+ 21`. Meta Knight's
-    run starts after the gap the slide runs into, so it stays where it is."""
+    An appended CharacterKind's frame is the kind itself, so the new frames start
+    where the roster ends and everything already keyed there has to move out of the
+    way: the colour diverts - King Dedede at frame 20 + colour, Meta Knight at
+    30 + colour - both slide as far as the frames added, which the mod matches by
+    rewriting the two addi immediates that form them. The trailing hold key keeps
+    its own frame and takes whatever value ends up before it."""
+    appended = len(values)
     keys = ramp_keys(data, fobj)
+    hold, real = keys[-1], keys[:-1]
 
-    frames = [k.frame for k in keys]
-    i = sum(1 for f in frames if f < new_frame)
-    if new_frame in frames:
-        run = i
-        while run < len(keys) and keys[run].frame == new_frame + (run - i):
-            run += 1
-        if run < len(keys) and keys[run].frame <= new_frame + (run - i):
-            raise SystemExit(f"  no room to slide the run at frame {new_frame}")
-        for j in range(i, run):
-            keys[j] = Key(keys[j].frame + 1, keys[j].value, keys[j].tan, keys[j].op)
-    keys.insert(i, Key(float(new_frame), float(n), 0.0, OP_CON))
-
-    # The last key holds the animation past its useful range; keep it on the
-    # last real entry, which the new frame becomes when it lands on the end.
-    if i == len(keys) - 2:
-        keys[-1] = Key(keys[-1].frame, float(n), keys[-1].tan, keys[-1].op)
-    return keys
+    out = [k for k in real if k.frame < ROSTER_FRAME]
+    out += [Key(float(ROSTER_FRAME + i), float(v), 0.0, OP_CON)
+            for i, v in enumerate(values)]
+    out += [Key(k.frame + appended, k.value, k.tan, k.op)
+            for k in real if k.frame >= ROSTER_FRAME]
+    if out[-1].frame >= hold.frame:
+        raise SystemExit(f"  ramp @ {fobj:#x}: {appended} frames run into the hold key")
+    out.append(Key(hold.frame, out[-1].value, hold.tan, hold.op))
+    return out
 
 
-def encoded_ramp(data, fobj, n, new_frame):
-    """The extended ramp as an FObj keyframe buffer."""
-    return encode(extended_keys(data, fobj, n, new_frame),
-                  data[fobj + FOBJ_VALUE_FLAG], data[fobj + FOBJ_TAN_FLAG])
+def index_values(first_value, appended):
+    """What an image- or TLUT-index ramp's appended keys select: the entries the
+    table grew by, in order."""
+    return [first_value + i for i in range(appended)]
 
 
-def extend_ramp(data, fobj, n, new_frame):
-    """Give the ramp a key selecting entry n at `new_frame`, in place."""
-    keys = extended_keys(data, fobj, n, new_frame)
-    buf = encode(keys, data[fobj + FOBJ_VALUE_FLAG], data[fobj + FOBJ_TAN_FLAG])
+VALUE_LIMIT = {FMT_S16: 0x7FFF, FMT_U16: 0xFFFF, FMT_S8: 0x7F, FMT_U8: 0xFF}
+
+
+def fitted_flag(value_flag, keys):
+    """The track's value flag with its fixed-point exponent lowered until the keys
+    fit. A vanilla ramp is a u8 over a 2^3 divisor, which tops out at 31.875 and so
+    cannot hold an image index past 31; the values are whole numbers, so dropping
+    the exponent costs nothing and keeps the format - and the buffer length - as
+    they were."""
+    fmt = value_flag & 0xE0
+    limit = VALUE_LIMIT.get(fmt)
+    if limit is None:
+        return value_flag
+
+    top = max(abs(k.value) for k in keys)
+    exp = value_flag & 0x1F
+    while exp > 0 and round(top * (1 << exp)) > limit:
+        exp -= 1
+    if round(top * (1 << exp)) > limit:
+        raise SystemExit(f"  ramp value {top:g} does not fit format {fmt:#x}")
+    return fmt | exp
+
+
+def encoded_ramp(data, fobj, values):
+    """The extended ramp as an FObj keyframe buffer, with the value flag it needs."""
+    keys = extended_keys(data, fobj, values)
+    flag = fitted_flag(data[fobj + FOBJ_VALUE_FLAG], keys)
+    return encode(keys, flag, data[fobj + FOBJ_TAN_FLAG]), flag
+
+
+def extend_ramp(data, fobj, values):
+    """Give the ramp a key per entry of `values` at frame ROSTER_FRAME on, in place."""
+    keys = extended_keys(data, fobj, values)
+    buf, flag = encoded_ramp(data, fobj, values)
+    data[fobj + FOBJ_VALUE_FLAG] = flag
     struct.pack_into(">I", data, fobj + FOBJ_LENGTH, len(buf))
     struct.pack_into(">I", data, fobj + FOBJ_BUFFER, append(data, buf))
     return [f"{int(k.frame)}:{k.value:g}" for k in keys]
 
 
-def grow_bank(data, relocs, tex, src_idx, im, new_frame):
+def grow_bank(data, relocs, tex, src_idx, im, appended):
     n = u16(data, tex + TEXANIM_N_IMAGES)
     img_tbl = u32(data, tex + TEXANIM_IMAGES)
     images = [u32(data, img_tbl + i * 4) for i in range(n)]
@@ -220,8 +329,8 @@ def grow_bank(data, relocs, tex, src_idx, im, new_frame):
         note = f"{w}x{h} {FORMAT_NAME.get(new_fmt, new_fmt)}"
 
     struct.pack_into(">I", data, tex + TEXANIM_IMAGES,
-                     append_ptr_array(data, relocs, images + [new_img]))
-    struct.pack_into(">H", data, tex + TEXANIM_N_IMAGES, n + 1)
+                     append_ptr_array(data, relocs, images + [new_img] * appended))
+    struct.pack_into(">H", data, tex + TEXANIM_N_IMAGES, n + appended)
 
     ramp = None
     for fobj in track_chain(data, u32(data, tex + TEXANIM_AOBJ)):
@@ -233,15 +342,17 @@ def grow_bank(data, relocs, tex, src_idx, im, new_frame):
             tlut_tbl = u32(data, tex + TEXANIM_TLUTS)
             tluts = [u32(data, tlut_tbl + i * 4) for i in range(n_tlut)]
             struct.pack_into(">I", data, tex + TEXANIM_TLUTS,
-                             append_ptr_array(data, relocs, tluts + [tluts[src_idx]]))
-            struct.pack_into(">H", data, tex + TEXANIM_N_TLUTS, n_tlut + 1)
-        keys = extend_ramp(data, fobj, n, new_frame)
-        if kind == TRACK_TIMG:
+                             append_ptr_array(data, relocs,
+                                              tluts + [tluts[src_idx]] * appended))
+            struct.pack_into(">H", data, tex + TEXANIM_N_TLUTS, n_tlut + appended)
+            keys = extend_ramp(data, fobj, index_values(n_tlut, appended))
+        else:
+            keys = extend_ramp(data, fobj, index_values(n, appended))
             ramp = keys
 
     if ramp is None:
         raise SystemExit(f"  bank @ {tex:#x}: no image-index track to extend")
-    print(f"  bank @ {tex:#x}: {n} -> {n + 1} frames, {note}")
+    print(f"  bank @ {tex:#x}: {n} -> {n + appended} frames, {note}")
     print(f"    ramp: {' '.join(ramp)}")
 
 
@@ -255,7 +366,11 @@ def grow_archive(src, out, args, im):
     relocs = list(arc.relocs)
     print(f"{src} -> {out}:")
     for tex in banks:
-        grow_bank(data, relocs, tex, args.source, im, args.new_frame)
+        grow_bank(data, relocs, tex, args.source, im, args.appended)
+    for fobj in joint_ramp_offsets(arc):
+        value = ramp_value_at(arc.data, fobj, args.source)
+        extend_ramp(data, fobj, [value] * args.appended)
+        print(f"  joint ramp @ {fobj:#x}: holds frame {args.source}'s {value:g}")
 
     publics = list(arc.publics.items())
     externs = [(name, off) for off, name in arc.externs]
@@ -274,16 +389,15 @@ def main(argv):
     p.add_argument("--out-dir", required=True, help="directory the rewritten archives land in")
     p.add_argument("--frames", type=int, default=20,
                    help="characters in the roster; a bank this many images wide is one of "
-                        "theirs, as is any bank whose ramp keys the colour diverts")
+                        "theirs, as is any bank whose ramp keys the colour diverts and any "
+                        "holding one image per kind with a machine")
     p.add_argument("--source", type=int, default=4,
-                   help="frame the new one is cloned from (default 4, Slick Star)")
-    p.add_argument("--new-frame", type=int, default=None,
-                   help="animation frame that selects the new entry (default --frames)")
+                   help="frame the new ones are cloned from (default 4, Slick Star)")
+    p.add_argument("--appended", type=int, default=13,
+                   help="frames every bank grows by, starting where the roster ends")
     p.add_argument("--image", default=None,
-                   help="PNG for the new frame; omitted reuses the source frame")
+                   help="PNG for the new frames; omitted reuses the source frame")
     args = p.parse_args(argv[1:])
-    if args.new_frame is None:
-        args.new_frame = args.frames
 
     im = None
     if args.image:

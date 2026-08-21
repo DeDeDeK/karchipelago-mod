@@ -12,8 +12,14 @@ shared data block.
   roles                          list the slot order
   info   BANK                    describe a bank
   dump   BANK OUTDIR             write every sound to a .wav
+  donors MACHINE OUTDIR          write the sample behind each of a machine's roles
   clone  MACHINE OUT             build a bank from a vanilla machine's sounds
   build  OUT --engine a.wav ...  build a bank from .wav files
+
+A star's own row leaves roles at -1 where the kind has no such sound - every
+star but Wagon has no boost release of its own, for one. `donors` and `clone`
+take those from --fallback's row instead, so a drop-in can fill a slot its
+clone kind leaves empty.
 """
 
 import argparse
@@ -47,16 +53,18 @@ ROLES = [
     ('surface', 'surface / run noise loop', True),
     ('rumble', 'rumble loop', True),
     ('spin', 'quick spin', False),
-    ('engine-start', 'engine start, one shot', False),
-    ('surface-start', 'surface start, one shot', False),
-    ('overheat', 'overheat loop', True),
+    ('engine-start', 'engine start', True),
+    ('surface-start', 'surface start', True),
+    ('overheat', 'overheat, one shot on auto-discharge', False),
 ]
 ROLE_NAMES = [r[0] for r in ROLES]
 
+# Star class slots, which for a star equal its MachineKind. The last two are the
+# flying riders, who have no engine of their own.
 STAR_MACHINES = [
-    'warp', 'wing', 'turbo', 'bulk', 'rocket', 'formula', 'slick', 'free',
-    'swerve', 'jet', 'wagon', 'devil', 'shadow', 'compact', 'hydra', 'dragoon',
-    'rex-wheelie', 'wheelie-bike', 'wheelie-scooter',
+    'warp', 'compact', 'winged', 'shadow', 'hydra', 'bulk', 'slick', 'formula',
+    'dragoon', 'wagon', 'rocket', 'swerve', 'turbo', 'jet', 'flight', 'free',
+    'steer', 'wing-kirby', 'wing-metaknight',
 ]
 
 
@@ -102,6 +110,24 @@ class Vanilla:
             return None
         bank, local = self.sound(sounds[0])
         return sound_pcm(bank, local)
+
+
+def resolve_row(rows, kind, fallback=None):
+    """A star's 13 FGM ids, with -1 roles taken from the fallback star's row.
+
+    Returns one (sfx_id, source_kind) per role.
+    """
+    row = rows[kind]
+    if fallback is None:
+        return [(sfx, kind) for sfx in row]
+    alt = rows[fallback]
+    return [(sfx, kind) if sfx >= 0 else (alt[i], fallback) for i, sfx in enumerate(row)]
+
+
+def star_index(name):
+    if name not in STAR_MACHINES:
+        raise SystemExit(f"unknown machine {name!r}; one of {', '.join(STAR_MACHINES)}")
+    return STAR_MACHINES.index(name)
 
 
 def build_bank(entries, base_index=DROPIN_BASE_INDEX, quiet=False):
@@ -171,16 +197,39 @@ def cmd_dump(args):
               + (f" loop@{loop}" if loop is not None else ""))
 
 
+def cmd_donors(args):
+    kind = star_index(args.machine)
+    fallback = star_index(args.fallback) if args.fallback else None
+    rows = load_rows(args.root)
+    v = Vanilla(args.root)
+    os.makedirs(args.outdir, exist_ok=True)
+    for i, ((name, _, looped), (sfx, src)) in enumerate(zip(ROLES, resolve_row(rows, kind, fallback))):
+        note = '' if src == kind else f" (from {STAR_MACHINES[src]})"
+        got = v.role_pcm(sfx)
+        if got is None:
+            print(f"  {i:2d} {name:14s} {v.names.name(sfx)}{note}  no sample")
+            continue
+        pcm, rate, loop = got
+        if args.pitch != 1.0:
+            pcm = wav.resample(pcm, args.pitch)
+            if loop is not None:
+                loop = int(loop / args.pitch)
+        path = os.path.join(args.outdir, f"{i:03d}_{name}.wav")
+        wav.write(path, pcm, rate)
+        print(f"  {i:2d} {name:14s} {v.names.name(sfx)}{note}  -> {path}  "
+              f"{len(pcm)} smp @{rate}"
+              + (f" loop@{loop}" if loop is not None else " one shot"))
+
+
 def cmd_clone(args):
-    if args.machine not in STAR_MACHINES:
-        raise SystemExit(f"unknown machine {args.machine!r}; one of {', '.join(STAR_MACHINES)}")
-    kind = STAR_MACHINES.index(args.machine)
-    row = load_rows(args.root)[kind]
+    kind = star_index(args.machine)
+    fallback = star_index(args.fallback) if args.fallback else None
+    row = resolve_row(load_rows(args.root), kind, fallback)
     v = Vanilla(args.root)
     want = set(args.roles.split(',')) if args.roles else set(ROLE_NAMES)
     print(f"cloning {args.machine} (star slot {kind}) at pitch {args.pitch}")
     entries = []
-    for (name, _, _), sfx in zip(ROLES, row):
+    for (name, _, _), (sfx, src) in zip(ROLES, row):
         if name not in want:
             entries.append(None)
             continue
@@ -236,12 +285,21 @@ def main(argv=None):
     q.add_argument('outdir')
     q.set_defaults(func=cmd_dump)
 
+    q = sub.add_parser('donors')
+    q.add_argument('machine', help=', '.join(STAR_MACHINES))
+    q.add_argument('outdir')
+    q.add_argument('--pitch', type=float, default=1.0,
+                   help='resample ratio; below 1.0 lowers the pitch and lengthens the sound')
+    q.add_argument('--fallback', help='star whose row fills the roles this one leaves at -1')
+    q.set_defaults(func=cmd_donors)
+
     q = sub.add_parser('clone')
     q.add_argument('machine', help=', '.join(STAR_MACHINES))
     q.add_argument('out')
     q.add_argument('--pitch', type=float, default=1.0,
                    help='resample ratio; below 1.0 lowers the pitch and lengthens the sound')
     q.add_argument('--roles', help='comma separated subset to take from the donor')
+    q.add_argument('--fallback', help='star whose row fills the roles this one leaves at -1')
     q.set_defaults(func=cmd_clone)
 
     q = sub.add_parser('build')

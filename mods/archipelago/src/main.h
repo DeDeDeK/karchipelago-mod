@@ -11,50 +11,31 @@
 #include "textbox_api.h"
 extern const TextBoxAPI *tb_api;
 
-// NULL when custom_machines is not built, in which case no machine or character
-// exists past the vanilla ceilings and every caller falls back to them.
+// Required: it owns the widened kind space and the engine seams that widening
+// breaks, and this mod gates through the filters it takes. NULL only in a build
+// that left it out, where machine gating is off entirely.
 #include "custom_machines_api.h"
 extern const CustomMachinesAPI *cm_api;
 
 // Import the registry if it has not resolved yet. Idempotent; safe from any scene.
 void AP_ResolveCustomMachines(void);
 
-// CustomMachineDesc.name of the machine the Archipelago goal awards. The registry is
-// generic, so this string is the only thing that ties a drop-in .dat to the AP wiring.
-#define AP_STAR_MACHINE_NAME "Archipelago Star"
-
-// Ceilings that include whatever custom_machines registered this boot.
+// The registry's own kind-space helpers, bound to our import.
 static inline int MachineKind_Num(void)
 {
-    return cm_api ? cm_api->GetKindCeiling() : VCKIND_NUM;
+    return CustomMachines_KindNum(cm_api);
 }
 static inline int CharacterKind_Num(void)
 {
-    return cm_api ? cm_api->GetCharacterKindCeiling() : CKIND_NUM;
+    return CustomMachines_CharacterKindNum(cm_api);
 }
-// Absolute MachineKind for a (is_bike, class slot) pair, custom slots included.
 static inline MachineKind MachineKind_Resolve(int is_bike, int class_index)
 {
-    if (cm_api)
-        return (MachineKind)cm_api->KindFromClassIndex(is_bike, class_index);
-    return MachineKind_FromClassIndex(is_bike, class_index);
+    return CustomMachines_ResolveKind(cm_api, is_bike, class_index);
 }
-// The (is_bike, class slot) pair the engine addresses a MachineKind by, custom kinds
-// included - the inverse of MachineKind_Resolve. A custom machine is the only kind
-// whose class slot and MachineKind differ, so hoshi's MachineKind_ClassIndex answers
-// for vanilla only and hands back the kind itself for one of these.
 static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
 {
-    if (cm_api)
-        return cm_api->ClassIndexFromKind(kind, is_bike);
-    *is_bike = MachineKind_IsBike(kind);
-    return MachineKind_ClassIndex(kind);
-}
-// MachineKind of the Archipelago Star, or -1 while nothing has registered it.
-static inline int ApStarMachineKind(void)
-{
-    AP_ResolveCustomMachines();
-    return cm_api ? cm_api->FindKindByName(AP_STAR_MACHINE_NAME) : -1;
+    return CustomMachines_ClassIndexOf(cm_api, kind, is_bike);
 }
 
 #define MAX_RECEIVED_ITEMS 512
@@ -75,6 +56,10 @@ static inline int ApStarMachineKind(void)
 // Always >= GMMODE_NUM but not necessarily AP_CHECKLIST_ROW - another custom tab
 // registering first pushes it higher. GMMODE_NUM until APChecklist_Register.
 extern int ap_checklist_mode;
+
+// Set while checklist rewards are re-applied from save data, so the gate unlockers
+// stay quiet instead of reprinting every already-owned unlock at boot.
+extern int ap_regrant_quiet;
 
 // Absolute clamp ceiling for per-stat patch totals. Patch_GetMaxValue returns
 // through extsb, so anything above 127 sign-extends negative.
@@ -147,13 +132,13 @@ typedef struct APSlotOptions
 // goal_forced_gates bits.
 #define GOALGATE_LEGENDARY_PIECES 0x1 // ITUNLOCK_HYDRA1-3 / ITUNLOCK_DRAGOON1-3
 #define GOALGATE_VS_KING_DEDEDE   0x2 // STKIND_VSKINGDEDEDE
-#define GOALGATE_AP_STAR_PIECES   0x4 // APSTARPIECE_ROSE..YELLOW
+#define GOALGATE_AP_STAR_PIECES   0x4 // AP_STAR_PIECE_ROSE..YELLOW
 
 #define LEGENDARY_PIECE_ITEM_BITS                                                  \
     ((1u << ITUNLOCK_HYDRA1) | (1u << ITUNLOCK_HYDRA2) | (1u << ITUNLOCK_HYDRA3) | \
      (1u << ITUNLOCK_DRAGOON1) | (1u << ITUNLOCK_DRAGOON2) | (1u << ITUNLOCK_DRAGOON3))
 
-#define AP_STAR_PIECE_ITEM_BITS ((1u << APSTARPIECE_NUM) - 1)
+#define AP_STAR_PIECE_ITEM_BITS ((1u << AP_STAR_PIECE_NUM) - 1)
 
 // Cross-boot progress for AP checklist objectives whose predicate counts over
 // more than one session.
@@ -181,7 +166,7 @@ typedef struct APSave
     u32 topride_item_unlocked_mask;                     // Bit N = TopRideItemKind N unlocked
     u8 color_unlocked_mask;                             // Bit N = KirbyColor N unlocked
     u8 base_ability_unlocked_mask;                      // Bit N = BaseAbilityKind N unlocked
-    u8 ap_star_piece_unlocked_mask;                     // Bit N = APStarPieceKind N unlocked
+    u8 ap_star_piece_unlocked_mask;                     // Bit N = APStarPiece N unlocked
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
     u8 spawn_rate_level;                                // Number of Spawn Rate Up items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-PATCH_STAT_MAX)
@@ -230,12 +215,38 @@ typedef struct APData
 extern APData *ap_data;
 extern APSave *ap_save;
 
+// machine_unlocked_mask is 32 bits, so only the first 32 MachineKinds can carry a
+// gate. custom_machines is free to register past that - its own cap is its own -
+// and the kinds beyond are treated as permanently available rather than shifted out
+// of range. OnSaveLoaded reports how many were left ungated.
+#define AP_MACHINE_GATE_NUM 32
+
+// The machine unlock item ids run from AP_MACHINE_UNLOCK_BASE up to where the box
+// unlock ids begin, so a build registering more MachineKinds than that block holds
+// has to stop at its edge instead of reading on into another category's ids. The
+// kinds past it get no unlock item and stay ungated like the ones past the mask.
+#define AP_MACHINE_UNLOCK_NUM (AP_BOX_UNLOCK_BASE - AP_MACHINE_UNLOCK_BASE)
+
+static inline int MachineUnlock_KindNum(void)
+{
+    int num = MachineKind_Num();
+    return num < AP_MACHINE_UNLOCK_NUM ? num : AP_MACHINE_UNLOCK_NUM;
+}
+
+static inline int MachineKind_IsUnlocked(int kind)
+{
+    if (kind < 0)
+        return 0;
+    if (kind >= AP_MACHINE_GATE_NUM)
+        return 1;
+    return (ap_save->machine_unlocked_mask >> kind) & 1;
+}
+
 void OnBoot();
 void OnSaveInit();
 void OnSaveLoaded();
 void OnMainMenuLoad();
 void OnPlayerSelectLoad();
-void On3DLoadStart();
 void On3DLoadEnd();
 void On3DPause(int pause_ply);
 void On3DUnpause(int pause_ply);

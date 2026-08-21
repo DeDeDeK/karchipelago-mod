@@ -5,8 +5,8 @@ nearest the machine's heading is the one that leaves, so the shot always launche
 it wears that pod's color. The sixth shot empties the ring and starts all six growing back over a
 second, during which a full-charge release is an ordinary boost with no shot and no cue.
 
-The whole feature is `mods/archipelago/src/ap_star_shot.c`, behind the **AP Star Shot** toggle in the
-Archipelago settings menu (default on). It no-ops entirely when the `custom_machines` registry is
+The whole feature is `mods/ap_star/src/ap_star_shot.c`, behind the **Star Shot** toggle in the
+Archipelago Star settings menu (default on). It no-ops entirely when the `custom_machines` registry is
 absent or when no machine named `Archipelago Star` is registered. It is live in every 3D mode the
 star is rideable in - City Trial, its stadiums, Air Ride races and Free Run. Top Ride has no
 `MachineData` and is out regardless.
@@ -47,17 +47,21 @@ Owner exclusion stays on - `desc.owner_gobj` is `rd->x0`, the rider GObj, which 
 There is no on-hit callback, so it damages riders and machines and keeps travelling. Boxes are hit
 either way: `Box_CheckProjectileCollision` (`0x80252334`) does no owner check.
 
-`lifetime` is overwritten to 300 frames; the kind's own default is 120.
+`lifetime` is overwritten to 233 frames; the kind's own default is 120.
 
 ### Growing in and fading out
 
-A single `user_hook_0` sizes the shot at both ends of its life. It leaves the ring at the size of the
-pod it came from and swells to full over the first 30 frames, then goes back to nothing over the last
-30. The fade end is needed because the kind's despawn vtable slot (`0x80226b1c`) is a bare
-`GObj_Destroy`: a shot that simply ran out of life would vanish between two frames. Prio 0 runs ahead
-of the lifetime decrement at prio 1, so a shot with one frame left is already at zero and there is no
-visible last frame. Launch size is written directly at spawn as well, since the first prio-0 pass may
-already have gone by.
+A single `user_hook_0` sizes the shot at both ends of its life. It swells from 0.05 to full over the
+first 30 frames and goes back to 0.05 over the last 30. The fade end is needed because the kind's
+despawn vtable slot (`0x80226b1c`) is a bare `GObj_Destroy`: a shot that simply ran out of life would
+vanish between two frames. Prio 0 runs ahead of the lifetime decrement at prio 1, so a shot with one
+frame left is already down and there is no visible last frame. The seed size is written directly at
+spawn as well, since the first prio-0 pass may already have gone by.
+
+The ends of the ramp sit at 0.05 rather than at 0 because the same factor drives the hitbox and the
+render cull, and a shot with no extent at all is a degenerate one for a frame. They sit that low so
+the growth reads: the shot recedes from the camera at roughly the rate a launch anywhere near full
+size would grow, and the two cancel on screen.
 
 Two fields carry the size, and both are 1 on a fresh shot, so the factor is written straight into
 each. The model's sphere joint is the visual half - the child of the tree root, not the root, since
@@ -66,14 +70,8 @@ the root's matrix is engine-owned while a child's local SRT always composes agai
 `desc.velocity_scale` at the tail of the create and nothing in the shared pipeline or in this kind's
 own code writes it again, while three readers pick it up every frame - the HurtData size at prio 7,
 the environment sweep radius, and the render cull radius. So one write moves the damage, the
-collision and the sphere together, and a shot that has just launched hits like the small thing it
+collision and the sphere together, and a shot that is still swelling hits like the small thing it
 looks like.
-
-The launch size is solved per shot rather than baked, so it tracks the machine and the model:
-`model_scale * model_scale_base` (what the machine bakes into its model matrix) times the pod joint's
-own scale times the pod geometry's half-extent, over the shot sphere's authored radius. On the
-shipping archives that is `1.0 * 1.0 * 1.25 * 0.875 / 3.0`, near a third. A result outside
-`0.05..1.0` means one of those assumptions has moved, and the shot launches full size instead.
 
 Ending on an impact rather than on lifetime still pops, which is what an impact should look like.
 
@@ -92,7 +90,7 @@ pointer back. The window is one synchronous call, so no other projectile can see
 for this kind, and none of its vtable slots touch the parts array, so nothing else depends on the
 model's shape.
 
-`mods/archipelago/assets/ApStarShot.dat` holds the model and nothing else: a two-joint tree whose
+`mods/ap_star/assets/ApStarShot.dat` holds the model and nothing else: a two-joint tree whose
 leaf carries one lit, untextured UV sphere of radius 3.0, public `apStarShot_model`. It is written by
 `scripts/hsd/make_ap_star_shot.py` from the same mesh generator the six assembly spheres use, and it
 is loaded per scene with `Gm_LoadGameFile`, so the pointer is refreshed on every 3D load and cleared
@@ -109,7 +107,7 @@ assembly spheres are painted from, in pod order.
 ## Trajectory
 
 A ground probe at the muzzle (`Raycast_Ground` down from 12 units above to 40 below) decides the mode
-at spawn. Speed is a constant 7 plus whatever of the machine's velocity is already pointing that
+at spawn. Speed is a constant 6.3 plus whatever of the machine's velocity is already pointing that
 way, so a boosting player cannot catch their own shot. Because the carry term is the full component,
 the shot pulls away from the machine at exactly that constant - and since the camera rides the
 machine, that is also how fast it reads on screen, whatever the player is doing.
@@ -174,10 +172,10 @@ Neither the fire path nor the scale writes can take `Machine_AnimThink`'s tail (
 `custom_machines` palette cycle already replaces that call. Instead the mod claims the engine's own
 per-kind extension slots on the star class, through two `CustomMachinesAPI` entries:
 
-| Slot | Tail | Table | Used for |
-|------|------|-------|----------|
-| `SetStarInitHandler` | `Machine_Star_Init` `0x801e80d8` | `0x804b15c0` | drop this machine's ring, so the next tick rebuilds it full against the new model |
-| `SetStarThinkHandler` | `Machine_Star_Think` `0x801eb520` | `0x804b160c` | claim the ring, advance the regrow, write the six pod scales |
+| Slot | Dispatch tail | Table | Used for |
+|------|---------------|-------|----------|
+| `SetStarInitHandler` | `Machine_Star_Init` (`0x801e7f3c`), tail at `0x801e80d8` | `0x804b15c0` | drop this machine's ring, so the next tick rebuilds it full against the new model |
+| `SetStarThinkHandler` | `Machine_Star_Think` (`0x801eacbc`), tail at `0x801eb520` | `0x804b160c` | claim the ring, advance the regrow, write the six pod scales |
 
 Both tails index their table by `md->kind` and call the entry only if it is non-NULL. The registry
 already relocates both tables into arrays it owns, so installing a handler is a store. A consumer's
@@ -188,8 +186,8 @@ tables is NULL, so nothing is inherited in practice.
 
 ## Tuning
 
-Shot speed, lifetime, grow and fade lengths, ride height, probe reach, collapse and regrow lengths
-and the respread ease rate are all named constants at the top of `ap_star_shot.c`, as are the two
-measurements the launch size is solved from. The sphere's radius and mesh resolution are constants in
+Shot speed, lifetime, grow and fade lengths, the seed scale, ride height, probe reach, collapse and
+regrow lengths and the respread ease rate are all named constants at the top of `ap_star_shot.c`.
+Range is speed times lifetime. The sphere's radius and mesh resolution are constants in
 `scripts/hsd/make_ap_star_shot.py`; changing the joint count there means changing
 `AP_STAR_SHOT_JOINTS` to match, or the walker asserts.

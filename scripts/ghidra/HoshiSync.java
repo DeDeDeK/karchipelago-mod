@@ -33,8 +33,11 @@ import ghidra.program.model.data.DataTypeConflictHandler;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.DoubleDataType;
 import ghidra.program.model.data.FloatDataType;
+import ghidra.program.model.data.FunctionDefinition;
 import ghidra.program.model.data.IntegerDataType;
+import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.PointerDataType;
+import ghidra.program.model.data.TypeDef;
 import ghidra.program.model.data.UnsignedCharDataType;
 import ghidra.program.model.data.UnsignedIntegerDataType;
 import ghidra.program.model.data.UnsignedLongLongDataType;
@@ -133,10 +136,12 @@ public class HoshiSync extends GhidraScript {
         }
 
         int pruned = pruneOrphanConflicts(dtm);
+        int renamed = disambiguateCallbackTypedefs(dtm);
         int after = dtm.getDataTypeCount(true);
 
         rpt("types   : " + before + " -> " + after + " (delta " + (after - before)
-                + ", pruned " + pruned + " orphaned conflicts)");
+                + ", pruned " + pruned + " orphaned conflicts, resolved " + renamed
+                + " shadowed function definitions)");
         if (res != null) {
             rpt("parsed  : successful=" + res.successful());
         }
@@ -150,7 +155,7 @@ public class HoshiSync extends GhidraScript {
         rpt("--- C parse messages ---");
         rpt(res != null && res.cParseMessages() != null ? res.cParseMessages() : "(none)");
 
-        return "delta=" + (after - before) + " pruned=" + pruned
+        return "delta=" + (after - before) + " pruned=" + pruned + " renamed=" + renamed
                 + (res != null ? " successful=" + res.successful() : " FAILED");
     }
 
@@ -183,6 +188,75 @@ public class HoshiSync extends GhidraScript {
             }
         }
         return total;
+    }
+
+    // The C parser emits a FunctionDefinition beside every function-pointer
+    // typedef, under the same name. FunctionSignatureParser resolves parameter
+    // types by simple name and gives up when one name matches two types, which
+    // makes such a typedef unusable in a prototype. Renaming the definition
+    // leaves the typedef as the sole owner of the name.
+    //
+    // Every parse re-emits the definition and re-points the typedef at the new
+    // copy, so the one renamed last time is stale and is dropped first - without
+    // that the rename would collide and a `_fn2`, `_fn3` chain would grow.
+    private int disambiguateCallbackTypedefs(DataTypeManager dtm) {
+        Map<String, DataType> typedefs = new HashMap<>();
+        List<DataType> defs = new ArrayList<>();
+        Iterator<DataType> it = dtm.getAllDataTypes();
+        while (it.hasNext()) {
+            DataType d = it.next();
+            if (d instanceof TypeDef) {
+                typedefs.put(d.getName(), d);
+            } else if (d instanceof FunctionDefinition) {
+                defs.add(d);
+            }
+        }
+        List<DataType> shadowed = new ArrayList<>();
+        for (DataType d : defs) {
+            if (typedefs.containsKey(d.getName())) {
+                shadowed.add(d);
+            }
+        }
+        if (shadowed.isEmpty()) {
+            return 0;
+        }
+        int touched = 0;
+        int tx = currentProgram.startTransaction("Rename shadowed function definitions");
+        try {
+            for (DataType d : shadowed) {
+                String want = d.getName() + "_fn";
+                DataType stale = dtm.getDataType(d.getCategoryPath(), want);
+                if (stale != null && !sameType(typedefTarget(typedefs.get(d.getName())), stale)) {
+                    List<DataType> one = new ArrayList<>();
+                    one.add(stale);
+                    dtm.remove(one, monitor);
+                }
+                try {
+                    d.setName(want);
+                    touched++;
+                } catch (Exception e) {
+                    rpt("note    : rename failed for " + d.getName() + ": " + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            rpt("note    : disambiguate failed: " + e.getClass().getSimpleName()
+                    + ": " + e.getMessage());
+        } finally {
+            currentProgram.endTransaction(tx, true);
+        }
+        return touched;
+    }
+
+    private DataType typedefTarget(DataType td) {
+        if (!(td instanceof TypeDef)) {
+            return null;
+        }
+        DataType t = ((TypeDef) td).getDataType();
+        return (t instanceof Pointer) ? ((Pointer) t).getDataType() : t;
+    }
+
+    private boolean sameType(DataType a, DataType b) {
+        return a != null && b != null && a.getPathName().equals(b.getPathName());
     }
 
     // Auto-analysis has already laid down conflicting `undefined` data at these

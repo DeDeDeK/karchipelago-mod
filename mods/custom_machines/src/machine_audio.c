@@ -1,18 +1,12 @@
 // A drop-in machine's sounds, and the star class's per-kind audio parameter row.
 //
-// The row array is authored in VcCommon.dat, sized to the 19 vanilla star slots
-// and reloaded per scene, so it is re-copied wider and repointed on every
-// vcLoadCommon. Each registered machine's row starts as a copy of its
-// descriptor's clone_kind.
-//
-// A companion .ssm beside the .dat then takes its own samples over that row.
-// Reaching one needs three things, all set up on the first vcLoadCommon, by which
-// point the audio system is running and the DVD is available: an SSM slot holding
-// the samples, a range of global sound indices no vanilla bank claims, and a
-// script per sound - a copy of the clone kind's, with its sound index rewritten so
-// the drop-in keeps the donor's volume and pitch envelope - in one SEM bank
-// appended past the vanilla 20. That bank is installed again after every
-// FGM_InitSEM, which reloads airride.sem and puts the vanilla map back.
+// The row array is authored in VcCommon.dat, sized to the 19 vanilla star slots and
+// reloaded per scene, so it is re-copied wider and repointed on every vcLoadCommon,
+// each custom row starting as its clone_kind's. A companion .ssm then takes its own
+// samples over that row, which needs an SSM slot, a range of global sound indices
+// past the vanilla 0-614, and a script per sound in an SEM bank appended past the
+// vanilla 20 - all set up on the first vcLoadCommon, and the bank reinstalled after
+// every FGM_InitSEM.
 
 #include "os.h"
 #include "audio.h"
@@ -96,30 +90,6 @@ static SSMSound *ChunkSound(SSMChunk *chunk, int index)
     return s;
 }
 
-// The companion path: the machine archive's, with its extension swapped.
-static int BankPath(char *dst, int max, const char *src)
-{
-    const char *ext = CUSTOM_MACHINE_AUDIO_EXT;
-    int n = 0;
-    int e = 0;
-
-    while (src[n] != '\0')
-    {
-        if (n + 1 >= max)
-            return 0;
-        dst[n] = src[n];
-        n++;
-    }
-    while (ext[e] != '\0')
-        e++;
-    if (n < e || dst[n - e] != '.')
-        return 0;
-    for (int i = 0; i < e; i++)
-        dst[n - e + i] = ext[i];
-    dst[n] = '\0';
-    return 1;
-}
-
 // Load every companion bank into one SSM slot sized for all of them, recording
 // the global sound index each role landed on.
 static void LoadDropinBanks(void)
@@ -133,7 +103,8 @@ static void LoadDropinBanks(void)
         for (int r = 0; r < SOUND_ROLE_NUM; r++)
             b->sound[r] = -1;
 
-        if (!BankPath(path, sizeof(path), CustomMachines_GetEntry(i)->path))
+        if (!CustomMachines_SideCarPath(path, sizeof(path), CustomMachines_GetEntry(i)->path,
+                                        CUSTOM_MACHINE_AUDIO_EXT))
             continue;
         if (DVDConvertPathToEntrynum(path) == -1)
             continue;
@@ -154,7 +125,7 @@ static void LoadDropinBanks(void)
     int slot = FGM_GetNextLargestSSMSizeIndex(total);
     if (slot < 0)
     {
-        OSReport("[MachineAudio] no room in ARAM for %d bytes of drop-in samples\n", total);
+        OSReport("[MachineAudio] No room in ARAM for %d bytes of drop-in samples\n", total);
         return;
     }
 
@@ -163,7 +134,9 @@ static void LoadDropinBanks(void)
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         DropinBank *b = &stc_bank[i];
-        if (!b->found || !BankPath(path, sizeof(path), CustomMachines_GetEntry(i)->path))
+        if (!b->found ||
+            !CustomMachines_SideCarPath(path, sizeof(path), CustomMachines_GetEntry(i)->path,
+                                        CUSTOM_MACHINE_AUDIO_EXT))
             continue;
 
         stc_stamp_base = next_index + 1;
@@ -222,6 +195,25 @@ static u32 *CloneScript(const u32 *donor, int sound_index)
     return copy;
 }
 
+// The FGM id a drop-in sound's script is copied from: the clone kind's, or the
+// first vanilla star row carrying one where the clone kind leaves the slot at -1.
+// Every star but Wagon has no boost release of its own, so a drop-in supplying
+// one has nothing on its own kind to inherit an envelope from.
+static int DonorSfx(int clone, int role)
+{
+    const int *row = (const int *)&stc_star_audio[clone];
+    if (row[role] >= 0)
+        return row[role];
+
+    for (int k = 0; k < VCSTAR_NUM; k++)
+    {
+        row = (const int *)&stc_star_audio[k];
+        if (row[role] >= 0)
+            return row[role];
+    }
+    return -1;
+}
+
 // One script per loaded drop-in sound, copied from whichever vanilla script the
 // clone kind uses for that sound slot. Runs once; the copies outlive any reload
 // of airride.sem.
@@ -235,7 +227,6 @@ static void CloneDropinScripts(void)
         DropinBank *b = &stc_bank[i];
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
         int clone = CloneKind(e);
-        const int *donor_row = (const int *)&stc_star_audio[clone];
 
         for (int r = 0; r < SOUND_ROLE_NUM; r++)
         {
@@ -243,11 +234,11 @@ static void CloneDropinScripts(void)
             if (b->sound[r] < 0)
                 continue;
 
-            int donor_fid = donor_row[r];
+            int donor_fid = DonorSfx(clone, r);
             if (donor_fid < 0)
             {
-                OSReport("[MachineAudio] '%s' sound %d has no script on kind %d to copy\n",
-                         e->name, r, clone);
+                OSReport("[MachineAudio] '%s' sound %d has no script on any star kind to copy\n",
+                         e->name, r);
                 continue;
             }
 
@@ -256,7 +247,7 @@ static void CloneDropinScripts(void)
             if (b->script[r] != NULL)
                 stc_script_num++;
             else
-                OSReport("[MachineAudio] no room to copy the script for '%s' sound %d\n",
+                OSReport("[MachineAudio] No room to copy the script for '%s' sound %d\n",
                          e->name, r);
         }
     }
@@ -279,9 +270,17 @@ static void InstallScriptMap(void)
     if (bank_num + 1 > SCRIPT_MAP_BANK_MAX
         || script_num + stc_script_num > SCRIPT_MAP_SCRIPT_MAX)
     {
-        OSReport("[MachineAudio] script map needs %d banks / %d scripts, past the %d / %d reserved\n",
-                 bank_num + 1, script_num + stc_script_num,
-                 SCRIPT_MAP_BANK_MAX, SCRIPT_MAP_SCRIPT_MAX);
+        // The tables are never swapped on this path, so the reinstall hook
+        // retries every scene. Say it once.
+        static int reported;
+
+        if (!reported)
+        {
+            reported = 1;
+            OSReport("[MachineAudio] Script map needs %d banks / %d scripts, past the %d / %d reserved - drop-in sounds are off\n",
+                     bank_num + 1, script_num + stc_script_num,
+                     SCRIPT_MAP_BANK_MAX, SCRIPT_MAP_SCRIPT_MAX);
+        }
         return;
     }
 

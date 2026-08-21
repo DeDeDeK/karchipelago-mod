@@ -2,11 +2,8 @@
 
 Everything the game plays that is not streamed music goes through one path: an
 FGM id names a script, the script names a sample, and the sample is DSP-ADPCM
-sitting in ARAM. This file covers that path, the three file formats behind it,
-and the room each of them has left for a mod.
-
-Streamed music is separate - `.hps` files played through `BGM_Play`
-(`0x8005e1a8`) - and none of what follows applies to it.
+sitting in ARAM. Streamed music is separate - `.hps` files played through
+`BGM_Play` (`0x8005e1a8`) - and none of what follows applies to it.
 
 ## The four numbering schemes
 
@@ -58,15 +55,21 @@ at `0x80498ea4`.
 
 ## Playing a sound
 
-`SFX_Play` (`0x800615f0`) is the full-volume wrapper; `SFX_PlayRaw`
-(`0x80442a10`) takes volume, pan, audio track and sound generator. Both land in
+`SFX_Play` (`0x800615f0`) is the full-volume wrapper - volume 255, pan 127,
+track 0, generator 1; `SFX_PlayRaw` (`0x80442a10`) takes all four. Both land in
 `_SFX_Play` (`0x80442674`), which does nothing but validate and allocate:
 
 ```c
-bank   = fid >> 16;                                       // rejected if >= stc_fgm_bank_num
+bank   = fid >> 16;                                        // rejected if >= stc_fgm_bank_num
 script = (fid & 0xFFFF) + stc_fgm_bank_start_script[bank]; // rejected if >= stc_fgm_script_num
+                                                           // or >= bank_start_script[bank + 1]
 fgm->script_data = stc_fgm_script_data[script];
 ```
+
+The index is also checked against the *next* bank's start, so an fid whose index
+runs past its own bank's span is refused rather than reaching a neighbour's
+script. The sound generator has to be 0-63 and the audio track in range and not
+in `stc_audio_track_blacklist`.
 
 Positional sounds go through an `AudioEmitter` instead - `AudioEmitter_Alloc`
 then `AudioEmitter_Play` - which owns distance attenuation and panning and calls
@@ -76,23 +79,70 @@ The script runs a command per audio tick batch in `FGMinstance_UpdateScript`
 (`0x80441760`). Opcode `0x01` stores its 16-bit operand into
 `FGMInstanceData.sound_index` and raises the "start a voice" flag;
 `FGMInstanceData_AllocPID` (`0x80440cd4`) then reaches `Audio_AllocPID`
-(`0x80448f08`), which is where a sound index becomes an AX voice:
-
-```c
-node = stc_ssm_sound_hash[index & 0x1F];
-for (; node; node = node->next)
-    if (node->index == index) break;
-if (node == NULL) return -1;              // unknown index: the sound silently drops
-for (ch = 0; ch < node->channel_num; ch++) {
-    AXSetVoiceAddr     (v, node + 0x10 + ch * 0x40);
-    AXSetVoiceAdpcm    (v, node + 0x20 + ch * 0x40);
-    AXSetVoiceAdpcmLoop(v, node + 0x48 + ch * 0x40);
-}
-vpb->pitch = node->sample_rate / 32000.0f;
-```
+(`0x80448f08`), which is where a sound index becomes an AX voice. It walks the
+chain at `stc_ssm_sound_hash[index & 0x1F]` for a node whose `index` matches,
+feeds each of the node's channels to `AXSetVoiceAddr` / `AXSetVoiceAdpcm` /
+`AXSetVoiceAdpcmLoop` out of the three 0x40-byte parameter blocks that follow it,
+and sets the voice pitch to `sample_rate / 32000`.
 
 There is no bounds check on the index anywhere - a miss returns -1 and the sound
-never starts, which is what makes appending sound indices past 614 safe.
+silently never starts, which is what makes appending sound indices past 614
+safe.
+
+## Sound generators, emitters and voices
+
+Three numbers follow a sound from the call site down to the hardware, and every
+struct on the way carries at least one of them.
+
+- **`sg`, the sound generator.** There are 64, which is the ceiling on concurrent
+  sounds. Allocation status lives in `Audio3D.sg_status`, and `FGMInstanceData`
+  (`+0x3d`), `AudioEmitterData` (`+0x42`) and the VPB all carry the same value.
+  It is what links an emitter to the live `FGMInstance`s it started: the game
+  walks the active instances and compares `sg` before touching a sound. Two
+  arrays are indexed by it, the most useful being the per-`sg` `UserVolume` at
+  `0x8059a178`.
+- **`pid`.** Held in `FGMInstanceData+0x10`. It indexes the `p_voices` array back
+  to the instance, and reaches that instance's VPB.
+- **`fgm_instance`.** Formed from the sfx id and a counter at `r13+0x13B0` that
+  increments with every new sound.
+
+A positional sound runs `AudioEmitter_Alloc` -> `AudioEmitter_Play` ->
+`AudioEmitterData_GetSoundGenerator` -> `SFX_Play`. `AudioEmitter_Play` creates
+the `AudioEmitterData` entry, stores the audio track and takes an `sg`;
+`SFX_Play` builds an `FGMInstance` carrying the sfx id, volume, pan and that
+`sg`; and on the audio tick the instance's script hits opcode `0x01`, which
+allocates the `pid` tying the instance to an AX voice in `AXLive.voices`.
+
+`AudioEmitter_Update` recomputes distance and writes the result into the per-`sg`
+volume array through `0x8044c284`. `AudioEmitter_SetVoiceParams` compares the new
+parameters against the live ones and only touches the `sg` when they differ; it
+derives a stop at `0x8006039c` when volume falls below 10 and a start at
+`0x800603e4` when it rises above 10.
+
+Below all of that, the loop at `0x8044a800` runs every audio tick over the whole
+VPB list (headed at `r13+0x1424`), reads each VPB's `sg` volume out of
+`0x8059a178` and pushes it to the hardware, usually with `AXSetVoiceVeDelta`.
+
+`AudioEmitterData_GetSoundGenerator` (`0x8005d6dc`) is the allocator: it scans
+`Audio3D.sg_status` for a free generator and, failing that, reclaims one from an
+emitter whose generator has no live sound left. "Live" is
+`Audio_GetFGMNumUsingSoundGenerator` (`0x80443d8c`), which walks the instance
+list counting instances that carry the generator *and* whose VPB behind `pid` is
+still active - flag `x9_01`, or `is_initializing == 0` with any
+`axvpb->vpb.state == 0`.
+
+`AudioEmitter_Alloc` (`0x8005d864`) is also the garbage collector for emitters
+whose sounds have finished. It prefers an emitter in state 1 whose `sg` no longer
+has an active sound, clearing that emitter's `sg` to -1 on the way; failing that
+it takes a slot in state 0; failing that it reports an error and returns -1. An
+emitter that is destroyed while holding a voice goes to state 1 rather than 0,
+which is what puts it in front of the collector. Many short sounds - an item
+hitting the ground - free their emitter as soon as they play, since the source
+does not move afterwards.
+
+The emitter debug display reads `V` = sounds this emitter is currently playing
+and `S` = sounds it was told to play; `S` can exceed `V` when the listener is out
+of range.
 
 ## `airride.sem`
 
@@ -159,16 +209,10 @@ sound test and nothing on the play path reads it.
 
 ## `.ssm`
 
-A sound bank. Twenty of them live in `iso/files/audio/jp/`.
-
-```
-0x00 u32 table_size     bytes of sound records, from 0x10
-0x04 u32 data_size      bytes of ADPCM, a multiple of 32
-0x08 u32 sound_num
-0x0c u32 sound_base     global sound index of this bank's sound 0
-0x10      sound records
-          the ADPCM data, starting at the next 32-byte boundary
-```
+A sound bank. Twenty of them live in `iso/files/audio/jp/`. The 0x10-byte header
+is hoshi's `SSMHeader`: table size, data size, sound count and the bank's
+`sound_base`. The record table follows at `0x10` and the ADPCM at the next
+32-byte boundary.
 
 `data_size` is the third read's size, and `File_Read` asserts that a read size
 is a multiple of 32, so a bank whose data block is not padded out to that
@@ -283,28 +327,27 @@ is chained rather than open-addressed, the script map is described entirely by
 
 ## Adding sounds
 
-Everything above adds up to a four-step recipe that needs no file replacement:
+Everything above adds up to a recipe that replaces no file on disc. Build a
+`.ssm` whose `sound_base` starts at 615, past the last index the vanilla banks
+claim; take a slot from `FGM_GetNextLargestSSMSizeIndex` big enough to hold it;
+`FGM_QueueLoad` its FST path into that slot and `FGM_SychronousLoad`; then widen
+the script map, by copying `bank_start_script` and `script_data` into larger
+mod-owned arrays, appending a bank whose scripts play the new indices, and
+repointing all four globals. Every existing FGM id keeps its meaning because the
+appended bank sits past them all.
 
-1. Build a `.ssm` whose `sound_base` starts at 615, past the last index the
-   vanilla banks claim.
-2. `FGM_GetNextLargestSSMSizeIndex` for a slot big enough to hold it.
-3. `FGM_QueueLoad` its FST path into that slot, then `FGM_SychronousLoad`.
-4. Widen the script map: copy `bank_start_script` and `script_data` into larger
-   mod-owned arrays, append a bank whose scripts play the new indices, and
-   repoint all four globals. Every existing FGM id keeps its meaning, because
-   the appended bank sits past them all.
-
-Step 4 has to run again after each `FGM_InitSEM`, and its arrays have to outlive
-a scene, since the game holds those pointers until something else replaces them.
+The map has to be widened again after each `FGM_InitSEM`, and the arrays have to
+outlive a scene, since the game holds those pointers until something else
+replaces them.
 
 The one thing a drop-in bank cannot decide for itself is its `sound_base`, once
-there is more than one of them and each has to start past the last.
+there is more than one and each has to start past the last.
 `FGM_LoadBankCallback` takes that number out of the staging buffer at
 `stc_ssm_load_header`, which a hook can overwrite while the load is in flight.
-What is resident is not a way to compute it: only nine banks are loaded at a
-time, the stage slot changes per stage, and the `star` bank is still on disc at
-the title screen. Two banks claiming one index is not an error anywhere - the
-sound hash simply returns whichever of them it reaches first.
+What is resident is no way to compute it: only nine banks are loaded at a time,
+the stage slot changes per stage, and the `star` bank is still on disc at the
+title screen. Two banks claiming one index is not an error anywhere - the sound
+hash simply returns whichever of them it reaches first.
 
 ## Tooling
 

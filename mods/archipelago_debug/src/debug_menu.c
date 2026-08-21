@@ -7,6 +7,7 @@
 #include "item.h"
 #include "stage.h"
 #include "stadium.h"
+#include "inline.h"
 
 #include "archipelago_api.h"
 #include "custom_machines_api.h"
@@ -35,7 +36,13 @@ static int tr_item_state[TRITEM_NUM];
 static int color_state[KIRBYCOLOR_NUM];
 static int stadium_state[STKIND_NUM];
 static int base_ability_state[BASEABILITY_NUM];
-static int star_piece_state[APSTARPIECE_NUM];
+static int star_piece_state[AP_STAR_PIECE_NUM];
+
+// MaskBits' buffer holds 32 bits, and the machine ceiling can exceed that.
+static inline int MaskWidth(int count)
+{
+    return count > 32 ? 32 : count;
+}
 
 #define DEF_SYNC(name, cat, arr, count) \
     static void name(int v) { \
@@ -45,7 +52,7 @@ static int star_piece_state[APSTARPIECE_NUM];
         for (int i = 0; i < (count); i++) \
             if (arr[i]) m |= ((u32)1 << i); \
         if (ap_api->GetUnlockMask(cat) != m) \
-            OSReport("[ApDebug] " #cat " = 0x%X\n", m); \
+            OSReport("[ApDebug] " #cat " = %s\n", MaskBits(m, MaskWidth(count))); \
         ap_api->SetUnlockMask(cat, m); \
     }
 
@@ -61,7 +68,7 @@ DEF_SYNC(SyncTRItems,   AP_UNLOCK_TOPRIDE_ITEM,    tr_item_state,  TRITEM_NUM)
 DEF_SYNC(SyncColors,    AP_UNLOCK_COLOR,           color_state,    KIRBYCOLOR_NUM)
 DEF_SYNC(SyncStadiums,  AP_UNLOCK_STADIUM,         stadium_state,  STKIND_NUM)
 DEF_SYNC(SyncBaseAbil,  AP_UNLOCK_BASE_ABILITY,    base_ability_state, BASEABILITY_NUM)
-DEF_SYNC(SyncStarPiece, AP_UNLOCK_AP_STAR_PIECE,   star_piece_state,   APSTARPIECE_NUM)
+DEF_SYNC(SyncStarPiece, AP_UNLOCK_AP_STAR_PIECE,   star_piece_state,   AP_STAR_PIECE_NUM)
 
 #define DEF_REFRESH(name, cat, arr, count) \
     static void name(void) { \
@@ -82,7 +89,7 @@ DEF_REFRESH(RefreshTRItems,   AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_N
 DEF_REFRESH(RefreshColors,    AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM)
 DEF_REFRESH(RefreshStadiums,  AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM)
 DEF_REFRESH(RefreshBaseAbil,  AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM)
-DEF_REFRESH(RefreshStarPiece, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   APSTARPIECE_NUM)
+DEF_REFRESH(RefreshStarPiece, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   AP_STAR_PIECE_NUM)
 
 void DebugMenu_RefreshStateFromMasks(void)
 {
@@ -108,7 +115,8 @@ void DebugMenu_RefreshStateFromMasks(void)
         u32 m = (count >= 32) ? 0xFFFFFFFFu : ((1u << (count)) - 1u); \
         ap_api->SetUnlockMask(cat, m); \
         for (int i = 0; i < (count); i++) arr[i] = 1; \
-        OSReport("[ApDebug] Unlock all " label ": " #cat " = 0x%X\n", m); \
+        OSReport("[ApDebug] Unlock all " label ": " #cat " = %s\n", \
+                 MaskBits(m, MaskWidth(count))); \
         ap_api->Textbox("All " label " unlocked"); \
         return 1; \
     } \
@@ -117,7 +125,8 @@ void DebugMenu_RefreshStateFromMasks(void)
         if (!ap_api) return 1; \
         ap_api->SetUnlockMask(cat, 0); \
         for (int i = 0; i < (count); i++) arr[i] = 0; \
-        OSReport("[ApDebug] Lock all " label ": " #cat " = 0x0\n"); \
+        OSReport("[ApDebug] Lock all " label ": " #cat " = %s\n", \
+                 MaskBits(0, MaskWidth(count))); \
         ap_api->Textbox("All " label " locked"); \
         return 1; \
     }
@@ -134,7 +143,7 @@ DEF_ALL(Tri, AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_NUM,       "TR ite
 DEF_ALL(Clr, AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM,   "colors")
 DEF_ALL(Std, AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM,       "stadiums")
 DEF_ALL(Bab, AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM, "base abilities")
-DEF_ALL(Sph, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   APSTARPIECE_NUM, "AP Star spheres")
+DEF_ALL(Sph, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   AP_STAR_PIECE_NUM, "AP Star spheres")
 
 #define GIVE_FN(name, id) \
     static int name(OptionDesc *self) { \
@@ -287,11 +296,15 @@ static int GiveEnergy1000(OptionDesc *self)
     return 1;
 }
 
-// Gate enable/disable toggle.
+// Gate enable/disable toggle. Never saved: every gate mirrors an AP unlock mask
+// that DebugMenu_RefreshStateFromMasks re-derives on save load, so a card copy
+// would only be overwritten - and the machine rows are renamed at runtime, which
+// would move their save hashes anyway.
 #define G(label, arr, idx, cb) \
     &(OptionDesc){ \
         .name = label, \
         .kind = OPTKIND_VALUE, \
+        .no_save = 1, \
         .val = &arr[idx], \
         .value_num = 2, \
         .value_names = toggle_values, \
@@ -456,12 +469,18 @@ static MenuDesc machines_menu = {
         G("Custom Machine 2",  machine_state, VCKIND_NUM + 1,        SyncMachines),
         G("Custom Machine 3",  machine_state, VCKIND_NUM + 2,        SyncMachines),
         G("Custom Machine 4",  machine_state, VCKIND_NUM + 3,        SyncMachines),
+        G("Custom Machine 5",  machine_state, VCKIND_NUM + 4,        SyncMachines),
+        G("Custom Machine 6",  machine_state, VCKIND_NUM + 5,        SyncMachines),
     },
 };
 
 #define MACHINES_MENU_VANILLA_OPTIONS 24
 
-_Static_assert(CUSTOM_MACHINE_MAX == 4, "machines_menu needs one trailing row per custom slot");
+// machine_unlocked_mask is 32 bits, so only MachineKinds under 32 carry a gate to
+// toggle. That is what limits the rows here, not how many the registry can take.
+#define MACHINES_MENU_CUSTOM_ROWS (32 - VCKIND_NUM)
+
+_Static_assert(MACHINES_MENU_CUSTOM_ROWS == 6, "machines_menu needs one trailing row per gateable custom slot");
 
 void DebugMenu_BindCustomMachines(const CustomMachinesAPI *api)
 {
@@ -470,8 +489,8 @@ void DebugMenu_BindCustomMachines(const CustomMachinesAPI *api)
     cm_api = api;
 
     int count = api->GetCount();
-    if (count > CUSTOM_MACHINE_MAX)
-        count = CUSTOM_MACHINE_MAX;
+    if (count > MACHINES_MENU_CUSTOM_ROWS)
+        count = MACHINES_MENU_CUSTOM_ROWS;
     for (int i = 0; i < count; i++)
         machines_menu.options[MACHINES_MENU_VANILLA_OPTIONS + i]->name =
             (char *)api->GetName(VCKIND_NUM + i);
@@ -605,12 +624,12 @@ static MenuDesc star_pieces_menu = {
     .options = {
         A("Unlock All", "Unlock all AP Star spheres", SphUnlockAll),
         A("Lock All",   "Lock all AP Star spheres",   SphLockAll),
-        G("Rose Sphere",   star_piece_state, APSTARPIECE_ROSE,   SyncStarPiece),
-        G("Green Sphere",  star_piece_state, APSTARPIECE_GREEN,  SyncStarPiece),
-        G("Violet Sphere", star_piece_state, APSTARPIECE_VIOLET, SyncStarPiece),
-        G("Tan Sphere",    star_piece_state, APSTARPIECE_TAN,    SyncStarPiece),
-        G("Blue Sphere",   star_piece_state, APSTARPIECE_BLUE,   SyncStarPiece),
-        G("Yellow Sphere", star_piece_state, APSTARPIECE_YELLOW, SyncStarPiece),
+        G("Rose Sphere",   star_piece_state, AP_STAR_PIECE_ROSE,   SyncStarPiece),
+        G("Green Sphere",  star_piece_state, AP_STAR_PIECE_GREEN,  SyncStarPiece),
+        G("Violet Sphere", star_piece_state, AP_STAR_PIECE_VIOLET, SyncStarPiece),
+        G("Tan Sphere",    star_piece_state, AP_STAR_PIECE_TAN,    SyncStarPiece),
+        G("Blue Sphere",   star_piece_state, AP_STAR_PIECE_BLUE,   SyncStarPiece),
+        G("Yellow Sphere", star_piece_state, AP_STAR_PIECE_YELLOW, SyncStarPiece),
     },
 };
 
@@ -646,8 +665,10 @@ static MenuDesc tr_stages_menu = {
     },
 };
 
+// One row per TRITEM kind, in enum order - Tri(Unlock|Lock)All drive the whole
+// TRITEM_NUM mask, so a missing row would leave a gate the menu cannot show.
 static MenuDesc tr_items_menu = {
-    .option_num = 19,
+    .option_num = 2 + TRITEM_NUM,
     .options = {
         A("Unlock All", "Unlock all TR items", TriUnlockAll),
         A("Lock All",   "Lock all TR items",   TriLockAll),
@@ -660,9 +681,14 @@ static MenuDesc tr_items_menu = {
         G("Invincible Candy",  tr_item_state, TRITEM_INVINCIBLE_CANDY, SyncTRItems),
         G("Buzz Saw",          tr_item_state, TRITEM_BUZZ_SAW,         SyncTRItems),
         G("Drill",             tr_item_state, TRITEM_DRILL,            SyncTRItems),
+        G("Freeze Fan",        tr_item_state, TRITEM_FREEZE_FAN,       SyncTRItems),
         G("Missile",           tr_item_state, TRITEM_MISSILE,          SyncTRItems),
+        G("Fire",              tr_item_state, TRITEM_FIRE,             SyncTRItems),
+        G("Party Ball (alt)",  tr_item_state, TRITEM_PARTY_BALL_ALT,   SyncTRItems),
+        G("Bomb",              tr_item_state, TRITEM_BOMB,             SyncTRItems),
         G("Step-boom",         tr_item_state, TRITEM_STEP_BOOM,        SyncTRItems),
         G("Lantern",           tr_item_state, TRITEM_LANTERN,          SyncTRItems),
+        G("Walky",             tr_item_state, TRITEM_WALKY,            SyncTRItems),
         G("Kracko",            tr_item_state, TRITEM_KRACKO,           SyncTRItems),
         G("Who? Paint",        tr_item_state, TRITEM_WHO_PAINT,        SyncTRItems),
         G("Smokescreen",       tr_item_state, TRITEM_SMOKESCREEN,      SyncTRItems),
@@ -940,7 +966,7 @@ static MenuDesc checks_menu = {
     .options = {
         &(OptionDesc){
             .name = "Auto-Grant on Z Unlock",
-            .description = "On: Z-unlock also grants the cell's reward (simulate AP). Off: only send the check; let AP client deliver.",
+            .description = "On: Z-unlock also grants the cell reward. Off: only send the check and let the AP client deliver.",
             .kind = OPTKIND_VALUE,
             .val = &auto_grant_on_debug_unlock,
             .value_num = 2,

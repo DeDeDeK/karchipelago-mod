@@ -6,6 +6,10 @@
 #include "patch_cap.h"
 #include "goal_max_stats_ct.h"
 
+// Multiplier on +1 patch and All-Up spawn weights while this goal is active, so
+// patches dominate the rolls without fully suppressing other drops.
+#define MAX_STATS_PATCH_BIAS 8
+
 // Latch the sticky save flag once every stat carries the slot's patch-cap target
 // worth of patches, then re-run goal evaluation.
 static void GoalMaxStatsCT_PerFrame(GOBJ *rg)
@@ -54,13 +58,11 @@ void GoalMaxStatsCT_On3DLoadEnd(void)
         GObj_AddProc(r, GoalMaxStatsCT_PerFrame, RDPRI_HITCOLL + 1);
         attached++;
     }
-    OSReport("[GoalMaxStatsCT] Active (%d players, target %d)\n",
-             attached, (int)ap_save->options.city_trial_patch_cap_max);
+    OSReport("[GoalMaxStatsCT] Active (%d players, target %d, %dx patch drop bias)\n",
+             attached, (int)ap_save->options.city_trial_patch_cap_max,
+             MAX_STATS_PATCH_BIAS);
 }
 
-// Multiplier on +1 patch and All-Up spawn weights while this goal is active, so
-// patches dominate the rolls without fully suppressing other drops.
-#define MAX_STATS_PATCH_BIAS 8
 
 static int IsPatchOrAllUpItemKind(u8 it_kind)
 {
@@ -109,8 +111,6 @@ void GoalMaxStatsCT_ApplyDropBias(void)
 {
     if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
         return;
-
-    OSReport("[GoalMaxStatsCT] Applying %dx patch/All-Up drop bias\n", MAX_STATS_PATCH_BIAS);
 
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
     if (obj)

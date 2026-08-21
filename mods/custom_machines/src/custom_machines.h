@@ -13,6 +13,10 @@
 // Two lines of about 24 characters, which is what the description box holds.
 #define CUSTOM_MACHINE_DESCRIPTION_MAX 64
 
+// Palette entries copied out of a descriptor. The archive is freed once discovery
+// is done, so the colors cannot be left pointing into it.
+#define CUSTOM_MACHINE_PALETTE_MAX 16
+
 // Widened class slot counts. Only the star class grows; the bike row keeps the
 // same width so both rows of the relocated lookup are indexed alike.
 #define CUSTOM_VCSTAR_NUM (VCSTAR_NUM + CUSTOM_MACHINE_MAX)
@@ -34,12 +38,26 @@ typedef struct CustomMachineEntry
     int palette_joint;                     // joint whose materials cycle, -1 if none
     float palette_period;                  // seconds for one pass through the palette
     int palette_count;
-    const u32 *palette;                    // into the boot-time archive, which is never freed
+    u32 palette[CUSTOM_MACHINE_PALETTE_MAX];
+    int trail_count;                       // tinted RGB triples in the vehicle particle bank
+    u8 trail_gen[8];                       // generator each offset belongs to
+    u16 trail_rgb[8];                      // byte offset of an RGB triple in that generator
+    int trail_clone_count;                 // spare bank slots this machine claims
+    u8 trail_clone_src[4];                 // generator copied
+    u8 trail_clone_dst[4];                 // slot it is copied into
+    int cine_machine_index;                // vanilla legendary the cutscene runs under, -1 if none
+    char cine_glow_file[CUSTOM_MACHINE_NAME_MAX];
+    char cine_glow_symbol[CUSTOM_MACHINE_NAME_MAX];
+    char cine_cam_symbol[CUSTOM_MACHINE_NAME_MAX];
+    char cine_parts_file[CUSTOM_MACHINE_NAME_MAX];
+    char cine_parts_symbol[CUSTOM_MACHINE_NAME_MAX];
 } CustomMachineEntry;
 
 void CustomMachines_OnBoot(void);
+void CustomMachines_On3DLoadStart(void);
 
 int                 CustomMachines_GetCount(void);
+int                 CustomMachines_GetKindCeiling(void);
 int                 CustomMachines_GetCharacterKindCeiling(void);
 CustomMachineEntry *CustomMachines_GetEntry(int index);
 CustomMachineEntry *CustomMachines_FindByKind(int machine_kind);
@@ -55,9 +73,17 @@ void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
 // the engine roots the instance.
 JOBJ *CustomMachines_GetMachineJoint(MachineData *md, int joint_index);
 
-// Read an archive off the disc during OnBoot, before any scene heap exists. The
-// buffer is never freed, so the archive stays resident for the run of the game.
+// Read an archive off the disc during OnBoot, before the HSD heap exists. The
+// storage comes from hoshi's persistent arena and stays resident; a caller that
+// only reads the file and drops it brackets the load in ArenaMark/ArenaRelease,
+// which is valid only while nothing allocated in between is still held.
 HSD_Archive *CustomMachines_LoadArchiveAtBoot(char *path);
+void *CustomMachines_ArenaMark(void);
+void CustomMachines_ArenaRelease(void *mark);
+
+// A machine's side-car path: its own with the extension swapped. Returns 0 if it
+// does not fit or the source has no extension to swap.
+int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *ext);
 
 // FST scan of machines/, validating each descriptor. Returns the count.
 int CustomMachines_Discover(void);
@@ -80,8 +106,32 @@ void CustomMachineText_OnBoot(void);
 // machine_audio.c - the star class's audio parameter array and drop-in banks.
 void CustomMachineAudio_OnBoot(void);
 
+// trail_bank.c - private copies of shared vehicle particle bank generators.
+void CustomMachineTrail_OnBoot(void);
+
 // machine_palette.c - the wall-clock material cycle a descriptor may ask for.
 void CustomMachinePalette_OnBoot(void);
+
+// machine_stats.c - the widened per-machine counter arrays.
+void CustomMachineStats_OnBoot(void);
+void CustomMachineStats_On3DLoadStart(void);
+
+// machine_blip.c - the City Trial blip a custom machine borrows.
+void CustomMachineBlip_OnBoot(void);
+
+// machine_spawn.c - the City Trial field spawn roll.
+void CustomMachineSpawn_OnBoot(void);
+void CustomMachineSpawn_SetWeightFilter(CustomMachineSpawnWeightFilter filter);
+
+// machine_preload.c - files this mod adds to City Trial's preload set.
+void CustomMachinePreload_OnBoot(void);
+int  CustomMachinePreload_Add(const char *path);
+
+// machine_cinematic.c - the vanilla legendary cutscene, driven by a descriptor.
+void CustomMachineCinematic_OnBoot(void);
+void CustomMachineCinematic_On3DLoadStart(void);
+int  CustomMachineCinematic_Start(int machine_kind, int ply);
+int  CustomMachineCinematic_IsRunning(void);
 
 // ui_frames.c - the 21st frame spliced into each character-indexed art bank.
 void CustomMachineUiFrames_OnBoot(void);

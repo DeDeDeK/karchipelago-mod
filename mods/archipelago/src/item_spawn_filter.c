@@ -12,9 +12,6 @@
 // filters its own item categories out of both box pools and event drop pools.
 static void FilterAllSpawnTables()
 {
-    OSReport("[SpawnFilter] FilterAllSpawnTables called (GrKind=%d, StageKind=%d)\n",
-             Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind());
-
     // Before the filters, so injected entries pass through them too.
     GateItems_EnsureAllUpInSpawnPools();
 

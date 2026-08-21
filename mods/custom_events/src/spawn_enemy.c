@@ -7,14 +7,14 @@
 
 #include "spawn_enemy.h"
 
-// EventActor_GetParentScale (0x802049b8) crashes on a null parent_gobj, which
-// is what standalone spawns have.
-static double EventActor_GetParentScale_Safe(GOBJ *gobj)
+// EventActor_GetParentAnimRate (0x802049b8) crashes on a null parent_gobj,
+// which is what standalone spawns have. 1.0 is the normal playback rate.
+static double EventActor_GetParentAnimRate_Safe(GOBJ *gobj)
 {
     if (!gobj)
         return 1.0;
     EnemyData *ed = gobj->userdata;
-    return (double)ed->scale;
+    return (double)ed->anim_rate;
 }
 
 // splArcLengthPoint (0x80415958) crashes on a null spline, which is what
@@ -55,7 +55,7 @@ static struct
 
 void SpawnEnemy_OnBoot(void)
 {
-    CODEPATCH_REPLACEFUNC(EventActor_GetParentScale, EventActor_GetParentScale_Safe);
+    CODEPATCH_REPLACEFUNC(EventActor_GetParentAnimRate, EventActor_GetParentAnimRate_Safe);
     CODEPATCH_REPLACEFUNC(splArcLengthPoint, splArcLengthPoint_Safe);
 
     s_fake_event_data.speed_table_ptr = (int)&s_fake_event_data.speed_unused;
@@ -84,7 +84,6 @@ static void MeteorDespawnProc(GOBJ *gobj)
 
         if (ed->lifetime_counter - ed->spawn_index >= METEOR_LANDING_FRAMES)
         {
-            OSReport("[SpawnEnemy] Meteor[%d]: despawn after landing\n", ed->lifetime_counter);
             // Vanilla state 16 func3 runs these before destroying; the collision
             // sphere and VFX handles persist otherwise.
             EventActor_CleanupCollisionSphere(ed);
@@ -129,10 +128,15 @@ GOBJ *SpawnEnemy_Random(GOBJ *machine_gobj, int use_splines)
             ed->path_active_flag = -1.0f;
             EnemyPath_Init(ed);
         }
+
+        OSReport("[SpawnEnemy] Spawned actor ID 0x%02X at (%.1f, %.1f, %.1f) splines=%d\n",
+                 id, desc.position.X, desc.position.Y, desc.position.Z, use_splines);
+    }
+    else
+    {
+        OSReport("[SpawnEnemy] EventActor_Create failed for actor ID 0x%02X\n", id);
     }
 
-    OSReport("[SpawnEnemy] Spawned actor ID 0x%02X GOBJ=%p at (%.1f, %.1f, %.1f) splines=%d\n",
-             id, actor, desc.position.X, desc.position.Y, desc.position.Z, use_splines);
     return actor;
 }
 
@@ -197,8 +201,6 @@ static GOBJ *SpawnMeteorOnPlayer(int ply_idx)
 
     GObj_AddProc(meteor, MeteorDespawnProc, 0x14);
 
-    OSReport("[SpawnEnemy] Meteor trap: spawned above player %d at (%.1f, %.1f, %.1f)\n",
-             ply_idx + 1, desc.position.X, desc.position.Y, desc.position.Z);
     return meteor;
 }
 
@@ -212,5 +214,7 @@ int SpawnEnemy_MeteorTrap(void)
         if (SpawnMeteorOnPlayer(i))
             spawned++;
     }
+
+    OSReport("[SpawnEnemy] Meteor trap: spawned above %d player(s)\n", spawned);
     return spawned > 0;
 }

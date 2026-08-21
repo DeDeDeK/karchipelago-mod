@@ -23,8 +23,7 @@
 #include "check_detection.h"
 #include "ap_checklist.h"
 #include "ap_check_detect.h"
-#include "ap_star_pieces.h"
-#include "ap_star_shot.h"
+#include "gate_ap_star.h"
 #include "gate_stadiums.h"
 #include "patch_cap.h"
 #include "gate_events.h"
@@ -74,6 +73,7 @@ _Static_assert(offsetof(APData, goal_complete) == 0x288, "GOAL_COMPLETE");
 _Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x28C, "DEATHLINK_MENU_ENABLED");
 
 int ap_checklist_mode = GMMODE_NUM;
+int ap_regrant_quiet = 0;
 
 ModDesc mod_desc = {
     .name = "KARchipelago",
@@ -88,7 +88,6 @@ ModDesc mod_desc = {
     .OnSaveLoaded = OnSaveLoaded,
     .OnMainMenuLoad = OnMainMenuLoad,
     .OnPlayerSelectLoad = OnPlayerSelectLoad,
-    .On3DLoadStart = On3DLoadStart,
     .On3DLoadEnd = On3DLoadEnd,
     .On3DPause = On3DPause,
     .On3DUnpause = On3DUnpause,
@@ -104,8 +103,6 @@ ModDesc mod_desc = {
 // persist for the whole runtime; anywhere else they last only the current scene.
 void OnBoot()
 {
-    OSReport("[Main] Running OnBoot for %s\n", mod_desc.name);
-
     ap_data = HSD_MemAlloc(sizeof(APData));
     memset(ap_data, 0, sizeof(APData));
     OSReport("[Main] APData at 0x%08x (%d bytes)\n", (uint)ap_data, sizeof(APData));
@@ -126,8 +123,6 @@ void OnBoot()
     CheckDetection_OnBoot();
 
     APCheckDetect_OnBoot();
-    ApStarPieces_OnBoot();
-    ApStarShot_OnBoot();
     GateStadiums_OnBoot();
     PatchCap_OnBoot();
     DeathLink_OnBoot();
@@ -156,7 +151,7 @@ void OnBoot()
 void OnSaveInit()
 {
     ap_save = (APSave *)mod_desc.save_ptr;
-    OSReport("[Main] save data for %s created!\n", mod_desc.name);
+    OSReport("[Main] Save block created (%d bytes)\n", sizeof(APSave));
     memset(ap_save, 0, sizeof(*ap_save));
 
     ChecklistRewards_OnSaveInit();
@@ -170,11 +165,9 @@ static void APOptions_ApplyRevealChecklists(void)
             RevealChecklist(row);
 }
 
-// Optional: absent when custom_machines is not built, leaving the roster at the vanilla
-// 26 machines and 20 characters. Deferred past OnBoot because mods boot alphabetically
-// and the registry boots after us, and re-tried per call because our own OnBoot asks
-// for it while setting up the title demo. A failed import says nothing on its own -
-// only OnSaveLoaded is past every mod's OnBoot, so that is where absence is decided.
+// Deferred past OnBoot because mods boot alphabetically and the registry boots after
+// us. A failed import says nothing on its own - only OnSaveLoaded is past every
+// mod's OnBoot, so that is where absence is decided. Idempotent.
 void AP_ResolveCustomMachines(void)
 {
     if (cm_api)
@@ -185,18 +178,33 @@ void AP_ResolveCustomMachines(void)
     if (!cm_api)
         return;
 
-    // The registry owns both select screens' packing; this is what makes it
-    // offer the unlocked roster rather than the engine's own.
+    // The registry owns both select screens' packing and the City Trial field spawn
+    // roll; these are what make it offer the unlocked roster rather than the
+    // engine's own.
     cm_api->SetAvailabilityFilter(GateMachines_FilterSelectCharacter);
+    cm_api->SetSpawnWeightFilter(GateMachines_SpawnWeight);
     OSReport("[Main] custom_machines: %d machine(s), %d kinds, %d characters\n",
              cm_api->GetCount(), cm_api->GetKindCeiling(),
              cm_api->GetCharacterKindCeiling());
+
+    // The registry may hand out more kinds than the unlock mask has bits for. Those
+    // stay permanently available rather than being gated, which is worth saying once.
+    if (cm_api->GetKindCeiling() > AP_MACHINE_GATE_NUM)
+        OSReport("[Main] %d machine kind(s) past bit %d cannot be gated and stay unlocked\n",
+                 cm_api->GetKindCeiling() - AP_MACHINE_GATE_NUM, AP_MACHINE_GATE_NUM - 1);
+
+    // Same story for the id block: past its edge there is no unlock item to receive.
+    if (cm_api->GetKindCeiling() > AP_MACHINE_UNLOCK_NUM)
+        OSReport("[Main] %d machine kind(s) past the %d-wide unlock id block get no AP item\n",
+                 cm_api->GetKindCeiling() - AP_MACHINE_UNLOCK_NUM, AP_MACHINE_UNLOCK_NUM);
 }
 
 // Runs on startup after any save data is loaded, whether or not a memory card is
 // inserted or held existing save data.
 void OnSaveLoaded()
 {
+    ap_save = (APSave *)mod_desc.save_ptr;
+
     // Deferred here because mods boot alphabetically and textbox boots after us,
     // so Hoshi_ImportMod would return NULL during our own OnBoot.
     if (!tb_api)
@@ -204,19 +212,20 @@ void OnSaveLoaded()
         tb_api = (const TextBoxAPI *)Hoshi_ImportMod(
             (char *)TEXTBOX_MOD_NAME, TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR);
         if (!tb_api)
-            OSReport("[Main] failed to import textbox API\n");
+            OSReport("[Main] textbox missing from this build: ITEM NOTIFICATIONS WILL CRASH\n");
     }
 
     AP_ResolveCustomMachines();
+    GateApStar_Resolve();
 
     // First point past every mod's OnBoot, so a still-unresolved import here really
-    // does mean the registry is not in this build. Deciding it any earlier patches
-    // both select screens underneath the registry's own patches, and since a hook
-    // stub ends with the instruction it displaced, the two chain and both packers run.
+    // does mean the registry is not in this build. It owns the widened kind space
+    // and the seams that widening breaks - both select screens' packing, the City
+    // Trial spawn roll, the assembly cutscene - all of which this mod gates through
+    // filters it takes, so without it machines go ungated rather than half-gated.
     if (!cm_api)
-        GateMachines_OnCustomMachinesAbsent();
+        OSReport("[Main] custom_machines missing from this build: MACHINE GATING IS OFF\n");
 
-    ap_save = (APSave *)mod_desc.save_ptr;
     ap_save->boot_num++;
 
     OSReport("[Main] Boot #%d, %d items received, options %s\n",
@@ -249,10 +258,58 @@ void OnSaveLoaded()
     OSReport("[Main] game_ready set - waiting for AP client connection\n");
 }
 
-// For any category whose slot option marks gating as disabled, pre-fill the
-// unlock mask with all-1s: the AP world ships no unlock items for ungated
-// categories. Bypasses the GateX_UnlockY textbox/log path so connecting doesn't
-// flood the screen with popups.
+// Every gateable MachineKind set. MachineKind_Num() can reach the mask's width, and
+// a shift that wide is undefined, so the full mask is spelled out rather than built.
+static u32 MachineGateMask(void)
+{
+    int num = MachineKind_Num();
+
+    if (num >= AP_MACHINE_GATE_NUM)
+        return 0xFFFFFFFFu;
+    return (1u << num) - 1;
+}
+
+// Comma-joins names into buf, tracking the write position in *pos.
+static void AppendCsv(char *buf, int *pos, const char *name)
+{
+    if (*pos)
+    {
+        buf[(*pos)++] = ',';
+        buf[(*pos)++] = ' ';
+    }
+    while (*name)
+        buf[(*pos)++] = *name++;
+    buf[*pos] = '\0';
+}
+
+static const char *GoalName(const APSlotOptions *opts, int row)
+{
+    static const char *const names[] = {
+        "100 squares", "N squares", "Hydra + Dragoon", "beat King Dedede",
+        "none", "listed squares", "max stats", "assemble AP Star",
+        "all legendaries",
+    };
+    u32 goal = opts->goal[row];
+
+    if (goal >= sizeof(names) / sizeof(names[0]))
+        return "?";
+    return names[goal];
+}
+
+static const char *ChecklistRowName(int row)
+{
+    static const char *const names[CHECKLIST_MODE_NUM] = {
+        [GMMODE_AIRRIDE]     = "Air Ride",
+        [GMMODE_TOPRIDE]     = "Top Ride",
+        [GMMODE_CITYTRIAL]   = "City Trial",
+        [AP_CHECKLIST_ROW]   = AP_CHECKLIST_NAME,
+    };
+    return names[row];
+}
+
+// For any category whose slot option marks gating as disabled, pre-fill the unlock
+// mask with all-1s: the AP world ships no unlock items for ungated categories. This
+// bypasses the GateX_UnlockY textbox path, so connecting does not flood the screen.
 static void APOptions_ApplyUngatedCategories(void)
 {
     const APSlotOptions *opts = &ap_save->options;
@@ -270,7 +327,7 @@ static void APOptions_ApplyUngatedCategories(void)
     if (opts->goal_forced_gates & GOALGATE_AP_STAR_PIECES)
         star_piece_mask = 0;
 
-    if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       (1u << MachineKind_Num()) - 1);
+    if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       MachineGateMask());
     if (!opts->ability_gating_enabled)       Unlock_SetMask(AP_UNLOCK_ABILITY,       (1u << COPYKIND_NUM) - 1);
     if (!opts->event_gating_enabled)         Unlock_SetMask(AP_UNLOCK_EVENT,         (1u << EVKIND_NUM) - 1);
     if (!opts->patch_gating_enabled)         Unlock_SetMask(AP_UNLOCK_PATCH,         (1u << PATCHKIND_NUM) - 1);
@@ -295,18 +352,34 @@ static void APOptions_ApplyUngatedCategories(void)
     if (!opts->checklist_rewards_gating_enabled)
         ChecklistRewards_GrantAllCosmetic();
 
-    OSReport("[Main] Gating - machines:%d abilities:%d events:%d patches:%d items:%d boxes:%d AR-stages:%d TR-stages:%d TR-items:%d colors:%d stadiums:%d\n",
-             opts->machine_gating_enabled, opts->ability_gating_enabled,
-             opts->event_gating_enabled, opts->patch_gating_enabled,
-             opts->item_gating_enabled, opts->box_gating_enabled,
-             opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
-             opts->topride_item_gating_enabled, opts->color_gating_enabled,
-             opts->stadium_gating_enabled);
-    OSReport("[Main] Gating - base abilities:%d goal-forced legendary pieces:%d Vs. King Dedede:%d AP Star spheres:%d\n",
-             opts->base_ability_gating_enabled,
-             (opts->goal_forced_gates & GOALGATE_LEGENDARY_PIECES) ? 1 : 0,
-             (opts->goal_forced_gates & GOALGATE_VS_KING_DEDEDE) ? 1 : 0,
-             (opts->goal_forced_gates & GOALGATE_AP_STAR_PIECES) ? 1 : 0);
+    static const char *const gate_names[] = {
+        "machines", "abilities", "events", "patches", "items", "boxes",
+        "AR stages", "TR stages", "TR items", "colors", "stadiums",
+        "base abilities", "checklist rewards",
+    };
+    const u8 gate_flags[] = {
+        opts->machine_gating_enabled, opts->ability_gating_enabled,
+        opts->event_gating_enabled, opts->patch_gating_enabled,
+        opts->item_gating_enabled, opts->box_gating_enabled,
+        opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
+        opts->topride_item_gating_enabled, opts->color_gating_enabled,
+        opts->stadium_gating_enabled, opts->base_ability_gating_enabled,
+        opts->checklist_rewards_gating_enabled,
+    };
+
+    char list[224];
+    int n = 0;
+    for (int i = 0; i < (int)(sizeof(gate_flags) / sizeof(gate_flags[0])); i++)
+        if (!gate_flags[i])
+            AppendCsv(list, &n, gate_names[i]);
+    OSReport("[Main] Gating on, except: %s\n", n ? list : "nothing");
+
+    n = 0;
+    if (opts->goal_forced_gates & GOALGATE_LEGENDARY_PIECES) AppendCsv(list, &n, "legendary pieces");
+    if (opts->goal_forced_gates & GOALGATE_VS_KING_DEDEDE)   AppendCsv(list, &n, "Vs. King Dedede");
+    if (opts->goal_forced_gates & GOALGATE_AP_STAR_PIECES)   AppendCsv(list, &n, "AP Star spheres");
+    if (n)
+        OSReport("[Main] Gating forced by the goal: %s\n", list);
 }
 
 // Copy the client's slot options into save data on first detection. Options are
@@ -318,29 +391,35 @@ static void APOptions_TransferToSave()
     if (!ap_data->options_valid)
         return;
 
-    OSReport("[Main] AP client connected - transferring slot options to save data\n");
+    OSReport("[Main] AP client connected - slot options transferred to save\n");
     memcpy(&ap_save->options, &ap_data->options, sizeof(APSlotOptions));
     ap_save->options_received = 1;
 
-    ap_menu_settings.deathlink_enabled = ap_save->options.death_link_enabled;
-    ap_menu_settings.energylink_enabled = ap_save->options.energy_link_enabled;
-    ap_menu_settings.traplink_enabled = ap_save->options.trap_link_enabled;
+    const APSlotOptions *opts = &ap_save->options;
+    ap_menu_settings.deathlink_enabled = opts->death_link_enabled;
+    ap_menu_settings.energylink_enabled = opts->energy_link_enabled;
+    ap_menu_settings.traplink_enabled = opts->trap_link_enabled;
     SyncLinkMenuStateToAPData();
-    OSReport("[Main] Menu toggles set - DeathLink: %d, EnergyLink: %d, TrapLink: %d\n",
-             ap_save->options.death_link_enabled, ap_save->options.energy_link_enabled, ap_save->options.trap_link_enabled);
-    OSReport("[Main] Goals - AirRide: %d, TopRide: %d, CityTrial: %d, Archipelago: %d\n",
-             ap_save->options.goal[GMMODE_AIRRIDE],
-             ap_save->options.goal[GMMODE_TOPRIDE],
-             ap_save->options.goal[GMMODE_CITYTRIAL],
-             ap_save->options.goal[AP_CHECKLIST_ROW]);
-    OSReport("[Main] CityTrial - PatchCap min: %d, max: %d\n",
-             ap_save->options.city_trial_patch_cap_min,
-             ap_save->options.city_trial_patch_cap_max);
-    OSReport("[Main] RevealChecklists - AirRide: %d, TopRide: %d, CityTrial: %d, Archipelago: %d\n",
-             ap_save->options.reveal_checklists[GMMODE_AIRRIDE],
-             ap_save->options.reveal_checklists[GMMODE_TOPRIDE],
-             ap_save->options.reveal_checklists[GMMODE_CITYTRIAL],
-             ap_save->options.reveal_checklists[AP_CHECKLIST_ROW]);
+
+    char list[224];
+    int n = 0;
+    if (opts->death_link_enabled)  AppendCsv(list, &n, "DeathLink");
+    if (opts->energy_link_enabled) AppendCsv(list, &n, "EnergyLink");
+    if (opts->trap_link_enabled)   AppendCsv(list, &n, "TrapLink");
+    OSReport("[Main] Links on: %s\n", n ? list : "none");
+
+    OSReport("[Main] Goals - AirRide: %s, TopRide: %s, CityTrial: %s, %s: %s\n",
+             GoalName(opts, GMMODE_AIRRIDE), GoalName(opts, GMMODE_TOPRIDE),
+             GoalName(opts, GMMODE_CITYTRIAL),
+             AP_CHECKLIST_NAME, GoalName(opts, AP_CHECKLIST_ROW));
+
+    n = 0;
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+        if (opts->reveal_checklists[r])
+            AppendCsv(list, &n, ChecklistRowName(r));
+    OSReport("[Main] CT patch cap %d-%d, checklists pre-revealed: %s\n",
+             opts->city_trial_patch_cap_min, opts->city_trial_patch_cap_max,
+             n ? list : "none");
 
     APOptions_ApplyRevealChecklists();
 
@@ -352,24 +431,18 @@ static void APOptions_TransferToSave()
 
 void OnMainMenuLoad()
 {
-    OSReport("[Main] Entering the main menu.\n");
+    OSReport("[Main] Entering the main menu\n");
 }
 
 // Runs when entering the player select menu (Air Ride or City Trial).
 void OnPlayerSelectLoad()
 {
-    OSReport("[Main] Entering player select (minor %d).\n", Scene_GetCurrentMinor());
+    OSReport("[Main] Entering player select (minor %d)\n", Scene_GetCurrentMinor());
 
     // City Trial colors persist from prior sessions and have no init block to
     // hook like AR/TR, so validate on every CSS load.
     if (Scene_GetCurrentMinor() == MNRKIND_CITYPLYSELECT)
         GateColors_ValidateCityTrialColors();
-}
-
-// Runs before the game is initialized.
-void On3DLoadStart()
-{
-    ApStarPieces_On3DLoadStart();
 }
 
 // Runs upon entering a 3D game (Air Ride, Top Ride, or City Trial).
@@ -420,11 +493,10 @@ void On3DLoadEnd()
         GOBJ *rg = Ply_GetRiderGObj(i);
         RiderData *rd = rg->userdata;
         MachineKind machine_kind = rd->starting_machine_idx;
-        OSReport("[Main] Player %d using rider [%d] color [%d] riding machine [%d].\n",
+        OSReport("[Main] Player %d: rider %d, color %d, machine %d\n",
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
-    GateMachines_On3DLoadEnd();
     GateAbilities_On3DLoadEnd();
     ItemSpawnFilter_On3DLoadEnd();
     PermanentPatch_On3DLoadEnd();
@@ -440,8 +512,6 @@ void On3DLoadEnd()
 
     GoalMaxStatsCT_On3DLoadEnd();
     APCheckDetect_On3DLoadEnd();
-    ApStarPieces_On3DLoadEnd();
-    ApStarShot_On3DLoadEnd();
     KirbyScale_On3DLoadEnd();
     DropAbility_On3DLoadEnd();
 }
@@ -452,7 +522,7 @@ void OnTopRideLoadEnd()
     static const char *const tr_mode_names[] = { "Race", "Time Attack", "Free Run" };
     TopRideMode tr_mode = TopRide_GetMode();
     const char *tr_mode_name = ((unsigned)tr_mode < 3) ? tr_mode_names[tr_mode] : "?";
-    OSReport("[Main] Top Ride gameplay loaded (mode: %s).\n", tr_mode_name);
+    OSReport("[Main] Starting Top Ride: %s\n", tr_mode_name);
 
     if (ap_menu_settings.energylink_enabled)
         EnergyLink_OnTopRideLoadEnd();
@@ -469,17 +539,17 @@ void OnTopRideLoadEnd()
 
 void On3DPause(int pause_ply)
 {
-    OSReport("[Main] Pausing 3D (player %d).\n", pause_ply);
+    OSReport("[Main] Paused by player %d\n", pause_ply + 1);
 }
 
 void On3DUnpause(int pause_ply)
 {
-    OSReport("[Main] Unpausing 3D (player %d).\n", pause_ply);
+    OSReport("[Main] Unpaused by player %d\n", pause_ply + 1);
 }
 
 void On3DExit()
 {
-    OSReport("[Main] Exiting 3D.\n");
+    OSReport("[Main] Exiting 3D\n");
 
     // Stadium_ExitMinor has finished latching GameData.stadium_results by this
     // point, so the round's placements and times are final and readable here.
@@ -507,7 +577,6 @@ void OnFrameStart()
         ChecklistRewards_ApplyLocations();
 
     CheckDetection_OnFrameStart();
-    ApStarPieces_OnFrameStart();
     APCheckDetect_OnFrameStart();
 }
 

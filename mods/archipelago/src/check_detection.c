@@ -74,13 +74,13 @@ static void RecordCheck(int mode, int clear_kind)
     if (ChecklistRewards_ResolveCell(mode, clear_kind, &src_mode, &src_ri))
     {
         u8 rtype = stc_reward_table_ptrs[src_mode][src_ri].reward_type;
-        OSReport("[Check] mode=%d clear_kind=%d type=%s (%d) recorded\n",
+        OSReport("[CheckDetection] mode=%d clear_kind=%d type=%s (%d) recorded\n",
                  mode, clear_kind,
                  Reward_TypeName(rtype), rtype);
     }
     else
     {
-        OSReport("[Check] mode=%d clear_kind=%d recorded (no local reward placement)\n",
+        OSReport("[CheckDetection] mode=%d clear_kind=%d recorded (no local reward placement)\n",
                  mode, clear_kind);
     }
     tb_api->EnqueueColoredNoun(NULL, "Check", tb_api->CheckColor, " sent");
@@ -228,7 +228,7 @@ static void AnnounceModeGoal(int row)
         { " goal complete!",  tb_api->GoalColor },
     };
     tb_api->EnqueueSegments(segs, 2);
-    OSReport("[Check] %s goal satisfied\n", name);
+    OSReport("[CheckDetection] %s goal satisfied\n", name);
 }
 
 void CheckDetection_EvaluateGoal(void)
@@ -263,7 +263,7 @@ void CheckDetection_EvaluateGoal(void)
         for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
             if (opt->goal[r] != GOAL_NONE)
                 ap_save->goal_announced[r] = 1;
-        OSReport("[Check] GOALS COMPLETE\n");
+        OSReport("[CheckDetection] GOALS COMPLETE\n");
         tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
         return;
     }
@@ -292,6 +292,7 @@ static void ProcessBackfill(void)
         return;
 
     int processed_any = 0;
+    int backfilled = 0;
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         for (int word = 0; word < 2; word++)
@@ -325,6 +326,7 @@ static void ProcessBackfill(void)
                 }
 
                 processed_any = 1;
+                backfilled++;
             }
         }
     }
@@ -338,7 +340,7 @@ static void ProcessBackfill(void)
 
     if (processed_any)
     {
-        OSReport("[Check] Backfill processed\n");
+        OSReport("[CheckDetection] Backfill applied (%d new check(s))\n", backfilled);
         CheckDetection_EvaluateGoal();
     }
 }
@@ -511,7 +513,7 @@ void CheckDetection_OnSaveLoaded(void)
     // the active goal.
     CheckDetection_EvaluateGoal();
 
-    OSReport("[Check] Loaded sent_checks AR=%d TR=%d CT=%d AP=%d goal=%d\n",
+    OSReport("[CheckDetection] Loaded sent_checks AR=%d TR=%d CT=%d AP=%d goal=%d\n",
              PopcountRow(GMMODE_AIRRIDE),
              PopcountRow(GMMODE_TOPRIDE),
              PopcountRow(GMMODE_CITYTRIAL),
@@ -536,7 +538,7 @@ void CheckDetection_OnBoot(void)
 
     CODEPATCH_HOOKAPPLY(0x80180a64);  // Goal-aware filler gate
     CODEPATCH_HOOKAPPLY(0x80180dc4);  // Filler-apply: record the check
-    OSReport("[Check] Hooks installed\n");
+    OSReport("[CheckDetection] Hooks installed\n");
 }
 
 void CheckDetection_ResetAll(void)
@@ -555,7 +557,7 @@ void CheckDetection_DebugClearAll(void)
 {
     CheckDetection_ResetAll();
     Hoshi_WriteSave();
-    OSReport("[Check] Debug: cleared all sent_checks and goal_complete\n");
+    OSReport("[CheckDetection] Debug: cleared all sent_checks and goal_complete\n");
 }
 
 void CheckDetection_DebugForceMarkAll(void)
@@ -577,7 +579,7 @@ void CheckDetection_DebugForceMarkAll(void)
     ap_data->goal_complete = 1;
     ap_save->max_stats_ct_achieved = 1;
     Hoshi_WriteSave();
-    OSReport("[Check] Debug: force-marked all sent_checks and goal_complete\n");
+    OSReport("[CheckDetection] Debug: force-marked all sent_checks and goal_complete\n");
 }
 
 void CheckDetection_DebugTriggerGoal(void)
@@ -585,6 +587,6 @@ void CheckDetection_DebugTriggerGoal(void)
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;
     Hoshi_WriteSave();
-    OSReport("[Check] Debug: goal_complete forced\n");
+    OSReport("[CheckDetection] Debug: goal_complete forced\n");
 }
 

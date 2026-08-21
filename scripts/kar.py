@@ -61,7 +61,7 @@ _MAP_LINE = re.compile(
 # The name field runs up to the first space or '(' - many rows carry a trailing
 # argument note, either separated ("gmGetGlobalP (GameData)") or glued on
 # ("ResultsScreen_Init(r3=ply num)").
-_MAP_NAME = re.compile(r"([A-Za-z_.$][\w.$@]*)\s*(.*)")
+_MAP_NAME = re.compile(r"([\w.$][\w.$@]*)\s*(.*)")
 
 
 class SymbolMap:
@@ -452,8 +452,14 @@ def cmd_check(args):
     for addr, name, where in header_protos():
         mapped = syms.by_name.get(name)
         if mapped is None:
-            groups.setdefault("header prototype not in the map", []).append(
-                f"0x{addr:08x} {name}  ({where})")
+            # A real map row under a different name is one of link.ld's
+            # deliberate aliases (Item_Create -> CityItem_Create), which links
+            # fine; only a still-`zz_` row is drift.
+            row = by_addr.get(addr)
+            aliased = row is not None and not row.startswith("zz_") and ld.get(name) == addr
+            if not aliased:
+                groups.setdefault("header prototype not in the map", []).append(
+                    f"0x{addr:08x} {name}  ({where})")
         elif mapped[0] != addr:
             groups.setdefault("header address disagrees with the map", []).append(
                 f"0x{addr:08x} {name}  map says 0x{mapped[0]:08x}  ({where})")

@@ -187,7 +187,7 @@ static void Rain_Ensure(void)
         return;
     stc_rain_gobj = WeatherGX_EnsureLayer(RAIN_GOBJ_CLASS, RAIN_GOBJ_PLINK, Rain_GX,
                                           RAIN_GX_LINK, RAIN_GX_PRI,
-                                          "[Rain] World-space rain layer installed");
+                                          "[Rain] World-space rain layer");
 }
 
 // Latch the active preset's rain config, resolving each 0 field to its module default.

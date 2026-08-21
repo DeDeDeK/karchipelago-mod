@@ -181,7 +181,7 @@ void APChecklist_Register(void)
     int mode = cc_api->Register(&ap_desc);
     if (mode < 0)
     {
-        OSReport("[APChecklist] Registration failed\n");
+        OSReport("[APChecklist] Registration rejected (rc %d) - AP tab disabled\n", mode);
         return;
     }
     // The framework appends to the next free slot; ChecklistModeRow maps whatever it

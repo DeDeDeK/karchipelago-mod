@@ -22,10 +22,13 @@ int Ability_GiveItem(CopyKind copy_kind)
         // which deref rd->machine_gobj (e.g. sleep -> Rider_CopyInputToMachine).
         if (!Rider_IsOnMachine(rd))
             continue;
-        OSReport("[AbilityItem] Giving ability %d to player %d...\n", copy_kind, rd->ply);
         Rider_GiveAbility(rd, copy_kind);
-        applied = 1;
+        applied++;
     }
+
+    OSReport("[AbilityItem] Gave the %s ability to %d player(s)\n",
+             (copy_kind < COPYKIND_NUM) ? CopyKind_Names[copy_kind] : "?", applied);
+
     if (applied && copy_kind < COPYKIND_NUM && CopyKind_Names[copy_kind])
         tb_api->EnqueueColoredNoun("Received: ", CopyKind_Names[copy_kind],
                                    tb_api->AbilityColors[copy_kind], " ability");

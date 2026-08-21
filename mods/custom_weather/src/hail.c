@@ -199,7 +199,7 @@ static void Hail_Ensure(void)
         return;
     stc_hail_gobj = WeatherGX_EnsureLayer(HAIL_GOBJ_CLASS, HAIL_GOBJ_PLINK, Hail_GX,
                                           HAIL_GX_LINK, HAIL_GX_PRI,
-                                          "[Hail] Damaging hail layer installed");
+                                          "[Hail] Damaging hail layer");
 }
 
 // Whether the machine has stage geometry overhead (a roof / overpass / bridge), in
@@ -323,7 +323,7 @@ void Hail_Reset(void)
 // Surfaced in the Rain submenu, since hail only falls on an active rain layer.
 OptionDesc hail_option = {
     .name = "Hail",
-    .description = "Mix thicker icy hail into the rain; a stone striking an exposed machine does 1 damage - duck under a roof to take cover (Preset = each preset's own hail, Off = rain only)",
+    .description = "Icy hail in the rain; a stone hitting an exposed machine does 1 damage (Preset = per-preset amount)",
     .kind = OPTKIND_VALUE,
     .val = &hail_index,
     .value_num = HAIL_AMOUNT_NUM,

@@ -7,9 +7,9 @@
 // Discovery runs at boot, before any scene exists, so the archive is read with a
 // self-contained loader (DVD read into an HSD_MemAlloc buffer, then Archive_Init)
 // rather than Archive_LoadFile, which allocates from a per-scene heap. Only the
-// name is kept, but neither allocation is freed: the read's completion callback is
-// not a barrier the buffer can be reused behind, and a later landing write into a
-// reallocated block corrupts the heap's block headers.
+// name is kept, so each read is bracketed in an arena mark/release - HSD_MemAlloc
+// is hoshi's bump allocator for the whole of OnBoot, and holding an item archive
+// would cost its full file size for the run.
 
 #include "os.h"
 #include "hsd.h"
@@ -36,6 +36,19 @@ static void FileLoadCallback(int result, void *arg)
 {
     (void)result;
     *(volatile int *)arg = 1;
+}
+
+// HSD_MemAlloc is hoshi's bump allocator during OnBoot, so a mark is the arena's
+// next address and a release rewinds to it. Only correct while nothing allocated
+// since the mark is still held.
+static void *ArenaMark(void)
+{
+    return *stc_hsd_heap_start;
+}
+
+static void ArenaRelease(void *mark)
+{
+    *stc_hsd_heap_start = (u8 *)mark;
 }
 
 static HSD_Archive *LoadArchiveAtBoot(char *path)
@@ -65,18 +78,25 @@ static HSD_Archive *LoadArchiveAtBoot(char *path)
 }
 
 // Leaves the provisional filename in place if the archive or its descriptor is
-// unusable; the per-round registration reports why.
+// unusable; the per-round registration reports why. The name is copied out, so the
+// archive is dropped before the next one loads.
 static void ReadDescriptorName(CustomItemEntry *e, char *path)
 {
+    void *mark = ArenaMark();
     HSD_Archive *arc = LoadArchiveAtBoot(path);
     if (arc == NULL)
+    {
+        ArenaRelease(mark);
         return;
+    }
 
     const CustomItemDesc *desc =
         (const CustomItemDesc *)Archive_GetPublicAddress(arc, CUSTOM_ITEM_SYMBOL);
     if (desc != NULL && desc->magic == CUSTOM_ITEM_MAGIC &&
         desc->version <= CUSTOM_ITEM_DESC_VERSION && desc->name != NULL)
         CustomItems_CopyName(e->name, desc->name);
+
+    ArenaRelease(mark);
 }
 
 static void CountCb(int entrynum, void *args)
@@ -117,7 +137,7 @@ static void IndexCb(int entrynum, void *args)
 
     if (path != NULL)
         ReadDescriptorName(e, path);
-    OSReport("[CustomItems] %s -> '%s'\n", path, e->name);
+    OSReport("[CustomItems] Found %s -> '%s'\n", path, e->name);
 }
 
 int CustomItems_Discover(void)

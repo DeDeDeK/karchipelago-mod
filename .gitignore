@@ -6,12 +6,9 @@
 /.claude/settings.local.json
 __pycache__/
 
-# Assets carrying data carved or cloned out of the retail disc. Each is
-# rebuilt from iso/ by the script its doc names, so none of it is committed.
-/mods/custom_weather/assets/
-/mods/custom_machines/assets/ApUiFrames.dat
-/mods/custom_machines/assets/machines/VcStarAp.dat
-/mods/custom_machines/assets/machines/VcStarAp.ssm
+# Assets
+/art/audio/
+**/assets/
 
 *.raw
 notes.txt

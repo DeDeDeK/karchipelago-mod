@@ -39,6 +39,7 @@ typedef struct CCList
     int save_slot;              // resolved CCSave slot, -1 until first access
     int layout_done;            // 1 once the saved grid layout has been applied this session
     int reveal_all;             // 1 once RevealAll latched the tab open for the session
+    int art_reported;           // 1 once a missing/incomplete tex_file has been reported
 } CCList;
 
 #define CC_BIT_TEST(w, k) (((w)[(k) >> 6] >> ((k) & 63)) & 1ULL)
@@ -301,17 +302,27 @@ static void CC_LoadTexturesForList(int idx)
     Gm_LoadGameFile(&arc, (char *)d->tex_file);
     if (arc == NULL)
     {
-        OSReport("[CustomChecklist] %s.dat not found - %s tab art disabled\n",
-                 d->tex_file, d->name);
+        // This runs on every visit to the tab, so a missing file says it once.
+        if (!g_lists[idx].art_reported)
+        {
+            g_lists[idx].art_reported = 1;
+            OSReport("[CustomChecklist] %s.dat not found - %s tab art disabled\n",
+                     d->tex_file, d->name);
+        }
         return;
     }
     if (d->banner_symbol)
         g_logo_imagedesc = Archive_GetPublicAddress(arc, (char *)d->banner_symbol);
     if (d->emblem_symbol)
         g_emblem_imagedesc = Archive_GetPublicAddress(arc, (char *)d->emblem_symbol);
-    if (g_logo_imagedesc == NULL || g_emblem_imagedesc == NULL)
-        OSReport("[CustomChecklist] %s.dat missing texture symbols (banner=%d emblem=%d)\n",
-                 d->tex_file, g_logo_imagedesc != NULL, g_emblem_imagedesc != NULL);
+    if ((g_logo_imagedesc == NULL || g_emblem_imagedesc == NULL) && !g_lists[idx].art_reported)
+    {
+        g_lists[idx].art_reported = 1;
+        OSReport("[CustomChecklist] %s.dat texture symbols: banner %s, emblem %s\n",
+                 d->tex_file,
+                 g_logo_imagedesc != NULL ? "ok" : "missing",
+                 g_emblem_imagedesc != NULL ? "ok" : "missing");
+    }
 }
 
 // REPLACEFUNC for ClearChecker_CheckForNewUnlocks (0x8004a1a4), the gate each mode's
@@ -970,7 +981,7 @@ static int CC_Register(const CustomChecklistDesc *desc)
     L->minor_id = CC_InstallMinor();
     if (L->minor_id < 0)
     {
-        OSReport("[CustomChecklist] Register failed: minor-scene install for '%s'\n",
+        OSReport("[CustomChecklist] Register rejected: minor-scene install failed for '%s'\n",
                  desc->name ? desc->name : "?");
         return -1;
     }

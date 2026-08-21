@@ -1,19 +1,8 @@
-// Makes both character select screens able to lay out one more icon than the game
-// was built for, and packs their icon lists.
-//
-// Three things cap the grids at 20. The name-plate art banks put King Dedede on
-// the frame an appended character needs. The packed icon list in GameData is a
-// 20-byte field with a live neighbour. And the icon positions come from a strip of
-// 20 anchor joints posed by an animation whose frame is the icon count, with no
-// key past 20 and no 21st anchor to pose. ui_frames.c gives the art banks their
-// appended entry; the rest is here.
-//
-// Packing is here too, because both screens build their lists by walking the
-// character grid this mod widened: vanilla's loops are a hard 10 columns into two
-// 10-byte stack rows, so an 11th column has nowhere to land and an appended
-// character is invisible however well it is registered. Who fills the list is a
-// consumer's decision, taken through an availability filter - with none set the
-// engine's own roster is reproduced, so a drop-in machine works standalone.
+// Lays out and packs more icons than either character select screen was built
+// for. The packed icon list in GameData grows into the free span past it - 33
+// entries on City Trial, which is the binding one - the icon positions past the
+// 20th anchor joint are computed rather than posed, and both screens' packing is
+// replaced because vanilla's walks a hard 10-column grid this mod widened.
 
 #include "os.h"
 #include "hsd.h"
@@ -25,36 +14,37 @@
 
 #include "custom_machines.h"
 
-// Every `addi rD, rS, 20` that forms King Dedede's name-plate frame: the color and
-// character setters of each CSS, then the Siconbig creator of each results screen.
-static const u32 stc_plate_frame_sites[] = {
-    0x80151b08, 0x80151bd4, // AirRideSelect_SetSIcon2Color / _SetSIcon2Character
-    0x8015c5c8, 0x8015c694, // CitySelect_SetSIcon2Color / _SetSIcon2Character
-    0x801672bc, 0x8016b064, // MnResult_CreateSiconBig / MnResult2_
-    0x8016e9bc, 0x80177b5c, // MnResult4_CreateSiconBig / MnResultCt_
-};
+// Flags that sit just past a screen's packed icon list, which a widened list would
+// run over. Each moves to the far end of its screen's own free span: Air Ride's two
+// to +0x87 and +0x88, City's one to +0x87, which is the last byte before the one
+// CitySelect_Think reads.
+#define AIRRIDE_ROWSPLIT_OFF  0x87
+#define AIRRIDE_DEBUGGRID_OFF 0x88
+#define CITY_DEBUGGRID_OFF    0x87
 
-#define PLATE_DEDEDE_FRAME 21
-
-// Every `lbz`/`stb` at select base +0x7a: the Air Ride row-layout flag, then City
-// Trial's debug-grid flag. Both sit one byte past their screen's packed icon list,
-// so the 21st entry lands on them. +0x7d is untouched by either screen and inside
-// the block each screen's init memsets, so that is where they move.
-#define RELOCATED_FLAG_OFF 0x7d
-
-static const u32 stc_airride_flag_sites[] = {
+// Every `lbz`/`stb` at Air Ride select base +0x7a, the row-layout flag.
+static const u32 stc_airride_rowsplit_sites[] = {
     0x80020b04, 0x80020b4c, 0x80020b98, 0x800214a4,
     0x80027f60, 0x800285c8, 0x80028818, 0x80028970, 0x80029c7c,
 };
 
-static const u32 stc_city_flag_sites[] = {
+// The same at +0x7b, Air Ride's debug-grid flag. The site in
+// AirRide_PopulateSelectIcons is in the part this file replaces, and moves only so
+// the vanilla function stays self-consistent if it is ever reached.
+static const u32 stc_airride_debuggrid_sites[] = {
+    0x80020a88, 0x8002881c, 0x8002895c, 0x80028968, 0x80029c64, 0x80029c70,
+};
+
+// City Trial's debug-grid flag at its own base +0x7a.
+static const u32 stc_city_debuggrid_sites[] = {
     0x8002e444, 0x80038d00, 0x8003a150, 0x8003a15c, 0x8003ac3c, 0x8003ac48,
 };
 
-// Icons the widened list and the layout below can carry. One past the vanilla 20,
-// which is what a single appended character needs and all the packed list has room
-// for once its neighbour moves.
-#define SELECT_ICON_MAX 21
+// Icons the widened lists and the layout below can carry, which City Trial's
+// headroom decides for both screens. The engine's cursor navigation is built for
+// two rows, so the extra icons are absorbed by tightening the rows rather than
+// adding a third.
+#define SELECT_ICON_MAX 33
 
 // Anchor joints each screen's ipos model ships with, and so the icons the engine
 // can pose by itself.
@@ -66,7 +56,6 @@ static const u32 stc_city_flag_sites[] = {
 #define AIRRIDE_SELECT_BASE 0x10a
 #define SELECT_COUNT        0x65
 #define SELECT_LIST         0x66
-#define SELECT_DEBUG_GRID   0x7b
 
 // Columns per row before this mod widens the grid, and so also the count at which
 // a drawn row is full and the icons wrap to two.
@@ -74,7 +63,7 @@ static const u32 stc_city_flag_sites[] = {
 
 // ipos GObj userdata: one Vec3 per icon at +0x60, then the scale every icon shares
 // and the icon count - in the opposite order on the two screens, so the scale's
-// offset comes from the layout below.
+// offset is all the layout below has to name.
 #define IPOS_POSITIONS 0x60
 
 // Where an icon sits, in columns from the left edge of the block the two rows
@@ -82,15 +71,14 @@ static const u32 stc_city_flag_sites[] = {
 // starts half a column in, so the rows interleave.
 typedef struct IconLayout
 {
-    float half_width;  // half the block both rows span, in world units
-    float top_y;
-    float bottom_y;
-    int scale_off;     // ipos userdata offset of the shared icon scale
-    Vec3 extra;        // icons past the anchor strip, which the userdata has no room for
+    int scale_off; // ipos userdata offset of the shared icon scale
+    // Icons past the anchor strip. The userdata's position array ends flush against
+    // the shared scale, so these are held here instead of extending it.
+    Vec3 extra[SELECT_ICON_MAX - ANCHOR_NUM];
 } IconLayout;
 
-static IconLayout stc_airride = { 30.62f, 5.2122f, -0.8853f, 0x150 };
-static IconLayout stc_city = { 25.1992f, 4.2999f, -0.7000f, 0x154 };
+static IconLayout stc_airride = { 0x150 };
+static IconLayout stc_city = { 0x154 };
 
 // Columns from the block's left edge to its right, which is what the spacing has
 // to divide to keep a count inside half_width.
@@ -102,14 +90,20 @@ static float RowSpread(int count)
     return a > b ? a : b;
 }
 
-// Redo the whole grid arithmetically. Only counts the anchor animation has no key
-// for come through here; up to 20 the engine's own pass has already run and is
-// left alone.
+// Redo the whole grid arithmetically, for the counts the anchor animation has no key
+// for; up to 20 the engine's own pass has already run.
+//
+// The block the rows span is measured off the strip the engine just posed rather
+// than named as a constant: Air Ride hangs its twenty anchors under a joint the
+// layout animation scales, so an authored coordinate is not the one that reaches the
+// position array, while City Trial's anchors carry that scale themselves. Past
+// twenty the animation holds its twenty-icon pose.
 static void Relayout(IconLayout *lay, int count, GOBJ *ipos)
 {
     Vec3 *pos;
     Vec3 *scale;
-    float spread, step, shrink, z;
+    float left, right, half, centre, top_y, bottom_y, z;
+    float spread, step, shrink;
     int top;
 
     if (ipos == NULL || count <= ANCHOR_NUM)
@@ -120,19 +114,28 @@ static void Relayout(IconLayout *lay, int count, GOBJ *ipos)
     pos = (Vec3 *)((u8 *)ipos->userdata + IPOS_POSITIONS);
     scale = (Vec3 *)((u8 *)ipos->userdata + lay->scale_off);
 
+    // The bottom row starts half a column in and so ends half a column past the
+    // top row, putting the block's right edge on the last icon of the strip.
+    left = pos[0].X;
+    right = pos[ANCHOR_NUM - 1].X;
+    half = (right - left) * 0.5f;
+    centre = (right + left) * 0.5f;
+    top_y = pos[0].Y;
+    bottom_y = pos[ANCHOR_NUM / 2].Y;
+    z = pos[0].Z;
+
     spread = RowSpread(count);
-    step = 2.0f * lay->half_width / spread;
+    step = 2.0f * half / spread;
     shrink = RowSpread(ANCHOR_NUM) / spread;
     top = (count + 1) / 2;
-    z = pos[0].Z;
 
     for (int i = 0; i < count; i++)
     {
-        Vec3 *p = (i < ANCHOR_NUM) ? &pos[i] : &lay->extra;
+        Vec3 *p = (i < ANCHOR_NUM) ? &pos[i] : &lay->extra[i - ANCHOR_NUM];
         int col = (i < top) ? i : i - top;
 
-        p->X = -lay->half_width + step * (float)col + ((i < top) ? 0.0f : step * 0.5f);
-        p->Y = (i < top) ? lay->top_y : lay->bottom_y;
+        p->X = centre - half + step * (float)col + ((i < top) ? 0.0f : step * 0.5f);
+        p->Y = (i < top) ? top_y : bottom_y;
         p->Z = z;
     }
 
@@ -143,10 +146,10 @@ static void Relayout(IconLayout *lay, int count, GOBJ *ipos)
 
 static void GetIconPos(IconLayout *lay, GOBJ *ipos, s8 index, Vec3 *out)
 {
-    if (ipos == NULL)
+    if (ipos == NULL || index < 0 || index >= SELECT_ICON_MAX)
         return;
     if (index >= ANCHOR_NUM)
-        *out = lay->extra;
+        *out = lay->extra[index - ANCHOR_NUM];
     else
         *out = ((Vec3 *)((u8 *)ipos->userdata + IPOS_POSITIONS))[index];
 }
@@ -174,27 +177,51 @@ static void CityGetIconPos(s8 index, Vec3 *out)
 }
 
 // Each screen's array of icon GObjs holds 20 pointers and its writer indexes it
-// unguarded, so a 21st icon overwrites the JOBJSet pointer that follows. Nothing
-// reads the array, so the write is undone as soon as it lands.
-static void AirRideCreateSIcon(s8 ckind, s8 index)
-{
-    ScMenuCommon *mc = Gm_GetMenuData();
-    JOBJSet *saved = mc->airride_select.ScMenSelplySicon2_scene_models;
+// unguarded, so an icon past the strip walks into the scene-model pointers that
+// follow it. Both writers end in the same `extsb`/`slwi`/`add`/`stw` before the
+// epilogue, so the store is taken over here and appended indices go to storage of
+// our own. Nothing reads either array.
+static GOBJ *stc_extra_icon[2][SELECT_ICON_MAX - ANCHOR_NUM];
 
-    _AirRideSelect_CreateSIcon(ckind, index);
-    if (index >= ANCHOR_NUM)
-        mc->airride_select.ScMenSelplySicon2_scene_models = saved;
+static void StoreIcon(int screen, int index, GOBJ *gobj, u8 *table_base)
+{
+    if (index < 0 || index >= SELECT_ICON_MAX)
+        return;
+    if (index < ANCHOR_NUM)
+        ((GOBJ **)(table_base + 4))[index] = gobj;
+    else
+        stc_extra_icon[screen][index - ANCHOR_NUM] = gobj;
 }
 
-static void CityCreateMachineIcon(s8 ckind, s8 index)
+static void StoreAirRideIcon(int index, GOBJ *gobj, u8 *table_base)
 {
-    ScMenuCommon *mc = Gm_GetMenuData();
-    JOBJSet **saved = mc->city_select.ScMenSelplySicon2Ct_scene_models;
-
-    _CitySelect_CreateScMenSelplySiconCt(ckind, index);
-    if (index >= ANCHOR_NUM)
-        mc->city_select.ScMenSelplySicon2Ct_scene_models = saved;
+    StoreIcon(0, index, gobj, table_base);
 }
+
+static void StoreCityIcon(int index, GOBJ *gobj, u8 *table_base)
+{
+    StoreIcon(1, index, gobj, table_base);
+}
+
+// r28 is the icon index, r30 the GObj, r31 the array's base less four. Exiting past
+// the store leaves the engine's own epilogue to run.
+CODEPATCH_HOOKCREATE(0x8015181c,
+    "extsb 3, 28\n\t"
+    "mr 4, 30\n\t"
+    "mr 5, 31\n\t",
+    StoreAirRideIcon,
+    "",
+    0x8015182c
+)
+
+CODEPATCH_HOOKCREATE(0x8015c2dc,
+    "extsb 3, 28\n\t"
+    "mr 4, 30\n\t"
+    "mr 5, 31\n\t",
+    StoreCityIcon,
+    "",
+    0x8015c2ec
+)
 
 static CustomMachineAvailabilityFilter stc_filter;
 
@@ -323,7 +350,7 @@ static int CountCityAvailable(void)
 static void PopulateAirRideIcons(void)
 {
     u8 *base = (u8 *)Gm_GetGameData() + AIRRIDE_SELECT_BASE;
-    int debug_grid = base[SELECT_DEBUG_GRID] && *stc_dblevel > DB_DEBUG_DEVELOP;
+    int debug_grid = base[AIRRIDE_DEBUGGRID_OFF] && *stc_dblevel > DB_DEBUG_DEVELOP;
     int n = PackSelectList(base, 0, 1, debug_grid);
 
     CustomMachineSelect_SetAirRideRowSplit(base, n >= VANILLA_GRID_COLS);
@@ -367,25 +394,22 @@ int CustomMachineSelect_GetIconMax(void)
 
 void CustomMachineSelect_SetAirRideRowSplit(void *select_base, int two_rows)
 {
-    ((u8 *)select_base)[RELOCATED_FLAG_OFF] = (u8)(two_rows ? 1 : 0);
+    ((u8 *)select_base)[AIRRIDE_ROWSPLIT_OFF] = (u8)(two_rows ? 1 : 0);
 }
 
-static void MoveFlag(const u32 *sites, int num)
+static void MoveFlag(const u32 *sites, int num, u32 offset)
 {
     for (int i = 0; i < num; i++)
-        CODEPATCH_REPLACEINSTRUCTION(sites[i], (*(u32 *)sites[i] & 0xFFFF0000) | RELOCATED_FLAG_OFF);
+        CODEPATCH_REPLACEINSTRUCTION(sites[i], (*(u32 *)sites[i] & 0xFFFF0000) | offset);
 }
+
+#define MOVE_FLAG(sites, off) MoveFlag(sites, sizeof(sites) / sizeof(u32), off)
 
 void CustomMachineSelect_OnBoot(void)
 {
-    for (int i = 0; i < (int)(sizeof(stc_plate_frame_sites) / sizeof(u32)); i++)
-    {
-        u32 addr = stc_plate_frame_sites[i];
-        CODEPATCH_REPLACEINSTRUCTION(addr, (*(u32 *)addr & 0xFFFF0000) | PLATE_DEDEDE_FRAME);
-    }
-
-    MoveFlag(stc_airride_flag_sites, sizeof(stc_airride_flag_sites) / sizeof(u32));
-    MoveFlag(stc_city_flag_sites, sizeof(stc_city_flag_sites) / sizeof(u32));
+    MOVE_FLAG(stc_airride_rowsplit_sites, AIRRIDE_ROWSPLIT_OFF);
+    MOVE_FLAG(stc_airride_debuggrid_sites, AIRRIDE_DEBUGGRID_OFF);
+    MOVE_FLAG(stc_city_debuggrid_sites, CITY_DEBUGGRID_OFF);
 
     // AirRide_CheckCharacterAvailable switches on a 20-entry jump table and reaches
     // the checklist query with an uninitialised reward index for anything past it.
@@ -395,12 +419,13 @@ void CustomMachineSelect_OnBoot(void)
 
     CODEPATCH_REPLACEFUNC(AirRideSelect_LayoutIcons, AirRideLayoutIcons);
     CODEPATCH_REPLACEFUNC(AirRideSelect_GetIconPos, AirRideGetIconPos);
-    CODEPATCH_REPLACEFUNC(AirRideSelect_CreateSIcon, AirRideCreateSIcon);
     CODEPATCH_REPLACEFUNC(CitySelect_LayoutMachineIcons, CityLayoutIcons);
     CODEPATCH_REPLACEFUNC(CitySelect_GetIconPos, CityGetIconPos);
-    CODEPATCH_REPLACEFUNC(CitySelect_CreateMachineIcon, CityCreateMachineIcon);
 
     CODEPATCH_REPLACEFUNC(AirRide_PopulateSelectIcons, PopulateAirRideIcons);
+
+    CODEPATCH_HOOKAPPLY(0x8015181c);  // Air Ride icon-GObj store
+    CODEPATCH_HOOKAPPLY(0x8015c2dc);  // City Trial icon-GObj store
 
     CODEPATCH_HOOKAPPLY(0x8002e4d0);  // CT Stadium (mode 1) counting pass
     CODEPATCH_HOOKAPPLY(0x8002e5c0);  // CT Free Run (mode 2) counting pass
@@ -419,6 +444,5 @@ void CustomMachineSelect_OnBoot(void)
     // produces counts 15-20; a filtered roster can land on exactly 10.
     CODEPATCH_REPLACEINSTRUCTION(0x80031350, 0x2c03000a);  // cmpwi r3, 10
 
-    OSReport("[CustomMachines] Select screens widened to %d icons, Dedede on plate frame %d\n",
-             SELECT_ICON_MAX, PLATE_DEDEDE_FRAME);
+    OSReport("[SelectScreen] Select screens widened to %d icons\n", SELECT_ICON_MAX);
 }

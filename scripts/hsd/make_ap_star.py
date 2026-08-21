@@ -28,7 +28,16 @@ DIFFUSE_R/G/B tracks in each of the Moving, Charge and Stop MatAnims (black
 under the body texture, magenta on the glow sprite, ramping warm while
 charging). Recoloring therefore rewrites those keyframes as well as the
 material and the pod's own copy of the body texture, keeping each key's
-intensity and how white it was and swapping only the hue.
+intensity and swapping the hue. The Charge tracks are the only ones whose keys
+are desaturated - the donor flashes its pods white at full charge - and
+--charge-bleach decides how much of that a retinted pod keeps, so it can
+brighten within its own color instead.
+
+The exhaust trail keeps the donor's own generators and only changes color. The
+animation bank names its particles by index into the vehicle particle bank, and
+this rewrites those slots with the donor's values so the archive says what it
+emits, then hands the registry the byte offsets of both generators' color
+operands so the sparkle follows the disc's cycle.
 
 The platform disc goes the other way. The donor paints it from textures alone,
 so this repoints its stages to leave the material color intact and shade it with
@@ -39,12 +48,13 @@ archive could do.
 Usage:
     uv run python scripts/hsd/make_ap_star.py \
         iso/files/VcStarSlick.dat \
-        mods/custom_machines/assets/machines/VcStarAp.dat \
+        mods/ap_star/assets/machines/VcStarAp.dat \
         vcDataStarAp --name "Archipelago Star" \
         --description "A gift from another world.\nSix worlds, one ride."
 """
 
 import argparse
+import glob
 import math
 import os
 import struct
@@ -68,7 +78,34 @@ MODELDATA_BONE_COUNT = 0x08
 MODELDATA_MAIN_LOD = (0x10, 0x18, 0x20)   # high, mid, low
 
 ANIMBANK_MATANIM = (0x04, 0x24, 0x2C)     # moving, charge, stop
+ANIMBANK_MOVING_PARTICLE = (0x38, 0x3C)
+ANIMBANK_BOOSTING_PARTICLE = (0x40, 0x44, 0x48)
 ANIMBANK_PARTICLE_BONES = (0x4C, 0x50, 0x54)
+
+# The donor's own vehicle particle bank generators, kept rather than retargeted.
+# They draw the four-point sparkle at texgraphic 0 image 1, spawning off the
+# machine's axis and drifting, which is what suits a machine that slides: a
+# generator that emits down a tight cone pins its trail to where the machine is
+# pointed, and on a Slick Star that reads as wrong the moment it stops facing the
+# way it is going.
+#
+# Emitting them directly would tint the Slick Star's own sparkle, since a
+# generator is bank data and this machine is a Slick Star clone that will share
+# the field with the real one. So each is copied into a slot no machine reads - 3
+# and 8 are the bank's only unreferenced generators - and the animation bank names
+# the copies.
+TRAIL_CLONES = ((20, 3), (51, 8))
+TRAIL_MOVING = (3, -1)
+TRAIL_BOOSTING = (8, -1, -1)
+
+# Byte offsets inside a source generator of the RGB triples its bytecode paints a
+# particle with: the two colors it spawns holding, the one it ramps up to over its
+# first three frames, and the one it fades out through. Each is followed by its own
+# alpha byte, left alone. Both sources share the offsets - 51 is 20's program with
+# padding after it - and a copy inherits them.
+TRAIL_RGB = (0x53, 0x5A, 0x60, 0x89)
+TRAIL_TINTS = tuple((dst, off) for _, dst in TRAIL_CLONES for off in TRAIL_RGB)
+TRAIL_BANK = "iso/files/EfPtclVehicle.dat"
 
 JOBJ_SIZE = 0x40
 DOBJ_SIZE = 0x10
@@ -84,6 +121,13 @@ FOBJDESC_SIZE = 0x14
 MAT_DIFFUSE_R, MAT_DIFFUSE_G, MAT_DIFFUSE_B = 4, 5, 6
 FMT_MAX = {FMT_S16: 0x7FFF, FMT_U16: 0xFFFF, FMT_S8: 0x7F, FMT_U8: 0xFF}
 
+# The star's assembly cutscene archives, both at the FST root and staged from
+# mods/ap_star/assets. The registry runs the vanilla legendary cinematic with
+# these in place of VsHydra.dat's, and index 1 keeps Hydra's rider pose, fanfare
+# and sky - the only decisions downstream of the archive load.
+CINEMATIC = ("ApStarGlow.dat", "apStarGlow", "apStarCam",
+             "ApStarParts.dat", "apStarParts", 1)
+
 # The joint carrying the platform disc, and the TObj flag fields that decide how
 # far a texture stage gets to interfere with the material color.
 PLATFORM_JOINT = 6
@@ -96,6 +140,59 @@ ALPHAMAP_PASS = 5
 # +Z is the machine's front, so slots run clockwise seen from above, matching
 # the logo's own order.
 RING_PHASE = -1.5 * math.pi
+
+
+def check_trail_offsets(path):
+    """Confirm every TRAIL_RGB offset still lands on a color operand in each source
+    generator, and that every destination slot is one no machine emits. An offset is
+    the payload of a `cf`/`df` opcode followed by one duration byte, so the two bytes
+    before it pin it. Skipped without the bank."""
+    if not os.path.exists(path):
+        print(f"  trail: {path} absent, offsets unchecked")
+        return
+    arc = Archive(path)
+    group = arc.publics["vehicle_ptcl"]
+    count = u32(arc.data, group + 0x08)
+    claimed = {dst for _, dst in TRAIL_CLONES}
+    for machine in sorted(glob.glob("iso/files/Vc*.dat")):
+        emitted = machine_generators(machine)
+        if emitted & claimed:
+            raise SystemExit(
+                f"{os.path.basename(machine)} emits {sorted(emitted & claimed)}; "
+                f"TRAIL_CLONES cannot claim it")
+    for src, dst in TRAIL_CLONES:
+        if src >= count or dst >= count:
+            raise SystemExit(f"{path} has no generator {max(src, dst)}")
+        desc = group + u32(arc.data, group + 0x0C + src * 4)
+        for off in TRAIL_RGB:
+            if arc.data[desc + off - 2] not in (0xCF, 0xDF):
+                raise SystemExit(
+                    f"generator {src} has no color opcode at +{off - 2:#x}; "
+                    f"TRAIL_RGB is stale")
+    print(f"  trail clones: {', '.join(f'{s} -> {d}' for s, d in TRAIL_CLONES)}, "
+          f"tinted at {', '.join(hex(o) for o in TRAIL_RGB)}")
+
+
+def machine_generators(path):
+    """The vehicle bank generators a machine archive's animation banks emit. Only
+    the star class is read - the bike class lays the same block out differently."""
+    slots = ANIMBANK_MOVING_PARTICLE + ANIMBANK_BOOSTING_PARTICLE + (0x30, 0x34)
+    out = set()
+    try:
+        arc = Archive(path)
+    except Exception:
+        return out
+    for name, off in arc.publics.items():
+        if not name.startswith("vcDataStar"):
+            continue
+        anim = u32(arc.data, off + VCDATA_ANIMBANK)
+        if anim == 0:
+            continue
+        for slot in slots:
+            gen = struct.unpack_from(">i", arc.data, anim + slot)[0]
+            if 0 <= gen < 64:
+                out.add(gen)
+    return out
 
 
 def ring_pose(slot, count, radius, height):
@@ -111,14 +208,16 @@ def normalized(color):
     return tuple(c / peak for c in color)
 
 
-def map_color(src, tint):
-    """Recolor one animated RGB triple. Black stays black, a fully saturated
-    source becomes the tint, and white stays white, so a charge ramp that ends
-    on a white flash still ends on a white flash."""
+def map_color(src, tint, bleach=0.0):
+    """Recolor one animated RGB triple. Black stays black and a fully saturated
+    source becomes the tint. How white the source was is kept as a fraction
+    `bleach` of the way back to white, which is the only lever on how much of
+    its hue the charge ramp gives up as it brightens: 0 holds the tint exactly,
+    1 restores the donor's white flash."""
     intensity = max(src)
     if intensity <= 0.0:
         return (0.0, 0.0, 0.0)
-    white = min(src) / intensity
+    white = bleach * min(src) / intensity
     return tuple(intensity * (t + (1.0 - t) * white) for t in tint)
 
 
@@ -298,7 +397,7 @@ class Donor:
                     f"expected {len(self.joints)}")
 
 
-def retint_aobj(b, aobj, tint):
+def retint_aobj(b, aobj, tint, bleach):
     """Rewrite one material AObj's DIFFUSE_R/G/B keyframes onto `tint`. Each
     track keeps its frames, ops and quantization format; only the values and,
     where a brighter tint needs the headroom, the fixed-point exponent move."""
@@ -321,7 +420,7 @@ def retint_aobj(b, aobj, tint):
         _, _, _, keys = tracks[kind]
         recolored[kind] = [
             map_color(tuple(track_value(tracks[o][3], k.frame) for o in channels),
-                      tint)[c]
+                      tint, bleach)[c]
             for k in keys
         ]
 
@@ -572,9 +671,9 @@ def build(src_path, out_path, new_public, args):
             for matanim in chain(b, b.ptr(node + 0x08), 0x00):
                 aobj = b.ptr(matanim + 0x04)
                 if aobj:
-                    retinted += retint_aobj(b, aobj, tint)
+                    retinted += retint_aobj(b, aobj, tint, args.charge_bleach)
     print(f"  retinted {retinted} diffuse tracks across "
-          f"{len(donor.matanim_trees)} animations")
+          f"{len(donor.matanim_trees)} animations, charge bleach {args.charge_bleach}")
 
     added = pod_count - len(donor.pods)
     paint_platform(b, donor, args.platform_color, args.platform_gloss)
@@ -599,6 +698,13 @@ def build(src_path, out_path, new_public, args):
     print(f"  BoneCount {len(joints)}, {total_dobjs} DObjs, "
           f"seat bone {seat}, particle bones {bones}")
 
+    for slots, ids in ((ANIMBANK_MOVING_PARTICLE, TRAIL_MOVING),
+                       (ANIMBANK_BOOSTING_PARTICLE, TRAIL_BOOSTING)):
+        for slot, value in zip(slots, ids):
+            struct.pack_into(">i", b.data, donor.anim_bank + slot, value)
+    check_trail_offsets(TRAIL_BANK)
+    print(f"  trail: moving {list(TRAIL_MOVING)}, boosting {list(TRAIL_BOOSTING)}")
+
     # The platform's cycle is wall-clock, which no MatAnim can be: the moving
     # animation's rate scales with velocity and the charge animation's frame is
     # the charge gauge. So the colors ship as descriptor data and the registry
@@ -608,11 +714,15 @@ def build(src_path, out_path, new_public, args):
     relocs = sorted(b.relocs)
     desc_off = append_descriptor(b.data, relocs, new_public, args,
                                  palette=(PLATFORM_JOINT, args.palette_period,
-                                          pod_count, palette))
+                                          pod_count, palette),
+                                 trail=TRAIL_TINTS,
+                                 trail_clones=TRAIL_CLONES,
+                                 cinematic=CINEMATIC)
     print(f"  descriptor '{args.name}' @ {desc_off:#x} "
           f"(clone kind {args.clone_kind}, spawn weight {args.spawn_weight}, "
           f"joint {PLATFORM_JOINT} cycles {pod_count} colors every "
           f"{args.palette_period:g}s)")
+    print(f"  cinematic: {CINEMATIC[0]} + {CINEMATIC[3]}, as Hydra")
 
     publics = [(new_public, donor.vcdata), ("customMachine", desc_off)]
     externs = [(name, off) for off, name in arc.externs]
@@ -642,8 +752,11 @@ def main(argv):
                    help="pod ring radius; the donor's three pods sit at 2.45")
     p.add_argument("--ring-height", type=float, default=1.05,
                    help="pod ring height above the body root; the donor's is 0.875")
-    p.add_argument("--pod-scale", type=float, default=1.25,
+    p.add_argument("--pod-scale", type=float, default=1.4375,
                    help="uniform scale on each pod joint")
+    p.add_argument("--charge-bleach", type=float, default=0.10,
+                   help="how far a pod's charge ramp travels toward white; "
+                        "0 brightens within its own hue, 1 is the donor's white flash")
     p.add_argument("--platform-color", type=color_arg, default=color_arg("BFF5BF"),
                    help="RRGGBB the platform disc rests at, and what it shows wherever "
                         "nothing is cycling its palette")

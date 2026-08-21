@@ -91,7 +91,7 @@ void SpawnRate_Increment()
     // Show the absolute effective rate, post-min and post-cap, rather than the
     // delta from vanilla.
     float pct = SpawnRate_GetScale() * 100.0f;
-    OSReport("[SpawnRate] Level %d, effective rate %.0f%%.\n",
+    OSReport("[SpawnRate] Level %d, effective rate %.0f%%\n",
              ap_save->spawn_rate_level, pct);
     tb_api->EnqueueColoredNounFmt(NULL, "Spawn rate", tb_api->ItemColor, " increased (%.0f%%)", pct);
 }

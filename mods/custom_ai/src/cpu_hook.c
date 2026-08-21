@@ -56,5 +56,4 @@ CODEPATCH_HOOKCREATE(0x80262fbc,
 void CpuAI_InstallHook(void)
 {
     CODEPATCH_HOOKAPPLY(0x80262fbc);
-    OSReport("[CustomAI] CPU re-profile hook installed (Rider_CPUInit)\n");
 }

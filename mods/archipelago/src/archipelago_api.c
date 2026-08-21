@@ -9,6 +9,7 @@
 #include "checklist_rewards.h"
 #include "check_detection.h"
 #include "energylink.h"
+#include "gate_ap_star.h"
 #include "textbox_api.h"
 
 u32 Unlock_GetMask(APUnlockCategory cat)
@@ -51,6 +52,11 @@ void Unlock_SetMask(APUnlockCategory cat, u32 mask)
         case AP_UNLOCK_AP_STAR_PIECE:  ap_save->ap_star_piece_unlocked_mask  = (u8)mask;  break;
         default: break;
     }
+
+    // ap_star reads its sphere gate at 3D load start, and it runs before this mod
+    // does, so the mask is pushed on every write rather than read back later.
+    if (cat == AP_UNLOCK_AP_STAR_PIECE)
+        GateApStar_PushMask();
 }
 
 static int ApiQueueItem(int ap_item_id)
@@ -143,6 +149,11 @@ static void ApiDebugTriggerTraplinkReceive(void)
     ap_data->traplink_receive = 1;
 }
 
+static int ApiDebugSpawnApStarPiece(int piece, int ply)
+{
+    return GateApStar_DebugSpawnPiece(piece, ply);
+}
+
 static const ArchipelagoAPI api = {
     .GetUnlockMask                = Unlock_GetMask,
     .SetUnlockMask                = Unlock_SetMask,
@@ -164,6 +175,7 @@ static const ArchipelagoAPI api = {
     .DebugTriggerDeathlinkReceive = ApiDebugTriggerDeathlinkReceive,
     .DebugTriggerTraplinkReceive  = ApiDebugTriggerTraplinkReceive,
     .DebugRevealChecklist         = ApiDebugRevealChecklist,
+    .DebugSpawnApStarPiece        = ApiDebugSpawnApStarPiece,
 };
 
 void ArchipelagoAPI_Export(void)

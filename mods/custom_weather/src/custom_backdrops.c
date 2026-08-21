@@ -171,7 +171,7 @@ void CustomBackdrop_OnBoot(void)
 {
     CODEPATCH_HOOKAPPLY(0x800dcc18);
     CODEPATCH_HOOKAPPLY(0x800dce84);
-    OSReport("[CustomBackdrop] Hook installed (%d backdrops in pool)\n",
+    OSReport("[CustomBackdrop] Hooks installed (%d backdrops in pool)\n",
              (int)BACKDROP_NUM);
 }
 

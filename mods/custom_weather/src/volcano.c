@@ -425,7 +425,7 @@ MenuDesc volcano_menu = {
     .options = {
         &(OptionDesc){
             .name = "Volcano",
-            .description = "Let the City Trial volcano erupt: Preset = only presets that set it, Off = never, On = every CT preset",
+            .description = "Let a volcano erupt in City Trial: Preset = only presets that set it, Off = never, On = all presets",
             .kind = OPTKIND_VALUE,
             .val = &show_index,
             .value_num = 3,

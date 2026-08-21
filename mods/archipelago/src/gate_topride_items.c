@@ -8,6 +8,9 @@
 #include "textbox_api.h"
 #include "inline.h"
 
+// One bit per Top Ride item kind whose blocked spawn has been reported this round.
+static u32 stc_blocked_reported;
+
 // TR items whose copy ability unlock is an alternative key to their own TR unlock.
 static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
     { TRITEM_FREEZE_FAN, COPYKIND_FREEZE },
@@ -49,8 +52,11 @@ void GateTopRideItems_ApplyMask()
     else
         mgr->enabled_mask &= ~(1 << TRITEM_PARTY_BALL_ALT);
 
-    OSReport("[TopRideItems] TopRide items: enabled mask %s -> %s (item mask %s, ability mask %s)\n",
-             MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM), MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM), MaskBits(ability_mask, 16));
+    stc_blocked_reported = 0;
+    OSReport("[GateTopRideItems] Enabled mask %s -> %s (item %s, ability %s)\n",
+             MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM),
+             MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM),
+             MaskBits(ability_mask, 16));
 }
 
 // Hook at 0x802db05c, right after TopRideItem_MgrInit (0x8034b5f4) returns in
@@ -77,13 +83,19 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
     // table at 0x804ea2fc and crash on a garbage model-name pointer.
     if (item_kind < 0 || item_kind >= TRITEM_NUM)
     {
-        OSReport("[TopRideItems] Blocked spawn of out-of-range kind %d\n", item_kind);
+        OSReport("[GateTopRideItems] Blocked spawn of out-of-range kind %d\n", item_kind);
         return 1;
     }
     if (mgr->enabled_mask & (1 << item_kind))
         return 0;
-    OSReport("[TopRideItems] Blocked spawn of locked kind %d (%s)\n",
-             item_kind, TopRideItemKind_Names[item_kind]);
+
+    // Party balls re-roll a locked kind repeatedly, so say it once per kind.
+    if (!(stc_blocked_reported & (1u << item_kind)))
+    {
+        stc_blocked_reported |= (1u << item_kind);
+        OSReport("[GateTopRideItems] Blocked spawn of locked kind %d (%s)\n",
+                 item_kind, TopRideItemKind_Names[item_kind]);
+    }
     return 1;
 }
 
@@ -145,7 +157,7 @@ void GateTopRideItems_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8034bf50);
     CODEPATCH_REPLACECALL(0x803574a4, GateTopRideItems_GetDataGated); // burst sum loop
     CODEPATCH_REPLACECALL(0x803574d0, GateTopRideItems_GetDataGated); // burst pick loop
-    OSReport("[TopRideItems] Top Ride item gating hooks installed\n");
+    OSReport("[GateTopRideItems] Top Ride item gating hooks installed\n");
 }
 
 // Chickie / Who? Paint / Lantern are unreachable through the unlock mask alone:
@@ -175,8 +187,9 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce)
 
     ap_save->topride_item_unlocked_mask |= (1 << kind);
     MarkNewItemRewardReceived(kind);
-    OSReport("[TopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
-             kind, TopRideItemKind_Names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
+    if (!ap_regrant_quiet)
+        OSReport("[GateTopRideItems] Top Ride item %d (%s) unlocked (mask = %s)\n",
+                 kind, TopRideItemKind_Names[kind], MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM));
     if (announce)
     {
         TextSegment segs[5] = {
@@ -227,7 +240,7 @@ int GateTopRideItems_GiveItem(TopRideItemKind kind)
 
         TopRide_KirbyApplyItem(k, kind);
         applied = 1;
-        OSReport("[TopRideItems] Applied TR item %d (%s) to player %d\n",
+        OSReport("[GateTopRideItems] Applied TR item %d (%s) to player %d\n",
                  kind, TopRideItemKind_Names[kind], i);
     }
     return applied;

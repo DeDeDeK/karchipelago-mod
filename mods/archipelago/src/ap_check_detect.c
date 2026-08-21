@@ -12,7 +12,7 @@
 
 #include "main.h"
 #include "ap_check_detect.h"
-#include "ap_star_pieces.h"
+#include "gate_ap_star.h"
 
 // Sampling for the Archipelago checklist's objectives. The framework polls every
 // predicate each frame in every scene, so a predicate is only ever a read of state
@@ -38,7 +38,7 @@ int APCheckDetect_IsSet(int ck)
     case APCK_ALLUPS_5:           return ap_save->checks.allup_collect_total >= AP_ALLUP_TOTAL_NEED;
     case APCK_SR1_PURPLE_3X:      return ap_save->checks.purple_sr1_wins >= AP_PURPLE_SR1_NEED;
     case APCK_AIRRIDE_ALL_COLORS: return ap_save->checks.race_color_mask == AP_RACE_COLOR_MASK_ALL;
-    case APCK_ASSEMBLE_AP_STAR:   return ApStarPieces_WasAssembled();
+    case APCK_ASSEMBLE_AP_STAR:   return GateApStar_WasAssembled();
     default:
         if (ck < 0 || ck >= APCK_NUM)
             return 0;
@@ -323,7 +323,7 @@ void APCheckDetect_OnFrameStart(void)
         if (st != NULL &&
             (st->flags_84d & PLYSTATS_DRAGOON_ASSEMBLED) &&
             (st->flags_84d & PLYSTATS_HYDRA_ASSEMBLED) &&
-            ApStarPieces_AssembledThisRound(ply))
+            GateApStar_AssembledThisRound(ply))
         {
             APCheckDetect_Observe(APCK_ASSEMBLE_ALL_LEGENDARY);
             return;
@@ -352,8 +352,9 @@ static void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int is_bike, Mac
         return;
 
     dedede_kirby_kos++;
-    OSReport("[APCheckDetect] Kirbys KO'd as King Dedede: %d/%d\n",
-             dedede_kirby_kos, AP_DEDEDE_KIRBY_KO_NEED);
+    if (dedede_kirby_kos <= AP_DEDEDE_KIRBY_KO_NEED)
+        OSReport("[APCheckDetect] Kirbys KO'd as King Dedede: %d/%d\n",
+                 dedede_kirby_kos, AP_DEDEDE_KIRBY_KO_NEED);
     if (dedede_kirby_kos >= AP_DEDEDE_KIRBY_KO_NEED)
         APCheckDetect_Observe(APCK_DD_DEDEDE_KO_KIRBY);
 }
@@ -374,8 +375,9 @@ static void APCheckDetect_EnemyDefeat(int ply, void *attacker_log, GOBJ *enemy)
         return;
 
     mic_enemy_kos++;
-    OSReport("[APCheckDetect] Enemies defeated as Mic Kirby: %d/%d\n",
-             mic_enemy_kos, AP_MIC_ENEMY_KO_NEED);
+    if (mic_enemy_kos <= AP_MIC_ENEMY_KO_NEED)
+        OSReport("[APCheckDetect] Enemies defeated as Mic Kirby: %d/%d\n",
+                 mic_enemy_kos, AP_MIC_ENEMY_KO_NEED);
     if (mic_enemy_kos >= AP_MIC_ENEMY_KO_NEED)
         APCheckDetect_Observe(APCK_MIC_ENEMY_KOS);
 }

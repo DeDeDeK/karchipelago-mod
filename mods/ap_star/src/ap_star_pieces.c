@@ -12,10 +12,8 @@
 
 #include "custom_items_api.h"
 
-#include "main.h"
-#include "ap_check_detect.h"
+#include "ap_star.h"
 #include "ap_star_pieces.h"
-#include "textbox_api.h"
 
 // CustomItemDesc.name of each sphere, indexed by APStarPieceKind. The name is the
 // handle that binds a drop-in .dat to this code, the same convention
@@ -31,8 +29,8 @@ static const char *const piece_names[APSTARPIECE_NUM] = {
 
 // Match progress (0..1) windows the n-th delivery step falls in. Vanilla spreads
 // three pieces over 15-30 / 25-50 / 50-80 percent of a round; these six divide the
-// same span so a full set lands inside one round. A round with fewer spheres
-// unlocked uses the first rows, keeping the deliveries early.
+// same span so a full set lands inside one round. A round with fewer spheres in
+// play uses the first rows, keeping the deliveries early.
 static const u8 piece_progress_range[APSTARPIECE_NUM][2] = {
     { 10, 20 }, { 20, 32 }, { 32, 45 }, { 45, 58 }, { 58, 70 }, { 70, 85 },
 };
@@ -46,11 +44,11 @@ static int pieces_matched = -1;         // -1 before the first scan, then the ma
 
 static u8 piece_mask[5];      // per-player collected spheres, cleared each round
 static u8 assembled_mask;     // per-player assembly this round, cleared each round
-static u8 ever_assembled;     // sticky for the boot; the checklist predicate reads it
+static u8 ever_assembled;     // sticky for the boot; polled long after the round
 
 // This round's delivery schedule, mirroring LegendaryPieceData's shape: a spawn
 // order, one progress threshold per step, and a one-tick request flag the carrier
-// box path reads back. Only the spheres unlocked this round are in it.
+// box path reads back. Only the spheres in play this round are in it.
 static struct
 {
     u8 enabled;
@@ -59,17 +57,13 @@ static struct
     u8 req_spawn;
     u8 order[APSTARPIECE_NUM];
     float progress[APSTARPIECE_NUM];
+    float claim_progress; // round progress when the pending carrier was claimed
 } sched;
 
-// Step whose carrier claim has been reported, +1. A claim repeats every tick until
-// a carrier actually spawns, so the report is held to one per step.
-static u8 claim_logged;
-
 // The collection tracker, built the way the vanilla one is: an icon element per
-// collected piece, hung on the anchors of the legendary HUD's position model and
-// packed left to right in collection order. It is a second row rather than a
-// share of the vanilla one, since that row's six anchors are already spoken for by
-// Hydra and Dragoon, so the AP row sits one icon height below it.
+// collected piece, hung on the anchors of the legendary HUD's position model and packed
+// left to right in collection order. Its own row, one icon height below the vanilla
+// one, whose six anchors Hydra and Dragoon already claim.
 #define AP_PIECE_HUD_KIND    0x3b
 #define AP_PIECE_HUD_ROW_DY  -3.4f
 
@@ -90,21 +84,16 @@ static struct
 // mount out of the cinematic's own proc rather than the pickup arm.
 static u8 pending_mount_mask;
 
-static int IsPieceUnlocked(int piece)
+static int IsPieceEnabled(int piece)
 {
-    return (ap_save->ap_star_piece_unlocked_mask & (1u << piece)) != 0;
+    return (ap_star_piece_gate & (1u << piece)) != 0;
 }
 
-int ApStarPieces_UnlockPiece(int piece)
+const char *ApStarPieces_GetName(int piece)
 {
     if (piece < 0 || piece >= APSTARPIECE_NUM)
-        return 0;
-
-    ap_save->ap_star_piece_unlocked_mask |= (u8)(1 << piece);
-    OSReport("[ApStarPieces] %s unlocked (mask = %s)\n", piece_names[piece],
-             MaskBits(ap_save->ap_star_piece_unlocked_mask, APSTARPIECE_NUM));
-    tb_api->EnqueueColoredNoun("Unlocked Item: ", piece_names[piece], tb_api->ItemColor, NULL);
-    return 1;
+        return "Unknown Sphere";
+    return piece_names[piece];
 }
 
 static int PieceSlotForHash(u32 id_hash)
@@ -258,34 +247,25 @@ static void UpdatePieceHud(int ply)
     piece_hud[ply].shown_mask = mask;
 }
 
-// Put the assembling player on the star. This is the tail of the vanilla
-// assembly - the cinematic that normally runs ahead of it drives presentation
-// only, and its rider mount is a two-way branch over Hydra and Dragoon.
+// Put the assembling player on the star without the cinematic: the recreate the
+// cinematic's own substate would have fired 150 frames in. Re-mounting a player already
+// riding the star costs them their patches, as vanilla does on a duplicate Hydra set.
 static void MountStar(int ply)
 {
-    int kind = ApStarMachineKind();
-    if (kind < 0 || cm_api == NULL)
+    int kind = ApStar_MachineKind();
+    int is_bike = 0;
+    int class_index = ApStar_ClassIndex(&is_bike);
+    if (kind < 0)
     {
         OSReport("[ApStarPieces] Player %d not mounted: no %s registered\n",
                  ply + 1, AP_STAR_MACHINE_NAME);
         return;
     }
 
-    int is_bike = 0;
-    int class_index = cm_api->ClassIndexFromKind(kind, &is_bike);
     GOBJ *rg = Ply_GetRiderGObj(ply);
     if (class_index < 0 || rg == NULL)
     {
         OSReport("[ApStarPieces] Player %d not mounted: no rider or class slot\n", ply + 1);
-        return;
-    }
-
-    // A recreate would tear the machine down and rebuild the same one, costing the
-    // player their patches for nothing.
-    if (cm_api->KindFromClassIndex(Ply_GetMachineIsBike(ply), Ply_GetMachineKind(ply)) == kind)
-    {
-        OSReport("[ApStarPieces] Player %d is already riding the %s\n",
-                 ply + 1, AP_STAR_MACHINE_NAME);
         return;
     }
 
@@ -298,19 +278,22 @@ static void MountStar(int ply)
 
 static void Assemble(int ply)
 {
-    pending_mount_mask |= (u8)(1 << ply);
     assembled_mask |= (u8)(1 << ply);
     piece_mask[ply] = 0;
 
-    // The count-4 rung is the pair of sounds the vanilla cinematic plays when a
-    // machine completes, not a fourth piece.
-    Ply_OnLegendaryPieceCollect(ply, 4);
-
-    if (!ever_assembled)
+    // The cinematic owns the mount and plays the completion sounds itself. With none -
+    // no machine to build the shot around, or one already running - both are owed
+    // directly, and the mount waits for the frame boundary: collection lands inside
+    // Machine_OnTouchItem, which is no place to tear down the machine it runs on. The
+    // count-4 rung is the pair of sounds a machine completes on, not a fourth piece.
+    if (!ApStar_StartAssembly(ply))
     {
-        ever_assembled = 1;
-        APCheckDetect_Observe(APCK_ASSEMBLE_AP_STAR);
+        pending_mount_mask |= (u8)(1 << ply);
+        Ply_OnLegendaryPieceCollect(ply, 4);
     }
+
+    ever_assembled = 1;
+    ApStar_FireAssemble(ply);
     OSReport("[ApStarPieces] Player %d assembled the %s\n", ply + 1, AP_STAR_MACHINE_NAME);
 }
 
@@ -354,12 +337,7 @@ static int CheckToSpawn(float progress)
         return ret;
 
     sched.req_spawn = 1;
-    if (claim_logged != (u8)(sched.next + 1))
-    {
-        claim_logged = (u8)(sched.next + 1);
-        OSReport("[ApStarPieces] Carrier claimed for sphere %d at %d%% of the round\n",
-                 sched.order[sched.next], (int)(progress * 100.0f));
-    }
+    sched.claim_progress = progress;
     return 2;
 }
 
@@ -383,7 +361,8 @@ static void SpawnPiece(int spawner, int p2, int p3)
         LegendaryPiece_MarkAsSpawned(spawner, kind);
     sched.next++;
     LegendaryPiece_ClearSpawnRequest(spawner);
-    OSReport("[ApStarPieces] Sphere %d loaded into a carrier box (kind %d)\n", piece, kind);
+    OSReport("[ApStarPieces] %s loaded into a carrier box at %d%% of the round (kind %d)\n",
+             piece_names[piece], (int)(sched.claim_progress * 100.0f), kind);
 }
 
 void ApStarPieces_OnBoot(void)
@@ -405,7 +384,7 @@ static void ImportRegistry(void)
         return;
 
     ResolvePieces();
-    if (!pickup_registered && ci_api->AddPickupHandler != NULL)
+    if (!pickup_registered)
     {
         ci_api->AddPickupHandler(OnPickup);
         pickup_registered = 1;
@@ -423,7 +402,7 @@ void ApStarPieces_On3DLoadStart(void)
     for (int i = 0; i < APSTARPIECE_NUM; i++)
     {
         if (piece_hash[i] != 0)
-            ci_api->SetEnabled(piece_hash[i], IsPieceUnlocked(i));
+            ci_api->SetEnabled(piece_hash[i], IsPieceEnabled(i));
     }
 }
 
@@ -446,7 +425,6 @@ void ApStarPieces_On3DLoadEnd(void)
     sched.next = 0;
     sched.num = 0;
     sched.req_spawn = 0;
-    claim_logged = 0;
     for (int i = 0; i < APSTARPIECE_NUM; i++)
         piece_kind[i] = -1;
 
@@ -460,7 +438,7 @@ void ApStarPieces_On3DLoadEnd(void)
     int num = 0;
     for (int i = 0; i < APSTARPIECE_NUM; i++)
     {
-        if (piece_hash[i] == 0 || !IsPieceUnlocked(i))
+        if (piece_hash[i] == 0 || !IsPieceEnabled(i))
             continue;
         piece_kind[i] = ci_api->GetAssignedKind(piece_hash[i]);
         if (piece_kind[i] >= 0)
@@ -509,6 +487,54 @@ void ApStarPieces_OnFrameStart(void)
         }
         UpdatePieceHud(ply);
     }
+}
+
+// Distance ahead of the machine to drop a debug sphere, matching the granted-box
+// offset so it lands in front of the rider to drive into rather than on them.
+#define AP_PIECE_DEBUG_FORWARD 10.0f
+
+int ApStarPieces_DebugSpawn(int piece, int ply)
+{
+    if (piece < 0 || piece >= APSTARPIECE_NUM || ply < 0 || ply >= 5)
+        return 0;
+
+    if (ci_api == NULL || piece_hash[piece] == 0)
+    {
+        OSReport("[ApStarPieces] No item registered for %s\n", piece_names[piece]);
+        return 0;
+    }
+
+    // A sphere held out of the registry never got an ItemKind, and the registry
+    // is only written at CityItemSpawn_Init, so opening its gate mid-round is not
+    // enough to spawn it.
+    int kind = ci_api->GetAssignedKind(piece_hash[piece]);
+    if (kind < 0)
+    {
+        OSReport("[ApStarPieces] %s is not registered this round; enable it and reload\n",
+                 piece_names[piece]);
+        return 0;
+    }
+
+    GOBJ *mg = Ply_GetMachineGObj(ply);
+    if (mg == NULL)
+    {
+        OSReport("[ApStarPieces] Player %d has no machine to spawn in front of\n", ply + 1);
+        return 0;
+    }
+
+    MachineData *md = mg->userdata;
+    Vec3 pos;
+    pos.X = md->pos.X + AP_PIECE_DEBUG_FORWARD * md->forward.X;
+    pos.Y = md->pos.Y + AP_PIECE_DEBUG_FORWARD * md->forward.Y;
+    pos.Z = md->pos.Z + AP_PIECE_DEBUG_FORWARD * md->forward.Z;
+
+    ItemDesc desc;
+    Item_InitDesc(&desc, (ItemKind)kind, 1.0f, 0, &pos, &md->up, &md->forward,
+                  -1, -1, 1, 3, -1, -1);
+    Item_Create(&desc);
+    OSReport("[ApStarPieces] Spawned %s for player %d (kind %d)\n",
+             piece_names[piece], ply + 1, kind);
+    return 1;
 }
 
 int ApStarPieces_WasAssembled(void)

@@ -49,6 +49,7 @@ INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) \
            -I$(MODS_ROOT_DIR)/custom_events/include \
            -I$(MODS_ROOT_DIR)/textbox/include \
            -I$(MODS_ROOT_DIR)/archipelago/include \
+           -I$(MODS_ROOT_DIR)/ap_star/include \
            -I$(MODS_ROOT_DIR)/hypernova/include \
            -I$(MODS_ROOT_DIR)/custom_items/include \
            -I$(MODS_ROOT_DIR)/custom_machines/include \
