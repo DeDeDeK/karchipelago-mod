@@ -168,6 +168,7 @@ static void OnFrameStart(void)
                     AP_ITEM_ALL_DOWN,
                     AP_ITEM_GIVE_DRAGOON,
                     AP_ITEM_GIVE_HYDRA,
+                    AP_ITEM_GIVE_AP_STAR,
                     AP_ITEM_1_HP_TRAP,
                     AP_ITEM_DROP_PATCHES_TRAP,
                 };

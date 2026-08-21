@@ -24,7 +24,19 @@ int GateApStar_MachineKind(void);
 
 // Drop one sphere in front of a player's machine, bypassing the delivery
 // schedule. Returns 0 if the sphere was locked when this scene loaded.
-int GateApStar_DebugSpawnPiece(int piece, int ply);
+int GateApStar_SpawnPiece(int piece, int ply);
+
+// Add one sphere to every human rider's collected set and announce it, the
+// give-item counterpart to unlocking one. Collects directly rather than spawning
+// a pickup, so it lands whether or not the sphere is in this round's item
+// registry - the way a Hydra or Dragoon part give ignores that part's unlock.
+// Both return an APItemResult: RETRY while no player can take it, and DROP with
+// ap_star absent, since no later round changes that.
+int GateApStar_GivePiece(int piece);
+
+// Put a human player straight through the assembly, awarding the star without
+// the six spheres.
+int GateApStar_GiveStar(void);
 
 // 1 once a player has assembled the star this boot; 1 if this player assembled
 // it in the round currently loaded.

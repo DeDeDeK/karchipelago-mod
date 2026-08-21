@@ -172,16 +172,23 @@ static MenuDesc special_menu = {
 };
 
 static MenuDesc legendary_menu = {
-    .option_num = 8,
+    .option_num = 15,
     .options = {
-        BUY(AP_ITKIND_DRAGOON1,    5000, "Dragoon Part A"),
-        BUY(AP_ITKIND_DRAGOON2,    5000, "Dragoon Part B"),
-        BUY(AP_ITKIND_DRAGOON3,    5000, "Dragoon Part C"),
-        BUY(AP_ITKIND_HYDRA1,      5000, "Hydra Part X"),
-        BUY(AP_ITKIND_HYDRA2,      5000, "Hydra Part Y"),
-        BUY(AP_ITKIND_HYDRA3,      5000, "Hydra Part Z"),
-        BUY(AP_ITEM_GIVE_DRAGOON,  17500, "Full Dragoon"),
-        BUY(AP_ITEM_GIVE_HYDRA,    17500, "Full Hydra"),
+        BUY(AP_ITKIND_DRAGOON1,          5000,  "Dragoon Part A"),
+        BUY(AP_ITKIND_DRAGOON2,          5000,  "Dragoon Part B"),
+        BUY(AP_ITKIND_DRAGOON3,          5000,  "Dragoon Part C"),
+        BUY(AP_ITKIND_HYDRA1,            5000,  "Hydra Part X"),
+        BUY(AP_ITKIND_HYDRA2,            5000,  "Hydra Part Y"),
+        BUY(AP_ITKIND_HYDRA3,            5000,  "Hydra Part Z"),
+        BUY(AP_STAR_PIECE_GIVE_ROSE,     2500,  "Rose Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_GREEN,    2500,  "Green Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_VIOLET,   2500,  "Violet Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_TAN,      2500,  "Tan Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_BLUE,     2500,  "Blue Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_YELLOW,   2500,  "Yellow Sphere"),
+        BUY(AP_ITEM_GIVE_DRAGOON,        17500, "Full Dragoon"),
+        BUY(AP_ITEM_GIVE_HYDRA,          17500, "Full Hydra"),
+        BUY(AP_ITEM_GIVE_AP_STAR,        17500, "Full AP Star"),
     },
 };
 
@@ -273,7 +280,7 @@ MenuDesc energylink_spend_menu = {
         CATEGORY("Copy Abilities",    "Give Kirby a copy ability",               copy_abilities_menu),
         CATEGORY("Food",              "Healing items",                           food_menu),
         CATEGORY("Special Items",     "Powerful one-use items",                  special_menu),
-        CATEGORY("Legendary Pieces",  "Dragoon and Hydra machine parts",         legendary_menu),
+        CATEGORY("Legendary Pieces",  "Dragoon, Hydra and AP Star parts",        legendary_menu),
         CATEGORY("City Trial Items",  "Boxes and other CT items",                ct_items_menu),
         CATEGORY("City Trial Events", "Trigger a City Trial event",              ct_events_menu),
         CATEGORY("Top Ride Items",    "Spawn a Top Ride item at your position",  topride_items_menu),

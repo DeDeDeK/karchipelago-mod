@@ -297,16 +297,8 @@ static void Assemble(int ply)
     OSReport("[ApStarPieces] Player %d assembled the %s\n", ply + 1, AP_STAR_MACHINE_NAME);
 }
 
-static void OnPickup(u32 id_hash, const char *name, int player)
+static void Collect(int player, int slot)
 {
-    (void)name;
-    if (player < 0 || player >= 5)
-        return;
-
-    int slot = PieceSlotForHash(id_hash);
-    if (slot < 0)
-        return;
-
     u8 bit = (u8)(1 << slot);
     if (piece_mask[player] & bit)
         return;
@@ -321,6 +313,19 @@ static void OnPickup(u32 id_hash, const char *name, int player)
         return;
     }
     Ply_OnLegendaryPieceCollect(player, (count + 1) / 2);
+}
+
+static void OnPickup(u32 id_hash, const char *name, int player)
+{
+    (void)name;
+    if (player < 0 || player >= 5)
+        return;
+
+    int slot = PieceSlotForHash(id_hash);
+    if (slot < 0)
+        return;
+
+    Collect(player, slot);
 }
 
 // REPLACECALL on the bl in CityItemSpawn_UpdateAndCheckToSpawn. Vanilla returns 2
@@ -489,11 +494,12 @@ void ApStarPieces_OnFrameStart(void)
     }
 }
 
-// Distance ahead of the machine to drop a debug sphere, matching the granted-box
-// offset so it lands in front of the rider to drive into rather than on them.
-#define AP_PIECE_DEBUG_FORWARD 10.0f
+// Distance ahead of the machine to drop a sphere spawned outside the delivery
+// schedule, matching the granted-box offset so it lands in front of the rider to
+// drive into rather than on them.
+#define AP_PIECE_SPAWN_FORWARD 10.0f
 
-int ApStarPieces_DebugSpawn(int piece, int ply)
+int ApStarPieces_SpawnPiece(int piece, int ply)
 {
     if (piece < 0 || piece >= APSTARPIECE_NUM || ply < 0 || ply >= 5)
         return 0;
@@ -524,9 +530,9 @@ int ApStarPieces_DebugSpawn(int piece, int ply)
 
     MachineData *md = mg->userdata;
     Vec3 pos;
-    pos.X = md->pos.X + AP_PIECE_DEBUG_FORWARD * md->forward.X;
-    pos.Y = md->pos.Y + AP_PIECE_DEBUG_FORWARD * md->forward.Y;
-    pos.Z = md->pos.Z + AP_PIECE_DEBUG_FORWARD * md->forward.Z;
+    pos.X = md->pos.X + AP_PIECE_SPAWN_FORWARD * md->forward.X;
+    pos.Y = md->pos.Y + AP_PIECE_SPAWN_FORWARD * md->forward.Y;
+    pos.Z = md->pos.Z + AP_PIECE_SPAWN_FORWARD * md->forward.Z;
 
     ItemDesc desc;
     Item_InitDesc(&desc, (ItemKind)kind, 1.0f, 0, &pos, &md->up, &md->forward,
@@ -534,6 +540,38 @@ int ApStarPieces_DebugSpawn(int piece, int ply)
     Item_Create(&desc);
     OSReport("[ApStarPieces] Spawned %s for player %d (kind %d)\n",
              piece_names[piece], ply + 1, kind);
+    return 1;
+}
+
+int ApStarPieces_CollectPiece(int piece, int ply)
+{
+    if (piece < 0 || piece >= APSTARPIECE_NUM || ply < 0 || ply >= 5)
+        return 0;
+
+    // Per-round state cleared on every load, so there is nothing to collect into
+    // outside a City Trial round.
+    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
+        return 0;
+    if (Ply_GetRiderGObj(ply) == NULL)
+        return 0;
+
+    Collect(ply, piece);
+    return 1;
+}
+
+int ApStarPieces_Assemble(int ply)
+{
+    if (ply < 0 || ply >= 5)
+        return 0;
+
+    // Assemble either hands the player to the cutscene or mounts them directly,
+    // and both want a City Trial round and a rider to act on.
+    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
+        return 0;
+    if (ApStar_MachineKind() < 0 || Ply_GetRiderGObj(ply) == NULL)
+        return 0;
+
+    Assemble(ply);
     return 1;
 }
 

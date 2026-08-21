@@ -1,8 +1,10 @@
 #include "os.h"
+#include "game.h"
 #include "hoshi/mod.h"
 
 #include "main.h"
 #include "gate_ap_star.h"
+#include "ap_item_handler.h"
 #include "ap_check_detect.h"
 
 // APStarPiece and ap_star's own APStarPieceKind number the six spheres the same
@@ -70,10 +72,63 @@ int GateApStar_MachineKind(void)
     return ap_star_api ? ap_star_api->GetMachineKind() : -1;
 }
 
-int GateApStar_DebugSpawnPiece(int piece, int ply)
+int GateApStar_SpawnPiece(int piece, int ply)
 {
     GateApStar_Resolve();
-    return ap_star_api ? ap_star_api->DebugSpawnPiece(piece, ply) : 0;
+    return ap_star_api ? ap_star_api->SpawnPiece(piece, ply) : 0;
+}
+
+int GateApStar_GivePiece(int piece)
+{
+    if (piece < 0 || piece >= AP_STAR_PIECE_NUM)
+        return AP_ITEM_DROP;
+
+    // Nothing a later round could change with the mod absent, so the item is
+    // dropped rather than left retrying for the rest of the seed.
+    GateApStar_Resolve();
+    if (ap_star_api == NULL)
+    {
+        OSReport("[GateApStar] Sphere %d give dropped with ap_star not built\n", piece);
+        return AP_ITEM_DROP;
+    }
+
+    int collected = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) == PKIND_HMN)
+            collected |= ap_star_api->CollectPiece(piece, i);
+    }
+    if (!collected)
+        return AP_ITEM_RETRY;
+
+    // ap_star owns the sphere names, so the announcement takes one from it rather
+    // than a copy that can drift out of step with the archives.
+    tb_api->EnqueueColoredNoun("Received: ", ap_star_api->GetPieceName(piece),
+                               tb_api->MachineColor, NULL);
+    return AP_ITEM_APPLIED;
+}
+
+int GateApStar_GiveStar(void)
+{
+    GateApStar_Resolve();
+    if (ap_star_api == NULL)
+    {
+        OSReport("[GateApStar] Star give dropped with ap_star not built\n");
+        return AP_ITEM_DROP;
+    }
+
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) != PKIND_HMN)
+            continue;
+        if (ap_star_api->Assemble(i))
+        {
+            tb_api->EnqueueColoredNoun("Received: ", AP_STAR_MACHINE_NAME,
+                                       tb_api->MachineColor, NULL);
+            return AP_ITEM_APPLIED;
+        }
+    }
+    return AP_ITEM_RETRY;
 }
 
 int GateApStar_WasAssembled(void)

@@ -133,7 +133,9 @@ static const ApStarAPI api = {
     .RemoveAssembleHandler = ApiRemoveAssembleHandler,
     .WasAssembled          = ApStarPieces_WasAssembled,
     .AssembledThisRound    = ApStarPieces_AssembledThisRound,
-    .DebugSpawnPiece       = ApStarPieces_DebugSpawn,
+    .SpawnPiece            = ApStarPieces_SpawnPiece,
+    .CollectPiece          = ApStarPieces_CollectPiece,
+    .Assemble              = ApStarPieces_Assemble,
 };
 
 void ApStar_ExportApi(void)

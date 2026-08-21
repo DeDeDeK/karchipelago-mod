@@ -77,13 +77,28 @@ Consumers import it with
 | `AddAssembleHandler` / `Remove...` | called as a player completes a set |
 | `WasAssembled` | boot-sticky, 1 once anyone has assembled |
 | `AssembledThisRound` | per-player, cleared on every 3D load |
-| `DebugSpawnPiece` | drop one sphere in front of a machine |
+| `SpawnPiece` | drop one sphere in front of a machine |
+| `CollectPiece` | add one sphere to a player's set with no pickup |
+| `Assemble` | award the star outright, spheres not required |
 
 The gate starts at `AP_STAR_PIECE_ALL`. A closed sphere is held out of the item registry
 entirely, so it never receives an `ItemKind` and no path can spawn it; a round arms only
 the open ones and a partial set delivers but cannot complete. The gate is read at 3D load
 start, because `custom_items` registers its items in `CityItemSpawn_Init`'s epilogue and
 that is the last moment a held item can be skipped.
+
+`CollectPiece` and `Assemble` are the collection path entered from outside it, and neither
+consults the gate: a sphere with no `ItemKind` this round can still be collected, and the
+star can be awarded with all six closed. That is what a consumer awarding a sphere or the
+machine as a prize goes through, and it is why the gate is about what spawns in a round
+rather than about what a player can be handed.
+
+`Assemble` is the set-completion path itself, entered without the set: the cutscene (or
+the mount and completion sounds when it cannot run), the assembled flags and the assemble
+handlers, with the player's collected spheres cleared the way a completed set clears them.
+It answers 0 outside a City Trial round, with the star unregistered, or with the player not
+riding. A consumer awarding the star as an item goes through it rather than through the
+machine registry, so everything watching the assembly still sees one.
 
 The API is a gate, not an unlock: whether a sphere is earned, bought or awarded is the
 consumer's idea, and all this mod knows is which spheres are in play. It says nothing to
@@ -98,7 +113,11 @@ that can drift out of step with `items/ApSphere*.dat`.
 file in that mod that imports this one. It holds `APSave.ap_star_piece_unlocked_mask` -
 reached from the client through the ordinary `AP_UNLOCK_AP_STAR_PIECE` category - announces
 an arriving sphere with the same `"Unlocked Item: "` textbox every other unlock uses, and
-latches `APCK_ASSEMBLE_AP_STAR` from an assemble handler. Archipelago numbers the spheres
+latches `APCK_ASSEMBLE_AP_STAR` from an assemble handler. It also carries the two give
+items Hydra and Dragoon have: AP IDs 980-985 collect one sphere into every human rider's
+set, and ID 14 runs the assembly outright. Both are sold in the Energy Link shop's
+Legendary Pieces menu, and neither is gated on the sphere unlocks, the way a Hydra or
+Dragoon part give ignores that part's unlock. Archipelago numbers the spheres
 itself, as `APStarPiece` alongside the 820-825 item IDs in `archipelago_api.h`, so its
 public header stands on its own; the two orders are a contract, since a sphere unlock item
 is applied by index.

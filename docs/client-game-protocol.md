@@ -242,6 +242,7 @@ These IDs must match between the APWorld Python code and the game mod, where the
 | 11  | `AP_ITEM_GIVE_HYDRA`       | `GateMachines_GiveLegendaryMachine(1)` |
 | 12  | `AP_ITEM_SPAWN_RATE_UP`    | `SpawnRate_Increment()` - adds +10% to the CT/TR item spawn rate scale (capped at 5x) |
 | 13  | `AP_ITEM_DROP_PATCHES_TRAP`| `Patch_DropTrap()` - ejects every human rider's equipped stat patches behind the machine (CT only) |
+| 14  | `AP_ITEM_GIVE_AP_STAR`     | `GateApStar_GiveStar()` - runs the Archipelago Star's assembly for the first human rider it can, spheres not required (CT only) |
 
 **Permanent +1 patches (100-108, aligned to PatchKind):** `AP_PERM_PATCH_*` = `100 + PatchKind`, in PatchKind order (Weight, Accel/Boost, TopSpeed, Turn, Charge, Glide, Offense, Defense, HP). Each calls `PermanentPatch_GiveItem(kind)`, incrementing `ap_save->permanent_patches[kind]`.
 
@@ -343,6 +344,14 @@ Not unlocks and not gated, so they carry no game-enum alignment.
 |-----|-----------------------|---------------|
 | 972 | `AP_ITEM_BIG_KIRBY`   | Scale every human Kirby model by x1.5, clamped to 2.0 |
 | 973 | `AP_ITEM_SMALL_KIRBY` | Scale every human Kirby model by x0.5, clamped to 0.5 |
+
+**Archipelago Star sphere gives (980-985, in APStarPiece order):**
+
+AP item ID = `980 + APStarPiece`. Adds that sphere to every human rider's collected set through `GateApStar_GivePiece`, the sphere counterpart of the 300-band Hydra and Dragoon part gives, and announces it under the name the `ap_star` mod carries for it. The sixth completes the set and runs the assembly. City Trial only, returning RETRY elsewhere. The collect is direct rather than a spawned pickup, so it does not need the sphere's unlock (820-825) to have arrived - the same way a Hydra or Dragoon part give ignores that part's unlock.
+
+| ID Range | Spheres |
+|----------|---------|
+| 980-985 | Rose, Green, Violet, Tan, Blue, Yellow |
 
 **Machine unlock note:** IDs 830-854 cover VCKINDs 0-24. VCKIND 25 (WHEELVSDEDEDE) is the Vs. King Dedede stadium's CPU-only machine - ID 855 is explicitly rejected by the handler and is not a valid machine unlock. IDs 856 and up continue the alignment into the MachineKinds `custom_machines` registers, in the order it discovers `machines/*.dat`.
 

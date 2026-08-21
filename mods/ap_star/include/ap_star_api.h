@@ -14,8 +14,8 @@
 // is earned is its idea, not this mod's.
 
 #define AP_STAR_MOD_NAME  "ap_star"
-#define AP_STAR_API_MAJOR 2
-#define AP_STAR_API_MINOR 0
+#define AP_STAR_API_MAJOR 3
+#define AP_STAR_API_MINOR 1
 
 // CustomMachineDesc.name of the machine archive. The registry is generic, so
 // this string is the only thing tying machines/VcStarAp.dat to this code.
@@ -80,7 +80,20 @@ typedef struct ApStarAPI
     // Drop one sphere on the ground in front of a player's machine, bypassing
     // the delivery schedule. Returns 0 if the sphere's gate was closed when this
     // scene loaded, since it has no ItemKind then.
-    int (*DebugSpawnPiece)(int piece, int ply);
+    int (*SpawnPiece)(int piece, int ply);
+
+    // Add one sphere to a player's collected set without a pickup, completing the
+    // set if it is the sixth. Independent of the gate - a sphere held out of the
+    // item registry can still be collected this way, which is how a consumer
+    // awards one directly. City Trial only, and 0 with the player not riding.
+    int (*CollectPiece)(int piece, int ply);
+
+    // Put a player straight through the assembly, as if they had just collected
+    // the sixth sphere: the cutscene (or the mount and completion sounds when it
+    // cannot run), the assembled flags and the assemble handlers. Their collected
+    // set is cleared, the way a set completed by pickup is. City Trial only, and
+    // 0 when the star is not registered or the player is not riding.
+    int (*Assemble)(int ply);
 } ApStarAPI;
 
 #endif // AP_STAR_API_H

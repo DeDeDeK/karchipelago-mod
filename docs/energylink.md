@@ -70,7 +70,7 @@ Auto-Charge is **skipped entirely** for `md->kind == VCKIND_WINGMETAKNIGHT`. His
 | Copy Abilities | 11 | 600 each |
 | Food | 12 | 200-1000 |
 | Special Items | 5 | 1000-2500 |
-| Legendary Pieces | 8 | 5000 each (full Dragoon/Hydra 17500) |
+| Legendary Pieces | 15 | 5000 each Hydra/Dragoon part, 2500 each AP Star sphere (full machine 17500) |
 | City Trial Items | 7 | 800-3200 |
 | City Trial Events | 16 | 2500 each |
 | Top Ride Items | 22 | 400-800 |

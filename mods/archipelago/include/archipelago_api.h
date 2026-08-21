@@ -33,6 +33,7 @@ typedef enum APItemId
     AP_ITEM_GIVE_HYDRA,
     AP_ITEM_SPAWN_RATE_UP,
     AP_ITEM_DROP_PATCHES_TRAP,
+    AP_ITEM_GIVE_AP_STAR,
 
     // Permanent +1 patch items (100-199, aligned to PatchKind)
     AP_PERM_PATCH_BASE = 100,
@@ -526,6 +527,19 @@ typedef enum APItemId
     // carry no game-enum alignment.
     AP_ITEM_BIG_KIRBY = 972,                    // grow Kirby's model
     AP_ITEM_SMALL_KIRBY,                        // shrink Kirby's model
+
+    // Archipelago Star sphere give items (980-985, in APStarPiece order). Drop
+    // the sphere itself in front of every human rider, the way the 300-band
+    // ITKIND gives drop a Hydra or Dragoon part. The sphere has to be unlocked as
+    // of the round's load to have an ItemKind at all, so one whose unlock has not
+    // arrived retries rather than spawning.
+    AP_STAR_PIECE_GIVE_BASE = 980,
+    AP_STAR_PIECE_GIVE_ROSE = 980,
+    AP_STAR_PIECE_GIVE_GREEN,
+    AP_STAR_PIECE_GIVE_VIOLET,
+    AP_STAR_PIECE_GIVE_TAN,
+    AP_STAR_PIECE_GIVE_BLUE,
+    AP_STAR_PIECE_GIVE_YELLOW,
 
 } APItemId;
 

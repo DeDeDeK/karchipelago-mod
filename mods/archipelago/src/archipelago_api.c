@@ -151,7 +151,7 @@ static void ApiDebugTriggerTraplinkReceive(void)
 
 static int ApiDebugSpawnApStarPiece(int piece, int ply)
 {
-    return GateApStar_DebugSpawnPiece(piece, ply);
+    return GateApStar_SpawnPiece(piece, ply);
 }
 
 static const ArchipelagoAPI api = {

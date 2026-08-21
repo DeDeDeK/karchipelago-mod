@@ -436,6 +436,13 @@ int APItems_HandleItem(uint ap_item_id)
         return ok;
     }
 
+    // Archipelago Star sphere give items (AP_STAR_PIECE_GIVE_BASE + APStarPiece).
+    // Collected straight into the player's set, and announced by the gate, which
+    // owns the sphere names.
+    if (ap_item_id >= AP_STAR_PIECE_GIVE_BASE &&
+        ap_item_id < AP_STAR_PIECE_GIVE_BASE + AP_STAR_PIECE_NUM)
+        return GateApStar_GivePiece(ap_item_id - AP_STAR_PIECE_GIVE_BASE);
+
     // Legendary machine assembly - assembled Dragoon/Hydra via the cinematic
     if (ap_item_id == AP_ITEM_GIVE_DRAGOON)
     {
@@ -451,6 +458,10 @@ int APItems_HandleItem(uint ap_item_id)
             tb_api->EnqueueColoredNoun("Received: ", "Hydra", tb_api->MachineColor, NULL);
         return ok;
     }
+
+    // The star's own assembly, awarded without the six spheres.
+    if (ap_item_id == AP_ITEM_GIVE_AP_STAR)
+        return GateApStar_GiveStar();
 
     if (ap_item_id == AP_ITEM_ALL_DOWN)
     {

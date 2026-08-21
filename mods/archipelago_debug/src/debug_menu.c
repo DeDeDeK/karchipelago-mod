@@ -201,6 +201,13 @@ GIVE_FN(GiveSphereTan,    AP_STAR_PIECE_UNLOCK_TAN)
 GIVE_FN(GiveSphereBlue,   AP_STAR_PIECE_UNLOCK_BLUE)
 GIVE_FN(GiveSphereYellow, AP_STAR_PIECE_UNLOCK_YELLOW)
 
+GIVE_FN(GiveSphereItemRose,   AP_STAR_PIECE_GIVE_ROSE)
+GIVE_FN(GiveSphereItemGreen,  AP_STAR_PIECE_GIVE_GREEN)
+GIVE_FN(GiveSphereItemViolet, AP_STAR_PIECE_GIVE_VIOLET)
+GIVE_FN(GiveSphereItemTan,    AP_STAR_PIECE_GIVE_TAN)
+GIVE_FN(GiveSphereItemBlue,   AP_STAR_PIECE_GIVE_BLUE)
+GIVE_FN(GiveSphereItemYellow, AP_STAR_PIECE_GIVE_YELLOW)
+
 GIVE_FN(GiveMaximTomato,  AP_ITKIND_FOODMAXIMTOMATO)
 GIVE_FN(GiveEnergyDrink,  AP_ITKIND_FOODENERGYDRINK)
 GIVE_FN(GiveIceCream,     AP_ITKIND_FOODICECREAM)
@@ -249,6 +256,7 @@ GIVE_FN(Give1HPTrap,        AP_ITEM_1_HP_TRAP)
 GIVE_FN(GiveAllDown,        AP_ITEM_ALL_DOWN)
 GIVE_FN(GiveDragoon,        AP_ITEM_GIVE_DRAGOON)
 GIVE_FN(GiveHydra,          AP_ITEM_GIVE_HYDRA)
+GIVE_FN(GiveApStar,         AP_ITEM_GIVE_AP_STAR)
 GIVE_FN(GiveDropPatchesTrap,AP_ITEM_DROP_PATCHES_TRAP)
 
 GIVE_FN(GivePatchCap,    AP_ITEM_PATCH_CAP_INCREASE)
@@ -845,7 +853,7 @@ static MenuDesc give_special_menu = {
 };
 
 static MenuDesc give_legendary_menu = {
-    .option_num = 8,
+    .option_num = 15,
     .options = {
         A("Dragoon Part A", "Give Dragoon Part A", GiveDragoonA),
         A("Dragoon Part B", "Give Dragoon Part B", GiveDragoonB),
@@ -853,8 +861,15 @@ static MenuDesc give_legendary_menu = {
         A("Hydra Part X",   "Give Hydra Part X",   GiveHydraX),
         A("Hydra Part Y",   "Give Hydra Part Y",   GiveHydraY),
         A("Hydra Part Z",   "Give Hydra Part Z",   GiveHydraZ),
-        A("Give Dragoon",   "Assemble full Dragoon", GiveDragoon),
-        A("Give Hydra",     "Assemble full Hydra",   GiveHydra),
+        A("Rose Sphere",    "Collect the Rose sphere",   GiveSphereItemRose),
+        A("Green Sphere",   "Collect the Green sphere",  GiveSphereItemGreen),
+        A("Violet Sphere",  "Collect the Violet sphere", GiveSphereItemViolet),
+        A("Tan Sphere",     "Collect the Tan sphere",    GiveSphereItemTan),
+        A("Blue Sphere",    "Collect the Blue sphere",   GiveSphereItemBlue),
+        A("Yellow Sphere",  "Collect the Yellow sphere", GiveSphereItemYellow),
+        A("Give Dragoon",   "Assemble full Dragoon",  GiveDragoon),
+        A("Give Hydra",     "Assemble full Hydra",    GiveHydra),
+        A("Give AP Star",   "Assemble the full Archipelago Star", GiveApStar),
     },
 };
 
@@ -942,7 +957,7 @@ static MenuDesc give_items_menu = {
         S("AP Star Spheres",   "Grant a sphere unlock item",      give_spheres_menu),
         S("Food",              "Healing items",                   give_food_menu),
         S("Special Items",     "Powerful one-use items",          give_special_menu),
-        S("Legendary Pieces",  "Dragoon and Hydra parts",        give_legendary_menu),
+        S("Legendary Pieces",  "Dragoon, Hydra and AP Star parts", give_legendary_menu),
         S("Top Ride Items",    "Spawn a Top Ride item for pickup", give_topride_items_menu),
         S("CT Events",         "Trigger a City Trial event",      give_events_menu),
         S("Traps & Events",    "Traps and event triggers",       give_traps_menu),

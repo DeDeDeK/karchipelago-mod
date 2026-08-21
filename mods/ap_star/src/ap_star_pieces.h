@@ -30,7 +30,18 @@ const char *ApStarPieces_GetName(int piece);
 // delivery schedule. `piece` is an APStarPieceKind. Returns 1 if one spawned;
 // the sphere has to be open as of this scene's load to have an ItemKind at all,
 // so a closed one reports and spawns nothing.
-int ApStarPieces_DebugSpawn(int piece, int ply);
+int ApStarPieces_SpawnPiece(int piece, int ply);
+
+// Add one sphere to a player's collected set without a pickup, completing the set
+// if it is the sixth. `piece` is an APStarPieceKind. Independent of the gate: a
+// sphere with no ItemKind this round can still be collected this way. Returns 0
+// outside a City Trial round or with the player not riding.
+int ApStarPieces_CollectPiece(int piece, int ply);
+
+// Run the assembly for a player who has not collected the set, awarding the star
+// outright. Returns 0 outside a City Trial round, with the star unregistered, or
+// with the player not riding.
+int ApStarPieces_Assemble(int ply);
 
 // 1 once a human player has assembled the star this boot. Sticky.
 int ApStarPieces_WasAssembled(void);
