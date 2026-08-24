@@ -1,11 +1,17 @@
 #include "main.h"
 #include "ap_announce.h"
+#include "settings_menu.h"
 
-// Quiet during the boot regrant, and while the client is posting the AP receipt line
-// for the item currently being applied.
+int APAnnounce_LocalEnabled(APLocalKind kind)
+{
+    return kind >= 0 && kind < APLOCAL_NUM && ap_menu_settings.local_messages[kind];
+}
+
+// Off by default: with a client attached its receipt line already names the item, the
+// sender and the color, so the mod's own would only repeat it.
 static int ShouldAnnounce(void)
 {
-    return !ap_regrant_quiet && !ap_item_quiet;
+    return !ap_regrant_quiet && APAnnounce_LocalEnabled(APLOCAL_ITEM);
 }
 
 int APAnnounce_Grant(const char *prefix, const char *noun, GXColor color, const char *suffix)

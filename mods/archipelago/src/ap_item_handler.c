@@ -26,14 +26,8 @@
 #include "spawn_rate.h"
 #include "gate_ap_star.h"
 #include "main.h"
-#include "ap_text.h"
 #include "settings_menu.h"
 #include "ap_announce.h"
-
-// Parallel to APSave.unprocessed_items: 1 where the entry came from the AP mailbox,
-// so its grant announce defers to the client's line. RAM only, so a queue surviving
-// a reboot announces locally instead.
-static u8 unprocessed_from_client[MAX_RECEIVED_ITEMS];
 
 // Bump the received counter, append to the unprocessed list, and acknowledge.
 // Returns 1 if an item was received.
@@ -64,7 +58,6 @@ int APItems_CheckMailbox()
     uint idx = ap_save->item_received_count;
     ap_save->item_received_count++;
 
-    unprocessed_from_client[ap_save->unprocessed_count] = 1;
     ap_save->unprocessed_items[ap_save->unprocessed_count] = incoming;
     ap_save->unprocessed_count++;
 
@@ -522,7 +515,6 @@ int APItems_Queue(uint ap_item_id)
 {
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
         return 0;
-    unprocessed_from_client[ap_save->unprocessed_count] = 0;
     ap_save->unprocessed_items[ap_save->unprocessed_count++] = ap_item_id;
     return 1;
 }
@@ -542,17 +534,14 @@ void APItems_PerFrame(GOBJ *g)
     {
         uint item_id = ap_save->unprocessed_items[i];
 
-        ap_item_quiet = unprocessed_from_client[i] && APText_ItemAnnounceSuppressed();
         int result = APItems_HandleItem(item_id);
-        ap_item_quiet = 0;
 
         if (result == AP_ITEM_RETRY)
             continue;
 
-        // Remove by swapping with the last element; the client flag moves with it.
+        // Remove by swapping with the last element.
         ap_save->unprocessed_count--;
         ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
-        unprocessed_from_client[i] = unprocessed_from_client[ap_save->unprocessed_count];
         break;
     }
 

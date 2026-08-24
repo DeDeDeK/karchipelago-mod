@@ -32,7 +32,7 @@ All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64
 | Offset | Type | Field | Writer | Reader | Description |
 |--------|------|-------|--------|--------|-------------|
 | 0x028  | u32  | `game_ready` | Game | Client | 1 when mod is fully initialized |
-| 0x02C  | u32  | `options_valid` | Client | Game | 1 after client has written all options |
+| 0x02C  | u32  | `options_valid` | Both | Both | Client sets 1 once every option is written; the game clears it as the transfer ack |
 | 0x030  | APSlotOptions | `options` | Client | Game | Slot options block, 0x030-0x0EF |
 
 ### Location Data Fields
@@ -72,9 +72,11 @@ Live mirror of the Settings menu toggles. Game-owned: client reads, never writes
 | 0x28C | u32     | `deathlink_menu_enabled` |
 | 0x290 | u32     | `energylink_menu_enabled` |
 | 0x294 | u32     | `traplink_menu_enabled` |
-| 0x2A0 | u32     | `text_menu_mask`, bit `1 << APTextKind` |
+| 0x29C | u32     | `text_menu_mask`, bit `1 << APTextKind` |
 
 The link toggles are the authoritative current state, not `APSlotOptions.death_link_enabled` / `energy_link_enabled` / `trap_link_enabled` - those only set the *initial* values and are never updated by later toggles. The player can flip a toggle mid-session, so the client must diff all three against last-seen every poll and forward the change to the AP server (`ConnectUpdate` `tags` for DeathLink, the equivalent for TrapLink/EnergyLink), and read all three on connect.
+
+The first of those reads must wait for `options_valid` to clear. The client writes the options and the game takes them in on its next frame, so until the ack lands the mirrors still hold the values the save booted with - and a client that diffs them straight after writing sees the slot's own links as "off", reads that as the player having turned them off in the menu, and drops the DeathLink and TrapLink tags until the mod corrects it a poll later. Any bounce in that window is lost.
 
 `text_menu_mask` is an optimization, not a gate: the mod filters every message by kind as it renders, so the menu stays authoritative even against a stale client. Reading it keeps the client from composing lines the player has turned off, and from parking one in the mailbox.
 
@@ -84,16 +86,15 @@ Client-authored text-box messages. The client composes the whole line - it owns 
 
 | Offset | Type          | Field | Writer | Reader |
 |--------|---------------|-------|--------|--------|
-| 0x298  | u32           | `client_alive`  | Client | Game |
-| 0x29C  | u32           | `text_pending`  | Both   | Both |
-| 0x2A0  | u32           | `text_menu_mask`| Game   | Client |
-| 0x2A4  | APTextMessage | `text_msg`      | Client | Game |
+| 0x298  | u32           | `text_pending`  | Both   | Both |
+| 0x29C  | u32           | `text_menu_mask`| Game   | Client |
+| 0x2A0  | APTextMessage | `text_msg`      | Client | Game |
 
-`client_alive` is a heartbeat, not a flag: the client bumps it (never to 0) on every poll, and the mod treats no change for `AP_CLIENT_ALIVE_TIMEOUT` (180 frames) as "no client attached". That is what lets the mod fall back to its own generic check message when the player is running without a client.
+There is no attachment flag or heartbeat. The game never asks whether a client is there: it renders whatever reaches the mailbox, and the lines it composes itself turn on their own Messages -> Local toggles, so nothing it prints depends on the answer. The client posts its own connect and disconnect lines as ordinary messages, which is the only place the distinction shows up in game.
 
-`text_msg` is a single-slot mailbox with the same handshake as `incoming_item_id`: the client writes the body and only then sets `text_pending` to 1, and must not write while `text_pending` is non-zero; the game renders the message and clears the flag. The game holds a pending message while the text box has no screen canvas (scene loads), so a full mailbox is backpressure and the message survives the load rather than being dropped. One message per client poll is the ceiling, which is far above what the text box can retire - it shows at most 8 at a time for several seconds each - so the client keeps its own bounded backlog rather than a shared ring.
+`text_msg` is a single-slot mailbox with the same handshake as `incoming_item_id`: the client writes the body and only then sets `text_pending` to 1, and must not write while `text_pending` is non-zero; the game renders the message and clears the flag. The game holds a pending message while the text box has no screen canvas (scene loads), so a full mailbox is backpressure and the message survives the load rather than being dropped. One message per client poll is the ceiling, which is far above what the text box can retire - it shows at most 8 at a time for several seconds each - so the client keeps its own unbounded backlog rather than a shared ring.
 
-`text_msg` is a fixed 128-byte `APTextMessage`:
+`text_msg` is a fixed 256-byte `APTextMessage`:
 
 | Offset | Type      | Field | Description |
 |--------|-----------|-------|-------------|
@@ -123,14 +124,14 @@ The client and game must synchronize before data exchange:
 
 1. **Wait for mod**: poll the pointer at `0x805d52d4` until non-zero. (`OnBoot` allocates the struct and stores it.)
 2. **Wait for initialization**: poll `game_ready` (base + `0x028`) until `1`. The mod sets it in `OnSaveLoaded`, so this also guarantees `item_received_index` is valid.
-3. **Write slot options**, then set `options_valid = 1`.
+3. **Write slot options**, then set `options_valid = 1`, and poll it until the game clears it back to 0. The link toggle mirrors are only the slot's once that ack lands.
 4. **Read `item_received_index`** and skip all items with index < this value - the game already received them.
 5. **Write `locations`**, then set `location_data_valid = 1`.
-6. **Begin normal operation**: item delivery, deathlink/energylink/traplink polling, location checking, heartbeat and text queue.
+6. **Begin normal operation**: item delivery, deathlink/energylink/traplink polling, location checking, and text queue.
 
 `text_pending` is not reset by the handshake. A client reconnecting to a game that never rebooted must read it rather than assume 0, or its first message overwrites one the mod has not rendered.
 
-The game's `OnFrameStart` picks up `options_valid` (copying options into save data and setting the initial menu toggles) and `location_data_valid` (applying the placement table and persisting), clearing each as it consumes it.
+The game's `OnFrameStart` picks up `options_valid` (copying options into save data and setting the initial menu toggles) and `location_data_valid` (applying the placement table and persisting), clearing each as it consumes it. `options_valid` is cleared on every client write, including a reconnect's, even though the copy into save data happens only once - the clear is what tells the client the mirrors are current, so a reconnect must get one too.
 
 The client should write options and location data on **every connection**. The game deduplicates: options are copied to persistent save data only on the first connection for a given save file, while location data is always re-applied.
 
@@ -555,19 +556,18 @@ The text box shows Archipelago traffic as one-line messages. The client is the a
 
 ### Client Responsibilities
 
-- **Heartbeat**: bump `client_alive` every poll, never to 0.
-- **Checks**: when `check_locations` confirms new locations, compose one line per location from `locations_info` - the scout cache the connect-time `LocationScouts` fills for every location this slot owns - so no server round trip is needed. Above a small burst threshold, collapse to a single count line.
-- **Items**: compose one line as each item goes into the `incoming_item_id` mailbox. The `NetworkItem` there carries the sending player and the item flags.
+- **Status**: post "Archipelago client connected" as a `STATUS` message once the handshake completes, and "disconnected" on a clean shutdown - the latter written straight into the mailbox, since nothing drains the backlog after that, and skipped if the mailbox is still full. A client killed outright posts neither, and the game keeps showing whatever it last received.
+- **Checks**: when `check_locations` confirms new locations, compose one line per location from `locations_info` - the scout cache the connect-time `LocationScouts` fills for every location this slot owns - so no server round trip is needed. One line per location, always - a burst goes into the outgoing queue like any other backlog.
+- **Items**: compose one line as each item goes into the `incoming_item_id` mailbox. The `NetworkItem` there carries the sending player and the item flags. Skip an item this slot placed for itself while check messages are on - its check line already named it.
 - **Server text**: relay `Hint`, `Goal`, `Release`, `Collect`, `Chat` and `ServerChat` `PrintJSON` packets. **Not `ItemSend`** - the server broadcasts one to the whole team for every check anyone makes, and this slot's own are already covered by the check and item lines.
 - **Encoding**: fold text to the glyphs the game font renders before packing.
 
 ### Game Responsibilities
 
-- `APText_OnFrameStart` (`ap_text.c`) tracks the heartbeat and renders a pending message into the text box, holding it while the text box reports it has no canvas.
+- `APText_OnFrameStart` (`ap_text.c`) renders a pending message into the text box, holding it while the text box reports it has no canvas. It keeps no client state.
 - Messages are filtered by `kind` against the Messages settings menu on render, so the menu is authoritative even against a stale client.
-- A `client_alive` transition posts a "client connected"/"disconnected" line under the status toggle.
-- While the client is attached and item messages are on, `ap_item_quiet` suppresses the mod's own announce for items applied from the AP mailbox, so each item produces one line rather than two. Every grant announce routes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`), which is where that suppression and the boot regrant's both apply. Announces that report a consequence the AP item name does not carry (patch cap percentage, spawn rate percentage) call the text box directly and keep printing, as do all non-AP paths: EnergyLink purchases, TrapLink, in-game pickups, gate prompts.
-- `check_detection.c` posts its own generic "Check: recorded" line only when no client is attached.
+- The lines the mod composes about AP traffic have their own toggles under Messages -> Local, keyed by `APLocalKind`: `APLOCAL_CHECK` for "Check recorded", `APLOCAL_ITEM` for an applied grant, `APLOCAL_GOAL` for the mode and seed goal lines. The first two default Off, so each event normally produces one line - the client's; a player running without a client turns them on.
+- Every grant announce routes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`), which is where the `APLOCAL_ITEM` toggle and the boot regrant's `ap_regrant_quiet` both apply. The check and goal lines have one call site each and test `APAnnounce_LocalEnabled` directly. Announces that report a consequence the AP item name does not carry (patch cap percentage, spawn rate percentage) call the text box directly and keep printing, as do all non-AP paths: EnergyLink purchases, TrapLink, in-game pickups, gate prompts.
 
 ## Invariants
 

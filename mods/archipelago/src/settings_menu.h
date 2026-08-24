@@ -4,6 +4,7 @@
 #include "hoshi/settings.h"
 
 #include "main.h"
+#include "ap_announce.h"
 
 // Menu toggle state, bound to the Settings menu via OptionDesc. Seeded from
 // APSlotOptions on first connect, then owned by the player.
@@ -22,6 +23,7 @@ typedef struct APMenuSettings
     int air_quick_spin_enabled;
     int onfoot_zoom_enabled;
     int text_messages[APTEXT_KIND_NUM];
+    int local_messages[APLOCAL_NUM];
 } APMenuSettings;
 
 extern APMenuSettings ap_menu_settings;

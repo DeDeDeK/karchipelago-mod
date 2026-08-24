@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 
 #include "os.h"
 #include "game.h"
@@ -72,14 +73,12 @@ _Static_assert(offsetof(APData, client_backfill) == 0x248, "CLIENT_BACKFILL_AIRR
 _Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x278, "CLIENT_BACKFILL_ARCHIPELAGO");
 _Static_assert(offsetof(APData, goal_complete) == 0x288, "GOAL_COMPLETE");
 _Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x28C, "DEATHLINK_MENU_ENABLED");
-_Static_assert(offsetof(APData, client_alive) == 0x298, "CLIENT_ALIVE");
-_Static_assert(offsetof(APData, text_pending) == 0x29C, "TEXT_PENDING");
-_Static_assert(offsetof(APData, text_menu_mask) == 0x2A0, "TEXT_MENU_MASK");
-_Static_assert(offsetof(APData, text_msg) == 0x2A4, "TEXT_MSG");
+_Static_assert(offsetof(APData, text_pending) == 0x298, "TEXT_PENDING");
+_Static_assert(offsetof(APData, text_menu_mask) == 0x29C, "TEXT_MENU_MASK");
+_Static_assert(offsetof(APData, text_msg) == 0x2A0, "TEXT_MSG");
 
 int ap_checklist_mode = GMMODE_NUM;
 int ap_regrant_quiet = 0;
-int ap_item_quiet = 0;
 
 ModDesc mod_desc = {
     .name = "KARchipelago",
@@ -288,7 +287,9 @@ static void AppendCsv(char *buf, int *pos, const char *name)
     buf[*pos] = '\0';
 }
 
-static const char *GoalName(const APSlotOptions *opts, int row)
+// buf holds the count goal's threshold, so callers need one buffer per goal named
+// in the same line.
+static const char *GoalName(const APSlotOptions *opts, int row, char *buf)
 {
     static const char *const names[] = {
         "100 squares", "N squares", "Hydra + Dragoon", "beat King Dedede",
@@ -299,6 +300,11 @@ static const char *GoalName(const APSlotOptions *opts, int row)
 
     if (goal >= sizeof(names) / sizeof(names[0]))
         return "?";
+    if (goal == GOAL_N_CHECKLIST)
+    {
+        sprintf(buf, "%d squares", opts->checklist_amount[row]);
+        return buf;
+    }
     return names[goal];
 }
 
@@ -387,24 +393,35 @@ static void APOptions_ApplyUngatedCategories(void)
 }
 
 // Copy the client's slot options into save data on first detection. Options are
-// immutable per AP slot, so this runs once per save file.
+// immutable per AP slot, so the copy runs once per save file, but every client write
+// is acknowledged by clearing options_valid with the menu mirrors already
+// republished. The client holds off diffing the link toggles until that clears -
+// before it, the mirrors still hold the save's own defaults, which reads as the
+// player having turned the links off in the menu.
 static void APOptions_TransferToSave()
 {
-    if (ap_save->options_received)
-        return;
     if (!ap_data->options_valid)
         return;
 
-    OSReport("[Main] AP client connected - slot options transferred to save\n");
-    memcpy(&ap_save->options, &ap_data->options, sizeof(APSlotOptions));
-    ap_save->options_received = 1;
+    int first_transfer = !ap_save->options_received;
+    if (first_transfer)
+    {
+        OSReport("[Main] AP client connected - slot options transferred to save\n");
+        memcpy(&ap_save->options, &ap_data->options, sizeof(APSlotOptions));
+        ap_save->options_received = 1;
+
+        ap_menu_settings.deathlink_enabled = ap_save->options.death_link_enabled;
+        ap_menu_settings.energylink_enabled = ap_save->options.energy_link_enabled;
+        ap_menu_settings.traplink_enabled = ap_save->options.trap_link_enabled;
+    }
+
+    SyncMenuStateToAPData();
+    ap_data->options_valid = 0;
+
+    if (!first_transfer)
+        return;
 
     const APSlotOptions *opts = &ap_save->options;
-    ap_menu_settings.deathlink_enabled = opts->death_link_enabled;
-    ap_menu_settings.energylink_enabled = opts->energy_link_enabled;
-    ap_menu_settings.traplink_enabled = opts->trap_link_enabled;
-    SyncMenuStateToAPData();
-
     char list[224];
     int n = 0;
     if (opts->death_link_enabled)  AppendCsv(list, &n, "DeathLink");
@@ -412,10 +429,12 @@ static void APOptions_TransferToSave()
     if (opts->trap_link_enabled)   AppendCsv(list, &n, "TrapLink");
     OSReport("[Main] Links on: %s\n", n ? list : "none");
 
+    char goals[CHECKLIST_MODE_NUM][24];
     OSReport("[Main] Goals - AirRide: %s, TopRide: %s, CityTrial: %s, %s: %s\n",
-             GoalName(opts, GMMODE_AIRRIDE), GoalName(opts, GMMODE_TOPRIDE),
-             GoalName(opts, GMMODE_CITYTRIAL),
-             AP_CHECKLIST_NAME, GoalName(opts, AP_CHECKLIST_ROW));
+             GoalName(opts, GMMODE_AIRRIDE, goals[GMMODE_AIRRIDE]),
+             GoalName(opts, GMMODE_TOPRIDE, goals[GMMODE_TOPRIDE]),
+             GoalName(opts, GMMODE_CITYTRIAL, goals[GMMODE_CITYTRIAL]),
+             AP_CHECKLIST_NAME, GoalName(opts, AP_CHECKLIST_ROW, goals[AP_CHECKLIST_ROW]));
 
     n = 0;
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)

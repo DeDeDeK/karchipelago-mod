@@ -57,14 +57,10 @@ static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
 // registering first pushes it higher. GMMODE_NUM until APChecklist_Register.
 extern int ap_checklist_mode;
 
-// The two conditions that silence a grant announce, read by APAnnounce_Grant.
 // Set while checklist rewards are re-applied from save data, so the gate unlockers
-// stay quiet instead of reprinting every already-owned unlock at boot.
+// stay quiet instead of reprinting every already-owned unlock at boot. Read by
+// APAnnounce_Grant alongside the Messages -> Local -> Items toggle.
 extern int ap_regrant_quiet;
-// Set while an item pulled from the AP mailbox is being applied and the client is
-// posting the receipt line itself. Never set for EnergyLink purchases, TrapLink, or
-// in-game pickups.
-extern int ap_item_quiet;
 
 // Absolute clamp ceiling for per-stat patch totals. Patch_GetMaxValue returns
 // through extsb, so anything above 127 sign-extends negative.
@@ -206,10 +202,6 @@ _Static_assert(AP_TEXT_SEG_NUM == TEXTBOX_MAX_SEGMENTS, "AP_TEXT_SEG_NUM must ma
 // textbox wraps onto three lines and truncates whatever is left over.
 #define AP_TEXT_BLOB_LEN 244
 
-// Frames without a client_alive change before the mod treats the client as gone. The
-// client bumps it every poll (10 Hz), so this is ~18 missed polls.
-#define AP_CLIENT_ALIVE_TIMEOUT 180
-
 // Archipelago's own palette (the CommonClient GUI names), plus a default that follows
 // the textbox's own DefaultColor.
 typedef enum APTextColor
@@ -281,9 +273,6 @@ typedef struct APData
     u32 deathlink_menu_enabled;
     u32 energylink_menu_enabled;
     u32 traplink_menu_enabled;
-
-    u32 client_alive;  // Client -> game. Bumped every poll; the mod treats no change for
-                       // AP_CLIENT_ALIVE_TIMEOUT frames as "no client".
 
     // Text mailbox, the same shape as incoming_item_id: the client fills text_msg and then
     // sets text_pending, the game renders and clears it. The game holds a pending message

@@ -10,7 +10,7 @@
 #include "checklist_rewards.h"
 #include "ap_checklist.h"
 #include "ap_check_detect.h"
-#include "ap_text.h"
+#include "ap_announce.h"
 #include "textbox_api.h"
 #include "settings_menu.h"
 
@@ -85,9 +85,7 @@ static void RecordCheck(int mode, int clear_kind)
         OSReport("[CheckDetection] mode=%d clear_kind=%d recorded (no local reward placement)\n",
                  mode, clear_kind);
     }
-    // With a client attached the richer "Check: sent <item> to <player>" line arrives
-    // within a poll, so only the unattached case needs local feedback.
-    if (!APText_ClientConnected() && APText_KindEnabled(APTEXT_KIND_CHECK))
+    if (APAnnounce_LocalEnabled(APLOCAL_CHECK))
         tb_api->EnqueueColoredNoun(NULL, "Check", tb_api->CheckColor, " recorded");
 
     CheckDetection_EvaluateGoal();
@@ -232,7 +230,8 @@ static void AnnounceModeGoal(int row)
         { name,               color },
         { " goal complete!",  tb_api->GoalColor },
     };
-    tb_api->EnqueueSegments(segs, 2);
+    if (APAnnounce_LocalEnabled(APLOCAL_GOAL))
+        tb_api->EnqueueSegments(segs, 2);
     OSReport("[CheckDetection] %s goal satisfied\n", name);
 }
 
@@ -269,7 +268,8 @@ void CheckDetection_EvaluateGoal(void)
             if (opt->goal[r] != GOAL_NONE)
                 ap_save->goal_announced[r] = 1;
         OSReport("[CheckDetection] GOALS COMPLETE\n");
-        tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
+        if (APAnnounce_LocalEnabled(APLOCAL_GOAL))
+            tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
         return;
     }
 

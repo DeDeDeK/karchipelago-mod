@@ -20,6 +20,11 @@ APMenuSettings ap_menu_settings = {
         [APTEXT_KIND_STATUS] = 1,
         [APTEXT_KIND_CHAT]   = 0,
     },
+    .local_messages = {
+        [APLOCAL_CHECK] = 0,
+        [APLOCAL_ITEM]  = 0,
+        [APLOCAL_GOAL]  = 1,
+    },
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
@@ -57,11 +62,59 @@ static void OnToggleItemMessages(int val)       { OSReport("[Settings] Item mess
 static void OnToggleHintMessages(int val)       { OSReport("[Settings] Hint messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleStatusMessages(int val)     { OSReport("[Settings] Status messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleChatMessages(int val)       { OSReport("[Settings] Chat messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+static void OnToggleLocalChecks(int val)        { OSReport("[Settings] Local check messages toggled %s\n", stc_off_on[val]); }
+static void OnToggleLocalItems(int val)         { OSReport("[Settings] Local item messages toggled %s\n", stc_off_on[val]); }
+static void OnToggleLocalGoals(int val)         { OSReport("[Settings] Local goal messages toggled %s\n", stc_off_on[val]); }
 
-// The client composes these lines and the mod only renders them, so a kind turned off
-// here is also skipped client-side once SyncMenuStateToAPData publishes the change.
+// The lines the mod composes itself. Checks and items default off: a client attached to
+// the same event posts a richer line a poll later.
+static MenuDesc local_messages_menu = {
+    .option_num = 3,
+    .options = {
+        &(OptionDesc){
+            .name = "Checks",
+            .description = "Show the mod's own line as a checkbox is recorded, without the item it sent",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.local_messages[APLOCAL_CHECK],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleLocalChecks,
+        },
+        &(OptionDesc){
+            .name = "Items",
+            .description = "Show the mod's own line as it applies an item, without a sender",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.local_messages[APLOCAL_ITEM],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleLocalItems,
+        },
+        &(OptionDesc){
+            .name = "Goals",
+            .description = "Show a line as each mode goal, and then the whole seed's goal, is met",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.local_messages[APLOCAL_GOAL],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleLocalGoals,
+        },
+    },
+};
+
+// The five kinds gate what the client composes and the mod only renders, so a kind
+// turned off here is skipped client-side too once SyncMenuStateToAPData publishes the
+// change. Local gates what the mod composes itself.
 static MenuDesc messages_menu = {
-    .option_num = 5,
+    .option_num = 6,
     .options = {
         &(OptionDesc){
             .name = "Checks",
@@ -122,6 +175,12 @@ static MenuDesc messages_menu = {
                 "On",
             },
             .on_change = OnToggleChatMessages,
+        },
+        &(OptionDesc){
+            .name = "Local",
+            .description = "Choose which lines the mod composes itself, alongside the client's",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &local_messages_menu,
         },
     },
 };

@@ -1,6 +1,6 @@
 # Archipelago Text Messages
 
-The in-game lines that report multiworld traffic: a location sent, an item received, a server hint, a goal or release announcement, chat. The Python client composes each line and the mod renders it; the mod side is `mods/archipelago/src/ap_text.c` plus the Messages settings menu, and the client side is `KARText.py` and the `_push_*_text` methods in `KARClient.py`.
+The in-game lines that report multiworld traffic: a location sent, an item received, a server hint, a goal or release announcement, chat. The Python client composes each line and the mod renders it; the mod side is `mods/archipelago/src/ap_text.c` for the client's lines and `ap_announce.c` for its own, plus the Messages settings menu; the client side is `KARText.py` and the `_push_*_text` methods in `KARClient.py`.
 
 ## Why the client writes the text
 
@@ -20,10 +20,19 @@ Each kind has its own Off/On toggle under Archipelago Settings -> Messages. The 
 | `APTEXT_KIND_STATUS` | On | Goal / release / collect, and client connect state |
 | `APTEXT_KIND_CHAT` | Off | Player and server chat |
 
+Those five gate what the client writes. The lines the mod composes itself sit under Messages -> Local and are gated separately by `APLocalKind`, since nothing about them is on the wire:
+
+| Kind | Default | Content |
+|------|---------|---------|
+| `APLOCAL_CHECK` | Off | `Check recorded`, as a checkbox is recorded |
+| `APLOCAL_ITEM` | Off | `Unlocked Machine: Warp Star`, `Received: Sleep` - a grant being applied |
+| `APLOCAL_GOAL` | On | `Air Ride goal complete!`, `All Goals complete!` |
+
 ## Wording
 
 ```
-Check: sent Progressive Sword to Kirby64
+Kirby sent Progressive Sword to Kirby64
+Kirby found their Warp Star
 Warp Star received from Kirby64
 Warp Star received
 Hint (priority): Progressive Sword is at Stadium DRAG RACE 2 (Kirby64)
@@ -31,9 +40,9 @@ Hint: Kirby64's Progressive Sword is at Stadium DRAG RACE 2
 Archipelago client connected
 ```
 
-A check line names the receiving player, which for a self-placed item is this slot; an item line names the sending player, and omits it when the item came from this slot or from the server's starting inventory.
+A check line is worded like the server's own ItemSend, naming this slot as the finder and the player the item went to; a self-placed item collapses to the `found their` form. An item line names the sending player, and omits it when the item came from the server's starting inventory. An item this slot placed for itself gets no item line at all while check messages are on - its check line already named it - so the `Warp Star received` form is what a starting-inventory item prints, or a self-placed one with checks turned off.
 
-Hints are reworded rather than relayed verbatim. The server only sends a hint to the two slots it concerns - the player receiving the item and the player whose world holds it - so exactly one of those is always this slot, and Archipelago's full phrasing spends most of one screen line restating it. The hint status becomes both the color and a word inside the `Hint:` prefix, which keeps the whole thing inside the five-run cap with the location name intact.
+Hints are reworded rather than relayed verbatim. The server only sends a hint to the two slots it concerns - the player receiving the item and the player whose world holds it - so exactly one of those is always this slot, and Archipelago's full phrasing spends most of one screen line restating it. The hint status becomes both the color and a word inside the `Hint:` prefix, which leaves the room the location name needs.
 
 Goal, release, collect and chat lines arrive from the server as a single uncolored run of text; the client strips the `(Team #N)` stamp and colors the line by kind.
 
@@ -67,18 +76,22 @@ The game font draws alphanumerics and a fixed set of punctuation: `` !"#$%&'()*+
 
 ## Duplicate Suppression
 
-The mod announces its own grants - `Unlocked Machine: Warp Star`, `Received: Sleep` - and those restate what the client's item line already said. While a client is attached and item messages are on, `ap_item_quiet` is set around the application of any item that came from the AP mailbox, which turns those announces off, so one item produces one line.
+Two sides narrate the same events. The mod knows an item is being applied and a checkbox is being recorded; the client knows which item, whose it was, and where it went. Left alone that prints each event twice, so the mod's half is off by default: `APLOCAL_CHECK` and `APLOCAL_ITEM` both start Off, and one event produces the client's one line. Turning either on gives both lines - the mod's at the moment the event lands, the client's a poll later - which is also what a player running without a client turns on to get any feedback at all. `APLOCAL_GOAL` starts On because the client has no equivalent: the server's goal broadcast names the slot, not the mode that just finished.
 
-Every grant announce goes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`) rather than calling the text box itself. That is deliberate: suppression is a property of the whole category, and a new unlock handler that copies its neighbour gets it without anyone remembering a guard. Announces that carry something the AP item name does not - `Patch cap increased (50%)`, `Spawn rate increased (60%)` - are the exception and call the text box directly, which is what marks them as exceptional. So does every non-AP path: EnergyLink purchases, TrapLink traps, in-game pickups, gate prompts. The boot regrant suppresses the same category through the same funnel, via `ap_regrant_quiet`.
+The decision is the toggle and nothing else. The mod does not try to work out whether a client is attached, or whether one narrated any particular item.
 
-The mailbox origin is tracked per queued item in a RAM-only array parallel to `APSave.unprocessed_items`, so an item still queued across a reboot announces locally again - the client's line for it scrolled off in the previous session.
+Every grant announce goes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`) rather than calling the text box itself. That is deliberate: the toggle is a property of the whole category, and a new unlock handler that copies its neighbour gets it without anyone remembering a guard. Announces that carry something the AP item name does not - `Patch cap increased (50%)`, `Spawn rate increased (60%)` - are the exception and call the text box directly, which is what marks them as exceptional. So does every non-AP path: EnergyLink purchases, TrapLink traps, in-game pickups, gate prompts. The boot regrant suppresses the same category through the same funnel, via `ap_regrant_quiet`.
 
-## Client Detection
+The check and goal lines have one call site each, in `check_detection.c`, so they test `APAnnounce_LocalEnabled` directly instead of routing through a funnel of their own.
 
-`client_alive` is a counter the client bumps on every poll. The mod treats no change for 180 frames as "no client", which drives two behaviors: the connect and disconnect lines, and the fallback `Check: recorded` that `check_detection.c` posts when a check is recorded with nothing attached to report it to. With a client attached that line is skipped, because the client's richer line arrives about a poll later.
+## Client Status
+
+The mod tracks no client state. `ap_text.c` renders what arrives in the mailbox, and the lines the mod composes itself turn on their own Local toggles and nothing else, so no game-side decision depends on whether a client is attached.
+
+That leaves the connect and disconnect lines to the client, which knows both moments first hand. It posts "Archipelago client connected" as an ordinary `STATUS` message once the handshake completes, and "disconnected" on a clean shutdown - written straight into the mailbox rather than queued, since nothing drains the backlog after that, and skipped if the mod is still holding an earlier message. A client killed outright posts neither.
 
 ## Transport
 
-One 128-byte record in `APData` plus a pending flag, the same mailbox handshake the item channel uses: the client writes the body, then sets the flag; the mod renders and clears it. The mod holds a pending message while the text box has no screen canvas, so a scene load backpressures the client instead of losing the message.
+One 256-byte record in `APData` plus a pending flag, the same mailbox handshake the item channel uses: the client writes the body, then sets the flag; the mod renders and clears it. The mod holds a pending message while the text box has no screen canvas, so a scene load backpressures the client instead of losing the message.
 
-That caps delivery at one message per client poll, roughly 10 a second. The text box shows at most 8 at a time and holds each for several seconds, so it retires messages far slower than that, and a shared ring would only move the backlog from the client into game memory. The client queues composed messages in a bounded deque instead and writes one per poll, keeping all Dolphin access in its poll loop; if the deque overflows it drops the oldest and logs once. A burst of more than three checks in one poll collapses to a single count line before it ever reaches the deque.
+That caps delivery at one message per client poll, roughly 10 a second. The text box shows at most 8 at a time and holds each for several seconds, so it retires messages far slower than that, and a shared ring would only move the backlog from the client into game memory. The client queues composed messages in an unbounded deque instead and writes one per poll, keeping all Dolphin access in its poll loop. Nothing is collapsed or dropped on the way in: a burst of checks queues one line each and drains at the poll's own pace. Goaling a world releases every check this slot placed at once, which is the case the queue is sized for - the records are 256 bytes each and the client has the memory.
