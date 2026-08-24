@@ -54,8 +54,8 @@ over-cap warning fires once before any entry is added. Each `.dat` becomes a
 
 - `file_entrynum` - FST entry, re-openable across scenes.
 - `id_hash` - FNV-1a over the full FST path. Stable identity independent of
-  registry order, so per-item enable state (menu / AP gating) survives reboots
-  and folder changes.
+  registry order, so a consumer mod's per-item gating survives reboots and folder
+  changes.
 - `name` - the descriptor's display name, the handle a consumer mod binds by. It
   must be known before any round registers anything, and for an item held
   disabled nothing ever registers it, so discovery reads each archive once here.
@@ -67,12 +67,9 @@ over-cap warning fires once before any entry is added. Each `.dat` becomes a
   address and a release rewinds to it. Boot's high-water mark is therefore one
   `.dat`, not one per drop-in; holding them would cost the full file size of every
   item permanently off the ~10.2 MB HSD heap.
-- `enabled` / `api_enabled` - the two independent spawn gates, both of which must
-  be open for the item to be registered. `enabled` is the player's settings-menu
-  toggle, which hoshi persists; `api_enabled` is the consumer-mod gate written by
-  `SetEnabled` and defaults open. They are separate fields because a consumer that
-  drives its gate every scene load would otherwise rewrite the player's saved
-  choice and leave the menu showing a value they never picked.
+- `api_enabled` - the consumer-mod spawn gate, written by `SetEnabled` and
+  defaulting open, so an item nobody gates spawns as soon as it is discovered.
+  Closed keeps the item out of the round entirely.
 - `assigned_kind` - the `ItemKind` assigned in the extended tables for the current
   round (`-1` until registered).
 
@@ -248,8 +245,8 @@ This mod ships no items of its own and has no `assets/`.
 `CustomItemsAPI` (`include/custom_items_api.h`) is exported via `Hoshi_ExportMod`
 for other mods (e.g. archipelago gating/granting custom items). Items are
 addressed by `id_hash`, not registry index, so a consumer's binding survives a
-folder change. Beyond the enumeration accessors it offers `IsEnabled` (master AND
-menu toggle AND consumer gate), `SetEnabled` (the consumer gate only),
+folder change. Beyond the enumeration accessors it offers `IsEnabled` and
+`SetEnabled` (the consumer gate),
 `GetAssignedKind` (this round's `ItemKind`, or -1), and add/remove for pickup
 handlers.
 
@@ -268,12 +265,9 @@ matches.
 
 ## File Layout
 
-`src/main.c` builds the `ModDesc` and the settings menu at boot: a master enable
-toggle plus one per discovered item, each bound to its registry entry's `enabled`
-flag and labeled by the stable `menu_label` (the saved per-item state is hashed on
-the option name, so it survives reboots). `enabled` is the only field the menu
-writes - a consumer mod's gate is `api_enabled` - so exiting the settings menu
-never persists a gate decision as if it were the player's.
+`src/main.c` is just the `ModDesc` and its `OnBoot`. The mod has no settings menu
+and contributes no entry to hoshi's: everything dropped into `items/` is discovered
+and enabled, and the only spawn gate is `api_enabled`, owned by consumer mods.
 
 `src/custom_items.c` holds boot, registry storage, and the exported API;
 `src/item_discovery.c` the FST scan and path hashing; `src/item_registry.c` the

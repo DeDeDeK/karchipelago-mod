@@ -92,13 +92,11 @@ typedef struct CustomItemsAPI
     // Display name of the index-th item (NULL if out of range).
     const char *(*GetName)(int index);
 
-    // 1 if enabled for spawning: master toggle AND the player's per-item menu
-    // toggle AND the consumer gate below.
+    // 1 if the item's consumer gate is open, i.e. it may spawn this round.
     int (*IsEnabled)(u32 id_hash);
 
-    // Set this consumer's gate on an item. Independent of the player's menu
-    // toggle, which stays theirs - either one off keeps the item out of the
-    // round. Gates default open, so an item nobody calls this on spawns freely.
+    // Set this consumer's gate on an item. Gates default open, so an item
+    // nobody calls this on spawns freely.
     void (*SetEnabled)(u32 id_hash, int enabled);
 
     // ItemKind assigned this round, or -1 if not registered yet this scene.

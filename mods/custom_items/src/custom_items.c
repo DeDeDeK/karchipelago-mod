@@ -5,9 +5,6 @@
 #include "custom_items.h"
 #include "custom_items_api.h"
 
-// Off gates every custom item out of spawning regardless of the per-item flags.
-int custom_items_enabled = 1;
-
 static CustomItemEntry stc_registry[CUSTOM_ITEM_MAX];
 static int stc_registry_count;
 
@@ -46,8 +43,6 @@ CustomItemEntry *CustomItems_AppendEntry(void)
     e->file_entrynum = -1;
     e->id_hash = 0;
     e->name[0] = '\0';
-    e->menu_label[0] = '\0';
-    e->enabled = 1;
     e->api_enabled = 1;
     e->assigned_kind = -1;
     return e;
@@ -84,12 +79,10 @@ static const char *Api_GetName(int index)
 static int Api_IsEnabled(u32 id_hash)
 {
     CustomItemEntry *e = CustomItems_FindByHash(id_hash);
-    return (custom_items_enabled && e != NULL && e->enabled && e->api_enabled) ? 1 : 0;
+    return (e != NULL && e->api_enabled) ? 1 : 0;
 }
 
-// Writes the consumer gate, not the menu toggle: the toggle is the player's and
-// hoshi persists it, so a mod driving this every scene load would rewrite their
-// saved choice and leave the menu showing a value they never picked.
+// Gates default open, so an item nobody calls this on spawns freely.
 static void Api_SetEnabled(u32 id_hash, int enabled)
 {
     CustomItemEntry *e = CustomItems_FindByHash(id_hash);
@@ -163,6 +156,6 @@ void CustomItems_OnBoot(void)
 
     Hoshi_ExportMod((void *)&stc_api);
 
-    OSReport("[CustomItems] Initialized (%d custom item%s discovered, master %s)\n",
-             n, n == 1 ? "" : "s", custom_items_enabled ? "enabled" : "disabled");
+    OSReport("[CustomItems] Initialized (%d custom item%s discovered)\n",
+             n, n == 1 ? "" : "s");
 }

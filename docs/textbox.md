@@ -111,7 +111,7 @@ Bound to `textbox_settings` (mod-owned storage, not `APSave`). Each option's sto
 | Max On Screen | 3 / 4 / 6 / 8 | 6 | Queue cap; enqueuing over it drops oldest |
 | Display Time | Short / Med / Long | Med | 180 / 300 / 480 frames at full opacity before the fade starts |
 | Typewriter -> Enabled | Off / On | On | Sampled per message at enqueue |
-| Typewriter -> Speed | Slow / Med / Fast | Med | 8 / 4 / 2 frames per glyph (`temp.char_delay`) |
+| Typewriter -> Speed | Slow / Med / Fast | Fast | 8 / 4 / 2 frames per glyph (`temp.char_delay`) |
 
 ## Top Ride Re-Render
 

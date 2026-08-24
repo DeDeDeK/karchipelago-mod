@@ -12,7 +12,7 @@
 TextBoxSettings textbox_settings = {
     .enabled            = 1,
     .typewriter_enabled = 1,
-    .typewriter_speed   = 1, // Med (4 frames/glyph)
+    .typewriter_speed   = 2, // Fast (2 frames/glyph)
     .font_size          = 1, // Med (0.4)
     .colored_names      = 1, // On
     .message_spacing    = 0, // Tight (touching)

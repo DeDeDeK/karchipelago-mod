@@ -149,9 +149,6 @@ int CustomItemRegistry_RegisterAll(void)
     stc_active_count = 0;
     stc_event_drop_active = 0;
 
-    if (!custom_items_enabled)
-        return 0;
-
     itCommonDataAll *all = *stc_it_common_data;
     if (all == NULL || all->itData == NULL)
         return 0; // item data not loaded - not a City Trial round with items
@@ -184,7 +181,7 @@ int CustomItemRegistry_RegisterAll(void)
     for (int i = 0; i < count && n < CUSTOM_ITEM_MAX; i++)
     {
         CustomItemEntry *e = CustomItems_GetEntry(i);
-        if (e == NULL || !e->enabled || !e->api_enabled)
+        if (e == NULL || !e->api_enabled)
             continue;
 
         const CustomItemDesc *desc = CustomItems_LoadDescriptor(e->file_entrynum, NULL);
@@ -298,7 +295,7 @@ int CustomItemRegistry_RegisterAll(void)
 // repoint, so both are re-applied here (PoolAppend is idempotent).
 void CustomItemRegistry_ReinjectPools(void)
 {
-    if (!custom_items_enabled || stc_active_count == 0)
+    if (stc_active_count == 0)
         return;
 
     grBoxGeneObj *g = *stc_grBoxGeneObj;

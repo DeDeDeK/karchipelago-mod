@@ -123,18 +123,6 @@ static void IndexCb(int entrynum, void *args)
     char *filename = FST_GetFilenameFromEntrynum(entrynum);
     CustomItems_CopyName(e->name, filename);
 
-    // menu_label is never overwritten by the descriptor, so the per-item
-    // toggle's save hash (keyed on the option name) stays stable across reboots.
-    CustomItems_CopyName(e->menu_label, filename);
-    int dot = -1;
-    for (int i = 0; e->menu_label[i] != '\0'; i++)
-    {
-        if (e->menu_label[i] == '.')
-            dot = i;
-    }
-    if (dot > 0) // keep a leading-dot name intact; strip only a real extension
-        e->menu_label[dot] = '\0';
-
     if (path != NULL)
         ReadDescriptorName(e, path);
     OSReport("[CustomItems] Found %s -> '%s'\n", path, e->name);
