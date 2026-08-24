@@ -26,6 +26,14 @@
 #include "spawn_rate.h"
 #include "gate_ap_star.h"
 #include "main.h"
+#include "ap_text.h"
+#include "settings_menu.h"
+#include "ap_announce.h"
+
+// Parallel to APSave.unprocessed_items: 1 where the entry came from the AP mailbox,
+// so its grant announce defers to the client's line. RAM only, so a queue surviving
+// a reboot announces locally instead.
+static u8 unprocessed_from_client[MAX_RECEIVED_ITEMS];
 
 // Bump the received counter, append to the unprocessed list, and acknowledge.
 // Returns 1 if an item was received.
@@ -56,6 +64,7 @@ int APItems_CheckMailbox()
     uint idx = ap_save->item_received_count;
     ap_save->item_received_count++;
 
+    unprocessed_from_client[ap_save->unprocessed_count] = 1;
     ap_save->unprocessed_items[ap_save->unprocessed_count] = incoming;
     ap_save->unprocessed_count++;
 
@@ -105,7 +114,7 @@ static GXColor ItemReceiveColor(ItemKind k)
 static void NotifyItemReceived(ItemKind k)
 {
     if ((unsigned)k < ITKIND_NUM && ItemKind_Names[k])
-        tb_api->EnqueueColoredNoun("Received: ", ItemKind_Names[k], ItemReceiveColor(k), NULL);
+        APAnnounce_Grant("Received: ", ItemKind_Names[k], ItemReceiveColor(k), NULL);
 }
 
 // Distance in machine forward units to push a granted box ahead of the rider, so
@@ -309,8 +318,8 @@ int APItems_HandleItem(uint ap_item_id)
         // and shows its own "Trap received!" message.
         int ok = GateTopRideItems_GiveItem(kind);
         if (ok && (unsigned)kind < TRITEM_NUM && TopRideItemKind_Names[kind])
-            tb_api->EnqueueColoredNoun("Received: TR ", TopRideItemKind_Names[kind],
-                                       tb_api->TopRideItemColor, NULL);
+            APAnnounce_Grant("Received: TR ", TopRideItemKind_Names[kind],
+                             tb_api->TopRideItemColor, NULL);
         return ok;
     }
 
@@ -329,8 +338,8 @@ int APItems_HandleItem(uint ap_item_id)
                 return 0; // no Top Ride analog - retry in City Trial / Air Ride
             int ok = GateTopRideItems_GiveItem((TopRideItemKind)tr_item);
             if (ok)
-                tb_api->EnqueueColoredNoun("Received: ", CopyKind_Names[copy_kind],
-                                           tb_api->AbilityColors[copy_kind], " ability");
+                APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
+                                 tb_api->AbilityColors[copy_kind], " ability");
             return ok;
         }
     }
@@ -387,7 +396,7 @@ int APItems_HandleItem(uint ap_item_id)
         EventKind kind = ap_item_id - AP_EVENT_BASE;
         int ok = Event_GiveItem(kind);
         if (ok && kind < EVKIND_NUM && EventKind_Names[kind])
-            tb_api->EnqueueColoredNoun("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
+            APAnnounce_Grant("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
         return ok;
     }
 
@@ -432,7 +441,7 @@ int APItems_HandleItem(uint ap_item_id)
             return 0;
         int ok = Patch_DropTrap();
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "Drop Patches", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "Drop Patches", tb_api->TrapColor, NULL);
         return ok;
     }
 
@@ -448,14 +457,14 @@ int APItems_HandleItem(uint ap_item_id)
     {
         int ok = GateMachines_GiveLegendaryMachine(0);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "Dragoon", tb_api->MachineColor, NULL);
+            APAnnounce_Grant("Received: ", "Dragoon", tb_api->MachineColor, NULL);
         return ok;
     }
     if (ap_item_id == AP_ITEM_GIVE_HYDRA)
     {
         int ok = GateMachines_GiveLegendaryMachine(1);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "Hydra", tb_api->MachineColor, NULL);
+            APAnnounce_Grant("Received: ", "Hydra", tb_api->MachineColor, NULL);
         return ok;
     }
 
@@ -467,7 +476,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         int ok = Patch_AllUp_GiveItem(-1);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "All Down", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "All Down", tb_api->TrapColor, NULL);
         return ok;
     }
 
@@ -475,7 +484,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         int ok = Patch_AllUp_GiveItem(1);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
+            APAnnounce_Grant("Received: ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
         return ok;
     }
 
@@ -499,7 +508,7 @@ int APItems_HandleItem(uint ap_item_id)
             }
         }
         if (applied)
-            tb_api->EnqueueColoredNoun("Received: ", "1 HP", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "1 HP", tb_api->TrapColor, NULL);
         return applied;
     }
 
@@ -507,11 +516,13 @@ int APItems_HandleItem(uint ap_item_id)
     return AP_ITEM_DROP;
 }
 
-// Returns 1 if queued, 0 if the queue is full.
+// Returns 1 if queued, 0 if the queue is full. For items the mod raises itself
+// (EnergyLink purchases and the like) - the AP mailbox has its own entry point.
 int APItems_Queue(uint ap_item_id)
 {
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
         return 0;
+    unprocessed_from_client[ap_save->unprocessed_count] = 0;
     ap_save->unprocessed_items[ap_save->unprocessed_count++] = ap_item_id;
     return 1;
 }
@@ -530,13 +541,18 @@ void APItems_PerFrame(GOBJ *g)
     for (uint i = 0; i < ap_save->unprocessed_count; i++)
     {
         uint item_id = ap_save->unprocessed_items[i];
+
+        ap_item_quiet = unprocessed_from_client[i] && APText_ItemAnnounceSuppressed();
         int result = APItems_HandleItem(item_id);
+        ap_item_quiet = 0;
+
         if (result == AP_ITEM_RETRY)
             continue;
 
-        // Remove by swapping with the last element.
+        // Remove by swapping with the last element; the client flag moves with it.
         ap_save->unprocessed_count--;
         ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
+        unprocessed_from_client[i] = unprocessed_from_client[ap_save->unprocessed_count];
         break;
     }
 

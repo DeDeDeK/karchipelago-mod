@@ -20,7 +20,7 @@ Three unrelated text paths exist in the binary:
 
 The renderer dispatches per character on the high bits of the 16-bit code.
 
-Codes `0x2000`-`0x3FFF` use the **master Latin bank** baked into `main.dol .data5`: images at `0x8050a040` (256 slots of `0x200` bytes each, I4 32x32, indexed by `(code - 0x2000) & 0xFF`) and kerning at `0x80509dc0` (256 x 2 bytes, `{u8 left_pad, u8 right_edge}`). Effective drawn width is `34 - left_pad - right_edge`, which is what `Text_GetStringWidth` in `text.h` reproduces. Vanilla populates roughly 90 slots (digits, A-Z, a-z, 22 scattered symbols up to `0x21xx`); the other ~165 are empty memory that a mod can write its own glyphs into. **All English UI in the game shares this one font.** SIS files carry no Latin glyphs at all.
+Codes `0x2000`-`0x3FFF` use the **master Latin bank** baked into `main.dol .data5`: images at `0x8050a040` (256 slots of `0x200` bytes each, I4 32x32, indexed by `(code - 0x2000) & 0xFF`) and kerning at `0x80509dc0` (320 x 2 bytes, `{u8 left_pad, u8 right_edge}`, running up to the image bank). Effective drawn width is `34 - left_pad - right_edge`, which is what `Text_GetStringWidth` in `text.h` reproduces. Vanilla populates roughly 90 slots (digits, A-Z, a-z, 22 scattered symbols up to `0x21xx`); the other ~165 are empty memory that a mod can write its own glyphs into. **All English UI in the game shares this one font.** SIS files carry no Latin glyphs at all.
 
 Codes `0x4000` and up use the **per-SIS bank** taken from the loading slot's `SISData` (`image_data_arr` / `kerning_data_arr`), same `0x200` stride and same 2-byte kerning layout, indexed by `(code - 0x4000) & 0xFF`. Only a few files supply one:
 
@@ -119,9 +119,11 @@ Both first `vsnprintf` into a stack buffer, then run `Text_ConvertASCIIToShiftJI
 | `-` | `0b` then Shift-JIS `0x817c` (0x8044fc24) |
 | other printable | `0b` then a symbol code from the tables at `0x80509b40` / `0x805098c0` |
 
+**The converter reads at most 128 input bytes.** Its loop bails once the input index passes `0x7f`, so anything beyond that is dropped without a return code saying so - and since both `Text_SetText` and `Text_AddSubtext` route through it, that is the hard ceiling on one subtext's text. It is a byte limit, not a character one: pre-sanitized punctuation already costs 2 bytes apiece, so a symbol-heavy string hits it well before 128 characters. Measuring with `Text_GetWidthAndHeight` afterwards measures only what survived, so a caller that hands over more than fits gets a width for text that never rendered.
+
 **`\n` and `\t` are not mapped.** They fall into the table-lookup branch and produce nothing, so multi-line text must be built from separate `Text_AddSubtext` calls, one `0x07` header each. `%d`, `%s` and `%f` work normally because `vsnprintf` resolves them first.
 
-There is no brace syntax for inline opcodes. To change color, scale or position mid-buffer, write opcode bytes directly or call `Text_SetColor` / `Text_SetScale` / `Text_SetPosition`, which patch the per-subtext header bytes located by `Text_GetCommand` (`text.h`).
+There is no brace syntax for inline opcodes. To change color or scale mid-buffer, write opcode bytes directly or call `Text_SetColor` / `Text_SetScale`, which patch the per-subtext header bytes located by `Text_GetCommand` (`text.h`). Position is the `0x07` header itself rather than an inline opcode, so `Text_SetSubtextPos` rewrites its two `s16` fields in place.
 
 ### Chained subtexts share one TERMINATE
 
@@ -190,7 +192,9 @@ For deeper changes the whole `gobj->gx_cb` can be replaced: `TextJoint_Create` i
 
 hoshi reserves GX link bit 63 (`HOSHI_SCREENCAM_GXLINK` in `externals/hoshi/include/hoshi/screen_cam.h`) for a shared overlay canvas so it is never culled by scene cameras. `ScreenCam_Create` in `externals/hoshi/src/screen_cam.c` creates it once per scene with `Text_CreateCanvas(1, 0, 0, 0, 0, HOSHI_SCREENCAM_GXLINK, 0, 63)`; `cobj_gxpri = 63` makes that camera draw last.
 
-Per message: `Text_CreateText(sis_idx, canvas_idx)` returns a fresh `Text *`, which typically wants `kerning = 1`, `use_aspect = 1`, a pixel-space `trans`, `viewport_scale` around 0.4, a `color`, and a `viewport_color` whose alpha decides whether a background box appears. Content goes in with `Text_AddSubtext(t, x, y, "")` to allocate the slot followed by `Text_SetText(t, 0, string)`. `Text_GetWidthAndHeight(t, 0, &w, &h)` then gives the values to store into `t->aspect`. `Text_Destroy(t)` tears it down.
+Per message: `Text_CreateText(sis_idx, canvas_idx)` returns a fresh `Text *`, which typically wants `kerning = 1`, a pixel-space `trans`, `viewport_scale` around 0.4, a `color`, and a `viewport_color` whose alpha decides whether a background box appears. Content goes in with `Text_AddSubtext(t, x, y, "")` to allocate the slot followed by `Text_SetText(t, 0, string)`. `Text_GetWidthAndHeight(t, 0, &w, &h)` then gives the values to store into `t->aspect`. `Text_Destroy(t)` tears it down.
+
+`use_aspect` is a separate decision and defaults to 0: it makes the renderer shrink a subtext horizontally to fit `aspect.X`, so set it only when a hard width limit is wanted. Code that measures its own layout and then stores the result into `aspect` should leave it clear - the flag can only shave the text it just fitted. `aspect` still drives the `viewport_color` background rect and the scissor reference frame either way.
 
 Run user strings through `Text_Sanitize(in, out, size)` (`externals/hoshi/Lib/text_joint/text_joint.c`) first: it pre-converts ASCII punctuation to the Shift-JIS codes the game's converter expects, spending 2 output bytes per converted symbol and 1 per alphanumeric or unlisted character. It reserves one byte for the terminator, so a `char[128]` holds at most 126 bytes of output; past that it truncates, terminates and returns 0.
 
@@ -381,7 +385,7 @@ These are unnamed in the symbol map; hoshi headers pin them as literal-address p
 | Address | Meaning |
 |---------|---------|
 | `0x8050a040` | master image table, 256 x `0x200` I4 32x32 |
-| `0x80509dc0` | master kerning table, 256 x 2 bytes |
+| `0x80509dc0` | master kerning table, 320 x 2 bytes |
 | `0x80509b40` | ASCII pair table, 320 x 2 bytes |
 | `0x805098c0` | SIS code table paired with the above |
 | `0x8050983c` | opcode dispatch jump table, entries `0x00`-`0x1a` |

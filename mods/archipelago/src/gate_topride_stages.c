@@ -7,6 +7,7 @@
 #include "gate_topride_stages.h"
 #include "textbox_api.h"
 #include "inline.h"
+#include "ap_announce.h"
 
 // Callers must pre-check the random-button case (course >= TOPRIDE_NUM).
 static int GateTopRideStages_CheckCourseUnlocked(int course)
@@ -165,6 +166,6 @@ int GateTopRideStages_UnlockStage(int course)
     ap_save->topride_stage_unlocked_mask |= (1 << course);
     OSReport("[GateTopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
              course, TopRideCourse_Names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
-    tb_api->EnqueueColoredNoun("Unlocked Course: ", TopRideCourse_Names[course], tb_api->StageColor, NULL);
+    APAnnounce_Grant("Unlocked Course: ", TopRideCourse_Names[course], tb_api->StageColor, NULL);
     return 1;
 }

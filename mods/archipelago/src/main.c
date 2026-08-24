@@ -43,6 +43,7 @@
 #include "settings_menu.h"
 #include "main_menu.h"
 #include "goal_max_stats_ct.h"
+#include "ap_text.h"
 
 APData *ap_data;
 APSave *ap_save;
@@ -71,9 +72,14 @@ _Static_assert(offsetof(APData, client_backfill) == 0x248, "CLIENT_BACKFILL_AIRR
 _Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x278, "CLIENT_BACKFILL_ARCHIPELAGO");
 _Static_assert(offsetof(APData, goal_complete) == 0x288, "GOAL_COMPLETE");
 _Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x28C, "DEATHLINK_MENU_ENABLED");
+_Static_assert(offsetof(APData, client_alive) == 0x298, "CLIENT_ALIVE");
+_Static_assert(offsetof(APData, text_pending) == 0x29C, "TEXT_PENDING");
+_Static_assert(offsetof(APData, text_menu_mask) == 0x2A0, "TEXT_MENU_MASK");
+_Static_assert(offsetof(APData, text_msg) == 0x2A4, "TEXT_MSG");
 
 int ap_checklist_mode = GMMODE_NUM;
 int ap_regrant_quiet = 0;
+int ap_item_quiet = 0;
 
 ModDesc mod_desc = {
     .name = "KARchipelago",
@@ -252,7 +258,7 @@ void OnSaveLoaded()
 
     // Hoshi's Mod_CopyFromSave has run by now, so ap_menu_settings reflects the
     // player's persisted toggle choices.
-    SyncLinkMenuStateToAPData();
+    SyncMenuStateToAPData();
 
     ap_data->game_ready = 1;
     OSReport("[Main] game_ready set - waiting for AP client connection\n");
@@ -348,14 +354,13 @@ static void APOptions_ApplyUngatedCategories(void)
         for (u8 ri = 8; ri <= 10; ri++)
             ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= (1ULL << ri);
 
-    // Cosmetic rewards are tracked by received_checklist_rewards, not a mask.
-    if (!opts->checklist_rewards_gating_enabled)
-        ChecklistRewards_GrantAllCosmetic();
+    // Placeable rewards are tracked by received_checklist_rewards, not a gate mask.
+    ChecklistRewards_GrantUnplaced(opts->checklist_reward_placed_types);
 
     static const char *const gate_names[] = {
         "machines", "abilities", "events", "patches", "items", "boxes",
         "AR stages", "TR stages", "TR items", "colors", "stadiums",
-        "base abilities", "checklist rewards",
+        "base abilities",
     };
     const u8 gate_flags[] = {
         opts->machine_gating_enabled, opts->ability_gating_enabled,
@@ -364,7 +369,6 @@ static void APOptions_ApplyUngatedCategories(void)
         opts->airride_stage_gating_enabled, opts->topride_stage_gating_enabled,
         opts->topride_item_gating_enabled, opts->color_gating_enabled,
         opts->stadium_gating_enabled, opts->base_ability_gating_enabled,
-        opts->checklist_rewards_gating_enabled,
     };
 
     char list[224];
@@ -399,7 +403,7 @@ static void APOptions_TransferToSave()
     ap_menu_settings.deathlink_enabled = opts->death_link_enabled;
     ap_menu_settings.energylink_enabled = opts->energy_link_enabled;
     ap_menu_settings.traplink_enabled = opts->trap_link_enabled;
-    SyncLinkMenuStateToAPData();
+    SyncMenuStateToAPData();
 
     char list[224];
     int n = 0;
@@ -578,6 +582,7 @@ void OnFrameStart()
 
     CheckDetection_OnFrameStart();
     APCheckDetect_OnFrameStart();
+    APText_OnFrameStart();
 }
 
 void OnFrameEnd()

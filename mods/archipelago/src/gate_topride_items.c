@@ -7,6 +7,7 @@
 #include "gate_topride_items.h"
 #include "textbox_api.h"
 #include "inline.h"
+#include "ap_announce.h"
 
 // One bit per Top Ride item kind whose blocked spawn has been reported this round.
 static u32 stc_blocked_reported;
@@ -199,7 +200,7 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce)
             {"Top Ride",                  tb_api->ModeColors[GMMODE_TOPRIDE]},
             {")",                         tb_api->DefaultColor},
         };
-        tb_api->EnqueueSegments(segs, 5);
+        APAnnounce_GrantSegments(segs, 5);
     }
     return 1;
 }

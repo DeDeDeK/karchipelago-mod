@@ -17,15 +17,18 @@ On-screen notification system (`mods/textbox/`). Queued, color-segmented message
 | Member | Purpose |
 |--------|---------|
 | `Enqueue(fmt, ...)` | printf-style single segment in `DefaultColor` |
-| `EnqueueSegments(segs, n)` | 1..`TEXTBOX_MAX_SEGMENTS` (5) segments with per-segment colors |
+| `EnqueueSegments(segs, n)` | 1..`TEXTBOX_MAX_SEGMENTS` (8) segments with per-segment colors |
 | `EnqueueColoredNoun(prefix, noun, color, suffix)` | Only the noun colored; NULL/empty prefix or suffix allowed |
 | `EnqueueColoredNounFmt(prefix, noun, color, suffix_fmt, ...)` | As above with a printf-style suffix |
+| `IsReady()` | 1 when an `Enqueue*` would be accepted - the textbox is on and a screen canvas exists |
 | `DefaultColor`, `MachineColor`, `EventColor`, `StadiumColor`, `StageColor`, `TopRideItemColor`, `ItemColor`, `TrapColor`, `DeathColor`, `EnergyColor`, `CheckColor`, `GoalColor`, `RewardColor`, `ShopColor`, `FillerColor` | Named category colors |
 | `AbilityColors[COPYKIND_NUM]`, `KirbyColors[KIRBYCOLOR_NUM]`, `ModeColors[GMMODE_NUM]`, `PatchColors[PATCHKIND_NUM]`, `BoxColors[BOXKIND_NUM]` | Indexed palettes |
 
 Palette RGB values live in `textbox_colors.c`; the alpha byte is ignored, since alpha is owned by the fade machinery. The palette fields are populated at `OnBoot` rather than in the static initializer because `extern const GXColor`s are not constant expressions in C.
 
-Segment text is **copied** at enqueue (into an 80-byte `TEXTBOX_SEGMENT_TEXT_SIZE` slot per segment), so callers may pass stack buffers.
+Segment text is **copied** at enqueue, so callers may pass stack buffers. The copy is one `TEXTBOX_MESSAGE_TEXT_SIZE` (248 byte) blob per queued message holding the segments' NUL-terminated strings back to back - a per-message budget rather than a per-segment one, since that is what a producer actually spends. A message that overruns the blob loses its trailing segments rather than any one segment losing its tail.
+
+`IsReady` exists for producers with their own queue: the archipelago mod renders client-authored messages out of a shared-memory mailbox, and polling `IsReady` lets it hold one during a scene transition instead of enqueuing into a missing canvas and losing the message.
 
 ## Canvas and Layout
 
@@ -41,11 +44,17 @@ The canvas is the hoshi ortho screen camera (640x480 raw pixels, created by `Scr
 
 ## Multi-Segment Colored-Noun Rendering
 
-A single message is one `Text` GObj laid out as **N horizontal subtexts on one line**, each with its own color - this is how `EnqueueColoredNoun` paints a noun in a category color inside an otherwise-default sentence. `CreateTextBoxSegmented` builds it:
+A single message is one `Text` GObj laid out as **subtexts flowing left to right and wrapping onto up to `TEXTBOX_MAX_LINES` (3) lines**, each with its own color - this is how `EnqueueColoredNoun` paints a noun in a category color inside an otherwise-default sentence. A segment that spans a line break becomes more than one subtext, so the subtext count is not the segment count. `CreateTextBoxSegmented` builds it:
 
 - For each segment, set `t->color` to that segment's RGB (+ the message's current alpha) **before** calling `Text_AddSubtext` - `Text_AddSubtext` captures `t->color` into the subtext's `COLOR` opcode at emit time. Setting it after would not take effect.
-- Each subtext is added at an `x_cursor` that advances by the previous subtext's measured width (`Text_GetWidthAndHeight`, pre-viewport-scale), so segments sit flush on the same line.
-- `t->aspect` is set to the whole line's bounding box (`total_width`, `max line_height`) so the `viewport_color` background rect (and any future scissor) encloses all segments.
+- Each subtext is added at the origin, measured, then moved to its final spot with `Text_SetSubtextPos`, which rewrites the subtext's `0x07` POS header in place. Adding-then-moving is what lets a run's width be known before its position is chosen. Coordinates are pre-viewport-scale units with y increasing downward; a line spans 32 units at a character scale of 1, which is also what `Text_GetWidthAndHeight` reports as height.
+- Break points are chosen by measuring through the engine, not by summing glyph advances. `Text_Sanitize` re-encodes ASCII into a different code space than `Text_GetStringWidth` assumes, so that helper reads the wrong kerning bank for sanitized text; `TextBox_SetRun` sets the subtext and calls `Text_GetWidthAndHeight` instead. `TextBox_FitRun` measures the whole run first, so a segment that already fits costs exactly one measurement, and only an overflowing one pays for the search.
+- One subtext holds at most `TEXTBOX_RUN_BYTES` (127) bytes of sanitized text, because `Text_ConvertASCIIToShiftJIS` (0x8044fb0c) stops reading its input after 128 bytes and both `Text_SetText` and `Text_AddSubtext` go through it. A character costs 1 byte if alphanumeric and 2 otherwise, so `TextBox_SetRun` scales its request by the overshoot until the sanitized form fits, and returns how many characters actually landed. Every caller works from that return value - measuring text the engine silently dropped would report a fit for a run that never rendered.
+- Wrapping prefers the last space that fits, including when the break came from the byte limit above rather than the line width. A single word wider than a whole line splits mid-word, which is also what guarantees the walk always advances. A wrapped line never starts with a space.
+- A subtext carries its segment's color in an opcode emitted at `Text_AddSubtext` time, so one opened for a segment is never filled by the next one - a segment that strips to nothing closes it out instead of handing it over.
+- Text past the last line is replaced by `TEXTBOX_TRUNC_MARK` (`..`), fitted with room reserved for the marker itself.
+- **Nothing is ever scaled down to fit.** `viewport_scale` is exactly the chosen font size, so the Font Size setting means readability and nothing else.
+- `t->aspect` is set to the whole block's bounding box (widest line, `line_height * line_count`) so the `viewport_color` background rect (and any future scissor) encloses every line.
 - `t->trans` is left at the origin as a placeholder - `TextBoxQueue_RepositionAll` runs before the next render and is the single source of truth for on-screen position.
 
 With Colored Names off, `TextBox_EnqueueInternal` rewrites every segment's color to `TextBox_DefaultColor` in a local copy, leaving the caller's array untouched.
@@ -63,12 +72,13 @@ The background quad alpha (`viewport_color.a`) is independent: it sits at the co
 `TextBox_PerFrame` (a GObj created each scene change) runs the whole lifecycle:
 
 1. Mirror every queued message's engine-side `temp.reveal_count` into `chars_revealed` (each `Text` is paced independently, so the whole queue is snapshotted, not just the oldest).
-2. Hold everything while the oldest message is still typing (`reveal_count < chars_total`).
-3. Otherwise advance a shared frame counter. Past the Display Time threshold, decrement the oldest message's `lifetime` and push it into alpha each frame; at zero, dequeue (which `Text_Destroy`s it) and reset the counter.
+2. Drop the oldest message outright if it has no `Text` - a scene-change rebuild that failed has nothing to reveal or fade, and leaving it at the head would hold every message behind it forever.
+3. Hold everything while the oldest message is still typing (`reveal_count < chars_total`).
+4. Otherwise advance a shared frame counter. Past the Display Time threshold, decrement the oldest message's `lifetime` and push it into alpha each frame; at zero, dequeue (which `Text_Destroy`s it) and reset the counter.
 
 Enqueuing when the queue is already at the "Max On Screen" cap drops oldest messages until the new one fits.
 
-`Sis_CountGlyphs` derives `chars_total` by walking the SIS opcode stream from `text->text_start` to its inline `0x00` TERMINATE, counting character codes (`>= 0x20`) and the 1-byte `0x1a` SPACE opcode - the two things the engine's reveal counter advances on. This is necessary because `Text_AddSubtext` / `Text_SetText` never write `text->text_end`. The walk is capped at 4096 bytes as a runaway guard.
+`Sis_CountGlyphs` derives `chars_total` by walking the SIS opcode stream from `text->text_start` to its inline `0x00` TERMINATE, counting the 2-byte character codes (`>= 0x20`), which is everything the engine's reveal counter advances on. Nothing here emits the 1-byte `0x1a` SPACE opcode: `Text_Sanitize` turns a space into code `0x8140` and the game's converter maps it to a glyph like any other. This is necessary because `Text_AddSubtext` / `Text_SetText` never write `text->text_end`. The walk is capped at 4096 bytes as a runaway guard.
 
 ## Typewriter Seeding
 
@@ -80,7 +90,7 @@ Whether the typewriter is active and how fast it runs are sampled **at enqueue**
 
 ## Scene-Change Rebuild and Persistence
 
-`Text` pointers are invalidated when the scene changes, but messages should persist visually across the transition. The queue stores **segment copies + `chars_revealed`**, not just the live `Text*`. `CreateTextBox_OnSceneChange` walks the queue, rebuilds each message's `Text` via `CreateTextBoxSegmented`, re-snapshots `chars_total` (`Sis_CountGlyphs`), re-arms the typewriter (resuming from `chars_revealed`), and repositions - so a finished message stays fully shown and a mid-reveal one picks up where it was. It then creates the per-frame `TextBox_PerFrame` GObj.
+`Text` pointers are invalidated when the scene changes, but messages should persist visually across the transition. The queue stores **the message's text blob + `chars_revealed`**, not just the live `Text*`. Both the first render and the rebuild go through `TextBox_MessageSegments`, which points a `TextSegment` array at that stored blob, so a message can never draw differently the second time. `CreateTextBox_OnSceneChange` walks the queue, rebuilds each message's `Text` via `CreateTextBoxSegmented`, re-snapshots `chars_total` (`Sis_CountGlyphs`), re-arms the typewriter (resuming from `chars_revealed`), and repositions - so a finished message stays fully shown and a mid-reveal one picks up where it was. It then creates the per-frame `TextBox_PerFrame` GObj.
 
 ### Pre-first-scene canvas-NULL guard
 

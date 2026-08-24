@@ -65,15 +65,47 @@ Both bitmasks are `CHECKLIST_MODE_NUM` (4) rows: rows 0-2 are Air Ride / Top Rid
 
 ### Menu Toggle State
 
-Live mirror of the Settings menu toggles. Game-owned: client reads, never writes. `SyncLinkMenuStateToAPData` (`settings_menu.c`) writes them on boot after save-restore, on the first-connect option transfer, and from each toggle's `on_change`.
+Live mirror of the Settings menu toggles. Game-owned: client reads, never writes. `SyncMenuStateToAPData` (`settings_menu.c`) writes them on boot after save-restore, on the first-connect option transfer, and from each toggle's `on_change`.
 
-| Offset | Type | Field |
-|--------|------|-------|
-| 0x28C | u32  | `deathlink_menu_enabled` |
-| 0x290 | u32  | `energylink_menu_enabled` |
-| 0x294 | u32  | `traplink_menu_enabled` |
+| Offset | Type   | Field |
+|--------|--------|-------|
+| 0x28C | u32     | `deathlink_menu_enabled` |
+| 0x290 | u32     | `energylink_menu_enabled` |
+| 0x294 | u32     | `traplink_menu_enabled` |
+| 0x2A0 | u32     | `text_menu_mask`, bit `1 << APTextKind` |
 
-These are the authoritative current state, not `APSlotOptions.death_link_enabled` / `energy_link_enabled` / `trap_link_enabled` - those only set the *initial* values and are never updated by later toggles. The player can flip a toggle mid-session, so the client must diff all three against last-seen every poll and forward the change to the AP server (`ConnectUpdate` `tags` for DeathLink, the equivalent for TrapLink/EnergyLink), and read all three on connect.
+The link toggles are the authoritative current state, not `APSlotOptions.death_link_enabled` / `energy_link_enabled` / `trap_link_enabled` - those only set the *initial* values and are never updated by later toggles. The player can flip a toggle mid-session, so the client must diff all three against last-seen every poll and forward the change to the AP server (`ConnectUpdate` `tags` for DeathLink, the equivalent for TrapLink/EnergyLink), and read all three on connect.
+
+`text_menu_mask` is an optimization, not a gate: the mod filters every message by kind as it renders, so the menu stays authoritative even against a stale client. Reading it keeps the client from composing lines the player has turned off, and from parking one in the mailbox.
+
+### Text Fields
+
+Client-authored text-box messages. The client composes the whole line - it owns every name the mod cannot know - and the mod only renders it.
+
+| Offset | Type          | Field | Writer | Reader |
+|--------|---------------|-------|--------|--------|
+| 0x298  | u32           | `client_alive`  | Client | Game |
+| 0x29C  | u32           | `text_pending`  | Both   | Both |
+| 0x2A0  | u32           | `text_menu_mask`| Game   | Client |
+| 0x2A4  | APTextMessage | `text_msg`      | Client | Game |
+
+`client_alive` is a heartbeat, not a flag: the client bumps it (never to 0) on every poll, and the mod treats no change for `AP_CLIENT_ALIVE_TIMEOUT` (180 frames) as "no client attached". That is what lets the mod fall back to its own generic check message when the player is running without a client.
+
+`text_msg` is a single-slot mailbox with the same handshake as `incoming_item_id`: the client writes the body and only then sets `text_pending` to 1, and must not write while `text_pending` is non-zero; the game renders the message and clears the flag. The game holds a pending message while the text box has no screen canvas (scene loads), so a full mailbox is backpressure and the message survives the load rather than being dropped. One message per client poll is the ceiling, which is far above what the text box can retire - it shows at most 8 at a time for several seconds each - so the client keeps its own bounded backlog rather than a shared ring.
+
+`text_msg` is a fixed 128-byte `APTextMessage`:
+
+| Offset | Type      | Field | Description |
+|--------|-----------|-------|-------------|
+| 0x00   | u8        | `kind`      | `APTextKind`: 0 check, 1 item, 2 hint, 3 status, 4 chat |
+| 0x01   | u8        | `seg_count` | 1..8 colored runs |
+| 0x02   | u8[8]     | `colors`    | `APTextColor` per run |
+| 0x0A   | u8[2]     | `pad`       | |
+| 0x0C   | char[244] | `text`      | `seg_count` NUL-terminated strings, back to back |
+
+`APTextColor` is 0 for the text box's own default plus Archipelago's twelve GUI color names in order: black, red, green, yellow, blue, magenta, cyan, white, orange, slateblue, plum, salmon.
+
+A whole message is therefore at most **243 rendered characters** across at most 8 colored runs. That is deliberately more than any font size can show, because the mod owns the fit: around 103 characters fit on a line at Small, 77 at Med and 56 at Large, and the text box wraps onto three lines and truncates the remainder with `..`. Nothing is scaled down to fit.
 
 ## Protocol Rules
 
@@ -94,7 +126,9 @@ The client and game must synchronize before data exchange:
 3. **Write slot options**, then set `options_valid = 1`.
 4. **Read `item_received_index`** and skip all items with index < this value - the game already received them.
 5. **Write `locations`**, then set `location_data_valid = 1`.
-6. **Begin normal operation**: item delivery, deathlink/energylink/traplink polling, location checking.
+6. **Begin normal operation**: item delivery, deathlink/energylink/traplink polling, location checking, heartbeat and text queue.
+
+`text_pending` is not reset by the handshake. A client reconnecting to a game that never rebooted must read it rather than assume 0, or its first message overwrites one the mod has not rendered.
 
 The game's `OnFrameStart` picks up `options_valid` (copying options into save data and setting the initial menu toggles) and `location_data_valid` (applying the placement table and persisting), clearing each as it consumes it.
 
@@ -130,12 +164,14 @@ All fields are `u32` unless noted. Per-mode arrays are `CHECKLIST_MODE_NUM` (4) 
 | 0x0DC | `color_gating_enabled`            | 0 or 1 | Kirby colors |
 | 0x0E0 | `stadium_gating_enabled`          | 0 or 1 | City Trial stadiums |
 | 0x0E4 | `base_ability_gating_enabled`     | 0 or 1 | Inhale / quick spin / charge |
-| 0x0E8 | `checklist_rewards_gating_enabled`| 0 or 1 | Non-progression checklist rewards, see below |
+| 0x0E8 | `checklist_reward_placed_types`   | bitmask | Checklist rewards placed as AP items, per (mode, type), see below |
 | 0x0EC | `goal_forced_gates`               | bitmask | See below |
 
 Every `*_gating_enabled` field uses the same convention: `1` = gated (default), the AP world ships unlock items for that category; `0` = ungated, the mod pre-fills that category's unlock mask at connect (`APOptions_ApplyUngatedCategories` in `main.c`) and the AP world must not generate unlock items for it. Twelve of the thirteen `APUnlockCategory` masks have their own toggle; `AP_UNLOCK_AP_STAR_PIECE` has none and rides `item_gating_enabled`, since the AP world classifies the six spheres as City Trial item unlocks.
 
-`checklist_rewards_gating_enabled` follows the same true=gated convention but is **not** mask-backed: when ungated the mod calls `ChecklistRewards_GrantAllCosmetic` and tracks the result in `received_checklist_rewards`. The 6 Dragoon/Hydra part markers are progression and are unaffected by the flag.
+`checklist_reward_placed_types` is not a gate flag. It holds one bit per (mode, reward type) pair at index `mode * CHECKLIST_REWARD_MODE_BITS + reward_type`, with `CHECKLIST_REWARD_MODE_BITS` = 9: `RewardType` tops out at `REWARD_PAUSE_POWERUPS` (8), so the three reward-bearing modes pack into 27 bits. A set bit means the AP world placed that mode's rewards of that type as items. At connect the mod calls `ChecklistRewards_GrantUnplaced`, which marks every reward whose pair is clear as received and tracks the result in `received_checklist_rewards` rather than an unlock mask.
+
+Only the seven reward types with no gate mask of their own can appear - `REWARD_FILLER` (0), `BONUS_MOVIE` (1), `EXTRA_RULE` (2), `SOUND_TEST` (4), `MUSIC` (5), `ENDING` (6), `PAUSE_POWERUPS` (8). The AP world builds the mask from the rewards it actually minted, so a mode the seed disabled ships no bits at all and the mod unlocks that mode's rewards outright - without that, its rewards would be neither placed nor granted. The 6 Dragoon/Hydra part markers are progression and are unaffected by the mask.
 
 `APSlotOptions` is 8-byte aligned, so `goal_forced_gates` sits in what was the block's tail padding and the block still ends at 0x0F0.
 
@@ -192,7 +228,7 @@ The client reads slot options from the AP server (as defined in `KAROptions.py`)
 | `colors_gated` | `color_gating_enabled` | |
 | `city_trial_stadiums_gated` | `stadium_gating_enabled` | |
 | `base_abilities_gated` | `base_ability_gating_enabled` | |
-| `checklist_rewards_gated` | `checklist_rewards_gating_enabled` | |
+| `checklist_rewards` | `checklist_reward_placed_types` | The AP world ships the rewards it actually minted, already folded into a per-(mode, `RewardType`) bitmask |
 | `legendary_pieces_goal_gated` / `vs_king_dedede_goal_gated` / `ap_star_pieces_goal_gated` | `goal_forced_gates` bits 0 / 1 / 2 | Each is 1 only when its category ships ungated *and* the seed's goal is gated on those unlocks |
 
 Options **not written to the mod**, used at AP generation time or carried only in `slot_data` for the client's own logic: `trap_chance` (the client's trap-roll logic), `spawn_rate_max` (item-count generation), `city_trial_permanent_patches` (whether permanent-patch items enter the pool - the mod has no corresponding field and always treats permanent patches as an active item category), and the per-mode `*_checkbox_fillers` fields.
@@ -513,6 +549,26 @@ Values are defined in `mods/archipelago/src/traplink.h`. Unknown kinds (future a
 - **Detecting traps**: code hooks on natural negative gameplay events set `traplink_send` to the corresponding kind. AP-delivered items can also trip these hooks (a received SPEEDMIN trap re-fires the bad-patch detector), so the client must handle deduplication.
 - **Receive recursion guard**: after applying an incoming trap, the mod suppresses outgoing sends for 120 frames (`TRAPLINK_RECV_GUARD_FRAMES`). This stops a received trap whose effect re-fires a send hook - an applied bad patch tripping the bad-patch send detector - from echoing straight back out as a new Bounce. It is a recursion guard, not a rate limit; burst collapsing and dedup of distinct logical traps remain the client's responsibility.
 
+## In-Game Messages
+
+The text box shows Archipelago traffic as one-line messages. The client is the author: it is the side that knows other worlds' item and location names, every player's name, and Archipelago's color conventions.
+
+### Client Responsibilities
+
+- **Heartbeat**: bump `client_alive` every poll, never to 0.
+- **Checks**: when `check_locations` confirms new locations, compose one line per location from `locations_info` - the scout cache the connect-time `LocationScouts` fills for every location this slot owns - so no server round trip is needed. Above a small burst threshold, collapse to a single count line.
+- **Items**: compose one line as each item goes into the `incoming_item_id` mailbox. The `NetworkItem` there carries the sending player and the item flags.
+- **Server text**: relay `Hint`, `Goal`, `Release`, `Collect`, `Chat` and `ServerChat` `PrintJSON` packets. **Not `ItemSend`** - the server broadcasts one to the whole team for every check anyone makes, and this slot's own are already covered by the check and item lines.
+- **Encoding**: fold text to the glyphs the game font renders before packing.
+
+### Game Responsibilities
+
+- `APText_OnFrameStart` (`ap_text.c`) tracks the heartbeat and renders a pending message into the text box, holding it while the text box reports it has no canvas.
+- Messages are filtered by `kind` against the Messages settings menu on render, so the menu is authoritative even against a stale client.
+- A `client_alive` transition posts a "client connected"/"disconnected" line under the status toggle.
+- While the client is attached and item messages are on, `ap_item_quiet` suppresses the mod's own announce for items applied from the AP mailbox, so each item produces one line rather than two. Every grant announce routes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`), which is where that suppression and the boot regrant's both apply. Announces that report a consequence the AP item name does not carry (patch cap percentage, spawn rate percentage) call the text box directly and keep printing, as do all non-AP paths: EnergyLink purchases, TrapLink, in-game pickups, gate prompts.
+- `check_detection.c` posts its own generic "Check: recorded" line only when no client is attached.
+
 ## Invariants
 
 - **ID 0 is reserved** as the "empty" sentinel for `incoming_item_id`. Never use 0 as a valid AP item ID.
@@ -521,3 +577,4 @@ Values are defined in `mods/archipelago/src/traplink.h`. Unknown kinds (future a
 - **The unprocessed item list persists in save data.** `unprocessed_items` is stored on the memory card and survives reboots, so items received but not yet applied (the player powered off before an event item could fire) are retained. `item_received_count` is also persisted and mirrored to `item_received_index` on boot so the client can resume from the right position.
 - **One item per frame.** At most one item resolves from the unprocessed list per frame, so 60 items/sec is the ceiling. The client can write to the mailbox as fast as the game clears it.
 - **Queue capacity is `MAX_RECEIVED_ITEMS` (512).** In-game EnergyLink purchases share the same queue, so a player can fill it without the client sending anything.
+- **Text messages are advisory.** Nothing in the game state depends on one arriving. The mod drops a message whose `kind` or `seg_count` is out of range.

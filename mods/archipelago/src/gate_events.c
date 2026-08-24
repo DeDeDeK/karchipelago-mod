@@ -6,6 +6,7 @@
 #include "gate_events.h"
 #include "textbox_api.h"
 #include "inline.h"
+#include "ap_announce.h"
 
 // Hook body at 0x800ede24 in CityEvent_Decide: chance_arr is the 16-entry stack chance
 // array (sp+0x08), already filled from the weights table but before history adjustment.
@@ -59,6 +60,6 @@ int GateEvents_UnlockEvent(int kind)
     ap_save->event_unlocked_mask |= (1 << kind);
     OSReport("[GateEvents] Event %d (%s) unlocked (mask = %s)\n",
              kind, name, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
-    tb_api->EnqueueColoredNoun("Unlocked Event: ", name, tb_api->EventColor, NULL);
+    APAnnounce_Grant("Unlocked Event: ", name, tb_api->EventColor, NULL);
     return 1;
 }

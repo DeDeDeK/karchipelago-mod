@@ -8,6 +8,7 @@
 #include "gate_stadiums.h"
 #include "textbox_api.h"
 #include "inline.h"
+#include "ap_announce.h"
 
 // gd->city.prev_stadium_kind[] is sized 5, but vanilla only uses 4 entries for history
 // exclusion.
@@ -164,6 +165,6 @@ int GateStadiums_UnlockStadium(StadiumKind kind, int announce)
         OSReport("[GateStadiums] Stadium %d (%s) unlocked (mask = %s)\n",
                  kind, StadiumKind_Names[kind], MaskBits(ap_save->stadium_unlocked_mask, STKIND_NUM));
     if (announce)
-        tb_api->EnqueueColoredNoun("Unlocked Stadium: ", StadiumKind_Names[kind], tb_api->StadiumColor, NULL);
+        APAnnounce_Grant("Unlocked Stadium: ", StadiumKind_Names[kind], tb_api->StadiumColor, NULL);
     return 1;
 }

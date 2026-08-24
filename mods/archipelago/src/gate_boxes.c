@@ -9,6 +9,7 @@
 #include "gate_boxes.h"
 #include "inline.h"
 #include "textbox_api.h"
+#include "ap_announce.h"
 
 // The ability / patch / item filters zero entries in this pool, so a box color can end
 // up empty even when its bit in box_unlocked_mask is set.
@@ -83,6 +84,6 @@ int GateBoxes_UnlockBox(BoxKind kind)
     ap_save->box_unlocked_mask |= (1 << kind);
     OSReport("[GateBoxes] Box %d (%s) unlocked (mask = %s)\n",
              kind, BoxKind_Names[kind], MaskBits(ap_save->box_unlocked_mask, 8));
-    tb_api->EnqueueColoredNoun("Unlocked Box: ", BoxKind_Names[kind], tb_api->BoxColors[kind], NULL);
+    APAnnounce_Grant("Unlocked Box: ", BoxKind_Names[kind], tb_api->BoxColors[kind], NULL);
     return 1;
 }

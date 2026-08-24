@@ -8,6 +8,7 @@
 #include "machine.h"
 #include "os.h"
 #include "energylink.h"
+#include "ap_announce.h"
 
 // PatchKind to the matching "+1" ITKIND.
 static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
@@ -137,7 +138,7 @@ int PermanentPatch_GiveItem(PatchKind kind)
     OSReport("[PatchItem] Permanent %s patch received (total %d)\n",
              PatchKind_Names[kind], ap_save->permanent_patches[kind]);
     if (kind < PATCHKIND_NUM)
-        tb_api->EnqueueColoredNoun("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
+        APAnnounce_Grant("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
     return 1;
 }
 
@@ -152,7 +153,7 @@ int PermanentPatch_GiveAllUp()
     }
 
     OSReport("[PatchItem] Permanent all-up received\n");
-    tb_api->EnqueueColoredNoun("Received: permanent +1 ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
+    APAnnounce_Grant("Received: permanent +1 ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
     return 1;
 }
 

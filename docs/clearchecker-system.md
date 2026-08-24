@@ -376,25 +376,32 @@ Placement only drives the `has_reward` display badge.
   the debug filler-give) bypass `Grant` entirely - they call `Checklist_GrantFiller`
   directly in `ap_item_handler.c` - and are unaffected.
 
-### Cosmetic ungating (`checklist_rewards_gating_enabled` off)
+### Unplaced-reward ungating (`checklist_reward_placed_types`)
 
-- When the slot option is off, the AP world removes the non-progression reward categories
-  from the item pool and frees their checkboxes to hold ordinary items. The mod
-  compensates at connect via `ChecklistRewards_GrantAllCosmetic()`, which sets the
-  `received_checklist_rewards` bit for every "cosmetic" reward across all three modes -
-  the complete unlock for these types (`ChecklistRewards_CheckUnlocked` reads the bit;
+- The AP world places checklist rewards one reward *type* at a time, per mode.
+  `checklist_reward_placed_types` holds one bit per (mode, type) pair at
+  `mode * CHECKLIST_REWARD_MODE_BITS + reward_type`, `CHECKLIST_REWARD_MODE_BITS` being 9,
+  so all three modes pack into 27 bits. Pairs the world left out are dropped from the item
+  pool, and their checkboxes are freed to hold ordinary items. The mod compensates at
+  connect via `ChecklistRewards_GrantUnplaced(placed_types)`, which sets the
+  `received_checklist_rewards` bit for every unplaced reward across all three modes - the
+  complete unlock for these types (`ChecklistRewards_CheckUnlocked` reads the bit;
   `ApplyVanillaRewardUnlock`'s `default` is a no-op for them).
-- `IsCosmeticRewardType(reward_type)` defines the set: `REWARD_FILLER`, `BONUS_MOVIE`,
-  `EXTRA_RULE`, `SOUND_TEST`, `MUSIC`, `ENDING`, `PAUSE_POWERUPS` - exactly the reward
-  types with **no gate mask of their own**.
-- Deliberately excluded: the gated categories (`REWARD_STADIUM`/`COURSE`/`MACHINE_*`/
-  characters/colors/TR items), governed by their own `*_gating_enabled` flags (granting
-  them here would badge them "received" without flipping their gate mask); and
-  `REWARD_DRAGOON_PART_*`/`HYDRA_PART_*`, which are progression (they assemble the
-  legendary machines) and must stay in the AP pool.
-- `GrantAllCosmetic` does **not** call `ChecklistRewards_Grant`: no per-reward textbox,
-  and no `Checklist_GrantFiller` bump for `REWARD_FILLER` (an ungated reward yields no
-  extra remote filler token).
+- `IsPlaceableRewardType(reward_type)` bounds which types the mask can speak for:
+  `REWARD_FILLER`, `BONUS_MOVIE`, `EXTRA_RULE`, `SOUND_TEST`, `MUSIC`, `ENDING`,
+  `PAUSE_POWERUPS` - exactly the reward types with **no gate mask of their own**.
+- Deliberately excluded whatever the mask says: the gated categories
+  (`REWARD_STADIUM`/`COURSE`/`MACHINE_*`/characters/colors/TR items), governed by their
+  own `*_gating_enabled` flags (granting them here would badge them "received" without
+  flipping their gate mask); and `REWARD_DRAGOON_PART_*`/`HYDRA_PART_*`, which are
+  progression (they assemble the legendary machines) and must stay in the AP pool.
+- The mask is per mode precisely so a mode the seed disabled works: the AP world places
+  none of that mode's rewards, ships no bits for it, and every one of its rewards is
+  granted here. A mask shared across modes would instead leave them neither placed nor
+  granted, and the content unreachable for the seed.
+- `GrantUnplaced` does **not** call `ChecklistRewards_Grant`: no per-reward textbox, and
+  no `Checklist_GrantFiller` bump for `REWARD_FILLER` (an unplaced reward yields no extra
+  remote filler token).
 
 ### Reward-loop and unlock hooks
 

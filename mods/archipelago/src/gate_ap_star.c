@@ -10,6 +10,7 @@
 // APStarPiece and ap_star's own APStarPieceKind number the six spheres the same
 // way, which is what lets an index cross the boundary unchanged.
 #include "ap_star_api.h"
+#include "ap_announce.h"
 
 static const ApStarAPI *ap_star_api;
 
@@ -60,8 +61,7 @@ int GateApStar_UnlockPiece(int piece)
         return 1;
     }
 
-    tb_api->EnqueueColoredNoun("Unlocked Item: ", ap_star_api->GetPieceName(piece),
-                               tb_api->ItemColor, NULL);
+    APAnnounce_Grant("Unlocked Item: ", ap_star_api->GetPieceName(piece), tb_api->ItemColor, NULL);
     GateApStar_PushMask();
     return 1;
 }
@@ -103,8 +103,7 @@ int GateApStar_GivePiece(int piece)
 
     // ap_star owns the sphere names, so the announcement takes one from it rather
     // than a copy that can drift out of step with the archives.
-    tb_api->EnqueueColoredNoun("Received: ", ap_star_api->GetPieceName(piece),
-                               tb_api->MachineColor, NULL);
+    APAnnounce_Grant("Received: ", ap_star_api->GetPieceName(piece), tb_api->MachineColor, NULL);
     return AP_ITEM_APPLIED;
 }
 
@@ -123,8 +122,7 @@ int GateApStar_GiveStar(void)
             continue;
         if (ap_star_api->Assemble(i))
         {
-            tb_api->EnqueueColoredNoun("Received: ", AP_STAR_MACHINE_NAME,
-                                       tb_api->MachineColor, NULL);
+            APAnnounce_Grant("Received: ", AP_STAR_MACHINE_NAME, tb_api->MachineColor, NULL);
             return AP_ITEM_APPLIED;
         }
     }

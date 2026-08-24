@@ -57,9 +57,14 @@ static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
 // registering first pushes it higher. GMMODE_NUM until APChecklist_Register.
 extern int ap_checklist_mode;
 
+// The two conditions that silence a grant announce, read by APAnnounce_Grant.
 // Set while checklist rewards are re-applied from save data, so the gate unlockers
 // stay quiet instead of reprinting every already-owned unlock at boot.
 extern int ap_regrant_quiet;
+// Set while an item pulled from the AP mailbox is being applied and the client is
+// posting the receipt line itself. Never set for EnergyLink purchases, TrapLink, or
+// in-game pickups.
+extern int ap_item_quiet;
 
 // Absolute clamp ceiling for per-stat patch totals. Patch_GetMaxValue returns
 // through extsb, so anything above 127 sign-extends negative.
@@ -83,6 +88,10 @@ typedef enum APGoalKind
     GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
     GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
 } APGoalKind;
+
+// Bits per checklist mode in APSlotOptions.checklist_reward_placed_types. RewardType
+// tops out at REWARD_PAUSE_POWERUPS (8), so all three modes pack into 27 bits.
+#define CHECKLIST_REWARD_MODE_BITS 9
 
 typedef struct APSlotOptions
 {
@@ -118,10 +127,12 @@ typedef struct APSlotOptions
     u32 stadium_gating_enabled;
     u32 base_ability_gating_enabled;
 
-    // Non-progression checklist rewards: 1 = each is an AP item, 0 = the mod
-    // pre-grants them all at connect. The 6 Dragoon/Hydra part markers are
-    // progression and are not affected.
-    u32 checklist_rewards_gating_enabled;
+    // Which checklist rewards the AP world placed as items, one bit per (mode,
+    // RewardType) pair at `mode * CHECKLIST_REWARD_MODE_BITS + reward_type`. Every
+    // unset pair is pre-granted at connect, so a mode the seed disabled has its
+    // rewards unlocked outright. The 6 Dragoon/Hydra part markers are progression
+    // and are not affected.
+    u32 checklist_reward_placed_types;
 
     // GOALGATE_* bits. Unlocks the AP world shipped as items even though their
     // category's gate is off, because this seed's goal is the thing they gate;
@@ -182,6 +193,66 @@ typedef struct APSave
     APCheckProgress checks;
 } APSave;
 
+// Client-authored textbox messages. The client owns every name the mod cannot know -
+// other worlds' item and location names, player names - so it composes the whole line
+// and the mod only renders it.
+
+// Colored runs per message.
+#define AP_TEXT_SEG_NUM 8
+_Static_assert(AP_TEXT_SEG_NUM == TEXTBOX_MAX_SEGMENTS, "AP_TEXT_SEG_NUM must match TEXTBOX_MAX_SEGMENTS");
+// seg_count NUL-terminated strings back to back, so a whole message is at most
+// AP_TEXT_BLOB_LEN - seg_count rendered characters. Sized past anything the textbox
+// can show so the fit decision belongs to the mod, which knows the font size: the
+// textbox wraps onto three lines and truncates whatever is left over.
+#define AP_TEXT_BLOB_LEN 244
+
+// Frames without a client_alive change before the mod treats the client as gone. The
+// client bumps it every poll (10 Hz), so this is ~18 missed polls.
+#define AP_CLIENT_ALIVE_TIMEOUT 180
+
+// Archipelago's own palette (the CommonClient GUI names), plus a default that follows
+// the textbox's own DefaultColor.
+typedef enum APTextColor
+{
+    APTEXTCOLOR_DEFAULT = 0,
+    APTEXTCOLOR_BLACK,
+    APTEXTCOLOR_RED,
+    APTEXTCOLOR_GREEN,
+    APTEXTCOLOR_YELLOW,
+    APTEXTCOLOR_BLUE,
+    APTEXTCOLOR_MAGENTA,
+    APTEXTCOLOR_CYAN,
+    APTEXTCOLOR_WHITE,
+    APTEXTCOLOR_ORANGE,
+    APTEXTCOLOR_SLATEBLUE,
+    APTEXTCOLOR_PLUM,
+    APTEXTCOLOR_SALMON,
+    APTEXTCOLOR_NUM,
+} APTextColor;
+
+// What a message is about. Each kind has its own Settings menu toggle; the mod filters
+// on render and the client reads text_menu_mask so it can skip composing at all.
+typedef enum APTextKind
+{
+    APTEXT_KIND_CHECK = 0, // a location this slot completed was sent
+    APTEXT_KIND_ITEM,      // an item arrived for this slot
+    APTEXT_KIND_HINT,      // a server hint concerning this slot
+    APTEXT_KIND_STATUS,    // goal / release / collect, and client connect state
+    APTEXT_KIND_CHAT,      // player and server chat
+    APTEXT_KIND_NUM,
+} APTextKind;
+
+typedef struct APTextMessage
+{
+    u8 kind;                    // APTextKind
+    u8 seg_count;               // 1..AP_TEXT_SEG_NUM
+    u8 colors[AP_TEXT_SEG_NUM]; // APTextColor per segment
+    u8 pad[2];
+    char text[AP_TEXT_BLOB_LEN];
+} APTextMessage;
+
+_Static_assert(sizeof(APTextMessage) == 256, "APTextMessage stride is part of the wire contract");
+
 // Shared struct the Python AP client reads and writes with dolphin-memory-engine
 // (OnBoot stores the pointer at 0x805d52d4). Field order is the wire contract.
 typedef struct APData
@@ -210,6 +281,16 @@ typedef struct APData
     u32 deathlink_menu_enabled;
     u32 energylink_menu_enabled;
     u32 traplink_menu_enabled;
+
+    u32 client_alive;  // Client -> game. Bumped every poll; the mod treats no change for
+                       // AP_CLIENT_ALIVE_TIMEOUT frames as "no client".
+
+    // Text mailbox, the same shape as incoming_item_id: the client fills text_msg and then
+    // sets text_pending, the game renders and clears it. The game holds a pending message
+    // while the textbox has no canvas, so a scene load backpressures the client.
+    u32 text_pending;
+    u32 text_menu_mask; // Game -> client. Bit (1 << APTextKind) set = that kind is shown.
+    APTextMessage text_msg;
 } APData;
 
 extern APData *ap_data;

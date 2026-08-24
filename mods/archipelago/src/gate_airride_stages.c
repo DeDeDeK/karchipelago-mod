@@ -6,6 +6,7 @@
 #include "gate_airride_stages.h"
 #include "textbox_api.h"
 #include "inline.h"
+#include "ap_announce.h"
 
 // Replaces AirRide_CheckCourseUnlocked (0x8000c0e0), which only checks stage_kind 8
 // (Nebula Belt) against the checklist. Stage kind 9 (random button) needs at least one
@@ -63,6 +64,6 @@ int GateAirRideStages_UnlockStage(int stage_kind, int announce)
         OSReport("[GateAirRideStages] Air Ride stage %d (%s) unlocked (mask = %s)\n",
                  stage_kind, AirRideCourse_Names[stage_kind], MaskBits(ap_save->airride_stage_unlocked_mask, 16));
     if (announce)
-        tb_api->EnqueueColoredNoun("Unlocked Course: ", AirRideCourse_Names[stage_kind], tb_api->StageColor, NULL);
+        APAnnounce_Grant("Unlocked Course: ", AirRideCourse_Names[stage_kind], tb_api->StageColor, NULL);
     return 1;
 }

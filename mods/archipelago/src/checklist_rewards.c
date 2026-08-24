@@ -17,6 +17,7 @@
 #include "gate_topride_items.h"
 #include "gate_stadiums.h"
 #include "textbox_api.h"
+#include "ap_announce.h"
 
 static const int reward_counts[GMMODE_NUM] = {
     [GMMODE_AIRRIDE]   = REWARD_COUNT_AIRRIDE,
@@ -328,7 +329,7 @@ void Checklist_AnnounceFiller(GameMode mode)
         {mode_name,         mode_color},
         {")",               tb_api->DefaultColor},
     };
-    tb_api->EnqueueSegments(segs, 5);
+    APAnnounce_GrantSegments(segs, 5);
 }
 
 // Display names for the textbox noun shown when a checklist reward is granted - the
@@ -472,7 +473,7 @@ static void AnnounceChecklistReward(GameMode mode, u8 reward_index, u8 reward_ty
     const char *prefix;
     GXColor color;
     ChecklistRewardStyle(reward_type, &prefix, &color);
-    tb_api->EnqueueColoredNoun(prefix, name, color, NULL);
+    APAnnounce_Grant(prefix, name, color, NULL);
 }
 
 // Grant a checklist reward received from the AP server. The unlock_cache at
@@ -512,8 +513,8 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
 
 // Reward types with no gate mask of their own - their unlocked state lives entirely
 // in received_checklist_rewards. These are the non-progression rewards the AP world
-// drops from the pool when checklist_rewards_gated is off.
-static int IsCosmeticRewardType(u8 reward_type)
+// may place as items, one `checklist_rewards` category at a time.
+static int IsPlaceableRewardType(u8 reward_type)
 {
     switch (reward_type)
     {
@@ -530,10 +531,12 @@ static int IsCosmeticRewardType(u8 reward_type)
     }
 }
 
-// checklist_rewards_gated off: mark every cosmetic reward received at connect, so the
-// content is available from the start and its box is freed for an ordinary AP item.
-// Not routed through Grant - no textbox, and no filler-token bump for REWARD_FILLER.
-void ChecklistRewards_GrantAllCosmetic(void)
+// Mark every reward the AP world did not place as received at connect, so the content is
+// available from the start and its box is freed for an ordinary AP item. Placement is
+// tracked per (mode, reward type), so a mode the seed disabled - whose rewards are never
+// placed - is unlocked outright. Not routed through Grant - no textbox, and no
+// filler-token bump for REWARD_FILLER.
+void ChecklistRewards_GrantUnplaced(u32 placed_types)
 {
     int total = 0;
     for (int mode = 0; mode < GMMODE_NUM; mode++)
@@ -541,14 +544,17 @@ void ChecklistRewards_GrantAllCosmetic(void)
         int count = reward_counts[mode];
         for (int ri = 0; ri < count; ri++)
         {
-            if (IsCosmeticRewardType(stc_reward_table_ptrs[mode][ri].reward_type))
+            u8 reward_type = stc_reward_table_ptrs[mode][ri].reward_type;
+            int bit = mode * CHECKLIST_REWARD_MODE_BITS + reward_type;
+            if (IsPlaceableRewardType(reward_type) && !((placed_types >> bit) & 1))
             {
                 ap_save->received_checklist_rewards[mode] |= (1ULL << ri);
                 total++;
             }
         }
     }
-    OSReport("[ChecklistRewards] Checklist rewards ungated - auto-granted %d cosmetic reward(s)\n", total);
+    OSReport("[ChecklistRewards] Auto-granted %d unplaced reward(s) (placed = %s)\n",
+             total, MaskBits(placed_types, 27));
 }
 
 // Filter for the reward loop in Checklist_SetRewardFlagOnUnlocks (0x8017DF5C).

@@ -13,25 +13,38 @@ APMenuSettings ap_menu_settings = {
     .ar_permanent_patches_enabled         = 1,
     .energylink_autocharge_rate           = 1, // Medium, ~1.5s to fill
     .ct_random_start_machine              = 1,
+    .text_messages = {
+        [APTEXT_KIND_CHECK]  = 1,
+        [APTEXT_KIND_ITEM]   = 1,
+        [APTEXT_KIND_HINT]   = 1,
+        [APTEXT_KIND_STATUS] = 1,
+        [APTEXT_KIND_CHAT]   = 0,
+    },
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
 static const char *stc_slow_med_fast[] = {"Slow", "Medium", "Fast"};
 
-void SyncLinkMenuStateToAPData(void)
+void SyncMenuStateToAPData(void)
 {
     if (!ap_data)
         return;
     ap_data->deathlink_menu_enabled  = ap_menu_settings.deathlink_enabled;
     ap_data->energylink_menu_enabled = ap_menu_settings.energylink_enabled;
     ap_data->traplink_menu_enabled   = ap_menu_settings.traplink_enabled;
+
+    u32 mask = 0;
+    for (int i = 0; i < APTEXT_KIND_NUM; i++)
+        if (ap_menu_settings.text_messages[i])
+            mask |= 1 << i;
+    ap_data->text_menu_mask = mask;
 }
 
-static void OnToggleDeathLink(int val)          { OSReport("[Settings] DeathLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
-static void OnToggleEnergyLink(int val)         { OSReport("[Settings] EnergyLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
+static void OnToggleDeathLink(int val)          { OSReport("[Settings] DeathLink toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+static void OnToggleEnergyLink(int val)         { OSReport("[Settings] EnergyLink toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleAutoCharge(int val)         { OSReport("[Settings] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
 static void OnChangeAutoChargeRate(int val)     { OSReport("[Settings] EnergyLink AutoCharge rate set to %s\n", stc_slow_med_fast[val]); }
-static void OnToggleTrapLink(int val)           { OSReport("[Settings] TrapLink toggled %s\n", stc_off_on[val]); SyncLinkMenuStateToAPData(); }
+static void OnToggleTrapLink(int val)           { OSReport("[Settings] TrapLink toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleCTPermanent(int val)        { OSReport("[Settings] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleCTStadiumPermanent(int val) { OSReport("[Settings] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleARPermanent(int val)        { OSReport("[Settings] AR Permanent Patches toggled %s\n", stc_off_on[val]); }
@@ -39,6 +52,79 @@ static void OnToggleRandomStartMachine(int val) { OSReport("[Settings] CT Random
 static void OnToggleDropAbility(int val)         { OSReport("[Settings] Drop Ability toggled %s\n", stc_off_on[val]); }
 static void OnToggleAirQuickSpin(int val)        { OSReport("[Settings] Air Quick Spin toggled %s\n", stc_off_on[val]); }
 static void OnToggleOnFootZoom(int val)          { OSReport("[Settings] On-Foot Zoom toggled %s\n", stc_off_on[val]); }
+static void OnToggleCheckMessages(int val)      { OSReport("[Settings] Check messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+static void OnToggleItemMessages(int val)       { OSReport("[Settings] Item messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+static void OnToggleHintMessages(int val)       { OSReport("[Settings] Hint messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+static void OnToggleStatusMessages(int val)     { OSReport("[Settings] Status messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+static void OnToggleChatMessages(int val)       { OSReport("[Settings] Chat messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+
+// The client composes these lines and the mod only renders them, so a kind turned off
+// here is also skipped client-side once SyncMenuStateToAPData publishes the change.
+static MenuDesc messages_menu = {
+    .option_num = 5,
+    .options = {
+        &(OptionDesc){
+            .name = "Checks",
+            .description = "Show which item a completed checkbox sent, and to whom",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.text_messages[APTEXT_KIND_CHECK],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleCheckMessages,
+        },
+        &(OptionDesc){
+            .name = "Items",
+            .description = "Show received items and who found them",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.text_messages[APTEXT_KIND_ITEM],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleItemMessages,
+        },
+        &(OptionDesc){
+            .name = "Hints",
+            .description = "Show server hints for your items and for items hidden in your world",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.text_messages[APTEXT_KIND_HINT],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleHintMessages,
+        },
+        &(OptionDesc){
+            .name = "Status",
+            .description = "Show goal, release and collect announcements and client connection changes",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.text_messages[APTEXT_KIND_STATUS],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleStatusMessages,
+        },
+        &(OptionDesc){
+            .name = "Chat",
+            .description = "Show player and server chat",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.text_messages[APTEXT_KIND_CHAT],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleChatMessages,
+        },
+    },
+};
 
 // Only round-start application is toggled here - receiving AP permanent-patch items
 // still increments the save counters either way.
@@ -89,7 +175,7 @@ OptionDesc ModSettings = {
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
     .menu_ptr = &(MenuDesc){
-        .option_num = 8,
+        .option_num = 9,
         .options = {
             &(OptionDesc){
                 .name = "Death Link",
@@ -167,6 +253,12 @@ OptionDesc ModSettings = {
                     "On",
                 },
                 .on_change = OnToggleTrapLink,
+            },
+            &(OptionDesc){
+                .name = "Messages",
+                .description = "Choose which Archipelago messages appear in the text box",
+                .kind = OPTKIND_MENU,
+                .menu_ptr = &messages_menu,
             },
             &(OptionDesc){
                 .name = "Permanent Patches",

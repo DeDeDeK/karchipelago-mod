@@ -6,6 +6,7 @@
 #include "gate_colors.h"
 #include "inline.h"
 #include "textbox_api.h"
+#include "ap_announce.h"
 
 static int GateColors_IsColorUnlocked(int color_idx)
 {
@@ -189,8 +190,8 @@ int GateColors_UnlockColor(int color_idx, int announce)
         OSReport("[GateColors] Color %d (%s) unlocked (mask = %s)\n",
                  color_idx, KirbyColor_Names[color_idx], MaskBits(ap_save->color_unlocked_mask, 8));
     if (announce)
-        tb_api->EnqueueColoredNoun("Unlocked Color: ", KirbyColor_Names[color_idx],
-                                   tb_api->KirbyColors[color_idx], " Kirby");
+        APAnnounce_Grant("Unlocked Color: ", KirbyColor_Names[color_idx],
+                         tb_api->KirbyColors[color_idx], " Kirby");
     return 1;
 }
 

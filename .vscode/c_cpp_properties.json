@@ -11,8 +11,10 @@
                 "${workspaceFolder}/mods/custom_events/include",
                 "${workspaceFolder}/mods/textbox/include",
                 "${workspaceFolder}/mods/archipelago/include",
+                "${workspaceFolder}/mods/ap_star/include",
                 "${workspaceFolder}/mods/hypernova/include",
                 "${workspaceFolder}/mods/custom_items/include",
+                "${workspaceFolder}/mods/custom_machines/include",
                 "${workspaceFolder}/mods/custom_checklist/include",
                 "${workspaceFolder}/mods/**/src"
             ],

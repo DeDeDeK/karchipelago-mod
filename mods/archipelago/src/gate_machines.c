@@ -12,6 +12,7 @@
 #include "settings_menu.h"
 #include "textbox_api.h"
 #include "inline.h"
+#include "ap_announce.h"
 
 // Machines that don't naturally spawn in CT: Top Ride stars, transformation forms,
 // and the Meta Knight / Dedede character forms. All have a 0 base spawn chance, so
@@ -511,7 +512,7 @@ int GateMachines_UnlockMachine(MachineKind kind, int announce)
             prefix = "Unlocked Character: ";
             name   = "Meta Knight";
         }
-        tb_api->EnqueueColoredNoun(prefix, name, tb_api->MachineColor, NULL);
+        APAnnounce_Grant(prefix, name, tb_api->MachineColor, NULL);
     }
     return 1;
 }

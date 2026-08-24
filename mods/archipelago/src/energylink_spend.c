@@ -54,14 +54,13 @@ static int Buy(OptionDesc *self)
 
     // Queue it so APItems_PerFrame applies it when the scene/intro gate allows -
     // the same path as items received from AP.
-    if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
+    if (!APItems_Queue(entry->item_id))
     {
         OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: queue full\n",
                  self->name, entry->item_id);
         tb_api->Enqueue("Queue full - try again later");
         return 0;
     }
-    ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
 
     // The integer cost lands on the send counter immediately so the client diffs
     // it on the next poll in any scene - no gameplay frame runs in the menu to
