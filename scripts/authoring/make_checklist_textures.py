@@ -26,8 +26,9 @@ ships as a data file rather than a compiled-in C array.
    takes the blue tint the checklist recolor applies.
 
 Run from the repo root:
-    uv run --with pillow python scripts/hsd/make_checklist_textures.py
+    uv run --with pillow python scripts/authoring/make_checklist_textures.py
 """
+
 import os
 import struct
 import sys
@@ -37,11 +38,12 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hsd.archive import build_archive
 from hsd.gx import GX_TF_I4, GX_TF_RGB5A3, align32, encode_i4_alpha, rgb5a3
+from hsd.schema import type_size
 
 BANNER_W = 248
 BANNER_H = 128
-PANEL = (121, 124, 131)   # gray panel color (~vanilla banner mean)
-CONTRAST = 0.20           # fraction of the logo's deviation from the panel to keep
+PANEL = (121, 124, 131)  # gray panel color (~vanilla banner mean)
+CONTRAST = 0.20  # fraction of the logo's deviation from the panel to keep
 # On the banner quad a texel renders ~1.61x TALLER than it is wide (measured live
 # with a checkerboard of known-square texels). So a logo that is square in texels
 # comes out stretched vertically on screen; ASPECT pre-compensates by widening the
@@ -49,14 +51,13 @@ CONTRAST = 0.20           # fraction of the logo's deviation from the panel to k
 # logo's height as a fraction of the texture height: < 1 leaves a gray margin so the
 # vertically-tiled copies stay separated (no edge-to-edge "double vision"); larger
 # is bigger on screen but closer together.
-ASPECT = 1.61             # a texel renders this much taller than wide (measured)
-LOGO_H_FRAC = 0.56        # logo height as a fraction of the 128px texture height
+ASPECT = 1.61  # a texel renders this much taller than wide (measured)
+LOGO_H_FRAC = 0.56  # logo height as a fraction of the 128px texture height
 
 EMBLEM_W = 64
 EMBLEM_H = 64
 
-ARCHIVE_VERSION = b"001B"          # matches the vanilla game archives
-IMAGEDESC_SIZE = 0x18              # _HSD_ImageDesc {ptr,u16 w,u16 h,u32 fmt,u32 mip,f32,f32}
+IMAGEDESC_SIZE = type_size("ImageDesc")
 BANNER_SYMBOL = "apBannerImg"
 EMBLEM_SYMBOL = "apEmblemImg"
 
@@ -134,7 +135,7 @@ def build_texture_archive(banner_blob, emblem_blob):
 
     relocs = [banner_desc_off + 0x00, emblem_desc_off + 0x00]  # both img_ptr slots
     publics = [(BANNER_SYMBOL, banner_desc_off), (EMBLEM_SYMBOL, emblem_desc_off)]
-    return build_archive(data, relocs, publics, ARCHIVE_VERSION)
+    return build_archive(data, relocs, publics)
 
 
 def main():
@@ -144,11 +145,15 @@ def main():
     archive = build_texture_archive(banner_blob, emblem_blob)
     with open(OUT_DAT, "wb") as f:
         f.write(archive)
-    print(f"banner: {BANNER_W}x{BANNER_H} RGB5A3 ({len(banner_blob)} bytes, "
-          f"logo {lw}x{lh}, {int(CONTRAST*100)}% watermark)")
+    print(
+        f"banner: {BANNER_W}x{BANNER_H} RGB5A3 ({len(banner_blob)} bytes, "
+        f"logo {lw}x{lh}, {int(CONTRAST * 100)}% watermark)"
+    )
     print(f"emblem: {EMBLEM_W}x{EMBLEM_H} I4 ({len(emblem_blob)} bytes)")
-    print(f"wrote {OUT_DAT} ({len(archive) / 1024:.1f} KB, "
-          f"publics '{BANNER_SYMBOL}' / '{EMBLEM_SYMBOL}')")
+    print(
+        f"wrote {OUT_DAT} ({len(archive) / 1024:.1f} KB, "
+        f"publics '{BANNER_SYMBOL}' / '{EMBLEM_SYMBOL}')"
+    )
 
 
 if __name__ == "__main__":

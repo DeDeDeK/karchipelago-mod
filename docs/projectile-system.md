@@ -40,6 +40,26 @@ at `0x802201e0`. That list covers all 17 kinds, so every kind is spawnable once 
 dereferences the slot unguarded (`0x8021f5c4`), so custom spawners outside the normal rider lifetime
 must check `((void **)0x8055a9a8)[kind] != NULL`.
 
+### Environment collider
+
+A kind whose `ProjKindData.mpcoll_desc` (`+0x14`) is non-NULL gets an mpColl `CollData` of its own at
+`proj->coll_data` (`+0x138`), created by `zz_80221cf0_` (`0x80221cf0`) with the projectile GObj as its
+owner and shaped by `Projectile_RebuildCollShape` (`0x80221c9c`) from the descriptor's radius and
+extents. A kind with no descriptor stores NULL there and has no environment collision at all.
+
+`Projectile_UpdateEnvColl` (`0x80221fd4`) is one frame of that collider: `mpColl_Update`, the map
+sweep and the pushback substep, then `flag_b` bit 0 set if anything was contacted. Every kind that
+does environment collision opens its `state_fn2` with it - plasma's (`0x802269fc`) calls it and then
+bursts the shot when the contact normal is steeper than the threshold in its render-state block. **A
+mod that replaces `state_fn2` has to call it itself**, or that projectile stops colliding with the
+world entirely.
+
+The sweep it runs is also the City Trial prop-break dispatch, gated on `CollData.flags` (`+0x34c`)
+bit 2 - which `mpColl_Create` clears and only machines set. The break force it weighs against a
+prop's HP is `CollData.radius` (`+0x344`) x impactSpeed^2, and a projectile leaves that field at
+zero, so breaking props takes both `mpColl_SetSceneObjBreak(cd, 1)` (`0x80247e58`) and a non-zero
+radius. No mod does either.
+
 ## State Tables
 
 Each kind's state table is an array of 24-byte `ProjectileStateEntry` records: a `state_id`

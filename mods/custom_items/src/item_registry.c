@@ -210,14 +210,18 @@ int CustomItemRegistry_RegisterAll(void)
 
         u32 flags = (desc->version >= 4) ? desc->flags : 0;
         void *joint_anim = (desc->version >= 5) ? desc->joint_anim : NULL;
+        void *mat_anim = (desc->version >= 6) ? desc->mat_anim : NULL;
         int drop_mat_anim = (flags & CUSTOM_ITEM_FLAG_NO_MAT_ANIM) != 0;
-        if ((drop_mat_anim || joint_anim != NULL) && stc_ext_itdata[base].anim_data != NULL)
+        if ((drop_mat_anim || joint_anim != NULL || mat_anim != NULL) &&
+            stc_ext_itdata[base].anim_data != NULL)
         {
             for (int a = 0; a < CUSTOM_ITEM_ANIM_SLOTS; a++)
             {
                 stc_custom_anim[n][a] = stc_ext_itdata[base].anim_data[a];
                 if (drop_mat_anim)
                     stc_custom_anim[n][a].mat_anim = NULL;
+                else if (mat_anim != NULL)
+                    stc_custom_anim[n][a].mat_anim = (MatAnimJointDesc *)mat_anim;
                 if (joint_anim != NULL)
                     stc_custom_anim[n][a].joint_anim = (AnimJointDesc *)joint_anim;
             }

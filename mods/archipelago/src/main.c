@@ -45,6 +45,7 @@
 #include "main_menu.h"
 #include "goal_max_stats_ct.h"
 #include "ap_text.h"
+#include "ap_patches.h"
 
 APData *ap_data;
 APSave *ap_save;
@@ -65,17 +66,20 @@ _Static_assert(offsetof(APData, options.goal_checks) == 0x078, "OPTION_GOAL_CHEC
 _Static_assert(offsetof(APData, options.goal_checks[AP_CHECKLIST_ROW]) == 0x0A8, "OPTION_GOAL_CHECKS_ARCHIPELAGO");
 _Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B8, "gating block moved");
 _Static_assert(offsetof(APData, options.goal_forced_gates) == 0x0EC, "OPTION_GOAL_FORCED_GATES");
-_Static_assert(offsetof(APData, location_data_valid) == 0x0F0, "LOCATION_DATA_VALID");
-_Static_assert(offsetof(APData, locations) == 0x0F4, "LOCATIONS_AIRRIDE");
-_Static_assert(offsetof(APData, sent_checks) == 0x208, "SENT_CHECKS_AIRRIDE");
-_Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x238, "SENT_CHECKS_ARCHIPELAGO");
-_Static_assert(offsetof(APData, client_backfill) == 0x248, "CLIENT_BACKFILL_AIRRIDE");
-_Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x278, "CLIENT_BACKFILL_ARCHIPELAGO");
-_Static_assert(offsetof(APData, goal_complete) == 0x288, "GOAL_COMPLETE");
-_Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x28C, "DEATHLINK_MENU_ENABLED");
-_Static_assert(offsetof(APData, text_pending) == 0x298, "TEXT_PENDING");
-_Static_assert(offsetof(APData, text_menu_mask) == 0x29C, "TEXT_MENU_MASK");
-_Static_assert(offsetof(APData, text_msg) == 0x2A0, "TEXT_MSG");
+_Static_assert(offsetof(APData, options.ap_patches) == 0x0F0, "OPTION_AP_PATCHES");
+_Static_assert(offsetof(APData, location_data_valid) == 0x0F8, "LOCATION_DATA_VALID");
+_Static_assert(offsetof(APData, locations) == 0x0FC, "LOCATIONS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks) == 0x210, "SENT_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x240, "SENT_CHECKS_ARCHIPELAGO");
+_Static_assert(offsetof(APData, client_backfill) == 0x250, "CLIENT_BACKFILL_AIRRIDE");
+_Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x280, "CLIENT_BACKFILL_ARCHIPELAGO");
+_Static_assert(offsetof(APData, goal_complete) == 0x290, "GOAL_COMPLETE");
+_Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x294, "DEATHLINK_MENU_ENABLED");
+_Static_assert(offsetof(APData, text_pending) == 0x2A0, "TEXT_PENDING");
+_Static_assert(offsetof(APData, text_menu_mask) == 0x2A4, "TEXT_MENU_MASK");
+_Static_assert(offsetof(APData, text_msg) == 0x2A8, "TEXT_MSG");
+_Static_assert(offsetof(APData, ap_patch_checks) == 0x3A8, "AP_PATCH_CHECKS");
+_Static_assert(offsetof(APData, ap_patch_backfill) == 0x3E8, "AP_PATCH_BACKFILL");
 
 int ap_checklist_mode = GMMODE_NUM;
 int ap_regrant_quiet = 0;
@@ -93,6 +97,7 @@ ModDesc mod_desc = {
     .OnSaveLoaded = OnSaveLoaded,
     .OnMainMenuLoad = OnMainMenuLoad,
     .OnPlayerSelectLoad = OnPlayerSelectLoad,
+    .On3DLoadStart = On3DLoadStart,
     .On3DLoadEnd = On3DLoadEnd,
     .On3DPause = On3DPause,
     .On3DUnpause = On3DUnpause,
@@ -148,6 +153,7 @@ void OnBoot()
     SpawnRate_OnBoot();
     ItemSpawnFilter_OnBoot();
     MainMenu_OnBoot();
+    ApPatches_OnBoot();
 
     ArchipelagoAPI_Export();
 }
@@ -240,6 +246,10 @@ void OnSaveLoaded()
     ap_data->item_received_index = ap_save->item_received_count;
 
     ChecklistRewards_OnSaveLoaded();
+
+    // Without this the client reads zeros after a reboot and re-sends the whole
+    // AP Patch category as if nothing had been collected.
+    ApPatches_OnSaveLoaded();
 
     // Mirrors sent_checks/goal_complete into shared memory and runs the initial
     // goal evaluation.
@@ -468,6 +478,13 @@ void OnPlayerSelectLoad()
         GateColors_ValidateCityTrialColors();
 }
 
+// Runs before a 3D game is initialized. Early enough to hold a custom item out
+// of the round's registry, which is written at CityItemSpawn_Init.
+void On3DLoadStart()
+{
+    ApPatches_On3DLoadStart();
+}
+
 // Runs upon entering a 3D game (Air Ride, Top Ride, or City Trial).
 // Players, riders, their machines, and the map have all been instantiated.
 void On3DLoadEnd()
@@ -535,6 +552,7 @@ void On3DLoadEnd()
 
     GoalMaxStatsCT_On3DLoadEnd();
     APCheckDetect_On3DLoadEnd();
+    ApPatches_On3DLoadEnd();
     KirbyScale_On3DLoadEnd();
     DropAbility_On3DLoadEnd();
 }
@@ -577,6 +595,7 @@ void On3DExit()
     // Stadium_ExitMinor has finished latching GameData.stadium_results by this
     // point, so the round's placements and times are final and readable here.
     APCheckDetect_On3DExit();
+    ApPatches_On3DExit();
 }
 
 // The memory heap is destroyed and recreated every scene change, so HSD objects
@@ -600,6 +619,7 @@ void OnFrameStart()
         ChecklistRewards_ApplyLocations();
 
     CheckDetection_OnFrameStart();
+    ApPatches_OnFrameStart();
     APCheckDetect_OnFrameStart();
     APText_OnFrameStart();
 }

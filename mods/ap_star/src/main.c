@@ -3,12 +3,14 @@
 #include "hoshi/settings.h"
 
 #include "ap_star.h"
+#include "ap_star_handling.h"
 #include "ap_star_pieces.h"
 #include "ap_star_shot.h"
 
 // Hoshi's Mod_CopyFromSave overwrites these later if a saved hash exists.
 ApStarSettings ap_star_settings = {
     .shot_enabled = 1,
+    .handling_enabled = 0,
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
@@ -58,6 +60,7 @@ static void On3DLoadStart(void)
 static void On3DLoadEnd(void)
 {
     ApStarPieces_On3DLoadEnd();
+    ApStarHandling_On3DLoadEnd();
     ApStarShot_On3DLoadEnd();
 }
 

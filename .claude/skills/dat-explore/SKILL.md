@@ -10,16 +10,14 @@ description: >
       zones, splines, spawn positions, items, rails, audio, yakumono,
       partition tree (`grdata`)
     - Grep public AND extern symbols across many .dat files (`find`)
-    - Carve a stage backdrop subtree into a Backdrop*.dat mod asset
     - Carve an Item.dat model into a customItem .dat mod asset
+    - Plan the manifest custom_weather rebuilds a stage backdrop from
     - Author a texture or model .dat from PNGs
-    Wraps `scripts/hsd/explore.py` (general explorer), the carve/author
-    scripts (`carve_backdrop.py`, `carve_all_backdrops.py`,
-    `carve_custom_item.py`, `make_ap_star_pieces.py`,
-    `make_checklist_textures.py`, `make_menu_logo.py`) and the measuring/checking tools
-    (`verify_carved.py`, `geom_bounds.py`, `menu_logo_bounds.py`, all under
-    `scripts/hsd/`). Reads files directly from disc - does not require
-    Dolphin to be running.
+    Wraps the general `.dat` toolchain in `scripts/hsd/` (`explore.py`,
+    `carve_custom_item.py`, `clone_machine.py`, `machine_preview.py`,
+    `make_machine_art.py`, `verify_carved.py`, `geom_bounds.py`) and the
+    per-mod asset authors in `scripts/authoring/`. Reads files directly from
+    disc - does not require Dolphin to be running.
 ---
 
 # dat-explore Skill
@@ -33,12 +31,22 @@ walking with exact size computation, subtree range-carving, GX texture-format
 tables/encoders, and AirRide public-symbol classification.
 
 Library modules:
-- `archive` - `Archive` (reader), `build_archive` (writer), `u16`/`s16`/`u32`/`s32`/`f32`/`cstr`.
+- `archive` - `Archive` (reader), `build_archive` / `Blob` (writer), `u16`/`s16`/`u32`/`s32`/`f32`/`cstr`.
+- `builder` - `Builder` (in-place edits over a parsed archive: read/repoint a
+  pointer field, append or duplicate a record) plus the joint / MatAnimJoint
+  preorder walks and DObj chain helpers an edit needs. The walks also run over
+  a read-only `Archive`.
+- `quad_model` - the textured-quad leaf a HUD or menu image is drawn as
+  (`reserve_quad` / `write_quad` / `write_jobj`), with the HSD struct sizes and
+  the vanilla quad's GX render config.
+- `ui_banks` - finding the character-indexed TexAnim banks in a menu archive
+  and extending their image / TLUT / quad-scale ramps.
 - `schema` - `SCHEMA` (type -> size + pointer fields), `resolved_fields`, `root_for`.
 - `walker` - `Walker` (typed reachability walk), `merge_intervals`, `carve_ranges`.
 - `format` - GX/HSD flag+enum tables and `describe(arc, type, off)` one-liners.
 - `grdata` - the `KAR_grData` stage-data decoder.
 - `gx` - `FORMAT_BLOCK`/`FORMAT_NAME`, `image_size`, `align32`, RGB5A3 / RGBA8 / I4 encoders.
+- `fobj` - packed keyframe streams (`decode` / `encode` / `Key`) and `JOINT_TRACK`.
 - `symbols` - `classify_symbol` (public name -> HSDLib root type).
 
 **Always invoke via `uv run python`** (see project rule in CLAUDE.md).
@@ -119,7 +127,7 @@ fields. Coverage:
 Flags: `--max-depth N`, `--root-type TYPE`, `--no-summary`.
 
 The summary footer lists the full reachable byte budget per type plus a
-total - the same numbers `carve_backdrop` uses to size a carved archive.
+total - the same numbers a carve or a manifest plan sizes itself by.
 Stage trees are large; pair with `--max-depth`.
 
 ### `grdata <file.dat> [<public>] [--expand SECTION]` - decode stage data
@@ -172,24 +180,18 @@ archives import X". Flags: `--publics-only`, `--externs-only`.
 ## Carving / authoring assets
 
 Carving extracts a reachable subtree from a game archive into a minimal
-standalone `.dat` with its own public(s). Both carve tools are thin wrappers
-over the same pipeline: `Walker.walk` (collect reachable offsets + sizes) ->
-`carve_ranges` (concatenate + realign the kept byte ranges, rebuild the
-reloc table into carved coordinates) -> `build_archive` (serialize).
+standalone `.dat` with its own public(s), through one pipeline: `Walker.walk`
+(collect reachable offsets + sizes) -> `carve_ranges` (concatenate + realign the
+kept byte ranges, rebuild the reloc table into carved coordinates) ->
+`build_archive` (serialize). A manifest plans the same walk without carrying the
+bytes, listing the donor ranges for the mod to read at runtime.
 
-- `scripts/hsd/carve_backdrop.py` - extract a stage's skybox model
-  (`grModel` slot 1, whose JOBJ root is the backdrop) into a Backdrop*.dat,
-  normalizing its geometry radius to City Trial's. Single-backdrop CLI plus
-  a `carve(input_path, src_symbol, slot, output_path, new_symbol)` API
-  (slot 0 = MainModel, 1 = SkyboxModel):
-  ```bash
-  uv run python scripts/hsd/carve_backdrop.py \
-      iso/files/GrSpace2Model.dat grModelSpace2 1 \
-      mods/custom_weather/assets/BackdropSpace.dat backdropSpace
-  ```
-- `scripts/hsd/carve_all_backdrops.py` - bulk run over `iso/files/Gr*Model.dat`.
-  `--dry-run` reports which archives actually have a backdrop subtree
-  without carving anything.
+- `scripts/authoring/make_backdrop_manifest.py` - plan every backdrop in
+  `iso/files/Gr*Model.dat` into `BackdropManifest.dat`: the donor file, the
+  byte ranges its subtree occupies, the relocations, and the radius
+  normalization factor. `--dry-run` reports the plan without writing.
+  `verify_backdrop_manifest.py` replays it and compares the rebuilt object
+  graph against the donor's.
 - `scripts/hsd/carve_custom_item.py` - carve an `Item.dat` model (by
   ItemKind) into a `customItem` .dat for the custom_items mod, optionally
   re-encoding a PNG into one texture slot:
@@ -198,12 +200,12 @@ reloc table into carved coordinates) -> `build_archive` (serialize).
       mods/custom_items/assets/items/MegaHydra.dat "Mega Hydra" \
       --base-kind 3 --scale 1.2 --weight-blue 40 --ev-destructible 80
   ```
-- `scripts/hsd/make_ap_star_pieces.py` - author the Archipelago Star's six
+- `scripts/authoring/make_ap_star_pieces.py` - author the Archipelago Star's six
   sphere items (generated UV-sphere `customItem` archives, one per logo color)
   plus `ApPieceIcons.dat`, their HUD tracker art.
-- `scripts/hsd/make_checklist_textures.py` - author `ApChecklistTex.dat`
+- `scripts/authoring/make_checklist_textures.py` - author `ApChecklistTex.dat`
   (banner RGB5A3 + emblem I4) from `art/ap-icon.png`.
-- `scripts/hsd/make_menu_logo.py` - author `MnTitleKarchi.dat`, a
+- `scripts/authoring/make_menu_logo.py` - author `MnTitleKarchi.dat`, a
   `_scene_models` model archive of textured quads for the title screen.
 
 See `docs/sky-backdrop-system.md` (backdrop consumption via the
@@ -212,11 +214,16 @@ See `docs/sky-backdrop-system.md` (backdrop consumption via the
 each authored file is used at runtime.
 
 Sizing is delicate - a misclassified blob silently corrupts the output - so
-always `verify_carved.py` a new carve. To add a new carve target, write a
-thin tool like the two above: walk the subtree, hand the visited map to
+always `verify_carved.py` a new carve. To add a new carve target, write a thin
+tool like `carve_custom_item.py`: walk the subtree, hand the visited map to
 `carve_ranges` with a `prefix` holding your descriptor / pointer slots, then
-`build_archive`. The two `make_*` scripts author archives the same way but
-build their structs from scratch instead of carving.
+`build_archive`. The `make_*` scripts author archives the same way but build
+their structs from scratch instead of carving.
+
+Anything that writes one mod's shipped asset to a fixed path under
+`mods/<mod>/assets/` belongs in `scripts/authoring/`, not here; `scripts/hsd/`
+holds only what works on any archive. An author reaches the library through the
+same `sys.path` insert (both directories sit one level under `scripts/`).
 
 ## Supporting tools
 
@@ -233,9 +240,11 @@ build their structs from scratch instead of carving.
   Exposes `measure_root(arc, root)`, `scale_geometry(arc, root, f)` (uniform
   rescale) and `joint_world_positions(arc, off, world)`; the carve uses
   these to normalize each backdrop to City's radius.
-- `scripts/hsd/menu_logo_bounds.py` - world-space XY box of each joint in
-  the title foreground scene, in `GObj_GetJObjIndex` order. Used to place
-  the custom logo quads over the vanilla logo joints.
+- `scripts/hsd/machine_preview.py <Vc*.dat> [out.dat]` - re-export a machine
+  archive under the public names a model viewer types (`_joint`,
+  `_matanim_joint`, `_figatree`); a `vcData<Class><Stem>` names nothing one
+  can draw. Keeps only the DObjs one LOD table asks for (`--lod`, high by
+  default). Viewer-only - the LOD tables no longer match the pruned tree.
 
 ## Library entry points (`scripts/hsd/`)
 
@@ -307,6 +316,7 @@ bind matrices, raw blobs).
 
 - Runtime memory access - use `dolphin-memory`.
 - Disassembly of code segments in a .dat - use `uv run python scripts/kar.py disasm`.
-- Editing/rewriting archives in place. The carve workflow rebuilds a minimal
-  archive from scratch; for arbitrary edits, consult HSDLib directly (its
-  `HSDRawFile` writer is what would need porting).
+- Full round-trip rewriting of an arbitrary archive. `builder` edits a parsed
+  data section in place and `build_archive` serializes it, which covers
+  repointing, appending and duplicating records; anything beyond that (layout
+  compaction, unsupported types) means consulting HSDLib directly.

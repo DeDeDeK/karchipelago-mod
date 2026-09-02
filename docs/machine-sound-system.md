@@ -219,8 +219,8 @@ one other site.
 
 The ids above name scripts, and a script names a sample by a global sound index
 that runs across every `.ssm` on the disc. A drop-in machine ships a companion
-`.ssm` next to its `.dat` with the same basename - `machines/VcStarAp.dat` and
-`machines/VcStarAp.ssm` - holding exactly one record per row slot in the order
+`.ssm` next to its `.dat` with the same basename - `machines/VcMine.dat` and
+`machines/VcMine.ssm` - holding exactly one record per row slot in the order
 above. A slot the author does not supply is a record with a sample rate of 0,
 and that slot keeps the clone kind's id. Records may point into the same data,
 so a machine whose engine start is its engine loop pays for one copy.
@@ -256,20 +256,15 @@ together, the way a bigger engine sounds; a loop point is scaled with it.
 `build` defaults each role to the loop flag its slot wants and loops from sample
 0. `--loop ROLE=SAMPLE` sets a real loop point, which matters for the charge
 sweeps and the rumble, whose vanilla loops start well into the sample, and
-`--loop ROLE=-1` forces a one shot.
+`--loop ROLE=-1` forces a one shot. The vanilla loop points a `clone` of the
+Slick Star carries are `--loop charge1=19740 --loop charge2=28867 --loop
+charge3=25296 --loop rumble=16734`, scaled by whatever `--pitch` asks for.
 
-## The Archipelago Star's voice
+Pass all thirteen roles every time. `build` writes an absent record for any role
+it is not given, and an absent role falls back to the clone kind's sound rather
+than keeping what the previous bank had.
 
-`mods/ap_star/assets/machines/VcStarAp.ssm` fills all thirteen slots from
-the Slick Star's row with the Warp Star's boost tiers, resampled to 0.82 - about
-three semitones down, and longer to match. It is 350 KB of ARAM over eleven
-distinct samples, engine start and surface start sharing with their loops. The
-editable sources are `art/audio/ap-star/*.wav`, one per slot, written by the
-`donors` command at the same pitch. Feeding all thirteen back through `build`
-with `--loop charge1=19740 --loop charge2=28867 --loop charge3=25296 --loop
-rumble=16734` reproduces the shipped bank byte for byte, so a hand-edited file
-drops straight in.
-
-Pass all thirteen every time. `build` writes an absent record for any role it is
-not given, and an absent role falls back to the Slick Star's sound rather than
-keeping what the previous bank had.
+No machine ships a companion bank. The Archipelago Star, the only drop-in
+registered, takes the Slick Star's row whole and sounds like one, so the loading
+and index-assignment path above runs with nothing to load and every drop-in sound
+resolves to its clone kind's.

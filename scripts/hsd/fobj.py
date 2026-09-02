@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from hsd.archive import Archive, NotAnHSDArchive, u32
-from hsd.schema import root_for, array_length
+from hsd.schema import array_length, root_for
 from hsd.symbols import classify_symbol
 from hsd.walker import Walker
 
@@ -52,15 +52,38 @@ OP_SPL = 4
 OP_SLP = 5
 OP_KEY = 6
 
-OP_NAMES = {OP_NONE: "NONE", OP_CON: "CON", OP_LIN: "LIN", OP_SPL0: "SPL0",
-            OP_SPL: "SPL", OP_SLP: "SLP", OP_KEY: "KEY"}
+OP_NAMES = {
+    OP_NONE: "NONE",
+    OP_CON: "CON",
+    OP_LIN: "LIN",
+    OP_SPL0: "SPL0",
+    OP_SPL: "SPL",
+    OP_SLP: "SLP",
+    OP_KEY: "KEY",
+}
 
 HAS_VALUE = frozenset((OP_CON, OP_LIN, OP_SPL0, OP_SPL, OP_KEY))
 HAS_TAN = frozenset((OP_SPL, OP_SLP))
 HAS_DELTA = frozenset((OP_CON, OP_LIN, OP_SPL0, OP_SPL))
 
-# JointTrackType HSD_A_J_PTCL. Its buffer holds particle-generator ids, not keys.
-TRACK_PTCL = 40
+# JointTrackType, the FObjDesc +0x0C selector naming which joint field a track
+# drives. PTCL is the odd one: its buffer holds particle-generator ids, not keys.
+JOINT_TRACK = {
+    "ROTX": 1,
+    "ROTY": 2,
+    "ROTZ": 3,
+    "PATH": 4,
+    "TRAX": 5,
+    "TRAY": 6,
+    "TRAZ": 7,
+    "SCAX": 8,
+    "SCAY": 9,
+    "SCAZ": 10,
+    "NODE": 11,
+    "BRANCH": 12,
+    "PTCL": 40,
+}
+TRACK_PTCL = JOINT_TRACK["PTCL"]
 
 
 @dataclass
@@ -71,8 +94,10 @@ class Key:
     op: int = OP_CON
 
     def __repr__(self):
-        return (f"Key(frame={self.frame:g}, value={self.value:g}, "
-                f"tan={self.tan:g}, op={OP_NAMES.get(self.op, self.op)})")
+        return (
+            f"Key(frame={self.frame:g}, value={self.value:g}, "
+            f"tan={self.tan:g}, op={OP_NAMES.get(self.op, self.op)})"
+        )
 
 
 class FObjError(ValueError):
@@ -181,7 +206,9 @@ def encode(keys, value_flag, tan_flag):
             if op in HAS_TAN:
                 write_value(out, keys[k].tan, tan_flag)
             if op in HAS_DELTA:
-                delta = int(keys[k + 1].frame - keys[k].frame) if k + 1 < len(keys) else 0
+                delta = (
+                    int(keys[k + 1].frame - keys[k].frame) if k + 1 < len(keys) else 0
+                )
                 write_packed(out, delta)
         i += run
     return bytes(out)
@@ -190,6 +217,7 @@ def encode(keys, value_flag, tan_flag):
 @dataclass
 class FObjTrack:
     """One HSD_FOBJDesc: its header fields and its decoded keys."""
+
     off: int
     track_type: int
     value_flag: int
@@ -221,7 +249,7 @@ def read_fobjdesc(arc, off):
         value_flag=d[off + 0x0D],
         tan_flag=d[off + 0x0E],
         start_frame=struct.unpack_from(">f", d, off + 0x08)[0],
-        buffer=bytes(d[buf_ptr:buf_ptr + length]) if buf_ptr else b"",
+        buffer=bytes(d[buf_ptr : buf_ptr + length]) if buf_ptr else b"",
     )
 
 
@@ -272,10 +300,12 @@ def cmd_verify(args):
                 bad.append((path, off, f"{type(exc).__name__}: {exc}"))
                 continue
             bad.append((path, off, f"{len(t.buffer)}B -> {len(again)}B"))
-    print(f"{tracks} track(s) in {files} archive(s): "
-          f"{tracks - shorter - len(bad)} byte-identical, "
-          f"{shorter} re-packed smaller, {len(bad)} wrong")
-    for path, off, why in bad[:args.show]:
+    print(
+        f"{tracks} track(s) in {files} archive(s): "
+        f"{tracks - shorter - len(bad)} byte-identical, "
+        f"{shorter} re-packed smaller, {len(bad)} wrong"
+    )
+    for path, off, why in bad[: args.show]:
         print(f"  {path} @ {off:#x}: {why}")
     return 1 if bad else 0
 
@@ -285,17 +315,20 @@ def cmd_dump(args):
     offsets = [int(args.offset, 0)] if args.offset else fobjdesc_offsets(arc)
     for off in offsets:
         t = read_fobjdesc(arc, off)
-        print(f"FOBJDesc @ {off:#x} track={t.track_type} start={t.start_frame:g} "
-              f"len={len(t.buffer)}B value_flag={t.value_flag:#04x} "
-              f"tan_flag={t.tan_flag:#04x}")
+        print(
+            f"FOBJDesc @ {off:#x} track={t.track_type} start={t.start_frame:g} "
+            f"len={len(t.buffer)}B value_flag={t.value_flag:#04x} "
+            f"tan_flag={t.tan_flag:#04x}"
+        )
         for k in t.keys:
             print(f"    {k}")
     return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     v = sub.add_parser("verify", help="decode/encode round trip over archives")

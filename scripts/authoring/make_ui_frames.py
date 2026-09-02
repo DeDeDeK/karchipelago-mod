@@ -41,8 +41,9 @@ donor by data-section offset: those are fixed for GKYE01, and the mod adds the
 loaded archive's data base to reach the live TexAnim.
 
 Run from the repo root:
-    uv run --with pillow python scripts/hsd/make_ui_frames.py
+    uv run --with pillow python scripts/authoring/make_ui_frames.py
 """
+
 import argparse
 import os
 import struct
@@ -50,16 +51,26 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hsd.add_ui_frame import (TEXANIM_AOBJ, TEXANIM_IMAGES, TEXANIM_N_IMAGES,
-                              TEXANIM_N_TLUTS, TRACK_TCLT, TRACK_TIMG,
-                              FOBJ_TRACK, encode_art, encoded_ramp, index_values,
-                              joint_ramp_offsets, ramp_value_at, texanim_offsets,
-                              track_chain)
-from hsd.ui_art import BANK_ROLE
-from hsd.archive import Archive, build_archive, u16, u32
+from hsd.archive import Archive, Blob, build_archive, u16, u32
 from hsd.gx import FORMAT_NAME, align32
+from hsd.ui_art import BANK_ROLE
+from hsd.ui_banks import (
+    FOBJ_TRACK,
+    TEXANIM_AOBJ,
+    TEXANIM_IMAGES,
+    TEXANIM_N_IMAGES,
+    TEXANIM_N_TLUTS,
+    TRACK_TCLT,
+    TRACK_TIMG,
+    encode_art,
+    encoded_ramp,
+    index_values,
+    joint_ramp_offsets,
+    ramp_value_at,
+    texanim_offsets,
+    track_chain,
+)
 
-ARCHIVE_VERSION = b"001B"
 PUBLIC = "apUiFrames"
 
 BANK_SIZE = 0x34
@@ -69,42 +80,16 @@ FILE_SIZE = 0x14
 # MnSelruleAll is left out on purpose. Its 96x24 I4 bank holds the rule screen's
 # option labels and is only found by the character-bank test because it happens to
 # hold 20 images; its animation frame is a rule value, never a CharacterKind.
-DONORS = ["MnBestrapAll", "MnResult2All", "MnResult4All", "MnResultAll",
-          "MnResultCtAll", "MnSelplyAll", "MnSelplyctAll", "MnSelstadiumAll"]
-
-
-class Blob:
-    """A data section under construction, with its relocation list."""
-
-    def __init__(self):
-        self.data = bytearray()
-        self.relocs = []
-        self.interned = {}
-        self.pointed = set()
-
-    def append(self, payload, alignment=4):
-        self.data.extend(b"\0" * ((-len(self.data)) & (alignment - 1)))
-        off = len(self.data)
-        self.data.extend(payload)
-        return off
-
-    def intern(self, payload, alignment=4):
-        """Append `payload` once; identical payloads share one offset."""
-        key = (bytes(payload), alignment)
-        if key not in self.interned:
-            self.interned[key] = self.append(payload, alignment)
-        return self.interned[key]
-
-    def ptr(self, at, target):
-        """Write a pointer at `at` and register it for relocation.
-
-        Interned structures are pointed at once per bank that shares them, and a
-        slot relocated twice is relocated twice by the engine, so each is
-        registered only the first time."""
-        struct.pack_into(">I", self.data, at, target)
-        if at not in self.pointed:
-            self.pointed.add(at)
-            self.relocs.append(at)
+DONORS = [
+    "MnBestrapAll",
+    "MnResult2All",
+    "MnResult4All",
+    "MnResultAll",
+    "MnResultCtAll",
+    "MnSelplyAll",
+    "MnSelplyctAll",
+    "MnSelstadiumAll",
+]
 
 
 def bank_tracks(data, tex):
@@ -139,30 +124,50 @@ def bank_image(blob, geom, art):
 
 
 def main(argv):
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--iso-dir", default="iso/files", help="extracted disc root")
     p.add_argument("--out", default="mods/custom_machines/assets/CmUiFrames.dat")
-    p.add_argument("--image", default="art/ap-icon.png",
-                   help="placeholder art, shown for any machine that ships no .art side-car")
-    p.add_argument("--frames", type=int, default=20,
-                   help="characters in the roster; a bank this many images wide is one of theirs")
-    p.add_argument("--source", type=int, default=4,
-                   help="frame the new ones are cloned from (default 4, Slick Star)")
-    p.add_argument("--appended", type=int, default=13,
-                   help="frames every bank grows by, which caps how many registered machines "
-                        "can carry art; must match CUSTOM_MACHINE_MAX")
+    p.add_argument(
+        "--image",
+        default="art/ap-icon.png",
+        help="placeholder art, shown for any machine that ships no .art side-car",
+    )
+    p.add_argument(
+        "--frames",
+        type=int,
+        default=20,
+        help="characters in the roster; a bank this many images wide is one of theirs",
+    )
+    p.add_argument(
+        "--source",
+        type=int,
+        default=4,
+        help="frame the new ones are cloned from (default 4, Slick Star)",
+    )
+    p.add_argument(
+        "--appended",
+        type=int,
+        default=13,
+        help="frames every bank grows by, which caps how many registered machines "
+        "can carry art; must match CUSTOM_MACHINE_MAX",
+    )
     args = p.parse_args(argv[1:])
 
     from PIL import Image
+
     im = Image.open(args.image).convert("RGBA")
 
     blob = Blob()
     files = []
     for name in DONORS:
         arc = Archive(os.path.join(args.iso_dir, name + ".dat"))
-        banks = [tex for tex in texanim_offsets(arc, args.frames)
-                 if bank_geometry(arc.data, tex, args.source) in BANK_ROLE]
+        banks = [
+            tex
+            for tex in texanim_offsets(arc, args.frames)
+            if bank_geometry(arc.data, tex, args.source) in BANK_ROLE
+        ]
         if not banks:
             raise SystemExit(f"{name}: no character-indexed bank")
 
@@ -179,11 +184,14 @@ def main(argv):
 
             geom = bank_geometry(data, tex, args.source)
             desc, note = bank_image(blob, geom, im)
-            timg_buf, timg_flag = encoded_ramp(data, timg,
-                                               index_values(n, args.appended))
+            timg_buf, timg_flag = encoded_ramp(
+                data, timg, index_values(n, args.appended)
+            )
             timg_off = blob.intern(timg_buf)
 
-            struct.pack_into(">IHHHH", blob.data, at, tex, n, n_tlut, args.source, args.appended)
+            struct.pack_into(
+                ">IHHHH", blob.data, at, tex, n, n_tlut, args.source, args.appended
+            )
             blob.ptr(at + 0x0C, desc)
             struct.pack_into(">I", blob.data, at + 0x10, timg)
             blob.ptr(at + 0x14, timg_off)
@@ -192,15 +200,19 @@ def main(argv):
             struct.pack_into(">B", blob.data, at + 0x30, timg_flag)
 
             if tclt:
-                tclt_buf, tclt_flag = encoded_ramp(data, tclt,
-                                                   index_values(n_tlut, args.appended))
+                tclt_buf, tclt_flag = encoded_ramp(
+                    data, tclt, index_values(n_tlut, args.appended)
+                )
                 tclt_off = blob.intern(tclt_buf)
                 struct.pack_into(">I", blob.data, at + 0x1C, tclt)
                 blob.ptr(at + 0x20, tclt_off)
                 struct.pack_into(">I", blob.data, at + 0x24, len(tclt_buf))
                 struct.pack_into(">B", blob.data, at + 0x31, tclt_flag)
-            print(f"  bank @ {tex:#x}: {BANK_ROLE[geom]}, {n} -> {n + args.appended} frames, "
-                  f"{note}" + (f", tlut {n_tlut} -> {n_tlut + args.appended}" if tclt else ""))
+            print(
+                f"  bank @ {tex:#x}: {BANK_ROLE[geom]}, {n} -> {n + args.appended} frames, "
+                f"{note}"
+                + (f", tlut {n_tlut} -> {n_tlut + args.appended}" if tclt else "")
+            )
 
         joints = joint_ramp_offsets(arc)
         ramps = blob.append(b"\0" * (RAMP_SIZE * len(joints))) if joints else 0
@@ -217,7 +229,9 @@ def main(argv):
 
     name_offs = [blob.append(f[0].encode("ascii") + b"\0", 1) for f in files]
     table = blob.append(b"\0" * (FILE_SIZE * (len(files) + 1)))
-    for i, ((name, n_banks, banks, n_ramps, ramps), name_off) in enumerate(zip(files, name_offs)):
+    for i, ((name, n_banks, banks, n_ramps, ramps), name_off) in enumerate(
+        zip(files, name_offs)
+    ):
         at = table + i * FILE_SIZE
         blob.ptr(at, name_off)
         struct.pack_into(">I", blob.data, at + 0x04, n_banks)
@@ -226,12 +240,14 @@ def main(argv):
         if n_ramps:
             blob.ptr(at + 0x10, ramps)
 
-    out = build_archive(blob.data, blob.relocs, [(PUBLIC, table)], ARCHIVE_VERSION)
+    out = build_archive(blob.data, blob.relocs, [(PUBLIC, table)])
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "wb") as f:
         f.write(out)
-    print(f"wrote {args.out} ({len(out) / 1024:.1f} KB, {len(files)} archive(s), "
-          f"{sum(f[1] for f in files)} bank(s), {sum(f[3] for f in files)} joint ramp(s))")
+    print(
+        f"wrote {args.out} ({len(out) / 1024:.1f} KB, {len(files)} archive(s), "
+        f"{sum(f[1] for f in files)} bank(s), {sum(f[3] for f in files)} joint ramp(s))"
+    )
     return 0
 
 

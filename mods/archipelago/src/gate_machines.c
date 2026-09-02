@@ -336,33 +336,17 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     Ply_SetMachineKind(ply, class_index);
 }
 
-// CT machine-select slots the player explicitly picked on the grid this session
-// (bit = slot). A manual CPU pick suppresses that slot's random-start-machine re-roll.
-static u8 ct_machine_manual_pick_mask = 0;
-
-void GateMachines_NoteManualMachinePick(int slot)
-{
-    if (slot >= 0 && slot < 4)
-        ct_machine_manual_pick_mask |= (u8)(1 << slot);
-}
-
 // Finalize the City Trial starting machine at the convergence point of
 // CitySelect_InitPlayerMachines (0x8002dea0), where the Trial and Stadium / Free Run
 // branches merge. Fires once per slot.
 //   x215[slot]: 0 = human, 2 = CPU, else inactive.
-//   x1d0: 0 = Trial (no machine grid), nonzero = Stadium / Free Run.
+//   x1d0: 0 = Trial (no machine grid), nonzero = Stadium / Free Run, which pick their
+//   machine on the grid and are left alone.
 void GateMachines_FinalizeCTMachine(int slot)
 {
     GameData *gd = Gm_GetGameData();
     if (!gd)
         return;
-
-    // Cleared even on the inactive-slot early return below, so it never leaks into
-    // the next match.
-    u8 manual_pick = (slot >= 0 && slot < 4) &&
-                     (ct_machine_manual_pick_mask & (1 << slot));
-    if (slot >= 0 && slot < 4)
-        ct_machine_manual_pick_mask &= (u8)~(1 << slot);
 
     u8 kind = gd->city_select_ply.x215[slot];
     if (kind != 0 && kind != 2)
@@ -372,22 +356,15 @@ void GateMachines_FinalizeCTMachine(int slot)
     if (kind == 2)
         gd->city_select_ply.ply_color[slot] = (u8)GateColors_RandomUnlockedColor();
 
-    if (gd->city_select_ply.x1d0 == 0)
-    {
-        CharacterKind ck;
-        if (ap_menu_settings.ct_random_start_machine)
-            ck = RandomUnlockedKirbyCKind();
-        else
-            ck = IsCKindUnlocked(CKIND_COMPACT) ? CKIND_COMPACT : RandomUnlockedKirbyCKind();
-        gd->city_select_ply.ply_icon_ckind[slot] = (u8)ck;
-    }
-    else if (kind == 2 && !manual_pick && ap_menu_settings.ct_random_start_machine)
-    {
-        u8 num = gd->city_select_ply.machine_select.num;
-        if (num > 0)
-            gd->city_select_ply.ply_icon_ckind[slot] =
-                gd->city_select_ply.machine_select.c_kind_arr[HSD_Randi(num)];
-    }
+    if (gd->city_select_ply.x1d0 != 0)
+        return;
+
+    CharacterKind ck;
+    if (ap_menu_settings.ct_random_start_machine)
+        ck = RandomUnlockedKirbyCKind();
+    else
+        ck = IsCKindUnlocked(CKIND_COMPACT) ? CKIND_COMPACT : RandomUnlockedKirbyCKind();
+    gd->city_select_ply.ply_icon_ckind[slot] = (u8)ck;
 }
 
 // Hook at the convergence point 0x8002dea0 (`lbz r3, 97(r28)`) in
@@ -396,16 +373,6 @@ void GateMachines_FinalizeCTMachine(int slot)
 CODEPATCH_HOOKCREATE(0x8002dea0,
     "mr 3, 26\n\t",
     GateMachines_FinalizeCTMachine,
-    "",
-    0
-)
-
-// Hook the icon[slot] store in CitySelect_Cursor1InputThink (0x800315ac,
-// `stb r27, 45(r30)`) - the sole player-driven machine-grid pick, since it runs only
-// when the chosen grid index changes. r29 = slot.
-CODEPATCH_HOOKCREATE(0x800315ac,
-    "mr 3, 29\n\t",
-    GateMachines_NoteManualMachinePick,
     "",
     0
 )

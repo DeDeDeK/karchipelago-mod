@@ -38,10 +38,12 @@ void ApStar_FireAssemble(int ply);
 // Export the API table. Runs at OnBoot, after the subsystems have initialized.
 void ApStar_ExportApi(void);
 
-// Menu toggle state, bound to this mod's settings page via OptionDesc.
+// Settings state. Only shot_enabled is bound to the settings page; handling_enabled
+// has no option on it and stays at its default.
 typedef struct ApStarSettings
 {
-    int shot_enabled; // the star fires a sphere on every full-charge release
+    int shot_enabled;     // the star fires a sphere on every full-charge release
+    int handling_enabled; // the pods left pick the star's handling profile
 } ApStarSettings;
 
 extern ApStarSettings ap_star_settings;

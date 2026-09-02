@@ -17,8 +17,9 @@ how many joints the tree has. The joint walker at 0x80221914 asserts on a
 mismatch and on any count above 10, which is why the tree is kept to two.
 
 Run from the repo root:
-    uv run python scripts/hsd/make_ap_star_shot.py
+    uv run python scripts/authoring/make_ap_star_shot.py
 """
+
 import os
 import struct
 import sys
@@ -26,18 +27,33 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hsd.archive import build_archive
 from hsd.gx import align32
-from hsd.make_ap_star_pieces import (GX_F32, GX_INDEX8, GX_NRM_XYZ, GX_POS_XYZ,
-                                     GX_VA_NRM, GX_VA_POS,
-                                     JOBJ_CLASSICAL_SCALING, JOBJ_LIGHTING,
-                                     JOBJ_OPA, JOBJ_ROOT_OPA,
-                                     MOBJ_RENDER_MODE, POBJ_CULLBACK, SZ_DOBJ,
-                                     SZ_JOBJ, SZ_MAT, SZ_MOBJ, SZ_POBJ,
-                                     SZ_VTX_ENTRY, display_list, sphere_mesh)
+
+from authoring.make_ap_star_pieces import (
+    GX_F32,
+    GX_INDEX8,
+    GX_NRM_XYZ,
+    GX_POS_XYZ,
+    GX_VA_NRM,
+    GX_VA_POS,
+    JOBJ_CLASSICAL_SCALING,
+    JOBJ_LIGHTING,
+    JOBJ_OPA,
+    JOBJ_ROOT_OPA,
+    MOBJ_RENDER_MODE,
+    POBJ_CULLBACK,
+    SZ_DOBJ,
+    SZ_JOBJ,
+    SZ_MAT,
+    SZ_MOBJ,
+    SZ_POBJ,
+    SZ_VTX_ENTRY,
+    display_list,
+    sphere_mesh,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "mods", "ap_star", "assets", "ApStarShot.dat")
 
-ARCHIVE_VERSION = b"001B"
 PUBLIC = "apStarShot_model"
 
 # Smaller and coarser than an assembly sphere: it is seen in motion, briefly.
@@ -49,7 +65,9 @@ WHITE = 0xFFFFFFFF
 
 
 def build():
-    positions, normals, prims = sphere_mesh(SPHERE_RADIUS, SPHERE_SEGMENTS, SPHERE_RINGS)
+    positions, normals, prims = sphere_mesh(
+        SPHERE_RADIUS, SPHERE_SEGMENTS, SPHERE_RINGS
+    )
     if len(positions) > 255:
         raise SystemExit("index8 vertex arrays hold 255 entries; lower the resolution")
 
@@ -92,11 +110,15 @@ def build():
 
     w32(root + 0x04, JOBJ_ROOT_OPA | JOBJ_CLASSICAL_SCALING)
     ptr(root + 0x08, child)
-    wf32(root + 0x20, 1.0); wf32(root + 0x24, 1.0); wf32(root + 0x28, 1.0)
+    wf32(root + 0x20, 1.0)
+    wf32(root + 0x24, 1.0)
+    wf32(root + 0x28, 1.0)
 
     w32(child + 0x04, JOBJ_OPA | JOBJ_LIGHTING | JOBJ_CLASSICAL_SCALING)
     ptr(child + 0x10, dobj)
-    wf32(child + 0x20, 1.0); wf32(child + 0x24, 1.0); wf32(child + 0x28, 1.0)
+    wf32(child + 0x20, 1.0)
+    wf32(child + 0x24, 1.0)
+    wf32(child + 0x28, 1.0)
 
     ptr(dobj + 0x08, mobj)
     ptr(dobj + 0x0C, pobj)
@@ -107,7 +129,7 @@ def build():
     w32(mat + 0x00, WHITE)  # ambient
     w32(mat + 0x04, WHITE)  # diffuse
     w32(mat + 0x08, WHITE)  # specular, unused without the bit
-    wf32(mat + 0x0C, 1.0)   # alpha
+    wf32(mat + 0x0C, 1.0)  # alpha
     wf32(mat + 0x10, 50.0)  # shininess
 
     ptr(pobj + 0x08, vtx)
@@ -128,9 +150,11 @@ def build():
     w32(vtx + 2 * SZ_VTX_ENTRY + 0x00, 0xFF)  # terminator
 
     tris = sum(len(v) - 2 for _, v in prims)
-    print(f"sphere r={SPHERE_RADIUS} {SPHERE_SEGMENTS}x{SPHERE_RINGS}: "
-          f"{len(positions)} verts, {tris} triangles, 2 joints")
-    return build_archive(data, relocs, [(PUBLIC, root)], ARCHIVE_VERSION)
+    print(
+        f"sphere r={SPHERE_RADIUS} {SPHERE_SEGMENTS}x{SPHERE_RINGS}: "
+        f"{len(positions)} verts, {tris} triangles, 2 joints"
+    )
+    return build_archive(data, relocs, [(PUBLIC, root)])
 
 
 def main():

@@ -54,89 +54,122 @@ source of the size-normalization problem solved at carve time below.
 
 `CustomBackdrop_Override` is hooked at `0x800dcc18`, just after `r30 = grobj` is loaded
 but before `r29 = ms` is read (the macro replays the clobbered `lwz r3, 8(r30)`). The
-callback picks a random enabled entry, loads that donor archive, and rewrites
-`grdata->model_section->backdrop` to point at the donor's backdrop slot. The stock loader
-then instantiates the foreign backdrop subtree as if it were native to this stage.
+callback picks a random enabled entry, rebuilds that backdrop's subtree out of the retail
+disc, and rewrites `grdata->model_section->backdrop` to point at it. The stock loader then
+instantiates the foreign backdrop subtree as if it were native to this stage.
 
 This is the simplest possible swap - no manual `HSD_JObjLoadJoint` / `HSD_JObjAddNext`, no
-scale patching, no GX callback. The loader handles all of it; the mod just lies about
-which `JOBJDesc *` it should use.
+GX callback. The loader handles all of it; the mod just lies about which `JOBJDesc *` it
+should use.
 
 ### Distance scaling
 
-Because every carved backdrop is normalized to one geometry radius and the loader stamps
-City Trial's `StageScale` (0.70) into the root joint, all backdrops would render at a
-single fixed distance. A second hook at `0x800dce84` - immediately after the backdrop
-branch stores the JObj at `GrObj+0xF4` and stamps `grGetStageScale()` into the root joint
-scale at `JOBJ+0x2C/30/34` - multiplies that scale by a user-selected factor, moving the
-whole sky dome nearer or farther. At the hook `r30 = grobj` and `r29 = backdrop JObj`
-(both non-volatile); the macro replays the clobbered `lwz r0, 20(r29)` so the
-classical-scaling flag handling that follows sees the rescaled joint, and the change lands
-before the per-frame matrix build.
+A second hook at `0x800dce84` - immediately after the backdrop branch stores the JObj at
+`GrObj+0xF4` and stamps `grGetStageScale()` into the root joint scale at `JOBJ+0x2C/30/34`
+- multiplies that stamped scale. At the hook `r30 = grobj` and `r29 = backdrop JObj` (both
+non-volatile); the macro replays the clobbered `lwz r0, 20(r29)` so the classical-scaling
+flag handling that follows sees the rescaled joint, and the change lands before the
+per-frame matrix build.
 
-The factor is exposed as the **Backdrop Distance** value option (`100% / 125% / 150% /
-175% / 200%`, default 125% since the stamped distance reads as too close in City Trial).
-It multiplies the loader's stamped scale, so it composes with the carve-time normalization
-rather than replacing it: 100% leaves the vanilla-distance sky dome, higher values push it
-out uniformly across all backdrops including Vanilla.
+Two factors ride on that one multiply:
 
-### Donor archive lifetime
+- **Geometry normalization**, `backdrop_geom_scale`, set per round by the override hook
+  from the manifest entry's `scale`. Donors are modelled anywhere from ~1300 units
+  (Colosseum 5) to ~10000 (Check 2, Jump 3), and the loader discards each donor's own
+  root scale, so untreated they render at radically different distances - small ones wrap
+  in and obscure the map, large ones recede to nothing. The factor is
+  `City_backdrop_radius / donor_radius`, which puts every backdrop at City Trial's own
+  backdrop distance. Vanilla resets it to `1.0`.
+- **Backdrop Distance**, the user-facing value option (`100% / 125% / 150% / 175% / 200%`,
+  default 125% since the stamped distance reads as too close in City Trial). 100% leaves
+  the normalized sky dome where it is; higher values push it out uniformly across all
+  backdrops including Vanilla.
 
-`Archive_LoadFile` allocates into a per-scene heap (despite passing `heap_id = 0`). The
-archive struct is zeroed in place when the 3D scene exits - caching the pointer across CT
-entries reads back as `file_size=0, data=0, flags=0`.
+Scaling the root joint is equivalent to scaling every vertex, since the backdrop is a
+rigid unskinned subtree under a uniform scale - and it is what lets the geometry stay
+byte-identical to the disc.
 
-So `custom_backdrops.c` does **not** cache. Each CT round reloads the donor fresh. No
-`Archive_Free` is called; scene teardown reclaims the storage automatically. Reload cost
-is ~200 KB I/O for most donors, ~1.2 MB for the heaviest two (Space2, Dedede1) - small
-relative to a full stage load.
+### Payload lifetime
 
-## Carving Donors
+`Archive_LoadFile` and `Heap_Alloc(0, ...)` both allocate into a per-scene heap (despite
+the `heap_id = 0`). The storage is zeroed in place when the 3D scene exits - caching a
+pointer across CT entries reads back as `file_size=0, data=0, flags=0`.
 
-Loading a full stage Model archive at runtime (1-2 MB) overflows the heap, so the backdrop
-subtree is pre-extracted into a slim asset.
+So `custom_backdrops.c` does **not** cache. Each CT round reloads the manifest and rebuilds
+the picked backdrop fresh. No `Archive_Free` or `HSD_Free` is called; scene teardown
+reclaims both automatically. Cost is ~200 KB of I/O and heap for most donors, ~1.2 MB for
+the heaviest two (Space2, Dedede1) - small relative to a full stage load.
 
-`scripts/hsd/carve_backdrop.py` walks the JOBJDesc tree starting at `<symbol>[1]`, computes
-exact byte sizes from each HSD struct's fields (image data sized from
-`width x height x bpp` rounded to GX tile padding; palette from `n_entries x 2`; etc.),
-packs the kept ranges with **32-byte alignment preserved** (GX requires cache-line
-alignment for textures, display lists, and vertex arrays), and emits a minimal HSD archive
-plus a synthesized `ModelSection`-shaped public symbol.
+## Rebuilding Donors From The Disc
 
-Output convention: `Backdrop<X>.dat` exposing public `backdrop<X>`, where `<X>` is the
-donor's `grModel<X>` suffix. Resident size after carving ranges from ~5% to ~75% of the
-source archive (most cluster ~150-230 KB; the two outliers, Space2 at 61% / ~1.2 MB and
-Dedede1 at 75% / ~1.2 MB, carry far more backdrop geometry).
+The mod ships no backdrop data. Shipping a carved subtree would mean redistributing retail
+geometry and textures (5.8 MB across 23 donors), and loading the donor `Gr*Model.dat`
+whole at runtime is not an option either: the HSD heap `Archive_LoadFile` draws from is
+10.2 MB total (`0x80A60BC0`-`0x81492B80`) and City Trial already holds
+`GrCity1Model.dat` (2.79 MB) plus every machine, rider and item archive, so a second
+0.5-2.8 MB stage archive does not fit - and `GrSimpleModel.dat` is 14.5 MB on its own.
 
-`scripts/hsd/carve_all_backdrops.py` batch-runs the carve over every `Gr*Model.dat` that
-has a non-NULL `ms[1]`; `--dry-run` reports which archives have backdrops without carving.
-`scripts/hsd/verify_carved.py` walks a carved file and confirms every reachable pointer
-lands inside its data section.
+So only a recipe ships. `scripts/authoring/make_backdrop_manifest.py` walks the JOBJDesc tree at
+`<symbol>[1]`, computes exact byte sizes from each HSD struct's fields (image data from
+`width x height x bpp` rounded to GX tile padding; palette from `n_entries x 2`; etc.), and
+records **which byte ranges of the donor file the subtree occupies** rather than their
+contents. At runtime the mod reads just those ranges off the disc, so it pays for the subtree
+alone rather than for the stage archive around it.
+
+Output: one `mods/custom_weather/assets/BackdropManifest.dat` (~15 KB) exporting public
+`backdropManifest`, covering all 23 donors. Per entry it holds:
+
+| Field | Meaning |
+|---|---|
+| `key` / `donor` | `grModel<X>` suffix, and the file to read (`GrCheck2Model.dat`) |
+| `payload_size` | bytes to allocate |
+| `scale` | `City_backdrop_radius / donor_radius`, applied to the root joint |
+| `root_off` | the backdrop `JOBJDesc`, payload-relative |
+| `ranges[]` | `(donor_off, dest_off, length)`, all multiples of 32 |
+| `relocs[]` | `(dest_off, dest_val)` per pointer in those ranges |
+
+Every range is expanded to 32-byte boundaries at both ends, which is what `File_Read`
+requires of an offset, a length and a destination alike - and what GX requires for
+textures, display lists and vertex arrays. In practice each donor's subtree is contiguous,
+so every backdrop is a single read.
+
+Relocations ship as value pairs, not just source offsets, because the bytes land raw off
+the disc: each pointer still holds a donor offset, and translating one needs the whole byte
+map, so the translated value is precomputed and the runtime only adds the payload base.
+
+`RebuildBackdrop` in `custom_backdrops.c` is the whole runtime: resolve the donor with
+`DVDConvertPathToEntrynum`, `Heap_Alloc` the payload 32-byte aligned, run each range
+through `File_Read` (blocking via `*stc_file_read_done = 0` / `File_ReadDone` /
+`while (File_Wait() == 0);`, the same pattern `File_LoadSync` uses), write the relocations,
+and stamp the root pointer into word 0 of the leading `0x20`-byte pp slot - which mirrors a
+vanilla stage's `grModel<X>[1]`, so it drops straight into `ModelSection.backdrop`.
+
+The offsets are specific to GKYE01, which the mod already targets exclusively.
+
+### Verification
+
+`scripts/authoring/verify_backdrop_manifest.py` replays the runtime in Python - reads the ranges
+out of the donor files, applies the relocations - and then walks the rebuilt payload with
+the same type-aware walker that planned it, comparing the object graph type-for-type and
+size-for-size against walking the donor's own subtree. The walker only follows a field
+listed in the reloc set, so a pointer the manifest failed to record goes unfollowed and
+shows up as a graph mismatch. All 23 backdrops reconstruct exactly.
 
 ### Size normalization
 
 Because the loader stamps City Trial's `StageScale` (0.70) onto every grafted backdrop's
 root joint regardless of donor, each backdrop's on-screen sphere radius is
-`0.70 x (its own geometry radius)`. Donor backdrops are modelled at wildly different raw
-sizes - from ~1300 units (Colosseum 5) to ~10000 (Check 2, Jump 3) - so untreated they
-render at radically different distances: small ones wrap in and obscure the map, large ones
-recede to nothing. A donor's *native* `StageScale` does not predict this (native on-screen
-radius ranges ~1260-16500), so there is no runtime scalar that equalizes them.
+`0.70 x (its own geometry radius)`. A donor's *native* `StageScale` does not predict this
+(native on-screen radius ranges ~1260-16500), so the correction has to be measured.
 
-The carve fixes it at the source. `scripts/hsd/geom_bounds.py` walks the backdrop subtree,
-parses each POBJ's display list for the positions actually drawn, accumulates the joint
-transforms, and computes the geometry radius about the root origin (with the root joint's
-scale forced to 1, since the loader overwrites it). `carve()` then uniformly scales the
-subtree to a target radius - City Trial's own backdrop radius (~2856) - by multiplying
-every joint translation and every drawn position vertex by `target / measured` (an exact
-uniform scale of the hierarchy, since rotations and per-node scales are dimensionless).
-`carve_all_backdrops.py` measures City's radius once and normalizes all donors to it. Every
-carved `Backdrop*.dat` therefore has the same geometry radius, so after the loader stamps
-0.70 they all render at City Trial's backdrop distance.
-
-KAR backdrop positions are all `F32`, so the rescale is a plain float multiply; integer
-position buffers would need re-quantization and the carve raises instead. Re-measuring a
-carved asset with `geom_bounds.py` reports the normalized radius as a built-in check.
+`scripts/hsd/geom_bounds.py` walks the backdrop subtree, parses each POBJ's display list
+for the positions actually drawn, accumulates the joint transforms, and computes the
+geometry radius about the root origin (with the root joint's scale forced to 1, since the
+loader overwrites it). `make_backdrop_manifest.py` measures City's backdrop radius (~2856)
+once and ships `target / measured` per donor, which the distance hook multiplies into the
+stamped scale. Because the subtree is rigid and unskinned and the scale is uniform, that
+renders identically to scaling every vertex - and it leaves the geometry byte-identical to
+the disc, which is what allows the ranges to be read verbatim.
 
 ## Stage Tables
 
@@ -191,13 +224,12 @@ resolves into Table A. The field at `+0x30` is the "is City" flag - `Gm_IsGrKind
 
 ## Pool Composition
 
-`carve_all_backdrops.py` produces 23 `Backdrop*.dat` files (one per `Gr*Model.dat` with a
-non-NULL `ms[1]`), all staged in `mods/custom_weather/assets/`. `backdrop_defs[]` in
-`custom_backdrops.c` references 21 of them, plus a "Vanilla" no-op entry at index 0, for 22
-menu options. Two carved files are deliberately unreferenced: `City1` (it would duplicate
-the Vanilla option) and `Simple` (a 4 KB placeholder, almost certainly a dummy). The other
-4 archives skipped during batch carving (`GrSimple2`, `GrTest`, `GrTest6`, `GrTest7`) all
-have `ms[1] == NULL`.
+`make_backdrop_manifest.py` plans 23 entries (one per `Gr*Model.dat` with a non-NULL
+`ms[1]`). `backdrop_defs[]` in `custom_backdrops.c` references 21 of them by `key`, plus a
+"Vanilla" no-op entry at index 0, for 22 menu options. Two entries are deliberately
+unreferenced: `City1` (it would duplicate the Vanilla option) and `Simple` (a 4 KB
+placeholder, almost certainly a dummy). The other 4 archives skipped during planning
+(`GrSimple2`, `GrTest`, `GrTest6`, `GrTest7`) all have `ms[1] == NULL`.
 
 The **Backdrops** menu (`backdrop_menu` in `custom_backdrops.c`) carries the Backdrop
 Distance value, an Enable-All / Disable-All pair, and one Enabled/Disabled toggle per

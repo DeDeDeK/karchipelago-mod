@@ -13,16 +13,16 @@
 // address is a CustomItemDesc. Magic is big-endian ASCII "CITM".
 #define CUSTOM_ITEM_SYMBOL        "customItem"
 #define CUSTOM_ITEM_MAGIC         0x4349544Du
-// v2 adds model_flag, v3 adds scale, v4 adds flags, v5 adds joint_anim; older
-// descriptors stay supported (the loader rejects only versions newer than this
-// one).
-#define CUSTOM_ITEM_DESC_VERSION  5
+// v2 adds model_flag, v3 adds scale, v4 adds flags, v5 adds joint_anim, v6 adds
+// mat_anim; older descriptors stay supported (the loader rejects only versions
+// newer than this one).
+#define CUSTOM_ITEM_DESC_VERSION  6
 
 // CustomItemDesc.flags (v4+).
 // NO_MAT_ANIM: the model is not the base kind's, so the base kind's material
 // animation - authored against its materials - must not be bound to it. The
 // state script still comes from the base kind, as does the joint animation
-// unless joint_anim overrides it.
+// unless joint_anim overrides it. Takes precedence over mat_anim.
 #define CUSTOM_ITEM_FLAG_NO_MAT_ANIM 0x00000001u
 
 // Folder (relative to FST root) and extension scanned for drop-in items.
@@ -74,6 +74,12 @@ typedef struct CustomItemDesc
     // joint tree and binds by tree position, so the base kind's belongs to the
     // base kind's model. NULL = inherit.
     void *joint_anim;   // 0x38
+
+    // (v6+) optional MatAnimJointDesc* bound in place of the base kind's
+    // material animation, in every anim slot. Lets a carved model keep the base
+    // kind's texture-swap animation while pointing its image table at the
+    // carve's own textures. NULL = inherit.
+    void *mat_anim;     // 0x3c
 } CustomItemDesc;
 
 // Invoked when a rider collects a custom item; `player` is the 0..4 slot.

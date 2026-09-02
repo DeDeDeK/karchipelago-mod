@@ -22,6 +22,7 @@ nonzero if any bad reloc or pointer is found.
 Usage:
     uv run python scripts/hsd/verify_carved.py <carved.dat> [<public>]
 """
+
 import argparse
 import os
 import sys
@@ -43,8 +44,10 @@ def _roots(arc, sym):
     typ, is_array = root_for(classify_symbol(sym))
     if is_array:
         n = array_length(arc, base)
-        return ([(u32(arc.data, base + i * 4), typ) for i in range(n)],
-                f"NullPtrArray<{typ}>[{n}]")
+        return (
+            [(u32(arc.data, base + i * 4), typ) for i in range(n)],
+            f"NullPtrArray<{typ}>[{n}]",
+        )
     if typ == "JOBJDesc":
         # A carved backdrop exposes its root through a ModelSection-shaped
         # prefix: ms[1] -> pp -> JOBJDesc.
@@ -58,7 +61,7 @@ def _sibling_count(arc, off, fd):
     lo = off + fd.cnt_off
     if lo + fd.cnt_w > len(arc.data):
         return 0
-    return int.from_bytes(arc.data[lo:lo + fd.cnt_w], "big")
+    return int.from_bytes(arc.data[lo : lo + fd.cnt_w], "big")
 
 
 def _entry_offsets(arc, off, fd):
@@ -69,8 +72,9 @@ def _entry_offsets(arc, off, fd):
     target = u32(arc.data, off + fd.off)
     if fd.kind == "records":
         size = SCHEMA[fd.type].size
-        return [("record", target + i * size)
-                for i in range(_sibling_count(arc, off, fd))]
+        return [
+            ("record", target + i * size) for i in range(_sibling_count(arc, off, fd))
+        ]
     if fd.kind == "array":
         n = array_length(arc, target)
     elif fd.kind == "run":
@@ -89,8 +93,10 @@ def verify(path, sym=None, root=None, root_type="JOBJDesc"):
         print(e, file=sys.stderr)
         return 1
     size = arc.data_size
-    print(f"file={arc.file_size:#x} data={size:#x} relocs={arc.nb_reloc} "
-          f"publics={arc.nb_public} externs={arc.nb_extern}")
+    print(
+        f"file={arc.file_size:#x} data={size:#x} relocs={arc.nb_reloc} "
+        f"publics={arc.nb_public} externs={arc.nb_extern}"
+    )
     for name, off in arc.publics.items():
         print(f"  public {name} @ {off:#x}")
 
@@ -172,12 +178,16 @@ def main(argv):
     p = argparse.ArgumentParser(description="Verify a carved HSD .dat file.")
     p.add_argument("path")
     p.add_argument("symbol", nargs="?", default=None)
-    p.add_argument("--root", type=lambda s: int(s, 0), default=None,
-                   help="walk from this data offset instead of the carved root")
+    p.add_argument(
+        "--root",
+        type=lambda s: int(s, 0),
+        default=None,
+        help="walk from this data offset instead of the carved root",
+    )
     p.add_argument("--root-type", default="JOBJDesc", choices=sorted(SCHEMA))
     args = p.parse_args(argv[1:])
     return verify(args.path, args.symbol, args.root, args.root_type)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main(sys.argv))

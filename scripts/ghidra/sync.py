@@ -34,7 +34,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from hoshi_headers import (
-    extract_globals, extract_protos, iter_headers, strip_bodies,
+    extract_globals,
+    extract_protos,
+    iter_headers,
+    strip_bodies,
 )
 
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -62,8 +65,11 @@ _BRIDGE_CWD = None
 
 
 def ghidra(args, project):
-    return subprocess.run(["ghidra", *args, "--project", project, "--json"],
-                          capture_output=True, text=True)
+    return subprocess.run(
+        ["ghidra", *args, "--project", project, "--json"],
+        capture_output=True,
+        text=True,
+    )
 
 
 def bridge_cwd(project):
@@ -77,8 +83,9 @@ def bridge_cwd(project):
     global _BRIDGE_CWD
     if _BRIDGE_CWD:
         return _BRIDGE_CWD
-    subprocess.run(["ghidra", "start", "--project", project],
-                   capture_output=True, text=True)
+    subprocess.run(
+        ["ghidra", "start", "--project", project], capture_output=True, text=True
+    )
     pids = []
     if os.path.isdir(BRIDGE_STATE):
         for fn in sorted(os.listdir(BRIDGE_STATE)):
@@ -89,8 +96,9 @@ def bridge_cwd(project):
                 except (OSError, ValueError):
                     pass
     if not pids:
-        found = subprocess.run(["pgrep", "-f", "GhidraCliBridge"],
-                               capture_output=True, text=True)
+        found = subprocess.run(
+            ["pgrep", "-f", "GhidraCliBridge"], capture_output=True, text=True
+        )
         pids = [int(p) for p in found.stdout.split()]
     for pid in pids:
         try:
@@ -110,14 +118,13 @@ def run_bridge_script(task, settings, project):
     os.makedirs(BRIDGE_SCRIPTS, exist_ok=True)
     with open(CFG_FILE, "w") as f:
         f.write(f"task={task}\nreport={REPORT_FILE}\n")
-        for key, value in settings.items():
-            f.write(f"{key}={value}\n")
+        f.writelines(f"{key}={value}\n" for key, value in settings.items())
     if os.path.exists(REPORT_FILE):
         os.remove(REPORT_FILE)
 
     name = os.path.basename(JAVA_SCRIPT)
-    resolved = os.path.join(BRIDGE_SCRIPTS, name)         # where the bridge looks
-    visible = os.path.join(bridge_cwd(project), name)     # what the client checks
+    resolved = os.path.join(BRIDGE_SCRIPTS, name)  # where the bridge looks
+    visible = os.path.join(bridge_cwd(project), name)  # what the client checks
     shutil.copyfile(JAVA_SCRIPT, resolved)
     shutil.copyfile(JAVA_SCRIPT, visible)
     try:
@@ -138,8 +145,9 @@ def print_report(text, problem_re=None, limit=25):
     print("\n".join(f"  {ln}" for ln in head.rstrip().splitlines()))
     if not marker:
         return
-    hits = [ln.strip() for ln in detail.splitlines()
-            if problem_re and problem_re.search(ln)]
+    hits = [
+        ln.strip() for ln in detail.splitlines() if problem_re and problem_re.search(ln)
+    ]
     for line in hits[:limit]:
         print(f"  {line}")
     if len(hits) > limit:
@@ -161,17 +169,23 @@ def phase_types(project, dry_run):
     """
     if dry_run:
         print(f"[types] would parse {MASTER_HEADER}")
-        print(f"[types] over {len(list(iter_headers(HOSHI_INCLUDE)))} "
-              f"body-stripped hoshi headers")
+        print(
+            f"[types] over {len(list(iter_headers(HOSHI_INCLUDE)))} "
+            f"body-stripped hoshi headers"
+        )
         return
     stripped = tempfile.mkdtemp(prefix="hoshi-stripped-")
     try:
         count = strip_bodies(HOSHI_INCLUDE, stripped)
         print(f"[types] parsing {count} body-stripped headers")
-        report = run_bridge_script("parse", {
-            "includes": f"{STUBS},{stripped}",
-            "files": MASTER_HEADER,
-        }, project)
+        report = run_bridge_script(
+            "parse",
+            {
+                "includes": f"{STUBS},{stripped}",
+                "files": MASTER_HEADER,
+            },
+            project,
+        )
         print_report(report, _PARSE_PROBLEM)
     finally:
         shutil.rmtree(stripped, ignore_errors=True)
@@ -194,12 +208,14 @@ def plan_protos(project):
     Ghidra sometimes carries the better name, so an existing real name wins over
     hoshi's and only the types are taken from the header.
     """
-    r = ghidra(["function", "list", "--fields", "address,name", "--limit", "60000"],
-               project)
+    r = ghidra(
+        ["function", "list", "--fields", "address,name", "--limit", "60000"], project
+    )
     if r.returncode != 0:
         sys.exit(f"ghidra function list failed:\n{r.stderr or r.stdout}")
-    known = {f["address"].lower().replace("0x", ""): f["name"]
-             for f in json.loads(r.stdout)}
+    known = {
+        f["address"].lower().replace("0x", ""): f["name"] for f in json.loads(r.stdout)
+    }
 
     plan, skipped = [], []
     for addr, name, sig, _loc in extract_protos(HOSHI_INCLUDE):
@@ -218,8 +234,10 @@ def plan_protos(project):
 
 def phase_protos(project, dry_run):
     plan, skipped = plan_protos(project)
-    print(f"[protos] {len(plan)} documented signatures, "
-          f"{len(skipped)} addresses with no function in Ghidra")
+    print(
+        f"[protos] {len(plan)} documented signatures, "
+        f"{len(skipped)} addresses with no function in Ghidra"
+    )
     if dry_run:
         for name, rtype in RETURN_TYPE_OVERRIDES.items():
             print(f"  [getter                ] {name} -> {rtype}")
@@ -238,8 +256,9 @@ def phase_protos(project, dry_run):
             failures.append((name, rtype, (r.stderr or r.stdout).strip()))
     for addr, sig, _note in plan:
         r = ghidra(["function", "set-signature", addr, "--signature", sig], project)
-        if r.returncode == 0 and re.search(r'"status"\s*:\s*"(signature_set|updated)"',
-                                           r.stdout):
+        if r.returncode == 0 and re.search(
+            r'"status"\s*:\s*"(signature_set|updated)"', r.stdout
+        ):
             ok += 1
         else:
             failures.append((addr, sig, (r.stderr or r.stdout).strip()))
@@ -265,8 +284,7 @@ def phase_globals(project, dry_run):
 
     os.makedirs(CFG_DIR, exist_ok=True)
     with open(GLOBALS_TSV, "w") as f:
-        for row in rows:
-            f.write("\t".join(str(col) for col in row) + "\n")
+        f.writelines("\t".join(str(col) for col in row) + "\n" for row in rows)
     print_report(run_bridge_script("globals", {"data": GLOBALS_TSV}, project))
 
 
@@ -284,20 +302,26 @@ def persist(project, program):
 def main(argv):
     p = argparse.ArgumentParser(
         prog="scripts/ghidra/sync.py",
-        description="Push hoshi types, signatures and globals into Ghidra.")
-    p.add_argument("phases", nargs="*",
-                   help=f"phases to run (default: {' '.join(PHASES)})")
+        description="Push hoshi types, signatures and globals into Ghidra.",
+    )
+    p.add_argument(
+        "phases", nargs="*", help=f"phases to run (default: {' '.join(PHASES)})"
+    )
     p.add_argument("--project", default="kar-decomp")
     p.add_argument("--program", default="kar.dol")
-    p.add_argument("--dry-run", action="store_true",
-                   help="report what would be pushed without changing Ghidra")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would be pushed without changing Ghidra",
+    )
     args = p.parse_args(argv[1:])
 
     requested = args.phases or list(PHASES)
     unknown = [ph for ph in requested if ph not in PHASES]
     if unknown:
-        p.error(f"unknown phase(s): {', '.join(unknown)}; "
-                f"choose from {', '.join(PHASES)}")
+        p.error(
+            f"unknown phase(s): {', '.join(unknown)}; choose from {', '.join(PHASES)}"
+        )
     if not os.path.isdir(HOSHI_INCLUDE):
         sys.exit(f"missing {HOSHI_INCLUDE}")
 

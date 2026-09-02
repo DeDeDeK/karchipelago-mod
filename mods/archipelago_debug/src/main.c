@@ -136,7 +136,7 @@ static void OnFrameStart(void)
             ap_api->DebugTriggerDeathlinkReceive();
             OSReport("[ApDebug] triggered deathlink_receive\n");
         }
-        else
+        else if (pad->held & PAD_TRIGGER_R)
         {
             // Walk the six Archipelago Star spheres, one per press, dropping each
             // in front of player 1 - six presses and six drive-overs is the whole
@@ -147,6 +147,17 @@ static void OnFrameStart(void)
             OSReport("[ApDebug] AP Star sphere %d %s\n", next_sphere,
                      spawned ? "spawned" : "unavailable");
             next_sphere = (next_sphere + 1) % AP_STAR_PIECE_NUM;
+        }
+        else
+        {
+            // One AP Box in front of player 1, without waiting on the spawner. The
+            // drop-ins are held out of the registry while ap_patches is 0, and an
+            // unregistered item has no ItemKind until the round reloads with it set.
+            if (ap_api->DebugSpawnApBox(0))
+                OSReport("[ApDebug] AP Box spawned\n");
+            else
+                OSReport("[ApDebug] no AP Box registered this round (ap_patches = %d)\n",
+                         ap_api->GetApPatchCount());
         }
     }
 

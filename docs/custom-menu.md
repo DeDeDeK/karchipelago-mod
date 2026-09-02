@@ -122,12 +122,11 @@ hazard, and hoshi relocates the minor table, so the entry is live.
 
 ## Asset Pipeline
 
-`scripts/hsd/make_menu_logo.py` authors `mods/archipelago/assets/MnTitleKarchi.dat` from two
-piece PNGs in `art/` (`AirRide_Archipelago.png`, `Archipelago_Kirbs-05.png`). Source art lives
-there rather than beside the archive because `assets/` is the disc staging folder - everything
-in it ships:
+`scripts/authoring/make_menu_logo.py` authors `mods/archipelago/assets/MnTitleKarchi.dat` from two
+piece PNGs in `art/` (`ap-banner.png`, `ap-kirbs.png`). Source art lives there rather than
+beside the archive because `assets/` is the disc staging folder - everything in it ships:
 
-    uv run --with pillow python scripts/hsd/make_menu_logo.py
+    uv run --with pillow python scripts/authoring/make_menu_logo.py
 
 Each piece is cropped to its opaque content box and encoded as an RGBA8 texture (full 8-bit
 color - the logo's smooth gradients band badly under RGB5A3). The pieces are wrapped in one

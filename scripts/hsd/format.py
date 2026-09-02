@@ -93,34 +93,72 @@ TOBJ_FLAGS_SINGLE = [
     (1 << 31, "MTX_DIRTY"),
 ]
 TOBJ_COORD = {
-    0: "UV", 1: "REFLECTION", 2: "HILIGHT", 3: "SHADOW", 4: "TOON", 5: "GRADATION",
+    0: "UV",
+    1: "REFLECTION",
+    2: "HILIGHT",
+    3: "SHADOW",
+    4: "TOON",
+    5: "GRADATION",
 }
 TOBJ_COLORMAP = {
-    1: "CM_ALPHA_MASK", 2: "CM_RGB_MASK", 3: "CM_BLEND", 4: "CM_MODULATE",
-    5: "CM_REPLACE", 6: "CM_PASS", 7: "CM_ADD", 8: "CM_SUB",
+    1: "CM_ALPHA_MASK",
+    2: "CM_RGB_MASK",
+    3: "CM_BLEND",
+    4: "CM_MODULATE",
+    5: "CM_REPLACE",
+    6: "CM_PASS",
+    7: "CM_ADD",
+    8: "CM_SUB",
 }
 TOBJ_ALPHAMAP = {
-    1: "AM_ALPHA_MASK", 2: "AM_BLEND", 3: "AM_MODULATE", 4: "AM_REPLACE",
-    5: "AM_PASS", 6: "AM_ADD", 7: "AM_SUB",
+    1: "AM_ALPHA_MASK",
+    2: "AM_BLEND",
+    3: "AM_MODULATE",
+    4: "AM_REPLACE",
+    5: "AM_PASS",
+    6: "AM_ADD",
+    7: "AM_SUB",
 }
 
 # GX enums (HSDRaw/GX/Enums.cs).
 GX_BLEND_MODE = {0: "NONE", 1: "BLEND", 2: "LOGIC", 3: "SUBTRACT"}
 GX_BLEND_FACTOR = {
-    0: "ZERO", 1: "ONE", 2: "SRCCOLOR", 3: "INVSRCCOLOR",
-    4: "SRCALPHA", 5: "INVSRCALPHA", 6: "DSTALPHA", 7: "INVDSTALPHA",
+    0: "ZERO",
+    1: "ONE",
+    2: "SRCCOLOR",
+    3: "INVSRCCOLOR",
+    4: "SRCALPHA",
+    5: "INVSRCALPHA",
+    6: "DSTALPHA",
+    7: "INVDSTALPHA",
 }
 GX_COMPARE = {
-    0: "NEVER", 1: "LESS", 2: "EQUAL", 3: "LEQUAL",
-    4: "GREATER", 5: "NEQUAL", 6: "GEQUAL", 7: "ALWAYS",
+    0: "NEVER",
+    1: "LESS",
+    2: "EQUAL",
+    3: "LEQUAL",
+    4: "GREATER",
+    5: "NEQUAL",
+    6: "GEQUAL",
+    7: "ALWAYS",
 }
 GX_TEX_FILTER = {
-    0: "NEAR", 1: "LINEAR", 2: "NEAR_MIP_NEAR",
-    3: "LIN_MIP_NEAR", 4: "NEAR_MIP_LIN", 5: "LIN_MIP_LIN",
+    0: "NEAR",
+    1: "LINEAR",
+    2: "NEAR_MIP_NEAR",
+    3: "LIN_MIP_NEAR",
+    4: "NEAR_MIP_LIN",
+    5: "LIN_MIP_LIN",
 }
 GX_BRIGHTNESS_DIST = {0: "GENTLE", 1: "MEDIUM", 2: "STEEP", 3: "SHARP"}
 GX_SPOT_FUNC = {
-    0: "OFF", 1: "FLAT", 2: "COS", 3: "COS2", 4: "SHARP", 5: "RING1", 6: "RING2",
+    0: "OFF",
+    1: "FLAT",
+    2: "COS",
+    3: "COS2",
+    4: "SHARP",
+    5: "RING1",
+    6: "RING2",
 }
 
 PE_FLAGS = [
@@ -147,17 +185,33 @@ LOBJ_FLAGS = [
 ]
 
 FOG_TYPES = {
-    0x00: "NONE", 0x02: "PERSP_LINEAR", 0x04: "PERSP_EXP", 0x05: "PERSP_EXP2",
-    0x06: "PERSP_REVEXP", 0x07: "PERSP_REVEXP2", 0x0A: "ORTHO_LINEAR",
-    0x0C: "ORTHO_EXP", 0x0D: "ORTHO_EXP2", 0x0E: "ORTHO_REVEXP",
+    0x00: "NONE",
+    0x02: "PERSP_LINEAR",
+    0x04: "PERSP_EXP",
+    0x05: "PERSP_EXP2",
+    0x06: "PERSP_REVEXP",
+    0x07: "PERSP_REVEXP2",
+    0x0A: "ORTHO_LINEAR",
+    0x0C: "ORTHO_EXP",
+    0x0D: "ORTHO_EXP2",
+    0x0E: "ORTHO_REVEXP",
     0x0F: "ORTHO_REVEXP2",
 }
 
 ROBJ_REFTYPES = {0x0: "EXP", 0x1: "JOBJ", 0x2: "LIMIT", 0x3: "BYTECODE", 0x4: "IKHINT"}
 ROBJ_LIMIT_NAMES = {
-    1: "MIN_ROTX", 2: "MAX_ROTX", 3: "MIN_ROTY", 4: "MAX_ROTY",
-    5: "MIN_ROTZ", 6: "MAX_ROTZ", 7: "MIN_TRAX", 8: "MAX_TRAX",
-    9: "MIN_TRAY", 10: "MAX_TRAY", 11: "MIN_TRAZ", 12: "MAX_TRAZ",
+    1: "MIN_ROTX",
+    2: "MAX_ROTX",
+    3: "MIN_ROTY",
+    4: "MAX_ROTY",
+    5: "MIN_ROTZ",
+    6: "MAX_ROTZ",
+    7: "MIN_TRAX",
+    8: "MAX_TRAX",
+    9: "MIN_TRAY",
+    10: "MAX_TRAY",
+    11: "MIN_TRAZ",
+    12: "MAX_TRAZ",
 }
 
 CAMERA_PROJ = {1: "PERSPECTIVE", 2: "FRUSTRUM", 3: "ORTHO"}
@@ -181,24 +235,61 @@ SPLINE_TYPES = {0: "LINEAR", 1: "BEZIER", 2: "BSPLINE", 3: "TENSION"}
 
 # KAR_CollisionJoint.Kind (HSDLib KdMeshKind).
 COLL_JOINT_KINDS = {
-    0: "BASIC", 1: "CONVEYOR_UNUSED", 2: "CONVEYOR", 3: "BREAKABLE",
-    4: "MOVING_TRANSLATION", 5: "MOVING_ROTATION",
+    0: "BASIC",
+    1: "CONVEYOR_UNUSED",
+    2: "CONVEYOR",
+    3: "BREAKABLE",
+    4: "MOVING_TRANSLATION",
+    5: "MOVING_ROTATION",
 }
 
 # KAR_CollisionTriangle +0x0C low nibble (HSDLib KCCollFlag).
-COLL_TRI_FLAGS = [(1 << 0, "FLOOR"), (1 << 1, "WALL"),
-                  (1 << 2, "CEILING"), (1 << 3, "UNK")]
+COLL_TRI_FLAGS = [
+    (1 << 0, "FLOOR"),
+    (1 << 1, "WALL"),
+    (1 << 2, "CEILING"),
+    (1 << 3, "UNK"),
+]
 
 # KAR_ZoneCollisionTriangle.Kind (HSDLib KdZone.ZoneKind), the low 25 bits
 # of the triangle's +0x10 word.
 ZONE_KINDS = [
-    "GroundedBoost", "GroundedBoostForce", "DashGate1", "DashGate2", "DashRing",
-    "WarpIn", "WarpOut", "SuperJump", "SuperJumpCameraTrailer", "Leap", "Spin",
-    "Airflow", "SwitchGrounded", "SwitchRing", "SwitchArea", "RandomAbility",
-    "FreeMovement", "DownForce", "ClawStart", "ClawEnd", "Unknown20",
-    "Unknown21", "Canon", "ClawTarget", "Unknown24", "DeathPlane", "Unknown26",
-    "Unknown27", "Unknown28", "Unknown29", "Unknown30", "PlaySound",
-    "LightArea", "Heal", "Reverb", "Unknown35",
+    "GroundedBoost",
+    "GroundedBoostForce",
+    "DashGate1",
+    "DashGate2",
+    "DashRing",
+    "WarpIn",
+    "WarpOut",
+    "SuperJump",
+    "SuperJumpCameraTrailer",
+    "Leap",
+    "Spin",
+    "Airflow",
+    "SwitchGrounded",
+    "SwitchRing",
+    "SwitchArea",
+    "RandomAbility",
+    "FreeMovement",
+    "DownForce",
+    "ClawStart",
+    "ClawEnd",
+    "Unknown20",
+    "Unknown21",
+    "Canon",
+    "ClawTarget",
+    "Unknown24",
+    "DeathPlane",
+    "Unknown26",
+    "Unknown27",
+    "Unknown28",
+    "Unknown29",
+    "Unknown30",
+    "PlaySound",
+    "LightArea",
+    "Heal",
+    "Reverb",
+    "Unknown35",
 ]
 
 
@@ -261,8 +352,10 @@ def rgba(arc, off):
 
 
 def vec3(arc, off):
-    return (f"({f32(arc.data, off):.2f}, {f32(arc.data, off + 4):.2f}, "
-            f"{f32(arc.data, off + 8):.2f})")
+    return (
+        f"({f32(arc.data, off):.2f}, {f32(arc.data, off + 4):.2f}, "
+        f"{f32(arc.data, off + 8):.2f})"
+    )
 
 
 def name_at(arc, struct_off, name_field_off=0x00):
@@ -312,14 +405,20 @@ def _d_mobj(arc, off):
 
 def _d_tobj(arc, off):
     flags = u32(arc.data, off + 0x40)
-    return _named(arc, off, f"map=TEXMAP{u32(arc.data, off + 0x08)}",
-                  f"flags={flags:#010x} [{decode_tobj_flags(flags)}]")
+    return _named(
+        arc,
+        off,
+        f"map=TEXMAP{u32(arc.data, off + 0x08)}",
+        f"flags={flags:#010x} [{decode_tobj_flags(flags)}]",
+    )
 
 
 def _d_pobj(arc, off):
     flags = u16(arc.data, off + 0x0C)
-    return (f" flags={flags:#06x} [{_bits(flags, POBJ_FLAGS)}]"
-            f" dl={u16(arc.data, off + 0x0E) * 32}B")
+    return (
+        f" flags={flags:#06x} [{_bits(flags, POBJ_FLAGS)}]"
+        f" dl={u16(arc.data, off + 0x0E) * 32}B"
+    )
 
 
 def _d_image(arc, off):
@@ -340,19 +439,23 @@ def _d_tlut(arc, off):
 
 
 def _d_material(arc, off):
-    return (f" amb={rgba(arc, off + 0x00)} dif={rgba(arc, off + 0x04)}"
-            f" spc={rgba(arc, off + 0x08)} alpha={f32(arc.data, off + 0x0C):.2f}"
-            f" shine={f32(arc.data, off + 0x10):.2f}")
+    return (
+        f" amb={rgba(arc, off + 0x00)} dif={rgba(arc, off + 0x04)}"
+        f" spc={rgba(arc, off + 0x08)} alpha={f32(arc.data, off + 0x0C):.2f}"
+        f" shine={f32(arc.data, off + 0x10):.2f}"
+    )
 
 
 def _d_pe(arc, off):
     d = arc.data
-    return (f" [{_bits(d[off], PE_FLAGS)}]"
-            f" blend={GX_BLEND_MODE.get(d[off + 4], d[off + 4])}"
-            f" src={GX_BLEND_FACTOR.get(d[off + 5], d[off + 5])}"
-            f" dst={GX_BLEND_FACTOR.get(d[off + 6], d[off + 6])}"
-            f" depth={GX_COMPARE.get(d[off + 8], d[off + 8])}"
-            f" aref=({d[off + 1]},{d[off + 2]}) dstA={d[off + 3]}")
+    return (
+        f" [{_bits(d[off], PE_FLAGS)}]"
+        f" blend={GX_BLEND_MODE.get(d[off + 4], d[off + 4])}"
+        f" src={GX_BLEND_FACTOR.get(d[off + 5], d[off + 5])}"
+        f" dst={GX_BLEND_FACTOR.get(d[off + 6], d[off + 6])}"
+        f" depth={GX_COMPARE.get(d[off + 8], d[off + 8])}"
+        f" aref=({d[off + 1]},{d[off + 2]}) dstA={d[off + 3]}"
+    )
 
 
 def _d_robj(arc, off):
@@ -382,21 +485,27 @@ def _d_lobj_attn(arc, off, flags, attn):
     p = u32(arc.data, off + 0x18)
     if flags & (1 << 6):  # LOBJ_RAW_PARAM
         a = [f32(arc.data, p + i * 4) for i in range(6)]
-        return (f" attn a=({a[0]:.3g},{a[1]:.3g},{a[2]:.3g})"
-                f" k=({a[3]:.3g},{a[4]:.3g},{a[5]:.3g})")
+        return (
+            f" attn a=({a[0]:.3g},{a[1]:.3g},{a[2]:.3g})"
+            f" k=({a[3]:.3g},{a[4]:.3g},{a[5]:.3g})"
+        )
     kind = flags & 0x3
     if kind == 1:  # INFINITE: a single float
         return f" attn={f32(arc.data, p):.3g}"
     if kind == 2:  # POINT
-        return (f" point ref_br={f32(arc.data, p):.3g}"
-                f" ref_dist={f32(arc.data, p + 4):.3g}"
-                f" dist={GX_BRIGHTNESS_DIST.get(u32(arc.data, p + 8), '?')}")
+        return (
+            f" point ref_br={f32(arc.data, p):.3g}"
+            f" ref_dist={f32(arc.data, p + 4):.3g}"
+            f" dist={GX_BRIGHTNESS_DIST.get(u32(arc.data, p + 8), '?')}"
+        )
     if kind == 3:  # SPOT
-        return (f" spot cutoff={f32(arc.data, p):.3g}"
-                f" func={GX_SPOT_FUNC.get(u32(arc.data, p + 4), '?')}"
-                f" ref_br={f32(arc.data, p + 8):.3g}"
-                f" ref_dist={f32(arc.data, p + 0x0C):.3g}"
-                f" dist={GX_BRIGHTNESS_DIST.get(u32(arc.data, p + 0x10), '?')}")
+        return (
+            f" spot cutoff={f32(arc.data, p):.3g}"
+            f" func={GX_SPOT_FUNC.get(u32(arc.data, p + 4), '?')}"
+            f" ref_br={f32(arc.data, p + 8):.3g}"
+            f" ref_dist={f32(arc.data, p + 0x0C):.3g}"
+            f" dist={GX_BRIGHTNESS_DIST.get(u32(arc.data, p + 0x10), '?')}"
+        )
     return ""
 
 
@@ -406,10 +515,12 @@ def _d_wobj(arc, off):
 
 def _d_fog(arc, off):
     ft = u32(arc.data, off + 0x00)
-    return (f" type={FOG_TYPES.get(ft, str(ft))}"
-            f" near={f32(arc.data, off + 0x08):.1f}"
-            f" far={f32(arc.data, off + 0x0C):.1f}"
-            f" color={rgba(arc, off + 0x10)}")
+    return (
+        f" type={FOG_TYPES.get(ft, str(ft))}"
+        f" near={f32(arc.data, off + 0x08):.1f}"
+        f" far={f32(arc.data, off + 0x0C):.1f}"
+        f" color={rgba(arc, off + 0x10)}"
+    )
 
 
 def _d_texlod(arc, off):
@@ -418,46 +529,62 @@ def _d_texlod(arc, off):
 
 
 def _d_tev(arc, off):
-    return (f" color_op={arc.data[off]} alpha_op={arc.data[off + 1]}"
-            f" active={u32(arc.data, off + 0x1C):#x}")
+    return (
+        f" color_op={arc.data[off]} alpha_op={arc.data[off + 1]}"
+        f" active={u32(arc.data, off + 0x1C):#x}"
+    )
 
 
 def _d_spline(arc, off):
     t = arc.data[off]
-    return (f" type={SPLINE_TYPES.get(t, t)} pts={u16(arc.data, off + 0x02)}"
-            f" tension={f32(arc.data, off + 0x04):.2f}"
-            f" len={f32(arc.data, off + 0x0C):.2f}")
+    return (
+        f" type={SPLINE_TYPES.get(t, t)} pts={u16(arc.data, off + 0x02)}"
+        f" tension={f32(arc.data, off + 0x04):.2f}"
+        f" len={f32(arc.data, off + 0x0C):.2f}"
+    )
 
 
 def _d_sobj(arc, off):
     def n(slot):
-        return array_length(arc, u32(arc.data, off + slot)) \
-            if _has_ptr(arc, off + slot) else 0
+        return (
+            array_length(arc, u32(arc.data, off + slot))
+            if _has_ptr(arc, off + slot)
+            else 0
+        )
+
     return f" models={n(0x00)} cameras={n(0x04)} lights={n(0x08)}"
 
 
 def _d_camera(arc, off):
     proj = u16(arc.data, off + 0x06)
-    vl, vr, vt, vb = struct.unpack(">4h", arc.data[off + 0x08:off + 0x10])
-    bits = [f"proj={CAMERA_PROJ.get(proj, str(proj))}",
-            f"view=({vl},{vt})-({vr},{vb})",
-            f"clip={f32(arc.data, off + 0x28):.1f}..{f32(arc.data, off + 0x2C):.1f}"]
+    vl, vr, vt, vb = struct.unpack(">4h", arc.data[off + 0x08 : off + 0x10])
+    bits = [
+        f"proj={CAMERA_PROJ.get(proj, str(proj))}",
+        f"view=({vl},{vt})-({vr},{vb})",
+        f"clip={f32(arc.data, off + 0x28):.1f}..{f32(arc.data, off + 0x2C):.1f}",
+    ]
     if proj == 1:  # PERSPECTIVE
-        bits.append(f"fov={f32(arc.data, off + 0x30):.1f}"
-                    f" aspect={f32(arc.data, off + 0x34):.3f}")
+        bits.append(
+            f"fov={f32(arc.data, off + 0x30):.1f}"
+            f" aspect={f32(arc.data, off + 0x34):.3f}"
+        )
     return _named(arc, off, *bits)
 
 
 def _d_mainmodel(arc, off):
-    return (f" jobj={u32(arc.data, off + 0x04)} dobj={u32(arc.data, off + 0x08)}"
-            f" pobj={u32(arc.data, off + 0x0C)}")
+    return (
+        f" jobj={u32(arc.data, off + 0x04)} dobj={u32(arc.data, off + 0x08)}"
+        f" pobj={u32(arc.data, off + 0x0C)}"
+    )
 
 
 def _d_bounding(arc, off):
-    return (f" viewregions={u16(arc.data, off + 0x04)}"
-            f" dynbbox={u16(arc.data, off + 0x0C)}"
-            f" statbbox={u16(arc.data, off + 0x14)}"
-            f" indices={u16(arc.data, off + 0x1C)}")
+    return (
+        f" viewregions={u16(arc.data, off + 0x04)}"
+        f" dynbbox={u16(arc.data, off + 0x0C)}"
+        f" statbbox={u16(arc.data, off + 0x14)}"
+        f" indices={u16(arc.data, off + 0x1C)}"
+    )
 
 
 def _d_fog_anim(arc, off):
@@ -473,8 +600,10 @@ def _d_aobj(arc, off):
         if cur not in arc.reloc_set:
             break
         cur = u32(arc.data, cur)
-    return (f" flags={flags:#010x} [{_bits(flags, AOBJ_FLAGS)}]"
-            f" end={f32(arc.data, off + 0x04):.1f} tracks={n}")
+    return (
+        f" flags={flags:#010x} [{_bits(flags, AOBJ_FLAGS)}]"
+        f" end={f32(arc.data, off + 0x04):.1f} tracks={n}"
+    )
 
 
 def _d_fobjdesc(arc, off):
@@ -482,9 +611,11 @@ def _d_fobjdesc(arc, off):
     # Tex / Light / Shape track), so it prints raw.
     vfmt, vscale = decode_anim_flag(arc.data[off + 0x0D])
     tfmt, tscale = decode_anim_flag(arc.data[off + 0x0E])
-    return (f" track={arc.data[off + 0x0C]} start={f32(arc.data, off + 0x08):.1f}"
-            f" len={u32(arc.data, off + 0x04)}B"
-            f" v={vfmt}/2^{vscale} t={tfmt}/2^{tscale}")
+    return (
+        f" track={arc.data[off + 0x0C]} start={f32(arc.data, off + 0x08):.1f}"
+        f" len={u32(arc.data, off + 0x04)}B"
+        f" v={vfmt}/2^{vscale} t={tfmt}/2^{tscale}"
+    )
 
 
 def _d_fobj(arc, off):
@@ -499,8 +630,10 @@ def _d_animjoint(arc, off):
 
 
 def _d_texanim(arc, off):
-    return (f" map=TEXMAP{u32(arc.data, off + 0x04)}"
-            f" images={u16(arc.data, off + 0x14)} tluts={u16(arc.data, off + 0x16)}")
+    return (
+        f" map=TEXMAP{u32(arc.data, off + 0x04)}"
+        f" images={u16(arc.data, off + 0x14)} tluts={u16(arc.data, off + 0x16)}"
+    )
 
 
 def _d_figatree(arc, off):
@@ -510,19 +643,25 @@ def _d_figatree(arc, off):
         while tbl + nodes < len(arc.data) and arc.data[tbl + nodes] != 0xFF:
             tracks += arc.data[tbl + nodes]
             nodes += 1
-    return (f" type={u32(arc.data, off)} frames={f32(arc.data, off + 0x08):.1f}"
-            f" nodes={nodes} tracks={tracks}")
+    return (
+        f" type={u32(arc.data, off)} frames={f32(arc.data, off + 0x08):.1f}"
+        f" nodes={nodes} tracks={tracks}"
+    )
 
 
 def _d_shapeset(arc, off):
-    return (f" flags={u16(arc.data, off):#06x} shapes={u16(arc.data, off + 0x02)}"
-            f" v_idx={u32(arc.data, off + 0x04)} n_idx={u32(arc.data, off + 0x10)}")
+    return (
+        f" flags={u16(arc.data, off):#06x} shapes={u16(arc.data, off + 0x02)}"
+        f" v_idx={u32(arc.data, off + 0x04)} n_idx={u32(arc.data, off + 0x10)}"
+    )
 
 
 def _d_ptclgroup(arc, off):
-    return (f" unk=({u16(arc.data, off)},{u16(arc.data, off + 0x02)})"
-            f" effect_id={u32(arc.data, off + 0x04):#x}"
-            f" generators={u32(arc.data, off + 0x08)}")
+    return (
+        f" unk=({u16(arc.data, off)},{u16(arc.data, off + 0x02)})"
+        f" effect_id={u32(arc.data, off + 0x04):#x}"
+        f" generators={u32(arc.data, off + 0x08)}"
+    )
 
 
 def _d_envelope(arc, off):
@@ -533,38 +672,48 @@ def _d_envelope(arc, off):
 
 
 def _d_collision(arc, off):
-    return (f" verts={_count_at(arc, off + 0x04)} tris={_count_at(arc, off + 0x0C)}"
-            f" joints={_count_at(arc, off + 0x14)}"
-            f" zone_verts={_count_at(arc, off + 0x1C)}"
-            f" zone_tris={_count_at(arc, off + 0x24)}"
-            f" zone_joints={_count_at(arc, off + 0x2C)}")
+    return (
+        f" verts={_count_at(arc, off + 0x04)} tris={_count_at(arc, off + 0x0C)}"
+        f" joints={_count_at(arc, off + 0x14)}"
+        f" zone_verts={_count_at(arc, off + 0x1C)}"
+        f" zone_tris={_count_at(arc, off + 0x24)}"
+        f" zone_joints={_count_at(arc, off + 0x2C)}"
+    )
 
 
 def _d_colljoint(arc, off):
-    return (f" bone={s32(arc.data, off):d} kind={u32(arc.data, off + 0x14):d}"
-            f" verts={u32(arc.data, off + 0x04)}+{u32(arc.data, off + 0x08)}"
-            f" faces={u32(arc.data, off + 0x0C)}+{u32(arc.data, off + 0x10)}")
+    return (
+        f" bone={s32(arc.data, off):d} kind={u32(arc.data, off + 0x14):d}"
+        f" verts={u32(arc.data, off + 0x04)}+{u32(arc.data, off + 0x08)}"
+        f" faces={u32(arc.data, off + 0x0C)}+{u32(arc.data, off + 0x10)}"
+    )
 
 
 def _d_zonejoint(arc, off):
-    return (f" bone={s32(arc.data, off):d} link={s32(arc.data, off + 0x14):d}"
-            f" verts={u32(arc.data, off + 0x04)}+{u32(arc.data, off + 0x08)}"
-            f" faces={u32(arc.data, off + 0x0C)}+{u32(arc.data, off + 0x10)}")
+    return (
+        f" bone={s32(arc.data, off):d} link={s32(arc.data, off + 0x14):d}"
+        f" verts={u32(arc.data, off + 0x04)}+{u32(arc.data, off + 0x08)}"
+        f" faces={u32(arc.data, off + 0x0C)}+{u32(arc.data, off + 0x10)}"
+    )
 
 
 def _d_colltree(arc, off):
-    return (f" buckets={u16(arc.data, off + 0x04)}"
-            f" coll_tris={u16(arc.data, off + 0x10)}"
-            f" zone_idx={u16(arc.data, off + 0x1C)}"
-            f" rough={u16(arc.data, off + 0x28)}")
+    return (
+        f" buckets={u16(arc.data, off + 0x04)}"
+        f" coll_tris={u16(arc.data, off + 0x10)}"
+        f" zone_idx={u16(arc.data, off + 0x1C)}"
+        f" rough={u16(arc.data, off + 0x28)}"
+    )
 
 
 def _d_bucket(arc, off):
     c1, c2 = s16(arc.data, off + 0x18), s16(arc.data, off + 0x1A)
     kind = "leaf" if c1 < 0 else f"branch({c1},{c2})"
-    return (f" {kind} depth={arc.data[off + 0x4C]}"
-            f" tris={u16(arc.data, off + 0x1C)}+{u16(arc.data, off + 0x1E)}"
-            f" zones={u16(arc.data, off + 0x24)}+{u16(arc.data, off + 0x26)}")
+    return (
+        f" {kind} depth={arc.data[off + 0x4C]}"
+        f" tris={u16(arc.data, off + 0x1C)}+{u16(arc.data, off + 0x1E)}"
+        f" zones={u16(arc.data, off + 0x24)}+{u16(arc.data, off + 0x26)}"
+    )
 
 
 def _d_splinelist(arc, off):
@@ -589,27 +738,34 @@ def _d_railcollnode(arc, off):
 
 
 def _d_railcoll(arc, off):
-    return (f" spline={s32(arc.data, off + 0x04):d}"
-            f" len_spline={s32(arc.data, off + 0x08):d}"
-            f" subanim={s32(arc.data, off + 0x0C):d}"
-            f" next=({s32(arc.data, off + 0x10):d},{s32(arc.data, off + 0x14):d},"
-            f"{s32(arc.data, off + 0x18):d}) prev={s32(arc.data, off + 0x1C):d}")
+    return (
+        f" spline={s32(arc.data, off + 0x04):d}"
+        f" len_spline={s32(arc.data, off + 0x08):d}"
+        f" subanim={s32(arc.data, off + 0x0C):d}"
+        f" next=({s32(arc.data, off + 0x10):d},{s32(arc.data, off + 0x14):d},"
+        f"{s32(arc.data, off + 0x18):d}) prev={s32(arc.data, off + 0x1C):d}"
+    )
 
 
 def _d_railparam(arc, off):
-    return (f" flags={u32(arc.data, off + 0x04):#x} data={u32(arc.data, off + 0x18)}"
-            f" dash={u32(arc.data, off + 0x20)}/{u32(arc.data, off + 0x28)}"
-            f" leap={u32(arc.data, off + 0x30)}")
+    return (
+        f" flags={u32(arc.data, off + 0x04):#x} data={u32(arc.data, off + 0x18)}"
+        f" dash={u32(arc.data, off + 0x20)}/{u32(arc.data, off + 0x28)}"
+        f" leap={u32(arc.data, off + 0x30)}"
+    )
 
 
 def _d_fgmnode(arc, off):
-    return (f" positional={u32(arc.data, off + 0x04)}"
-            f" triggered={u32(arc.data, off + 0x0C)}")
+    return (
+        f" positional={u32(arc.data, off + 0x04)} triggered={u32(arc.data, off + 0x0C)}"
+    )
 
 
 def _d_fgmentry(arc, off):
-    return (f" sounds={u32(arc.data, off + 0x04)} type={u32(arc.data, off + 0x0C)}"
-            f" dist={f32(arc.data, off + 0x10):.1f}")
+    return (
+        f" sounds={u32(arc.data, off + 0x04)} type={u32(arc.data, off + 0x0C)}"
+        f" dist={f32(arc.data, off + 0x10):.1f}"
+    )
 
 
 def _d_yakumononode(arc, off):
@@ -617,8 +773,10 @@ def _d_yakumononode(arc, off):
 
 
 def _d_yakumonoaudio(arc, off):
-    return (f" sounds={u32(arc.data, off + 0x04)} kind={u32(arc.data, off + 0x08)}"
-            f" prox={u32(arc.data, off + 0x0C)} vol={f32(arc.data, off + 0x10):.2f}")
+    return (
+        f" sounds={u32(arc.data, off + 0x04)} kind={u32(arc.data, off + 0x08)}"
+        f" prox={u32(arc.data, off + 0x0C)} vol={f32(arc.data, off + 0x10):.2f}"
+    )
 
 
 def _d_hurt(arc, off):
@@ -634,9 +792,16 @@ def _d_subanim(arc, off):
 
 
 def _d_itemnode(arc, off):
-    have = [n for n, s in (("timing", 0x04), ("citytrial", 0x08),
-                           ("airride", 0x0C), ("coliseum", 0x10))
-            if _has_ptr(arc, off + s)]
+    have = [
+        n
+        for n, s in (
+            ("timing", 0x04),
+            ("citytrial", 0x08),
+            ("airride", 0x0C),
+            ("coliseum", 0x10),
+        )
+        if _has_ptr(arc, off + s)
+    ]
     return f" [{' '.join(have) or '-'}]"
 
 
@@ -662,11 +827,13 @@ def _d_splinenode(arc, off):
         return u32(arc.data, p + 0x04) if p else 0
 
     setup = deref(off + 0x00)
-    return (f" course={count(deref(setup)) if setup else 0}"
-            f" cpu_range={count(deref(off + 0x04))}"
-            f" conveyor={'y' if deref(off + 0x10) else 'n'}"
-            f" rail={count(deref(off + 0x14))}"
-            f" heavy={count(deref(off + 0x18))}")
+    return (
+        f" course={count(deref(setup)) if setup else 0}"
+        f" cpu_range={count(deref(off + 0x04))}"
+        f" conveyor={'y' if deref(off + 0x10) else 'n'}"
+        f" rail={count(deref(off + 0x14))}"
+        f" heavy={count(deref(off + 0x18))}"
+    )
 
 
 def _d_positionnode(arc, off):
@@ -699,9 +866,11 @@ def _d_treenode(arc, off):
 
 
 def _d_stagenode(arc, off):
-    return (f" scale={f32(arc.data, off + 0x08):.3f}"
-            f" accel={f32(arc.data, off + 0x04):.3f}"
-            f" gravity={f32(arc.data, off + 0x0C):.4f} {vec3(arc, off + 0x10)}")
+    return (
+        f" scale={f32(arc.data, off + 0x08):.3f}"
+        f" accel={f32(arc.data, off + 0x04):.3f}"
+        f" gravity={f32(arc.data, off + 0x0C):.4f} {vec3(arc, off + 0x10)}"
+    )
 
 
 _DESCRIBERS = {

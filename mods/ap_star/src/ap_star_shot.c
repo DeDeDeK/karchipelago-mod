@@ -11,6 +11,7 @@
 #include "code_patch/code_patch.h"
 
 #include "ap_star.h"
+#include "ap_star_handling.h"
 #include "ap_star_shot.h"
 
 // The shot is a plasma spread projectile with its model swapped for a sphere at
@@ -68,6 +69,7 @@ typedef struct RingState
     u8 shrink[AP_STAR_POD_NUM]; // frames left of a fired pod's collapse
     u8 regrowing;
     u8 regrow_timer;
+    s8 profile;        // handling profile the pods left have the machine on
     u32 stamp;         // last frame this machine was seen
 } RingState;
 
@@ -229,6 +231,26 @@ static void SetPodPose(RingState *r, int i, float f)
     JObj_SetMtxDirtySub(j);
 }
 
+// The pods left pick the profile. An empty ring holds the last one rather than
+// passing through a seventh, and the refill puts it back on the first. With the
+// profiles off the machine goes back to its shipped attributes.
+static void UpdateProfile(RingState *r, MachineData *md)
+{
+    int pods = 0;
+    for (int i = 0; i < AP_STAR_POD_NUM; i++)
+    {
+        if (r->alive_mask & (1 << i))
+            pods++;
+    }
+
+    int profile = ap_star_settings.handling_enabled ? ApStarHandling_ProfileForPods(pods) : 0;
+    if (profile < 0 || profile == r->profile)
+        return;
+
+    r->profile = (s8)profile;
+    ApStarHandling_Apply(md, profile);
+}
+
 // Tail of the star class's per-kind Think slot, once per frame per machine.
 static void OnStarThink(MachineData *md)
 {
@@ -253,6 +275,8 @@ static void OnStarThink(MachineData *md)
     {
         SolveSpread(r);
     }
+
+    UpdateProfile(r, md);
 
     for (int i = 0; i < AP_STAR_POD_NUM; i++)
     {

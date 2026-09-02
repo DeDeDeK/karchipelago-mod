@@ -35,7 +35,9 @@ Whichever branch runs, the resulting `box_color` is forwarded as the first argum
 
 ### The -1 return is safe, and safer than vanilla
 
-`CityItemSpawn_Think` saves the picker's return in r30 and forwards it to `PowerUp_SpawnFromSky`, which tests `box_color == -1` at entry (0x800ecdfc) and returns immediately, before touching `box_color`/`box_size` - so no box is placed and the unwritten out-params never matter.
+The picker's return is the box's `ItemKind`, which for the three vanilla colors is the color itself. `CityItemSpawn_Think` saves it in r30 and forwards it as `PowerUp_SpawnFromSky`'s `kind` argument, which tests `kind == -1` at entry (0x800ecdfc) and returns immediately, before touching `box_color`/`box_size` - so no box is placed and the unwritten out-params never matter.
+
+The one thing that can still place a box on a `-1` is the AP Patch category, whose seam sits on the `bl` at 0x800eb20c and overrides the picker's return with the AP box's own kind. Box gating never sees that box: no color gate applies to it, and on a `-1` it writes its own color and size before the return reaches the spawn.
 
 Vanilla has no such exit. With an all-zero chance table its cumulative walk never matches, `selected` falls through to 9, and `box_color` becomes 3. That trips the `box_color < 3` bounds check at 0x800ebda4, which calls `__assert` (0x804284b8) and panics. Returning `-1` masks that crash path on exactly the edge case gating creates.
 

@@ -110,35 +110,37 @@ static void NotifyItemReceived(ItemKind k)
         APAnnounce_Grant("Received: ", ItemKind_Names[k], ItemReceiveColor(k), NULL);
 }
 
-// Distance in machine forward units to push a granted box ahead of the rider, so
+// Distance in machine forward units to push a spawned item ahead of the rider, so
 // it lands in front of them to drive into rather than on top of them.
-#define AP_BOX_SPAWN_FORWARD 10.0f
+#define AP_SPAWN_FORWARD 10.0f
 
-// Spawn a box pickup for every human player, offset ahead of the machine along
-// its forward vector. Mirrors SpawnItemPlayer - the initial raycast from
-// is_airborne=1 settles the box onto the ground. Caller must guarantee item data
-// tables are loaded (City Trial only).
+int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
+{
+    if (ply < 0 || ply >= 5)
+        return 0;
+    GOBJ *mg = Ply_GetMachineGObj(ply);
+    if (!mg)
+        return 0;
+    MachineData *md = mg->userdata;
+
+    Vec3 pos;
+    pos.X = md->pos.X + AP_SPAWN_FORWARD * md->forward.X;
+    pos.Y = md->pos.Y + AP_SPAWN_FORWARD * md->forward.Y;
+    pos.Z = md->pos.Z + AP_SPAWN_FORWARD * md->forward.Z;
+
+    // Mirrors SpawnItemPlayer - the initial raycast from is_airborne=1 settles
+    // the item onto the ground.
+    ItemDesc desc;
+    Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &md->up, &md->forward,
+                  box_kind, size, 1, 3, -1, -1);
+    return Item_Create(&desc) != NULL;
+}
+
 static void SpawnBoxHumansForward(ItemKind kind)
 {
     for (int i = 0; i < 5; i++)
-    {
-        if (Ply_GetPKind(i) != PKIND_HMN)
-            continue;
-        GOBJ *mg = Ply_GetMachineGObj(i);
-        if (!mg)
-            continue;
-        MachineData *md = mg->userdata;
-
-        Vec3 pos;
-        pos.X = md->pos.X + AP_BOX_SPAWN_FORWARD * md->forward.X;
-        pos.Y = md->pos.Y + AP_BOX_SPAWN_FORWARD * md->forward.Y;
-        pos.Z = md->pos.Z + AP_BOX_SPAWN_FORWARD * md->forward.Z;
-
-        ItemDesc desc;
-        Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &md->up, &md->forward,
-                      -1, -1, 1, 3, -1, -1);
-        Item_Create(&desc);
-    }
+        if (Ply_GetPKind(i) == PKIND_HMN)
+            APItems_SpawnForward(i, kind, -1, -1);
 }
 
 // Handle an AP item by its raw ID. Returns an APItemResult: APPLIED on success,

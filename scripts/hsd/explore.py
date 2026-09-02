@@ -84,8 +84,9 @@ def _walk_print(arc, root, root_type, max_depth):
             return
         counts[typ] = counts.get(typ, 0) + 1
         if off in visited:
-            line(depth, label, typ, off,
-                 f" (cycle, first seen at depth {visited[off]})")
+            line(
+                depth, label, typ, off, f" (cycle, first seen at depth {visited[off]})"
+            )
             return
         visited[off] = depth
         line(depth, label, typ, off, describe(arc, typ, off))
@@ -107,14 +108,19 @@ def _walk_print(arc, root, root_type, max_depth):
             indent = "  " * (depth + 1)
             if fd.kind == "buffer":
                 nbytes = count * fd.stride
-                print(f"{indent}{fd.label}: {fd.type}[{count}] @ {target:#x} "
-                      f"({nbytes} B)")
+                print(
+                    f"{indent}{fd.label}: {fd.type}[{count}] @ {target:#x} ({nbytes} B)"
+                )
                 continue
             print(f"{indent}{fd.label}: {fd.type}[{count}] @ {target:#x}")
             for i in range(count):
                 if fd.kind == "records":
-                    go(depth + 2, f"[{i}]: ", fd.type,
-                       target + i * SCHEMA[fd.type].size)
+                    go(
+                        depth + 2,
+                        f"[{i}]: ",
+                        fd.type,
+                        target + i * SCHEMA[fd.type].size,
+                    )
                     continue
                 entry = target + i * fd.stride
                 if entry + 4 > len(arc.data) or entry not in arc.reloc_set:
@@ -140,7 +146,7 @@ def _field_count(arc, off, fd):
     slot = off + fd.cnt_off
     if slot + width > len(arc.data):
         return 0
-    return int.from_bytes(arc.data[slot:slot + width], "big")
+    return int.from_bytes(arc.data[slot : slot + width], "big")
 
 
 def _print_counts(counts):
@@ -157,8 +163,11 @@ def cmd_tree(args):
     if arc is None:
         return 1
     if args.root_type and args.root_type not in SCHEMA:
-        print(f"unknown --root-type {args.root_type!r}. Known types: "
-              f"{', '.join(sorted(SCHEMA))}", file=sys.stderr)
+        print(
+            f"unknown --root-type {args.root_type!r}. Known types: "
+            f"{', '.join(sorted(SCHEMA))}",
+            file=sys.stderr,
+        )
         return 1
     sym = args.symbol
     if sym is None:
@@ -226,8 +235,10 @@ def cmd_grdata(args):
             print("no grData* public found", file=sys.stderr)
             return 1
     elif sym not in arc.publics:
-        print(f"public symbol {sym!r} not found. Available: {list(arc.publics)}",
-              file=sys.stderr)
+        print(
+            f"public symbol {sym!r} not found. Available: {list(arc.publics)}",
+            file=sys.stderr,
+        )
         return 1
 
     off = arc.publics[sym]
@@ -257,8 +268,10 @@ def cmd_find(args):
         if not args.externs_only:
             for name, off in arc.publics.items():
                 if pat.search(name):
-                    print(f"{path}  pub  {off:#08x}  {name}  "
-                          f"[{classify_symbol(name) or '?'}]")
+                    print(
+                        f"{path}  pub  {off:#08x}  {name}  "
+                        f"[{classify_symbol(name) or '?'}]"
+                    )
                     hits += 1
         if not args.publics_only:
             for off, name in arc.externs:
@@ -271,8 +284,9 @@ def cmd_find(args):
 
 
 def main(argv):
-    p = argparse.ArgumentParser(prog="hsd/explore.py",
-                                description="HSD .dat archive explorer.")
+    p = argparse.ArgumentParser(
+        prog="hsd/explore.py", description="HSD .dat archive explorer."
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pls = sub.add_parser("ls", help="list header, publics, externs")
@@ -282,30 +296,47 @@ def main(argv):
     ptree = sub.add_parser("tree", help="walk the typed tree at a public symbol")
     ptree.add_argument("path")
     ptree.add_argument("symbol", nargs="?", default=None)
-    ptree.add_argument("--root-type", default=None,
-                       help=f"type at the root (one of: {', '.join(sorted(SCHEMA))})")
+    ptree.add_argument(
+        "--root-type",
+        default=None,
+        help=f"type at the root (one of: {', '.join(sorted(SCHEMA))})",
+    )
     ptree.add_argument("--max-depth", type=int, default=None)
-    ptree.add_argument("--no-summary", dest="summary", action="store_false",
-                       help="skip the reachable type/size footer")
+    ptree.add_argument(
+        "--no-summary",
+        dest="summary",
+        action="store_false",
+        help="skip the reachable type/size footer",
+    )
     ptree.set_defaults(func=cmd_tree, summary=True)
 
     pgd = sub.add_parser("grdata", help="decode a KAR_grData public")
     pgd.add_argument("path")
     pgd.add_argument("symbol", nargs="?", default=None)
-    pgd.add_argument("--expand", action="append", default=[],
-                     choices=SECTION_NAMES + ["all"],
-                     help="expand a sub-node in full (repeatable)")
+    pgd.add_argument(
+        "--expand",
+        action="append",
+        default=[],
+        choices=SECTION_NAMES + ["all"],
+        help="expand a sub-node in full (repeatable)",
+    )
     pgd.set_defaults(func=cmd_grdata)
 
     pfn = sub.add_parser("find", help="grep public/extern symbols across .dat files")
     pfn.add_argument("pattern")
-    pfn.add_argument("globs", nargs="*", default=["iso/files/*.dat"],
-                     help="file globs (default: iso/files/*.dat)")
+    pfn.add_argument(
+        "globs",
+        nargs="*",
+        default=["iso/files/*.dat"],
+        help="file globs (default: iso/files/*.dat)",
+    )
     grp = pfn.add_mutually_exclusive_group()
-    grp.add_argument("--publics-only", action="store_true",
-                     help="skip extern symbol matches")
-    grp.add_argument("--externs-only", action="store_true",
-                     help="skip public symbol matches")
+    grp.add_argument(
+        "--publics-only", action="store_true", help="skip extern symbol matches"
+    )
+    grp.add_argument(
+        "--externs-only", action="store_true", help="skip public symbol matches"
+    )
     pfn.set_defaults(func=cmd_find)
 
     args = p.parse_args(argv[1:])

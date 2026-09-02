@@ -92,7 +92,7 @@ model's shape.
 
 `mods/ap_star/assets/ApStarShot.dat` holds the model and nothing else: a two-joint tree whose
 leaf carries one lit, untextured UV sphere of radius 3.0, public `apStarShot_model`. It is written by
-`scripts/hsd/make_ap_star_shot.py` from the same mesh generator the six assembly spheres use, and it
+`scripts/authoring/make_ap_star_shot.py` from the same mesh generator the six assembly spheres use, and it
 is loaded per scene with `Gm_LoadGameFile`, so the pointer is refreshed on every 3D load and cleared
 when the load fails.
 
@@ -166,6 +166,14 @@ ease-out-back curve that overshoots slightly before settling. Firing is locked o
 window. The spread resets to the authored ring on that same frame, while every pod is at zero scale
 and the change cannot be seen.
 
+The count of surviving pods also selects the machine's handling profile, on a fixed ladder from
+the machine as shipped at six down to Jet Star's at one. `UpdateProfile` reads it off
+`alive_mask` at the end of each per-machine tick and only acts on a change; an empty ring answers
+no profile at all, so the regrow window holds the last one until the refill takes the count back
+to six. That is the ring's whole involvement - the profiles themselves live in
+`ap_star_handling.c`, behind `ap_star_settings.handling_enabled`, which no settings option is
+bound to, so the count is read and discarded.
+
 ## Where the per-machine work runs
 
 Neither the fire path nor the scale writes can take `Machine_AnimThink`'s tail (`0x801c6274`) - the
@@ -189,5 +197,5 @@ tables is NULL, so nothing is inherited in practice.
 Shot speed, lifetime, grow and fade lengths, the seed scale, ride height, probe reach, collapse and
 regrow lengths and the respread ease rate are all named constants at the top of `ap_star_shot.c`.
 Range is speed times lifetime. The sphere's radius and mesh resolution are constants in
-`scripts/hsd/make_ap_star_shot.py`; changing the joint count there means changing
+`scripts/authoring/make_ap_star_shot.py`; changing the joint count there means changing
 `AP_STAR_SHOT_JOINTS` to match, or the walker asserts.

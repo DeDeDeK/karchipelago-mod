@@ -1,5 +1,7 @@
 // Random City Trial skybox selection: swaps the stage's backdrop JObj for one
-// carved out of another stage's archive.
+// rebuilt out of another stage's archive on the retail disc.
+
+#include <string.h>
 
 #include "os.h"
 #include "game.h"
@@ -12,39 +14,38 @@
 #include "custom_weather.h"
 
 // Index 0 ("Vanilla") is the no-override path: the stock loader keeps CT's own
-// backdrop, so no donor archive is loaded.
+// backdrop, so nothing is rebuilt.
 typedef struct BackdropDef
 {
     const char *display_name;
-    const char *filename;   // NULL for vanilla
-    const char *symbol;     // NULL for vanilla
+    const char *key;        // manifest entry, NULL for vanilla
 } BackdropDef;
 
 #define BACKDROP_VANILLA_INDEX 0
 
 static const BackdropDef backdrop_defs[] = {
-    { "Vanilla",     NULL,                       NULL                 },
-    { "Check 2",     "BackdropCheck2.dat",       "backdropCheck2"     },
-    { "Colosseum 1", "BackdropColosseum1.dat",   "backdropColosseum1" },
-    { "Colosseum 3", "BackdropColosseum3.dat",   "backdropColosseum3" },
-    { "Colosseum 5", "BackdropColosseum5.dat",   "backdropColosseum5" },
-    { "Dedede 1",    "BackdropDedede1.dat",      "backdropDedede1"    },
-    { "Desert 1",    "BackdropDesert1.dat",      "backdropDesert1"    },
-    { "Heat 2",      "BackdropHeat2.dat",        "backdropHeat2"      },
-    { "Ice 1",       "BackdropIce1.dat",         "backdropIce1"       },
-    { "Jump 1",      "BackdropJump1.dat",        "backdropJump1"      },
-    { "Jump 2",      "BackdropJump2.dat",        "backdropJump2"      },
-    { "Jump 3",      "BackdropJump3.dat",        "backdropJump3"      },
-    { "Machine 2",   "BackdropMachine2.dat",     "backdropMachine2"   },
-    { "Pasture 1",   "BackdropPasture1.dat",     "backdropPasture1"   },
-    { "Plants 1",    "BackdropPlants1.dat",      "backdropPlants1"    },
-    { "Sky 2",       "BackdropSky2.dat",         "backdropSky2"       },
-    { "Space 2",     "BackdropSpace2.dat",       "backdropSpace2"     },
-    { "Valley 2",    "BackdropValley2.dat",      "backdropValley2"    },
-    { "Zeroyon 1",   "BackdropZeroyon1.dat",     "backdropZeroyon1"   },
-    { "Zeroyon 3",   "BackdropZeroyon3.dat",     "backdropZeroyon3"   },
-    { "Zeroyon 4",   "BackdropZeroyon4.dat",     "backdropZeroyon4"   },
-    { "Zeroyon 5",   "BackdropZeroyon5.dat",     "backdropZeroyon5"   },
+    { "Vanilla",     NULL         },
+    { "Check 2",     "Check2"     },
+    { "Colosseum 1", "Colosseum1" },
+    { "Colosseum 3", "Colosseum3" },
+    { "Colosseum 5", "Colosseum5" },
+    { "Dedede 1",    "Dedede1"    },
+    { "Desert 1",    "Desert1"    },
+    { "Heat 2",      "Heat2"      },
+    { "Ice 1",       "Ice1"       },
+    { "Jump 1",      "Jump1"      },
+    { "Jump 2",      "Jump2"      },
+    { "Jump 3",      "Jump3"      },
+    { "Machine 2",   "Machine2"   },
+    { "Pasture 1",   "Pasture1"   },
+    { "Plants 1",    "Plants1"    },
+    { "Sky 2",       "Sky2"       },
+    { "Space 2",     "Space2"     },
+    { "Valley 2",    "Valley2"    },
+    { "Zeroyon 1",   "Zeroyon1"   },
+    { "Zeroyon 3",   "Zeroyon3"   },
+    { "Zeroyon 4",   "Zeroyon4"   },
+    { "Zeroyon 5",   "Zeroyon5"   },
 };
 #define BACKDROP_NUM (sizeof(backdrop_defs) / sizeof(backdrop_defs[0]))
 
@@ -65,9 +66,15 @@ static char *backdrop_distance_names[] = {"100%", "125%", "150%", "175%", "200%"
     ((int)(sizeof(backdrop_distance_factors) / sizeof(backdrop_distance_factors[0])))
 static int backdrop_distance_index = 1; // default 125%
 
-// The donor archive is never cached across rounds: Archive_LoadFile allocates into
-// the per-scene heap, which is zeroed on 3D scene exit. Teardown reclaims it, so
-// there is no Archive_Free.
+// Normalizes the picked backdrop's dome to City Trial's radius. Donors are modelled
+// anywhere from ~1300 to ~10000 units and the loader stamps City's StageScale over
+// whatever the root joint carried, so without this they render at wildly different
+// distances. Set per round by the override hook, consumed by the distance hook.
+static float backdrop_geom_scale = 1.0f;
+
+// Neither the manifest nor the payload is cached across rounds: both live in the
+// per-scene heap, which is zeroed on 3D scene exit. Teardown reclaims them, so
+// there is no Archive_Free and no HSD_Free.
 
 static int PickEnabled(void)
 {
@@ -93,10 +100,72 @@ static int PickEnabled(void)
     return BACKDROP_VANILLA_INDEX;
 }
 
+static const BackdropManifestEntry *FindEntry(const BackdropManifest *m, const char *key)
+{
+    for (u32 i = 0; i < m->entry_num; i++)
+    {
+        if (strcmp(m->entries[i].key, key) == 0)
+            return &m->entries[i];
+    }
+    return NULL;
+}
+
+// Rebuild one backdrop subtree from the retail disc. Reads the entry's ranges into a
+// fresh allocation, relocates every pointer in them, and returns the payload base -
+// which leads with a pp slot shaped like a vanilla stage's grModel<X>[1], so it drops
+// straight into ModelSection.backdrop. NULL if the donor is not on the disc.
+static void *RebuildBackdrop(const BackdropManifestEntry *e)
+{
+    int entrynum = DVDConvertPathToEntrynum((char *)e->donor);
+    if (entrynum < 0)
+    {
+        OSReport("[CustomBackdrop] %s not on disc\n", e->donor);
+        return NULL;
+    }
+
+    // File_Read DMAs straight into the buffer, so the base has to be 32-byte
+    // aligned; the ranges are already sized and placed in multiples of 32.
+    u8 *alloc = Heap_Alloc(0, e->payload_size + 31);
+    if (alloc == NULL)
+    {
+        OSReport("[CustomBackdrop] %s alloc failed (%d bytes)\n",
+                 e->donor, e->payload_size + 31);
+        return NULL;
+    }
+    u8 *base = (u8 *)(((u32)alloc + 31) & ~31);
+
+    // No range covers the leading pp slot, and the heap hands back dirty memory, so
+    // clear it here: everything past word 0 must read as "no model motion".
+    for (u32 i = 0; i < BACKDROP_PP_SLOT / 4; i++)
+        ((u32 *)base)[i] = 0;
+
+    for (u32 i = 0; i < e->range_num; i++)
+    {
+        const BackdropRange *r = &e->ranges[i];
+        *stc_file_read_done = 0;
+        File_Read(entrynum, r->donor_off, base + r->dest_off, r->length,
+                  0x21, 1, File_ReadDone, NULL);
+        while (File_Wait() == 0)
+            ;
+    }
+
+    for (u32 i = 0; i < e->reloc_num; i++)
+    {
+        const BackdropReloc *rl = &e->relocs[i];
+        *(u32 *)(base + rl->dest_off) = (u32)base + rl->dest_val;
+    }
+
+    // Word 0 of the pp slot is the backdrop root; the rest stays zero (no motion).
+    *(u32 *)base = (u32)base + e->root_off;
+    return base;
+}
+
 static void CustomBackdrop_Override(GrObj *grobj)
 {
     if (grobj == NULL || grobj->gr_kind != GR_CITY1)
         return;
+
+    backdrop_geom_scale = 1.0f;
 
     int picked = PickEnabled();
 
@@ -108,26 +177,40 @@ static void CustomBackdrop_Override(GrObj *grobj)
 
     const BackdropDef *def = &backdrop_defs[picked];
 
-    HSD_Archive *donor = Archive_LoadFile((char *)def->filename);
-    if (donor == NULL)
-    {
-        OSReport("[CustomBackdrop] Archive_LoadFile(%s) failed\n", def->filename);
-        return;
-    }
-
-    void **donor_ms = Archive_GetPublicAddress(donor, (char *)def->symbol);
-    if (donor_ms == NULL || donor_ms[1] == NULL)
-    {
-        OSReport("[CustomBackdrop] %s lookup failed in %s\n", def->symbol, def->filename);
-        return;
-    }
-
     ModelSection *ct_ms = grobj->gr_data->model_section;
     if (ct_ms == NULL)
         return;
 
-    ct_ms->backdrop = (JOBJDesc **)donor_ms[1];
-    OSReport("[CustomBackdrop] Selected %s\n", def->display_name);
+    HSD_Archive *arc = Archive_LoadFile(BACKDROP_MANIFEST_FILE);
+    if (arc == NULL)
+    {
+        OSReport("[CustomBackdrop] %s missing\n", BACKDROP_MANIFEST_FILE);
+        return;
+    }
+
+    const BackdropManifest *m = Archive_GetPublicAddress(arc, BACKDROP_MANIFEST_SYMBOL);
+    if (m == NULL || m->magic != BACKDROP_MANIFEST_MAGIC
+        || m->version != BACKDROP_MANIFEST_VERSION)
+    {
+        OSReport("[CustomBackdrop] %s unusable (magic/version)\n", BACKDROP_MANIFEST_FILE);
+        return;
+    }
+
+    const BackdropManifestEntry *e = FindEntry(m, def->key);
+    if (e == NULL)
+    {
+        OSReport("[CustomBackdrop] no manifest entry for %s\n", def->key);
+        return;
+    }
+
+    void *payload = RebuildBackdrop(e);
+    if (payload == NULL)
+        return;
+
+    ct_ms->backdrop = (JOBJDesc **)payload;
+    backdrop_geom_scale = e->scale;
+    OSReport("[CustomBackdrop] Selected %s (%d KB from %s)\n",
+             def->display_name, e->payload_size / 1024, e->donor);
 }
 
 // Inside 3D_CreateStageModel, after r30 = grobj and just before it reads
@@ -140,14 +223,15 @@ CODEPATCH_HOOKCREATE(0x800dcc18,
     0x800dcc1c);
 
 // 3D_CreateStageModel stamps grGetStageScale() (City's 0.70) into the backdrop
-// root joint's JOBJ+0x2C/30/34; scaling that uniformly moves the whole sky dome
-// in or out without re-carving geometry.
+// root joint's JOBJ+0x2C/30/34, discarding the donor's own scale. Both corrections
+// ride on that one stamped value: the geometry factor equalizes donors modelled at
+// different raw sizes, and the user's distance factor then moves the whole dome.
 static void CustomBackdrop_ScaleDistance(GrObj *grobj, JOBJ *backdrop)
 {
     if (grobj == NULL || backdrop == NULL || grobj->gr_kind != GR_CITY1)
         return;
 
-    float f = backdrop_distance_factors[backdrop_distance_index];
+    float f = backdrop_distance_factors[backdrop_distance_index] * backdrop_geom_scale;
     if (f == 1.0f)
         return;
 

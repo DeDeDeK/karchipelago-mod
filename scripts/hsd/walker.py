@@ -377,7 +377,9 @@ class Walker:
         self._follow_bound_container(off, 0x00, off + 0x04, 0x20, indexed=True)
         self._follow_bound_container(off, 0x08, off + 0x0C, 0x24, indexed=True)
         self._follow_bound_container(off, 0x10, off + 0x14, 0x18, indexed=False)
-        self.record_buffer(off, 0x18, u16(self.arc.data, off + 0x1C) * 2, "bounding_blob")
+        self.record_buffer(
+            off, 0x18, u16(self.arc.data, off + 0x1C) * 2, "bounding_blob"
+        )
 
     def _follow_bound_container(self, src, slot, count_off, stride, indexed):
         count = u16(self.arc.data, count_off)

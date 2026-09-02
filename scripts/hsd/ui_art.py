@@ -18,6 +18,7 @@ The formats above are the donor frames'. An appended frame carries its own forma
 so the encoders here emit RGB5A3 for the three color roles and I4 for the
 silhouette, and neither a CMPR encoder nor a quantizer is needed.
 """
+
 from PIL import Image, ImageFilter
 
 from hsd.gx import GX_TF_CMPR, GX_TF_I4
@@ -32,18 +33,63 @@ BANK_ROLE = {
     (40, 40, GX_TF_C4): "icon",
 }
 
-ROLE_SIZE = {"portrait": (64, 64), "picture": (80, 48),
-             "silhouette": (80, 48), "icon": (40, 40)}
+ROLE_SIZE = {
+    "portrait": (64, 64),
+    "picture": (80, 48),
+    "silhouette": (80, 48),
+    "icon": (40, 40),
+}
 
 # Measured off frame 4 of the portrait banks: a flat warm gray darkening along the
 # bottom edge, where a soft contact shadow pools under the machine.
 PORTRAIT_BACK = (106, 107, 102)
 PORTRAIT_SHADOW = (79, 80, 84)
 
+# How far a pixel travels from a keyed backdrop before it counts as fully
+# covered. The pastels a machine is painted in clear it several times over, so
+# only a glow's own falloff lands inside it.
+MATTE_SOFTNESS = 64
+
 # The silhouette is the picture's own alpha under a small blur. Fitting
 # dilate/blur/gain against frame 4 lands on no dilation and this sigma, which both
 # matches the vanilla look and keeps the two layers registered.
 SILHOUETTE_SIGMA = 1.5
+
+
+def key_matte(im, back):
+    """Lift a flat viewport backdrop to alpha.
+
+    A render taken off a model viewer carries no alpha of its own, and the part
+    that needs it most - the additive glow around a machine's pods - fades into
+    the backdrop rather than ending at an edge. Coverage is taken from how far a
+    pixel travels from the backdrop colour, and the backdrop's share is then
+    divided back out, which recovers that falloff instead of the hard cut a
+    colour-equality key leaves.
+    """
+    px = im.load()
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    dst = out.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, _ = px[x, y]
+            a = max(abs(r - back[0]), abs(g - back[1]), abs(b - back[2]))
+            a = min(255, round(a * 255 / MATTE_SOFTNESS))
+            if not a:
+                continue
+            f = a / 255.0
+            dst[x, y] = tuple(
+                min(255, max(0, round((c - (1.0 - f) * bc) / f)))
+                for c, bc in zip((r, g, b), back)
+            ) + (a,)
+    return out
+
+
+def trim(im, threshold=8):
+    """`im` cropped to what it actually draws, so framing sees the subject and
+    not the empty margin a render is taken with."""
+    mask = im.getchannel("A").point(lambda v: 255 if v >= threshold else 0)
+    box = mask.getbbox()
+    return im.crop(box) if box else im
 
 
 def contain(im, w, h, margin=0.0):
@@ -61,18 +107,6 @@ def contain(im, w, h, margin=0.0):
     return out
 
 
-def cover(im, w, h, zoom=1.0):
-    """`im` scaled to fill (w, h), centred and cropped - the vanilla portrait crop,
-    which is tight enough to clip the machine on at least one side."""
-    scale = max(w / im.width, h / im.height) * zoom
-    size = (max(1, round(im.width * scale)), max(1, round(im.height * scale)))
-    scaled = im.resize(size, Image.LANCZOS)
-
-    left = (size[0] - w) // 2
-    top = (size[1] - h) // 2
-    return scaled.crop((left, top, left + w, top + h))
-
-
 def _shadow(alpha, w, h):
     """The machine's alpha squashed flat and blurred, pooled at the bottom edge."""
     squashed = alpha.resize((w, max(1, h // 4)), Image.LANCZOS)
@@ -82,11 +116,18 @@ def _shadow(alpha, w, h):
 
 
 def portrait(hero, w, h):
-    """The grid tile: the machine over a synthesized backdrop, flattened opaque."""
-    art = cover(hero, w, h, zoom=1.05)
+    """The grid tile: the machine over a synthesized backdrop, flattened opaque.
+
+    A vanilla tile fits its machine inside the square rather than filling it -
+    the Slick Star's spans the width and leaves half the height as backdrop -
+    so a wide machine keeps all of itself instead of being cropped to a detail."""
+    art = contain(hero, w, h, margin=0.08)
     back = Image.new("RGBA", (w, h), PORTRAIT_BACK + (255,))
-    back.paste(Image.new("RGBA", (w, h), PORTRAIT_SHADOW + (255,)),
-               (0, 0), _shadow(art.getchannel("A"), w, h))
+    back.paste(
+        Image.new("RGBA", (w, h), PORTRAIT_SHADOW + (255,)),
+        (0, 0),
+        _shadow(art.getchannel("A"), w, h),
+    )
     back.alpha_composite(art)
     return back
 
@@ -94,7 +135,8 @@ def portrait(hero, w, h):
 def silhouette(picture_im, w, h):
     """The bloom under the picture: its alpha blurred, carried as alpha again."""
     blurred = picture_im.getchannel("A").filter(
-        ImageFilter.GaussianBlur(SILHOUETTE_SIGMA))
+        ImageFilter.GaussianBlur(SILHOUETTE_SIGMA)
+    )
     out = Image.new("RGBA", (w, h), (255, 255, 255, 0))
     out.putalpha(blurred)
     return out
@@ -116,6 +158,7 @@ def icon(topdown, w, h):
 
 def role_images(hero, topdown):
     """Every role's image at its target size, from a hero and a top-down render."""
+    hero, topdown = trim(hero), trim(topdown)
     pw, ph = ROLE_SIZE["picture"]
     picture_im = contain(hero, pw, ph)
     return {
@@ -124,3 +167,28 @@ def role_images(hero, topdown):
         "silhouette": silhouette(picture_im, pw, ph),
         "icon": icon(topdown, *ROLE_SIZE["icon"]),
     }
+
+
+def contact_sheet(images, zoom=6, back=(128, 128, 132)):
+    """The four role images magnified side by side over a mid gray, for eyeballing
+    what a build is about to ship at 40x40 and 64x64."""
+    pad = zoom * 2
+    tiles = [
+        images[r].resize(
+            (images[r].width * zoom, images[r].height * zoom), Image.NEAREST
+        )
+        for r in ("portrait", "picture", "silhouette", "icon")
+    ]
+    out = Image.new(
+        "RGBA",
+        (
+            sum(t.width for t in tiles) + pad * (len(tiles) + 1),
+            max(t.height for t in tiles) + pad * 2,
+        ),
+        back + (255,),
+    )
+    x = pad
+    for t in tiles:
+        out.alpha_composite(t, (x, pad))
+        x += t.width + pad
+    return out

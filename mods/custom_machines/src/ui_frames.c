@@ -41,7 +41,7 @@ static const u32 stc_divert_sites[] = {
 };
 #define DIVERT_METAKNIGHT_OFF 0x14
 
-// Authored by scripts/hsd/make_ui_frames.py; the layouts must match.
+// Authored by scripts/authoring/make_ui_frames.py; the layouts must match.
 typedef struct UiFrameBank
 {
     u32 texanim_off;       // 0x00 data-section offset of the TexAnim

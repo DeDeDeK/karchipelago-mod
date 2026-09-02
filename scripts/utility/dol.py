@@ -13,8 +13,10 @@ from pyisotools.iso import GamecubeISO
 
 def main(argv):
     parser = ArgumentParser(
-        "dol.py", description="Extracts .dol file from iso to a specified location.",
-        allow_abbrev=False)
+        "dol.py",
+        description="Extracts .dol file from iso to a specified location.",
+        allow_abbrev=False,
+    )
     parser.add_argument("iso", help="path to vanilla iso")
     parser.add_argument("dol", help="path to outputted .dol file")
     args = parser.parse_args(args=argv)

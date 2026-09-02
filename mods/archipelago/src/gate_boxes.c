@@ -23,8 +23,9 @@ static int BoxHasItems(grBoxGeneObj *obj, int box)
     return 0;
 }
 
-// Replaces GrBoxGeneratorDetermine (0x800ebc04). Returns box_color, or -1 when nothing
-// is eligible - PowerUp_SpawnFromSky treats -1 as "place no box".
+// Replaces GrBoxGeneratorDetermine (0x800ebc04). Returns the box's ItemKind, which is
+// the picked color for the three vanilla box kinds, or -1 when nothing is eligible -
+// PowerUp_SpawnFromSky treats -1 as "place no box".
 int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;

@@ -117,12 +117,12 @@ single `ItemKind` and `Box_OutcomeLogic` (`0x80250ae8`) spawns one item from it.
 
 The set arms only in `CITYMODE_TRIAL`. Free Run and the stadiums leave it disabled.
 
-For testing, `archipelago_debug` drops one sphere in front of player 1 on each **D-Pad Down**,
-walking the six in order, so six presses and six drive-overs run the whole assembly without
-waiting on the schedule. It goes through `ArchipelagoAPI.DebugSpawnApStarPiece`, which reads
-the sphere's `ItemKind` out of the `custom_items` registry - a sphere that was locked when the
+For testing, `archipelago_debug` drops one sphere in front of player 1 on each **R + D-Pad
+Down**, walking the six in order, so six presses and six drive-overs run the whole assembly
+without waiting on the schedule. It goes through `ArchipelagoAPI.DebugSpawnApStarPiece`, which
+reads the sphere's `ItemKind` out of the `custom_items` registry - a sphere that was locked when the
 scene loaded was never registered and cannot be spawned until it is unlocked and the round
-reloads. Deathlink's trigger moved to **L + D-Pad Down**.
+reloads. Deathlink's trigger is **L + D-Pad Down**, and a bare **D-Pad Down** spawns an AP Box.
 
 ## Gating
 
@@ -273,7 +273,7 @@ three-pointer block is assembled in mod RAM.
 | `ApStarParts.dat` | `apStarParts` | the star's own model plus a 150-frame FigaTree that flies the pods in |
 | `ApStarGlow.dat` | `apStarGlow`, `apStarCam` | Hydra's streaks and flashes rebuilt for six pods, plus the camera descriptor |
 
-Both are written by `uv run python scripts/hsd/make_ap_star_assembly.py`.
+Both are written by `uv run python scripts/authoring/make_ap_star_assembly.py`.
 
 **The parts model** is a carve of `VcStarAp.dat`'s main model, all 17 joints. Each drawn
 joint's DObj chain is trimmed to its high LOD, plus the pods' XLU glow quad, because the
@@ -319,7 +319,7 @@ reads the flat star's ring of pods at a steeper angle than Hydra's bulk needs.
 
 ## Authoring the Spheres and the Icons
 
-`uv run --with pillow python scripts/hsd/make_ap_star_pieces.py` writes all seven archives -
+`uv run --with pillow python scripts/authoring/make_ap_star_pieces.py` writes all seven archives -
 the six sphere items and the icon set - from the palette held at the top of the file.
 
 The sphere is generated, not carved: a UV sphere of radius 2.08 (a Hydra piece's

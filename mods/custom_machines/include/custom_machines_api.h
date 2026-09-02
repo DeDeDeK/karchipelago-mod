@@ -38,7 +38,7 @@ struct MachineData;
 #define CUSTOM_MACHINE_DROPIN_EXT ".dat"
 
 // A machine may drop a sound bank of the same basename beside its archive -
-// machines/VcStarAp.dat and machines/VcStarAp.ssm. It is an ordinary HAL .ssm
+// machines/VcMine.dat and machines/VcMine.ssm. It is an ordinary HAL .ssm
 // holding one record per MachineAudioParams sound slot, in that struct's order;
 // a record with a sample rate of 0 is absent and that slot keeps the sound the
 // descriptor's clone_kind uses. Build one with scripts/audio/machine_audio.py.

@@ -16,7 +16,6 @@ mods/ap_star/
   include/ap_star_api.h            what consumers import
   assets/
     machines/VcStarAp.dat          the machine, discovered by custom_machines
-    machines/VcStarAp.ssm          its sound bank
     machines/VcStarAp.art          its select-screen UI frames
     items/ApSphere*.dat            the six spheres, discovered by custom_items
     ApStarShot.dat                 the fired sphere's model
@@ -27,6 +26,7 @@ mods/ap_star/
     main.c                         ModDesc, hoshi callbacks, settings page
     ap_star.c / .h                 kind lookup, sphere gate, handler lists, API export
     ap_star_shot.c / .h            the charge-release projectile
+    ap_star_handling.c / .h        the six handling profiles the pods left select
     ap_star_pieces.c / .h          sphere delivery, collection, tracker, mount
 ```
 
@@ -42,10 +42,16 @@ filename prefix - `ApStar*`, `ApPiece*` - the only namespacing available; the en
 loaders reach these by bare filename in any case, through `Gm_LoadGameFile`,
 `lbLoadArchive` and `Preload_CreateEntry`.
 
-`VcStarAp.dat` and `VcStarAp.ssm` carry data cloned out of the retail disc, so neither is
-authored by hand: `scripts/hsd/make_ap_star.py` and `scripts/audio/machine_audio.py` build
-them from an `iso/` extraction, and `scripts/hsd/make_machine_art.py` builds the `.art`
-side-car. Every `assets/` tree is `.gitignore`d, so none of them are in the repo.
+`VcStarAp.dat` is the star's model, rebuilt from `VcStarSlick.dat` into six pods on an even
+ring - one per Archipelago logo color - over a repainted platform. It is the source of
+truth and is edited in place, through `scripts/hsd/builder.py`'s in-place graph editing over
+a parsed archive. `scripts/hsd/make_machine_art.py` builds the `.art` side-car from two
+renders, and `scripts/authoring/make_ap_star_assembly.py` re-carves `ApStarParts.dat` out of
+the model, so an edit to the star needs that rerun. Every `assets/` tree is `.gitignore`d,
+so the archive carries retail-derived data without the repo doing so.
+
+No `.ssm` ships beside them, so the machine speaks with its clone kind's voice - the Slick
+Star's engine, charge and boost sounds, unpitched.
 
 ## Binding to the machine
 
@@ -138,10 +144,18 @@ the machine-unlock mask, and the star's unlock item falls in the appended range 
 
 ## Settings
 
-The mod carries its own `ModDesc` settings page, **Archipelago Star**, with the **Star
-Shot** toggle (default on) and its own hoshi save slot. Nothing pushes an Archipelago slot
-option into it - the toggle is the player's, so a standalone build can turn the shot off
-and an Archipelago build does not override the player's choice on connect.
+The mod carries its own `ModDesc` settings page, **Archipelago Star**, with one toggle and
+its own hoshi save slot. **Star Shot** (default on) is whether a full-charge release fires a
+pod.
+
+`ap_star_settings.handling_enabled` gates the handling ladder, and nothing on the page is
+bound to it: the ladder in `ap_star_handling.c` is built but not offered to players, so the
+field holds its default of 0 and every star drives on the profile it shipped with. Binding
+an `OptionDesc` to it is all that turning the feature on takes.
+
+Nothing pushes an Archipelago slot option into the page - the toggle is the player's, so a
+standalone build can turn it off and an Archipelago build does not override the player's
+choice on connect.
 
 ## Shipping a second machine
 

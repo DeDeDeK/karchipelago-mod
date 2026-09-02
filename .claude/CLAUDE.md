@@ -9,10 +9,10 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 ## Project Structure
 
 - `mods/` - one subdirectory per mod: sources in `src/`, and a public API header at `include/<mod>_api.h` if the mod exports one (other mods import it via `Hoshi_ImportMod`). `INCLUDE_MODS` chooses which are built. A mod's `assets/` is the **disc staging folder** - its contents are copied into the FST root keeping their paths under `assets/`, so only things the game loads belong there.
-- `art/` - source assets the authoring scripts read: PNGs for `scripts/hsd/`, WAVs for `scripts/audio/`. Kept out of `mods/*/assets/` because nothing on disc reads them and staging them just pads the package.
+- `art/` - source assets the authoring scripts read: PNGs for `scripts/authoring/` and `scripts/hsd/`, WAVs for `scripts/audio/`. Kept out of `mods/*/assets/` because nothing on disc reads them and staging them just pads the package.
 - `externals/hoshi/` - the hoshi modding framework (submodule): headers, linker script, symbol map (`GKYE01.map`), framework source.
 - `docs/` - per-system reference docs and data files; one doc per system, found by filename.
-- `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), plus `ghidra/` (type pipeline), `hsd/` (`.dat` toolchain), `audio/` (machine sound / SSM toolchain), `devkitpro/` (toolchain build), `utility/` (ISO / DOL / memcard-tile helpers).
+- `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), plus `ghidra/` (type pipeline), `hsd/` (the general `.dat` toolchain - anything that works on any archive), `authoring/` (per-mod asset authors: one script per shipped `.dat`, writing to a fixed path under `mods/<mod>/assets/`), `audio/` (machine sound / SSM toolchain), `devkitpro/` (toolchain build), `utility/` (ISO / DOL / memcard-tile helpers).
 - `out/` - build output; `out/Riivolution/` is the deployable package. Do not hand-edit.
 - `iso/` - extracted contents of `kar.iso` - original game assets for inspection.
 

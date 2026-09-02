@@ -181,8 +181,8 @@ root) exporting two `_HSD_ImageDesc` publics:
   the *vanilla* emblem TObj by its 40x40 I4 signature, then repoints it here; the
   replacement's own size is unconstrained.)
 
-`scripts/hsd/make_checklist_textures.py` authors the archive from `art/ap-icon.png`
-(`uv run --with pillow python scripts/hsd/make_checklist_textures.py`). The framework loads
+`scripts/authoring/make_checklist_textures.py` authors the archive from `art/ap-icon.png`
+(`uv run --with pillow python scripts/authoring/make_checklist_textures.py`). The framework loads
 it by name (`tex_file = "ApChecklistTex"`) per tab build and swaps the checklist's
 banner/emblem TObjs onto these descriptors.
 
@@ -191,7 +191,12 @@ banner/emblem TObjs onto these descriptors.
 There are 52 objectives, `clear_kind` 0-51, enumerated as `APCheckKind` in
 `ap_check_detect.h`. The numbering is a cross-repo wire contract - the AP location code is
 `361 + clear_kind`, and `APLocation` in the apworld's `KARLocations.py` restates the same
-order and the same label text by hand, with nothing mechanically catching a desync. An AP box
+order and the same label text by hand, with nothing mechanically catching a desync. The band
+is 52 wide rather than the 120 a full row would hold, because the AP Patch location block
+starts at 413: growing past 52 objectives moves every patch code, so the two counts have to
+be raised together. The blank cells above `APCK_NUM` are held clear everywhere a row mask is
+written - `RecordCheck`, the backfill, and the debug force-mark - so one can never encode
+into a patch's code. An AP box
 whose check never fires is worse than one that doesn't exist: the location still exists in the
 multiworld and logic still treats it as reachable, so fill can strand progression on it.
 
@@ -440,7 +445,7 @@ boxes that need something to ride, the eight colors for the all-colors race.
   `Ply_AddDeath` / `Ply_RecordEnemyDefeat` interceptions `APCheckDetect_OnBoot` installs),
   and `APCheckDetect_IsSet`.
 - `mods/archipelago/assets/ApChecklistTex.dat` - the AP banner/emblem archive.
-- `scripts/hsd/make_checklist_textures.py` - authors `ApChecklistTex.dat`.
+- `scripts/authoring/make_checklist_textures.py` - authors `ApChecklistTex.dat`.
 - `mods/archipelago/src/main.h` / `main.c` - the wire structs, `CHECKLIST_MODE_NUM` /
   `AP_CHECKLIST_ROW`, the runtime `ap_checklist_mode`, and the offset assertions.
 - `mods/archipelago/src/check_detection.c` / `.h` - `ChecklistModeRow` / `ChecklistRowMode`,

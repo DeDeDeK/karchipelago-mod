@@ -38,6 +38,24 @@ static int stadium_state[STKIND_NUM];
 static int base_ability_state[BASEABILITY_NUM];
 static int star_piece_state[AP_STAR_PIECE_NUM];
 
+// Seed sizes the AP Patch count row offers. A build with no AP Patch seed reports
+// 0, and picking any nonzero row is what lets the drop-ins register at the next
+// round load.
+static char *ap_patch_count_values[] = {"Off", "8", "64", "512"};
+static const int ap_patch_count_map[] = {0, 8, 64, AP_PATCH_MAX};
+static int ap_patch_count_state;
+
+// Nearest row at or below the live count, so a seed's own value shows as the
+// closest offered size rather than snapping the option back to Off.
+static void RefreshApPatchCount(void)
+{
+    int n = ap_api ? ap_api->GetApPatchCount() : 0;
+    ap_patch_count_state = 0;
+    for (int i = 1; i < (int)(sizeof(ap_patch_count_map) / sizeof(ap_patch_count_map[0])); i++)
+        if (n >= ap_patch_count_map[i])
+            ap_patch_count_state = i;
+}
+
 // MaskBits' buffer holds 32 bits, and the machine ceiling can exceed that.
 static inline int MaskWidth(int count)
 {
@@ -106,6 +124,7 @@ void DebugMenu_RefreshStateFromMasks(void)
     RefreshStadiums();
     RefreshBaseAbil();
     RefreshStarPiece();
+    RefreshApPatchCount();
 }
 
 #define DEF_ALL(prefix, cat, arr, count, label) \
@@ -343,6 +362,25 @@ static int CheckDbgForceMarkAll(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugForceMarkAllChecks();
     ap_api->Textbox("Force-marked all sent_checks");
+    return 1;
+}
+
+static void OnApPatchCountChange(int v)
+{
+    if (!ap_api) return;
+    int n = ap_patch_count_map[v];
+    ap_api->DebugSetApPatchCount(n);
+    OSReport("[ApDebug] ap_patches = %d, registers on the next round load\n", n);
+}
+
+static int ApPatchDbgCollect(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    if (ap_api->DebugCollectApPatch())
+        ap_api->Textbox("Collected an AP Patch");
+    else
+        ap_api->Textbox("No AP Patch left to collect");
     return 1;
 }
 
@@ -977,7 +1015,7 @@ static MenuDesc reveal_menu = {
 };
 
 static MenuDesc checks_menu = {
-    .option_num = 7,
+    .option_num = 9,
     .options = {
         &(OptionDesc){
             .name = "Auto-Grant on Z Unlock",
@@ -994,6 +1032,17 @@ static MenuDesc checks_menu = {
         S("Reveal Checklists",       "Make checkboxes visible (visual only)",       reveal_menu),
         A("Simulate Location Data",  "Fill location arrays with a random shuffle",  CheckDbgSimulateLocationData),
         A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, and location shuffle", CheckDbgClearAllChecklistData),
+        &(OptionDesc){
+            .name = "AP Patches",
+            .description = "Override the seed's AP Patch location count; the drop-ins register at the next round load.",
+            .kind = OPTKIND_VALUE,
+            .no_save = 1,
+            .val = &ap_patch_count_state,
+            .value_num = 4,
+            .value_names = ap_patch_count_values,
+            .on_change = OnApPatchCountChange,
+        },
+        A("Collect AP Patch",        "Claim the lowest unclaimed AP Patch",         ApPatchDbgCollect),
     },
 };
 

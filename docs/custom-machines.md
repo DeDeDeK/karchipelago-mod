@@ -32,11 +32,11 @@ uv run python scripts/hsd/clone_machine.py iso/files/VcStarWing.dat \
   --cinematic MineGlow.dat,mineGlow,mineCam,MineParts.dat,mineParts
 ```
 
-It renames the source archive's single public and appends a `CustomMachineDesc` under a second `customMachine` public, with a relocation per string pointer. `--cinematic` is optional and `--cine-index` picks which vanilla legendary the cutscene borrows its rider pose, fanfare and sky from. Nothing inside the donor's own seven slots is touched, so the result is its donor under a new name; a machine that wants its own shape or paint edits the archive itself, the way `scripts/hsd/make_ap_star.py` does for the Archipelago Star.
+It renames the source archive's single public and appends a `CustomMachineDesc` under a second `customMachine` public, with a relocation per string pointer. `--cinematic` is optional and `--cine-index` picks which vanilla legendary the cutscene borrows its rider pose, fanfare and sky from. Nothing inside the donor's own seven slots is touched, so the result is its donor under a new name; a machine that wants its own shape or paint edits the archive itself, with `scripts/hsd/builder.py` - the Archipelago Star's six-pod ring and repainted platform are `VcStarSlick.dat` edited that way.
 
-`mods/*/assets/` is copied to the disc root by the ordinary asset step, so any mod's `assets/machines/*.dat` lands at `machines/` on disc with no packaging change. A machine therefore ships as its own mod folder - `mods/ap_star/assets/machines/VcStarAp.dat` is the Archipelago Star's, with `VcStarAp.ssm` and `VcStarAp.art` beside it - and this mod discovers all three without knowing the mod exists. Nothing but a machine descriptor may go in `assets/machines/` under a `.dat` extension: the scan probes every `.dat` there for a `customMachine` public and reports the ones that have none. Side-cars carry their own extensions and are found by basename, never scanned. A machine's other archives - a cutscene's models, for instance - belong at the FST root.
+`mods/*/assets/` is copied to the disc root by the ordinary asset step, so any mod's `assets/machines/*.dat` lands at `machines/` on disc with no packaging change. A machine therefore ships as its own mod folder - `mods/ap_star/assets/machines/VcStarAp.dat` is the Archipelago Star's, with `VcStarAp.art` beside it - and this mod discovers both without knowing the mod exists. Nothing but a machine descriptor may go in `assets/machines/` under a `.dat` extension: the scan probes every `.dat` there for a `customMachine` public and reports the ones that have none. Side-cars carry their own extensions and are found by basename, never scanned. A machine's other archives - a cutscene's models, for instance - belong at the FST root.
 
-Assets carrying data taken out of the disc - `VcStarAp.dat`, `VcStarAp.ssm`, `CmUiFrames.dat` - are `.gitignore`d rather than committed, so no vanilla data lives in the repo. Each is written by its own script out of an `iso/` extraction, and the ordinary asset step then picks it up like any other file in `assets/`.
+Assets carrying data taken out of the disc - `VcStarAp.dat`, `CmUiFrames.dat` - are `.gitignore`d rather than committed, so no vanilla data lives in the repo. Each is written by its own script out of an `iso/` extraction, and the ordinary asset step then picks it up like any other file in `assets/`.
 
 ## What a machine archive holds
 
@@ -145,7 +145,7 @@ A consumer that gates characters registers a `CustomMachineAvailabilityFilter` t
 
 ## Drop-in audio
 
-A machine that wants a voice of its own ships a `.ssm` sound bank beside its `.dat`, same basename - `machines/VcStarAp.dat` and `machines/VcStarAp.ssm`. Nothing on the disc is replaced and the machine archive is untouched; a machine with no companion keeps its clone kind's sounds.
+A machine that wants a voice of its own ships a `.ssm` sound bank beside its `.dat`, same basename - `machines/VcMine.dat` and `machines/VcMine.ssm`. Nothing on the disc is replaced and the machine archive is untouched; a machine with no companion keeps its clone kind's sounds, which is what the Archipelago Star does.
 
 The bank is an ordinary HAL sound bank holding exactly one record per row slot, in the order above. A slot the author does not supply is a record with a sample rate of 0 and no samples, and that slot keeps the clone kind's id. Records may point into the same data, so a machine whose engine start is its engine loop - which is what every vanilla star does - pays for one copy.
 
@@ -159,7 +159,7 @@ Three things have to line up before one of those samples can play, and `machine_
 
 ```
 uv run python scripts/audio/machine_audio.py clone slick \
-  mods/ap_star/assets/machines/VcStarAp.ssm \
+  mods/mymod/assets/machines/VcMine.ssm \
   --fallback warp --pitch 0.82
 
 uv run python scripts/audio/machine_audio.py build machines/VcMine.ssm \
@@ -213,7 +213,7 @@ Every place the game draws a machine picture - the select-screen portrait and ma
 
 Image dimensions vary frame to frame within a bank; the column is the frame the appended ones are cloned from, which is frame 4, the Slick Star. That geometry is also what says which role a bank plays, so four images cover all twenty:
 
-- **portrait** - the character-select grid tile. Fully opaque, filling the tile, framed close enough to overflow it on at least one side. The backdrop is a flat warm gray `(106, 107, 102)` darkening to about `(79, 80, 84)` along the bottom edge, where a soft contact shadow pools under the machine.
+- **portrait** - the character-select grid tile. Fully opaque, with the machine fitted inside the square rather than filling it: the vanilla Slick Star's tile spans the width and leaves half the height as backdrop, and only the longest machines overflow an edge. The backdrop is a flat warm gray `(106, 107, 102)` darkening to about `(79, 80, 84)` along the bottom edge, where a soft contact shadow pools under the machine.
 - **picture** - the large art beside the select cursor and on all four results screens. A three-quarter hero view, alpha cutout, no backdrop.
 - **silhouette** - drawn directly under the picture at the same size and position, as a soft white bloom. I4, so intensity is also alpha. It is the picture's own alpha under a Gaussian blur at sigma 1.5, which both matches the vanilla look and keeps the two layers registered.
 - **icon** - the small machine icon: the time-attack board's tile, and the one a results or stadium-select row carries beside the rider's face. A top-down view, not the hero angle, with a hard black outline and a white halo outside it.
@@ -237,14 +237,26 @@ Those tracks have to grow with the image ramps. Left alone, an appended frame dr
 `CmUiFrames.dat` carries one placeholder image per bank, the widened ramps and the widened quad-scale tracks. Twenty banks need only four distinct textures between them and most of their ramps encode to the same bytes, so both are interned and the side-car comes to 25 KB. A registered machine's own art overrides the placeholder in that machine's own slot, and travels beside the machine as `machines/<name>.art` - an archive exporting a `customMachineArt` public, magic `CMAR`, holding one image per bank geometry keyed by the source frame's `(width, height, format)`. A machine with no side-car shows the placeholder, so it still gets a cell.
 
 ```
-uv run --with pillow python scripts/hsd/make_ui_frames.py
+uv run --with pillow python scripts/authoring/make_ui_frames.py
 
 uv run --with pillow python scripts/hsd/make_machine_art.py \
   mods/ap_star/assets/machines/VcStarAp.art \
-  --hero art/ap-star-hero.png --topdown art/ap-star-top.png
+  --hero art/ap-star-hero.png --topdown art/ap-star-top.png --matte auto
 ```
 
-Two renders are needed because the icon's angle is not the picture's: a three-quarter hero view from slightly above, and a straight top-down. Both want a transparent background, a generous margin so nothing clips before framing, and at least 4x the target resolution - 320x192 or better for the 80x48 slots. Art is scaled to fit its target and padded, never stretched, except the portrait, which is scaled to fill and cropped the way the vanilla tiles are.
+Two renders are needed because the icon's angle is not the picture's: a three-quarter hero view from slightly above, and a straight top-down. Both want a generous margin and at least 4x the target resolution - 320x192 or better for the 80x48 slots. Each is cropped to its own alpha before anything is framed, so the margin costs nothing and a subject sitting small in a big canvas still fills its target. Art is then scaled to fit and padded, never stretched or cropped.
+
+A render off a model viewer usually arrives opaque on the viewport's backdrop instead. `--matte RRGGBB` keys a flat one out, and `--matte auto` reads the colour off the four corners and fails if they disagree. Alpha comes from how far a pixel travels from that colour and the backdrop's share is divided back out, so a pod's additive glow keeps its falloff rather than ending on the hard edge a colour-equality key leaves. `--preview <path>` writes the four finished images magnified side by side, which is the only way to judge a 40x40 icon before it is on screen.
+
+**Getting the renders.** A machine archive does not open in a model viewer as it ships. HSDraw types a root by its public name's suffix - `_joint` is a JObj, `_matanim_joint` a MatAnimJoint tree, `_figatree` a FigaTree - and a machine exports one public, a `vcData<Class><Stem>`, which names nothing the viewer can draw. `scripts/hsd/machine_preview.py` writes a viewer-only copy: the same data section and relocations under a public table naming the model root, the shadow model and each animation-bank slot the way the viewer expects. Every joint carries its three LOD meshes at once and a viewer draws all of them, so it also keeps only the DObjs one LOD table asks for - `--lod`, high by default - and a pod's always-drawn glow sprite is in every table and survives with whichever is chosen. The copy is not a disc asset: pruning leaves the LOD tables indexing a flat DObj order the tree no longer has, and nothing binds a machine by these names.
+
+```
+uv run python scripts/hsd/machine_preview.py mods/ap_star/assets/machines/VcStarAp.dat
+```
+
+It defaults to `out/preview/<stem>_preview.dat`, which `make clean` takes with the rest of `out/`.
+
+To light the render the way City Trial does, `grDataCity1`'s primary light chain is a white ambient plus one INFINITE diffuse+specular light coloured `(255, 255, 217)` at `(-1000, 700, 1500)` with no interest point, so it aims at the origin - the light `stc_main_light` caches at stage init. The other two light groups swap that for a cooler `(216, 216, 255)` ambient under a plain white key at `(-1000, 1000, 1500)`. The platform disc's gloss is a sphere map rather than a specular highlight, so a viewer without sphere-map texgen renders it flatter than the game does.
 
 Whatever the source, an image is re-encoded to suit the bank: RGB5A3 in a picture bank and I4 in a silhouette bank. Format is per frame and `HSD_TObjSetup` (`0x803f7158`) reads the CI-ness of the one frame it is drawing, so an RGB5A3 frame in a CMPR, C4 or C8 bank leaves every other frame alone and needs neither a CMPR encoder nor a quantizer. Its TLUT slot is filled with the donor's and never consulted.
 
@@ -253,8 +265,6 @@ Whatever the source, an image is re-encoded to suit the bank: RGB5A3 in a pictur
 Three shapes of bank qualify, and the script has to tell them apart from the many other TexAnims in these archives. Most hold one image per character, so an image count of 20 identifies them. The picture banks hold one per character *color* and are wider than the roster, so they are matched on the shape the diverts leave on their ramp instead: a key on every frame `0` to `17`, none on King Dedede's kind 18 or Meta Knight's 19, and one on each of the frames they are diverted to. Matching only on frames 20 and 30 is not enough - `MnAll.dat`, `MnClCheckAll.dat` and `MnSelplym2dAll.dat` all key those frames for unrelated banks.
 
 The small icon banks are the third shape and stop two short of the roster. Everything that draws one reaches the `CharacterKind` through `Machine_GetCKind` (`0x8000b9f4`), which never hands back King Dedede's kind or Meta Knight's - vanilla parks their star slots on the Warp Star - so the banks hold 18 images, one per kind with a machine of its own, under a ramp keying frame `N` to image `N`. An identity ramp on its own fits any strip animation, so the count is what tells them from `MnClCheckAll.dat`'s 39 checklist tiles or `MnSelstadiumAll.dat`'s 24 stadium thumbnails. Their appended frames still start at 20, which leaves 18 and 19 unkeyed and holding image 17 exactly as vanilla does. Ungrown, an appended `CharacterKind` runs past the last key onto that same image, and every results row and the stadium select draw the Flight Warp Star.
-
-`scripts/hsd/verify_ui_frames.py` checks the splice: it applies the side-car to the vanilla donors the way the mod does, rewrites the same donors with `add_ui_frame.py`, and compares what the engine would read out of both - image counts, TLUT counts, appended images, decoded ramps and decoded quad-scale keys. It models the placeholder path only, since a machine's own art replaces it at runtime.
 
 ## The material cycle
 
@@ -346,7 +356,6 @@ The only machine registered today, and what the registry was built for. It is a 
 | Thing | Value |
 |---|---|
 | Archive | `machines/VcStarAp.dat`, public `vcDataStarAp` |
-| Sound bank | `machines/VcStarAp.ssm` |
 | UI art | `machines/VcStarAp.art` |
 | Cutscene | `ApStarGlow.dat` + `ApStarParts.dat`, run as Hydra |
 | Display name | `"Archipelago Star"` - the handle the mod uses to find it |
@@ -367,11 +376,11 @@ None of those kind numbers is hardcoded anywhere. They are what a single registe
 
 **Title screen.** The title scene's demo player is set up at `0x8000d300` from three `li r4` operands: `RiderKind` at `0x8000d340`, `is_bike` at `0x8000d34c`, class slot at `0x8000d358`. `main_menu.c` rewrites all three on each title entry, since the registry only resolves after every mod has booted, pointing them at Kirby on the Archipelago Star and falling back to King Dedede on the Wagon Star when no such machine is registered. The ride must stay star-class: the demo init uses hardcoded star-only state ids and a wheel-class machine crashes there. The Wagon Star's idle volume floor of 20.0 is why the title think and exit callbacks zero the floor for whichever kind the demo uses and put it back on the way out; a kind whose floor is already 0.0 passes through unchanged, and machine loops are only ever created at volume 0.0 and ramped up, so this never lets an audible frame through.
 
-**The sound.** `VcStarAp.ssm` is `machine_audio.py clone slick --fallback warp --pitch 0.82`: all thirteen slots from the Slick Star's row, the Warp Star's boost tiers standing in for the three Slick leaves at -1, everything resampled a little under three semitones down and lengthened to match. Engine start and surface start share the engine and surface samples exactly as the Slick Star's do, so the bank is thirteen slots over eleven samples and 350 KB of ARAM. The editable sources are `art/audio/ap-star/*.wav`, one per slot at the same pitch, written by the same tool's `donors` subcommand.
+**The sound.** No `.ssm` ships beside the archive, so the star keeps its clone kind's row whole and sounds like a Slick Star.
 
-**The model.** `VcStarAp.dat` is built out of `VcStarSlick.dat` by `scripts/hsd/make_ap_star.py`, which turns the Slick Star's three engine pods into six on an even ring, one per logo color, over a repainted platform. `--ring-radius`, `--ring-height` and `--pod-scale` are the shape knobs, `--charge-bleach`, `--platform-color`, `--platform-gloss` and `--palette-period` the paint ones; the defaults pull the ring in to 2.20 from the donor's 2.45, raise it to 1.05 from 0.875, scale each pod to 1.4375, hold a charging pod 10% of the way to the donor's white flash, rest the platform at `#BFF5BF` shaded no darker than 0.75 of it, and walk it around the pod palette every 12 seconds.
+**The model.** `VcStarAp.dat` is `VcStarSlick.dat` with the Slick Star's three engine pods turned into six on an even ring, one per logo color, over a repainted platform. The ring sits at radius 2.20 against the donor's 2.45 and height 1.05 against 0.875, each pod scaled to 1.4375; a charging pod is held 10% of the way to the donor's white flash, and the platform rests at `#BFF5BF` shaded no darker than 0.75 of it, walking around the pod palette every 12 seconds.
 
-Nothing is remodelled. The three new pods are new JObjs hung off the same ring pivot whose DObjs point at the donor's own POBJs, so the archive carries 27 DObjs over 15 pieces of geometry and every donor animation still plays. The joint layout it produces:
+Nothing is remodelled. The three new pods are new JObjs hung off the same ring pivot whose DObjs point at the donor's own POBJs through copied DObj/MObj/TObj records, so the archive carries 27 DObjs over 15 pieces of geometry and every donor animation still plays. The joint layout it produces:
 
 | Joint | Role |
 |---|---|
@@ -385,11 +394,11 @@ Nothing is remodelled. The three new pods are new JObjs hung off the same ring p
 
 Bone count is 17. Four things outside the JObj tree are keyed to that numbering and the builder repatches all of them: `ModelData.BoneCount`; the three main LOD tables, whose bytes are flat DObj indices in JObj preorder; the Moving FigaTree's per-node track-count table; and the three MatAnimJoint trees, which are walked in lockstep with the JObj tree and so grow the same three nodes. Because the new pods precede the particle and seat joints in preorder, `VehicleAttributes+0x00` (the rider sit bone) and `AnimationBank+0x4c` (the particle spawn bone) shift up by three.
 
-A pod's color is animated rather than static: each of the Moving, Charge and Stop MatAnims drives its material's DIFFUSE_R/G/B, black under the body texture and magenta on the glow sprite, ramping warm while charging. Recoloring therefore rewrites those keyframes as well as the material color and the pod's own tinted copy of the 64x64 body texture, keeping each key's intensity and swapping the hue. The Charge tracks are the only ones with desaturated keys - the donor flashes its pods white at 100 charge - and `--charge-bleach` scales how far a key is allowed back toward white, so at the 0.10 default a charging pod climbs to a slightly hotter version of its own color rather than to white. A track whose fixed-point exponent cannot hold the brighter value has its exponent lowered rather than its format changed, which keeps every keyframe buffer the same length.
+A pod's color is animated rather than static: each of the Moving, Charge and Stop MatAnims drives its material's DIFFUSE_R/G/B, black under the body texture and magenta on the glow sprite, ramping warm while charging. Recoloring therefore rewrites those keyframes as well as the material color and the pod's own tinted copy of the 64x64 body texture, keeping each key's intensity and swapping the hue. The Charge tracks are the only ones with desaturated keys - the donor flashes its pods white at 100 charge - and a key is allowed only 10% of the way back toward white, so a charging pod climbs to a slightly hotter version of its own color rather than to white. A track whose fixed-point exponent cannot hold the brighter value has its exponent lowered rather than its format changed, which keeps every keyframe buffer the same length.
 
-The six colors and their ring order are the assembly pieces' own list in `scripts/hsd/make_ap_star_pieces.py`, imported rather than restated, so a pod and the sphere the player collects for it can never drift apart. Slot 0 sits on +Z, the machine's front, and the rest run clockwise seen from above. The same list is written into the archive as the descriptor's palette, which is what the platform cycles through.
+The six colors and their ring order are the assembly pieces' own list in `scripts/authoring/make_ap_star_pieces.py`, imported rather than restated, so a pod and the sphere the player collects for it can never drift apart. Slot 0 sits on +Z, the machine's front, and the rest run clockwise seen from above. The same list is written into the archive as the descriptor's palette, which is what the platform cycles through.
 
-The platform disc is repainted the other way around, so that its color can be animated at all. The donor drives it entirely from textures: a striped 256x256 map `REPLACE`s the color and contributes the 1-bit alpha that cuts the disc into a grate, and a magenta sphere map then `BLEND`s over that at full strength, so the material color never survives to a pixel. The builder cuts the first stage down to a single opaque texel with both channels set to `PASS` - which retires the Slick Star's stripes, and with them the cutout, leaving a solid disc - and turns the sphere map into gray with its luminance range stretched onto `[--platform-gloss, 1.0]`, `MODULATE`d over the material. The material renders with `RENDER_CONSTANT` and no lighting, so its diffuse is the disc's whole color and the gloss is all the shading it has. The 32 KB the stripes occupied holds the 32-byte replacement and is otherwise zeroed, so the retirement costs no file size.
+The platform disc is repainted the other way around, so that its color can be animated at all. The donor drives it entirely from textures: a striped 256x256 map `REPLACE`s the color and contributes the 1-bit alpha that cuts the disc into a grate, and a magenta sphere map then `BLEND`s over that at full strength, so the material color never survives to a pixel. The builder cuts the first stage down to a single opaque texel with both channels set to `PASS` - which retires the Slick Star's stripes, and with them the cutout, leaving a solid disc - and turns the sphere map into gray with its luminance range stretched onto `[0.75, 1.0]`, `MODULATE`d over the material. The material renders with `RENDER_CONSTANT` and no lighting, so its diffuse is the disc's whole color and the gloss is all the shading it has. The 32 KB the stripes occupied holds the 32-byte replacement and is otherwise zeroed, so the retirement costs no file size.
 
 The exhaust keeps the donor's own particles - the four-point sparkle at texture group 0 image 1, generator 20 while cruising and 51 on boost - and only changes color. They emit off the machine's axis and drift, which is what a machine that slides needs: a generator that emits down a tight cone pins its trail to where the machine is pointed, and a Slick Star spends much of its time not facing the way it is going.
 

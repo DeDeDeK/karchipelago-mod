@@ -141,7 +141,19 @@ see `item.h`).
 
 `Ply_IncrementItemCollectNum` has a **single caller**: `Machine_OnTouchItem`
 (`0x801db34c`, call site `0x801db928`), on the common path for *every*
-collected item (`itemkind = item+0x1c`, `src_tag = item+0x20`).
+collected item (`itemkind = item+0x1c`, `src_tag = item+0x20`). The kind it is
+handed has already been rewritten to the item's base kind by the custom-item
+behavior clamp, so a custom kind is credited to whatever vanilla kind it clones.
+
+That single call site carries a conditional hook (`ap_patches.c`, at
+`0x801db91c`, where the call's own arguments are reloaded from `r21`). It skips
+the call for the AP Patch and the AP Box, so neither reaches any counter this
+function feeds: not the per-kind slot, not `Ply_GetItemCollectTotal`, not the
+first-20-seconds aggregate at `+0x804`, and not the Tac aggregate at `+0x808`.
+Without it an AP Patch would count as an Offense patch and an AP Box break as a
+blue box, letting one location category farm another's cells. Every other item,
+custom kinds included, takes the vanilla path unchanged.
+
 `Ply_DecrementItemCollectNum` has **two callers**, both on the drop pipeline:
 `Rider_SpawnDropPatchSeq` (`0x8019ce50`, two sites) when a rider sheds patches,
 and the all-up legendary drop when a collected Hydra/Dragoon piece is thrown.

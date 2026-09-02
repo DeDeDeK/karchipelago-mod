@@ -15,23 +15,32 @@ import struct
 # GX texture format -> (block_w, block_h, bpp). Textures are stored in
 # blocks; a level is padded up to whole blocks.
 FORMAT_BLOCK = {
-    0: (8, 8, 4),   # I4
-    1: (8, 4, 8),   # I8
-    2: (8, 4, 8),   # IA4
+    0: (8, 8, 4),  # I4
+    1: (8, 4, 8),  # I8
+    2: (8, 4, 8),  # IA4
     3: (4, 4, 16),  # IA8
     4: (4, 4, 16),  # RGB565
     5: (4, 4, 16),  # RGB5A3
     6: (4, 4, 32),  # RGBA8
-    8: (8, 8, 4),   # C4
-    9: (8, 4, 8),   # C8
+    8: (8, 8, 4),  # C4
+    9: (8, 4, 8),  # C8
     10: (4, 4, 16),  # C14X2
     14: (8, 8, 4),  # CMPR
 }
 
 # GX texture format -> short name (for display).
 FORMAT_NAME = {
-    0: "I4", 1: "I8", 2: "IA4", 3: "IA8", 4: "RGB565", 5: "RGB5A3",
-    6: "RGBA8", 8: "C4", 9: "C8", 10: "C14X2", 14: "CMPR",
+    0: "I4",
+    1: "I8",
+    2: "IA4",
+    3: "IA8",
+    4: "RGB565",
+    5: "RGB5A3",
+    6: "RGBA8",
+    8: "C4",
+    9: "C8",
+    10: "C14X2",
+    14: "CMPR",
 }
 
 GX_TF_I4 = 0
@@ -68,7 +77,9 @@ def rgb5a3(r, g, b, a):
 
 
 def encode_rgb5a3(im):
-    """Encode an RGBA PIL image to GX_TF_RGB5A3 (16bpp, 4x4 tiles, big-endian)."""
+    """Encode an RGBA PIL image to GX_TF_RGB5A3 (16bpp, 4x4 tiles, big-endian).
+    Dimensions that are not a multiple of the 4x4 block edge-replicate into the
+    padding texels, which the GPU never samples but the blob still stores."""
     w, h = im.size
     px = im.load()
     out = bytearray()
@@ -76,7 +87,7 @@ def encode_rgb5a3(im):
         for tx in range(0, w, 4):
             for y in range(ty, ty + 4):
                 for x in range(tx, tx + 4):
-                    out += struct.pack(">H", rgb5a3(*px[x, y]))
+                    out += struct.pack(">H", rgb5a3(*px[min(x, w - 1), min(y, h - 1)]))
     return bytes(out)
 
 
@@ -112,9 +123,11 @@ def colorize(r, g, b, tint):
         f = lum / 128.0
         return int(tr * f), int(tg * f), int(tb * f)
     f = (lum - 128) / 127.0
-    return (int(tr + (255 - tr) * f),
-            int(tg + (255 - tg) * f),
-            int(tb + (255 - tb) * f))
+    return (
+        int(tr + (255 - tr) * f),
+        int(tg + (255 - tg) * f),
+        int(tb + (255 - tb) * f),
+    )
 
 
 def tint_cmpr(blob, tint):
@@ -154,8 +167,11 @@ def gray_cmpr(blob, floor):
     stretch is what lets the brightest texel still reach the material's full
     color however dark the source was."""
     out = bytearray(blob)
-    lums = [_lum565(v) for off in range(0, len(out) - 7, 8)
-            for v in struct.unpack_from(">HH", out, off)]
+    lums = [
+        _lum565(v)
+        for off in range(0, len(out) - 7, 8)
+        for v in struct.unpack_from(">HH", out, off)
+    ]
     lo, hi = (min(lums), max(lums)) if lums else (0, 0)
     for off in range(0, len(out) - 7, 8):
         c0, c1 = struct.unpack_from(">HH", out, off)
@@ -203,3 +219,96 @@ def encode_i4_alpha(im):
                 for x in range(tx, tx + 8, 2):
                     out.append(((a[x, y] >> 4) << 4) | (a[x + 1, y] >> 4))
     return bytes(out)
+
+
+def encode_cmpr(im):
+    """Encode an opaque PIL image to GX_TF_CMPR (4bpp). Tiles are 8x8, each
+    holding four 4x4 sub-blocks; a sub-block stores two RGB565 endpoints and
+    sixteen 2-bit palette indices. The endpoints are the corners of the block's
+    color bounding box, ordered c0 > c1 so the block decodes in the four-color
+    opaque mode; a flat block collapses onto one endpoint, which is opaque under
+    either mode."""
+    w, h = im.size
+    px = im.load()
+    out = bytearray()
+    for ty in range(0, h, 8):
+        for tx in range(0, w, 8):
+            for sy in (0, 4):
+                for sx in (0, 4):
+                    out += _cmpr_block(px, w, h, tx + sx, ty + sy)
+    return bytes(out)
+
+
+def _cmpr_block(px, w, h, bx, by):
+    texels = [
+        px[min(bx + x, w - 1), min(by + y, h - 1)][:3]
+        for y in range(4)
+        for x in range(4)
+    ]
+    c0 = _pack565([max(t[i] for t in texels) for i in range(3)])
+    c1 = _pack565([min(t[i] for t in texels) for i in range(3)])
+    if c0 == c1:
+        return struct.pack(">HHI", c0, 0, 0)
+    pal = _cmpr_palette(c0, c1)
+    bits = 0
+    for i, t in enumerate(texels):
+        best = min(
+            range(4), key=lambda k: sum((t[j] - pal[k][j]) ** 2 for j in range(3))
+        )
+        bits |= best << (30 - 2 * i)
+    return struct.pack(">HHI", c0, c1, bits)
+
+
+def _pack565(rgb):
+    return ((rgb[0] >> 3) << 11) | ((rgb[1] >> 2) << 5) | (rgb[2] >> 3)
+
+
+def _cmpr_palette(c0, c1):
+    """The four colors a CMPR (DXT1) sub-block interpolates between."""
+
+    def unpack(v):
+        return (
+            ((v >> 11) & 31) * 255 // 31,
+            ((v >> 5) & 63) * 255 // 63,
+            (v & 31) * 255 // 31,
+        )
+
+    a, b = unpack(c0), unpack(c1)
+    if c0 > c1:
+        return [
+            a + (255,),
+            b + (255,),
+            tuple((2 * a[i] + b[i]) // 3 for i in range(3)) + (255,),
+            tuple((a[i] + 2 * b[i]) // 3 for i in range(3)) + (255,),
+        ]
+    return [
+        a + (255,),
+        b + (255,),
+        tuple((a[i] + b[i]) // 2 for i in range(3)) + (255,),
+        (0, 0, 0, 0),
+    ]
+
+
+def decode_cmpr(blob, width, height):
+    """GX_TF_CMPR blob -> RGBA Pillow image. CMPR tiles 8x8, each tile holding
+    four 4x4 DXT1 sub-blocks in row-major order."""
+    from PIL import Image
+
+    im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    px = im.load()
+    off = 0
+    for ty in range(0, height, 8):
+        for tx in range(0, width, 8):
+            for sy in (0, 4):
+                for sx in (0, 4):
+                    c0, c1 = struct.unpack_from(">HH", blob, off)
+                    bits = struct.unpack_from(">I", blob, off + 4)[0]
+                    off += 8
+                    pal = _cmpr_palette(c0, c1)
+                    for y in range(4):
+                        for x in range(4):
+                            idx = (bits >> (30 - 2 * (y * 4 + x))) & 3
+                            X, Y = tx + sx + x, ty + sy + y
+                            if X < width and Y < height:
+                                px[X, Y] = pal[idx]
+    return im

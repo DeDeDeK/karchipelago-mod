@@ -25,7 +25,7 @@ def sound_pcm(bank, index, channel=0):
     """Decode one sound. Returns (samples, sample_rate, loop_start or None)."""
     snd = bank.sounds[index]
     c = snd.channels[channel]
-    raw = bank.data[_frame_base(c.ca) // 2:(c.ea // 16) * 8 + 8]
+    raw = bank.data[_frame_base(c.ca) // 2 : (c.ea // 16) * 8 + 8]
     first = nibble_to_sample(c.ca, c.ca)
     count = nibble_to_sample(c.ea, c.ca) - first + 1
     pcm = dsp.decode(raw, c.coef, count=first + count)[first:]
@@ -35,6 +35,7 @@ def sound_pcm(bank, index, channel=0):
 def encode_sound(pcm, loop_start=None, coef=None):
     """Encode PCM into (Channel, adpcm bytes). Addresses are relative to nibble 0."""
     from .ssm import Channel
+
     book = coef if coef is not None else dsp.make_book(pcm)
     adpcm, headers = dsp.encode(pcm, book)
     ch = Channel(loop=1 if loop_start is not None else 0, coef=book)

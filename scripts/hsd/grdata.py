@@ -16,8 +16,7 @@ expand.
 """
 
 from .archive import f32, s32, u16, u32
-from .format import (COLL_JOINT_KINDS, SPLINE_TYPES, describe, rgba, vec3,
-                     zone_kind_name)
+from .format import COLL_JOINT_KINDS, SPLINE_TYPES, describe, rgba, vec3, zone_kind_name
 from .schema import array_length
 
 # (offset, name, HSDLib type, kind). kind: 'ptr' relocated reference,
@@ -71,11 +70,19 @@ SECTION_NAMES = [name for name, _ in _SECTIONS.values()]
 SUBANIM_SLOTS = ["SuperJump", "Leap", "Rail", "x0C", "x10", "EventAnim"]
 
 POSITION_SLOTS = [
-    (0x04, "Startpos"), (0x08, "Enemypos"), (0x0C, "Gravitypos"),
-    (0x10, "Airflowpos"), (0x14, "Conveyorpos"), (0x18, "ItemPos"),
-    (0x1C, "Eventpos"), (0x20, "Vehiclepos"), (0x24, "GlobalDeadPos"),
-    (0x28, "LocalDeadPos"), (0x2C, "Yakumonopos"),
-    (0x30, "ItemAreaPos"), (0x34, "VehicleAreapos"),
+    (0x04, "Startpos"),
+    (0x08, "Enemypos"),
+    (0x0C, "Gravitypos"),
+    (0x10, "Airflowpos"),
+    (0x14, "Conveyorpos"),
+    (0x18, "ItemPos"),
+    (0x1C, "Eventpos"),
+    (0x20, "Vehiclepos"),
+    (0x24, "GlobalDeadPos"),
+    (0x28, "LocalDeadPos"),
+    (0x2C, "Yakumonopos"),
+    (0x30, "ItemAreaPos"),
+    (0x34, "VehicleAreapos"),
 ]
 
 
@@ -141,18 +148,28 @@ def _stage(arc, sn):
     print(f"    StageScale       = {f32(arc.data, sn + 0x08):.4f}")
     print(f"    GravityStrength  = {f32(arc.data, sn + 0x0C):.4f}")
     print(f"    GravityDirection = {vec3(arc, sn + 0x10)}")
-    print(f"    Fog              = map={'on' if fog & 1 else 'off'} "
-          f"player={'on' if fog & 2 else 'off'}")
+    print(
+        f"    Fog              = map={'on' if fog & 1 else 'off'} "
+        f"player={'on' if fog & 2 else 'off'}"
+    )
     print(f"    ItemRestitution  = [{_floats(arc, sn + 0x20, 8)}]")
     print(f"    PlayerRestitution= [{_floats(arc, sn + 0x40, 8)}]")
     print(f"    MinimapScale     = {f32(arc.data, sn + 0x60):.4f}")
     print(f"    MinimapPlayer    = {vec3(arc, sn + 0x64)}")
-    print(f"    AudioFlags       = ({arc.data[sn + 0x80]}, {arc.data[sn + 0x81]}, "
-          f"{arc.data[sn + 0x82]})")
-    for base, label in ((0x84, "BoostPads"), (0x9C, "BoostGates"), (0xB4, "BoostRings")):
-        pairs = "  ".join(f"[{i}] accel=({_floats(arc, sn + base + i * 0xC, 2)}) "
-                          f"time={f32(arc.data, sn + base + i * 0xC + 8):g}"
-                          for i in range(2))
+    print(
+        f"    AudioFlags       = ({arc.data[sn + 0x80]}, {arc.data[sn + 0x81]}, "
+        f"{arc.data[sn + 0x82]})"
+    )
+    for base, label in (
+        (0x84, "BoostPads"),
+        (0x9C, "BoostGates"),
+        (0xB4, "BoostRings"),
+    ):
+        pairs = "  ".join(
+            f"[{i}] accel=({_floats(arc, sn + base + i * 0xC, 2)}) "
+            f"time={f32(arc.data, sn + base + i * 0xC + 8):g}"
+            for i in range(2)
+        )
         print(f"    {label:17s}= {pairs}")
     print(f"    OoB min          = {vec3(arc, sn + 0xCC)}")
     print(f"    OoB max          = {vec3(arc, sn + 0xD8)}")
@@ -160,8 +177,10 @@ def _stage(arc, sn):
     if pad:
         cnt = _deref(arc, pad)
         if cnt:
-            print(f"    PadCount         = ({u32(arc.data, cnt):d}, "
-                  f"{u32(arc.data, cnt + 4):d})")
+            print(
+                f"    PadCount         = ({u32(arc.data, cnt):d}, "
+                f"{u32(arc.data, cnt + 4):d})"
+            )
 
 
 def _lights(arc, lg):
@@ -176,8 +195,10 @@ def _lights(arc, lg):
             if not light:
                 continue
             lobj = _deref(arc, light)
-            print(f"        Light[{j}] @ {light:#x}"
-                  + (f" -> LObjDesc @ {lobj:#x}" if lobj else " (no LObj)"))
+            print(
+                f"        Light[{j}] @ {light:#x}"
+                + (f" -> LObjDesc @ {lobj:#x}" if lobj else " (no LObj)")
+            )
             _lobj_chain(arc, lobj, "          ")
 
 
@@ -190,8 +211,10 @@ def _lobj_chain(arc, off, indent):
         for foff, label in ((0x10, "position"), (0x14, "interest")):
             p = _deref(arc, cur + foff)
             if p:
-                print(f"{indent}  {label}: WObjDesc @ {p:#x}"
-                      f"{describe(arc, 'WObjDesc', p)}")
+                print(
+                    f"{indent}  {label}: WObjDesc @ {p:#x}"
+                    f"{describe(arc, 'WObjDesc', p)}"
+                )
         cur = _deref(arc, cur + 0x04)
 
 
@@ -202,10 +225,12 @@ def _collision(arc, cn):
         j = joints + i * 0x1C
         kind = u32(arc.data, j + 0x14)
         force = _deref(arc, j + 0x18)
-        line = (f"    joint[{i:3d}] bone={s32(arc.data, j):3d} "
-                f"kind={COLL_JOINT_KINDS.get(kind, kind)} "
-                f"verts={u32(arc.data, j + 0x04)}+{u32(arc.data, j + 0x08)} "
-                f"faces={u32(arc.data, j + 0x0C)}+{u32(arc.data, j + 0x10)}")
+        line = (
+            f"    joint[{i:3d}] bone={s32(arc.data, j):3d} "
+            f"kind={COLL_JOINT_KINDS.get(kind, kind)} "
+            f"verts={u32(arc.data, j + 0x04)}+{u32(arc.data, j + 0x08)} "
+            f"faces={u32(arc.data, j + 0x0C)}+{u32(arc.data, j + 0x10)}"
+        )
         if force:
             line += f" force={vec3(arc, force)}"
         print(line)
@@ -225,11 +250,13 @@ def _zone_joints(arc, cn):
             flags = u32(arc.data, tri + 0x14)
         param, param_rel = ptr(arc, j + 0x18)
         param_s = f"{param:#x}" if param_rel else f"{param:d}"
-        print(f"    zone[{i:3d}] bone={s32(arc.data, j):3d} "
-              f"{zone_kind_name(kind)} flags={flags:#x} "
-              f"link={s32(arc.data, j + 0x14):d} "
-              f"verts={u32(arc.data, j + 0x04)}+{u32(arc.data, j + 0x08)} "
-              f"faces={face_start}+{u32(arc.data, j + 0x10)} param={param_s}")
+        print(
+            f"    zone[{i:3d}] bone={s32(arc.data, j):3d} "
+            f"{zone_kind_name(kind)} flags={flags:#x} "
+            f"link={s32(arc.data, j + 0x14):d} "
+            f"verts={u32(arc.data, j + 0x04)}+{u32(arc.data, j + 0x08)} "
+            f"faces={face_start}+{u32(arc.data, j + 0x10)} param={param_s}"
+        )
 
 
 def _splines(arc, sn):
@@ -248,8 +275,10 @@ def _splines(arc, sn):
         base = _deref(arc, rng)
         for i in range(count):
             r = base + i * 0x18
-            print(f"      [{i:2d}] flags={u32(arc.data, r + 0x14):#010x} "
-                  f"left={_deref(arc, r):#x} right={_deref(arc, r + 0x04):#x}")
+            print(
+                f"      [{i:2d}] flags={u32(arc.data, r + 0x14):#010x} "
+                f"left={_deref(arc, r):#x} right={_deref(arc, r + 0x04):#x}"
+            )
     conv = _deref(arc, sn + 0x10)
     if conv:
         _spline_list(arc, _deref(arc, conv), "    +10  conveyor")
@@ -268,8 +297,10 @@ def _spline_list(arc, lst, label):
         if not sp:
             continue
         t = arc.data[sp]
-        print(f"      [{i:2d}] {SPLINE_TYPES.get(t, t)} pts={u16(arc.data, sp + 0x02)} "
-              f"len={f32(arc.data, sp + 0x0C):.1f}")
+        print(
+            f"      [{i:2d}] {SPLINE_TYPES.get(t, t)} pts={u16(arc.data, sp + 0x02)} "
+            f"len={f32(arc.data, sp + 0x0C):.1f}"
+        )
 
 
 def _positions(arc, pn):
@@ -298,26 +329,39 @@ def _subanim(arc, sn):
         for j in range(count):
             aj = _deref(arc, arr + j * 4)
             if aj:
-                print(f"          [{j:2d}] AnimJoint @ {aj:#x}"
-                      f"{describe(arc, 'AnimJoint', aj)}")
+                print(
+                    f"          [{j:2d}] AnimJoint @ {aj:#x}"
+                    f"{describe(arc, 'AnimJoint', aj)}"
+                )
 
 
 def _items(arc, it):
     print(f"\n  ItemNode @ {it:#x}:")
-    for foff, name in ((0x04, "TimingTable"), (0x08, "CityTrial"),
-                       (0x0C, "AirRide"), (0x10, "Coliseum")):
+    for foff, name in (
+        (0x04, "TimingTable"),
+        (0x08, "CityTrial"),
+        (0x0C, "AirRide"),
+        (0x10, "Coliseum"),
+    ):
         p = _deref(arc, it + foff)
-        print(f"    +{foff:02X}  {name:12s} -> {p:#x}" if p
-              else f"    +{foff:02X}  {name:12s} -> NULL")
+        print(
+            f"    +{foff:02X}  {name:12s} -> {p:#x}"
+            if p
+            else f"    +{foff:02X}  {name:12s} -> NULL"
+        )
     timing = _deref(arc, it + 0x04)
     if timing:
-        print(f"      timing entries={u32(arc.data, timing + 0x08)} "
-              f"positions={u32(arc.data, timing + 0x10)} "
-              f"areas={u32(arc.data, timing + 0x18)}")
+        print(
+            f"      timing entries={u32(arc.data, timing + 0x08)} "
+            f"positions={u32(arc.data, timing + 0x10)} "
+            f"areas={u32(arc.data, timing + 0x18)}"
+        )
     city = _deref(arc, it + 0x08)
     if city:
-        print(f"      citytrial item_chances={u32(arc.data, city + 0x08)} "
-              f"special_timings={u32(arc.data, city + 0x24)}")
+        print(
+            f"      citytrial item_chances={u32(arc.data, city + 0x08)} "
+            f"special_timings={u32(arc.data, city + 0x24)}"
+        )
 
 
 def _fog(arc, fn):
@@ -334,10 +378,12 @@ def _fog(arc, fn):
         print(f"    +04  FogTypes @ {types:#x}  count={count}")
         for i in range(count):
             e = base + i * 0x48
-            print(f"      [{i:2d}] x00={u32(arc.data, e):#x} "
-                  f"colors={rgba(arc, e + 0x04)} {rgba(arc, e + 0x10)} "
-                  f"{rgba(arc, e + 0x14)} {rgba(arc, e + 0x20)} "
-                  f"{rgba(arc, e + 0x24)} flag={arc.data[e + 0x44]}")
+            print(
+                f"      [{i:2d}] x00={u32(arc.data, e):#x} "
+                f"colors={rgba(arc, e + 0x04)} {rgba(arc, e + 0x10)} "
+                f"{rgba(arc, e + 0x14)} {rgba(arc, e + 0x20)} "
+                f"{rgba(arc, e + 0x24)} flag={arc.data[e + 0x44]}"
+            )
 
 
 def _rails(arc, rn):
@@ -356,7 +402,10 @@ def _rails(arc, rn):
 
 def _fgm(arc, fn):
     print(f"\n  FGMNode @ {fn:#x}:")
-    for slot, cnt_slot, label in ((0x00, 0x04, "positional"), (0x08, 0x0C, "triggered")):
+    for slot, cnt_slot, label in (
+        (0x00, 0x04, "positional"),
+        (0x08, 0x0C, "triggered"),
+    ):
         count = u32(arc.data, fn + cnt_slot)
         base = _deref(arc, fn + slot)
         print(f"    {label}: {count}")
@@ -369,8 +418,10 @@ def _fgm(arc, fn):
 def _yakumono(arc, yn):
     count = u32(arc.data, yn + 0x04)
     arr = _deref(arc, yn)
-    print(f"\n  YakumonoNode @ {yn:#x}:  entries={count} "
-          f"(array holds {array_length(arc, arr) if arr else 0})")
+    print(
+        f"\n  YakumonoNode @ {yn:#x}:  entries={count} "
+        f"(array holds {array_length(arc, arr) if arr else 0})"
+    )
     for i in range(array_length(arc, arr) if arr else 0):
         d = _deref(arc, arr + i * 4)
         if not d:
@@ -378,19 +429,27 @@ def _yakumono(arc, yn):
         coll = _deref(arc, d + 0x0C)
         hurt = _deref(arc, d + 0x10)
         audio = _deref(arc, d + 0x14)
-        print(f"    [{i:2d}] YakumonoDesc @ {d:#x} models={_deref(arc, d + 0x04):#x} "
-              f"anim={_deref(arc, d + 0x08):#x}"
-              + (f" coll={{{describe(arc, 'grCollisionNode', coll).strip()}}}" if coll else "")
-              + (f"{describe(arc, 'HurtCollision', hurt)}" if hurt else "")
-              + (f"{describe(arc, 'YakumonoAudio', audio)}" if audio else ""))
+        print(
+            f"    [{i:2d}] YakumonoDesc @ {d:#x} models={_deref(arc, d + 0x04):#x} "
+            f"anim={_deref(arc, d + 0x08):#x}"
+            + (
+                f" coll={{{describe(arc, 'grCollisionNode', coll).strip()}}}"
+                if coll
+                else ""
+            )
+            + (f"{describe(arc, 'HurtCollision', hurt)}" if hurt else "")
+            + (f"{describe(arc, 'YakumonoAudio', audio)}" if audio else "")
+        )
 
 
 def _partition(arc, pn):
     tree = _deref(arc, pn)
     if not tree:
         return
-    print(f"\n  PartitionNode @ {pn:#x} -> grCollisionTree @ {tree:#x}"
-          f"{describe(arc, 'grCollisionTree', tree)}")
+    print(
+        f"\n  PartitionNode @ {pn:#x} -> grCollisionTree @ {tree:#x}"
+        f"{describe(arc, 'grCollisionTree', tree)}"
+    )
     n = u16(arc.data, tree + 0x04)
     base = _deref(arc, tree)
     depths = {}
@@ -402,18 +461,24 @@ def _partition(arc, pn):
         depths[arc.data[b + 0x4C]] = depths.get(arc.data[b + 0x4C], 0) + 1
         if u16(arc.data, b + 0x18) == 0xFFFF:
             leaves += 1
-    print(f"    buckets={n} leaves={leaves} "
-          f"depths={{{', '.join(f'{d}: {c}' for d, c in sorted(depths.items()))}}}")
-    print(f"    bit table: {(u16(arc.data, tree + 0x58) + 7) // 8} B "
-          f"({u16(arc.data, tree + 0x58)} triangles)")
+    print(
+        f"    buckets={n} leaves={leaves} "
+        f"depths={{{', '.join(f'{d}: {c}' for d, c in sorted(depths.items()))}}}"
+    )
+    print(
+        f"    bit table: {(u16(arc.data, tree + 0x58) + 7) // 8} B "
+        f"({u16(arc.data, tree + 0x58)} triangles)"
+    )
 
 
 def _respawn(arc, rn):
     count = u32(arc.data, rn + 0x04)
     base = _deref(arc, rn)
     idx = [str(u32(arc.data, base + i * 4)) for i in range(count)] if base else []
-    print(f"\n  RespawnNode @ {rn:#x}:  count={count} "
-          f"GlobalDeadPos indices=[{', '.join(idx)}]")
+    print(
+        f"\n  RespawnNode @ {rn:#x}:  count={count} "
+        f"GlobalDeadPos indices=[{', '.join(idx)}]"
+    )
 
 
 _PRINTERS = {

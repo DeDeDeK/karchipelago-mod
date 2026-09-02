@@ -40,8 +40,16 @@ CUSTOM_MACHINE_DESC_VERSION = 7
 DESC_SIZE = 0x78
 
 
-def append_descriptor(data, relocs, new_public, args, palette=None, trail=None,
-                      trail_clones=None, cinematic=None):
+def append_descriptor(
+    data,
+    relocs,
+    new_public,
+    args,
+    palette=None,
+    trail=None,
+    trail_clones=None,
+    cinematic=None,
+):
     """Append a CustomMachineDesc plus its strings, and return its offset. Every
     string slot becomes a new relocation, exactly as the carved-asset scripts
     synthesize their descriptor pointers. A machine with no description leaves
@@ -76,7 +84,7 @@ def append_descriptor(data, relocs, new_public, args, palette=None, trail=None,
         data.extend(args.description.encode("ascii") + b"\0")
 
     cine_offs = []
-    for text in (cinematic[:5] if cinematic else []):
+    for text in cinematic[:5] if cinematic else []:
         cine_offs.append(len(data))
         data.extend(text.encode("ascii") + b"\0")
     data.extend(b"\0" * (-len(data) & 3))
@@ -143,29 +151,38 @@ def clone(src_path, out_path, new_public, args):
     if len(arc.publics) != 1:
         raise SystemExit(f"expected exactly one public, found {list(arc.publics)}")
     public = next(iter(arc.publics))
-    print(f"  public '{public}' @ {arc.publics[public]:#x}, "
-          f"{arc.data_size / 1024:.1f} KB data, {arc.nb_reloc} relocs")
+    print(
+        f"  public '{public}' @ {arc.publics[public]:#x}, "
+        f"{arc.data_size / 1024:.1f} KB data, {arc.nb_reloc} relocs"
+    )
 
     data = bytearray(arc.data)
     relocs = list(arc.relocs)
-    desc_off = append_descriptor(data, relocs, new_public, args,
-                                 cinematic=cinematic_from(args))
-    print(f"  descriptor '{args.name}' @ {desc_off:#x} "
-          f"(character {'no' if args.no_character else 'yes'}, "
-          f"clone kind {args.clone_kind}, spawn weight {args.spawn_weight})")
+    desc_off = append_descriptor(
+        data, relocs, new_public, args, cinematic=cinematic_from(args)
+    )
+    print(
+        f"  descriptor '{args.name}' @ {desc_off:#x} "
+        f"(character {'no' if args.no_character else 'yes'}, "
+        f"clone kind {args.clone_kind}, spawn weight {args.spawn_weight})"
+    )
     for line in args.description.split("\n") if args.description else []:
         print(f"    description: {line}")
     if args.cinematic:
-        print(f"    cinematic: {args.cinematic}, "
-              f"as {'Hydra' if args.cine_index else 'Dragoon'}")
+        print(
+            f"    cinematic: {args.cinematic}, "
+            f"as {'Hydra' if args.cine_index else 'Dragoon'}"
+        )
 
     publics = [(new_public, arc.publics[public]), ("customMachine", desc_off)]
     externs = [(name, off) for off, name in arc.externs]
     out = build_archive(data, relocs, publics, arc.version, externs)
     with open(out_path, "wb") as f:
         f.write(out)
-    print(f"  wrote {out_path} ({len(out) / 1024:.1f} KB, publics "
-          f"'{new_public}' + 'customMachine')")
+    print(
+        f"  wrote {out_path} ({len(out) / 1024:.1f} KB, publics "
+        f"'{new_public}' + 'customMachine')"
+    )
 
 
 def main(argv):
@@ -173,28 +190,55 @@ def main(argv):
     p.add_argument("src", help="donor archive, e.g. iso/files/VcStarWing.dat")
     p.add_argument("out", help="output archive path")
     p.add_argument("public", help="public symbol name for the clone")
-    p.add_argument("--name", default=None, help="display name (default: the public symbol)")
-    p.add_argument("--description", default="",
-                   help="select-screen blurb under the name; two lines of about 24 "
-                        r"characters, split with \n")
-    p.add_argument("--no-character", action="store_true",
-                   help="register the machine without a CharacterKind or select-grid cell")
-    p.add_argument("--rider-kind", type=int, default=0,
-                   help="RiderKind for the appended CharacterDesc row (0 = Kirby)")
-    p.add_argument("--clone-kind", type=int, default=6,
-                   help="star MachineKind whose per-kind engine rows - audio parameters and "
-                        "the machine-specific handlers - this machine inherits "
-                        "(default 6, Slick Star)")
-    p.add_argument("--spawn-weight", type=float, default=2.0,
-                   help="City Trial spawn weight; 0 never spawns loose on the field")
-    p.add_argument("--cinematic", default="",
-                   help="assembly cutscene archives, as "
-                        "GLOW.dat,glowSymbol,cameraSymbol,PARTS.dat,partsSymbol; both files "
-                        "sit at the FST root and the camera animation is a second public in "
-                        "the glow archive")
-    p.add_argument("--cine-index", type=int, default=1,
-                   help="vanilla legendary the cutscene runs under - 0 Dragoon, 1 Hydra - "
-                        "which picks the rider pose, fanfare and sky it borrows")
+    p.add_argument(
+        "--name", default=None, help="display name (default: the public symbol)"
+    )
+    p.add_argument(
+        "--description",
+        default="",
+        help="select-screen blurb under the name; two lines of about 24 "
+        r"characters, split with \n",
+    )
+    p.add_argument(
+        "--no-character",
+        action="store_true",
+        help="register the machine without a CharacterKind or select-grid cell",
+    )
+    p.add_argument(
+        "--rider-kind",
+        type=int,
+        default=0,
+        help="RiderKind for the appended CharacterDesc row (0 = Kirby)",
+    )
+    p.add_argument(
+        "--clone-kind",
+        type=int,
+        default=6,
+        help="star MachineKind whose per-kind engine rows - audio parameters and "
+        "the machine-specific handlers - this machine inherits "
+        "(default 6, Slick Star)",
+    )
+    p.add_argument(
+        "--spawn-weight",
+        type=float,
+        default=2.0,
+        help="City Trial spawn weight; 0 never spawns loose on the field",
+    )
+    p.add_argument(
+        "--cinematic",
+        default="",
+        help="assembly cutscene archives, as "
+        "GLOW.dat,glowSymbol,cameraSymbol,PARTS.dat,partsSymbol; both files "
+        "sit at the FST root and the camera animation is a second public in "
+        "the glow archive",
+    )
+    p.add_argument(
+        "--cine-index",
+        type=int,
+        default=1,
+        help="vanilla legendary the cutscene runs under - 0 Dragoon, 1 Hydra - "
+        "which picks the rider pose, fanfare and sky it borrows",
+    )
     args = p.parse_args(argv[1:])
 
     if args.name is None:

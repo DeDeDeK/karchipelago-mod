@@ -19,10 +19,13 @@ def main(argv):
     parser = ArgumentParser(
         "iso.py",
         description="Creates a modified iso from a base iso and root folder "
-                    "containing additional/modified files.",
-        allow_abbrev=False)
+        "containing additional/modified files.",
+        allow_abbrev=False,
+    )
     parser.add_argument("src", help="path to vanilla iso")
-    parser.add_argument("replace", help="path to folder containing files to replace in the iso")
+    parser.add_argument(
+        "replace", help="path to folder containing files to replace in the iso"
+    )
     parser.add_argument("dest", help="path to outputted .xdelta file")
     args = parser.parse_args(args=argv)
 
@@ -64,12 +67,22 @@ def copy_all_files(src_folder, dst_folder):
 
 def create_xdelta_patch(original_iso, modified_iso, patch_file):
     print("Creating patch...")
-    result = subprocess.run([
-        "xdelta", "-B", "1363148800", "-e", "-f", "-s",
-        str(Path(original_iso).resolve()),
-        str(Path(modified_iso).resolve()),
-        str(Path(patch_file).resolve()),
-    ], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [
+            "xdelta",
+            "-B",
+            "1363148800",
+            "-e",
+            "-f",
+            "-s",
+            str(Path(original_iso).resolve()),
+            str(Path(modified_iso).resolve()),
+            str(Path(patch_file).resolve()),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
     if result.returncode != 0:
         print("Error creating patch:", result.stderr)

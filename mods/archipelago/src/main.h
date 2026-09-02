@@ -85,6 +85,10 @@ typedef enum APGoalKind
     GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
 } APGoalKind;
 
+// AP Patch locations get their own bitmask, sized so AP_PATCH_MAX packs into
+// whole u64 words.
+#define AP_PATCH_WORDS (AP_PATCH_MAX / 64)
+
 // Bits per checklist mode in APSlotOptions.checklist_reward_placed_types. RewardType
 // tops out at REWARD_PAUSE_POWERUPS (8), so all three modes pack into 27 bits.
 #define CHECKLIST_REWARD_MODE_BITS 9
@@ -98,7 +102,7 @@ typedef struct APSlotOptions
     u32 reveal_checklists[CHECKLIST_MODE_NUM]; // Per checklist-mode row: 1 = every square starts revealed
 
     u32 goal[CHECKLIST_MODE_NUM];             // APGoalKind per checklist-mode row
-    u32 checklist_amount[CHECKLIST_MODE_NUM]; // 1-120 - threshold for GOAL_N_CHECKLIST per row
+    u32 checklist_amount[CHECKLIST_MODE_NUM]; // 1-120 squares for GOAL_N_CHECKLIST
 
     u32 city_trial_patch_cap_min;          // 1-127 - per-stat cap the player starts at
     u32 city_trial_patch_cap_max;          // 1-127 - per-stat cap ceiling; min == max -> flat cap
@@ -134,6 +138,11 @@ typedef struct APSlotOptions
     // category's gate is off, because this seed's goal is the thing they gate;
     // an ungated pre-fill has to leave exactly these bits locked.
     u32 goal_forced_gates;
+
+    // 0-AP_PATCH_MAX AP Patch locations in the seed; 0 = feature off. No goal reads
+    // it. APSlotOptions is 8-byte aligned, so the 4 bytes of tail padding past this
+    // field keep the block 200 bytes wide and every APData offset below it fixed.
+    u32 ap_patches;
 } APSlotOptions;
 
 // goal_forced_gates bits.
@@ -181,6 +190,7 @@ typedef struct APSave
     u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX]; // (target_mode << 8) | clear_kind, 0xFFFF = remote
     u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received
     u64 sent_checks[CHECKLIST_MODE_NUM][2];             // Authoritative completed-checkbox bitmask per row
+    u64 ap_patch_collected[AP_PATCH_WORDS];             // Bit N = AP Patch N collected
     u8 goal_complete;                                   // Sticky once set
     u8 goal_announced[CHECKLIST_MODE_NUM];              // Sticky per row; fires that row's "goal complete" textbox once
     u8 max_stats_ct_achieved;                           // Sticky once a human hit the cap on all 9 stats in a CT round
@@ -280,6 +290,12 @@ typedef struct APData
     u32 text_pending;
     u32 text_menu_mask; // Game -> client. Bit (1 << APTextKind) set = that kind is shown.
     APTextMessage text_msg;
+
+    // AP Patch locations, bit w*64+i of word w. Same single-writer split as
+    // sent_checks / client_backfill: the game owns the first, the client the
+    // second, and the game ORs the second in and clears it each frame.
+    u64 ap_patch_checks[AP_PATCH_WORDS];
+    u64 ap_patch_backfill[AP_PATCH_WORDS];
 } APData;
 
 extern APData *ap_data;
@@ -317,6 +333,7 @@ void OnSaveInit();
 void OnSaveLoaded();
 void OnMainMenuLoad();
 void OnPlayerSelectLoad();
+void On3DLoadStart();
 void On3DLoadEnd();
 void On3DPause(int pause_ply);
 void On3DUnpause(int pause_ply);

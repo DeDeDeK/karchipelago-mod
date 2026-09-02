@@ -17,8 +17,6 @@ does not classify; they run after every HSDLib rule so they can never
 shadow one.
 """
 
-from typing import Optional
-
 # (kind, pattern, class-name). kind: 'eq' exact, 'pre' prefix, 'suf'
 # suffix, 'pre_suf' (prefix, suffix) pair, 'pre_not' (prefix, excluded
 # substring).
@@ -119,7 +117,11 @@ _RULES = [
     ("suf", "hud_colors", "HSDNullPointerArrayAccessor<KAR_HudColor>"),
     ("suf", "_dynamics", "SBM_PhysicsGroup"),
     ("pre", "dbEffectData", "KAR_dbEffectData"),
-    ("pre", "smSoundTestFGMGroupTable", "HSDArrayAccessor<KAR_smSoundTestFGMGroupTable>"),
+    (
+        "pre",
+        "smSoundTestFGMGroupTable",
+        "HSDArrayAccessor<KAR_smSoundTestFGMGroupTable>",
+    ),
 ]
 
 # KAR symbol families HSDLib leaves unclassified. Effect banks export four
@@ -151,7 +153,7 @@ def _match(name: str, kind: str, pattern) -> bool:
     return name.startswith(pattern[0]) and name.endswith(pattern[1])
 
 
-def classify_symbol(name: str) -> Optional[str]:
+def classify_symbol(name: str) -> str | None:
     """Return the HSD root accessor class name for `name`, or None.
 
     None means "unclassified" - either an unknown public symbol or one

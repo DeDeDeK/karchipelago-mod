@@ -87,8 +87,8 @@ spawn weights (`weight_box[3]`, `weight_event[6]`). `magic` is `'CITM'`
 (`0x4349544D`); `version` gates forward compatibility - v2 added `model_flag`
 (the model's itData render flag: `0x02000000` for flat panels,
 `0x03/0x05/0x0b000000` for the skinned legendary pieces), v3 `scale`, v4 `flags`,
-v5 `joint_anim`. Older descriptors stay supported; the loader rejects only
-versions newer than it knows.
+v5 `joint_anim`, v6 `mat_anim`. Older descriptors stay supported; the loader
+rejects only versions newer than it knows.
 
 One flag is defined. `CUSTOM_ITEM_FLAG_NO_MAT_ANIM` says the supplied `model` is
 not the base kind's, so the base kind's material animation must not be bound to
@@ -99,6 +99,14 @@ animates diffuse R/G/B over a 240-frame loop, which cycles a solid-colored
 replacement model through colors that are not its own. Set the flag whenever the
 model comes from somewhere other than `base_kind`; leave it clear when the model
 was carved from the base kind itself.
+
+`mat_anim` is the other answer to the same problem: a `MatAnimJointDesc*` bound
+in place of the base kind's, in every anim slot. Where the flag drops the
+animation, this replaces it, so a carve that rewrote the textures the base kind's
+animation would have swapped can carry its own copy of that animation with the
+image table repointed at the rewritten textures - which is how the AP Box keeps
+the blue box's crack sequence on six recolored faces. The flag wins if both are
+set. Leave it NULL to inherit.
 
 `joint_anim` is the same argument for the other half of the animation record: an
 `AnimJointDesc*` bound in place of the base kind's, in every anim slot. A joint
@@ -150,10 +158,10 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    `{ JOBJ *j; int flag; ... }` with only `j` and `flag` written - an 8-byte pair
    would let `+0x8` read into the next array element and trip the assert. `flag`
    carries the descriptor's `model_flag` (`0x02000000` flat for v1 descriptors). A
-   kind that sets `NO_MAT_ANIM` or supplies a `joint_anim` also gets its own
-   `anim_data`: the base kind's slots copied with `mat_anim` nulled and/or
-   `joint_anim` repointed, which is what `CityItem_StateChange` (`0x8024f488`)
-   hands to `CityItem_BindStateAnim` (`0x80251894`). Two slots are copied - the
+   kind that sets `NO_MAT_ANIM` or supplies a `mat_anim` / `joint_anim` also gets
+   its own `anim_data`: the base kind's slots copied with `mat_anim` nulled or
+   repointed and/or `joint_anim` repointed, which is what `CityItem_StateChange`
+   (`0x8024f488`) hands to `CityItem_BindStateAnim` (`0x80251894`). Two slots are copied - the
    widest anim array any vanilla kind has, since a state selects its slot by index
    and nothing records how many exist.
 2. **Lift the ceiling** - `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
@@ -224,20 +232,32 @@ saturating); `--ev-*` (`dyna`/`tac`/`meteor`/`destructible`/`chamber`/`ufo`) set
 the event-source drop weights. `--texture PNG` re-encodes a custom texture
 (RGB5A3) into one ImageDesc; on a multi-texture model add `--texture-index N` to
 choose which slot, and `--texture-fit cover|contain` to center-crop or letterbox a
-mismatched aspect instead of stretching it.
+mismatched aspect instead of stretching it. `--no-effect` appends a zero-entry
+`PatchEffectInfo` and points the descriptor at it, so the carve keeps the base kind's
+look, state script and pickup SFX while granting nothing; `--effect-group` picks the
+BAD/GOOD/FAKE group that record carries (GOOD by default).
 
 A model `Item.dat` does not hold has to be generated instead of carved, and the
-descriptor is the same either way - `scripts/hsd/make_ap_star_pieces.py` builds the
+descriptor is the same either way - `scripts/authoring/make_ap_star_pieces.py` builds the
 Archipelago Star's six spheres that way, emitting the `CustomItemDesc`, a generated
 JOBJ tree and its own zero-entry `PatchEffectInfo` into one archive.
+
+A third shape is a carve the script then rewrites: `scripts/authoring/make_ap_box.py` carves
+`ITKIND_BOXBLUE` and its material animation, grows the model's TEX0 index buffer from 4
+entries to 24, re-indexes the display list onto a generated texture atlas, repoints the
+animation's four-entry image table at one atlas per crack stage, and emits the descriptor
+itself, so the AP Box keeps the vanilla box's material, border and crack sequence while
+showing six different faces.
 
 `mods/*/assets/` is copied to the disc root by the ordinary asset step, so any mod's
 `assets/items/*.dat` lands at `items/` on disc with no packaging change, and this mod
 discovers it there without knowing the mod exists. An item whose pickup does something
 therefore ships with the mod that implements it - `mods/hypernova/assets/items/MiracleFruit.dat`
-is the Miracle Fruit, and `mods/ap_star/assets/items/ApSphere*.dat` the Archipelago Star's
-six spheres. An item that needs no code at all is not a mod: dropping its `.dat` into any
-built mod's `assets/items/` registers it, and it spawns and behaves as its `base_kind`.
+is the Miracle Fruit, `mods/ap_star/assets/items/ApSphere*.dat` the Archipelago Star's
+six spheres, and `mods/archipelago/assets/items/ApPatch.dat` / `ApBox.dat` the Archipelago
+location patches and the box that drops them. An item that needs no code at all is not a mod:
+dropping its `.dat` into any built mod's `assets/items/` registers it, and it spawns and
+behaves as its `base_kind`.
 This mod ships no items of its own and has no `assets/`.
 
 ## API

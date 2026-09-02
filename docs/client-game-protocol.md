@@ -33,14 +33,14 @@ All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64
 |--------|------|-------|--------|--------|-------------|
 | 0x028  | u32  | `game_ready` | Game | Client | 1 when mod is fully initialized |
 | 0x02C  | u32  | `options_valid` | Both | Both | Client sets 1 once every option is written; the game clears it as the transfer ack |
-| 0x030  | APSlotOptions | `options` | Client | Game | Slot options block, 0x030-0x0EF |
+| 0x030  | APSlotOptions | `options` | Client | Game | Slot options block, 0x030-0x0F7 |
 
 ### Location Data Fields
 
 | Offset | Type        | Field                 | Writer | Reader            | Description |
 |--------|-------------|-----------------------|--------|-------------------|-------------|
-| 0x0F0  | u32         | `location_data_valid` | Client | Game (clear to 0) | 1 after client has written `locations` |
-| 0x0F4  | u16[3][46]  | `locations`           | Client | Game              | `locations[source_mode][source_reward_index]` = destination cell for this slot's checklist reward |
+| 0x0F8  | u32         | `location_data_valid` | Client | Game (clear to 0) | 1 after client has written `locations` |
+| 0x0FC  | u16[3][46]  | `locations`           | Client | Game              | `locations[source_mode][source_reward_index]` = destination cell for this slot's checklist reward |
 
 `locations` is indexed by **source reward** - the entry at `[m][i]` says where in the checklist grid this slot's reward `i` of mode `m` lives. Only the 3 real game modes are indexed (the AP checklist tab has no native rewards). Rows are padded to 46; meaningful entry counts are AR=46, TR=33, CT=44, and unused trailing entries should be `0xFFFF`.
 
@@ -57,11 +57,22 @@ All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64
 
 | Offset | Type | Field | Writer | Reader | Description |
 |--------|------|-------|--------|--------|-------------|
-| 0x208 | u64[4][2] | `sent_checks`     | Game   | Client | Bitmask of checkboxes the player has completed in gameplay or via filler. Bit `(k % 64)` of word `(k / 64)` for clear_kind `k`. Mirror of `APSave.sent_checks`. |
-| 0x248 | u64[4][2] | `client_backfill` | Client | Game (clears) | Additive backfill: client writes bits for checks the AP server already knows about (fresh save, slot takeover, `!collect`). |
-| 0x288 | u8        | `goal_complete`   | Game   | Client | Sticky once set. 1 when the active goal condition is satisfied. Persisted to `APSave.goal_complete`. |
+| 0x210 | u64[4][2] | `sent_checks`     | Game   | Client | Bitmask of checkboxes the player has completed in gameplay or via filler. Bit `(k % 64)` of word `(k / 64)` for clear_kind `k`. Mirror of `APSave.sent_checks`. |
+| 0x250 | u64[4][2] | `client_backfill` | Client | Game (clears) | Additive backfill: client writes bits for checks the AP server already knows about (fresh save, slot takeover, `!collect`). |
+| 0x290 | u8        | `goal_complete`   | Game   | Client | Sticky once set. 1 when the active goal condition is satisfied. Persisted to `APSave.goal_complete`. |
 
 Both bitmasks are `CHECKLIST_MODE_NUM` (4) rows: rows 0-2 are Air Ride / Top Ride / City Trial, row 3 is the synthetic AP checklist tab.
+
+### AP Patch Fields
+
+| Offset | Type | Field | Writer | Reader | Description |
+|--------|------|-------|--------|--------|-------------|
+| 0x3A8 | u64[8] | `ap_patch_checks`   | Game   | Client        | Bit `i` of word `w` = AP Patch `w * 64 + i` collected, location code `413 + w * 64 + i`. Mirror of `APSave.ap_patch_collected`. |
+| 0x3E8 | u64[8] | `ap_patch_backfill` | Client | Game (clears) | Additive backfill, the same protocol as `client_backfill`. |
+
+`APData` ends at 0x428. AP Patches are one flat block rather than per-mode rows: they are City Trial content only, and they carry no checklist cell, so they never decode through the mode / clear_kind codec. The client reads-and-diffs `ap_patch_checks` every poll and reports new bits as ordinary location checks, which gives them the ordinary check line with no text work on either side.
+
+Like the other u64 fields these are not written atomically, so a torn read is possible; the client only ever ORs newly-seen bits, so a torn read costs one poll.
 
 ### Menu Toggle State
 
@@ -69,10 +80,10 @@ Live mirror of the Settings menu toggles. Game-owned: client reads, never writes
 
 | Offset | Type   | Field |
 |--------|--------|-------|
-| 0x28C | u32     | `deathlink_menu_enabled` |
-| 0x290 | u32     | `energylink_menu_enabled` |
-| 0x294 | u32     | `traplink_menu_enabled` |
-| 0x29C | u32     | `text_menu_mask`, bit `1 << APTextKind` |
+| 0x294 | u32     | `deathlink_menu_enabled` |
+| 0x298 | u32     | `energylink_menu_enabled` |
+| 0x29C | u32     | `traplink_menu_enabled` |
+| 0x2A4 | u32     | `text_menu_mask`, bit `1 << APTextKind` |
 
 The link toggles are the authoritative current state, not `APSlotOptions.death_link_enabled` / `energy_link_enabled` / `trap_link_enabled` - those only set the *initial* values and are never updated by later toggles. The player can flip a toggle mid-session, so the client must diff all three against last-seen every poll and forward the change to the AP server (`ConnectUpdate` `tags` for DeathLink, the equivalent for TrapLink/EnergyLink), and read all three on connect.
 
@@ -86,9 +97,9 @@ Client-authored text-box messages. The client composes the whole line - it owns 
 
 | Offset | Type          | Field | Writer | Reader |
 |--------|---------------|-------|--------|--------|
-| 0x298  | u32           | `text_pending`  | Both   | Both |
-| 0x29C  | u32           | `text_menu_mask`| Game   | Client |
-| 0x2A0  | APTextMessage | `text_msg`      | Client | Game |
+| 0x2A0  | u32           | `text_pending`  | Both   | Both |
+| 0x2A4  | u32           | `text_menu_mask`| Game   | Client |
+| 0x2A8  | APTextMessage | `text_msg`      | Client | Game |
 
 There is no attachment flag or heartbeat. The game never asks whether a client is there: it renders whatever reaches the mailbox, and the lines it composes itself turn on their own Messages -> Local toggles, so nothing it prints depends on the answer. The client posts its own connect and disconnect lines as ordinary messages, which is the only place the distinction shows up in game.
 
@@ -167,6 +178,9 @@ All fields are `u32` unless noted. Per-mode arrays are `CHECKLIST_MODE_NUM` (4) 
 | 0x0E4 | `base_ability_gating_enabled`     | 0 or 1 | Inhale / quick spin / charge |
 | 0x0E8 | `checklist_reward_placed_types`   | bitmask | Checklist rewards placed as AP items, per (mode, type), see below |
 | 0x0EC | `goal_forced_gates`               | bitmask | See below |
+| 0x0F0 | `ap_patches`                      | 0-512  | AP Patch locations in this seed. 0 = the category is off and neither AP item is registered. The mod accepts and clamps to 512; the AP world's option tops out at 200, the width of its location block |
+
+`APSlotOptions` holds `u64`s, so it is 8-byte aligned and 4 bytes of tail padding follow `ap_patches`. The block ends at 0x0F8 either way, which is what keeps every offset below it fixed.
 
 Every `*_gating_enabled` field uses the same convention: `1` = gated (default), the AP world ships unlock items for that category; `0` = ungated, the mod pre-fills that category's unlock mask at connect (`APOptions_ApplyUngatedCategories` in `main.c`) and the AP world must not generate unlock items for it. Twelve of the thirteen `APUnlockCategory` masks have their own toggle; `AP_UNLOCK_AP_STAR_PIECE` has none and rides `item_gating_enabled`, since the AP world classifies the six spheres as City Trial item unlocks.
 
@@ -174,7 +188,7 @@ Every `*_gating_enabled` field uses the same convention: `1` = gated (default), 
 
 Only the seven reward types with no gate mask of their own can appear - `REWARD_FILLER` (0), `BONUS_MOVIE` (1), `EXTRA_RULE` (2), `SOUND_TEST` (4), `MUSIC` (5), `ENDING` (6), `PAUSE_POWERUPS` (8). The AP world builds the mask from the rewards it actually minted, so a mode the seed disabled ships no bits at all and the mod unlocks that mode's rewards outright - without that, its rewards would be neither placed nor granted. The 6 Dragoon/Hydra part markers are progression and are unaffected by the mask.
 
-`APSlotOptions` is 8-byte aligned, so `goal_forced_gates` sits in what was the block's tail padding and the block still ends at 0x0F0.
+`APSlotOptions` is 8-byte aligned, so the block ends at 0x0F8 with `location_data_valid` immediately after.
 
 ### Goal-Forced Gates
 
@@ -229,10 +243,11 @@ The client reads slot options from the AP server (as defined in `KAROptions.py`)
 | `colors_gated` | `color_gating_enabled` | |
 | `city_trial_stadiums_gated` | `stadium_gating_enabled` | |
 | `base_abilities_gated` | `base_ability_gating_enabled` | |
+| `ap_patches` | `ap_patches` | AP Patch locations only - no goal reads it |
 | `checklist_rewards` | `checklist_reward_placed_types` | The AP world ships the rewards it actually minted, already folded into a per-(mode, `RewardType`) bitmask |
 | `legendary_pieces_goal_gated` / `vs_king_dedede_goal_gated` / `ap_star_pieces_goal_gated` | `goal_forced_gates` bits 0 / 1 / 2 | Each is 1 only when its category ships ungated *and* the seed's goal is gated on those unlocks |
 
-Options **not written to the mod**, used at AP generation time or carried only in `slot_data` for the client's own logic: `trap_chance` (the client's trap-roll logic), `spawn_rate_max` (item-count generation), `city_trial_permanent_patches` (whether permanent-patch items enter the pool - the mod has no corresponding field and always treats permanent patches as an active item category), and the per-mode `*_checkbox_fillers` fields.
+Options **not written to the mod**, used at AP generation time or carried only in `slot_data` for the client's own logic: `trap_chance` (the client's trap-roll logic), `spawn_rate_max` (item-count generation), `ap_patch_placement` (which AP Patch locations may hold progression), `city_trial_permanent_patches` (whether permanent-patch items enter the pool - the mod has no corresponding field and always treats permanent patches as an active item category), and the per-mode `*_checkbox_fillers` fields.
 
 ## Item Delivery
 

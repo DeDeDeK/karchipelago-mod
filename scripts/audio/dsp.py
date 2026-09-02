@@ -5,11 +5,9 @@ decoder is exact - the console runs this same recurrence in the DSP - so an
 encode/decode round trip is the only quality knob here.
 """
 
-import struct
-
 
 def clamp16(x):
-    return -32768 if x < -32768 else (32767 if x > 32767 else x)
+    return -32768 if x < -32768 else (min(x, 32767))
 
 
 def nibbles_to_bytes(nib):
@@ -78,7 +76,7 @@ def _encode_frame(pcm, coef, hist1, hist2):
             for s in pcm:
                 resid = (s << 11) - c1 * h1 - c2 * h2
                 q = int(round(resid / (step * 2048)))
-                q = -8 if q < -8 else (7 if q > 7 else q)
+                q = -8 if q < -8 else (min(q, 7))
                 val = clamp16(((q * step << 11) + c1 * h1 + c2 * h2 + 1024) >> 11)
                 err += (val - s) ** 2
                 nibs.append(q & 0xF)
@@ -97,7 +95,7 @@ def encode(pcm, coef, yn1=0, yn2=0):
     hist1, hist2 = yn1, yn2
     frames = []
     for i in range(0, len(pcm), 14):
-        err, blk, hist1, hist2 = _encode_frame(pcm[i:i + 14], coef, hist1, hist2)
+        err, blk, hist1, hist2 = _encode_frame(pcm[i : i + 14], coef, hist1, hist2)
         out += blk
         frames.append(blk[0])
     return bytes(out), frames
@@ -135,7 +133,7 @@ def make_book(pcm, iterations=16):
     frames = []
     h1 = h2 = 0
     for i in range(0, len(pcm), 14):
-        frame = pcm[i:i + 14]
+        frame = pcm[i : i + 14]
         eq = _normal_eq(frame, h1, h2)
         sol = _solve(*eq)
         if sol and abs(sol[0]) < 4 and abs(sol[1]) < 4:
@@ -150,7 +148,10 @@ def make_book(pcm, iterations=16):
     for _ in range(iterations):
         pooled = [[0.0] * 5 for _ in range(8)]
         for sol, eq in frames:
-            k = min(range(8), key=lambda j: (sol[0] - cent[j][0]) ** 2 + (sol[1] - cent[j][1]) ** 2)
+            k = min(
+                range(8),
+                key=lambda j: (sol[0] - cent[j][0]) ** 2 + (sol[1] - cent[j][1]) ** 2,
+            )
             for t in range(5):
                 pooled[k][t] += eq[t]
         for j in range(8):
@@ -169,6 +170,7 @@ def snr(ref, test):
     sig = sum(float(s) * s for s in ref[:n])
     noise = sum((float(a) - b) ** 2 for a, b in zip(ref[:n], test[:n]))
     if noise == 0:
-        return float('inf')
+        return float("inf")
     import math
+
     return 10 * math.log10(sig / noise) if sig else 0.0

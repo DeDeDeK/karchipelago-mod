@@ -10,6 +10,7 @@
 #include "check_detection.h"
 #include "energylink.h"
 #include "gate_ap_star.h"
+#include "ap_patches.h"
 #include "textbox_api.h"
 
 u32 Unlock_GetMask(APUnlockCategory cat)
@@ -154,6 +155,26 @@ static int ApiDebugSpawnApStarPiece(int piece, int ply)
     return GateApStar_SpawnPiece(piece, ply);
 }
 
+static int ApiDebugSpawnApBox(int ply)
+{
+    return ApPatches_DebugSpawnBox(ply);
+}
+
+static int ApiDebugCollectApPatch(void)
+{
+    return ApPatches_DebugClaim();
+}
+
+static int ApiGetApPatchCount(void)
+{
+    return ApPatches_GetCount();
+}
+
+static void ApiDebugSetApPatchCount(int count)
+{
+    ApPatches_DebugSetCount(count);
+}
+
 static const ArchipelagoAPI api = {
     .GetUnlockMask                = Unlock_GetMask,
     .SetUnlockMask                = Unlock_SetMask,
@@ -176,6 +197,10 @@ static const ArchipelagoAPI api = {
     .DebugTriggerTraplinkReceive  = ApiDebugTriggerTraplinkReceive,
     .DebugRevealChecklist         = ApiDebugRevealChecklist,
     .DebugSpawnApStarPiece        = ApiDebugSpawnApStarPiece,
+    .DebugSpawnApBox              = ApiDebugSpawnApBox,
+    .DebugCollectApPatch          = ApiDebugCollectApPatch,
+    .GetApPatchCount              = ApiGetApPatchCount,
+    .DebugSetApPatchCount         = ApiDebugSetApPatchCount,
 };
 
 void ArchipelagoAPI_Export(void)

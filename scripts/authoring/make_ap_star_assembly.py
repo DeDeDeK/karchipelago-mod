@@ -25,7 +25,7 @@ block rides along byte for byte, with the path joint's scale tightened for a
 machine whose footprint is smaller than Hydra's.
 
 Usage:
-    uv run python scripts/hsd/make_ap_star_assembly.py
+    uv run python scripts/authoring/make_ap_star_assembly.py
 """
 
 import argparse
@@ -37,7 +37,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hsd import fobj
-from hsd.archive import Archive, build_archive, f32, u16, u32
+from hsd.archive import Archive, build_archive, f32, u16
+from hsd.builder import Builder, dobjs_of, walk_joints
 from hsd.walker import Walker, carve_ranges
 
 MACHINE_DAT = "mods/ap_star/assets/machines/VcStarAp.dat"
@@ -93,16 +94,18 @@ POD_SWIRL = math.radians(85.0)
 
 # Fraction of the flight covered at each fraction of the flight time. Mirrors
 # the vanilla shape: most of the distance early, a hover, then the last snap.
-POD_PROGRESS = [(0.00, 0.00), (0.22, 0.55), (0.45, 0.80),
-                (0.70, 0.90), (0.90, 0.955), (1.00, 1.00)]
+POD_PROGRESS = [
+    (0.00, 0.00),
+    (0.22, 0.55),
+    (0.45, 0.80),
+    (0.70, 0.90),
+    (0.90, 0.955),
+    (1.00, 1.00),
+]
 
 # Radial overshoot after landing, as (frames past arrival, offset in units).
 POD_BOUNCE = [(0, 0.00), (2, -0.30), (5, 0.12), (8, -0.04), (11, 0.00)]
 POD_SCALE_POP = [(-1, 1.00), (1, 1.20), (4, 0.90), (7, 1.00)]
-
-TRACK = {"ROTX": 1, "ROTY": 2, "ROTZ": 3, "PATH": 4, "TRAX": 5, "TRAY": 6,
-         "TRAZ": 7, "SCAX": 8, "SCAY": 9, "SCAZ": 10, "NODE": 11,
-         "BRANCH": 12, "PTCL": 40}
 
 
 def lerp(a, b, t):
@@ -140,60 +143,22 @@ def mat_apply_t(m, v):
     return tuple(sum(m[k][i] * v[k] for k in range(3)) for i in range(3))
 
 
-class Out:
-    """An appendable data section plus its reloc source set."""
-
-    def __init__(self, data, relocs):
-        self.d = bytearray(data)
-        self.relocs = set(relocs)
-
-    def align(self, n=4):
-        while len(self.d) % n:
-            self.d.append(0)
-
-    def put(self, blob, align=4):
-        self.align(align)
-        off = len(self.d)
-        self.d.extend(blob)
-        return off
-
-    def alloc(self, size, align=4):
-        return self.put(b"\0" * size, align)
-
-    def w32(self, off, v):
-        struct.pack_into(">I", self.d, off, v)
-
-    def wf32(self, off, v):
-        struct.pack_into(">f", self.d, off, v)
-
-    def rd32(self, off):
-        return u32(self.d, off)
-
-    def ptr(self, off, target):
-        self.w32(off, target)
-        self.relocs.add(off)
-
-    def clr(self, off):
-        self.w32(off, 0)
-        self.relocs.discard(off)
-
-    def copy_struct(self, src, size):
-        """Copy `size` bytes from `src` in this buffer, carrying its relocs."""
-        off = self.put(bytes(self.d[src:src + size]))
-        for i in range(0, size, 4):
-            if src + i in self.relocs:
-                self.relocs.add(off + i)
-        return off
-
-
 class Track:
     """One FigaTree track: which node it drives and its packed keys."""
 
-    def __init__(self, node, kind, keys=None, op=fobj.OP_LIN,
-                 raw=None, value_flag=fobj.FMT_FLOAT, tan_flag=fobj.FMT_FLOAT,
-                 start_frame=0):
+    def __init__(
+        self,
+        node,
+        kind,
+        keys=None,
+        op=fobj.OP_LIN,
+        raw=None,
+        value_flag=fobj.FMT_FLOAT,
+        tan_flag=fobj.FMT_FLOAT,
+        start_frame=0,
+    ):
         self.node = node
-        self.kind = TRACK[kind] if isinstance(kind, str) else kind
+        self.kind = fobj.JOINT_TRACK[kind] if isinstance(kind, str) else kind
         self.value_flag = value_flag
         self.tan_flag = tan_flag
         self.start_frame = start_frame
@@ -213,23 +178,32 @@ def emit_figatree(out, node_count, tracks, end_frame=END_FRAME):
         by_node[t.node].append(t)
     ordered = [t for group in by_node for t in group]
 
-    key_offs = [out.put(t.buf) for t in ordered]
+    key_offs = [out.blob(t.buf) for t in ordered]
 
     recs = out.alloc(0x0C * len(ordered))
     for i, t in enumerate(ordered):
         rec = recs + 0x0C * i
-        struct.pack_into(">HhBBBB", out.d, rec, len(t.buf), t.start_frame,
-                         t.kind, t.value_flag, t.tan_flag, 0)
-        out.ptr(rec + 8, key_offs[i])
+        struct.pack_into(
+            ">HhBBBB",
+            out.data,
+            rec,
+            len(t.buf),
+            t.start_frame,
+            t.kind,
+            t.value_flag,
+            t.tan_flag,
+            0,
+        )
+        out.set_ptr(rec + 8, key_offs[i])
 
-    table = out.put(bytes(len(g) for g in by_node) + b"\xff")
+    table = out.blob(bytes(len(g) for g in by_node) + b"\xff")
 
     tree = out.alloc(0x14)
-    out.clr(tree + 0x00)              # name
-    out.w32(tree + 0x04, 0)           # type
-    out.wf32(tree + 0x08, end_frame)
-    out.ptr(tree + 0x0C, table)
-    out.ptr(tree + 0x10, recs)
+    out.set_ptr(tree + 0x00, None)  # name
+    out.set_u32(tree + 0x04, 0)  # type
+    out.set_f32(tree + 0x08, end_frame)
+    out.set_ptr(tree + 0x0C, table)
+    out.set_ptr(tree + 0x10, recs)
     return tree
 
 
@@ -243,7 +217,7 @@ class Choreography:
 
     def __init__(self, arc, root):
         d = arc.data
-        joints = joint_preorder(arc, root)
+        joints = [off for off, _ in walk_joints(arc, root)]
         self.joints = joints
 
         def tr(j):
@@ -251,7 +225,8 @@ class Choreography:
 
         self.ring_rot_y = f32(d, joints[J_RING] + 0x18)
         self.ring_origin = tuple(
-            sum(tr(j)[k] for j in range(J_RING + 1)) for k in range(3))
+            sum(tr(j)[k] for j in range(J_RING + 1)) for k in range(3)
+        )
         self.ring_mtx = rot_zyx(0.0, self.ring_rot_y, 0.0)
         self.rest = [tr(J_POD0 + i) for i in range(NUM_PODS)]
         self.pod_scale = f32(d, joints[J_POD0] + 0x20)
@@ -292,25 +267,16 @@ class Choreography:
 
     def machine_path(self, i):
         """The same path lifted out of the ring pivot into model space."""
-        return [(f, tuple(self.ring_origin[k] + mat_apply(self.ring_mtx, p)[k]
-                          for k in range(3))) for f, p in self.path(i)]
-
-
-def joint_preorder(arc, root):
-    """Joint descriptor offsets in HSD_JObjLoadJoint order."""
-    order = []
-
-    def walk(off):
-        order.append(off)
-        child = arc.deref(off + 0x08)
-        if child:
-            walk(child)
-        nxt = arc.deref(off + 0x0C)
-        if nxt:
-            walk(nxt)
-
-    walk(root)
-    return order
+        return [
+            (
+                f,
+                tuple(
+                    self.ring_origin[k] + mat_apply(self.ring_mtx, p)[k]
+                    for k in range(3)
+                ),
+            )
+            for f, p in self.path(i)
+        ]
 
 
 def group_joints(arc, root, remap):
@@ -330,23 +296,15 @@ def matanim_group(arc, root, remap):
     return [remap[o] for o in (root, mesh, anchor, head)]
 
 
-def dobj_chain(arc, joint):
-    out = []
-    o = arc.deref(joint + 0x10)
-    while o:
-        out.append(o)
-        o = arc.deref(o + 0x04)
-    return out
-
-
 def build_parts(root_dir, verbose=True):
     arc = Archive(os.path.join(root_dir, MACHINE_DAT))
     model_data = arc.deref(arc.publics["vcDataStarAp"] + 0x04)
     root = arc.deref(model_data + 0x00)
-    joints = joint_preorder(arc, root)
+    joints = [off for off, _ in walk_joints(arc, root)]
     if len(joints) != NUM_JOINTS:
-        raise SystemExit(f"{MACHINE_DAT}: expected {NUM_JOINTS} joints, "
-                         f"found {len(joints)}")
+        raise SystemExit(
+            f"{MACHINE_DAT}: expected {NUM_JOINTS} joints, found {len(joints)}"
+        )
 
     chor = Choreography(arc, root)
 
@@ -357,7 +315,7 @@ def build_parts(root_dir, verbose=True):
     relocs = list(arc.relocs)
     dropped = set()
     for j, joint in enumerate(joints):
-        chain = dobj_chain(arc, joint)
+        chain = dobjs_of(arc, joint)
         if len(chain) < 2:
             continue
         keep = [chain[0], chain[-1]] if j >= J_POD0 and len(chain) > 3 else [chain[0]]
@@ -373,11 +331,14 @@ def build_parts(root_dir, verbose=True):
 
     prefix = bytearray(0x20)
     res = carve_ranges(arc, visited, prefix, base_relocs=(0x00, 0x04))
-    out = Out(res.data, res.relocs)
+    out = Builder(res)
 
     tracks = []
-    spin = [(0, chor.ring_rot_y), (RING_SPIN_START, chor.ring_rot_y),
-            (int(END_FRAME), chor.ring_rot_y + 2.0 * math.pi)]
+    spin = [
+        (0, chor.ring_rot_y),
+        (RING_SPIN_START, chor.ring_rot_y),
+        (int(END_FRAME), chor.ring_rot_y + 2.0 * math.pi),
+    ]
     tracks.append(Track(J_RING, "ROTY", spin))
     for i in range(NUM_PODS):
         path = chor.path(i)
@@ -390,18 +351,20 @@ def build_parts(root_dir, verbose=True):
             tracks.append(Track(J_POD0 + i, axis, pop))
 
     tree = emit_figatree(out, NUM_JOINTS, tracks)
-    out.ptr(0x00, res.remap[root])
-    out.ptr(0x04, tree)
-    out.clr(0x08)
+    out.set_ptr(0x00, res.remap[root])
+    out.set_ptr(0x04, tree)
+    out.set_ptr(0x08, None)
 
-    blob = build_archive(out.d, sorted(out.relocs),
-                         [("apStarParts", 0)], arc.version)
+    blob = build_archive(
+        out.data, sorted(out.relocs), [("apStarParts", 0)], arc.version
+    )
     path = os.path.join(root_dir, OUT_DIR, "ApStarParts.dat")
     with open(path, "wb") as f:
         f.write(blob)
     if verbose:
-        print(f"{path}: {len(blob)} bytes, {len(out.relocs)} relocs, "
-              f"{len(tracks)} tracks")
+        print(
+            f"{path}: {len(blob)} bytes, {len(out.relocs)} relocs, {len(tracks)} tracks"
+        )
     return chor
 
 
@@ -423,7 +386,8 @@ def hydra_glow_tracks(arc):
             kind, vflag, tflag = d[t + 4], d[t + 5], d[t + 6]
             keys = arc.deref(t + 8)
             out.setdefault(node, []).append(
-                (kind, vflag, tflag, start, bytes(d[keys:keys + length])))
+                (kind, vflag, tflag, start, bytes(d[keys : keys + length]))
+            )
             t += 0x0C
     return out
 
@@ -451,88 +415,99 @@ def build_glow(root_dir, chor, verbose=True):
     visited[HYDRA_CAM_LO] = ("opaque", HYDRA_CAM_HI - HYDRA_CAM_LO)
 
     prefix = bytearray(0x20)
-    res = carve_ranges(arc, visited, prefix,
-                       base_relocs=(0x00, 0x04, 0x08, 0x10))
-    out = Out(res.data, res.relocs)
+    res = carve_ranges(arc, visited, prefix, base_relocs=(0x00, 0x04, 0x08, 0x10))
+    out = Builder(res)
     rm = res.remap
 
     glow_root = rm[HYDRA_GLOW_ROOT]
     ma_root = rm[HYDRA_GLOW_MATANIM]
     # A head bone's vertices sit this far down its own Y from the bone itself,
     # per its inverse bind matrix, so the ribbon tip trails the bone.
-    bind_lift = -f32(arc.data, arc.deref(
-        arc.deref(arc.deref(HYDRA_G1_MESH + 0x08) + 0x0C) + 0x38) + 0x1C)
+    bind_lift = -f32(
+        arc.data,
+        arc.deref(arc.deref(arc.deref(HYDRA_G1_MESH + 0x08) + 0x0C) + 0x38) + 0x1C,
+    )
 
     # Six streak groups: the carved one, then five copies. A group is four
     # joints (root, envelope mesh, anchor bone, head bone); the mesh needs its
     # own DObj, POBJ and envelope array so its two bones resolve to its own
     # copies, and shares the material, vertex array and display list.
     g0 = group_joints(arc, HYDRA_G1_ROOT, rm)
-    g0_dobj = out.rd32(g0[1] + 0x10)
-    g0_pobj = out.rd32(g0_dobj + 0x0C)
-    g0_envs = out.rd32(g0_pobj + 0x14)
+    g0_dobj = out.get_u32(g0[1] + 0x10)
+    g0_pobj = out.get_u32(g0_dobj + 0x0C)
+    g0_envs = out.get_u32(g0_pobj + 0x14)
 
     groups = [g0]
     for _ in range(NUM_PODS - 1):
-        joints = [out.copy_struct(g0[k], 0x40) for k in range(4)]
-        dobj = out.copy_struct(g0_dobj, 0x10)
-        pobj = out.copy_struct(g0_pobj, 0x18)
-        env_a = out.copy_struct(out.rd32(g0_envs + 0x00), 0x10)
-        env_b = out.copy_struct(out.rd32(g0_envs + 0x04), 0x10)
+        joints = [out.copy(g0[k], 0x40) for k in range(4)]
+        dobj = out.copy(g0_dobj, 0x10)
+        pobj = out.copy(g0_pobj, 0x18)
+        env_a = out.copy(out.get_u32(g0_envs + 0x00), 0x10)
+        env_b = out.copy(out.get_u32(g0_envs + 0x04), 0x10)
         envs = out.alloc(0x0C)
-        out.ptr(envs + 0x00, env_a)
-        out.ptr(envs + 0x04, env_b)
-        out.clr(envs + 0x08)
-        out.ptr(env_a + 0x00, joints[2])
-        out.ptr(env_b + 0x00, joints[3])
-        out.ptr(pobj + 0x14, envs)
-        out.ptr(dobj + 0x0C, pobj)
-        out.ptr(joints[1] + 0x10, dobj)
-        out.ptr(joints[0] + 0x08, joints[1])
-        out.ptr(joints[1] + 0x08, joints[2])
-        out.ptr(joints[2] + 0x0C, joints[3])
-        out.clr(joints[2] + 0x08)
-        out.clr(joints[3] + 0x08)
-        out.clr(joints[3] + 0x0C)
+        out.set_ptr(envs + 0x00, env_a)
+        out.set_ptr(envs + 0x04, env_b)
+        out.set_ptr(envs + 0x08, None)
+        out.set_ptr(env_a + 0x00, joints[2])
+        out.set_ptr(env_b + 0x00, joints[3])
+        out.set_ptr(pobj + 0x14, envs)
+        out.set_ptr(dobj + 0x0C, pobj)
+        out.set_ptr(joints[1] + 0x10, dobj)
+        out.set_ptr(joints[0] + 0x08, joints[1])
+        out.set_ptr(joints[1] + 0x08, joints[2])
+        out.set_ptr(joints[2] + 0x0C, joints[3])
+        out.set_ptr(joints[2] + 0x08, None)
+        out.set_ptr(joints[3] + 0x08, None)
+        out.set_ptr(joints[3] + 0x0C, None)
         groups.append(joints)
 
     for a, b in zip(groups, groups[1:]):
-        out.ptr(a[0] + 0x0C, b[0])
-    out.ptr(groups[-1][0] + 0x0C, rm[HYDRA_FLASH_ROOT])
-    out.ptr(glow_root + 0x08, groups[0][0])
+        out.set_ptr(a[0] + 0x0C, b[0])
+    out.set_ptr(groups[-1][0] + 0x0C, rm[HYDRA_FLASH_ROOT])
+    out.set_ptr(glow_root + 0x08, groups[0][0])
 
     # The material-animation tree has to mirror the joint tree node for node.
     # Every streak shares one alpha curve, re-keyed so a streak stays up until
     # its own pod lands rather than Hydra's single 20-50 fade.
     ma_g0 = matanim_group(arc, HYDRA_MA_G1_ROOT, rm)
     streak_matanim = rm[HYDRA_MA_STREAK]
-    aobj = out.rd32(streak_matanim + 0x04)
-    fobjdesc = out.rd32(aobj + 0x08)
+    aobj = out.get_u32(streak_matanim + 0x04)
+    fobjdesc = out.get_u32(aobj + 0x08)
     alpha = fobj.encode(
-        [fobj.Key(frame=f, value=v, op=fobj.OP_LIN) for f, v in
-         ((0, 1.0), (STREAK_ON, 1.0), (60, 0.55), (max(ARRIVE), 0.35),
-          (max(ARRIVE) + 1, 0.0), (int(END_FRAME), 0.0))],
-        fobj.FMT_FLOAT, fobj.FMT_FLOAT)
-    alpha_off = out.put(alpha)
-    out.w32(fobjdesc + 0x04, len(alpha))
-    out.w32(fobjdesc + 0x0C, out.rd32(fobjdesc + 0x0C) & 0xFF000000)
-    out.ptr(fobjdesc + 0x10, alpha_off)
+        [
+            fobj.Key(frame=f, value=v, op=fobj.OP_LIN)
+            for f, v in (
+                (0, 1.0),
+                (STREAK_ON, 1.0),
+                (60, 0.55),
+                (max(ARRIVE), 0.35),
+                (max(ARRIVE) + 1, 0.0),
+                (int(END_FRAME), 0.0),
+            )
+        ],
+        fobj.FMT_FLOAT,
+        fobj.FMT_FLOAT,
+    )
+    alpha_off = out.blob(alpha)
+    out.set_u32(fobjdesc + 0x04, len(alpha))
+    out.set_u32(fobjdesc + 0x0C, out.get_u32(fobjdesc + 0x0C) & 0xFF000000)
+    out.set_ptr(fobjdesc + 0x10, alpha_off)
 
     ma_groups = [ma_g0]
     for _ in range(NUM_PODS - 1):
-        nodes = [out.copy_struct(ma_g0[k], 0x0C) for k in range(4)]
-        out.ptr(nodes[0] + 0x00, nodes[1])
-        out.ptr(nodes[1] + 0x00, nodes[2])
-        out.ptr(nodes[2] + 0x04, nodes[3])
-        out.clr(nodes[2] + 0x00)
-        out.clr(nodes[3] + 0x00)
-        out.clr(nodes[3] + 0x04)
-        out.ptr(nodes[1] + 0x08, streak_matanim)
+        nodes = [out.copy(ma_g0[k], 0x0C) for k in range(4)]
+        out.set_ptr(nodes[0] + 0x00, nodes[1])
+        out.set_ptr(nodes[1] + 0x00, nodes[2])
+        out.set_ptr(nodes[2] + 0x04, nodes[3])
+        out.set_ptr(nodes[2] + 0x00, None)
+        out.set_ptr(nodes[3] + 0x00, None)
+        out.set_ptr(nodes[3] + 0x04, None)
+        out.set_ptr(nodes[1] + 0x08, streak_matanim)
         ma_groups.append(nodes)
     for a, b in zip(ma_groups, ma_groups[1:]):
-        out.ptr(a[0] + 0x04, b[0])
-    out.ptr(ma_groups[-1][0] + 0x04, rm[HYDRA_MA_FLASH])
-    out.ptr(ma_root + 0x00, ma_groups[0][0])
+        out.set_ptr(a[0] + 0x04, b[0])
+    out.set_ptr(ma_groups[-1][0] + 0x04, rm[HYDRA_MA_FLASH])
+    out.set_ptr(ma_root + 0x00, ma_groups[0][0])
 
     node_count = 4 * NUM_PODS + 6
     tracks = []
@@ -563,9 +538,16 @@ def build_glow(root_dir, chor, verbose=True):
         tracks.append(Track(base + 2, "SCAX", taper))
         tracks.append(Track(base + 3, "SCAX", taper))
 
-        head = [(f, tuple(c * STREAK_REACH + (bind_lift if k == 1 else 0.0)
-                          for k, c in enumerate(mat_apply_t(aim, p))))
-                for f, p in path]
+        head = [
+            (
+                f,
+                tuple(
+                    c * STREAK_REACH + (bind_lift if k == 1 else 0.0)
+                    for k, c in enumerate(mat_apply_t(aim, p))
+                ),
+            )
+            for f, p in path
+        ]
         for axis, comp in (("TRAX", 0), ("TRAY", 1), ("TRAZ", 2)):
             tracks.append(Track(base + 3, axis, [(f, p[comp]) for f, p in head]))
 
@@ -573,10 +555,18 @@ def build_glow(root_dir, chor, verbose=True):
     # re-authored, from three pulses to one per pod.
     for src_node, dst_node in zip(range(13, 18), range(4 * NUM_PODS + 1, node_count)):
         for kind, vflag, tflag, start, buf in flash.get(src_node, ()):
-            if src_node == 17 and kind == TRACK["BRANCH"]:
+            if src_node == 17 and kind == fobj.JOINT_TRACK["BRANCH"]:
                 continue
-            tracks.append(Track(dst_node, kind, raw=buf, value_flag=vflag,
-                                tan_flag=tflag, start_frame=start))
+            tracks.append(
+                Track(
+                    dst_node,
+                    kind,
+                    raw=buf,
+                    value_flag=vflag,
+                    tan_flag=tflag,
+                    start_frame=start,
+                )
+            )
     pulses = [(0, 0.0)]
     for arrive in ARRIVE:
         pulses.append((arrive, 1.0))
@@ -585,25 +575,30 @@ def build_glow(root_dir, chor, verbose=True):
     tracks.append(Track(node_count - 1, "BRANCH", pulses, op=fobj.OP_CON))
 
     tree = emit_figatree(out, node_count, tracks)
-    out.ptr(0x00, glow_root)
-    out.ptr(0x04, tree)
-    out.ptr(0x08, ma_root)
-    out.ptr(0x10, rm[HYDRA_CAM_DESC])
+    out.set_ptr(0x00, glow_root)
+    out.set_ptr(0x04, tree)
+    out.set_ptr(0x08, ma_root)
+    out.set_ptr(0x10, rm[HYDRA_CAM_DESC])
 
-    blob = build_archive(out.d, sorted(out.relocs),
-                         [("apStarGlow", 0), ("apStarCam", 0x10)], arc.version)
+    blob = build_archive(
+        out.data,
+        sorted(out.relocs),
+        [("apStarGlow", 0), ("apStarCam", 0x10)],
+        arc.version,
+    )
     path = os.path.join(root_dir, OUT_DIR, "ApStarGlow.dat")
     with open(path, "wb") as f:
         f.write(blob)
     if verbose:
-        print(f"{path}: {len(blob)} bytes, {len(out.relocs)} relocs, "
-              f"{len(tracks)} tracks, {node_count} joints")
+        print(
+            f"{path}: {len(blob)} bytes, {len(out.relocs)} relocs, "
+            f"{len(tracks)} tracks, {node_count} joints"
+        )
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--root", default=os.getcwd(),
-                    help="repo root (default: cwd)")
+    ap.add_argument("--root", default=os.getcwd(), help="repo root (default: cwd)")
     args = ap.parse_args(argv)
     chor = build_parts(args.root)
     build_glow(args.root, chor)

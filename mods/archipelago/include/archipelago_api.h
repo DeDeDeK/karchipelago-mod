@@ -5,7 +5,7 @@
 
 // Bump major on breaking changes, minor on additions.
 #define ARCHIPELAGO_API_MAJOR 3
-#define ARCHIPELAGO_API_MINOR 3
+#define ARCHIPELAGO_API_MINOR 5
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
@@ -13,6 +13,10 @@
 // Checklist-mode rows: the three vanilla GameModes plus the AP tab at the row past them.
 #define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
 #define AP_CHECKLIST_ROW   GMMODE_NUM
+
+// Ceiling on the AP Patch locations a seed may carry, matching the apworld's
+// ap_patches range end.
+#define AP_PATCH_MAX 512
 
 // AP item IDs - must match the IDs defined in the APWorld Python code.
 // ID 0 is reserved as the "empty" sentinel for the mailbox.
@@ -698,6 +702,20 @@ typedef struct ArchipelagoAPI
     // bypassing the delivery schedule. `piece` is an APStarPiece. Returns 0 if
     // the sphere was locked when this scene loaded, since it has no ItemKind then.
     int (*DebugSpawnApStarPiece)(int piece, int ply);
+
+    // (minor 4+) Drop one AP Box in front of a player's machine, and claim the
+    // lowest unclaimed AP Patch outright. Both return 0 when the AP Patch
+    // category is off, or when the drop-ins were not registered as this scene
+    // loaded, since they have no ItemKind then.
+    int (*DebugSpawnApBox)(int ply);
+    int (*DebugCollectApPatch)(void);
+
+    // (minor 5+) The seed's AP Patch location count, and a debug override of it.
+    // The drop-ins are held out of the item registry while the count is 0, so the
+    // override is what lets a build with no such seed exercise the category; it
+    // takes effect at the next round load.
+    int (*GetApPatchCount)(void);
+    void (*DebugSetApPatchCount)(int count);
 } ArchipelagoAPI;
 
 #endif // ARCHIPELAGO_API_H

@@ -295,6 +295,57 @@ const char *CustomWeather_GetPresetName(int weather_kind);
 // >1 pushes the far fog wall out, <1 pulls it in. 1.0 = unchanged.
 float CustomWeather_GetFogScale(void);
 
+// BackdropManifest.dat, authored by scripts/authoring/make_backdrop_manifest.py. It holds
+// no game data: each entry is a recipe for rebuilding one stage's backdrop subtree
+// out of the retail disc, so no vanilla geometry or texture ships with the mod.
+#define BACKDROP_MANIFEST_FILE    "BackdropManifest.dat"
+#define BACKDROP_MANIFEST_SYMBOL  "backdropManifest"
+#define BACKDROP_MANIFEST_MAGIC   0x42444D46u  // 'BDMF'
+#define BACKDROP_MANIFEST_VERSION 1
+
+// Bytes the payload reserves before the first range, holding a pp slot shaped like a
+// vanilla stage's grModel<X>[1]: word 0 is the backdrop root, the rest reads as zero.
+#define BACKDROP_PP_SLOT 0x20
+
+// One byte range of the donor file. All three fields are multiples of 32, which is
+// what File_Read requires of an offset, a length and a destination alike.
+typedef struct BackdropRange
+{
+    u32 donor_off;   // 0x00 absolute offset in the donor file
+    u32 dest_off;    // 0x04 offset in the payload
+    u32 length;      // 0x08
+} BackdropRange;
+
+// One pointer to fix up. The bytes arrive raw off the disc, so every pointer still
+// holds a donor offset; dest_val is that offset already translated into payload
+// coordinates, leaving the runtime to add the payload base.
+typedef struct BackdropReloc
+{
+    u32 dest_off;    // 0x00 where the pointer sits in the payload
+    u32 dest_val;    // 0x04 payload offset it should point at
+} BackdropReloc;
+
+typedef struct BackdropManifestEntry
+{
+    const char *key;              // 0x00 grModel<X> suffix, e.g. "Check2"
+    const char *donor;            // 0x04 e.g. "GrCheck2Model.dat"
+    u32 payload_size;             // 0x08
+    float scale;                  // 0x0C normalizes the dome to City's radius
+    u32 root_off;                 // 0x10 backdrop JOBJDesc, payload-relative
+    const BackdropRange *ranges;  // 0x14
+    u32 range_num;                // 0x18
+    const BackdropReloc *relocs;  // 0x1C
+    u32 reloc_num;                // 0x20
+} BackdropManifestEntry;          // 0x24
+
+typedef struct BackdropManifest
+{
+    u32 magic;                            // 0x00 BACKDROP_MANIFEST_MAGIC
+    u32 version;                          // 0x04
+    u32 entry_num;                        // 0x08
+    const BackdropManifestEntry *entries; // 0x0C
+} BackdropManifest;
+
 void CustomWeather_OnBoot(void);
 void CustomWeatherRuntime_OnBoot(void);
 void CustomBackdrop_OnBoot(void);

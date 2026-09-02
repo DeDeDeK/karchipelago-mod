@@ -15,8 +15,8 @@ import re
 # decl only encodes a single element). Guessing counts from prose comments risks
 # overrunning into an adjacent global, so this stays curated.
 ARRAY_SIZES = {
-    "stc_playerdata": 5,      # PlayerData[5] (slots 0-4); the headline indexed global
-    "psGeneratorCount": 64,   # one per particle bank; Ptcl_Alloc checks bank < 0x40
+    "stc_playerdata": 5,  # PlayerData[5] (slots 0-4); the headline indexed global
+    "psGeneratorCount": 64,  # one per particle bank; Ptcl_Alloc checks bank < 0x40
     "psGeneratorDesc": 64,
 }
 
@@ -76,7 +76,7 @@ def strip_text(text):
     i = 0
     n = len(text)
     depth = 0
-    last_sig = ""     # last significant char emitted, for the `{` discriminator
+    last_sig = ""  # last significant char emitted, for the `{` discriminator
     line_start = True
 
     while i < n:
@@ -233,14 +233,17 @@ def extract_protos(root):
                 continue
             seen.add(addr)
             lineno = text.count("\n", 0, m.start()) + 1
-            rows.append((addr, name, " ".join(m.group("sig").split()),
-                         f"{rel}:{lineno}"))
+            rows.append(
+                (addr, name, " ".join(m.group("sig").split()), f"{rel}:{lineno}")
+            )
     return rows
 
 
 # A literal address, or an SDA base+offset sum: (0xBASE + 0xOFF | DEC)
-_ADDR = (r"(?:0x[0-9a-fA-F]+"
-         r"|\(\s*0x[0-9a-fA-F]+\s*\+\s*(?:0x[0-9a-fA-F]+|\d+)\s*\))")
+_ADDR = (
+    r"(?:0x[0-9a-fA-F]+"
+    r"|\(\s*0x[0-9a-fA-F]+\s*\+\s*(?:0x[0-9a-fA-F]+|\d+)\s*\))"
+)
 
 # static PlayerData *stc_playerdata = (PlayerData *)0x8055a9f0;
 # static CityItemMgr **stc_city_item_mgr = (CityItemMgr **)(0x805dd0e0 + 0x7EC);
@@ -249,7 +252,7 @@ _STATIC_RE = re.compile(
     r"(?P<decl>[A-Za-z_][\w\s]*?)\s*"
     r"(?P<stars>\*+)\s*(?:const\s+)?"
     r"(?P<name>[A-Za-z_]\w*)\s*=\s*"
-    r"\(\s*[^)]*\*+\s*\)\s*"           # a pointer cast (no nested parens)
+    r"\(\s*[^)]*\*+\s*\)\s*"  # a pointer cast (no nested parens)
     r"(?P<addr>" + _ADDR + r")\s*;"
 )
 
@@ -281,8 +284,7 @@ def extract_globals(root):
         if addr in seen:
             return
         seen.add(addr)
-        rows.append((f"0x{addr:08x}", base, stars,
-                     ARRAY_SIZES.get(name, 1), name))
+        rows.append((f"0x{addr:08x}", base, stars, ARRAY_SIZES.get(name, 1), name))
 
     for path, _rel in iter_headers(root):
         for line in _read(path).splitlines():

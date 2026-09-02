@@ -39,8 +39,10 @@ def fit_centered(img, width, height):
     scale = min(width / img.width, height / img.height)
     size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    canvas.paste(img.resize(size, Image.LANCZOS),
-                 ((width - size[0]) // 2, (height - size[1]) // 2))
+    canvas.paste(
+        img.resize(size, Image.LANCZOS),
+        ((width - size[0]) // 2, (height - size[1]) // 2),
+    )
     return canvas
 
 

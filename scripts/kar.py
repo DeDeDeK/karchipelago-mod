@@ -30,12 +30,13 @@ MEM1 = os.path.join(HERE, "mem1.raw")
 MAP = os.path.join(ROOT, "externals", "hoshi", "GKYE01.map")
 LINK_LD = os.path.join(ROOT, "externals", "hoshi", "packtool", "link.ld")
 HOSHI_INCLUDE = os.path.join(ROOT, "externals", "hoshi", "include")
-OBJDUMP = os.path.join(ROOT, "externals", "devkitpro", "devkitPPC", "bin",
-                       "powerpc-eabi-objdump")
+OBJDUMP = os.path.join(
+    ROOT, "externals", "devkitpro", "devkitPPC", "bin", "powerpc-eabi-objdump"
+)
 
 MEM1_BASE = 0x80000000
-SDA_BASE = 0x805DD0E0    # r13
-SDA2_BASE = 0x805E6700   # r2
+SDA_BASE = 0x805DD0E0  # r13
+SDA2_BASE = 0x805E6700  # r2
 GHIDRA_PROGRAM = "kar.dol"
 
 
@@ -56,7 +57,8 @@ def parse_int(text):
 
 # ADDR SIZE ADDR ALIGN NAME [note]
 _MAP_LINE = re.compile(
-    r"^([0-9a-fA-F]{8}) ([0-9a-fA-F]{6,8}) ([0-9a-fA-F]{8}) (\d+) (.*)$")
+    r"^([0-9a-fA-F]{8}) ([0-9a-fA-F]{6,8}) ([0-9a-fA-F]{8}) (\d+) (.*)$"
+)
 
 # The name field runs up to the first space or '(' - many rows carry a trailing
 # argument note, either separated ("gmGetGlobalP (GameData)") or glued on
@@ -78,8 +80,12 @@ class SymbolMap:
                 nm = _MAP_NAME.match(m.group(5).strip())
                 if not nm:
                     continue
-                row = (int(m.group(1), 16), int(m.group(2), 16),
-                       nm.group(1), nm.group(2).strip())
+                row = (
+                    int(m.group(1), 16),
+                    int(m.group(2), 16),
+                    nm.group(1),
+                    nm.group(2).strip(),
+                )
                 self.rows.append(row)
                 self.by_name.setdefault(row[2], row)
         self.rows.sort()
@@ -130,8 +136,11 @@ def header_protos():
     """(addr, name, where) for every hoshi prototype with a `// 0xADDR` comment."""
     sys.path.insert(0, os.path.join(HERE, "ghidra"))
     import hoshi_headers
-    return [(int(a, 16), n, w)
-            for a, n, _sig, w in hoshi_headers.extract_protos(HOSHI_INCLUDE)]
+
+    return [
+        (int(a, 16), n, w)
+        for a, n, _sig, w in hoshi_headers.extract_protos(HOSHI_INCLUDE)
+    ]
 
 
 def mem1_size():
@@ -145,8 +154,10 @@ def read_mem(addr, length):
     size = mem1_size()
     off = addr - MEM1_BASE
     if off < 0 or length < 0 or off + length > size:
-        sys.exit(f"0x{addr:08x}+0x{length:x} is outside mem1.raw "
-                 f"(0x{MEM1_BASE:08x}..0x{MEM1_BASE + size:08x})")
+        sys.exit(
+            f"0x{addr:08x}+0x{length:x} is outside mem1.raw "
+            f"(0x{MEM1_BASE:08x}..0x{MEM1_BASE + size:08x})"
+        )
     with open(MEM1, "rb") as f:
         f.seek(off)
         return f.read(length)
@@ -173,12 +184,15 @@ def cmd_sym(args):
         head = f"0x{addr:08x} is {row[2]}" + (f"+0x{off:x}" if off else "")
     else:
         needle = args.target.lower()
-        rows = ([syms.by_name[args.target]] if args.target in syms.by_name
-                else [r for r in syms.rows if needle in r[2].lower()])
+        rows = (
+            [syms.by_name[args.target]]
+            if args.target in syms.by_name
+            else [r for r in syms.rows if needle in r[2].lower()]
+        )
         head = f"{len(rows)} symbol(s) matching '{args.target}'"
 
     print(head, file=sys.stderr)
-    for addr, size, name, note in rows[:args.limit]:
+    for addr, size, name, note in rows[: args.limit]:
         tags = []
         if ld.get(name) == addr:
             tags.append("ld")
@@ -209,9 +223,21 @@ def objdump(data, vma):
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         out = subprocess.run(
-            [OBJDUMP, "-D", "-b", "binary", "-m", "powerpc", "-EB",
-             f"--adjust-vma={vma:#x}", path],
-            capture_output=True, text=True, check=True).stdout
+            [
+                OBJDUMP,
+                "-D",
+                "-b",
+                "binary",
+                "-m",
+                "powerpc",
+                "-EB",
+                f"--adjust-vma={vma:#x}",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
     finally:
         os.remove(path)
     lines = out.splitlines()
@@ -278,8 +304,10 @@ def cmd_disasm(args):
         sys.exit(f"no size for 0x{start:08x} in the map; pass a length")
 
     label = syms.label(start) or "unnamed"
-    print(f"{label}  0x{start:08x}..0x{start + length:08x}  ({length} bytes)",
-          file=sys.stderr)
+    print(
+        f"{label}  0x{start:08x}..0x{start + length:08x}  ({length} bytes)",
+        file=sys.stderr,
+    )
     lines = objdump(read_mem(start, length), start)
     if not args.raw:
         lines = annotate(lines, syms, start, start + length)
@@ -289,7 +317,7 @@ def cmd_disasm(args):
 
 def fmt_hex(addr, data):
     for i in range(0, len(data), 16):
-        chunk = data[i:i + 16]
+        chunk = data[i : i + 16]
         cells = " ".join(f"{b:02x}" for b in chunk).ljust(47)
         text = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
         yield f"{addr + i:08x}  {cells}  |{text}|"
@@ -298,26 +326,31 @@ def fmt_hex(addr, data):
 def fmt_words(addr, data, syms):
     top = MEM1_BASE + mem1_size()
     for i in range(0, len(data) - 3, 16):
-        words = [struct.unpack_from(">I", data, j)[0]
-                 for j in range(i, min(i + 16, len(data) - 3), 4)]
+        words = [
+            struct.unpack_from(">I", data, j)[0]
+            for j in range(i, min(i + 16, len(data) - 3), 4)
+        ]
         cells = " ".join(f"{w:08x}" for w in words).ljust(35)
-        names = [n for w in words if MEM1_BASE <= w < top
-                 for n in [syms.label(w)] if n]
+        names = [n for w in words if MEM1_BASE <= w < top for n in [syms.label(w)] if n]
         line = f"{addr + i:08x}  {cells}"
         yield f"{line}  ; {', '.join(names)}" if names else line
 
 
 def fmt_floats(addr, data):
     for i in range(0, len(data) - 3, 16):
-        vals = [struct.unpack_from(">f", data, j)[0]
-                for j in range(i, min(i + 16, len(data) - 3), 4)]
+        vals = [
+            struct.unpack_from(">f", data, j)[0]
+            for j in range(i, min(i + 16, len(data) - 3), 4)
+        ]
         yield f"{addr + i:08x}  " + " ".join(f"{v:>14.6g}" for v in vals)
 
 
 def fmt_halfs(addr, data):
     for i in range(0, len(data) - 1, 16):
-        vals = [struct.unpack_from(">H", data, j)[0]
-                for j in range(i, min(i + 16, len(data) - 1), 2)]
+        vals = [
+            struct.unpack_from(">H", data, j)[0]
+            for j in range(i, min(i + 16, len(data) - 1), 2)
+        ]
         yield f"{addr + i:08x}  " + " ".join(f"{v:04x}" for v in vals)
 
 
@@ -370,26 +403,37 @@ def cmd_find(args):
             continue
         addr = lo + j
         ctx = " ".join(
-            (f"[{struct.unpack_from('>I', data, k)[0]:08x}]" if k == j
-             else f"{struct.unpack_from('>I', data, k)[0]:08x}")
-            if 0 <= k <= len(data) - 4 else "........"
-            for k in range(j - 8, j + 12, 4))
+            (
+                f"[{struct.unpack_from('>I', data, k)[0]:08x}]"
+                if k == j
+                else f"{struct.unpack_from('>I', data, k)[0]:08x}"
+            )
+            if 0 <= k <= len(data) - 4
+            else "........"
+            for k in range(j - 8, j + 12, 4)
+        )
         label = syms.label(addr)
         print(f"0x{addr:08x}  {ctx}" + (f"  {label}" if label else ""))
-    print(f"{hits} match(es)" + (f", {hits - args.limit} not shown"
-                                 if hits > args.limit else ""), file=sys.stderr)
+    print(
+        f"{hits} match(es)"
+        + (f", {hits - args.limit} not shown" if hits > args.limit else ""),
+        file=sys.stderr,
+    )
 
 
 def cmd_decomp(args):
     for target in args.targets:
         r = subprocess.run(
             ["ghidra", "decompile", target, "--program", GHIDRA_PROGRAM],
-            capture_output=True, text=True, timeout=600, check=False)
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
         try:
             items = json.loads(r.stdout)
         except json.JSONDecodeError:
-            print(f"{target}: {(r.stderr or r.stdout).strip()[:400]}",
-                  file=sys.stderr)
+            print(f"{target}: {(r.stderr or r.stdout).strip()[:400]}", file=sys.stderr)
             continue
         if not items:
             print(f"{target}: no function there", file=sys.stderr)
@@ -456,19 +500,25 @@ def cmd_check(args):
             # deliberate aliases (Item_Create -> CityItem_Create), which links
             # fine; only a still-`zz_` row is drift.
             row = by_addr.get(addr)
-            aliased = row is not None and not row.startswith("zz_") and ld.get(name) == addr
+            aliased = (
+                row is not None and not row.startswith("zz_") and ld.get(name) == addr
+            )
             if not aliased:
                 groups.setdefault("header prototype not in the map", []).append(
-                    f"0x{addr:08x} {name}  ({where})")
+                    f"0x{addr:08x} {name}  ({where})"
+                )
         elif mapped[0] != addr:
             groups.setdefault("header address disagrees with the map", []).append(
-                f"0x{addr:08x} {name}  map says 0x{mapped[0]:08x}  ({where})")
+                f"0x{addr:08x} {name}  map says 0x{mapped[0]:08x}  ({where})"
+            )
         if name not in ld:
             groups.setdefault("header prototype not in link.ld", []).append(
-                f"0x{addr:08x} {name}  ({where})")
+                f"0x{addr:08x} {name}  ({where})"
+            )
         elif ld[name] != addr:
             groups.setdefault("header address disagrees with link.ld", []).append(
-                f"0x{addr:08x} {name}  link.ld says 0x{ld[name]:08x}  ({where})")
+                f"0x{addr:08x} {name}  link.ld says 0x{ld[name]:08x}  ({where})"
+            )
 
     # Only a still-`zz_` map row counts as drift. An address the map has no row
     # for is the map's coarse sizing, and a differently-named row is usually one
@@ -477,12 +527,13 @@ def cmd_check(args):
         mapped = by_addr.get(addr)
         if mapped and mapped.startswith("zz_"):
             groups.setdefault("link.ld name still unnamed in the map", []).append(
-                f"0x{addr:08x} {name}  (map: {mapped})")
+                f"0x{addr:08x} {name}  (map: {mapped})"
+            )
 
     total = sum(len(v) for v in groups.values())
     for title, items in groups.items():
         print(f"\n{title} ({len(items)})")
-        for item in items[:args.limit]:
+        for item in items[: args.limit]:
             print(f"  {item}")
         if len(items) > args.limit:
             print(f"  ({len(items) - args.limit} more; raise --limit)")
@@ -492,8 +543,10 @@ def cmd_check(args):
 
 def main():
     p = argparse.ArgumentParser(
-        prog="kar.py", description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        prog="kar.py",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("sym", help="look up a symbol by address, name, or range")
@@ -510,8 +563,12 @@ def main():
     s = sub.add_parser("read", help="dump data from mem1.raw")
     s.add_argument("addr", help="0xADDR | NAME")
     s.add_argument("length", nargs="?", help="bytes (default 0x40)")
-    s.add_argument("-f", "--format", default="hex",
-                   choices=["hex", "words", "floats", "halfs", "string"])
+    s.add_argument(
+        "-f",
+        "--format",
+        default="hex",
+        choices=["hex", "words", "floats", "halfs", "string"],
+    )
     s.set_defaults(fn=cmd_read)
 
     s = sub.add_parser("find", help="find a 32-bit value in mem1.raw")
@@ -528,8 +585,9 @@ def main():
     s = sub.add_parser("rename", help="name a symbol in the map and link.ld")
     s.add_argument("addr")
     s.add_argument("name")
-    s.add_argument("--force", action="store_true",
-                   help="replace an already-discovered name")
+    s.add_argument(
+        "--force", action="store_true", help="replace an already-discovered name"
+    )
     s.set_defaults(fn=cmd_rename)
 
     s = sub.add_parser("check", help="cross-check headers, link.ld, and the map")
