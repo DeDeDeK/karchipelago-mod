@@ -16,7 +16,7 @@
 
 // Sampling for the Archipelago checklist's objectives. The framework polls every
 // predicate each frame in every scene, so a predicate is only ever a read of state
-// latched by the two hooks below.
+// latched by the hooks below.
 
 // Objectives observed this boot, one bit per APCheckKind. Objectives that count
 // across boots read ap_save->checks instead.
@@ -139,8 +139,10 @@ static int run_base[5][RUN_ITEM_NUM];
 static int prev_allup[5];
 static int needs_baseline[5];
 
-// Coral placed by the loaded stage, sampled once at load (0 outside City Trial).
+// Coral placed by the loaded stage, sampled once at load (0 outside City Trial),
+// and how much of it anyone has broken this round.
 static int coral_total;
+static int coral_broken;
 
 // Is a City Trial Trial round loaded? The three-legendary poll needs it, and that
 // poll cannot ride the per-rider sampler: assembly ends in
@@ -215,10 +217,6 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     }
     prev_allup[ply] = allup;
 
-    // yakumono_break is zeroed per game, so no baseline is needed.
-    if (coral_total > 0 && st->yakumono_break[AP_CORAL_DESC_ID] >= coral_total)
-        APCheckDetect_Observe(APCK_BREAK_ALL_CORAL);
-
     // Only the copy-wheel grant paths set this mask, so a Mic panel picked up off
     // the ground does not count - the same wheel-only demand vanilla's Bomb and
     // Sleep cells make.
@@ -274,6 +272,7 @@ void APCheckDetect_On3DLoadEnd(void)
     for (int i = 0; i < 5; i++)
         needs_baseline[i] = 1;
     coral_total = 0;
+    coral_broken = 0;
     dedede_kirby_kos = 0;
     mic_enemy_kos = 0;
     in_city_trial = 0;
@@ -380,6 +379,24 @@ static void APCheckDetect_EnemyDefeat(int ply, void *attacker_log, GOBJ *enemy)
                  mic_enemy_kos, AP_MIC_ENEMY_KO_NEED);
     if (mic_enemy_kos >= AP_MIC_ENEMY_KO_NEED)
         APCheckDetect_Observe(APCK_MIC_ENEMY_KOS);
+}
+
+// Replaces the one bl Ply_IncrementYakumonoBreakCount, inside
+// GrYaku_IncrementBreakCount, the single path every break family credits through.
+// PlayerStats.yakumono_break only counts the props that player broke, so the coral
+// objective counts here instead - a CPU breaking coral fills the same round total.
+static void APCheckDetect_YakumonoBreak(int ply, int desc_id)
+{
+    Ply_IncrementYakumonoBreakCount(ply, desc_id);
+
+    if (desc_id != AP_CORAL_DESC_ID || coral_total <= 0)
+        return;
+
+    coral_broken++;
+    if (coral_broken <= coral_total)
+        OSReport("[APCheckDetect] Coral broken: %d/%d\n", coral_broken, coral_total);
+    if (coral_broken >= coral_total)
+        APCheckDetect_Observe(APCK_BREAK_ALL_CORAL);
 }
 
 // Stadium_ComputeRank* skip slots whose gate byte is nonzero, leaving their
@@ -608,5 +625,6 @@ void APCheckDetect_OnBoot(void)
 {
     CODEPATCH_REPLACECALL(0x801e1f74, APCheckDetect_AddDeath);
     CODEPATCH_REPLACECALL(0x802022ec, APCheckDetect_EnemyDefeat);
+    CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
     OSReport("[APCheckDetect] Hooks installed\n");
 }

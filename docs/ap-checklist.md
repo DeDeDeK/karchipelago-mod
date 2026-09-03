@@ -206,7 +206,7 @@ free checks the fill could hide progression behind.
 
 Predicates never sample. The framework polls all 52 every frame, in every scene, including
 menus and loads - so each one is a single read of state latched elsewhere, and the sampling
-lives in five seams in `ap_check_detect.c`.
+lives in six seams in `ap_check_detect.c`.
 
 **`On3DExit` - stadium and Air Ride results.** hoshi installs the hook at `0x80015274`,
 which is the epilogue of `Stadium_ExitMinor` (`0x80014d5c`), the very function whose copy
@@ -308,7 +308,6 @@ same scope the vanilla City Trial cells use.
 | clear_kind | Objective | Detection |
 |---|---|---|
 | 0 | Visit the flower on top of Castle Hall on foot | `foot_visit_checks[]`: `!Rider_IsOnMachine(rd)` and `rd->pos` within 2 units of the flower, at `(408.7, 370.8, -564.6)`. The flower sits on a very small platform, and the stage's out-of-bounds box spans 2600 units in X and Z, so the sphere is tight. The on-foot requirement stops a machine flying through the spot from counting. |
-| 1 | Break all the coral in one game | `PlayerStats.yakumono_break[33] >= Gr_GetYakumonoSpawnTotal(33)`. Coral is yakumono descriptor 33 and GrCity1 places 10; the total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does. `yakumono_break` is zeroed per game, so no baseline is needed. |
 | 2 | Go out of bounds | `calcDistanceFromOOB(&rd->pos) < 0` - the engine's own definition, the condition that makes `Machine_CheckFallDeath` respawn the player. |
 | 3 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
 | 4 | Collect 5 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.checks.allup_collect_total` |
@@ -384,6 +383,23 @@ Testing the victim's rider kind is not a formality. A stadium CPU draws its char
 gated select grid, so once King Dedede or Meta Knight is unlocked - and this box needs Dedede
 unlocked - a rival can be one of them rather than a Kirby. The player can assign each CPU a
 machine from that grid, so an all-Kirby field stays arrangeable.
+
+**The yakumono break recorder - the coral box.** `GrYaku_IncrementBreakCount`
+(`0x80105d80`) is where every break family credits its break, and its single
+`bl Ply_IncrementYakumonoBreakCount` at `0x80105da0` is the one call site that function has,
+so `APCheckDetect_OnBoot` repoints it at a wrapper the same way as the two recorders above.
+
+| clear_kind | Objective | Detection |
+|---|---|---|
+| 1 | Break all the coral in one game | a per-round count of breaks with `desc_id` 33 - coral - reaching `Gr_GetYakumonoSpawnTotal(33)`, which is 10 on `GrCity1`. The total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does. The counter is reset in `On3DLoadEnd` alongside the other per-game ones, and gated on a nonzero total, which scopes it to City Trial |
+
+Counting at the credit path rather than reading `PlayerStats.yakumono_break[33]` is what makes
+the box mean "the coral is gone", not "one player broke all of it".
+`Ply_IncrementYakumonoBreakCount` bumps only the crediting player's record - and a break with
+no identifiable attacker falls back to the first occupied slot (`GrYakuBreak_GetAttackerPly`,
+`0x80105cb0`) - so with CPUs in the city the coral can all be broken with no single player's
+counter ever reaching 10. The wrapper is also above the vanilla function's own
+`PlayerStats.flags_855` bit-6 suppression, so a break that records against nobody still counts.
 
 **The enemy-defeat recorder - the Mic count.** `Ply_RecordEnemyDefeat` (`0x8023205c`) is the
 enemy-side counterpart of `Ply_AddDeath`: it credits a player with an enemy kill, bumping
