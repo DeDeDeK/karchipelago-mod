@@ -24,8 +24,8 @@ static MenuDesc stc_top_menu = {
     .option_num = 1,
     .options = {
         &(OptionDesc){
-            .name = "Star Shot",
-            .description = "Archipelago Star fires one of its spheres on a full-charge release",
+            .name = "Sphere Shot",
+            .description = "Archipelago Star fires one of its spheres after a full charge.",
             .kind = OPTKIND_VALUE,
             .val = &ap_star_settings.shot_enabled,
             .value_num = 2,
@@ -40,7 +40,7 @@ static MenuDesc stc_top_menu = {
 
 static OptionDesc ModSettings = {
     .name = "Archipelago Star",
-    .description = "The Archipelago Star machine and its City Trial assembly",
+    .description = "Settings for the Archipelago Star",
     .kind = OPTKIND_MENU,
     .menu_ptr = &stc_top_menu,
 };

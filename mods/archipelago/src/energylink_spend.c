@@ -274,7 +274,7 @@ static MenuDesc cosmetic_menu = {
 MenuDesc energylink_spend_menu = {
     .option_num = 11,
     .options = {
-        CATEGORY("Stat Patches",      "Temporary stat patches for this round",   stat_patches_menu),
+        CATEGORY("Stat Patches",      "One-time stat patch gives",               stat_patches_menu),
         CATEGORY("Permanent Patches", "Permanent stat boosts across all rounds", permanent_patches_menu),
         CATEGORY("Copy Abilities",    "Give Kirby a copy ability",               copy_abilities_menu),
         CATEGORY("Food",              "Healing items",                           food_menu),
@@ -282,7 +282,7 @@ MenuDesc energylink_spend_menu = {
         CATEGORY("Legendary Pieces",  "Dragoon, Hydra and AP Star parts",        legendary_menu),
         CATEGORY("City Trial Items",  "Boxes and other CT items",                ct_items_menu),
         CATEGORY("City Trial Events", "Trigger a City Trial event",              ct_events_menu),
-        CATEGORY("Top Ride Items",    "Spawn a Top Ride item at your position",  topride_items_menu),
+        CATEGORY("Top Ride Items",    "Give Kirby a Top Ride Item",              topride_items_menu),
         CATEGORY("Checkbox Fillers",  "Fill a checklist square of your choice",  checkbox_fillers_menu),
         CATEGORY("Cosmetic",          "Cosmetic items",                          cosmetic_menu),
     },

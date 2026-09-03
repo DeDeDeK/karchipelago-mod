@@ -11,7 +11,7 @@ APMenuSettings ap_menu_settings = {
     .ct_permanent_patches_enabled         = 1,
     .ct_stadium_permanent_patches_enabled = 1,
     .ar_permanent_patches_enabled         = 1,
-    .energylink_autocharge_rate           = 1, // Medium, ~1.5s to fill
+    .energylink_autocharge_rate           = 1,
     .ct_random_start_machine              = 1,
     .text_messages = {
         [APTEXT_KIND_CHECK]  = 1,
@@ -73,7 +73,7 @@ static MenuDesc local_messages_menu = {
     .options = {
         &(OptionDesc){
             .name = "Checks",
-            .description = "Show the mod's own line as a checkbox is recorded, without the item it sent",
+            .description = "Show when checks are recorded",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.local_messages[APLOCAL_CHECK],
             .value_num = 2,
@@ -85,7 +85,7 @@ static MenuDesc local_messages_menu = {
         },
         &(OptionDesc){
             .name = "Items",
-            .description = "Show the mod's own line as it applies an item, without a sender",
+            .description = "Show when items are applied",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.local_messages[APLOCAL_ITEM],
             .value_num = 2,
@@ -97,7 +97,7 @@ static MenuDesc local_messages_menu = {
         },
         &(OptionDesc){
             .name = "Goals",
-            .description = "Show a line as each mode goal, and then the whole seed's goal, is met",
+            .description = "Show when goals are complete",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.local_messages[APLOCAL_GOAL],
             .value_num = 2,
@@ -110,9 +110,6 @@ static MenuDesc local_messages_menu = {
     },
 };
 
-// The five kinds gate what the client composes and the mod only renders, so a kind
-// turned off here is skipped client-side too once SyncMenuStateToAPData publishes the
-// change. Local gates what the mod composes itself.
 static MenuDesc messages_menu = {
     .option_num = 6,
     .options = {
@@ -154,7 +151,7 @@ static MenuDesc messages_menu = {
         },
         &(OptionDesc){
             .name = "Status",
-            .description = "Show goal, release and collect announcements and client connection changes",
+            .description = "Show goal/release/collect and client connection changes",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.text_messages[APTEXT_KIND_STATUS],
             .value_num = 2,
@@ -178,7 +175,7 @@ static MenuDesc messages_menu = {
         },
         &(OptionDesc){
             .name = "Local",
-            .description = "Choose which lines the mod composes itself, alongside the client's",
+            .description = "Offline messages settings",
             .kind = OPTKIND_MENU,
             .menu_ptr = &local_messages_menu,
         },
@@ -339,7 +336,7 @@ OptionDesc ModSettings = {
             },
             &(OptionDesc){
                 .name = "Drop Ability",
-                .description = "Press Z to discard your copy ability, or your item power in Top Ride",
+                .description = "Press Z to discard your copy ability, or your item/power in Top Ride",
                 .kind = OPTKIND_VALUE,
                 .val = &ap_menu_settings.drop_ability_enabled,
                 .value_num = 2,
@@ -351,7 +348,7 @@ OptionDesc ModSettings = {
             },
             &(OptionDesc){
                 .name = "Air Quick Spin",
-                .description = "Allow the L/R-flick quick spin while airborne (City Trial / Air Ride)",
+                .description = "Allow quick spinning in the air",
                 .kind = OPTKIND_VALUE,
                 .val = &ap_menu_settings.air_quick_spin_enabled,
                 .value_num = 2,
@@ -363,7 +360,7 @@ OptionDesc ModSettings = {
             },
             &(OptionDesc){
                 .name = "On-Foot Zoom",
-                .description = "Zoom the camera with the C-Stick while on foot, as on a machine",
+                .description = "Allow camera zoom control when off of a machine",
                 .kind = OPTKIND_VALUE,
                 .val = &ap_menu_settings.onfoot_zoom_enabled,
                 .value_num = 2,
