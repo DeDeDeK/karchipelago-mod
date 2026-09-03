@@ -74,6 +74,8 @@ _Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x240, "SENT_C
 _Static_assert(offsetof(APData, client_backfill) == 0x250, "CLIENT_BACKFILL_AIRRIDE");
 _Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x280, "CLIENT_BACKFILL_ARCHIPELAGO");
 _Static_assert(offsetof(APData, goal_complete) == 0x290, "GOAL_COMPLETE");
+_Static_assert(offsetof(APData, goal_satisfied_mask) == 0x291, "GOAL_SATISFIED_MASK");
+_Static_assert(CHECKLIST_MODE_NUM <= 8, "goal_satisfied_mask is one byte");
 _Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x294, "DEATHLINK_MENU_ENABLED");
 _Static_assert(offsetof(APData, text_pending) == 0x2A0, "TEXT_PENDING");
 _Static_assert(offsetof(APData, text_menu_mask) == 0x2A4, "TEXT_MENU_MASK");

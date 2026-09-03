@@ -60,6 +60,7 @@ All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64
 | 0x210 | u64[4][2] | `sent_checks`     | Game   | Client | Bitmask of checkboxes the player has completed in gameplay or via filler. Bit `(k % 64)` of word `(k / 64)` for clear_kind `k`. Mirror of `APSave.sent_checks`. |
 | 0x250 | u64[4][2] | `client_backfill` | Client | Game (clears) | Additive backfill: client writes bits for checks the AP server already knows about (fresh save, slot takeover, `!collect`). |
 | 0x290 | u8        | `goal_complete`   | Game   | Client | Sticky once set. 1 when the active goal condition is satisfied. Persisted to `APSave.goal_complete`. |
+| 0x291 | u8        | `goal_satisfied_mask` | Game | Client | Bit `r` = row `r`'s own goal satisfied; rows set to `GOAL_NONE` stay clear. Per-row sticky, since every goal reduces to sticky bits. Recomputed on every goal evaluation, including after `goal_complete` latches, so a save load repopulates it. Not persisted - it is derived from `APSave.sent_checks`. |
 
 Both bitmasks are `CHECKLIST_MODE_NUM` (4) rows: rows 0-2 are Air Ride / Top Ride / City Trial, row 3 is the synthetic AP checklist tab.
 
@@ -488,6 +489,8 @@ Evaluated in `check_detection.c` against `ap_save->options` (the slot options co
 | `GOAL_MAX_STATS_CT` | Sticky save bit `max_stats_ct_achieved`, set when any human player's 9 CT stats simultaneously reach `city_trial_patch_cap_max` (1-127; **not** `PATCH_STAT_MAX`, the absolute clamp ceiling of 127) during a `CITYMODE_TRIAL` round. Stadium and Free Run do not count. When `min < max` the player must first receive every Patch Cap Increase item to make the ceiling reachable. |
 
 Victory fires only if at least one mode has a non-NONE goal AND every mode's goal is satisfied. Mode goals are independent - set a mode's goal to `GOAL_NONE` to keep it out of the victory condition.
+
+Per-mode satisfaction is published as `goal_satisfied_mask` alongside the aggregate `goal_complete`, and the mod announces each mode's goal as it lands. The client feeds the mask to Universal Tracker: UT's go-mode readout is the world's completion condition, and under UT the apworld swaps the AND-every-victory rule for "some goal is still outstanding and in logic" - the mask is what tells it which goals are already done, since logic reachability alone can only say a goal is *available*.
 
 ### Collect / Release
 

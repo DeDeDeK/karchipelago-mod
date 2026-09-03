@@ -238,26 +238,31 @@ static void AnnounceModeGoal(int row)
 
 void CheckDetection_EvaluateGoal(void)
 {
-    if (ap_save->goal_complete)
-        return;  // sticky once set
-
     APSlotOptions *opt = &ap_save->options;
 
     // Victory needs at least one non-NONE goal, all of them satisfied. If every
     // mode is GOAL_NONE it never fires.
+    u8 satisfied_mask = 0;
     int any_real_goal = 0;
     int all_ok = 1;
-    int newly_satisfied[CHECKLIST_MODE_NUM];
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         APGoalKind goal = (APGoalKind)opt->goal[r];
         int sat = goal_satisfied(goal, r, PopcountRow(r), opt->checklist_amount[r]);
-        newly_satisfied[r] = (goal != GOAL_NONE) && sat && !ap_save->goal_announced[r];
         if (goal != GOAL_NONE)
+        {
             any_real_goal = 1;
+            if (sat)
+                satisfied_mask |= (u8)(1 << r);
+        }
         if (!sat)
             all_ok = 0;
     }
+    // Published before the sticky return so a save load repopulates it after victory.
+    ap_data->goal_satisfied_mask = satisfied_mask;
+
+    if (ap_save->goal_complete)
+        return;  // sticky once set
 
     if (any_real_goal && all_ok)
     {
@@ -277,7 +282,7 @@ void CheckDetection_EvaluateGoal(void)
     // Victory not reached yet: announce each mode goal that just became satisfied.
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        if (!newly_satisfied[r])
+        if (!(satisfied_mask & (1 << r)) || ap_save->goal_announced[r])
             continue;
         ap_save->goal_announced[r] = 1;
         AnnounceModeGoal(r);
@@ -558,6 +563,7 @@ void CheckDetection_ResetAll(void)
     }
     ap_save->goal_complete = 0;
     ap_data->goal_complete = 0;
+    ap_data->goal_satisfied_mask = 0;
     ap_save->max_stats_ct_achieved = 0;
     ApPatches_ResetAll();
 }
@@ -591,6 +597,7 @@ void CheckDetection_DebugForceMarkAll(void)
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;
     ap_save->max_stats_ct_achieved = 1;
+    CheckDetection_EvaluateGoal();  // republish goal_satisfied_mask over the forced checks
     ApPatches_DebugForceMarkAll();
     Hoshi_WriteSave();
     OSReport("[CheckDetection] Debug: force-marked all sent_checks and goal_complete\n");
@@ -600,6 +607,13 @@ void CheckDetection_DebugTriggerGoal(void)
 {
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;
+    // goal_complete asserts every real goal is done, so the per-row mask has to agree -
+    // sent_checks are untouched here, so nothing else would set it.
+    u8 mask = 0;
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+        if (ap_save->options.goal[r] != GOAL_NONE)
+            mask |= (u8)(1 << r);
+    ap_data->goal_satisfied_mask = mask;
     Hoshi_WriteSave();
     OSReport("[CheckDetection] Debug: goal_complete forced\n");
 }

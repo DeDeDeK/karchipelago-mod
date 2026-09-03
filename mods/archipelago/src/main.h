@@ -277,6 +277,7 @@ typedef struct APData
     u64 sent_checks[CHECKLIST_MODE_NUM][2];      // Game -> client. Bit (k%64) of word (k/64) = checkbox k complete on that row.
     u64 client_backfill[CHECKLIST_MODE_NUM][2];  // Client -> game, additive. Mod ORs into sent_checks each frame, then clears.
     u8 goal_complete;                            // Game -> client. Sticky once the active goal is satisfied.
+    u8 goal_satisfied_mask;                      // Game -> client. Bit r = row r's goal satisfied; 0 for GOAL_NONE rows. Sticky per row.
 
     // Live mirrors of the Settings menu toggles, game-owned. The client polls
     // them to forward mid-session enable/disable to the AP server.
