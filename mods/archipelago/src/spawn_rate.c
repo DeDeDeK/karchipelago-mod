@@ -12,7 +12,7 @@
 // item density against a malformed save.
 #define SPAWN_RATE_SCALE_MAX 3.0f
 
-static float SpawnRate_GetScale()
+float SpawnRate_GetScale()
 {
     u32 min_pct = ap_save->options.spawn_rate_min;
     // 0 = options not yet received, so fall back to vanilla. The 10% floor keeps

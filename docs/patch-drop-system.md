@@ -4,8 +4,17 @@ The patch drop system ejects a rider's collected stat patches back into the worl
 items when something forces them to "drop their stats" - damage, boost overuse, or our trap
 item. It is a producer/consumer queue: `Rider_DropPatches` (0x8019d330) enqueues an event by
 writing fields on `RiderData`, and `Rider_TickDropPatches` (0x8019dc74) drains that queue one
-item per frame-cooldown. The engine side is unmodified by the mod; `Patch_DropTrap` in
-`mods/archipelago/src/patch_item.c` only calls into it.
+item per frame-cooldown. `Patch_DropTrap` in `mods/archipelago/src/patch_item.c` only calls
+into it.
+
+The all-up phase is patched. `mods/ap_star/src/ap_star_pieces.c` puts the AP Star spheres into
+it so one can be knocked out of a rider the way a Hydra part can, with four seams: a
+`REPLACECALL` at 0x8019d4bc adding the rider's sphere count to the quota the producer caps
+`allups_dropped` against, a `HOOKCREATE` at 0x8019d868 re-rolling the chosen kind over the
+vanilla pieces plus the spheres, a `REPLACECALL` at 0x8019d8d4 charging a sphere's decrement
+to its clamped base kind, and a conditional hook at 0x8019d8f8 clearing the sphere's own bit
+and exiting to 0x8019d950 past both vanilla mask branches. Nothing else in the pipeline is
+touched.
 
 ## Pipeline
 
@@ -20,7 +29,10 @@ still ticking, then dispatches: all-ups first if any are owed, otherwise patches
 `Rider_TickDropAllUp` (0x8019d55c) handles the all-up phase. It picks the matching
 `Game3dData.patch_drop_modeN_params` block and calls `CityItem_Throw` directly - but what it
 throws is a collected **Legendary-machine piece** (item kinds 0x37-0x3c; Hydra 0x37-0x39,
-Dragoon 0x3a-0x3c), *not* `ITKIND_ALLUP`. The thrown piece is also cleared from the rider's
+Dragoon 0x3a-0x3c), *not* `ITKIND_ALLUP`. The candidate list is the six bits of the two piece
+masks packed into a stack array; when it is empty the array's first entry is still -1 and the
+code adds 0x37 to it regardless, so the kind reaching the throw would be 54. Vanilla never
+gets there because the quota that gates the phase is zero when no piece is held. The thrown piece is also cleared from the rider's
 Hydra/Dragoon collection mask. Each successful spawn decrements `allups_dropped`, increments
 `patch_drop_progress`, and drains one from `patch_drop_count`. It negates `forward` when
 `patch_drop_mode == 1`, but that branch is dead in practice: mode 1 never queues all-ups.
@@ -72,8 +84,10 @@ The queue lives entirely in `RiderData` fields (declared in `externals/hoshi/inc
   producer adds to it, capped so the total never exceeds
   `Ply_GetHydraCollection + Ply_GetDragoonCollection` - the rider's quota, earned by collecting
   Legendary Air Ride Machine pieces. It is **not** reset on a fresh session.
-- 0x5a0 is scratch: the Legendary-piece item kind `Rider_TickDropAllUp` picked for the current
-  spawn, written and consumed within one call.
+- `drop_piece_kind` (0x5a0) - the Legendary-piece item kind `Rider_TickDropAllUp` picked for
+  the current spawn, written and consumed within one call. It is read back after the throw to
+  decide which mask to clear the bit from, which is why the value has to be the kind actually
+  thrown.
 
 Spawn geometry reads `hand_bone_pos` (0x318) as the origin and `forward` (0x324) as the throw
 direction, with `forward` negated for mode 1 so drops fly behind the rider.

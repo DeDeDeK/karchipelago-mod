@@ -25,6 +25,12 @@ The category has two sources inside `UpdateAndCheckToSpawn`. `CityItemSpawn_Chec
 
 Whichever branch runs, the resulting `box_color` is forwarded as the first argument to `PowerUp_SpawnFromSky` (0x800ecdf4) at 0x800eb260, which is what actually places the box.
 
+**A large red box is always a carrier.** Red's three entries in City Trial's table are
+`7 / 7 / 0`, so the picker can never select red-large - `selected % 3` only reaches 2 for a
+color whose large weight is nonzero. Category 2 hardcodes `box_size = 2`, so every large red
+box on the field came from the legendary-piece path (Dragoon, Hydra, or an AP Star sphere).
+Nothing announces a carrier, and this is the only thing that distinguishes one.
+
 **"Red box" is not one thing.** `GKYE01.map` labels category 1 "blue/green box" and category 2 "red box", which is misleading: category 1's picker selects from a 9-entry table that *includes* red, so normal red item boxes are fully gated here. Category 2 is not a normal box at all - it is the legendary piece carrier, which deliberately stays outside box-color gating. Locking Red suppresses every random red box; it does not hide Dragoon/Hydra part deliveries. A carrier is still a real red box, so it bumps the red-box break counter and keeps spawning with Red locked or the red pool empty. Breaking one while the red pool is empty is harmless: `CityItemSpawn_GetRandomItemID` walks a zero-length pool, `HSD_Randi(0)` returns 0 without dividing, and the roll falls through to `-1`, which spawns no item.
 
 `GrBoxGeneratorDetermine` (0x800ebc04) reads a 9-entry chance table from `grBoxGeneInfo->item_desc->box_spawn_chances`. It is 3 colors x 3 sizes, color-major (`[blue_small, blue_medium, blue_large, green_*, red_*]`). Vanilla sums the nine, rolls `HSD_Randi(total)`, walks the cumulative distribution to a `selected` index, then writes `selected / 3` to `*box_color` and `selected % 3` to `*box_size`. The table lives in read-only `.dat` data shared across spawn cycles, so it cannot be edited in place - the replacement copies the nine bytes to the stack and zeroes there.

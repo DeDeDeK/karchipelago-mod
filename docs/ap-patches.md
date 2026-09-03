@@ -211,15 +211,73 @@ picker, and on a winning roll returns `box_kind` instead of what came back, leav
 and `box_size` the roll wrote in place.
 
 That makes the AP box a fourth outcome of the vanilla box roll rather than a spawn of its own. It
-inherits the fall timer, the field's simultaneous-item cap, the position and slot picking and the
-8-entry recent-slot ring buffer, and both spawn-rate hooks scale it with everything else - the
-frequency knob is the Spawn Rate Up item, not a setting. The cost is that an AP box displaces the
-blue, green or red one that tick would otherwise have placed.
+inherits the fall timer, the position and slot picking and the 8-entry recent-slot ring buffer, and
+the spawn-rate hooks scale it with everything else - the frequency knob is the Spawn Rate Up item,
+not a setting. The cost is that an AP box displaces the blue, green or red one that tick would
+otherwise have placed. What it does **not** inherit is the field's simultaneous-item cap, which is
+checked upstream of the seam; the section below is what stands in for it.
 
-`AP_BOX_PERCENT` is 16, just under the 14-in-71 share red holds in City Trial's own chance
-table (`[20, 15, 10, 5, 4, 3, 7, 7, 0]`), so it reads as one more color rather than a flood.
-A five-minute round is roughly 50 boxes, so about 8 of them are AP boxes and, at 1.92 patches a
-box, about 15 patches. The roll is skipped entirely while the round is not armed or
+### Why a percentage is not enough
+
+`AP_BOX_PERCENT` is 6, and there is a second limit on top of it, because the quantity a
+percentage is taken against is not throttled.
+
+`CityItemSpawn_UpdateAndCheckToSpawn` (`0x800ea6e0`) runs three steps in this order, and the
+order is the whole problem:
+
+1. **Decrement the timer, and on expiry reset it** (`0x800ea990`). City Trial's six
+   `ItemFallDesc` rows run `item_max` 45-60 with timers of 20-30, 30-40 and 40-50 frames across
+   the round, so a tick lands every ~0.42-0.75 s - about **623 ticks in a five-minute round**.
+2. **Check the field's simultaneous-item cap** (`0x800eaa8c`, `cur_num_items` vs `item_max`).
+   On a full field this jumps to the skip-spawn branch, which does not even advance the script
+   index - the tick is dead.
+3. **Read the next byte of the spawn script** and map it through the category table at
+   `0x805d617c`. City Trial's normal script is `[0, 0, 0, 0, 1]` (`box_spawn_chances + 9`), so
+   **one tick in five is a box tick**, giving ~125 box ticks a round if none are dead.
+
+The timer resets in step 1 regardless of what step 2 decides, so the cap never slows the
+*cadence* - it only decides which ticks are live. That is fine for a vanilla color, which is
+picked in step 3 and therefore only ever competes for ticks the cap already admitted. An AP box
+is substituted on the picker's **return**, downstream of all three, and it is exempt from the
+color gates besides. So the emptier the field, the more ticks survive step 2 and the more AP
+boxes land - and an early seed with box and patch gating on is exactly the case where nothing
+else is spawning to fill the field at all. Gating makes the category *more* generous, which is
+backwards.
+
+At the old 16% an unthrottled round pays out ~20 AP boxes and ~38 patches. That is the go-mode
+reading, and it is worst at the start of a seed.
+
+### The two limits
+
+**`AP_BOX_PERCENT` is 6**, well under the 14-in-71 share red holds in the city's own chance table
+(`[20, 15, 10, 5, 4, 3, 7, 7, 0]`). Matching a real color's share only makes sense for something
+the cap throttles like a real color.
+
+**`AP_BOX_MIN_INTERVAL` is 2400 frames (40 s)**, a floor on the gap between two winning rolls. It
+is divided by `SpawnRate_GetScale()` so the Spawn Rate Up item still moves the cadence and a
+sub-vanilla `spawn_rate_min` still slows it - the floor bounds the category against *gating*, not
+against the knob that is supposed to control it.
+
+Nothing counts the interval down. The spawner already keeps a frame clock for the round in
+`grBoxGeneInfo.match_frames_left` (`+0x29c`), rebuilt at the top of
+`CityItemSpawn_UpdateAndCheckToSpawn` every frame from the round timer as
+`(min * 60 + sec) * 60 + subseconds * 0.6`, so the seam records the deadline as a value of that
+clock and compares against it on the next box tick. `box_gate_frames` starts at `INT_MAX` at
+`On3DLoadStart` - the clock is always below it, so the round's first roll is never held back - and
+a winning roll sets it to `match_frames_left - interval`.
+
+Reading the round's own clock rather than ticking one is what keeps the whole feature inside the
+seam. There is no per-frame work for a value only a box tick reads, no state to reset besides the
+one `On3DLoadStart` already writes, and a paused round, a round that has ended and a round of any
+length all behave correctly for free, because they are already correct in the clock.
+
+The floor is what makes the rate stop depending on how much of the game is locked. A fully
+unthrottled round offers ~125 box ticks, which at 6% wants ~7.5 AP boxes; the floor allows at most
+7 in five minutes. The two land in the same place by construction, so a gated round and an ungated
+one pay out at the same rate - about **7 AP boxes and 11 patches** in a five-minute round, against
+~20 boxes and ~38 patches before.
+
+The roll is skipped entirely while the round is not armed or
 `ap_patches - popcount(ap_patch_collected)` has reached zero, which leaves the category dormant for
 the round without disabling the items, so a `!collect` or a backfill mid-session re-arms on the
 next load.
@@ -253,11 +311,17 @@ box is spawned through `PowerUp_SpawnFromSky` instead, so it can never be carryi
 
 The count comes off `ItemData + 0x40`, the box size the stage's `box_spawn_chances` table rolled
 at spawn time. City Trial's table is `[20, 15, 10, 5, 4, 3, 7, 7, 0]` across 3 colors x 3 sizes,
-which is 45.1% small / 36.6% medium / 18.3% large and averages **1.92 items per box**, so an AP
-box opens exactly like an ordinary one.
+which is 45.1% small / 36.6% medium / 18.3% large, so vanilla's 1 / 2 / 4 averages 1.92 items per
+box.
 
-The one departure is a clamp of the count against live `remaining` at **break** time, not at arm
-time, so the last box of a run cannot spawn patches nothing can claim.
+Two clamps sit on top of that. `AP_BOX_MAX_PATCHES` is 2, which flattens the large box's 4 down to
+the medium box's 2 and brings the average to **1.55 patches per box**: a single break can then only
+ever be worth a pair of checks, so the category advances at a rate the box roll sets rather than
+one a lucky size roll can spike. The second is a clamp against live `remaining` at **break** time,
+not at arm time, so the last box of a run cannot spawn patches nothing can claim.
+
+Only the first two entries of the `{0, 180, 90, -90}` yaw table can be reached under the cap, which
+is the same pair a vanilla medium box uses.
 
 ## Collection
 
@@ -376,6 +440,7 @@ collected total never reads past the window the count describes.
 ## Logging
 
 The `[APPatches]` component prints one "Hooks installed" line at boot, one line per claim, one
-per round at arm time with the remaining count and the roll's share, and one at round end with the
-AP boxes the roll produced - enough to see whether the share is landing where it should. Nothing
+per round at arm time with the remaining count, the roll's share and the scaled interval floor,
+and one at round end with the AP boxes the roll produced - enough to see whether the share is
+landing where it should, and whether the floor or the percentage was the binding limit. Nothing
 per spawn.

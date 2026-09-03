@@ -328,6 +328,124 @@ static void OnPickup(u32 id_hash, const char *name, int player)
     Collect(player, slot);
 }
 
+// Dropping a sphere. Rider_TickDropAllUp (0x8019d55c) throws a collected legendary
+// piece when a rider is hit hard enough, and every part of it is written against the two
+// vanilla masks: the candidate list is their six bits, the thrown kind is the list index
+// plus 0x37, and the bit cleared afterwards is indexed back off that kind. A sphere is
+// held in piece_mask[] and its ItemKind is a custom one past the vanilla table, so it is
+// invisible to all three and unsafe for any of them. Four seams put it in.
+
+// The kind the candidate roll produces when the list is empty: local_68[0] is still -1
+// and 0x37 is added unconditionally. Vanilla never throws it because the quota is zero
+// when no piece is held; adding spheres to the quota makes it reachable, so it is read
+// here as "the rider holds no vanilla piece".
+#define AP_DROP_NO_VANILLA 54
+
+static int SphereSlotForKind(int kind)
+{
+    if (kind < 0)
+        return -1;
+    for (int i = 0; i < APSTARPIECE_NUM; i++)
+    {
+        if (piece_kind[i] == kind)
+            return i;
+    }
+    return -1;
+}
+
+// REPLACECALL on the bl Ply_GetDragoonCollection in Rider_DropPatches. The sum of the two
+// collection counts is the rider's legendary-drop quota, and allups_dropped is capped
+// against it - so without the spheres in that sum a rider holding nothing else queues no
+// drop at all and Rider_TickDropAllUp is never dispatched.
+static int DropQuotaDragoon(int ply)
+{
+    int n = Ply_GetDragoonCollection(ply);
+    if (ply >= 0 && ply < 5)
+        n += Popcount64(piece_mask[ply]);
+    return n;
+}
+
+// HOOKCREATE on the stw that stores the kind about to be thrown. Vanilla has already
+// rolled uniformly over the pieces in its two masks; re-rolling over those plus the
+// rider's spheres keeps every piece they hold equally likely to come out.
+static int PickDropKind(int kind, RiderData *rd)
+{
+    int ply = rd->ply;
+    if (ply >= 5)
+        return kind;
+
+    u8 mask = piece_mask[ply];
+    int spheres = Popcount64(mask);
+    if (spheres == 0)
+    {
+        // The quota and the masks drain together, so this only reads as "the rider holds
+        // nothing" if they ever desync. Returning -1 takes vanilla's own bail rather than
+        // letting kind 54 reach the throw.
+        return kind == AP_DROP_NO_VANILLA ? -1 : kind;
+    }
+
+    int vanilla = 0;
+    if (kind != AP_DROP_NO_VANILLA)
+        vanilla = Popcount64(Ply_GetHydraPieceMask(ply) & 7) +
+                  Popcount64(Ply_GetDragoonPieceMask(ply) & 7);
+    if (HSD_Randi(vanilla + spheres) < vanilla)
+        return kind;
+
+    int pick = HSD_Randi(spheres);
+    for (int i = 0; i < APSTARPIECE_NUM; i++)
+    {
+        if (!(mask & (1 << i)))
+            continue;
+        if (pick-- == 0)
+            return piece_kind[i] >= 0 ? piece_kind[i] : kind;
+    }
+    return kind;
+}
+
+// REPLACECALL on the bl Ply_DecrementItemCollectNum in Rider_TickDropAllUp. item_collect
+// is 0x45 entries indexed by ItemKind and the callee bounds-checks neither end, so a
+// sphere's kind would write past PlayerStats. The pickup counted the clamped base kind,
+// so the drop takes it back off the same slot.
+static void DropDecrementCollect(int ply, ItemKind kind)
+{
+    if (SphereSlotForKind(kind) >= 0)
+        kind = ITKIND_HYDRA1;
+    Ply_DecrementItemCollectNum(ply, kind);
+}
+
+// HOOKCONDITIONALCREATE on the lwz that reloads the thrown kind for the mask clear. Both
+// vanilla branches XOR a mask by 1 << (kind - 0x37) or 1 << (kind - 0x3a); a sphere kind
+// runs both off the end, so it clears its own bit and exits past them to the cooldown
+// reset. The HUD row diffs piece_mask each frame, so the icon leaves with the bit.
+static int DropClearSphere(RiderData *rd)
+{
+    int slot = SphereSlotForKind(rd->drop_piece_kind);
+    if (slot < 0)
+        return 0;
+
+    int ply = rd->ply;
+    if (ply < 5)
+        piece_mask[ply] &= (u8)~(1 << slot);
+    OSReport("[ApStarPieces] Player %d dropped %s\n", ply + 1, piece_names[slot]);
+    return 1;
+}
+
+CODEPATCH_HOOKCREATE(0x8019d868,
+    "mr 3, 0\n\t"
+    "mr 4, 30\n\t",
+    PickDropKind,
+    "mr 0, 3\n\t",
+    0
+)
+
+CODEPATCH_HOOKCONDITIONALCREATE(0x8019d8f8,
+    "mr 3, 30\n\t",
+    DropClearSphere,
+    "",
+    0,           // not a sphere: run the lwz and take vanilla's mask branch
+    0x8019d950   // sphere: skip both branches, resume at the cooldown reset
+)
+
 // REPLACECALL on the bl in CityItemSpawn_UpdateAndCheckToSpawn. Vanilla returns 2
 // when one of its own pieces wants the next carrier box and 3 when neither does;
 // the AP set only claims a carrier vanilla passed on.
@@ -377,7 +495,11 @@ void ApStarPieces_OnBoot(void)
 
     CODEPATCH_REPLACECALL(0x800ea7e0, CheckToSpawn);  // bl CityItemSpawn_CheckToSpawnLegendaryPiece
     CODEPATCH_REPLACECALL(0x800eb27c, SpawnPiece);    // bl CityItemSpawn_SpawnLegendaryPiece
-    OSReport("[ApStarPieces] Spawn hooks installed\n");
+    CODEPATCH_REPLACECALL(0x8019d4bc, DropQuotaDragoon);      // bl Ply_GetDragoonCollection in Rider_DropPatches
+    CODEPATCH_REPLACECALL(0x8019d8d4, DropDecrementCollect);  // bl Ply_DecrementItemCollectNum in Rider_TickDropAllUp
+    CODEPATCH_HOOKAPPLY(0x8019d868);                          // sphere in the drop candidate roll
+    CODEPATCH_HOOKAPPLY(0x8019d8f8);                          // ... and out of the collected mask
+    OSReport("[ApStarPieces] Spawn and drop hooks installed\n");
 }
 
 static void ImportRegistry(void)

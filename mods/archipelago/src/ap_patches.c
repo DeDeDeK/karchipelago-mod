@@ -15,11 +15,30 @@
 
 #include "main.h"
 #include "ap_item_handler.h"
+#include "spawn_rate.h"
 #include "ap_patches.h"
 
-// Percent of City Trial box spawns that come up as an AP Box. Matches red's share of
-// the city's own 9-entry chance table (14 of 71), so it lands like a fourth color.
-#define AP_BOX_PERCENT 16
+// Percent of the city's box-category spawn ticks that come up as an AP Box. Well under
+// the 14-in-71 share red holds in the city's own chance table, because the tick a box
+// rolls on is not the throttled quantity: the spawner's item cap is checked ahead of
+// the roll, so a full field kills a tick before it ever reaches here, and a field that
+// gating has emptied lets every one of them through.
+#define AP_BOX_PERCENT 6
+
+// Frames an AP Box roll waits after a winning one, divided by the spawn-rate scale so
+// the Spawn Rate Up item still moves the cadence. This is the ceiling the percentage on
+// its own cannot give: City Trial ticks at 20-50 frames, one in five of them a box, so
+// an unthrottled round offers roughly 125 box ticks and the percentage alone would pay
+// out against however many of those the field's cap happened to leave live.
+//
+// The clock is grBoxGeneInfo.match_frames_left, which the spawner rebuilds from the
+// round timer every frame - so nothing has to be counted down, and a paused or ended
+// round stops the interval on its own.
+#define AP_BOX_MIN_INTERVAL (40 * 60)
+
+// Patches one AP Box scatters, capping the 1 / 2 / 4 the vanilla size roll gives, so a
+// single large box cannot hand over a run of checks.
+#define AP_BOX_MAX_PATCHES 2
 
 // Yaw offset in degrees applied to the nth item out of a breaking box, from the
 // table Box_OutcomeLogic reads at 0x80489f48. A zero offset skips the rotation.
@@ -41,6 +60,7 @@ static int box_kind = -1;
 
 static int round_armed;
 static int boxes_rolled;
+static int box_gate_frames; // match_frames_left must fall to this before the next roll
 
 int ApPatches_CollectedCount(void)
 {
@@ -133,16 +153,25 @@ static int RollBoxSize(void)
 // REPLACECALL on the bl GrBoxGeneratorDetermine at 0x800eb20c, the one call site
 // CityItemSpawn_Think reaches when its tick came up an item box. The picker's
 // return is the box's ItemKind, so an AP box is one more outcome of the vanilla
-// roll - it inherits the fall timer, the field's item cap and the spawn-rate
-// scaling, and it keeps the color and size the roll landed on.
+// roll - it keeps the color and size the roll landed on and inherits the fall timer.
+// What it does not inherit is the throttle: the field's item cap is checked before
+// this runs, so gating that empties the field hands the roll every tick the timer
+// makes. The interval floor is what holds the cadence steady across that.
 static int DetermineBox(int *box_color, int *box_size)
 {
     int kind = GrBoxGeneratorDetermine(box_color, box_size);
 
     if (!round_armed || ApPatches_Remaining() <= 0)
         return kind;
+
+    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
+    int now = info != NULL ? info->match_frames_left : 0;
+    if (now > box_gate_frames)
+        return kind;
     if (HSD_Randi(100) >= AP_BOX_PERCENT)
         return kind;
+
+    box_gate_frames = now - (int)((float)AP_BOX_MIN_INTERVAL / SpawnRate_GetScale());
 
     // No gate ever sees the AP box, so it still lands on the tick where box
     // gating has left no vanilla color eligible - carrying its own color and size.
@@ -170,6 +199,8 @@ static void BreakApBox(ItemData *id)
         return;
 
     int count = (id->x40 == 1) ? 2 : (id->x40 == 2) ? 4 : 1;
+    if (count > AP_BOX_MAX_PATCHES)
+        count = AP_BOX_MAX_PATCHES;
     int remaining = ApPatches_Remaining();
     if (count > remaining)
         count = remaining;
@@ -386,6 +417,7 @@ void ApPatches_On3DLoadStart(void)
     box_kind = -1;
     round_armed = 0;
     boxes_rolled = 0;
+    box_gate_frames = 0x7fffffff; // open, so the round's first roll is not held back
     ptcl_state = 0; // the bank tables are rebuilt with the scene
 
     if (ci_api == NULL)
@@ -431,8 +463,9 @@ void ApPatches_On3DLoadEnd(void)
     }
 
     round_armed = 1;
-    OSReport("[APPatches] Armed with %d patch(es) left, %d%% of box spawns\n",
-             ApPatches_Remaining(), AP_BOX_PERCENT);
+    OSReport("[APPatches] Armed with %d patch(es) left, %d%% of box spawns, %d frame floor\n",
+             ApPatches_Remaining(), AP_BOX_PERCENT,
+             (int)((float)AP_BOX_MIN_INTERVAL / SpawnRate_GetScale()));
 }
 
 void ApPatches_On3DExit(void)

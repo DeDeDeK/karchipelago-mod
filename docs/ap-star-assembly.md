@@ -95,19 +95,55 @@ The schedule is rolled per round in `ApStarPieces_On3DLoadEnd`, mirroring
 `LegendaryPieces_Init` (`0x800ecfac`): the unlocked pieces are shuffled into a delivery
 order, and each step draws a match-progress threshold out of its own window.
 
-| Step | Window (percent of the round elapsed) |
-|---|---|
-| 1 | 10-20 |
-| 2 | 20-32 |
-| 3 | 32-45 |
-| 4 | 45-58 |
-| 5 | 58-70 |
-| 6 | 70-85 |
-
 Vanilla spreads three parts over 15-30 / 25-50 / 50-80 and rolls a flat 30% per machine
-for whether that machine's set appears at all. The AP set divides the same span into six
-and is always armed, so a full round always offers every sphere the player owns - a
-six-piece set behind a per-round coin flip would rarely finish.
+for whether that machine's set appears at all. The AP set is always armed, so a full round
+always offers every sphere the player owns - a six-piece set behind a per-round coin flip
+would rarely finish.
+
+### One delivery each, and why that is enough
+
+Vanilla sends each of a machine's three parts exactly once and then switches the set off:
+`CityItemSpawn_CheckToSpawnLegendaryPiece` (`0x800ed2f0`) only returns 2 while
+`is_enabled` is set and `progress` has passed `spawn_progress[next_piece_index]`, and
+`CityItemSpawn_SpawnLegendaryPiece` (`0x800ed384`) clears `is_enabled` once
+`next_piece_index` passes 2. There is no re-delivery anywhere in it, and the AP set matches
+that: six steps, one carrier each.
+
+It works because **the carrier box never expires**. `LegendaryPiece_ClearSpawnRequest`
+(`0x80252e74`) is not clearing a flag despite the name - it is two instructions that write
+`-1` into the box's `ItemData.lifetime` (`+0x44`). The expiry check in
+`CityItem_LifetimeThink` (`0x8024fa38`) is
+
+```
+if (0 < lifetime) lifetime--;
+if (lifetime == 0) CityItem_EnterExpire(gobj);
+```
+
+so a lifetime of `-1` is never decremented and never equals 0. A carrier stands in the city
+for the rest of the round until a player breaks it, and the six accumulate. One delivery is
+a guaranteed delivery, and it is guaranteed to still be there an hour later. `SpawnPiece`
+calls the same function on the AP carrier, so the set inherits this unchanged.
+
+What is *not* immortal is the piece inside. `Box_OutcomeLogic` hands the contents to
+`Box_SpawnContents` (`0x80253378`), which builds an ordinary descriptor through
+`CityItem_InitDesc` (`0x802509a0`); that function gives every item
+`lifetime_min + HSD_Randi(lifetime_variance)` and special-cases kinds `0x37`-`0x3c`, the six
+legendary pieces, only to clear their `flags`. The lifetime is untouched, so a broken-open
+piece left on the ground expires like anything else. That is vanilla behavior and the set
+keeps it: a sphere a rival cracked out and drove past is gone for the round.
+
+### Finding one
+
+Nothing announces a carrier. `CityItemSpawn_Think` places it with `PowerUp_SpawnFromSky`
+like any other box and then writes `forced_item`; there is no sound, no marker and no
+message on either the vanilla path or this one.
+
+What identifies it is its **size**. The category-2 path hardcodes `box_color = 2` and
+`box_size = 2` at `0x800eb218`, and City Trial's own 9-entry chance table is
+`[20, 15, 10, 5, 4, 3, 7, 7, 0]` - three colors by three sizes, color-major, so red is
+7 / 7 / **0**. An ordinary red box in City Trial is small or medium and **never large**. A
+large red box is therefore always a legendary or sphere carrier, and that is the only tell
+the game gives.
 
 Nothing has to be done about three legendary sets competing for carriers.
 `CityItemSpawn_Think` runs every frame and a due piece short-circuits the ordinary spawn
@@ -180,9 +216,52 @@ for a three-piece set: counts 1, 2 and 3 play rising tones, and 4 plays the pair
 sounds the assembly cinematic uses on completion. Six pieces climb the same three rungs
 two at a time, and the sixth plays the completion pair.
 
-Losing a piece is the one vanilla behavior the set does not have.
-`Rider_TickDropAllUp` (`0x8019d55c`) builds its candidate list from the two vanilla
-masks, so a hard enough hit can knock a Hydra part loose but never a sphere.
+### Dropping a sphere
+
+A sphere comes loose the way a Hydra part does, which is what makes a single carrier each
+survivable: a sphere a rival took can be knocked back out of them.
+
+The engine side is `Rider_DropPatches` (`0x8019d330`) queueing a drop and
+`Rider_TickDropAllUp` (`0x8019d55c`) throwing one legendary piece per cooldown while
+`RiderData.allups_dropped` is positive. Every part of it is written against the two vanilla
+masks - the candidate list is their six bits, the thrown kind is the list index plus `0x37`,
+and the bit cleared afterwards is indexed back off that kind - while a sphere lives in this
+mod's `piece_mask[]` under a custom `ItemKind` past the vanilla item table. Four seams put
+it in, and three of them exist only to keep vanilla's bookkeeping off a kind it cannot
+index.
+
+| Site | Patch | Behavior |
+|---|---|---|
+| `0x8019d4bc`, the `bl` into `Ply_GetDragoonCollection` inside `Rider_DropPatches` | `REPLACECALL` | Add the rider's sphere count to the drop quota |
+| `0x8019d868`, the `stw` of the kind about to be thrown | `HOOKCREATE` | Re-roll over the vanilla pieces plus the rider's spheres |
+| `0x8019d8d4`, the `bl` into `Ply_DecrementItemCollectNum` | `REPLACECALL` | Charge a sphere to the clamped base kind |
+| `0x8019d8f8`, the `lwz` that reloads the kind for the mask clear | conditional hook | Sphere -> clear its own bit and exit to `0x8019d950` |
+
+**The quota.** `allups_dropped` is capped against
+`Ply_GetHydraCollection + Ply_GetDragoonCollection`, so a rider holding only spheres queues
+no legendary drop at all and `Rider_TickDropAllUp` is never dispatched. The seam adds
+`Popcount(piece_mask[ply])` to the Dragoon half of that sum, which is the whole of it - the
+quota and the masks then drain together, one decrement per successful throw.
+
+**The roll.** Vanilla has already picked uniformly among the pieces in its two masks by the
+time the kind is stored. The hook re-rolls over that count plus the rider's spheres, so
+every piece held is equally likely to be the one that comes out. It reads a kind of **54**
+as "no vanilla piece": `local_68[0]` is still `-1` when the candidate list is empty and the
+code adds `0x37` regardless. Vanilla never throws that value because its quota is zero when
+no piece is held, and putting spheres in the quota is exactly what makes it reachable.
+
+**The counter.** `PlayerStats.item_collect[]` is `0x45` entries indexed by `ItemKind`, and
+`Ply_DecrementItemCollectNum` (`0x8022fb58`) guards `ply < 5` and `kind != -1` but neither
+end of the array - a sphere's kind would write past the struct. The pickup counted the
+clamped base kind (`ITKIND_HYDRA1`, the Hydra Part X slot), so the drop takes it back off
+the same slot.
+
+**The mask.** Both vanilla branches XOR a piece mask by `1 << (kind - 0x37)` or
+`1 << (kind - 0x3a)`, which a sphere kind runs off the end of. The conditional hook clears
+the sphere's own bit instead and exits past both branches to the cooldown reset at
+`0x8019d950`, leaving the rest of the bookkeeping - progress, cooldown, `allups_dropped`,
+the returned count - to vanilla. The HUD row diffs `piece_mask` once a frame, so the icon
+leaves with the bit and no GObj is touched from inside the throw.
 
 ## The Tracker
 
