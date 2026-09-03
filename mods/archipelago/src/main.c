@@ -245,6 +245,11 @@ void OnSaveLoaded()
 
     ap_data->item_received_index = ap_save->item_received_count;
 
+    // Deferred past OnBoot: the custom_checklist framework mod boots after us, so its
+    // API only resolves once every mod has exported. Ahead of the reward regrant,
+    // which marks cells on the AP tab and so needs its clear data to exist.
+    APChecklist_Register();
+
     ChecklistRewards_OnSaveLoaded();
 
     // Without this the client reads zeros after a reboot and re-sends the whole
@@ -254,10 +259,6 @@ void OnSaveLoaded()
     // Mirrors sent_checks/goal_complete into shared memory and runs the initial
     // goal evaluation.
     CheckDetection_OnSaveLoaded();
-
-    // Also deferred past OnBoot: the custom_checklist framework mod boots after
-    // us, so its API only resolves once every mod has exported.
-    APChecklist_Register();
 
     // Re-applied every boot, not just at option transfer: the vanilla modes' reveal
     // rides along in the game's own clear data, but the AP tab's cells live in RAM

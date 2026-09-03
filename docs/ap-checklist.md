@@ -120,7 +120,7 @@ the tab.
 The AP cells are opened through the framework's `RevealAll(mode)` rather than by writing
 `is_visible` from here, because the framework latches the request per tab and re-applies it
 after its own grid shuffle, which drops every `is_visible` bit. Reveal state is also
-**re-applied on every boot**, from `OnSaveLoaded` right after `APChecklist_Register`, gated on
+**re-applied on every boot**, from `OnSaveLoaded` once the tab is registered, gated on
 `options_received`: the option transfer runs once per save file, and the vanilla modes'
 reveal survives in the game's own clear data, but a custom tab's cells live in RAM and come
 up blank. Without the re-apply the AP tab would be revealed only during the session the

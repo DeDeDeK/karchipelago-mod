@@ -560,6 +560,15 @@ reward on the same cell.
 then `RegrantAllReceivedRewards`, which replays `Grant(announce=0)` for every bit in
 `received_checklist_rewards` to restore `has_reward` and the gate-mask routing.
 
+`APChecklist_Register` runs before it in `OnSaveLoaded`, and the order is load-bearing: a
+reward placed on an Archipelago-tab checkbox is marked through `gmGetClearcheckerTypeP`,
+and the tab's clear data is created by `custom_checklist` at registration - regranting
+first dereferences NULL. `MarkRewardCell` carries the rest of the guard: the encoded target
+is a checklist-mode row, so it maps back to the tab's runtime mode, range-checks the row
+and clear_kind against the wire value, and skips the Archipelago row outright when the tab
+is not registered, which is also what keeps a build without `custom_checklist` from
+reaching vanilla's `mode >= 3` assert.
+
 `ChecklistRewards_ApplyLocations` runs once per client connection, when
 `ap_data->location_data_valid` is set. It copies `ap_data->locations[m][ap_ri]` into
 `ap_save->shuffled_rewards[m][game_ri]`, rebuilds, regrants (rewards received before the

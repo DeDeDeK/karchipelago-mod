@@ -15,6 +15,11 @@
 // only resolves once all mods have exported.
 void APChecklist_Register(void);
 
+// 1 once custom_checklist has accepted the tab and its clear data exists. Anything
+// that indexes the AP row's clear data has to check this first: without the framework
+// in the build the vanilla accessor asserts on a mode past City Trial.
+int APChecklist_IsRegistered(void);
+
 // Make every AP checklist cell that backs an objective visible. Only the cells in
 // ap_checks[] are revealed - the rest of the 120-cell grid has no objective behind
 // it. No-op if the tab is not registered.

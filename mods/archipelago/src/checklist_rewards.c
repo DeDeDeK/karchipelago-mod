@@ -476,11 +476,43 @@ static void AnnounceChecklistReward(GameMode mode, u8 reward_index, u8 reward_ty
     APAnnounce_Grant(prefix, name, color, NULL);
 }
 
+// Raise has_reward on the checklist cell a reward is placed on, for its display
+// badge. is_unlocked means "player completed this in gameplay" and belongs to the
+// check-detection path, so only the badge is written here. The encoded target is a
+// checklist-mode ROW; the AP tab's runtime mode is whatever custom_checklist assigned
+// it, and its clear data does not exist until the tab registers.
+static void MarkRewardCell(GameMode mode, u8 reward_index)
+{
+    // shuffled u16 = (target_row << 8) | target_clear_kind, 0xFFFF = remote.
+    u16 loc = ap_save->shuffled_rewards[mode][reward_index];
+    if (loc == 0xFFFF)
+        return;
+
+    u8 row = (u8)(loc >> 8);
+    u8 clear_kind = (u8)(loc & 0xFF);
+    if (row >= CHECKLIST_MODE_NUM || clear_kind >= CLEAR_KIND_NUM)
+        return;
+    if (row == AP_CHECKLIST_ROW && !APChecklist_IsRegistered())
+        return;
+
+    GameClearData *cd = gmGetClearcheckerTypeP((GameMode)ChecklistRowMode(row));
+    if (!cd)
+        return;
+    cd->clear[clear_kind].has_reward = 1;
+}
+
 // Grant a checklist reward received from the AP server. The unlock_cache at
 // GameData+0xD50 is rebuilt by Checklist_BuildUnlockBitfields via the REPLACEFUNC'd
 // ClearChecker_CheckUnlocked, so it picks up the new bit without a write here.
 void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
 {
+    if ((unsigned)mode >= GMMODE_NUM || reward_index >= reward_counts[mode])
+    {
+        OSReport("[ChecklistRewards] Grant out of range (mode=%d ri=%d) - ignored\n",
+                 mode, reward_index);
+        return;
+    }
+
     ap_save->received_checklist_rewards[mode] |= (1ULL << reward_index);
 
     // reward_type survives cross-mode / shuffle remapping (only clear_kind is
@@ -493,15 +525,7 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
         AnnounceChecklistReward(mode, reward_index, reward_type);
     ApplyVanillaRewardUnlock(mode, reward_index, reward_type);
 
-    // shuffled u16 = (target_mode << 8) | target_clear_kind, 0xFFFF = remote. Only
-    // has_reward (the display badge) is written; is_unlocked means "player completed
-    // this in gameplay" and belongs to the check-detection path.
-    u16 loc = ap_save->shuffled_rewards[mode][reward_index];
-    if (loc != 0xFFFF)
-    {
-        GameClearData *cd = gmGetClearcheckerTypeP((GameMode)(loc >> 8));
-        cd->clear[loc & 0xFF].has_reward = 1;
-    }
+    MarkRewardCell(mode, reward_index);
 
     // A FILLER reward grants one filler token to the reward's OWN mode, on a real
     // receipt only: the replay path (announce=0) must not re-grant, as

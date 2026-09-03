@@ -163,6 +163,16 @@ void APChecklist_RevealAll(void)
     cc_api->RevealAll(ap_checklist_mode);
 }
 
+// Set only once custom_checklist has accepted the tab, so callers can tell a live tab
+// from ap_checklist_mode's GMMODE_NUM default - the framework hands out that same mode
+// when the AP tab registers first.
+static int ap_tab_registered = 0;
+
+int APChecklist_IsRegistered(void)
+{
+    return ap_tab_registered;
+}
+
 void APChecklist_Register(void)
 {
     static int registered = 0;
@@ -187,6 +197,7 @@ void APChecklist_Register(void)
     // The framework appends to the next free slot; ChecklistModeRow maps whatever it
     // assigned to the fixed AP_CHECKLIST_ROW, so registration order does not matter.
     ap_checklist_mode = mode;
+    ap_tab_registered = 1;
 
     OSReport("[APChecklist] Registered AP tab (mode %d, %d custom checks)\n", mode, AP_CHECK_NUM);
 }
