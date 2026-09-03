@@ -19,11 +19,13 @@ APMenuSettings ap_menu_settings = {
         [APTEXT_KIND_HINT]   = 1,
         [APTEXT_KIND_STATUS] = 1,
         [APTEXT_KIND_CHAT]   = 0,
+        [APTEXT_KIND_LINK]   = 1,
     },
     .local_messages = {
         [APLOCAL_CHECK] = 0,
         [APLOCAL_ITEM]  = 0,
         [APLOCAL_GOAL]  = 1,
+        [APLOCAL_LINK]  = 0,
     },
 };
 
@@ -62,14 +64,16 @@ static void OnToggleItemMessages(int val)       { OSReport("[Settings] Item mess
 static void OnToggleHintMessages(int val)       { OSReport("[Settings] Hint messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleStatusMessages(int val)     { OSReport("[Settings] Status messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleChatMessages(int val)       { OSReport("[Settings] Chat messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
+static void OnToggleLinkMessages(int val)       { OSReport("[Settings] Link messages toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleLocalChecks(int val)        { OSReport("[Settings] Local check messages toggled %s\n", stc_off_on[val]); }
 static void OnToggleLocalItems(int val)         { OSReport("[Settings] Local item messages toggled %s\n", stc_off_on[val]); }
 static void OnToggleLocalGoals(int val)         { OSReport("[Settings] Local goal messages toggled %s\n", stc_off_on[val]); }
+static void OnToggleLocalLinks(int val)         { OSReport("[Settings] Local link messages toggled %s\n", stc_off_on[val]); }
 
-// The lines the mod composes itself. Checks and items default off: a client attached to
-// the same event posts a richer line a poll later.
+// The lines the mod composes itself. Checks, items and links default off: a client
+// attached to the same event posts a richer line a poll later.
 static MenuDesc local_messages_menu = {
-    .option_num = 3,
+    .option_num = 4,
     .options = {
         &(OptionDesc){
             .name = "Checks",
@@ -107,11 +111,23 @@ static MenuDesc local_messages_menu = {
             },
             .on_change = OnToggleLocalGoals,
         },
+        &(OptionDesc){
+            .name = "Links",
+            .description = "Show when a DeathLink or TrapLink is sent, and when one lands",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.local_messages[APLOCAL_LINK],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleLocalLinks,
+        },
     },
 };
 
 static MenuDesc messages_menu = {
-    .option_num = 6,
+    .option_num = 7,
     .options = {
         &(OptionDesc){
             .name = "Checks",
@@ -172,6 +188,18 @@ static MenuDesc messages_menu = {
                 "On",
             },
             .on_change = OnToggleChatMessages,
+        },
+        &(OptionDesc){
+            .name = "Links",
+            .description = "Show DeathLink and TrapLink traffic, and who sent it",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.text_messages[APTEXT_KIND_LINK],
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleLinkMessages,
         },
         &(OptionDesc){
             .name = "Local",

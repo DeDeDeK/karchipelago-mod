@@ -2,6 +2,8 @@
 
 DeathLink synchronizes deaths between players in a multiworld: dying in Kirby Air Ride sets `ap_data->deathlink_send`, and the client setting `ap_data->deathlink_receive` kills the local player. Implemented in `mods/archipelago/src/deathlink.c`, gated on `ap_menu_settings.deathlink_enabled`.
 
+Both directions announce themselves in the text box. The mod's own "DeathLink sent!" / "DeathLink received!" lines sit behind the Messages -> Local -> Links toggle (`APLOCAL_LINK`), off by default, and mark the moment the send hook fires or the kill lands. The client posts the line that names the other player, gated by Messages -> Links.
+
 Air Ride / City Trial and Top Ride are two separate implementations. Top Ride has no rider, machine, HP or fall-death system, so it gets its own send hook (the SAND-course sand pit) and its own receive effect (a random damage state), wired through `OnTopRideLoadEnd` because TR loads on scene minor 19 and never fires `On3DLoadEnd`.
 
 ## Sending Deaths
@@ -40,7 +42,7 @@ The hook's prologue saves r4/r5 to the stack and the epilogue restores all three
 
 ## Receiving Deaths
 
-`DeathLink_PerFrame` runs as a GObj update function created in `DeathLink_On3DLoadEnd`, called from `On3DLoadEnd` for the 3D modes (Air Ride, City Trial, the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) currently on a machine (`Rider_IsOnMachine`), arms that slot's echo suppression and calls `KillPlayer(rd, md)`. After killing everyone it enqueues a "Deathlink received!" textbox and clears `deathlink_receive`.
+`DeathLink_PerFrame` runs as a GObj update function created in `DeathLink_On3DLoadEnd`, called from `On3DLoadEnd` for the 3D modes (Air Ride, City Trial, the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) currently on a machine (`Rider_IsOnMachine`), arms that slot's echo suppression and calls `KillPlayer(rd, md)`. After killing everyone it enqueues a "DeathLink received!" textbox and clears `deathlink_receive`.
 
 ### Kill mechanism by mode
 
@@ -110,7 +112,7 @@ The hook site `0x80331a94` is inside the per-frame TR-stage function at `0x80331
 
 ## Top Ride Receive
 
-`DeathLink_TopRidePerFrame`, created by `DeathLink_OnTopRideLoadEnd`, picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)` and applies that **same** state to every human kirby in `mgr->kirbys[0..3]`, arming each slot's echo suppression first. It then enqueues a "Deathlink received!" textbox and clears `deathlink_receive`.
+`DeathLink_TopRidePerFrame`, created by `DeathLink_OnTopRideLoadEnd`, picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)` and applies that **same** state to every human kirby in `mgr->kirbys[0..3]`, arming each slot's echo suppression first. It then enqueues a "DeathLink received!" textbox and clears `deathlink_receive`.
 
 This replaces the AR/CT kill path entirely: Top Ride has no rider/machine/HP/fall-death system, so there is nothing to zero or to fall off of. A damage state is the closest analog to "death".
 

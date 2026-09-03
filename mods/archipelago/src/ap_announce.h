@@ -11,6 +11,7 @@ typedef enum APLocalKind
     APLOCAL_CHECK = 0, // "Check recorded" as a checkbox completes
     APLOCAL_ITEM,      // a grant applied from the AP queue
     APLOCAL_GOAL,      // a mode goal, or every goal, becoming satisfied
+    APLOCAL_LINK,      // a DeathLink / TrapLink send firing, or a receive landing
     APLOCAL_NUM,
 } APLocalKind;
 

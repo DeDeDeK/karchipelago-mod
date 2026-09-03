@@ -9,6 +9,7 @@
 
 #include "main.h"
 #include "settings_menu.h"
+#include "ap_announce.h"
 #include "textbox_api.h"
 #include "traplink.h"
 #include "ap_item_handler.h"
@@ -19,6 +20,14 @@
 // sends are suppressed for a window covering the apply -> pickup-hook latency.
 #define TRAPLINK_RECV_GUARD_FRAMES 120
 static int recv_suppress_frames = 0;
+
+// Names the outgoing kind for the local line. The client puts the same strings on
+// the wire as trap_name.
+static const char *const traplink_kind_names[] = {
+    [TRAPLINK_KIND_BAD_PATCH]  = "Bad Patch",
+    [TRAPLINK_KIND_SLEEP]      = "Sleep",
+    [TRAPLINK_KIND_SPEED_DOWN] = "Speed Down",
+};
 
 void TrapLink_Send(TrapLinkKind kind)
 {
@@ -31,6 +40,13 @@ void TrapLink_Send(TrapLinkKind kind)
 
     OSReport("[TrapLink] Send triggered (kind %d)\n", kind);
     ap_data->traplink_send = (uint)kind;
+
+    // Both directions are narrated locally under Messages -> Local -> Links, off by
+    // default: a client attached to the same event posts a line naming the other
+    // player a poll later.
+    if (APAnnounce_LocalEnabled(APLOCAL_LINK))
+        tb_api->EnqueueColoredNounFmt(NULL, "TrapLink", tb_api->TrapColor, " sent! (%s)",
+                                      traplink_kind_names[kind]);
 }
 
 // Trap items that can be randomly selected when traplink is triggered
@@ -207,7 +223,8 @@ static void TrapLink_PerFrame(GOBJ *g)
 
     if (handled)
     {
-        tb_api->EnqueueColoredNoun(NULL, "Trap", tb_api->TrapColor, " received!");
+        if (APAnnounce_LocalEnabled(APLOCAL_LINK))
+            tb_api->EnqueueColoredNoun(NULL, "TrapLink", tb_api->TrapColor, " received!");
         ap_data->traplink_receive = 0;
         // The apply is about to trigger our own send hooks.
         recv_suppress_frames = TRAPLINK_RECV_GUARD_FRAMES;

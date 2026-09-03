@@ -310,7 +310,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_GIVE_BASE;
         // Notify here rather than in the give handler - TrapLink also calls it
-        // and shows its own "Trap received!" message.
+        // and shows its own "TrapLink received!" message.
         int ok = GateTopRideItems_GiveItem(kind);
         if (ok && (unsigned)kind < TRITEM_NUM && TopRideItemKind_Names[kind])
             APAnnounce_Grant("Received: TR ", TopRideItemKind_Names[kind],

@@ -241,6 +241,7 @@ typedef enum APTextKind
     APTEXT_KIND_HINT,      // a server hint concerning this slot
     APTEXT_KIND_STATUS,    // goal / release / collect, and client connect state
     APTEXT_KIND_CHAT,      // player and server chat
+    APTEXT_KIND_LINK,      // DeathLink / TrapLink traffic, in both directions
     APTEXT_KIND_NUM,
 } APTextKind;
 

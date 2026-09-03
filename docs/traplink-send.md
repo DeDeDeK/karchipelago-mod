@@ -2,6 +2,8 @@
 
 TrapLink has two sides. **Send** detects negative events happening to a human player in-game and writes a `TrapLinkKind` value (>0) into `ap_data->traplink_send`; the AP client reads and clears the field, looks up the matching `trap_name` string, and forwards a TrapLink Bounce. **Receive** happens when the client sets `ap_data->traplink_receive = 1`: `TrapLink_PerFrame` dispatches a mode-appropriate trap effect on every human player. The GObj is installed by `TrapLink_On3DLoadEnd` (Air Ride / City Trial) or `TrapLink_OnTopRideLoadEnd` (Top Ride), and only when `ap_menu_settings.traplink_enabled` is set. Source: `mods/archipelago/src/traplink.c`.
 
+Both directions announce themselves in the text box. The mod's own "TrapLink sent! (Bad Patch)" / "TrapLink received!" lines sit behind the Messages -> Local -> Links toggle (`APLOCAL_LINK`), off by default, and mark the moment `TrapLink_Send` fires or a receive applies. The client posts the line that names the other player, gated by Messages -> Links.
+
 Outgoing kinds (`traplink.h`):
 
 | Value | Constant | Trigger |
@@ -72,7 +74,7 @@ Fires when a human Top Ride Kirby collects a bad TR item - currently only `TRITE
 
 Most City Trial trap items (`AP_ITKIND_*`, `AP_EVENT_*`) require `Gm_IsInCity`, which is why AR and TR need mode-specific effects instead of the shared `trap_items` list. The CT pool also carries two synthetic traps: `AP_ITEM_1_HP_TRAP`, which damages each human machine down to 1 HP, and `AP_ITEM_DROP_PATCHES_TRAP`, whose handler in `ap_item_handler.c` gates on `Gm_IsInCity` and calls `Patch_DropTrap()` in `patch_item.c` to eject each human rider's equipped stat patches behind the machine.
 
-When a receive applies, `TrapLink_PerFrame` enqueues a "Trap received!" textbox, clears `traplink_receive`, and arms the recursion guard. If every eligible handler returned 0 this frame - no human rider or Kirby present, or every event-active CT effect refused - the flag stays set and the GObj retries next frame.
+When a receive applies, `TrapLink_PerFrame` enqueues a "TrapLink received!" textbox, clears `traplink_receive`, and arms the recursion guard. If every eligible handler returned 0 this frame - no human rider or Kirby present, or every event-active CT effect refused - the flag stays set and the GObj retries next frame.
 
 ## Key Addresses
 
@@ -89,7 +91,7 @@ When a receive applies, `TrapLink_PerFrame` enqueues a "Trap received!" textbox,
 
 ## Implementation Notes
 
-- `TrapLink_Send(kind)` is the single entry point for every send trigger. It no-ops unless `traplink_enabled`, on `TRAPLINK_KIND_NONE`, and while the receive guard window is active, then writes the kind into `ap_data->traplink_send`. It has no mode gate - hooks only fire in their applicable gameplay contexts.
+- `TrapLink_Send(kind)` is the single entry point for every send trigger. It no-ops unless `traplink_enabled`, on `TRAPLINK_KIND_NONE`, and while the receive guard window is active, then writes the kind into `ap_data->traplink_send` and announces it. `traplink_kind_names[]` holds the same strings the client puts on the wire as `trap_name`. It has no mode gate - hooks only fire in their applicable gameplay contexts.
 - Human-vs-CPU filtering stays at each call site, since the two engines discriminate differently: the 3D hooks use `Ply_CheckIfCPU`, the Top Ride hook uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`.
 - Because the toggle is checked inside `TrapLink_Send`, individual hooks do not re-check it. The toggle also gates GObj installation, so the receive proc is not even created while TrapLink is off.
 - `TrapLink_OnBoot()`, called from `main.c`'s `OnBoot`, applies both code patches.

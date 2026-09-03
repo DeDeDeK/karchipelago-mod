@@ -110,7 +110,7 @@ There is no attachment flag or heartbeat. The game never asks whether a client i
 
 | Offset | Type      | Field | Description |
 |--------|-----------|-------|-------------|
-| 0x00   | u8        | `kind`      | `APTextKind`: 0 check, 1 item, 2 hint, 3 status, 4 chat |
+| 0x00   | u8        | `kind`      | `APTextKind`: 0 check, 1 item, 2 hint, 3 status, 4 chat, 5 link |
 | 0x01   | u8        | `seg_count` | 1..8 colored runs |
 | 0x02   | u8[8]     | `colors`    | `APTextColor` per run |
 | 0x0A   | u8[2]     | `pad`       | |
@@ -577,6 +577,7 @@ The text box shows Archipelago traffic as one-line messages. The client is the a
 - **Status**: post "Archipelago client connected" as a `STATUS` message once the handshake completes, and "disconnected" on a clean shutdown - the latter written straight into the mailbox, since nothing drains the backlog after that, and skipped if the mailbox is still full. A client killed outright posts neither, and the game keeps showing whatever it last received.
 - **Checks**: when `check_locations` confirms new locations, compose one line per location from `locations_info` - the scout cache the connect-time `LocationScouts` fills for every location this slot owns - so no server round trip is needed. One line per location, always - a burst goes into the outgoing queue like any other backlog.
 - **Items**: compose one line as each item goes into the `incoming_item_id` mailbox. The `NetworkItem` there carries the sending player and the item flags. Skip an item this slot placed for itself while check messages are on - its check line already named it.
+- **Links**: compose one line each time a DeathLink or TrapLink Bounce is accepted or forwarded, naming the other player on the incoming ones and the `trap_name` on both TrapLink directions. The DeathLink `cause` is dropped - it restates the source name in a sentence that costs most of a screen line.
 - **Server text**: relay `Hint`, `Goal`, `Release`, `Collect`, `Chat` and `ServerChat` `PrintJSON` packets. **Not `ItemSend`** - the server broadcasts one to the whole team for every check anyone makes, and this slot's own are already covered by the check and item lines.
 - **Encoding**: fold text to the glyphs the game font renders before packing.
 
@@ -584,8 +585,8 @@ The text box shows Archipelago traffic as one-line messages. The client is the a
 
 - `APText_OnFrameStart` (`ap_text.c`) renders a pending message into the text box, holding it while the text box reports it has no canvas. It keeps no client state.
 - Messages are filtered by `kind` against the Messages settings menu on render, so the menu is authoritative even against a stale client.
-- The lines the mod composes about AP traffic have their own toggles under Messages -> Local, keyed by `APLocalKind`: `APLOCAL_CHECK` for "Check recorded", `APLOCAL_ITEM` for an applied grant, `APLOCAL_GOAL` for the mode and seed goal lines. The first two default Off, so each event normally produces one line - the client's; a player running without a client turns them on.
-- Every grant announce routes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`), which is where the `APLOCAL_ITEM` toggle and the boot regrant's `ap_regrant_quiet` both apply. The check and goal lines have one call site each and test `APAnnounce_LocalEnabled` directly. Announces that report a consequence the AP item name does not carry (patch cap percentage, spawn rate percentage) call the text box directly and keep printing, as do all non-AP paths: EnergyLink purchases, TrapLink, in-game pickups, gate prompts.
+- The lines the mod composes about AP traffic have their own toggles under Messages -> Local, keyed by `APLocalKind`: `APLOCAL_CHECK` for "Check recorded", `APLOCAL_ITEM` for an applied grant, `APLOCAL_GOAL` for the mode and seed goal lines, `APLOCAL_LINK` for a DeathLink or TrapLink firing or landing. All but the goal lines default Off, so each event normally produces one line - the client's; a player running without a client turns them on.
+- Every grant announce routes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`), which is where the `APLOCAL_ITEM` toggle and the boot regrant's `ap_regrant_quiet` both apply. The check and goal lines have one call site each and test `APAnnounce_LocalEnabled` directly. Announces that report a consequence the AP item name does not carry (patch cap percentage, spawn rate percentage) call the text box directly and keep printing, as do all non-AP paths: EnergyLink purchases, in-game pickups, gate prompts.
 
 ## Invariants
 

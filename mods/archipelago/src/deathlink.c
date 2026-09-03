@@ -7,6 +7,7 @@
 #include "main.h"
 #include "settings_menu.h"
 #include "deathlink.h"
+#include "ap_announce.h"
 #include "textbox_api.h"
 
 #define DEATHLINK_PLY_MAX 5
@@ -20,6 +21,15 @@
 #define DEATHLINK_SUPPRESS_FRAMES 60
 
 static u8 deathlink_suppress[DEATHLINK_PLY_MAX];
+
+// Both directions are narrated locally under Messages -> Local -> Links, off by
+// default: a client attached to the same event posts a line naming the other
+// player a poll later.
+static void Announce(const char *suffix)
+{
+    if (APAnnounce_LocalEnabled(APLOCAL_LINK))
+        tb_api->EnqueueColoredNoun(NULL, "DeathLink", tb_api->DeathColor, suffix);
+}
 
 static void SuppressSend(int ply)
 {
@@ -65,6 +75,7 @@ static void SendDeathLink(int ply, const char *cause)
 
     OSReport("[DeathLink] Player %d died (%s) - sending\n", ply + 1, cause);
     ap_data->deathlink_send = 1;
+    Announce(" sent!");
 }
 
 // Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0, where
@@ -158,7 +169,7 @@ static void DeathLink_PerFrame(GOBJ *g)
     }
 
     OSReport("[DeathLink] Received - killed %d human(s)\n", killed);
-    tb_api->EnqueueColoredNoun(NULL, "Deathlink", tb_api->DeathColor, " received!");
+    Announce(" received!");
     ap_data->deathlink_receive = 0;
 }
 
@@ -186,6 +197,7 @@ static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
     OSReport("[DeathLink] Player %d died (TR sand pit) - sending\n",
              kirby->player_slot + 1);
     ap_data->deathlink_send = 1;
+    Announce(" sent!");
 }
 CODEPATCH_HOOKCREATE(0x80331a94,
     "mr 3, 31\n\t",
@@ -254,7 +266,7 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
 
     OSReport("[DeathLink] Received (TR) - applied %s to %d humans\n",
              deathlink_state_names[idx], hits);
-    tb_api->EnqueueColoredNoun(NULL, "Deathlink", tb_api->DeathColor, " received!");
+    Announce(" received!");
     ap_data->deathlink_receive = 0;
 }
 
