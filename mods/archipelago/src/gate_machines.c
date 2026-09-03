@@ -139,8 +139,18 @@ void GateMachines_FixupTRInit(u8 *lobby_base)
     {
         if (lobby_base[0x1b + i] == 2) // CPU panel
         {
+            // panel_pkind: 1 = HMN, 2 = CPU. Only the visible panels' colors are
+            // worth avoiding.
+            u8 taken[4];
+            int num_taken = 0;
+            for (int j = 0; j < 4; j++)
+            {
+                u8 pkind = lobby_base[0x1b + j];
+                if (j != i && (pkind == 1 || pkind == 2))
+                    taken[num_taken++] = lobby_base[0x23 + j];
+            }
             lobby_base[0x2f + i] = (u8)GetRandomUnlockedTRMachine();
-            lobby_base[0x23 + i] = (u8)GateColors_RandomUnlockedColor();
+            lobby_base[0x23 + i] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
         }
         else
             lobby_base[0x2f + i] = (u8)first;
@@ -351,10 +361,6 @@ void GateMachines_FinalizeCTMachine(int slot)
     u8 kind = gd->city_select_ply.x215[slot];
     if (kind != 0 && kind != 2)
         return; // inactive slot
-
-    // Independent of the machine toggle; humans keep their CSS color pick.
-    if (kind == 2)
-        gd->city_select_ply.ply_color[slot] = (u8)GateColors_RandomUnlockedColor();
 
     if (gd->city_select_ply.x1d0 != 0)
         return;
