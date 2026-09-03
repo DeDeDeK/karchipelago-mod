@@ -20,6 +20,21 @@ Two stage-state predicates sit alongside the mode accessors and answer a differe
 | `CityTrial_IsInCity()` | 0x8000acb0 | The loaded stage is the open City Trial map. |
 | `Gm_IsLegendaryAssembling()` | 0x8000c934 | A Dragoon/Hydra assembly cinematic is running (reads the cinematic GObj pointer at `GameData+0xa8c`). Not a mode or stadium check. |
 
+## The Title Screen's Attract Demo
+
+Idling on the title screen starts an attract demo, and that demo is a **real 3D round**: `TitleScreen_MinorExit` (0x8000e1d8, `gmautodemo.c`) sets the mode up exactly as a menu would and then enters minor 18 (`MNRKIND_3D`) - or minor 19 for Top Ride - **without leaving `MJRKIND_TITLE`**. Everything downstream runs: the stage loads, `CityItemSpawn_Init` builds the item registry, `On3DLoadStart` / `On3DLoadEnd` / `On3DExit` fire, items spawn and get collected.
+
+Two fields in `TitleScreenData` (`GameData+0xc`) drive it:
+
+| Field | Meaning |
+|-------|---------|
+| `autodemo_state` (0x15) | `TitleAutoDemoState`: 0 title screen, 1 attract round, 2 movie, 3 second movie of a pair. |
+| `autodemo_slot` (0x17) | Rotating attract slot 0-3, advanced on every hand-back to the title screen. Slots 0 and 2 run Air Ride, slot 1 City Trial, slot 3 Top Ride. Read by `TitleScreen_GetAutoDemoKind()` (0x8000af94). |
+
+The City Trial slot calls `Gm_SetCityMode(CITYMODE_TRIAL)` and `CityTrial_Init`, then sets all four `PlayerDesc.p_kind` to `PKIND_NONE` and three of them back to `PKIND_CPU` with randomly chosen characters (0x8000e108). So the demo has **no human player**, and `Gm_IsInCity()`, `Gm_GetCityMode()`, `Gm_GetCurrentStadiumKind()` and the rest answer exactly as they do for a round the player started - a mod gate written from mode and stage state alone lets the demo through.
+
+`Gm_IsAutoDemo()` (`game.h`, `Scene_GetCurrentMajor() == MJRKIND_TITLE && autodemo_state == TITLEDEMO_ROUND`) is the discriminator. Anything that records progress has to consult it: per-player work is usually safe because the demo has only CPUs, but anything counted for the round regardless of who did it is not. Vanilla is immune for a structural reason rather than a check - its own unlock flow runs in `CityTrial_MinorExit`, the `MJRKIND_CITY` `cb_ExitMinor`, which the demo never reaches.
+
 ## Major Scenes
 
 Each major is described by a `MajorSceneDesc` (12 bytes) holding its own id, the default next major, the first minor to enter, and two callbacks: `cb_Enter` (once on major entry) and `cb_ExitMinor` (after each minor exits). The vanilla table is `stc_major_scene_desc` at `0x80495058`.

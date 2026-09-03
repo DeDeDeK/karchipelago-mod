@@ -287,6 +287,12 @@ void APCheckDetect_On3DLoadEnd(void)
     // Fantasy Meadows and GrSpace2 is Nebula Belt in every Air Ride mode.
     in_nebula = Scene_GetCurrentMajor() == MJRKIND_AIR && Gr_GetCurrentGrKind() == GR_SPACE2;
 
+    // The title screen's attract demo runs a real City Trial round with a CPU in
+    // every slot. The per-rider samplers below already skip it for want of a human,
+    // but the coral objective counts a break whoever made it, so nothing arms.
+    if (Gm_IsAutoDemo())
+        return;
+
     if (Scene_GetCurrentMajor() == MJRKIND_AIR)
     {
         if (Gr_GetCurrentGrKind() == GR_PLANTS1)

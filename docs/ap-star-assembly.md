@@ -151,7 +151,10 @@ timer, so three sets due at once take three carriers on three consecutive frames
 than starving each other. A box carries exactly one piece either way: `forced_item` is a
 single `ItemKind` and `Box_OutcomeLogic` (`0x80250ae8`) spawns one item from it.
 
-The set arms only in `CITYMODE_TRIAL`. Free Run and the stadiums leave it disabled.
+The set arms only in `CITYMODE_TRIAL`. Free Run and the stadiums leave it disabled, and so
+does the title screen's attract demo - `Gm_IsAutoDemo()`, a real City Trial round run inside
+`MJRKIND_TITLE` with a CPU in every slot. Nothing in the assembly path asks who the player
+is, so a CPU completing the set there would award the star's location check.
 
 For testing, `archipelago_debug` drops one sphere in front of player 1 on each **R + D-Pad
 Down**, walking the six in order, so six presses and six drive-overs run the whole assembly
@@ -164,7 +167,8 @@ reloads. Deathlink's trigger is **L + D-Pad Down**, and a bare **D-Pad Down** sp
 
 Each sphere carries a gate bit in `ap_star_piece_gate`, and a sphere whose bit is clear is
 held out of the item registry entirely. `ApStarPieces_On3DLoadStart` calls
-`CustomItemsAPI.SetEnabled` on each sphere with its bit, which is early enough:
+`CustomItemsAPI.SetEnabled` on each sphere with its bit - and with the attract demo held out
+alongside - which is early enough:
 `custom_items` registers its items at `CityItemSpawn_Init`'s epilogue, and a gated item is
 skipped there, so it never gets an `ItemKind` and no path can spawn it. A round arms only
 the spheres that are in, taking the first rows of the delivery schedule, so a partial set

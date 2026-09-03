@@ -540,6 +540,9 @@ void On3DLoadEnd()
                  i + 1, rd->kind, rd->color_idx, machine_kind);
     }
 
+    if (Gm_IsAutoDemo())
+        OSReport("[Main] Title attract demo round - no check counts toward the seed\n");
+
     GateAbilities_On3DLoadEnd();
     ItemSpawnFilter_On3DLoadEnd();
     PermanentPatch_On3DLoadEnd();

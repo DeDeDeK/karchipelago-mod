@@ -525,11 +525,14 @@ void ApStarPieces_On3DLoadStart(void)
         return;
 
     // Held out of the registry entirely until its own item arrives, so a locked
-    // sphere has no ItemKind and cannot be spawned by any path.
+    // sphere has no ItemKind and cannot be spawned by any path. The title screen's
+    // attract demo is held out the same way: it is a City Trial round with a CPU in
+    // every slot, and a CPU assembling the star would award its check.
+    int demo = Gm_IsAutoDemo();
     for (int i = 0; i < APSTARPIECE_NUM; i++)
     {
         if (piece_hash[i] != 0)
-            ci_api->SetEnabled(piece_hash[i], IsPieceEnabled(i));
+            ci_api->SetEnabled(piece_hash[i], !demo && IsPieceEnabled(i));
     }
 }
 
@@ -555,7 +558,8 @@ void ApStarPieces_On3DLoadEnd(void)
     for (int i = 0; i < APSTARPIECE_NUM; i++)
         piece_kind[i] = -1;
 
-    if (ci_api == NULL || !Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
+    if (ci_api == NULL || Gm_IsAutoDemo() ||
+        !Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
     // The kinds are assigned by custom_items at CityItemSpawn_Init, so they are

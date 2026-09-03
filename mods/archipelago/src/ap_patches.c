@@ -435,7 +435,10 @@ void ApPatches_On3DLoadStart(void)
 
     // custom_items registers at CityItemSpawn_Init's epilogue and skips a disabled
     // item, so a held-out kind is never handed an ItemKind and nothing can spawn it.
-    int on = ApPatches_GetCount() > 0 &&
+    // The title screen's attract demo is a City Trial round in every respect the
+    // gate below reads, so it is held out here rather than at the roll: a CPU
+    // collecting a patch claims a location the same way a player does.
+    int on = ApPatches_GetCount() > 0 && !Gm_IsAutoDemo() &&
              Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL;
     if (patch_hash != 0)
         ci_api->SetEnabled(patch_hash, on);
@@ -447,7 +450,7 @@ void ApPatches_On3DLoadEnd(void)
 {
     if (ci_api == NULL || ApPatches_GetCount() == 0)
         return;
-    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
+    if (Gm_IsAutoDemo() || !Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
     // The kinds are handed out at CityItemSpawn_Init, so they are only valid from

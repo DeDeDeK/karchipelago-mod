@@ -35,10 +35,16 @@ unbinds the item.
 The registry import is deferred past `OnBoot` - mod load order follows FST order, so an
 export is not available until its owner has booted - and the two hashes are resolved by
 scanning the registry for those names. `On3DLoadStart` calls `SetEnabled` on both with
-`ap_patches > 0 && Gm_IsInCity() && CITYMODE_TRIAL`, which is early enough: the registry
+`ap_patches > 0 && !Gm_IsAutoDemo() && Gm_IsInCity() && CITYMODE_TRIAL`, which is early enough: the registry
 is written at `CityItemSpawn_Init`'s epilogue and skips a disabled item, so a held-out kind
 never receives an `ItemKind` and no path can spawn it. The two assigned kinds are fetched at
 `On3DLoadEnd` and are valid for that scene only, so they are re-fetched every round.
+
+`Gm_IsAutoDemo()` is in that gate because the title screen's attract demo runs a real City
+Trial round inside `MJRKIND_TITLE`, with a CPU in every slot and no human. Every other term
+of the gate passes for it, and the pickup handler claims a location for whichever player
+collected the patch - so the demo is held out of the registry rather than filtered at the
+pickup.
 
 ### AP Patch
 

@@ -294,6 +294,11 @@ and box 26 also matches King Dedede's wheelie (bike index 5, the same number as
 Both per-frame procs below are attached by `AttachSamplers`, which walks the five player
 slots and hangs the proc on every `PKIND_HMN` rider's GObj at `RDPRI_HITCOLL + 1`.
 
+`APCheckDetect_On3DLoadEnd` returns without arming anything when `Gm_IsAutoDemo()` - the
+title screen's attract demo, a real City Trial round run inside `MJRKIND_TITLE` with a CPU in
+every slot. The samplers would find no human to attach to anyway, but the coral objective
+counts a break whoever made it, so the whole round is skipped rather than each hook.
+
 **A per-frame proc on each human rider - the City Trial objectives.** Attached from
 `On3DLoadEnd`, and only for `Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL`, since "in
 one game" means one CT Trial run. Counters baseline on the first frame where
