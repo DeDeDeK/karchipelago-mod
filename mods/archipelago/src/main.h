@@ -76,13 +76,13 @@ typedef enum APGoalKind
 {
     GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
     GOAL_N_CHECKLIST,           // Complete N checklist squares
+    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
     GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
     GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
-    GOAL_NONE,                  // No goal for this mode
-    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
     GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
     GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
     GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
+    GOAL_NONE,                  // No goal for this mode - always last, the AP world orders it last too
 } APGoalKind;
 
 // AP Patch locations get their own bitmask, sized so AP_PATCH_MAX packs into

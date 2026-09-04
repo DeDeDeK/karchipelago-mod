@@ -305,9 +305,15 @@ static void AppendCsv(char *buf, int *pos, const char *name)
 static const char *GoalName(const APSlotOptions *opts, int row, char *buf)
 {
     static const char *const names[] = {
-        "100 squares", "N squares", "Hydra + Dragoon", "beat King Dedede",
-        "none", "listed squares", "max stats", "assemble AP Star",
-        "all legendaries",
+        [GOAL_100_CHECKLIST]      = "100 squares",
+        [GOAL_N_CHECKLIST]        = "N squares",
+        [GOAL_CHECKLIST_LIST]     = "listed squares",
+        [GOAL_HYDRA_AND_DRAGOON]  = "Hydra + Dragoon",
+        [GOAL_BEAT_KING_DEDEDE]   = "beat King Dedede",
+        [GOAL_MAX_STATS_CT]       = "max stats",
+        [GOAL_ASSEMBLE_AP_STAR]   = "assemble AP Star",
+        [GOAL_ALL_LEGENDARIES_CT] = "all legendaries",
+        [GOAL_NONE]               = "none",
     };
     u32 goal = opts->goal[row];
 

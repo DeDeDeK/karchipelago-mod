@@ -205,17 +205,20 @@ The field is only read in the ungated branch; a bit is 0 when its own category i
 
 ### GoalKind Enum
 
+One enum shared by all four rows, so a value means the same thing whichever `*_goal` option
+carries it. `GOAL_NONE` is last, which is also where each AP option lists it.
+
 | Value | Name                  | AP Option String       | Modes |
 |-------|-----------------------|------------------------|-------|
-| 0     | `GOAL_100_CHECKLIST`  | `100_checklist_blocks` | All   |
+| 0     | `GOAL_100_CHECKLIST`  | `100_checklist_blocks` | City Trial, Air Ride, Top Ride |
 | 1     | `GOAL_N_CHECKLIST`    | `n_checklist_blocks`   | All   |
-| 2     | `GOAL_HYDRA_AND_DRAGOON` | `hydra_and_dragoon` | City Trial only |
-| 3     | `GOAL_BEAT_KING_DEDEDE`  | `beat_king_dedede`  | City Trial only |
-| 4     | `GOAL_NONE`           | `none`                 | All   |
-| 5     | `GOAL_CHECKLIST_LIST` | `checklist_list`       | All   |
-| 6     | `GOAL_MAX_STATS_CT`   | `max_stats_ct`         | City Trial only |
-| 7     | `GOAL_ASSEMBLE_AP_STAR` | `assemble_archipelago_star` | Archipelago row only |
-| 8     | `GOAL_ALL_LEGENDARIES_CT` | `all_three_legendaries_in_one_run` | Archipelago row only |
+| 2     | `GOAL_CHECKLIST_LIST` | `checklist_list`       | All   |
+| 3     | `GOAL_HYDRA_AND_DRAGOON` | `hydra_and_dragoon` | City Trial only |
+| 4     | `GOAL_BEAT_KING_DEDEDE`  | `beat_king_dedede`  | City Trial only |
+| 5     | `GOAL_MAX_STATS_CT`   | `max_stats_in_one_run` | City Trial only |
+| 6     | `GOAL_ASSEMBLE_AP_STAR` | `assemble_archipelago_star` | Archipelago row only |
+| 7     | `GOAL_ALL_LEGENDARIES_CT` | `all_three_legendaries_in_one_run` | Archipelago row only |
+| 8     | `GOAL_NONE`           | `none`                 | All   |
 
 ### goal_checks Layout (GOAL_CHECKLIST_LIST)
 
