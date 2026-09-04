@@ -115,6 +115,19 @@ static void ApplyFogCurve(HSD_Fog *fog, const CustomPresetDef *def)
     fog->type = FogCurveToGX(def ? def->fog_curve : FOG_CURVE_INHERIT);
 }
 
+// Comma-joins effect names into buf, tracking the write position in *pos.
+static void AppendFx(char *buf, int *pos, const char *name)
+{
+    if (*pos)
+    {
+        buf[(*pos)++] = ',';
+        buf[(*pos)++] = ' ';
+    }
+    while (*name)
+        buf[(*pos)++] = *name++;
+    buf[*pos] = '\0';
+}
+
 void CustomWeatherRuntime_Tick(GrObj *grobj)
 {
     if (!grobj)

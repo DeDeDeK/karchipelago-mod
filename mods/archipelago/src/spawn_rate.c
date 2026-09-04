@@ -12,7 +12,7 @@
 // item density against a malformed save.
 #define SPAWN_RATE_SCALE_MAX 3.0f
 
-static float SpawnRate_GetScale()
+float SpawnRate_GetScale()
 {
     u32 min_pct = ap_save->options.spawn_rate_min;
     // 0 = options not yet received, so fall back to vanilla. The 10% floor keeps
@@ -91,7 +91,7 @@ void SpawnRate_Increment()
     // Show the absolute effective rate, post-min and post-cap, rather than the
     // delta from vanilla.
     float pct = SpawnRate_GetScale() * 100.0f;
-    OSReport("[SpawnRate] Level %d, effective rate %.0f%%.\n",
+    OSReport("[SpawnRate] Level %d, effective rate %.0f%%\n",
              ap_save->spawn_rate_level, pct);
     tb_api->EnqueueColoredNounFmt(NULL, "Spawn rate", tb_api->ItemColor, " increased (%.0f%%)", pct);
 }

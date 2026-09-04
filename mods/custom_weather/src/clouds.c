@@ -249,7 +249,7 @@ static void Cloud_Ensure(void)
         return;
     stc_cloud_gobj = WeatherGX_EnsureLayer(CLOUD_GOBJ_CLASS, CLOUD_GOBJ_PLINK, Cloud_GX,
                                            CLOUD_GX_LINK, CLOUD_GX_PRI,
-                                           "[Clouds] Cloud deck layer installed");
+                                           "[Clouds] Cloud deck layer");
 }
 
 // GX callback on the world camera link. Draws each cloud as a cluster of translucent

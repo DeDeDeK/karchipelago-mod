@@ -1,181 +1,64 @@
 # Machine Charge System
 
-The charge system is the core mechanic of Kirby Air Ride machines (stars/bikes/etc.): the player holds A to charge while grounded, then releases to boost. This covers the 3D-mode (`MachineData`) charge engine. Top Ride has its own, unrelated charge component with different fields and a per-frame decay branch.
+Holding A while grounded fills a 0.0-1.0 meter; releasing it spends the meter on a boost. This is the 3D-mode engine, which lives on `MachineData`. Top Ride has an unrelated charge component of its own, with different fields and a per-frame decay branch, and none of this applies to it.
 
-## Key Data Fields (MachineData)
+`MachineData.charge_value` (+0x78c) is the meter, and `charge_display_value` (+0x798) is the copy the HUD reads, rewritten on every frame the meter moves. Neither is the charge *stat*: `stats.values[PATCHKIND_CHARGE]` (+0x95c) is a patch-modifiable attribute that scales `base_charge_rate`, so charge patches change how fast the meter fills, not how full it is.
 
-| Offset | Type | Field | Description |
-|--------|------|-------|-------------|
-| 0x324 | Vec3 | `velocity` | Velocity vector; first operand of the charge-rate angle calculation |
-| 0x424 | Vec3 | `up` | Up vector; second operand of the charge-rate angle calculation (reflected against velocity) |
-| 0x4B0 | int | `charge_full_duration` | Frame count loaded into `charge_full_timer` when charge hits 1.0 |
-| 0x4B4 | int | `charge_cooldown_duration` | Frame count loaded into `charge_cooldown_timer` after auto-discharge |
-| 0x4FC | float | `base_charge_rate` | Base rate of charge accumulation per frame (scaled by charge stat patches) |
-| 0x500 | float | `turning_charge_rate` | Charge rate when turning (higher than base; interpolated by angle) |
-| 0x664 | Vec2 | `input.stick` | Analog stick input, written by `Rider_UpdateIsCharge` during charge |
-| 0x66C | int | `input.buttons` | Button input; nonzero when player is pressing A. Checked by `Machine_CheckEnterCharge` |
-| 0x78C | float | `charge_value` | **Current charge level.** Ranges 0.0–1.0. This is the value that determines boost strength on release |
-| 0x790 | int | `charge_full_timer` | Counts down from `charge_full_duration` when charge reaches 1.0. Auto-discharges at 0 |
-| 0x794 | int | `charge_cooldown_timer` | Post-discharge cooldown; blocks further charging while nonzero |
-| 0x798 | float | `charge_display_value` | Mirror of `charge_value`, written each frame for HUD display |
-| 0xC30 bit 0x80 | bitfield | `charge_is_playing_skid_sfx` | Skid sound effect flag during charge |
-| 0xC30 bit 0x40 | bitfield | `charge_is_grounded` | **Must be set for charge to increment.** Read by `MachinePhys_Charge` to gate the `Machine_IncrementCharge` call. Set when machine touches ground; bikes always have this set |
-| 0xC32 | byte | (charge effect flags) | Effect-state flag byte written by `Machine_IncrementCharge` / `Machine_ChargeUpdate` / `Machine_ClearChargeState` (bits 0x40 / 0x20 / 0x10 / 0x08). Distinct from the `charge_is_grounded` flag at 0xC30. Not yet broken out in `machine.h` |
+## Entering the state
 
-### Charge Stat vs Charge Value
+`Rider_IASACheck_Charge` (0x801ab624) tests the A button - mask 0x100 in the rider's button word - and enters rider state 0x28 through `AS_StarBeginCharge` (0x801ab688). That calls `Machine_CheckEnterCharge` (0x801ef150), which checks the machine's own input word at +0x66c and hands off to `Machine_EnterCharge` (0x801ef278) to move the machine to state 0xF.
 
-- `stats.charge` (at MachineData+0x95C, `PATCHKIND_CHARGE` = index 4 in the `stats.values[9]` array based at 0x94C) is the **charge stat** — a patch-modifiable attribute that affects charge rate. Collecting charge patches increases this stat.
-- `charge_value` (at 0x78C) is the **current charge meter level** — the 0.0–1.0 value that fills up while holding A and is consumed on release for a boost.
+Rider state and machine state are separate machines and both have to move. `Rider_UpdateIsCharge` (0x801c75f4) is what copies the stick and the button into the machine's input words (+0x664 stick, +0x66c buttons), which is why the machine-side check reads its own copy rather than the controller.
 
-These are distinct: the stat affects how fast the meter fills, the value is the meter itself.
+## Accumulating
 
-## Charge Lifecycle
+The charge state's physics function is `MachinePhys_Charge` (0x801ef364). It runs the ordinary movement and collision, then calls `Machine_IncrementCharge` (0x801cc480) only while `charge_is_grounded` (+0xc30 bit 0x40) is set. That gate is what makes charging a grounded-only move; bikes hold the flag set always.
 
-### Entering charge state
+`Machine_IncrementCharge` interpolates the rate by how far the machine is turned:
 
 ```
-Player holds A
-  → Rider_IASACheck_Charge (0x801AB624)
-    → checks button mask 0x100 (A button)
-    → AS_StarBeginCharge (0x801AB688)
-      → RiderStateChange to state 0x28
-      → Machine_CheckEnterCharge (0x801EF150)
-        → checks md->0x66C != 0 (charge input flag)
-        → Machine_EnterCharge (0x801EF278)
-          → MachineStateChange to state 0xF
+r    = VEC_Reflection(md->up /*0x424*/, md->velocity /*0x324*/)
+a    = Vec_GetAngleBetween(r, md->forward /*0x418*/)      // radians
+rate = base_charge_rate + (a / pi) * (turning_charge_rate - base_charge_rate)
 ```
 
-### Per-frame charge accumulation
+`PSVECMagnitude` (0x803d2158) guards both vectors at 1e-5; below that the angle is taken as 0 and the rate is the base one, so a stationary machine charges at `base_charge_rate`.
 
-While in the charge state, the machine's physics function is `MachinePhys_Charge` (0x801EF364):
+Three conditions skip the increment: +0xc35 bit 0x01, the sign bit of the byte at +0xc36, and a nonzero `charge_cooldown_timer` (+0x794). While any holds, the meter, the display mirror and two of the effect flags are all left alone.
 
-```
-MachinePhys_Charge (each frame)
-  → ... physics updates ...
-  → if (charge_is_grounded):  // 0xC30 bit 0x40
-      Machine_IncrementCharge (0x801CC480)
-```
+Otherwise the rate is added and, if that crosses 1.0, the meter clamps there, `charge_full_timer` (+0x790) is loaded from `charge_full_duration` (+0x4b0), `Machine_PlaySFX(md, 3)` plays the charge-full cue and `Machine_ApplyColAnim(md, 0x1D, 0)` puts the glow on. Filling the meter plays nothing else and starts nothing else - it arms the auto-discharge timer.
 
-**`Machine_IncrementCharge` formula:**
+Three flags in the byte at +0xc32 come out of this function. Bits 0x40 and 0x20 are set and 0x10 cleared on every frame the meter actually moves, and the audio path tests that pair to keep the charge loop alive, so the loop dies the instant an increment is skipped. Bit 0x08 is set whenever the computed rate is nonzero and the meter is not full, and that one runs even on the frames the guards skipped everything else.
 
-```c
-// 1. Compute steering angle factor (0.0 = straight, 1.0 = max turn) from the
-//    velocity vector (md+0x324) and the up vector (md+0x424), via
-//    PSVECMagnitude (0x803d2158) → VEC_Reflection (0x80064c18) →
-//    Vec_GetAngleBetween (0x80062ecc), normalized by a r2-relative constant.
-angle_factor = compute_angle_factor(&md->velocity /*0x324*/, &md->up /*0x424*/);
+`Machine_AddCharge` (0x801ca334) and `Machine_AddChargeEx` (0x801cc378) are the explicit-rate siblings, taking the rate in `f1` for vehicle phases that compute it themselves - star glide, rail run, the wheelie push. Both add, clamp and fire the same full-charge effects; only `AddChargeEx` also updates the +0xc32 flags.
 
-// 2. Interpolate between base and turning charge rates
-charge_rate = base_charge_rate + angle_factor * (turning_charge_rate - base_charge_rate);
+## Holding, and the overcharge penalty
 
-// 3. Guard conditions: skip increment (jump to step 7) if any of:
-//    - md->0xC35 bit 0x01 is set (unknown block flag)
-//    - md->0xC36 is negative (sign-bit / 0x80 test on the byte)
-//    - md->0x794 != 0 (post-discharge cooldown active)
+`Machine_ChargeUpdate` (0x801ca4c0) runs each frame from `Machine_ChargeThink` (0x801c5fe0) and does three things in order.
 
-// 4. If charge_value < 1.0:
-charge_value += charge_rate;
-if (charge_value > 1.0):
-    charge_value = 1.0;
-    // Charge is full:
-    md->0x790 = md->0x4B0;  // start auto-discharge timer
-    Machine_PlaySFX(md, 3);  // "charge full" sound
-    Machine_ApplyColAnim(md, 0x1D, 0);  // glow effect
+It clears +0xc32 bits 0x20 and 0x40 first, which is the other half of the arrangement above: those flags are re-set only by an increment, so anything that stops the meter moving stops the charge sound on the same frame.
 
-// 5. Mirror charge to 0x798 for display
-md->0x798 = charge_value;
-// 6. Set/clear effect flags in byte md+0xC32 (set 0x40, set 0x20, clear 0x10).
-//    NOTE: this is *not* charge_is_grounded (0xC30 bit 0x40) — that flag is
-//    *read* by MachinePhys_Charge to gate whether this function runs at all.
+It then decrements `charge_cooldown_timer` if it is running, and clears the 0x1F overlay when it reaches zero.
 
-// 7. (always runs, even when steps 3-6 were guarded out) If the computed
-//    charge_rate != 0.0 AND charge_value != 1.0 (actively charging, not full),
-//    set md+0xC32 bit 0x08 ("charging in progress" marker).
-```
+Finally it decrements `charge_full_timer`, and reaching zero there is the auto-discharge: `charge_value` and `charge_display_value` are zeroed, the 0x1D glow is taken off, `charge_cooldown_timer` is loaded from `charge_cooldown_duration` (+0x4b4), the machine's `overheat_loop_sfx` plays at full volume, and ColAnim 0x1F goes on. Despite the field's name that sound is a one-shot penalty cue for overcharging, not a loop.
 
-### Charge hold
+## Release and clearing
 
-While held at full charge, `Machine_ChargeUpdate` (0x801CA4C0) decrements the timer at 0x790. When it reaches 0, the charge auto-discharges:
+`AS_StarChargeRelease` (0x801abc64) moves the rider to state 0x2A, copies input to the machine and applies a boost proportional to `charge_value` at the moment of release.
 
-```c
-// Auto-discharge when timer expires:
-if (md->0x790 != 0) {
-    md->0x790--;
-    if (md->0x790 == 0) {
-        // Clear charge state
-        charge_value = 0.0;
-        md->0x798 = 0.0;
-        md->0x790 = 0;
-        // Start cooldown timer
-        md->0x794 = md->0x4B4;
-        Machine_PlaySFX(md, release_sfx);
-        Machine_ApplyColAnim(md, 0x1F, 0);  // discharge visual
-    }
-}
-```
+What "proportional" means is a per-machine table. `Machine_ApplyChargeBoost` (0x801da3c0) calls `LerpTable(0.1, charge_display_value, boost_gain)` (0x80062c4c) over the eleven floats at `vcData->attr+0x0a8`, which the attribute memcpy puts at `MachineData+0x508`: entry *n* is the gain at *n*/10 charge, and the sample lerps between neighbours. The result is scaled by `boost_gain_any` (attr `+0x0d8`, 1.0 on every machine) and becomes the boost velocity. Hydra's first eight entries are 0 and its last three are 0.03, which is the whole of its charge requirement; Rocket Star holds 0.01 for ten entries and jumps to 3.3 at full; Wagon Star's are all zero, so it has no charge boost. `charge_deplete_rate` (attr `+0x0a4`) then decides how fast the boost bleeds off - 1.0 on most machines, 0.00012 on Hydra.
 
-### Charge release (boost)
+`charge_full_duration` (+0x4b0) and `charge_cooldown_duration` (+0x4b4) are themselves attributes, at `+0x050` and `+0x054` of the archive block, and both are scaled by the charge stat. Slick Star ships 360 and 60; Hydra ships 1600.
 
-When the player releases A:
-```
-AS_StarChargeRelease (0x801ABC64)
-  → RiderStateChange to state 0x2A
-  → Rider_CopyInputToMachine
-  → boost applied proportional to charge_value
-```
+`Machine_ClearChargeState` (0x801ca294) zeroes the meter, the display mirror, the full timer and the flags. Eleven-odd sites call it - hit reactions, state transitions, death, being knocked off the machine - and they clear an externally injected meter as readily as an earned one.
 
-The boost magnitude is proportional to `charge_value` at the moment of release.
+Other functions on the path: `AS_StarChargeHold` (0x801ab940) is rider state 0x28's think; `chargeMain` (0x801abad0) is the shared per-frame charge routine those states call, which also tests for dismount; `Rider_UpdateCharge` (0x801cceb8) is the rider-side ground update, re-running the point collision and reading ground type and traction alongside the same velocity/up/forward angle math; `Machine_RotateDuringCharge` (0x801ec5cc) turns the machine in place while it charges; and `Machine_NullCharge` (0x801c8edc), the first call in `Machine_ChargeThink`, zeroes the machine's input words at +0x664, +0x668 and +0x66c.
 
-### Charge cleared
+## External writes to `charge_value`
 
-`Machine_ClearChargeState` (0x801CA294) resets all charge fields:
-```c
-charge_value = 0.0;
-md->0x798 = 0.0;
-md->0x790 = 0;
-// clear bitfield flags
-```
+EnergyLink's Auto-Charge writes `md->charge_value` from outside the engine's charge path and reads its positive frame-to-frame delta back as an energy source. How the engine reacts to a write it did not make:
 
-Called on: hit reactions, state transitions, death, getting knocked off, etc. (11+ call sites).
-
-## Call Hierarchy
-
-```
-Machine_ChargeThink? (0x801C5FE0) — per-frame top-level
-  ├── Machine_NullCharge — zeros input fields 0x664/0x668/0x66C
-  ├── Machine_ChargeUpdate — manages timers (0x790, 0x794)
-  ├── [physics func pointer] → MachinePhys_Charge
-  │     ├── ... movement/collision ...
-  │     └── if grounded: Machine_IncrementCharge — adds to charge_value
-  └── ... other per-frame updates ...
-```
-
-## External Writes to `charge_value`
-
-EnergyLink's Auto-Charge writes `md->charge_value` directly from outside the engine's charge path, and reads its positive frame-to-frame delta as an energy source. The accounting (rates, costs, which characters are excluded) lives in `energylink.md`; what matters here is how the engine reacts to a write it did not make:
-
-- **No SFX or visual.** Bumping `charge_value` doesn't trigger the "charge full" sound (`Machine_PlaySFX(md, 3)`) or the `0x1D` glow — those only fire on `Machine_IncrementCharge`'s own crossing of 1.0. The stored boost is invisible until the player next holds A.
-- **No auto-discharge trigger.** `charge_full_timer` (0x790) is only loaded by `Machine_IncrementCharge`, so an externally filled meter never starts its own countdown. The timer is set on the next frame the player charges and `Machine_IncrementCharge` observes `charge_value >= 1.0`.
-- **State-agnostic.** Nothing gates an external write on the charge state, `charge_is_grounded`, or `charge_cooldown_timer`. The engine's own clears still apply normally: hit reactions and any `Machine_ClearChargeState` path zero the injected value like a legitimately built one.
-- **`VCKIND_WINGMETAKNIGHT` is not a charge meter.** Meta Knight's Wing machine reads `charge_value` as a raw speed term, so writing it every frame is a constant max-speed buff rather than a stored boost. King Dedede's meter is ordinary.
-
-## Key Functions
-
-| Address | Size | Symbol |
-|---------|------|--------|
-| 0x801AB624 | 0x64 | `Rider_IASACheck_Charge` |
-| 0x801AB688 | 0xAC | `AS_StarBeginCharge` |
-| 0x801AB940 | 0x90 | `AS_StarChargeHold` |
-| 0x801ABAD0 | 0x58 | `chargeMain` |
-| 0x801ABC64 | 0x4C | `AS_StarChargeRelease` |
-| 0x801C5FE0 | 0x1AC | `Machine_ChargeThink?` |
-| 0x801C75F4 | 0x14 | `Rider_UpdateIsCharge` |
-| 0x801C8EDC | 0x18 | `Machine_NullCharge` |
-| 0x801CA294 | 0x68 | `Machine_ClearChargeState` |
-| 0x801CA4C0 | 0x124 | `Machine_ChargeUpdate` |
-| 0x801CC480 | 0x178 | `Machine_IncrementCharge` |
-| 0x801CCEB8 | 0x394 | `Rider_UpdateCharge` |
-| 0x801EC5CC | 0x1C0 | `Machine_RotateDuringCharge` |
-| 0x801EF150 | 0x78 | `Machine_CheckEnterCharge` |
-| 0x801EF278 | 0x7C | `Machine_EnterCharge` |
-| 0x801EF364 | 0xF0 | `MachinePhys_Charge` |
+- **No sound and no glow.** The charge-full cue and the 0x1D overlay only fire on `Machine_IncrementCharge`'s own crossing of 1.0, so a meter filled from outside is invisible until the player next holds A.
+- **No auto-discharge.** `charge_full_timer` is loaded only by `Machine_IncrementCharge`, so an externally filled meter never starts its own countdown. It gets one on the first frame the player charges with the meter already at or above 1.0.
+- **State-agnostic.** Nothing gates an external write on the charge state, `charge_is_grounded` or `charge_cooldown_timer`. The engine's own clears still apply: any `Machine_ClearChargeState` path zeroes the injected value.
+- **`VCKIND_WINGMETAKNIGHT` is not a charge meter.** Meta Knight's Wing machine reads `charge_value` as a raw speed term, so writing it every frame is a permanent top-speed buff rather than a stored boost. King Dedede's meter is ordinary.

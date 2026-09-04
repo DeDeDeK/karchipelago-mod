@@ -8,19 +8,16 @@
 
 // Ring buffer with one slot reserved to tell empty from full, so capacity is one less than the
 // size; "Max On Screen" tops out at 8.
-#define TEXTBOX_QUEUE_SIZE        9
-#define TEXTBOX_SEGMENT_TEXT_SIZE 80
+#define TEXTBOX_QUEUE_SIZE 9
 
-// Stored copy of a segment, used to recreate the TextBox after a scene change.
-typedef struct TextBoxSegmentEntry
-{
-    char text[TEXTBOX_SEGMENT_TEXT_SIZE];
-    GXColor color;
-} TextBoxSegmentEntry;
+// A whole message's text, however it is split into segments. Both the first render and the
+// rebuild after a scene change read this, so what is stored is what is drawn.
+#define TEXTBOX_MESSAGE_TEXT_SIZE 248
 
 typedef struct TextBoxMessage
 {
-    TextBoxSegmentEntry segments[TEXTBOX_MAX_SEGMENTS];
+    char segment_text[TEXTBOX_MESSAGE_TEXT_SIZE]; // segment_count NUL-terminated strings back to back
+    GXColor colors[TEXTBOX_MAX_SEGMENTS];
     u8 segment_count;
     uint lifetime;           // seeds peak text alpha (200), then counts down as the fade timer
     Vec2 scale;
@@ -68,6 +65,7 @@ void TextBox_TopRideReRender(void);
 
 // Concrete implementations exported through TextBoxAPI.
 int TextBox_Enqueue(const char *format, ...);
+int TextBox_IsReady(void);
 int TextBox_EnqueueSegments(const TextSegment *segs, int seg_count);
 int TextBox_EnqueueColoredNoun(const char *prefix, const char *noun, GXColor noun_color, const char *suffix);
 int TextBox_EnqueueColoredNounFmt(const char *prefix, const char *noun, GXColor noun_color,

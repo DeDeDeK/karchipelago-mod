@@ -12,7 +12,7 @@
 TextBoxSettings textbox_settings = {
     .enabled            = 1,
     .typewriter_enabled = 1,
-    .typewriter_speed   = 1, // Med (4 frames/glyph)
+    .typewriter_speed   = 2, // Fast (2 frames/glyph)
     .font_size          = 1, // Med (0.4)
     .colored_names      = 1, // On
     .message_spacing    = 0, // Tight (touching)
@@ -26,6 +26,16 @@ TextBoxSettings textbox_settings = {
 #define TEXTBOX_CANVAS_W 640.0f
 #define TEXTBOX_CANVAS_H 480.0f
 #define TEXTBOX_MARGIN   10.0f
+
+// Lines a single message may wrap onto before its tail is replaced by TEXTBOX_TRUNC_MARK.
+#define TEXTBOX_MAX_LINES  3
+#define TEXTBOX_TRUNC_MARK ".."
+
+// Text_ConvertASCIIToShiftJIS stops after 128 input bytes, so one subtext holds at most this
+// much sanitized text. A character costs 1 byte if alphanumeric and 2 otherwise, so no run of
+// TEXTBOX_RUN_CHARS or more can fit and there is never a reason to sanitize past it.
+#define TEXTBOX_RUN_BYTES 127
+#define TEXTBOX_RUN_CHARS 128
 
 // Preset tables, indexed by the matching settings field.
 static const float font_size_scales[] = { 0.30f, 0.40f, 0.55f };
@@ -125,12 +135,6 @@ static int Sis_OpWidth(u8 op)
     }
 }
 
-// A char code (>= 0x20) and the 1-byte SPACE opcode (0x1a) each advance the typewriter by one.
-static int Sis_IsGlyph(u8 op)
-{
-    return op >= 0x20 || op == 0x1a;
-}
-
 // Text_AddSubtext / Text_SetText don't update text->text_end, so the glyph count is derived by
 // walking the stream to its inline 0x00 TERMINATE. The result matches the engine's final
 // temp.reveal_count. The limit guards against a runaway scan on malformed data.
@@ -143,7 +147,7 @@ static int Sis_CountGlyphs(u8 *start)
     u8 *limit = start + 4096;
     while (p < limit && *p != 0x00) // 0x00 = TERMINATE
     {
-        if (Sis_IsGlyph(*p))
+        if (*p >= 0x20) // a 2-byte glyph code, and the only thing the typewriter counts
             count++;
         p += Sis_OpWidth(*p);
     }
@@ -175,7 +179,165 @@ static void TextBox_ApplyTypewriter(TextBoxMessage *msg)
     msg->text->text_end          = NULL;
 }
 
-// Build a multi-segment Text GObj: one subtext per segment, laid out left to right on one line.
+int TextBox_IsReady(void)
+{
+    return textbox_settings.enabled && *stc_textcanvas_first != NULL;
+}
+
+// Sets subtext `sub` to as much of the first `len` characters of `s` (plus `tail`, if given) as
+// one subtext holds, and measures what actually landed. Returns the number of characters of `s`
+// placed, short of `len` only when the run hits TEXTBOX_RUN_BYTES. Sanitized text is not in the
+// code space Text_GetStringWidth assumes, so widths have to come from the engine.
+static int TextBox_SetRun(Text *t, int sub, const char *s, int len, const char *tail,
+                          float *out_w, float *out_h)
+{
+    char raw[TEXTBOX_RUN_CHARS + 8];
+    char buf[TEXTBOX_RUN_CHARS * 2 + 16];
+
+    if (len < 0)
+        len = 0;
+    if (len > TEXTBOX_RUN_CHARS)
+        len = TEXTBOX_RUN_CHARS;
+
+    for (;;)
+    {
+        int n = len;
+        memcpy(raw, s, n);
+        if (tail)
+        {
+            for (int i = 0; tail[i] != '\0' && n < (int)sizeof(raw) - 1; i++)
+                raw[n++] = tail[i];
+        }
+        raw[n] = '\0';
+
+        // A sanitize that overflows leaves buf empty, so it reports the whole buffer as its
+        // cost: too long to keep, and a ratio that halves the next attempt.
+        int bytes = Text_Sanitize(raw, buf, sizeof(buf)) ? (int)strlen(buf) : (int)sizeof(buf);
+        if (bytes <= TEXTBOX_RUN_BYTES || len == 0)
+            break;
+
+        // Cost is between 1 and 2 bytes per character, so scaling by the overshoot lands within
+        // a character or two; the -1 floor keeps it strictly decreasing.
+        int next = len * TEXTBOX_RUN_BYTES / bytes;
+        len = (next < len) ? next : len - 1;
+    }
+
+    Text_SetText(t, sub, buf);
+
+    float w = 0.0f, h = 0.0f;
+    Text_GetWidthAndHeight(t, sub, &w, &h);
+    if (out_w)
+        *out_w = w;
+    if (out_h)
+        *out_h = h;
+
+    return len;
+}
+
+static int PrevSpace(const char *s, int from)
+{
+    for (int i = from; i > 0; i--)
+        if (s[i] == ' ')
+            return i;
+    return -1;
+}
+
+static int NextSpace(const char *s, int from)
+{
+    for (int i = from + 1; s[i] != '\0'; i++)
+        if (s[i] == ' ')
+            return i;
+    return -1;
+}
+
+// Longest prefix of `s` that renders within `avail`, broken at a space where one is available.
+// Leaves subtext `sub` holding that prefix and its width in *out_w. Returns 0 when nothing fits
+// and the caller should start a new line first; at a line start it always takes at least one
+// character, so the walk cannot stall. The first measurement covers the whole run, so a segment
+// that already fits costs exactly one measure.
+static int TextBox_FitRun(Text *t, int sub, const char *s, int len, float avail,
+                          int at_line_start, float *out_w)
+{
+    float w = 0.0f;
+    // Everything below searches within what one subtext can hold, so a run the engine had to
+    // trim wraps at the trim rather than reporting a fit for text it never measured.
+    int placed = TextBox_SetRun(t, sub, s, len, NULL, &w, NULL);
+    int capped = (placed < len);
+    len = placed;
+
+    if (w <= avail)
+    {
+        // A run the engine trimmed still breaks like any other: at a space where there is one.
+        if (capped)
+        {
+            int brk = PrevSpace(s, len - 1);
+            if (brk > 0)
+                len = TextBox_SetRun(t, sub, s, brk, NULL, &w, NULL);
+        }
+        *out_w = w;
+        return len;
+    }
+
+    // Width is near enough to linear in character count to seed the search within a word or two.
+    int est = (w > 0.0f) ? (int)((float)len * (avail / w)) : 0;
+    if (est >= len)
+        est = len - 1;
+    if (est < 0)
+        est = 0;
+
+    int brk = PrevSpace(s, est);
+    while (brk > 0)
+    {
+        TextBox_SetRun(t, sub, s, brk, NULL, &w, NULL);
+        if (w <= avail)
+            break;
+        brk = PrevSpace(s, brk - 1);
+    }
+
+    if (brk > 0)
+    {
+        for (;;)
+        {
+            int nxt = NextSpace(s, brk);
+            if (nxt < 0 || nxt > len)
+                nxt = len;
+
+            float w2 = 0.0f;
+            TextBox_SetRun(t, sub, s, nxt, NULL, &w2, NULL);
+            if (w2 > avail)
+            {
+                TextBox_SetRun(t, sub, s, brk, NULL, &w, NULL);
+                break;
+            }
+            brk = nxt;
+            w = w2;
+            if (nxt == len)
+                break;
+        }
+        *out_w = w;
+        return brk;
+    }
+
+    if (!at_line_start)
+        return 0;
+
+    // A single word wider than a whole line, so it splits mid-word.
+    int n = (est > 0) ? est : 1;
+    for (;;)
+    {
+        TextBox_SetRun(t, sub, s, n, NULL, &w, NULL);
+        if (w <= avail || n <= 1)
+            break;
+        n--;
+    }
+    *out_w = w;
+    return n;
+}
+
+// Build a multi-segment Text GObj: one subtext per run of a segment that shares a line. Segments
+// flow left to right and wrap onto up to TEXTBOX_MAX_LINES lines; text past the last line is
+// replaced by TEXTBOX_TRUNC_MARK. Nothing is ever scaled down to fit - the chosen font size is
+// what renders.
 static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2 scale, uint lifetime, u8 bg_alpha)
 {
     if (seg_count <= 0 || seg_count > TEXTBOX_MAX_SEGMENTS)
@@ -186,7 +348,6 @@ static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2
         return NULL;
 
     t->kerning = 1;
-    t->use_aspect = 1;
     // A placeholder - TextBoxQueue_RepositionAll runs before the next render and is the single
     // source of truth for on-screen position.
     t->trans = (Vec3){0, 0, 0};
@@ -195,37 +356,132 @@ static Text *CreateTextBoxSegmented(const TextSegment *segs, int seg_count, Vec2
     // the panel can't outlast the glyphs.
     t->viewport_color = (GXColor){0, 0, 0, (bg_alpha < lifetime) ? bg_alpha : (u8)lifetime};
 
-    char sanitize_buf[TEXTBOX_SEGMENT_TEXT_SIZE * 2];
-    float x_cursor = 0.0f;
-    float total_width = 0.0f;
-    float line_height = 0.0f;
+    // Subtext positions and measured widths are in pre-viewport-scale units, so the pixel budget
+    // is divided through rather than the widths multiplied up.
+    float budget = (scale.X > 0.0f) ? (TEXTBOX_CANVAS_W - 2.0f * TEXTBOX_MARGIN) / scale.X : 0.0f;
 
-    for (int i = 0; i < seg_count; i++)
+    float x       = 0.0f;
+    float widest  = 0.0f;
+    float line_h  = 0.0f;
+    float trunc_w = -1.0f;
+    int line      = 0;
+    int last_line = 0;
+    int sub       = 0;
+    int sub_open  = 0;
+    int done      = 0;
+
+    for (int i = 0; i < seg_count && !done; i++)
     {
-        // Text_AddSubtext captures t->color into the subtext's COLOR opcode, so it must be set
-        // before the subtext is added.
-        t->color = (GXColor){segs[i].color.r, segs[i].color.g, segs[i].color.b, lifetime};
+        const char *p = segs[i].text;
+        if (!p)
+            continue;
 
-        Text_AddSubtext(t, x_cursor, 0, "");
+        while (*p != '\0' && !done)
+        {
+            // A line never opens with a space, including when a fresh segment lands on one.
+            if (x <= 0.0f)
+            {
+                while (*p == ' ')
+                    p++;
+                if (*p == '\0')
+                {
+                    // Text_AddSubtext baked this segment's color into any subtext opened for it,
+                    // so the next segment must not inherit it.
+                    if (sub_open)
+                    {
+                        sub++;
+                        sub_open = 0;
+                    }
+                    break;
+                }
+            }
 
-        Text_Sanitize((char *)segs[i].text, sanitize_buf, sizeof(sanitize_buf));
-        Text_SetText(t, i, sanitize_buf);
+            if (!sub_open)
+            {
+                // Text_AddSubtext captures t->color into the subtext's COLOR opcode, so it must
+                // be set before the subtext is added.
+                t->color = (GXColor){segs[i].color.r, segs[i].color.g, segs[i].color.b, lifetime};
+                Text_AddSubtext(t, 0, 0, "");
+                sub_open = 1;
+            }
 
-        // Measured pre-viewport-scale, post-text-scale, so the next segment starts immediately
-        // after this one on the same line.
-        float seg_w = 0, seg_h = 0;
-        Text_GetWidthAndHeight(t, i, &seg_w, &seg_h);
-        x_cursor += seg_w;
-        total_width += seg_w;
-        if (seg_h > line_height)
-            line_height = seg_h;
+            int   len   = (int)strlen(p);
+            int   final = (line >= TEXTBOX_MAX_LINES - 1);
+            float w     = 0.0f;
+            int   take  = TextBox_FitRun(t, sub, p, len, budget - x, x <= 0.0f, &w);
+
+            if (take == 0 && !final)
+            {
+                x = 0.0f;
+                line++;
+                continue;
+            }
+
+            // Anything still unplaced once the last line is reached gives way to the marker,
+            // which is fitted with room reserved for itself.
+            int truncated = 0;
+            if (final && (take < len || i + 1 < seg_count))
+            {
+                if (trunc_w < 0.0f)
+                    TextBox_SetRun(t, sub, TEXTBOX_TRUNC_MARK, sizeof(TEXTBOX_TRUNC_MARK) - 1,
+                                   NULL, &trunc_w, NULL);
+
+                float avail = budget - x - trunc_w;
+                take = (avail > 0.0f) ? TextBox_FitRun(t, sub, p, len, avail, 1, &w) : 0;
+                TextBox_SetRun(t, sub, p, take, TEXTBOX_TRUNC_MARK, &w, NULL);
+                truncated = 1;
+            }
+
+            if (line_h <= 0.0f)
+            {
+                float dw = 0.0f;
+                Text_GetWidthAndHeight(t, sub, &dw, &line_h);
+            }
+
+            Text_SetSubtextPos(t, sub, (int)(x + 0.5f), (int)((float)line * line_h + 0.5f));
+            x += w;
+            if (x > widest)
+                widest = x;
+            last_line = line;
+            sub++;
+            sub_open = 0;
+
+            if (truncated)
+            {
+                done = 1;
+                break;
+            }
+
+            p += take;
+            while (*p == ' ')
+                p++;
+            if (*p != '\0')
+            {
+                x = 0.0f;
+                line++;
+            }
+        }
     }
 
-    // Aspect must enclose the whole line, or the viewport_color background rect won't cover
-    // every segment.
-    t->aspect = (Vec2){total_width, line_height};
+    // Aspect must enclose every line, or the viewport_color background rect won't cover the
+    // whole message.
+    t->aspect = (Vec2){widest, line_h * (float)(last_line + 1)};
 
     return t;
+}
+
+// Points `segs` at the stored blob's NUL-terminated runs. Both the first render and the
+// scene-change rebuild go through here, so a message can never draw differently the second time.
+static int TextBox_MessageSegments(const TextBoxMessage *msg, TextSegment *segs)
+{
+    int pos = 0;
+    for (int i = 0; i < msg->segment_count; i++)
+    {
+        segs[i].text  = &msg->segment_text[pos];
+        segs[i].color = msg->colors[i];
+        pos += (int)strlen(&msg->segment_text[pos]) + 1;
+    }
+    return msg->segment_count;
 }
 
 // Rebuilds the queued Text objects invalidated by the scene change, then installs the per-frame
@@ -242,12 +498,8 @@ void CreateTextBox_OnSceneChange()
                 continue;
 
             TextSegment segs[TEXTBOX_MAX_SEGMENTS];
-            for (int s = 0; s < msg->segment_count; s++)
-            {
-                segs[s].text = msg->segments[s].text;
-                segs[s].color = msg->segments[s].color;
-            }
-            msg->text = CreateTextBoxSegmented(segs, msg->segment_count, msg->scale, msg->lifetime, msg->bg_alpha_target);
+            int n = TextBox_MessageSegments(msg, segs);
+            msg->text = CreateTextBoxSegmented(segs, n, msg->scale, msg->lifetime, msg->bg_alpha_target);
             if (!msg->text)
             {
                 OSReport("[TextBox] Failed to recreate textbox on scene change\n");
@@ -334,8 +586,18 @@ static void TextBox_PerFrame(GOBJ *g)
     }
 
     TextBoxMessage *oldest = TextBoxQueue_GetAt(0);
-    if (!oldest || !oldest->text)
+    if (!oldest)
         return;
+
+    // Nothing to reveal or fade if the scene-change rebuild failed, so drop it now instead of
+    // holding the whole queue behind a message that will never age out.
+    if (!oldest->text)
+    {
+        TextBoxMessage dead;
+        TextBox_Dequeue(&dead);
+        textbox_state.framecounter = 0;
+        return;
+    }
     if (oldest->typewriter_active && oldest->text->temp.reveal_count < oldest->chars_total)
         return;
 
@@ -379,39 +641,45 @@ static int TextBox_EnqueueInternal(const TextSegment *segs, int seg_count)
         TextBoxMessage removed_text;
         TextBox_Dequeue(&removed_text);
         textbox_state.framecounter = 0;
-        OSReport("[TextBox] Visible cap reached, auto-dequeued oldest message.\n");
     }
 
     if (TextBoxQueue_IsEmpty())
         textbox_state.framecounter = 0;
-
-    // A local copy, so applying the Colored Names setting doesn't mutate the caller's buffer.
-    int colored = textbox_settings.colored_names ? 1 : 0;
-    TextSegment local_segs[TEXTBOX_MAX_SEGMENTS];
-    for (int i = 0; i < seg_count; i++)
-    {
-        local_segs[i].text  = segs[i].text;
-        local_segs[i].color = colored ? segs[i].color : TextBox_DefaultColor;
-    }
 
     TextBoxMessage entry;
     entry.lifetime = 200;
     float font_scale = Settings_FontScale();
     entry.scale = (Vec2){font_scale, font_scale};
     entry.bg_alpha_target = Settings_BgAlphaTarget();
-    entry.segment_count = (u8)seg_count;
+
+    // Copied in first: the caller's strings need not outlive the call, and applying the Colored
+    // Names setting here keeps it out of the caller's buffer. A message longer than the blob
+    // loses its tail segments rather than any segment losing its tail.
+    int colored = textbox_settings.colored_names ? 1 : 0;
+    int pos = 0;
+    entry.segment_count = 0;
     for (int i = 0; i < seg_count; i++)
     {
-        const char *src = local_segs[i].text ? local_segs[i].text : "";
-        strncpy(entry.segments[i].text, src, TEXTBOX_SEGMENT_TEXT_SIZE - 1);
-        entry.segments[i].text[TEXTBOX_SEGMENT_TEXT_SIZE - 1] = '\0';
-        entry.segments[i].color = local_segs[i].color;
+        const char *src = segs[i].text ? segs[i].text : "";
+        int room = TEXTBOX_MESSAGE_TEXT_SIZE - 1 - pos;
+        int n    = (int)strlen(src);
+        if (room <= 0)
+            break;
+        if (n > room)
+            n = room;
+        memcpy(&entry.segment_text[pos], src, n);
+        entry.segment_text[pos + n] = '\0';
+        entry.colors[i] = colored ? segs[i].color : TextBox_DefaultColor;
+        pos += n + 1;
+        entry.segment_count++;
     }
 
-    entry.text = CreateTextBoxSegmented(local_segs, seg_count, entry.scale, entry.lifetime, entry.bg_alpha_target);
+    TextSegment stored_segs[TEXTBOX_MAX_SEGMENTS];
+    int stored_count = TextBox_MessageSegments(&entry, stored_segs);
+    entry.text = CreateTextBoxSegmented(stored_segs, stored_count, entry.scale, entry.lifetime, entry.bg_alpha_target);
     if (!entry.text)
     {
-        OSReport("[TextBox] Failed to create Text object!\n");
+        OSReport("[TextBox] Failed to create the Text object\n");
         return 0;
     }
 
@@ -467,7 +735,7 @@ int TextBox_EnqueueColoredNoun(const char *prefix, const char *noun, GXColor nou
 int TextBox_EnqueueColoredNounFmt(const char *prefix, const char *noun, GXColor noun_color,
                                   const char *suffix_format, ...)
 {
-    char suffix_buf[TEXTBOX_SEGMENT_TEXT_SIZE];
+    char suffix_buf[TEXTBOX_MESSAGE_TEXT_SIZE];
     if (suffix_format)
     {
         va_list args;
@@ -487,7 +755,7 @@ int TextBox_Enqueue(const char *format, ...)
     if (!textbox_settings.enabled)
         return 0;
 
-    char buffer[TEXTBOX_SEGMENT_TEXT_SIZE];
+    char buffer[TEXTBOX_MESSAGE_TEXT_SIZE];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);

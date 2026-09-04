@@ -97,6 +97,9 @@ static const CustomCheck ap_checks[] = {
     { APCK_BOX_RED_10,         "City Trial: In one game,\nbreak 10 or more red boxes!",   APCheckDetect_IsSet },
 
     { APCK_MEADOWS_SHORTCUT,   "Air Ride: FANTASY MEADOWS\nTake the shortcut!",      APCheckDetect_IsSet },
+
+    { APCK_ASSEMBLE_AP_STAR,   "City Trial: Collect all 6 spheres\nand assemble the Archipelago Star!", APCheckDetect_IsSet },
+    { APCK_ASSEMBLE_ALL_LEGENDARY, "City Trial: In one game, assemble\nDragoon, Hydra and Archipelago Star!", APCheckDetect_IsSet },
 };
 
 #define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))
@@ -150,6 +153,11 @@ static const CustomChecklistDesc ap_desc = {
     .is_ready = APChecklist_IsReady,
 };
 
+int APChecklist_GetBuildMode(void)
+{
+    return cc_api && cc_api->GetBuildMode ? cc_api->GetBuildMode() : -1;
+}
+
 void APChecklist_RevealAll(void)
 {
     if (!cc_api)
@@ -158,6 +166,16 @@ void APChecklist_RevealAll(void)
     // Through the framework rather than by writing is_visible here: it latches the tab
     // open for the session, so a reveal that lands before the grid shuffle survives it.
     cc_api->RevealAll(ap_checklist_mode);
+}
+
+// Set only once custom_checklist has accepted the tab, so callers can tell a live tab
+// from ap_checklist_mode's GMMODE_NUM default - the framework hands out that same mode
+// when the AP tab registers first.
+static int ap_tab_registered = 0;
+
+int APChecklist_IsRegistered(void)
+{
+    return ap_tab_registered;
 }
 
 void APChecklist_Register(void)
@@ -178,12 +196,13 @@ void APChecklist_Register(void)
     int mode = cc_api->Register(&ap_desc);
     if (mode < 0)
     {
-        OSReport("[APChecklist] Registration failed\n");
+        OSReport("[APChecklist] Registration rejected (rc %d) - AP tab disabled\n", mode);
         return;
     }
     // The framework appends to the next free slot; ChecklistModeRow maps whatever it
     // assigned to the fixed AP_CHECKLIST_ROW, so registration order does not matter.
     ap_checklist_mode = mode;
+    ap_tab_registered = 1;
 
     OSReport("[APChecklist] Registered AP tab (mode %d, %d custom checks)\n", mode, AP_CHECK_NUM);
 }

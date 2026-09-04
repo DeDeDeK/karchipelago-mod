@@ -39,6 +39,7 @@ typedef struct CCList
     int save_slot;              // resolved CCSave slot, -1 until first access
     int layout_done;            // 1 once the saved grid layout has been applied this session
     int reveal_all;             // 1 once RevealAll latched the tab open for the session
+    int art_reported;           // 1 once a missing/incomplete tex_file has been reported
 } CCList;
 
 #define CC_BIT_TEST(w, k) (((w)[(k) >> 6] >> ((k) & 63)) & 1ULL)
@@ -150,12 +151,17 @@ static GameClearData *CC_GetClearcheckerTypeP(GameMode mode)
 #define CC_REWARD_COUNT_CITYTRIAL 44
 
 // REPLACEFUNC for Checklist_GetRewardNum (0x80049c20): 0 for custom tabs gates the
-// reward loops off and dodges the vanilla mode>=3 assert.
+// reward loops off and dodges the vanilla mode>=3 assert. A build reads CITYTRIAL from
+// ClearCheckerUI.mode while gmGetClearcheckerTypeP already serves the tab's block, so
+// it answers 0 there too - otherwise Checklist_SetRewardFlagOnUnlocks walks City
+// Trial's reward table and sets has_reward on the custom tab's cells.
 static u8 CC_GetRewardNum(GameMode mode)
 {
     static const u8 counts[GMMODE_NUM] = {
         CC_REWARD_COUNT_AIRRIDE, CC_REWARD_COUNT_TOPRIDE, CC_REWARD_COUNT_CITYTRIAL,
     };
+    if (g_build_active >= 0 && mode == GMMODE_CITYTRIAL)
+        return 0;
     return mode < GMMODE_NUM ? counts[mode] : 0;
 }
 
@@ -301,17 +307,27 @@ static void CC_LoadTexturesForList(int idx)
     Gm_LoadGameFile(&arc, (char *)d->tex_file);
     if (arc == NULL)
     {
-        OSReport("[CustomChecklist] %s.dat not found - %s tab art disabled\n",
-                 d->tex_file, d->name);
+        // This runs on every visit to the tab, so a missing file says it once.
+        if (!g_lists[idx].art_reported)
+        {
+            g_lists[idx].art_reported = 1;
+            OSReport("[CustomChecklist] %s.dat not found - %s tab art disabled\n",
+                     d->tex_file, d->name);
+        }
         return;
     }
     if (d->banner_symbol)
         g_logo_imagedesc = Archive_GetPublicAddress(arc, (char *)d->banner_symbol);
     if (d->emblem_symbol)
         g_emblem_imagedesc = Archive_GetPublicAddress(arc, (char *)d->emblem_symbol);
-    if (g_logo_imagedesc == NULL || g_emblem_imagedesc == NULL)
-        OSReport("[CustomChecklist] %s.dat missing texture symbols (banner=%d emblem=%d)\n",
-                 d->tex_file, g_logo_imagedesc != NULL, g_emblem_imagedesc != NULL);
+    if ((g_logo_imagedesc == NULL || g_emblem_imagedesc == NULL) && !g_lists[idx].art_reported)
+    {
+        g_lists[idx].art_reported = 1;
+        OSReport("[CustomChecklist] %s.dat texture symbols: banner %s, emblem %s\n",
+                 d->tex_file,
+                 g_logo_imagedesc != NULL ? "ok" : "missing",
+                 g_emblem_imagedesc != NULL ? "ok" : "missing");
+    }
 }
 
 // REPLACEFUNC for ClearChecker_CheckForNewUnlocks (0x8004a1a4), the gate each mode's
@@ -970,7 +986,7 @@ static int CC_Register(const CustomChecklistDesc *desc)
     L->minor_id = CC_InstallMinor();
     if (L->minor_id < 0)
     {
-        OSReport("[CustomChecklist] Register failed: minor-scene install for '%s'\n",
+        OSReport("[CustomChecklist] Register rejected: minor-scene install failed for '%s'\n",
                  desc->name ? desc->name : "?");
         return -1;
     }
@@ -997,9 +1013,16 @@ static void CC_RevealAll(int mode)
              g_lists[idx].desc.check_num);
 }
 
+// The tab whose build is in progress, as a checklist mode; -1 outside a build.
+static int CC_GetBuildMode(void)
+{
+    return g_build_active >= 0 ? g_lists[g_build_active].mode : -1;
+}
+
 static const CustomChecklistAPI g_api = {
     .Register = CC_Register,
     .RevealAll = CC_RevealAll,
+    .GetBuildMode = CC_GetBuildMode,
 };
 
 static void OnBoot(void)

@@ -20,4 +20,10 @@ void APItems_OnSceneChange();
 // Append an AP item ID to the unprocessed queue. Returns 1 on success, 0 if full.
 int APItems_Queue(uint ap_item_id);
 
+// Spawn one item just ahead of a player's machine, where it can be driven into
+// rather than landing on the rider. box_kind and size are the box fields, -1 each
+// for anything that is not a box. Returns 0 if that player has no machine. Caller
+// must guarantee the item data tables are loaded (City Trial only).
+int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size);
+
 #endif

@@ -1,94 +1,43 @@
 # Patch Type Gating
 
-Each of the 9 City Trial stat patches can be individually locked behind an Archipelago unlock item. When a patch type is locked, none of its ITKIND variants appear in any spawn pool.
+Each of the 9 City Trial stat patches can be individually locked behind an Archipelago unlock item; while a patch type is locked none of its ITKIND variants appear in any spawn pool. AP items 780-788 (`AP_PATCH_UNLOCK_BASE` + `PatchKind`) route through `ap_item_handler.c` to `GatePatches_UnlockPatch`, which sets the bit in `APSave.patch_unlocked_mask` and posts a textbox. The mask is exposed to other mods through `ArchipelagoAPI` as `AP_UNLOCK_PATCH`; when the slot option `patch_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` (`main.c`) pre-fills it with all 9 bits at connect and the gate never bites.
+
+**File:** `mods/archipelago/src/gate_patches.c`.
 
 ## What Is Gated
 
-The 9 `PatchKind` values (`item.h`), one bit each in `patch_unlocked_mask`. The Up, Down, and Fake ITKIND variants of a stat gate together under one unlock — unlocking OFFENSE enables `ITKIND_OFFENSE`, `ITKIND_OFFENSEDOWN`, and `ITKIND_OFFENSEFAKE` at once. HP is the exception: it has only `ITKIND_HP`, no Down or Fake variant.
+The 9 `PatchKind` values (`item.h`). Each covers three ITKINDs at once - `ITKIND_<STAT>`, `ITKIND_<STAT>DOWN`, `ITKIND_<STAT>FAKE` - collapsed onto one `PatchKind` by `ItemKindToPatchKind()`. `PATCHKIND_HP` is the exception: `ITKIND_HP` has no Down or Fake variant. Grouping the variants keeps the AP pool at 9 items instead of 27, and "unlock offense stat items" is how a player thinks about it anyway.
 
-| Bit | `PatchKind` | ITKIND variants | AP item |
-|----:|-------------|-----------------|--------:|
-| 0 | `PATCHKIND_WEIGHT` | `WEIGHT` / `WEIGHTDOWN` / `WEIGHTFAKE` | 780 |
-| 1 | `PATCHKIND_ACCEL` | `ACCEL` / `ACCELDOWN` / `ACCELFAKE` | 781 |
-| 2 | `PATCHKIND_TOPSPEED` | `TOPSPEED` / `TOPSPEEDDOWN` / `TOPSPEEDFAKE` | 782 |
-| 3 | `PATCHKIND_TURN` | `TURN` / `TURNDOWN` / `TURNFAKE` | 783 |
-| 4 | `PATCHKIND_CHARGE` | `CHARGE` / `CHARGEDOWN` / `CHARGEFAKE` | 784 |
-| 5 | `PATCHKIND_GLIDE` | `GLIDE` / `GLIDEDOWN` / `GLIDEFAKE` | 785 |
-| 6 | `PATCHKIND_OFFENSE` | `OFFENSE` / `OFFENSEDOWN` / `OFFENSEFAKE` | 786 |
-| 7 | `PATCHKIND_DEFENSE` | `DEFENSE` / `DEFENSEDOWN` / `DEFENSEFAKE` | 787 |
-| 8 | `PATCHKIND_HP` | `HP` | 788 |
-
-**Not gated:** `ITKIND_ALLUP` and the `*MAX` items (`ITKIND_SPEEDMAX`, `ITKIND_CHARGEMAX`, `ITKIND_OFFENSEMAX`, `ITKIND_DEFENSEMAX`) are not mapped by `ItemKindToPatchKind` (it returns `-1` for them), so they are never removed — a locked stat still lets All-Up and Max-stat pickups through. Those have their own bits in the individual-item gate.
-
-## Entry Points
-
-**Files:** `mods/archipelago/src/gate_patches.c` / `gate_patches.h`
-
-| Symbol | Kind | Where | Role |
-|--------|------|-------|------|
-| `GatePatches_FilterSpawnTables()` | mod | gate_patches.c | Filters the three `grBoxGeneObj` box pools (`item_group_spawn[]`, `sameitem_*`, `subsequent_*`). |
-| `GatePatches_FilterEventDropTables()` | mod | gate_patches.c | Zeroes locked entries in `grBoxGeneInfo->item_desc->event_source_drop[]`. |
-| `GatePatches_UnlockPatch(PatchKind kind)` | mod | gate_patches.c | Sets the unlock bit, logs, and posts a textbox notification. Called from `ap_item_handler.c`. |
-| `ItemKindToPatchKind(u8 it_kind)` | mod (static) | gate_patches.c | Collapses up / down / fake ITKINDs onto one `PatchKind`; `-1` for non-patch items. |
-| `FilterPatchItemsFromPool(...)` | mod (static) | gate_patches.c | Stable two-pointer compaction of one box pool. |
-| `FilterAllSpawnTables()` | mod (static) | item_spawn_filter.c | Owns the two spawn-table hook points and calls every gate module's filters. |
-| `CityItemSpawn_InitItemFallChances` | game | 0x800eb374 | Populates the spawn tables at City Trial start. |
-| `CityEvent_ModifyItemFallDesc` | game | 0x800ed784 | Reinitialises them mid-match on an event. |
-
-This module installs **no hooks of its own** — hoshi allows only one hook per address, so `item_spawn_filter.c` owns both sites.
+`ITKIND_ALLUP` and the four `*MAX` items (`SPEEDMAX`, `CHARGEMAX`, `OFFENSEMAX`, `DEFENSEMAX`) are **not** mapped by `ItemKindToPatchKind` - it returns `-1` for them - so a locked stat still lets All-Up and Max-stat pickups through. Those carry their own bits in the individual-item gate.
 
 ## Game System
 
-All City Trial item spawning flows through the `grBoxGeneObj` spawn table system. The tables live at `*(0x805dd0e0 + 0x608)` and contain three pools that must all be filtered:
+Every City Trial item drop is rolled out of one of two table families, and a patch ITKIND can sit in both.
 
-- **`item_group_spawn[BOXKIND_NUM]`** — per-box-type item pools (blue/green/red). Each entry has `it_kind[ITKIND_NUM - 1]`, `chance[ITKIND_NUM - 1]`, and `num` (count of active entries). When a box spawns, the game picks from the corresponding pool via weighted random.
-- **`sameitem_it_kind/chance/num`** — used by the "All Same Item" City Trial event. When active, all boxes drop the same item selected from this pool.
-- **`subsequent_it_kind/chance/num`** — used when a blue box drops more than one patch power-up in sequence.
+`grBoxGeneObj` (`*stc_grBoxGeneObj`, r13+0x608) holds the box pools, each a parallel `it_kind[]` / `chance[]` array with a `num` count:
 
-The event-drop table is separate: `grBoxGeneInfo->item_desc->event_source_drop[]` (`grBoxGeneInfo` at `*(0x805dd0e0 + 0x610)`, `item_desc` at +0xc, `event_source_drop` at +0x18, count at +0x1c). One entry per ITKIND with six per-source weight columns — `chance_dyna`, `chance_tac`, `chance_meteor`, `chance_destructible`, `chance_chamber`, `chance_ufo`.
+- `item_group_spawn[BOXKIND_NUM]` - one pool per box color, also used for sky and ground drops.
+- `sameitem_*` - the pool the "All Same Item" event draws the single item from.
+- `subsequent_*` - the pool a blue box uses when it drops more than one power-up in sequence.
 
-The tables are populated once at City Trial start (`CityItemSpawn_InitItemFallChances`, 0x800eb374) and can be reinitialised mid-match by events (`CityEvent_ModifyItemFallDesc`, 0x800ed784). Filtering must happen after both.
+`grBoxGeneInfo` (`*stc_grBoxGeneInfo`, r13+0x610) holds the event drop table at `item_desc->event_source_drop[]`: one entry per ITKIND with six independent weight columns, one per drop source (`chance_dyna`, `chance_tac`, `chance_meteor`, `chance_destructible`, `chance_chamber`, `chance_ufo`).
+
+Both are populated at City Trial start by `CityItemSpawn_InitItemFallChances` (0x800eb374) and can be repopulated mid-match by `CityEvent_ModifyItemFallDesc` (0x800ed784) when an event changes the drop mix. Filtering has to run after each, or the repopulation undoes it.
 
 ## Implementation
 
-`FilterAllSpawnTables()` in `item_spawn_filter.c` is installed at two function-epilogue hooks (safe to call C with no arguments):
+This module installs **no hooks of its own**. hoshi allows one hook per address and three gate modules need the same two sites, so `item_spawn_filter.c` owns them and calls each module's filters in a fixed order: All-Up injection, then the box-pool filters (abilities, patches, items), then the event-drop filters in the same order, then the Max Stats drop-weight bias.
 
-| Hook address | Function (entry) | Clobbered instruction | When it runs |
-|-------------|-----------------|----------------------|-------------|
-| `0x800eb558` | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` | After initial spawn-table population |
-| `0x800ed7f0` | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `lwz r0, 0x14(r1)` | After event-triggered reinit |
+| Hook address | Hooked function (entry) | Clobbered instruction |
+|-------------|-----------------|----------------------|
+| `0x800eb558` | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` |
+| `0x800ed7f0` | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `lwz r0, 0x14(r1)` |
 
-For stadium / Air Ride modes the `CityItemSpawn` init path never runs, so `ItemSpawnFilter_On3DLoadEnd()` calls `FilterAllSpawnTables()` directly instead (guarded by `!Gm_IsInCity() && *stc_grBoxGeneObj`).
+Both are function epilogues, so the hook can call C with no arguments. Stadium and Air Ride never run the `CityItemSpawn` init path at all, so `ItemSpawnFilter_On3DLoadEnd()` runs the same chain at scene load instead, guarded by `!Gm_IsInCity() && *stc_grBoxGeneObj`.
 
-Inside `FilterAllSpawnTables()` the order is: `GateItems_EnsureAllUpInSpawnPools()` → box-pool filters (`GateAbilities_` → `GatePatches_` → `GateItems_`) → event-drop filters (same order) → `GoalMaxStatsCT_ApplyDropBias()`.
+The two pool families are filtered differently, and the difference is load-bearing:
 
-### Filtering logic
+- **Box pools** (`FilterPatchItemsFromPool`): a locked entry is deleted by stable two-pointer forward compaction and `*pool_num` shrinks. The game samples these pools by random index, so the array length must actually shrink or the roll can land on a hole. Order is preserved - this is *not* a swap-with-last delete.
+- **Event drop table** (`GatePatches_FilterEventDropTables`): entries cannot move, because callers index the table directly. All six `chance_*` columns of a locked entry are zeroed in place instead.
 
-`ItemKindToPatchKind(u8 it_kind)` maps an ITKIND to its `PatchKind`. For each entry whose `PatchKind` bit is clear in `ap_save->patch_unlocked_mask`:
-
-- **Box pools** (`FilterPatchItemsFromPool`): the entry is removed by stable two-pointer forward compaction and `*pool_num` is shrunk. The game samples these pools by random index, so the array length must actually shrink. Order is preserved — this is *not* a swap-with-last delete.
-- **Event-drop pool** (`GatePatches_FilterEventDropTables`): cannot be compacted (callers iterate the table by index), so all six `chance_*` columns of the entry are set to `0` instead.
-
-## Save Data
-
-`u16 patch_unlocked_mask` in `APSave` (`main.h`, accessed via the global `ap_save`) — bit N = `PatchKind` N.
-
-The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_PATCH`. When the slot option `patch_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` in `main.c` pre-fills the mask with `(1 << PATCHKIND_NUM) - 1` at connect.
-
-## AP Items
-
-9 AP items, `AP_PATCH_UNLOCK_BASE` (780, `archipelago_api.h`) + `PatchKind` index → IDs 780–788.
-
-`ap_item_handler.c` routes IDs in `[780, 780 + PATCHKIND_NUM)` to `GatePatches_UnlockPatch(id - AP_PATCH_UNLOCK_BASE)`, which:
-
-1. Sets `ap_save->patch_unlocked_mask |= (1 << kind)`.
-2. Logs `[GatePatches] Patch %d (%s) unlocked (mask = %s)` using `PatchKind_Names[kind]` and `MaskBits(mask, 16)`.
-3. Enqueues a textbox: `EnqueueColoredNoun("Unlocked Patch: ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL)`.
-
-The new mask takes effect at the next spawn-table population (next round or event reinit), when `FilterAllSpawnTables()` re-runs the filters.
-
-## Design Decisions
-
-**Variant grouping:** Up, Down, and Fake variants gate together under one `PatchKind` rather than individually. This keeps the AP item count manageable (9 instead of 27) and is intuitive — "unlock offense stat items" means all offense-related patches. `ItemKindToPatchKind()` handles the many-to-one relationship.
-
-**Filter chain architecture:** All spawn-table filtering (abilities, patches, items) shares the same two hook points. `item_spawn_filter.c`'s `FilterAllSpawnTables()` owns the hooks and calls each gate module's filters independently, avoiding conflicts at shared hook addresses. Box-type gating is unrelated to this chain — `gate_boxes.c` handles it with a `REPLACEFUNC` on `GrBoxGeneratorDetermine`.
+A newly received unlock takes effect at the next spawn-table population - the next round, or the next event reinit - because that is when the filters re-run over freshly loaded `.dat` data.

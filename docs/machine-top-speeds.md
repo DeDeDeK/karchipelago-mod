@@ -7,20 +7,15 @@ the Fantasy Meadows "1 lap without dropping below 20 mph!" checklist cell.
 ## Where the numbers live
 
 Each `Vc*.dat` holds one public `vcData*` struct whose first field is a pointer to the
-vehicle's attribute blob. `Machine_AdjustAttributes` (`0x801c7278`) memcpy's 124 words
-(0x1f0 bytes) out of that blob into `MachineData+0x460`, so **attribute offset `k` lands
-at `MachineData + 0x460 + k`**:
-
-| MachineData | attr offset | Field |
-|---|---|---|
-| 0x4cc | 0x6c | `hp_max` |
-| 0x4f0 | 0x90 | `top_speed_ground` |
-| 0x5ac | 0x14c | `top_speed_air` |
+vehicle's attribute blob. `Machine_AdjustAttributes` (`0x801c7278`) memcpys 124 words
+(0x1f0 bytes) out of that blob into `MachineData+0x460`, so attribute offset `k` lands at
+`MachineData + 0x460 + k`: `top_speed_ground` is attr `+0x90` and `MachineData+0x4f0`,
+`top_speed_air` is attr `+0x14c` and `+0x5ac`, `hp_max` is attr `+0x6c` and `+0x4cc`.
 
 After the copy, `Machine_AdjustAttributes` dispatches the per-class scaling callback
 (`Machine_AdjustAttributesStar` `0x801e906c` / `Machine_AdjustAttributesBike`
 `0x801f4dac`), which multiplies `top_speed_ground` by two `Machine_ScaleFromRatio`
-factors — one keyed on the accel stat ratio, one on the top-speed stat ratio (the latter
+factors - one keyed on the accel stat ratio, one on the top-speed stat ratio (the latter
 using a per-VCKIND min/max pair). `Machine_ScaleFromRatio` returns exactly `1.0` at ratio
 `0`, and `Machine_GetStatRatio` sums the patch/stat arrays at `MachineData+0x94C`,
 `+0x970`, `+0x994`, `+0x9B8` plus `PlayerData.stat_aux`. **In Air Ride and Top Ride those
@@ -79,29 +74,30 @@ grounded cap clears the `1.303867` floor.
 | 10 | Rocket Star | VcStarRocket | 1.0125 | 15.53 | 1.2150 | 18.64 | 220 | **no** |
 | 25 | VS Dedede Wheelie | VcWheelVsDedede | 0.9315 | 14.29 | 1.6200 | 24.85 | 270 | **no** |
 
-The internal `Star_*` / `Wheel_*` names run in VCKIND order; the archive-to-VCKIND
-mapping above comes from the file/symbol name pair table at `0x804b152c`, which the
-vehicle loader walks in that same order.
+The archive-to-VCKIND mapping is the `{filename, symbol}` name pair table the vehicle
+loader walks, reached as `stc_vcNameTable[is_bike]` (`0x805d6f90`): the star table at
+`0x804b1528` is slots 0-18 in VCKIND order, and the bike table at `0x804b1c08` is slots
+0-6, whose VCKINDs are `19 + slot`.
 
 Boost and charge release exceed the cap only transiently, and charging costs speed while
 it is held, so neither raises a machine's sustainable floor. Gliding swaps in the air cap,
-which is higher for every machine except Turbo Star, Dedede Wheelie and Rocket Star — but
-it cannot be held for a full lap, and Rocket Star is under the 20 mph floor in both
-states.
+which is the higher of the two on every machine but Formula Star, Swerve Star, Wheel
+Kirby, Turbo Star and Dedede Wheelie - but it cannot be held for a full lap, and Rocket
+Star is the one machine under the 20 mph floor in both states.
 
 ## Consequences for the 20 mph cell
 
 The Fantasy Meadows cell needs `|world_velocity| >= 1.303867` on *every* frame of a lap,
-so the cap is a **necessary** condition — but not a sufficient one, because how a machine
-sheds speed matters as much as how fast it goes. Play-tested verdict:
+so the cap is a **necessary** condition - but not a sufficient one, because how a machine
+sheds speed matters as much as how fast it goes. In practice:
 
 | Machine | Cap | Verdict |
 |---|---:|---|
 | Rocket Star | 15.53 | fails, cap far under the floor |
 | Compact Star | 18.02 | fails, cap under the floor |
 | Shadow Star | 19.88 | fails, cap just under the floor |
-| Swerve Star | 31.19 | **fails on handling** — it comes to a full stop to steer, and the course cannot be lapped without turning |
-| Hydra | 18.64 | **passes** — resting cap is under the floor, but its charge carries it over |
+| Swerve Star | 31.19 | **fails on handling** - it comes to a full stop to steer, and the course cannot be lapped without turning |
+| Hydra | 18.64 | **passes** - resting cap is under the floor, but its charge carries it over |
 
 Everything else on the table clears it. Jet Star (20.50) and Wheelie Scooter (21.12) have
 the thinnest remaining margins, so a mistake costs the lap on those two even though they

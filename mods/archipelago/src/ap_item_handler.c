@@ -24,7 +24,10 @@
 #include "gate_colors.h"
 #include "gate_stadiums.h"
 #include "spawn_rate.h"
+#include "gate_ap_star.h"
 #include "main.h"
+#include "settings_menu.h"
+#include "ap_announce.h"
 
 // Bump the received counter, append to the unprocessed list, and acknowledge.
 // Returns 1 if an item was received.
@@ -44,7 +47,7 @@ int APItems_CheckMailbox()
         // has advanced past it and item_received_count was never bumped.
         if (!warned_full)
         {
-            OSReport("[APItems] unprocessed queue full (%d); holding item %d in mailbox\n",
+            OSReport("[APItems] Unprocessed queue full (%d) - holding item %d in the mailbox\n",
                      MAX_RECEIVED_ITEMS, incoming);
             warned_full = 1;
         }
@@ -60,7 +63,7 @@ int APItems_CheckMailbox()
 
     ap_data->item_received_index = ap_save->item_received_count;
 
-    OSReport("[APItems] AP item ID %d received (index %d).\n", incoming, idx);
+    OSReport("[APItems] AP item ID %d received (index %d)\n", incoming, idx);
 
     // Clear the mailbox so the client can write the next item
     ap_data->incoming_item_id = 0;
@@ -104,38 +107,58 @@ static GXColor ItemReceiveColor(ItemKind k)
 static void NotifyItemReceived(ItemKind k)
 {
     if ((unsigned)k < ITKIND_NUM && ItemKind_Names[k])
-        tb_api->EnqueueColoredNoun("Received: ", ItemKind_Names[k], ItemReceiveColor(k), NULL);
+        APAnnounce_Grant("Received: ", ItemKind_Names[k], ItemReceiveColor(k), NULL);
 }
 
-// Distance in machine forward units to push a granted box ahead of the rider, so
+// Distance in machine forward units to push a spawned item ahead of the rider, so
 // it lands in front of them to drive into rather than on top of them.
-#define AP_BOX_SPAWN_FORWARD 10.0f
+#define AP_SPAWN_FORWARD 10.0f
 
-// Spawn a box pickup for every human player, offset ahead of the machine along
-// its forward vector. Mirrors SpawnItemPlayer - the initial raycast from
-// is_airborne=1 settles the box onto the ground. Caller must guarantee item data
-// tables are loaded (City Trial only).
-static void SpawnBoxHumansForward(ItemKind kind)
+int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
 {
+    if (ply < 0 || ply >= 5)
+        return 0;
+    GOBJ *mg = Ply_GetMachineGObj(ply);
+    if (!mg)
+        return 0;
+    MachineData *md = mg->userdata;
+
+    Vec3 pos;
+    pos.X = md->pos.X + AP_SPAWN_FORWARD * md->forward.X;
+    pos.Y = md->pos.Y + AP_SPAWN_FORWARD * md->forward.Y;
+    pos.Z = md->pos.Z + AP_SPAWN_FORWARD * md->forward.Z;
+
+    // Mirrors SpawnItemPlayer - the initial raycast from is_airborne=1 settles
+    // the item onto the ground.
+    ItemDesc desc;
+    Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &md->up, &md->forward,
+                  box_kind, size, 1, 3, -1, -1);
+    return Item_Create(&desc) != NULL;
+}
+
+// Both return the number of human riders the item actually reached. A rider on
+// foot has no machine to spawn at and both paths skip them, so a give that landed
+// on nobody has to stay queued rather than report itself applied.
+static int SpawnBoxHumansForward(ItemKind kind)
+{
+    int gave = 0;
+    for (int i = 0; i < 5; i++)
+        if (Ply_GetPKind(i) == PKIND_HMN)
+            gave += APItems_SpawnForward(i, kind, -1, -1);
+    return gave;
+}
+
+static int SpawnItemHumansCounted(ItemKind kind)
+{
+    int gave = 0;
     for (int i = 0; i < 5; i++)
     {
-        if (Ply_GetPKind(i) != PKIND_HMN)
+        if (Ply_GetPKind(i) != PKIND_HMN || Ply_GetMachineGObj(i) == NULL)
             continue;
-        GOBJ *mg = Ply_GetMachineGObj(i);
-        if (!mg)
-            continue;
-        MachineData *md = mg->userdata;
-
-        Vec3 pos;
-        pos.X = md->pos.X + AP_BOX_SPAWN_FORWARD * md->forward.X;
-        pos.Y = md->pos.Y + AP_BOX_SPAWN_FORWARD * md->forward.Y;
-        pos.Z = md->pos.Z + AP_BOX_SPAWN_FORWARD * md->forward.Z;
-
-        ItemDesc desc;
-        Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &md->up, &md->forward,
-                      -1, -1, 1, 3, -1, -1);
-        Item_Create(&desc);
+        SpawnItemPlayer(i, kind);
+        gave++;
     }
+    return gave;
 }
 
 // Handle an AP item by its raw ID. Returns an APItemResult: APPLIED on success,
@@ -238,10 +261,21 @@ int APItems_HandleItem(uint ap_item_id)
         return GateItems_UnlockItem(kind);
     }
 
-    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854).
-    // The bound stops before WHEELVSDEDEDE (25), the stadium CPU-only Dedede
-    // machine, so a stray ID 855 falls through to the unknown-item path.
-    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
+    // Archipelago Star sphere unlock items (AP_STAR_PIECE_UNLOCK_BASE + APStarPiece)
+    if (ap_item_id >= AP_STAR_PIECE_UNLOCK_BASE &&
+        ap_item_id < AP_STAR_PIECE_UNLOCK_BASE + AP_STAR_PIECE_NUM)
+    {
+        int piece = ap_item_id - AP_STAR_PIECE_UNLOCK_BASE;
+        return GateApStar_UnlockPiece(piece);
+    }
+
+    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854
+    // for the vanilla machines and 856 up for registered custom ones, capped at
+    // the end of the block so registered kinds can never reach another category's
+    // ids). ID 855 is WHEELVSDEDEDE (25), the stadium CPU-only Dedede machine,
+    // which is not exposed and falls through to the unknown-item path.
+    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + MachineUnlock_KindNum() &&
+        ap_item_id != AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
     {
         MachineKind kind = ap_item_id - AP_MACHINE_UNLOCK_BASE;
         return GateMachines_UnlockMachine(kind, /*announce=*/1);
@@ -294,11 +328,11 @@ int APItems_HandleItem(uint ap_item_id)
     {
         TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_GIVE_BASE;
         // Notify here rather than in the give handler - TrapLink also calls it
-        // and shows its own "Trap received!" message.
+        // and shows its own "TrapLink received!" message.
         int ok = GateTopRideItems_GiveItem(kind);
         if (ok && (unsigned)kind < TRITEM_NUM && TopRideItemKind_Names[kind])
-            tb_api->EnqueueColoredNoun("Received: TR ", TopRideItemKind_Names[kind],
-                                       tb_api->TopRideItemColor, NULL);
+            APAnnounce_Grant("Received: TR ", TopRideItemKind_Names[kind],
+                             tb_api->TopRideItemColor, NULL);
         return ok;
     }
 
@@ -317,8 +351,8 @@ int APItems_HandleItem(uint ap_item_id)
                 return 0; // no Top Ride analog - retry in City Trial / Air Ride
             int ok = GateTopRideItems_GiveItem((TopRideItemKind)tr_item);
             if (ok)
-                tb_api->EnqueueColoredNoun("Received: ", CopyKind_Names[copy_kind],
-                                           tb_api->AbilityColors[copy_kind], " ability");
+                APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
+                                 tb_api->AbilityColors[copy_kind], " ability");
             return ok;
         }
     }
@@ -375,7 +409,7 @@ int APItems_HandleItem(uint ap_item_id)
         EventKind kind = ap_item_id - AP_EVENT_BASE;
         int ok = Event_GiveItem(kind);
         if (ok && kind < EVKIND_NUM && EventKind_Names[kind])
-            tb_api->EnqueueColoredNoun("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
+            APAnnounce_Grant("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
         return ok;
     }
 
@@ -394,21 +428,22 @@ int APItems_HandleItem(uint ap_item_id)
         {
             if (major != MJRKIND_CITY && major != MJRKIND_AIR)
                 return 0;
-            Patch_GiveItem(patch_kind, 1);
+            if (!Patch_GiveItem(patch_kind, 1))
+                return AP_ITEM_RETRY;
             NotifyItemReceived(it_kind);
-            return 1;
+            return AP_ITEM_APPLIED;
         }
 
         if (Gm_IsInCity())
         {
             // Boxes spawn ahead of the rider (to drive into and break) rather
             // than on top of them; everything else spawns at the rider.
-            if (it_kind <= ITKIND_BOXRED)
-                SpawnBoxHumansForward(it_kind);
-            else
-                SpawnItemHumans(it_kind);
+            int gave = (it_kind <= ITKIND_BOXRED) ? SpawnBoxHumansForward(it_kind)
+                                                  : SpawnItemHumansCounted(it_kind);
+            if (!gave)
+                return AP_ITEM_RETRY;
             NotifyItemReceived(it_kind);
-            return 1;
+            return AP_ITEM_APPLIED;
         }
         return 0;
     }
@@ -420,31 +455,42 @@ int APItems_HandleItem(uint ap_item_id)
             return 0;
         int ok = Patch_DropTrap();
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "Drop Patches", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "Drop Patches", tb_api->TrapColor, NULL);
         return ok;
     }
+
+    // Archipelago Star sphere give items (AP_STAR_PIECE_GIVE_BASE + APStarPiece).
+    // Collected straight into the player's set, and announced by the gate, which
+    // owns the sphere names.
+    if (ap_item_id >= AP_STAR_PIECE_GIVE_BASE &&
+        ap_item_id < AP_STAR_PIECE_GIVE_BASE + AP_STAR_PIECE_NUM)
+        return GateApStar_GivePiece(ap_item_id - AP_STAR_PIECE_GIVE_BASE);
 
     // Legendary machine assembly - assembled Dragoon/Hydra via the cinematic
     if (ap_item_id == AP_ITEM_GIVE_DRAGOON)
     {
         int ok = GateMachines_GiveLegendaryMachine(0);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "Dragoon", tb_api->MachineColor, NULL);
+            APAnnounce_Grant("Received: ", "Dragoon", tb_api->MachineColor, NULL);
         return ok;
     }
     if (ap_item_id == AP_ITEM_GIVE_HYDRA)
     {
         int ok = GateMachines_GiveLegendaryMachine(1);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "Hydra", tb_api->MachineColor, NULL);
+            APAnnounce_Grant("Received: ", "Hydra", tb_api->MachineColor, NULL);
         return ok;
     }
+
+    // The star's own assembly, awarded without the six spheres.
+    if (ap_item_id == AP_ITEM_GIVE_AP_STAR)
+        return GateApStar_GiveStar();
 
     if (ap_item_id == AP_ITEM_ALL_DOWN)
     {
         int ok = Patch_AllUp_GiveItem(-1);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "All Down", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "All Down", tb_api->TrapColor, NULL);
         return ok;
     }
 
@@ -452,7 +498,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         int ok = Patch_AllUp_GiveItem(1);
         if (ok)
-            tb_api->EnqueueColoredNoun("Received: ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
+            APAnnounce_Grant("Received: ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
         return ok;
     }
 
@@ -476,7 +522,7 @@ int APItems_HandleItem(uint ap_item_id)
             }
         }
         if (applied)
-            tb_api->EnqueueColoredNoun("Received: ", "1 HP", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "1 HP", tb_api->TrapColor, NULL);
         return applied;
     }
 
@@ -484,7 +530,8 @@ int APItems_HandleItem(uint ap_item_id)
     return AP_ITEM_DROP;
 }
 
-// Returns 1 if queued, 0 if the queue is full.
+// Returns 1 if queued, 0 if the queue is full. For items the mod raises itself
+// (EnergyLink purchases and the like) - the AP mailbox has its own entry point.
 int APItems_Queue(uint ap_item_id)
 {
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
@@ -502,19 +549,16 @@ void APItems_OnSceneChange()
 // skipped so items behind them still process; only RETRY items stay in the queue.
 void APItems_PerFrame(GOBJ *g)
 {
-    int item_received = APItems_CheckMailbox();
+    APItems_CheckMailbox();
 
     for (uint i = 0; i < ap_save->unprocessed_count; i++)
     {
         uint item_id = ap_save->unprocessed_items[i];
+
         int result = APItems_HandleItem(item_id);
+
         if (result == AP_ITEM_RETRY)
             continue;
-
-        if (result == AP_ITEM_APPLIED)
-            OSReport("[APItems] AP item ID %d applied.\n", item_id);
-        else
-            OSReport("[APItems] AP item ID %d dropped.\n", item_id);
 
         // Remove by swapping with the last element.
         ap_save->unprocessed_count--;

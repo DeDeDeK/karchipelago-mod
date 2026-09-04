@@ -4,122 +4,44 @@ A custom City Trial event (`CUSTOM_EVKIND_GRAVITY_CHANGE`, kind 17) that scales 
 
 The load-bearing fact: **gravity is a strength scalar plus a direction vector, in two adjacent `StageNode` fields.** To change how strong gravity feels, scale the *strength* (`gravity_strength`, +0x0C) and leave the *direction* (`gravity_dir`, +0x10) a unit vector. Scaling the direction instead denormalizes the machine's derived up vector and breaks air control.
 
-## Entry Points
-
-| Function | Role |
-|----------|------|
-| `GravityChange_Start` | Pick a multiplier, save the original `gravity_strength`, apply. Called from `CustomEvent_State1Wrapper`. |
-| `GravityChange_Active` | Re-apply the scaled strength each frame, in case something overwrites it. Called from `CustomEvent_State2Wrapper`. |
-| `GravityChange_End2` | Restore the original `gravity_strength`. Called from `CustomEvent_State3Wrapper`. |
-| `GetStageGravityStrength` (static) | Resolves `*stc_grobj -> gr_data -> stage_node -> &gravity_strength`, with NULL guards. |
-
-No `check` callback is registered, so the event is always eligible; no per-frame `end` callback either.
-
-## Registration
-
-`custom_params[CUSTOM_EVKIND_GRAVITY_CHANGE - EVKIND_NUM]` in `custom_events.c`:
-
-| Field | Value |
-|-------|-------|
-| `duration` | 900 frames (~15 s) |
-| `is_siren` | 1 (siren SFX + music fade + sky transition) |
-| `sky_preset` | 8 (Pink Sky) |
-| `bgm_file` | 0x31 (`event_meteo`) |
-| `weight` | 20 |
-| `label` | `"Gravity Change"` |
-| `hud_text` | `"Gravity is changing!"` |
+Like every custom event it is a row in `custom_params[]` and `custom_functions[]` in `custom_events.c`; the mod's wrappers on the event state table call the kind's callbacks in place of the vanilla per-kind dispatch. Its parameters: 900-frame duration (~15 s), siren intro, sky preset 8 (Pink Sky), BGM file 0x31 (`event_meteo`), roll weight 20. No `check` callback is registered, so the event is always eligible, and there is no per-frame `end`.
 
 ## Implementation
 
-Each trigger picks `GRAVITY_MULT_LOW` (0.5, floaty) or `GRAVITY_MULT_HIGH` (2.0, heavy) via `HSD_Randi(2)` in `GravityChange_Start`, holding the choice in a static for `Active`/`End2`. The original strength is captured at start, the scaled value re-applied every active frame, and the original written back on cleanup. `gravity_dir` is never touched.
+`GravityChange_Start` picks `GRAVITY_MULT_LOW` (0.5, floaty) or `GRAVITY_MULT_HIGH` (2.0, heavy) with `HSD_Randi(2)`, holds the choice in a static, captures the original `gravity_strength` and writes the scaled value. `GravityChange_Active` re-applies it every frame in case something overwrites the field; `GravityChange_End2` writes the original back. `gravity_dir` is never touched.
 
-- **Low gravity** (`< 1.0`): floaty machines, longer/higher jumps, drift, extended air time.
-- **High gravity** (`> 1.0`): machines hug the ground, jumps cut short, snappier landings.
+The field is reached through `GetStageGravityStrength`, which walks `*stc_grobj -> gr_data (+0x8) -> stage_node (+0x4)` and returns `&stage_node->gravity_strength`, NULL-guarded at every step - if the chain is not up (no stage loaded) the event no-ops rather than writing through a null pointer, and `gravity_modified` stays 0 so `Active`/`End2` skip too.
 
-Possible extensions: rotate `gravity_dir` by a small angle *while keeping it unit-length* for diagonal gravity (machines build their up vector from it, so the world genuinely re-orients); or lerp `gravity_strength` over several frames at start/end instead of switching instantly.
+Low gravity gives floaty machines, longer and higher jumps, drift and extended air time; high gravity makes machines hug the ground with short jumps and snappy landings.
 
 ## Gravity System
 
-The single entry point for "which way is down, and how hard, at this position" is `Gm_GetDownVector` (0x800ceb18):
+The single entry point for "which way is down, and how hard, at this position" is `Gm_GetDownVector` (0x800ceb18): it writes the unit down direction into an out-param `Vec3` and returns the strength scalar. It consults the stage's gravity zones first, and if no zone applies at the queried position it falls back to the global stage gravity - copying `StageNode.gravity_dir` out and returning `StageNode.gravity_strength`. Machines, items, enemies and the camera all source their down/up from this one function, which is why one field write changes the whole world's physics.
 
-```c
-// Writes the unit down direction into *out, returns the gravity strength scalar.
-float Gm_GetDownVector(Vec3 *pos, Vec3 *out);
-```
+City Trial's `StageNode` holds `gravity_strength` = 0.025 and `gravity_dir` = (0, -1, 0). Those same two values are the hard-coded fallback `Gm_GetDownVector` returns when there is no `stage_node` at all (float constants at 0x805df5dc / 0x805df5e4).
 
-It consults the stage's gravity zones first, and if no zone applies at `pos` it falls back to the **global stage gravity**: it copies `StageNode.gravity_dir` into `*out` and returns `StageNode.gravity_strength`. Machines, items, enemies and the camera all source their down/up from this one function.
+### How gravity reaches a machine
 
-### Data Location
+Every machine refreshes a cached copy each frame in `Machine_RefreshGravity` (0x801c98c4, also run once from `Machine_Create`). Given the `MachineData`, it calls `Gm_GetDownVector(&md->pos /*+0x3E8*/, &md->down /*+0x768*/)`, stores the returned strength at `MachineData+0x764`, and writes the component-wise negation of the down vector to `MachineData+0x774` as the machine's up vector. (An early-out on a flag bit at `MachineData+0xC3A` skips the refresh entirely for some machine states.)
 
-```c
-// Access chain: stc_grobj -> gr_data (+0x8) -> stage_node (+0x4)
-GrObj *grobj = *stc_grobj;
-StageNode *node = grobj->gr_data->stage_node;
-float  strength = node->gravity_strength;  // +0x0C - magnitude
-Vec3  *dir      = &node->gravity_dir;      // +0x10 - unit down direction
-```
+So the downward pull is `down_direction * strength` and the **up vector is the negated raw down direction**, which is exactly why the choice of field matters:
 
-### StageNode layout (relevant fields)
+- Scaling `gravity_strength` cleanly scales fall acceleration while the direction - and therefore the unit up vector - stays correct. Ground and air both behave like real low/high gravity.
+- Scaling `gravity_dir` *also* changes the felt pull, since consumers multiply by it, but it leaves the vector non-unit, so the derived up (`-down`) is no longer unit length and the orientation and air-control matrices built from it go haywire.
 
-| Offset | Type | Field | City Trial value |
-|--------|------|-------|------------------|
-| +0x00 | int | x0 | |
-| +0x04 | float | `machine_accel` (base machine acceleration scalar) | 1.21 |
-| +0x08 | float | `scale` (stage model scale) | 0.70 |
-| +0x0C | float | `gravity_strength` (fall-accel scalar - the real "how strong" knob) | 0.025 |
-| +0x10 | Vec3 | `gravity_dir` (unit down direction) | (0, -1, 0) |
-| +0x1C | int | `fog_flags` | |
-
-`0.025` is also the hard-coded fallback `Gm_GetDownVector` returns when there is no `stage_node` (constant at 0x805df5e4).
-
-### How gravity is applied
-
-Every machine refreshes a cached copy of the gravity each frame in `Machine_RefreshGravity` (0x801c98c4, also run once at `Machine_Create`):
-
-```c
-// param = RiderData
-float mag = Gm_GetDownVector(&rider->pos /*+0x3E8*/, &rider->down /*+0x768*/);
-rider->grav_mag /*+0x764*/ = mag;            // cached strength
-rider->up.X /*+0x774*/ = -rider->down.X;     // up vector = -down direction
-rider->up.Y /*+0x778*/ = -rider->down.Y;
-rider->up.Z /*+0x77C*/ = -rider->down.Z;
-```
-
-| RiderData offset | Meaning |
-|------------------|---------|
-| +0x764 | cached gravity strength (from `gravity_strength`) |
-| +0x768 | cached down direction (from `gravity_dir`) |
-| +0x774 | up direction = -down (used for orientation / air control) |
-
-The downward pull is `down_direction * strength`, and the **up vector is the negated raw down direction**. That is exactly why the field you scale matters:
-
-- Scaling `gravity_strength` (+0x0C) cleanly scales fall acceleration while the direction - and therefore the unit up vector - stays correct. Ground and air both behave like real low/high gravity.
-- Scaling `gravity_dir` (+0x10) *also* changes the felt pull (consumers multiply by it), but it makes the vector non-unit, so the derived up vector (`-down`) is no longer unit length. Orientation and air-control matrices built from a short up vector go haywire.
+`Machine_PhysicsThink` (0x801c6368) is what accumulates the resulting acceleration into velocity and position.
 
 ### Gravity zones (localized overrides)
 
 `Gm_GetDownVector` checks two kinds of localized gravity before falling back to the global vector (module `grgravity.c`):
 
-- **Point zones** (`grGravity_GetPointZoneDown`, 0x800e6834): pull toward the nearest zone point. Zone positions live at `stc_grobj+0x13C` (stride 0x24), radii at `stage_node+0x70`. The resulting direction is normalized (`VEC_NormalizeAndSnap`).
-- **Spline zones** (`grGravity_GetSplineZoneDown`, 0x800e69b0): pull toward the nearest point on a gravity spline (`gr_data+0x1C` spline data; `splArcLengthPoint`).
+- **Point zones** (`grGravity_GetPointZoneDown`, 0x800e6834): pull toward the nearest zone point. Zone positions live at `stc_grobj+0x13C` (stride 0x24), radii at `stage_node+0x70`. The result is normalized with `VEC_NormalizeAndSnap`.
+- **Spline zones** (`grGravity_GetSplineZoneDown`, 0x800e69b0): pull toward the nearest point on a gravity spline (`gr_data+0x1C` spline data, via `splArcLengthPoint`).
 
-These produce "pull toward a center/curve" gravity for curved/orbital stages. `grGetGravityposNum` (0x800d0dcc) and `loadGravityLocations?` (0x800d0de4) are a debug count/loader pair called only from `debug_Race3D_loadLocations`, but the zone data they describe is consumed by `Gm_GetDownVector` for real. City Trial's stage has no zones, so it always falls through to the global (0,-1,0) x 0.025.
+These produce "pull toward a center/curve" gravity for curved or orbital stages. `grGetGravityposNum` (0x800d0dcc) and `loadGravityLocations?` (0x800d0de4) are a debug count/loader pair called only from `debug_Race3D_loadLocations`, but the zone data they describe is consumed by `Gm_GetDownVector` for real. City Trial's stage defines no zones, so it always falls through to the global (0,-1,0) x 0.025 - and therefore to the field this event scales.
 
 ### Actor and item gravity
 
-Enemies cache their down/up from `Gm_GetDownVector` too (the enemy-update cluster around 0x8022xxxx calls it), but they additionally carry a private fall scalar at `EnemyData+0x3A4` (default 0.02, from per-type actor data at `*actor_data+0x3C`) applied as `vel += accel` with GroundSnap for Y. Scaling stage `gravity_strength` changes the down/up they orient to; their private fall scalar is unaffected.
+Enemies cache their down/up from `Gm_GetDownVector` too, but carry a private fall scalar at `EnemyData+0x3A4` (default 0.02, from per-type actor data at `*actor_data+0x3C`) applied as `vel += accel` with GroundSnap for Y. Scaling stage `gravity_strength` changes the down/up they orient to but not that private scalar, so enemies fall at an unchanged rate during the event.
 
-Items resolve their down direction through `Gm_GetDownVector` as well (`CityItem_GetDownVector?` 0x80254c50, `ItemColl_HandleLand`, `ItemColl_BounceLand`, `CityItem_Throw`, `shootPowerUps?`, `Box_SpawnContents?`). An item's `fall_dir` (Vec3 at `ItemData+0x1C8`) is the down direction used for ground raycasting, and throw elevation angles are built around it. So items follow the global gravity direction but use their own `gravity` scalar (`ItemData+0x44`) for fall speed.
-
-## Symbols
-
-| Symbol | Address | Size | Notes |
-|--------|---------|------|-------|
-| `Gm_GetDownVector` | 0x800ceb18 | 0x110 | Central gravity accessor: returns strength, writes unit down dir. In `link.ld`. |
-| `grGravity_GetPointZoneDown` | 0x800e6834 | 0x17C | `grgravity.c` point-zone down-vector lookup |
-| `grGravity_GetSplineZoneDown` | 0x800e69b0 | 0x21C | `grgravity.c` spline-zone down-vector lookup |
-| `Machine_RefreshGravity` | 0x801c98c4 | 0x68 | Per-machine gravity cache refresh (calls `Gm_GetDownVector`, writes +0x764/+0x768/+0x774) |
-| `Machine_PhysicsThink` | 0x801c6368 | 0x240 | Machine position/velocity accumulator |
-| `grGetGravityposNum` | 0x800d0dcc | 0x18 | Gravity-zone count (debug accessor) |
-| `loadGravityLocations?` | 0x800d0de4 | 0xD4 | Gravity-zone loader (debug accessor) |
-| `grGetStageScale` | 0x800d3058 | 0x24 | Reads `stage_node->scale` (sibling field) |
+Items resolve their down direction through `Gm_GetDownVector` as well (`CityItem_GetDownVector?` 0x80254c50, `ItemColl_HandleLand`, `ItemColl_BounceLand`, `CityItem_Throw`, `shootPowerUps?`, `Box_SpawnContents`). An item's `fall_dir` (Vec3 at `ItemData+0x1C8`) is the down direction used for ground raycasting, and throw elevation angles are built around it, but fall speed comes from the item's own `gravity` scalar at `ItemData+0x44` - so items follow the global gravity direction without following its strength.

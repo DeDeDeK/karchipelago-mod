@@ -7,9 +7,9 @@
 // Kirby Melee stadiums (Waddle Dee, Sword Knight, Scarfy, ...). City Trial's
 // free-roam city has no pool enemies.
 //
-// A preset retunes the global enemy parameter table (stc_enemy_param_table); the
-// per-enemy copies of the same knobs (ed+0x378 detect range, ed+0x3c0 move speed)
-// are dead - nothing reads them.
+// A preset retunes the global enemy parameter table (stc_enemy_param_table).
+// The per-enemy copies of the range knobs (ed+0x378 detect, ed+0x37c chase) are
+// dead - nothing reads them - so range can only be changed globally.
 typedef enum EnemyAIPreset
 {
     ENEMY_AI_DEFAULT = 0,   // Vanilla enemy params - no changes

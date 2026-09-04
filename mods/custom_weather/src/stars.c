@@ -249,7 +249,7 @@ static void Star_Ensure(void)
         return;
     stc_star_gobj = WeatherGX_EnsureLayer(STAR_GOBJ_CLASS, STAR_GOBJ_PLINK, Star_GX,
                                           STAR_GX_LINK, STAR_GX_PRI,
-                                          "[Stars] Starfield layer installed");
+                                          "[Stars] Starfield layer");
 }
 
 // Emit one billboard vertex: P + u*right + v*up, flat color.

@@ -77,12 +77,23 @@ typedef enum APCheckKind
     // The one course feature vanilla writes no cell about.
     APCK_MEADOWS_SHORTCUT,    // 49
 
+    // Collect all six Archipelago spheres in one City Trial round. Needs all six
+    // sphere items, which are what put the spheres in the pool.
+    APCK_ASSEMBLE_AP_STAR,    // 50
+
+    // Assemble Dragoon, Hydra and the Archipelago Star in one City Trial round -
+    // the three-machine version of vanilla's City Trial cell 0x77.
+    APCK_ASSEMBLE_ALL_LEGENDARY, // 51
+
     APCK_NUM,
 } APCheckKind;
 
 // Has this objective been achieved? Reads only latched state, so it is safe to
 // poll every frame in any scene.
 int APCheckDetect_IsSet(int ck);
+
+// Latch an objective, here or elsewhere in the mod. Idempotent.
+void APCheckDetect_Observe(int ck);
 
 // Installs the two KO recorder interceptions - the rival one the Destruction Derby
 // objective needs, and the enemy one the Mic objective needs.
@@ -92,6 +103,11 @@ void APCheckDetect_OnBoot(void);
 // Trial round, the shortcut one on Fantasy Meadows - and rebaselines the per-run
 // counters.
 void APCheckDetect_On3DLoadEnd(void);
+
+// Polls the three-legendary objective. Not part of the per-rider sampler because
+// assembly ends in Rider_RespawnFullRecreate, which rebuilds the rider it would
+// be attached to.
+void APCheckDetect_OnFrameStart(void);
 
 // Samples the stadium results block, which Stadium_ExitMinor finishes latching
 // immediately before this hook site.

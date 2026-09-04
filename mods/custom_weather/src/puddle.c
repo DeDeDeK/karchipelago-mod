@@ -290,7 +290,8 @@ static void Puddle_Arm(void)
     }
 
     stc_inited = 1;
-    OSReport("[Puddle] Armed %d roaming pools\n", stc_count);
+    OSReport("[Puddle] Armed %d pools (roaming %s)\n",
+             stc_count, WeatherToggle(puddle_roaming, 1) ? "on" : "off");
 }
 
 // GX callback on the world camera link. Draws each surfaced pool as a flat
@@ -347,7 +348,7 @@ static void Puddle_Ensure(void)
         return;
     stc_puddle_gobj = WeatherGX_EnsureLayer(PUDDLE_GOBJ_CLASS, PUDDLE_GOBJ_PLINK, Puddle_GX,
                                             PUDDLE_GX_LINK, PUDDLE_GX_PRI,
-                                            "[Puddle] Ground puddle layer installed");
+                                            "[Puddle] Ground puddle layer");
 }
 
 // Latch the active preset's puddle config, resolving each 0 field to its module

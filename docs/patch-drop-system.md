@@ -1,86 +1,150 @@
 # Patch Drop System
 
-The patch drop system spawns patch items behind/in front of a rider when something forces them to "drop their stats" (typically damage, boost overuse, or our trap item). It is a producer/consumer queue: `Rider_DropPatches` enqueues an event by writing fields on `RiderData`, then `Rider_TickDropPatches` runs per-frame and drains the queue, spawning one item at a time on a cooldown. The in-game implementation is unmodified by the mod; it is only called into from `Patch_DropTrap` in `patch_item.c`.
+The patch drop system ejects a rider's collected stat patches back into the world as physical
+items when something forces them to "drop their stats" - damage, boost overuse, or our trap
+item. It is a producer/consumer queue: `Rider_DropPatches` (0x8019d330) enqueues an event by
+writing fields on `RiderData`, and `Rider_TickDropPatches` (0x8019dc74) drains that queue one
+item per frame-cooldown. `Patch_DropTrap` in `mods/archipelago/src/patch_item.c` only calls
+into it.
 
-## Function Map
+The all-up phase is patched. `mods/ap_star/src/ap_star_pieces.c` puts the AP Star spheres into
+it so one can be knocked out of a rider the way a Hydra part can, with four seams: a
+`REPLACECALL` at 0x8019d4bc adding the rider's sphere count to the quota the producer caps
+`allups_dropped` against, a `HOOKCREATE` at 0x8019d868 re-rolling the chosen kind over the
+vanilla pieces plus the spheres, a `REPLACECALL` at 0x8019d8d4 charging a sphere's decrement
+to its clamped base kind, and a conditional hook at 0x8019d8f8 clearing the sphere's own bit
+and exiting to 0x8019d950 past both vanilla mask branches. Nothing else in the pipeline is
+touched.
 
-| Address | Name | Role |
-|---------|------|------|
-| 0x8019d330 | `Rider_DropPatches` | Producer. Enqueues a drop event by writing `patch_drop_count`, `patch_drop_mode`, and (for modes 0/2) incrementing `allups_dropped`. Resets `patch_drop_cooldown` and `patch_drop_progress` to 0 on a fresh session. |
-| 0x8019dc74 | `Rider_TickDropPatches` | Per-frame consumer. Skips while cooldown is active. Dispatches to the all-up sub-handler if any all-ups are owed, else to the patch sub-handler. |
-| 0x8019d55c | `Rider_TickDropAllUp` | All-up sub-handler. Negates `forward` if `patch_drop_mode == 1`, looks up the matching `Game3dData.patch_drop_modeN_params` block, and calls `CityItem_Throw` directly - throwing a collected **Legendary-machine piece** (item kinds 0x37-0x3c; Hydra 0x37-0x39, Dragoon 0x3a-0x3c), **not** `ITKIND_ALLUP`. The thrown piece is also cleared from the rider's Hydra/Dragoon collection mask. **Decrements `allups_dropped` by 1 and increments `patch_drop_progress` by 1 per successful spawn**, then returns the new `patch_drop_count` (count - 1). (In practice mode is never 1 here - mode 1 never queues all-ups - so the negation branch is dead.) |
-| 0x8019d9b4 | `Rider_TickDropPatch` | Patch sub-handler. Two paths: while `patch_drop_progress < Game3dData.patch_drop_burst_threshold`, calls `Rider_SpawnDropPatchSeq`; once the threshold is crossed, switches to a **silent** burst path (random single stat, or all-stats dump if count >= 9 and all 9 stats are positive). The burst path mutates stats but does **not** call `CityItem_Throw`. |
-| 0x8019ce50 | `Rider_SpawnDropPatchSeq` | Inner sequential spawner. Two branches, gated by the consolidation predicate at 0x8019d274 (`patch_drop_count >= 9 && all 9 stats > 0`): if it holds, throws a single **All Up** item (table index 9 = `ITKIND_ALLUP`), dumps all 9 stats via 0x80191294 (`delta = -1`), and drains `patch_drop_count` by 9; otherwise picks one random positive stat, looks up its ItemKind in the table at 0x804AE2C8, throws it, and drains count by 1. Both branches call `CityItem_Throw` and increment `patch_drop_progress` by 1. |
-| 0x8022fb58 | `Ply_DecrementItemCollectNum` | Drop-side accounting partner of `Ply_IncrementItemCollectNum` (0x8022fbcc). Decrements one slot of the per-itemkind collection counter array on `PlayerData` and (for itemkind > 2 and a guard field) the aggregate counter. Called by both drop sub-handlers after a successful `CityItem_Throw`. |
-| 0x80253ce4 | `CityItem_Throw(item_kind, spawn_group, pos, throw_dir, flag, elev_angle, speed)` | Spawns one item with a randomized throw velocity (geometry below). Builds a spawn descriptor via `CityItem_InitDesc` (0x802509a0), maps the `ItemKind` via `CityItem_GetUnkKindFromItemKind` (0x8024ea54), hands the descriptor to `CityItem_Create` (0x8024eef4), then asserts the throw direction is non-zero/non-pathological (`__assert` in `itlib.c`: `"*** Item throw front dir is Zero!"` / `"*** Item throw front dir is Irregul(%f, %f, %f)!"`). Writes the caller-supplied `flag` to `(item+0x2c)+0x248`. |
+## Pipeline
 
-Helpers still unnamed in `GKYE01.map` (broader use across the codebase, not just drops):
+`Rider_DropPatches` is the producer. It writes `patch_drop_count` (how many items are owed),
+`patch_drop_mode`, and for modes 0 and 2 adds to `allups_dropped`. On a fresh session (queue
+was empty) it zeroes `patch_drop_cooldown` and `patch_drop_progress`; calling it again while a
+queue is still draining *adds* to the count and updates the mode without resetting either.
 
-- **0x8019d274** - Consolidation predicate. Returns 1 iff `patch_drop_count >= 9` **and** all 9 stats are positive. Gates the "consolidate into one All Up" branch in both `Rider_SpawnDropPatchSeq` (sequential, throws) and the inlined copy in `Rider_TickDropPatch` (burst, silent).
-- **0x80191294** - Calls `Stat_AddClampedAll` (0x80194e60) on every stat plus `Ply_SetAllUpCollected(ply, allups + delta)` (reading the current count with `Ply_GetAllUpCollected` at 0x8022d024). The "dump all 9 stats" step with `delta = -1`. Pure stat/all-up math, no spawn. 2 callers: the burst all-stats path (silent) and the sequential All-Up consolidation in `Rider_SpawnDropPatchSeq` (which does throw an item first).
+`Rider_TickDropPatches` is the per-frame consumer. It returns early while the cooldown is
+still ticking, then dispatches: all-ups first if any are owed, otherwise patches.
 
-The single-stat paths use `Stat_AddClamped` (0x80194d80) with `delta = -1`: it adds a delta to one entry of `stat_array` and clamps to `[Patch_GetMinValue(), Patch_GetMaxValue()]`. Pure stat math, no spawn; 4 other callers in the rider system.
+`Rider_TickDropAllUp` (0x8019d55c) handles the all-up phase. It picks the matching
+`Game3dData.patch_drop_modeN_params` block and calls `CityItem_Throw` directly - but what it
+throws is a collected **Legendary-machine piece** (item kinds 0x37-0x3c; Hydra 0x37-0x39,
+Dragoon 0x3a-0x3c), *not* `ITKIND_ALLUP`. The candidate list is the six bits of the two piece
+masks packed into a stack array; when it is empty the array's first entry is still -1 and the
+code adds 0x37 to it regardless, so the kind reaching the throw would be 54. Vanilla never
+gets there because the quota that gates the phase is zero when no piece is held. The thrown piece is also cleared from the rider's
+Hydra/Dragoon collection mask. Each successful spawn decrements `allups_dropped`, increments
+`patch_drop_progress`, and drains one from `patch_drop_count`. It negates `forward` when
+`patch_drop_mode == 1`, but that branch is dead in practice: mode 1 never queues all-ups.
 
-## RiderData Fields
+`Rider_TickDropPatch` (0x8019d9b4) handles the patch phase and has two paths. While
+`patch_drop_progress < Game3dData.patch_drop_burst_threshold` it defers to
+`Rider_SpawnDropPatchSeq`; once the threshold is crossed it switches to a silent burst path
+that mutates stats without spawning anything (see below).
 
-| Offset | Name | Meaning |
-|--------|------|---------|
-| 0x318 | `hand_bone_pos` (Vec3) | Position passed as the spawn origin. |
-| 0x324 | `forward` (Vec3) | Velocity passed to the spawn; **negated** by both sub-handlers when `patch_drop_mode == 1` (drops fly behind), used as-is for modes 0/2 (drops fly forward). |
-| 0x590 | `patch_drop_cooldown` | Per-spawn cooldown; ticked down by `Rider_TickDropPatches`. Reset to `Game3dData.patch_drop_cooldown_init` after each spawn. Reset to 0 on a fresh `Rider_DropPatches` call. |
-| 0x594 | `patch_drop_progress` | Drops dispatched this session. Compared against `Game3dData.patch_drop_burst_threshold` to switch the patch sub-handler from sequential to burst. Reset to 0 on a fresh session. Incremented by 1 on **every** successful spawn - by `Rider_SpawnDropPatchSeq` (2 sites: single-stat and All-Up-consolidation) **and** by `Rider_TickDropAllUp`. So it counts spawns across both phases; because the all-up phase drains first, those all-up spawns already advance `progress` before the patch phase runs. |
-| 0x598 | `patch_drop_count` | Queue length: number of items still to spawn. Drained one per spawn (the consolidation branch drains 9 at once); consumer returns early when this is 0. A fresh `Rider_DropPatches` call with `count == 0` seeds it; calling again while `count != 0` **adds** to the existing queue (and updates `patch_drop_mode`) without resetting cooldown/progress. |
-| 0x59c | `patch_drop_mode` | 0/1/2; written by `Rider_DropPatches`, read by sub-handlers. |
-| 0x5a0 | (scratch) | Transient: the Legendary-piece item kind (0x37-0x3c) `Rider_TickDropAllUp` selected for the current spawn - written then immediately consumed within the same call. |
-| 0x5a4 | `allups_dropped` | All-ups still queued to drop (a live countdown, despite the name). The producer (`Rider_DropPatches`, modes 0/2) **adds** to it, capped so the total never exceeds `Ply_GetHydraCollection + Ply_GetDragoonCollection` - the rider's quota of all-ups, granted by collecting Legendary Air Ride Machine pieces. The all-up consumer (`Rider_TickDropAllUp`) **decrements** it by 1 per spawn. While non-zero, `Rider_TickDropPatches` routes to the all-up sub-handler; only once it hits 0 does the patch sub-handler run. Not reset on a fresh `Rider_DropPatches` session. |
+`Rider_SpawnDropPatchSeq` (0x8019ce50) is the only function in the pipeline that actually
+throws patches. A predicate at 0x8019d274 - `patch_drop_count >= 9` **and** all nine stats
+positive - chooses between its two branches. When it holds, it throws one **All Up** item
+(table index 9), dumps all nine stats through 0x80191294 with `delta = -1`, and drains
+`patch_drop_count` by 9. Otherwise it picks one random positive stat, maps it to an `ItemKind`
+through the table at 0x804AE2C8, throws it, and drains one. Both branches call `CityItem_Throw`
+and bump `patch_drop_progress`.
 
-## Drop Mode Semantics
+Both sub-handlers call `Ply_DecrementItemCollectNum` (0x8022fb58) after a successful throw -
+the drop-side partner of `Ply_IncrementItemCollectNum` (0x8022fbcc). It decrements one slot of
+the per-itemkind collection counter array on `PlayerData`, plus the aggregate counter for
+itemkind > 2.
 
-`drop_mode` is the third argument to `Rider_DropPatches` (matching the `rider.h` declaration). The behavior:
+`CityItem_Throw` (0x80253ce4) takes `(item_kind, spawn_group, pos, throw_dir, flag,
+elev_angle, speed)`. It builds a spawn descriptor via `CityItem_InitDesc` (0x802509a0), maps
+the `ItemKind` through `CityItem_GetUnkKindFromItemKind` (0x8024ea54), hands the descriptor to
+`CityItem_Create` (0x8024eef4), and asserts the throw direction is non-zero and non-pathological
+(`itlib.c`: `"*** Item throw front dir is Zero!"` / `"*** Item throw front dir is
+Irregul(%f, %f, %f)!"`). The caller's `flag` lands at `(item+0x2c)+0x248`.
 
-| Mode | Drop Count | All-ups | Direction |
+The stat math itself is separate from spawning. 0x80191294 calls `Stat_AddClampedAll`
+(0x80194e60) on all nine stats and adjusts the all-up counter via `Ply_GetAllUpCollected`
+(0x8022d024) / `Ply_SetAllUpCollected`. Single-stat paths use `Stat_AddClamped` (0x80194d80),
+which clamps one `stat_array` entry to `[Patch_GetMinValue(), Patch_GetMaxValue()]`. Neither
+spawns anything.
+
+## Queue State on RiderData
+
+The queue lives entirely in `RiderData` fields (declared in `externals/hoshi/include/rider.h`):
+
+- `patch_drop_cooldown` (0x590) - ticked down by the consumer, reset to
+  `Game3dData.patch_drop_cooldown_init` after each spawn.
+- `patch_drop_progress` (0x594) - drops dispatched this session, incremented on **every**
+  successful spawn by both sub-handlers. Because the all-up phase drains first, all-up spawns
+  already advance progress before any patch is thrown - which is what pushes the patch phase
+  toward the burst threshold sooner than the patch count alone suggests.
+- `patch_drop_count` (0x598) - items still owed; the consumer returns when it hits 0.
+- `patch_drop_mode` (0x59c) - 0/1/2, read by both sub-handlers.
+- `allups_dropped` (0x5a4) - all-ups still queued (a live countdown, despite the name). The
+  producer adds to it, capped so the total never exceeds
+  `Ply_GetHydraCollection + Ply_GetDragoonCollection` - the rider's quota, earned by collecting
+  Legendary Air Ride Machine pieces. It is **not** reset on a fresh session.
+- `drop_piece_kind` (0x5a0) - the Legendary-piece item kind `Rider_TickDropAllUp` picked for
+  the current spawn, written and consumed within one call. It is read back after the throw to
+  decide which mask to clear the bit from, which is why the value has to be the kind actually
+  thrown.
+
+Spawn geometry reads `hand_bone_pos` (0x318) as the origin and `forward` (0x324) as the throw
+direction, with `forward` negated for mode 1 so drops fly behind the rider.
+
+## Drop Modes
+
+`drop_mode` is the third argument to `Rider_DropPatches`.
+
+| Mode | Drop count | All-ups | Direction |
 |------|------------|---------|-----------|
-| 0 | Small fixed count from `patch_drop_mode0_count` | Probabilistic single all-up (RNG roll vs. remaining quota using `patch_drop_allup_rng_max`) | Forward |
-| 1 | Sum of positive stats x `patch_drop_mode1_factor` | None - sub-handler skips the all-up consolidation block entirely | Behind (forward vector negated) |
-| 2 | Sum of positive stats x `patch_drop_mode2_factor` | All remaining all-ups in the quota (deterministic) | Forward |
+| 0 | Fixed `patch_drop_mode0_count` (the `stat_array` argument is ignored) | Probabilistic single all-up: RNG roll vs. remaining quota using `patch_drop_allup_rng_max` | Forward |
+| 1 | Sum of positive stats x `patch_drop_mode1_factor` | None - the all-up block is skipped entirely | Behind |
+| 2 | Sum of positive stats x `patch_drop_mode2_factor` | All remaining all-ups in the quota, deterministically | Forward |
 
-Mode-specific tuning lives in three `PatchDropModeParams` blocks (24 bytes / 6 floats) in `Game3dData`:
+## Tuning in Game3dData
 
-- `Game3dData.patch_drop_mode0_params` (0x1d4)
-- `Game3dData.patch_drop_mode1_params` (0x1ec)
-- `Game3dData.patch_drop_mode2_params` (0x204)
+Each mode has a `PatchDropModeParams` block (24 bytes, three float pairs):
+`patch_drop_mode0_params` (0x1d4), `patch_drop_mode1_params` (0x1ec),
+`patch_drop_mode2_params` (0x204). The pairs are `lerp(lo, hi, rand)` ranges:
 
-Each block is three (lo, hi) float pairs:
+| Pair | Offset | Use |
+|------|--------|-----|
+| A | +0x00 / +0x04 | Throw **speed** - the magnitude the pitched direction is scaled by. |
+| B | +0x08 / +0x0c | Throw **elevation angle**, degrees, multiplied by `deg2rad` before use. |
+| C | +0x10 / +0x14 | Forward **spawn offset** - scales the normalized fanned forward and adds it to the hand-bone position. |
 
-| Field | Offset | Use in sub-handlers |
-|-------|--------|---------------------|
-| `lo_a` / `hi_a` | +0x00 / +0x04 | `lerp(lo, hi, rand)` -> **second** `CityItem_Throw` f32 arg = throw **speed** (magnitude the pitched throw direction is scaled by to set the item's launch velocity). |
-| `lo_b` / `hi_b` | +0x08 / +0x0c | `lerp(lo, hi, rand)` x `deg2rad` (~0.01745) -> **first** `CityItem_Throw` f32 arg = throw **elevation angle** (radians; pitches the throw direction up/down around the horizontal axis). |
-| `lo_c` / `hi_c` | +0x10 / +0x14 | `lerp(lo, hi, rand)` -> forward **spawn offset**: scales the normalized (horizontally-fanned) forward and adds it to the hand-bone position, placing the spawn origin ahead of the rider (before `patch_drop_spawn_y_bias`). |
-
-Other patch-drop tuning fields in `Game3dData` (all named in `game.h`):
+The scalar fields (all named in `game.h`):
 
 | Field | Offset | Meaning |
 |-------|--------|---------|
-| `patch_drop_mode0_count` | 0x1bc | Queue length for a mode-0 drop. The producer uses this **unconditionally** for mode 0 and ignores the `stat_array` argument (only modes 1/2 derive the count from summed stats). `Rider_DropPatches` takes no count argument. |
-| `patch_drop_spawn_arg7` | 0x1c0 | Passed verbatim as `CityItem_Throw`'s last int arg, which gets stored at `item+0x248` (item flag word). |
-| `patch_drop_spawn_y_bias` | 0x1c4 | Float added to spawn position Y before calling `CityItem_Throw` (lifts drops off the hand bone). |
-| `patch_drop_mode2_factor` | 0x1c8 | Float; multiplied with the sum of positive stats to size mode-2 drops. |
-| `patch_drop_mode1_factor` | 0x1cc | Same role for mode 1. |
-| `patch_drop_throw_spread` | 0x1d0 | Max throw-spread half-angle (degrees, `f32`). Read by `Rider_TickDropAllUp` and `Rider_SpawnDropPatchSeq`: multiplied by `deg2rad` (~0.01745) and a random `[0,1)` factor, then - with the sign flipped on odd `patch_drop_count` values - used to rotate the throw direction so successive drops fan out left/right. |
-| `patch_drop_cooldown_init` | 0x21c | Frame count written into `RiderData.patch_drop_cooldown` after each successful spawn. |
-| `patch_drop_burst_threshold` | 0x220 | Once `patch_drop_progress` reaches this, the patch sub-handler switches from sequential to silent-burst. |
-| `patch_drop_allup_rng_max` | 0x224 | Mode-0 only: ceiling for the all-up RNG roll (`HSD_Randi(this) >= remaining_quota` -> no all-up this drop). |
+| `patch_drop_mode0_count` | 0x1bc | Queue length for a mode-0 drop. `Rider_DropPatches` takes no count argument. |
+| `patch_drop_spawn_arg7` | 0x1c0 | Passed verbatim as `CityItem_Throw`'s `flag`, stored at `item+0x248`. |
+| `patch_drop_spawn_y_bias` | 0x1c4 | Added to spawn Y, lifting drops off the hand bone. |
+| `patch_drop_mode2_factor` | 0x1c8 | Multiplier on the sum of positive stats for mode 2. |
+| `patch_drop_mode1_factor` | 0x1cc | Same for mode 1. |
+| `patch_drop_throw_spread` | 0x1d0 | Max throw-spread half-angle in degrees. Scaled by `deg2rad` and a random `[0,1)` factor, with the sign flipped on odd `patch_drop_count` values, so successive drops fan out left/right. |
+| `patch_drop_cooldown_init` | 0x21c | Frames written into `patch_drop_cooldown` after each spawn. |
+| `patch_drop_burst_threshold` | 0x220 | Progress at which the patch sub-handler goes silent-burst. |
+| `patch_drop_allup_rng_max` | 0x224 | Mode-0 only: ceiling for the all-up roll (`HSD_Randi(this) >= remaining_quota` means no all-up). |
 
 ## Throw Geometry
 
-In order: `Rider_SpawnDropPatchSeq` first fans the rider's `forward` left/right by `patch_drop_throw_spread` (sign flipped on odd `patch_drop_count`) to get the throw direction. Pair **C** then scales the *normalized* fanned-forward and adds it to the hand-bone position - that is the spawn origin, not a velocity.
+`Rider_SpawnDropPatchSeq` fans the rider's `forward` left/right by `patch_drop_throw_spread`
+to get the throw direction. Pair **C** then scales the *normalized* fanned forward and adds it
+to the hand-bone position: that is the spawn origin, not a velocity.
 
-The fanned direction is handed to `CityItem_Throw`, which builds a horizontal axis from `Gm_GetDownVector` + `VEC_CrossNormalizeSnap(down, throw_dir)`, pitches `throw_dir` around that axis by the pair-**B** elevation angle (radians) via `RotateVecAroundAxis`, then multiplies each component of the pitched direction by the pair-**A** speed and writes it to the item's velocity at `(item+0x2c)+0xc4/0xc8/0xcc`. Neither f32 arg is written to the spawn descriptor.
+`CityItem_Throw` does the rest. It builds a horizontal axis from `Gm_GetDownVector` +
+`VEC_CrossNormalizeSnap(down, throw_dir)`, pitches the direction around that axis by the pair-**B**
+elevation angle via `RotateVecAroundAxis`, scales each component by the pair-**A** speed, and
+writes the result to the item's velocity at `(item+0x2c)+0xc4/0xc8/0xcc`. Neither float argument
+reaches the spawn descriptor.
 
 ## Stat to ItemKind Table
 
-`Rider_SpawnDropPatchSeq` translates the picked stat slot (`PatchKind` index 0..8) into an `ItemKind` via the read-only table at **0x804AE2C8**. Indices 0..8 are the nine stat patches; the same array also has a **10th entry at index 9** (`0x804AE2EC`) that the consolidation branch uses for the All-Up throw:
+`Rider_SpawnDropPatchSeq` maps the picked stat slot (`PatchKind` index 0..8) to an `ItemKind`
+through the read-only table at **0x804AE2C8**. It has a 10th entry at index 9 (`0x804AE2EC`)
+used by the consolidation branch:
 
 | Index | ItemKind |
 |-------|----------|
@@ -95,28 +159,45 @@ The fanned direction is handed to `CityItem_Throw`, which builds a horizontal ax
 | 8 (HP)       | 19 = `ITKIND_HP` |
 | 9 (All Up - consolidation only) | 20 = `ITKIND_ALLUP` |
 
-Indices 0..8 are the same mapping as our local `stc_patch_itkinds[]` in `patch_item.c`. The duplication is harmless but worth knowing - if we ever need this lookup outside `patch_item.c`, prefer a hoshi-side declaration over re-duplicating. (Words at index 10/11 - `0x1e`/`0x1f` - are *not* part of this lookup; the drop code only reads indices 0..9.)
+Indices 0..8 are the same mapping as `stc_patch_itkinds[]` in `patch_item.c`. Words at index
+10/11 (`0x1e`/`0x1f`) are not part of this lookup - the drop code only reads 0..9.
 
-## Burst Path Is Silent
+## The Burst Path Spawns Nothing
 
-When `patch_drop_progress >= patch_drop_burst_threshold`, the patch sub-handler switches paths and **stops spawning items entirely** (no `CityItem_Throw` call). In the all-stats path (`Rider_TickDropPatch` -> 0x80191294) and the random-single-stat path (-> `Stat_AddClamped` at 0x80194d80):
+Once `patch_drop_progress >= patch_drop_burst_threshold`, `Rider_TickDropPatch` mirrors the
+sequential spawner's two branches - "all nine positive, consolidate" vs "one random stat" - but
+strips the spawn out of both. It calls 0x80191294 or `Stat_AddClamped` to mutate stats, then
+only appearance/HUD-refresh helpers (0x80191334, which calls 0x80193e78 and 0x80191374, and
+0x80193718). None of those reach `CityItem_Throw`.
 
-- Both helpers only mutate `stat_array` (clamping against `Patch_GetMinValue`/`Patch_GetMaxValue`) and, for the all-stats variant, the all-up collected counter (`Ply_GetAllUpCollected`/`Ply_SetAllUpCollected`).
-- The only post-mutation calls `Rider_TickDropPatch` makes are appearance/HUD-refresh helpers - 0x80191334 (which itself calls 0x80193e78 and 0x80191374) and 0x80193718. None of them reach `CityItem_Throw`. (Those 0x8019xxxx helpers are still `zz_`-labelled in the map; the roles are inferred from usage.)
-- `Rider_SpawnDropPatchSeq` is the only path that calls `CityItem_Throw`; it runs while progress is below the threshold.
-
-The burst path mirrors the sequential spawner's two branches - "all 9 positive -> consolidate" vs "one random stat" - but strips the spawn out of both. Below the threshold, the all-9-positive case throws a single visible **All Up** item (and removes 9 stats); above it, the identical stat removal happens with no item at all.
-
-So once you cross the burst threshold, stats are deleted with no flying patch visual. This is fine for vanilla because `Rider_DropPatches` only generates large drop counts in mode 1 / mode 2 (proportional to summed stats), and the threshold is tuned so a normal-stats rider doesn't hit it. But it matters for `Patch_DropTrap`: if we ever pass a very large `patch_drop_count`, we'll silently zero out stats past the threshold rather than fountain patches.
+So past the threshold stats are deleted with no flying patch at all. Vanilla gets away with it
+because only modes 1 and 2 generate counts large enough to cross the threshold, and the
+threshold is tuned so a normal-stats rider does not. It matters for `Patch_DropTrap`: a very
+large `patch_drop_count` would silently zero stats instead of fountaining patches.
 
 ## Spawn-Source Tag
 
-`CityItem_Throw`'s `spawn_group` argument (the second int) identifies what spawned the item: the patch-drop pipeline passes **3** from both drop sub-handlers; the yakumono-break helpers (`zz_8021c8ec_`, `zz_8021db44_`, `zz_8021efd8_`) pass **4/5/6**. `CityItem_InitDesc` stores it at desc+8 and `CityItem_InitData` (0x8024eaf4) copies it onto the item's data sub-struct at `(item+0x2c)+0x20`, where it is written once at creation and never overwritten.
+`CityItem_Throw`'s `spawn_group` argument identifies what spawned the item. The patch-drop
+pipeline passes **3** from both sub-handlers; the yakumono-break helpers (`zz_8021c8ec_`,
+`zz_8021db44_`, `zz_8021efd8_`) pass 4/5/6. `CityItem_InitDesc` stores it at desc+8 and
+`CityItem_InitData` (0x8024eaf4) copies it to `(item+0x2c)+0x20`, where it is written once at
+creation and never overwritten.
 
-No gameplay logic branches on this field. Within the city-item subsystem it is read only by two ground-collision assertions - in `CityItem_LifetimeThink` (`"Item pos is ground center(%d:%d,%d)"`) and the under-ground check (`"*** Error : Why? Item under ground not found!(%d,%d:%d,%d)"`) - which print it next to the item id (`+0x1c`) and the spawn-location indices (`+0x34`/`+0x38`). So it is effectively a debug **source-attribution** tag carried on each item, not a control input.
+No gameplay logic branches on it. Inside the city-item subsystem it is read only by two
+ground-collision assertions - in `CityItem_LifetimeThink`
+(`"Item pos is ground center(%d:%d,%d)"`) and the under-ground check
+(`"*** Error : Why? Item under ground not found!(%d,%d:%d,%d)"`) - which print it next to the
+item id (`+0x1c`) and spawn-location indices (`+0x34`/`+0x38`). It is a debug source-attribution
+tag, not a control input.
 
 ## Mod Use
 
-`Patch_DropTrap` in `patch_item.c` calls `Rider_DropPatches(rd, rd->stats.values, drop_mode)` for each human rider (`rd->stats.values` is the rider's `float values[9]` stat array), picking `drop_mode` randomly per player via `HSD_Randi(3)` so the trap varies its visual signature.
+`Patch_DropTrap` calls `Rider_DropPatches(rd, rd->stats.values, drop_mode)` for each human
+rider, picking `drop_mode` with `HSD_Randi(3)` per player so the trap varies its visual
+signature.
 
-The caller - `APItems_HandleItem` in `ap_item_handler.c` - only reaches `Patch_DropTrap` when `Gm_IsInCity()` is true, i.e. the **City Trial open-city phase**. Both Free Run and the stadium phase are blocked further up by the shared scene gate (`Gm_GetCityMode() == CITYMODE_FREERUN || CityTrial_IsInStadium()` -> defer), because neither loads the item data tables; the spawn path inside `Rider_DropPatches` (`CityItem_Throw` -> `CityItem_Create`, ultimately `Item_GetItDataPtr`) would crash there.
+Its caller, `APItems_HandleItem` in `ap_item_handler.c`, only reaches it when `Gm_IsInCity()`
+is true - the City Trial open-city phase. Free Run and the stadium phase are already blocked
+further up by the shared scene gate (`Gm_GetCityMode() == CITYMODE_FREERUN ||
+CityTrial_IsInStadium()` -> defer), because neither loads the item data tables and the spawn
+path (`CityItem_Throw` -> `CityItem_Create` -> `Item_GetItDataPtr`) would crash there.

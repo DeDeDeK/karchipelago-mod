@@ -17,6 +17,7 @@ on-screen backdrop size.
 Usage:
     uv run python scripts/hsd/geom_bounds.py iso/files/GrCity1Model.dat grModelCity1 [slot]
 """
+
 import math
 import os
 import struct
@@ -25,21 +26,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hsd.archive import Archive, f32, u16, u32
 
-
 CTYPE_SIZE = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4}  # U8 S8 U16 S16 F32
 
 
 def read_comp(data, off, ctype, frac):
     if ctype == 4:
         return f32(data, off)
-    if ctype == 0:   # U8
+    if ctype == 0:  # U8
         v = data[off]
     elif ctype == 1:  # S8
-        v = struct.unpack(">b", data[off:off + 1])[0]
+        v = struct.unpack(">b", data[off : off + 1])[0]
     elif ctype == 2:  # U16
         v = u16(data, off)
     elif ctype == 3:  # S16
-        v = struct.unpack(">h", data[off:off + 2])[0]
+        v = struct.unpack(">h", data[off : off + 2])[0]
     else:
         return 0.0
     return v / (1 << frac)
@@ -104,14 +104,23 @@ def parse_vtxdesc(data, off):
         attr = u32(data, cur)
         if attr == 0xFF:
             break
-        atype = u32(data, cur + 0x04)   # 1=DIRECT 2=IDX8 3=IDX16
+        atype = u32(data, cur + 0x04)  # 1=DIRECT 2=IDX8 3=IDX16
         ccnt = u32(data, cur + 0x08)
         ctype = u32(data, cur + 0x0C)
         frac = data[cur + 0x10]
         stride = u16(data, cur + 0x12)
         buf = u32(data, cur + 0x14)
-        attrs.append(dict(attr=attr, atype=atype, ccnt=ccnt, ctype=ctype,
-                          frac=frac, stride=stride, buf=buf))
+        attrs.append(
+            dict(
+                attr=attr,
+                atype=atype,
+                ccnt=ccnt,
+                ctype=ctype,
+                frac=frac,
+                stride=stride,
+                buf=buf,
+            )
+        )
         cur += 0x18
     return attrs
 
@@ -123,21 +132,21 @@ CLR_DIRECT_SIZE = {0: 2, 1: 3, 2: 4, 3: 2, 4: 3, 5: 4}
 def attr_vertex_bytes(a):
     """Bytes this attribute occupies per-vertex in the DL stream."""
     attr = a["attr"]
-    if a["atype"] == 2:   # INDEX8
+    if a["atype"] == 2:  # INDEX8
         return 1
-    if a["atype"] == 3:   # INDEX16
+    if a["atype"] == 3:  # INDEX16
         return 2
-    if a["atype"] == 1:   # DIRECT
-        if attr <= 7:                       # PNMTXIDX / TEXnMTXIDX
+    if a["atype"] == 1:  # DIRECT
+        if attr <= 7:  # PNMTXIDX / TEXnMTXIDX
             return 1
-        if attr == 9:                       # POS
+        if attr == 9:  # POS
             n = 3 if a["ccnt"] == 1 else 2
             return n * CTYPE_SIZE.get(a["ctype"], 2)
-        if attr == 10:                      # NRM (NBT9 ignored; backdrops use NRM)
+        if attr == 10:  # NRM (NBT9 ignored; backdrops use NRM)
             return 3 * CTYPE_SIZE.get(a["ctype"], 2)
-        if attr in (11, 12):                # CLR0 / CLR1
+        if attr in (11, 12):  # CLR0 / CLR1
             return CLR_DIRECT_SIZE.get(a["ctype"], 4)
-        if 13 <= attr <= 20:                # TEX0..7
+        if 13 <= attr <= 20:  # TEX0..7
             n = 2 if a["ccnt"] == 1 else 1
             return n * CTYPE_SIZE.get(a["ctype"], 2)
         return CTYPE_SIZE.get(a["ctype"], 2)
@@ -191,7 +200,7 @@ def pos_records(data, dl_off, dl_size, attrs):
     return pos_attr, recs
 
 
-def _iter_pobjs(arc, off):
+def iter_pobjs(arc, off):
     """Yield each POBJ offset hung off the JObj at `off` (via its DObj list)."""
     data = arc.data
     flags = u32(data, off + 0x04)
@@ -206,7 +215,7 @@ def _iter_pobjs(arc, off):
         dobj = u32(data, dobj + 0x04) if (dobj + 0x04) in arc.reloc_set else 0
 
 
-def _pobj_pos_records(arc, pobj):
+def pobj_pos_records(arc, pobj):
     """(pos_attr, [rec_off,...]) for one POBJ."""
     data = arc.data
     attrs = parse_vtxdesc(data, u32(data, pobj + 0x08))
@@ -215,6 +224,25 @@ def _pobj_pos_records(arc, pobj):
     if not (dl and attrs):
         return None, []
     return pos_records(data, dl, dlsz, attrs)
+
+
+def joint_world_positions(arc, off, world):
+    """Yield the world-space (x, y, z) of every vertex the JObj at `off`
+    draws, transformed by `world`."""
+    for pobj in iter_pobjs(arc, off):
+        pa, recs = pobj_pos_records(arc, pobj)
+        if pa is None:
+            continue
+        ncomp = 3 if pa["ccnt"] == 1 else 2
+        ctype, frac = pa["ctype"], pa["frac"]
+        csz = CTYPE_SIZE.get(ctype, 2)
+        for rec in recs:
+            comps = [
+                read_comp(arc.data, rec + k * csz, ctype, frac) for k in range(ncomp)
+            ]
+            if ncomp == 2:
+                comps.append(0.0)
+            yield mat_apply(world, *comps)
 
 
 def measure_root(arc, root):
@@ -234,26 +262,16 @@ def measure_root(arc, root):
             continue
         seen.add(off)
         world = mat_mul(parent_m, jobj_local_mtx(data, off, force_scale_one=is_root))
-        for pobj in _iter_pobjs(arc, off):
-            npobj += 1
-            pa, recs = _pobj_pos_records(arc, pobj)
-            if pa is None:
-                continue
-            ncomp = 3 if pa["ccnt"] == 1 else 2
-            ctype, frac = pa["ctype"], pa["frac"]
-            csz = CTYPE_SIZE.get(ctype, 2)
-            for rec in recs:
-                comps = [read_comp(data, rec + k * csz, ctype, frac) for k in range(ncomp)]
-                if ncomp == 2:
-                    comps.append(0.0)
-                wx, wy, wz = mat_apply(world, *comps)
-                minv[0] = min(minv[0], wx); maxv[0] = max(maxv[0], wx)
-                minv[1] = min(minv[1], wy); maxv[1] = max(maxv[1], wy)
-                minv[2] = min(minv[2], wz); maxv[2] = max(maxv[2], wz)
-                r = math.sqrt(wx * wx + wy * wy + wz * wz)
-                if r > maxr:
-                    maxr = r
-                nverts += 1
+        npobj += sum(1 for _ in iter_pobjs(arc, off))
+        for wx, wy, wz in joint_world_positions(arc, off, world):
+            minv[0] = min(minv[0], wx)
+            maxv[0] = max(maxv[0], wx)
+            minv[1] = min(minv[1], wy)
+            maxv[1] = max(maxv[1], wy)
+            minv[2] = min(minv[2], wz)
+            maxv[2] = max(maxv[2], wz)
+            maxr = max(maxr, math.sqrt(wx * wx + wy * wy + wz * wz))
+            nverts += 1
         nxt = u32(data, off + 0x0C) if (off + 0x0C) in arc.reloc_set else 0
         if nxt and not is_root:  # root pp slot holds a single joint, no siblings
             stack.append((nxt, parent_m, False))
@@ -263,8 +281,16 @@ def measure_root(arc, root):
 
     half = [(maxv[i] - minv[i]) / 2 for i in range(3)]
     center = [(maxv[i] + minv[i]) / 2 for i in range(3)]
-    return dict(root=root, nverts=nverts, npobj=npobj, minv=minv, maxv=maxv,
-                center=center, half=half, radius=maxr)
+    return dict(
+        root=root,
+        nverts=nverts,
+        npobj=npobj,
+        minv=minv,
+        maxv=maxv,
+        center=center,
+        half=half,
+        radius=maxr,
+    )
 
 
 def backdrop_root(arc, sym, slot=1):
@@ -298,17 +324,18 @@ def scale_geometry(arc, root, f):
         for toff in (off + 0x2C, off + 0x30, off + 0x34):  # translation X/Y/Z
             v = struct.unpack_from(">f", data, toff)[0]
             struct.pack_into(">f", data, toff, v * f)
-        for pobj in _iter_pobjs(arc, off):
-            pa, recs = _pobj_pos_records(arc, pobj)
+        for pobj in iter_pobjs(arc, off):
+            pa, recs = pobj_pos_records(arc, pobj)
             if pa is None:
                 continue
             if pa["ctype"] != 4:
                 raise ValueError(
                     f"POBJ {pobj:#x}: POS ctype {pa['ctype']} is not F32; "
-                    "integer position re-quantization is not implemented")
+                    "integer position re-quantization is not implemented"
+                )
             ncomp = 3 if pa["ccnt"] == 1 else 2
             for rec in recs:
-                if rec in scaled_recs:        # buffers are shared across POBJs
+                if rec in scaled_recs:  # buffers are shared across POBJs
                     continue
                 scaled_recs.add(rec)
                 for k in range(ncomp):
@@ -333,12 +360,18 @@ def main(argv):
     path, sym = argv[1], argv[2]
     slot = int(argv[3]) if len(argv) > 3 else 1
     r = measure(path, sym, slot)
-    print(f"{os.path.basename(path)} {sym}[{slot}]  root={r['root']:#x}  "
-          f"pobj={r['npobj']} verts={r['nverts']}")
-    print(f"  bbox min=({r['minv'][0]:.1f},{r['minv'][1]:.1f},{r['minv'][2]:.1f}) "
-          f"max=({r['maxv'][0]:.1f},{r['maxv'][1]:.1f},{r['maxv'][2]:.1f})")
-    print(f"  center=({r['center'][0]:.1f},{r['center'][1]:.1f},{r['center'][2]:.1f}) "
-          f"half=({r['half'][0]:.1f},{r['half'][1]:.1f},{r['half'][2]:.1f})")
+    print(
+        f"{os.path.basename(path)} {sym}[{slot}]  root={r['root']:#x}  "
+        f"pobj={r['npobj']} verts={r['nverts']}"
+    )
+    print(
+        f"  bbox min=({r['minv'][0]:.1f},{r['minv'][1]:.1f},{r['minv'][2]:.1f}) "
+        f"max=({r['maxv'][0]:.1f},{r['maxv'][1]:.1f},{r['maxv'][2]:.1f})"
+    )
+    print(
+        f"  center=({r['center'][0]:.1f},{r['center'][1]:.1f},{r['center'][2]:.1f}) "
+        f"half=({r['half'][0]:.1f},{r['half'][1]:.1f},{r['half'][2]:.1f})"
+    )
     print(f"  radius(root-scale=1) = {r['radius']:.2f}")
 
 

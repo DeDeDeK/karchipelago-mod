@@ -7,36 +7,36 @@ and the constraints to plan around.
 
 ## Why This Is Feasible
 
-hoshi does **not** hard-code which mods exist. At boot it discovers mods by scanning the disc
-filesystem for `.bin` files under `/mods` (`externals/hoshi/src/hoshi.c`):
-
-```c
-FST_ForEachInFolder("/mods", ".bin", 0, (void (*)(int, void *))Mods_CountFile, &mod_num);
-...
-FST_ForEachInFolder("/mods", ".bin", 0, (void (*)(int, void *))Mods_LoadGlobal, 0);
-```
-
-Each `.bin` found is read (`Mods_LoadFile` -> `DVDFastOpen` / `File_LoadOffsetSync`, then
-relocated) and installed (`Mods_LoadGlobal`). The consequence: **a mod is loaded iff its `.bin`
-is present in `/mods` at scan time; an absent `.bin` is simply skipped.** There is no manifest
-and no fixed list - presence in the FST is the entire contract.
+hoshi does not hard-code which mods exist. At boot it calls
+`FST_ForEachInFolder("/mods", ".bin", ...)` twice (`externals/hoshi/src/hoshi.c`) - once with
+`Mods_CountFile` to size the loader table, then again with `Mods_LoadGlobal`, which reads each
+file (`Mods_LoadFile` -> `DVDFastOpen` / `File_LoadOffsetSync`), relocates it and installs it.
+A mod is loaded iff its `.bin` is present in `/mods` at scan time; an absent `.bin` is simply
+skipped. There is no manifest and no fixed list - presence in the FST is the entire contract.
 
 Riivolution file-replacement patches add files to the in-memory FST that the game reads. So
 gating a mod's `.bin` behind a Riivolution `<option>`/`<choice>` *is* the on/off switch:
 enabling the option adds the `.bin` to the FST, the boot scan finds it, and the mod loads. No
 changes to the loader are required.
 
-The build-time counterpart already exists: the Makefile's `INCLUDE_MODS` selects which mod
-folders are compiled and packed, and it defaults to **empty** - nothing is built unless a build
-passes an explicit list (`make package INCLUDE_MODS=archipelago,textbox`; names not present
-under `mods/` are ignored). A per-mod Riivolution option is the runtime version of the same
-choice: ship all the `.bin`s and let the player pick in Dolphin's Riivolution menu.
+The build-time counterpart already exists. The Makefile's `INCLUDE_MODS` lists the mod folders
+to compile and pack, and it has **no default** - a build that omits it silently produces a
+package with no mods in it (`make package INCLUDE_MODS=archipelago,textbox`; names that do not
+match a folder under `mods/` are dropped without a warning). It gates each mod's `assets/` copy
+as well as its code. Sources are globbed from each included mod's `src/`, so adding a file - or
+a whole new mod folder - needs no registration; the one manual step for a new mod is adding its
+public `include/` dir to the Makefile's `INCLUDES` list, since those are enumerated explicitly.
+A per-mod Riivolution option is the runtime version of the same choice: ship every `.bin` and
+let the player pick in Dolphin's Riivolution menu. The current candidates are `ap_star`,
+`archipelago`, `archipelago_debug`, `custom_ai`, `custom_checklist`, `custom_events`,
+`custom_items`, `custom_machines`, `custom_weather`, `hypernova` and `textbox`.
 
 ## How the Current Package Is Structured
 
 The generated XML (`out/Riivolution/riivolution/KARchipelago.xml`, copied verbatim from
-`externals/hoshi/dol/out/Riivolution/` by the `riivolution` target) exposes one section
-(`Mod`) with one option (`KARchipelago`) whose single `Enabled` choice applies both patches:
+`externals/hoshi/dol/out/Riivolution/` by the Makefile's `riivolution` target) exposes one
+section (`Mod`) with one option (`KARchipelago`) whose single `Enabled` choice applies both
+patches:
 
 - **`code_patch`** - `<memory valuefile="/KARchipelago/payload.bin" offset="0x805f6390"/>` plus
   the memory hooks that redirect game execution into the loader. This is the framework
@@ -55,7 +55,7 @@ The generated XML (`out/Riivolution/riivolution/KARchipelago.xml`, copied verbat
 `external` paths resolve under `Load/Riivolution/` (so `/KARchipelago/...` is
 `Load/Riivolution/KARchipelago/...`, where `make deploy` stages them). `disc` paths are
 relative to the game's FST root - `/KARchipelago/mods/archipelago.bin` lands at
-`/mods/archipelago.bin`, `/KARchipelago/ap-icon.png` at `/ap-icon.png`, etc.
+`/mods/archipelago.bin`, `/KARchipelago/ApIcon.dat` at `/ApIcon.dat`, etc.
 
 To make mods pluggable, split that one `files` patch into a mandatory **core** patch plus one
 patch per mod, each behind its own option.
@@ -63,44 +63,35 @@ patch per mod, each behind its own option.
 ## Target XML Shape
 
 ```xml
-<wiidisc version="1">
-  <id game="GKY"/>
-  <options>
-    <section name="KARchipelago">
-      <option name="Core (required)">
-        <choice name="Enabled"><patch id="core"/></choice>
-      </option>
-      <option name="Archipelago">
-        <choice name="Enabled">
-          <patch id="mod-archipelago"/>
-          <patch id="mod-textbox"/>   <!-- bundled dependency; see Known Limitations -->
-        </choice>
-      </option>
-      <option name="Custom AI">
-        <choice name="Enabled"><patch id="mod-custom_ai"/></choice>
-      </option>
-    </section>
-  </options>
+<options>
+  <section name="KARchipelago">
+    <option name="Core (required)">
+      <choice name="Enabled"><patch id="core"/></choice>
+    </option>
+    <option name="Archipelago">
+      <choice name="Enabled">
+        <patch id="mod-archipelago"/>
+        <patch id="mod-textbox"/>   <!-- bundled dependency -->
+      </choice>
+    </option>
+    <option name="Custom AI">
+      <choice name="Enabled"><patch id="mod-custom_ai"/></choice>
+    </option>
+  </section>
+</options>
 
-  <patch id="core">
-    <memory valuefile="/KARchipelago/payload.bin" offset="0x805f6390"/>
-    <!-- ... the remaining code_patch <memory> entries, verbatim ... -->
-    <file external="/KARchipelago/hoshi.bin"      disc="/hoshi.bin"      create="true"/>
-    <file external="/KARchipelago/MnSettings.dat" disc="/MnSettings.dat" create="true"/>
-    <file external="/KARchipelago/MxDb.dat"       disc="/MxDb.dat"       create="true"/>
-  </patch>
+<patch id="core">
+  <memory valuefile="/KARchipelago/payload.bin" offset="0x805f6390"/>
+  <!-- ... the remaining code_patch <memory> entries, verbatim ... -->
+  <file external="/KARchipelago/hoshi.bin"      disc="/hoshi.bin"      create="true"/>
+  <file external="/KARchipelago/MnSettings.dat" disc="/MnSettings.dat" create="true"/>
+  <file external="/KARchipelago/MxDb.dat"       disc="/MxDb.dat"       create="true"/>
+</patch>
 
-  <patch id="mod-archipelago">
-    <file external="/KARchipelago/mods/archipelago.bin" disc="/mods/archipelago.bin" create="true"/>
-    <file external="/KARchipelago/ap-icon.png"          disc="/ap-icon.png"          create="true"/>
-  </patch>
-  <patch id="mod-textbox">
-    <file external="/KARchipelago/mods/textbox.bin" disc="/mods/textbox.bin" create="true"/>
-  </patch>
-  <patch id="mod-custom_ai">
-    <file external="/KARchipelago/mods/custom_ai.bin" disc="/mods/custom_ai.bin" create="true"/>
-  </patch>
-</wiidisc>
+<patch id="mod-archipelago">
+  <file external="/KARchipelago/mods/archipelago.bin" disc="/mods/archipelago.bin" create="true"/>
+  <file external="/KARchipelago/ApIcon.dat"           disc="/ApIcon.dat"           create="true"/>
+</patch>
 ```
 
 `create="true"` is required because `/mods/*.bin` (and the other added files) do not exist on
@@ -126,44 +117,50 @@ Build-side coupling for a standalone mod repo: it still needs hoshi (headers, `L
 any mod it imports (e.g. a standalone `archipelago` repo needs `textbox_api.h`). Those shared
 API headers are the real coupling surface between split repos.
 
-## Known Limitations
+## Constraints
 
-1. **Core is non-optional.** The `code_patch` memory hooks + `payload.bin` are the loader
-   itself. Present it as a clearly-required option (or fold it into a base the player must
-   enable). Disabling it = vanilla game, no `/mods` scan.
+**Core is non-optional.** The `code_patch` memory hooks + `payload.bin` are the loader itself.
+Present it as a clearly-required option (or fold it into a base the player must enable).
+Disabling it = vanilla game, no `/mods` scan.
 
-2. **Inter-mod dependencies are real and currently unguarded.** Mods publish/consume APIs via
-   `Hoshi_ExportMod` / `Hoshi_ImportMod` (matched by `ModDesc.name`). `_Hoshi_ImportMod` returns
-   `0` (NULL) gracefully when the requested mod is absent - but consumers do not all check the
-   result:
-   - `archipelago` dereferences the textbox API (`tb_api->...`) at well over a hundred call
-     sites; the only NULL check is at the import site in `OnSaveLoaded`, none at the uses. So
-     "Archipelago on, Textbox off" crashes on the first notification.
-   - `archipelago_debug` imports `ArchipelagoAPI` + `CustomEventsAPI` the same way.
+**Inter-mod dependencies are real and only partly guarded.** Mods publish and consume APIs via
+`Hoshi_ExportMod` / `Hoshi_ImportMod`, matched on `ModDesc.name`; `_Hoshi_ImportMod`
+(`externals/hoshi/src/export.c`) returns `0` when the requested mod is absent, so an import
+never faults on its own. Whether that is survivable depends on the consumer:
 
-   Two ways to handle it:
-   - **Bundle the dependency** into the dependent's choice (the `mod-textbox` patch listed under
-     the Archipelago option above). Simplest; ships today with no code change.
-   - **Harden the consumer** to NULL-guard `tb_api` / `ce_api` so the dependency becomes
-     genuinely optional. More work, but then the mods are truly independent plugins.
+- `archipelago` dereferences the textbox API at ~90 call sites with no NULL check at any of
+  them - only at the import in `OnSaveLoaded`, which logs a warning and continues. "Archipelago
+  on, Textbox off" crashes on the first notification.
+- Its other imports degrade cleanly: `custom_machines` (`AP_ResolveCustomMachines` in
+  `mods/archipelago/src/main.c`) leaves machines ungated, and `ap_star`
+  (`GateApStar_Resolve` in `mods/archipelago/src/gate_ap_star.c`) simply installs no assemble
+  handler. `archipelago_debug` guards all three of its imports the same way.
 
-3. **Assets travel with their mod, not core.** `ap-icon.png` belongs to the `archipelago` patch.
-   Giving each mod its own asset subfolder lets the per-mod patch map a single `<folder>`
-   instead of enumerating files.
+Two ways to handle textbox: bundle it into the Archipelago choice (as in the XML above; ships
+today with no code change), or NULL-guard `tb_api` at its uses so the dependency becomes
+genuinely optional.
 
-4. **Boot order / deferred imports already handled.** Mods boot in alphabetical order.
-   `archipelago` boots before `textbox`, so it defers its `Hoshi_ImportMod` to `OnSaveLoaded`
-   (by which point every mod has exported its API) rather than calling it in `OnBoot`.
-   Splitting into options does not change ordering, but any new exporter/consumer pair must keep
-   imports out of `OnBoot`.
+**Assets travel with their mod, not core.** `ApIcon.dat` belongs to the `archipelago` patch,
+`ApStarShot.dat` to `ap_star`. Since each mod's `assets/` folder already stages its own files,
+a per-mod patch can map one `<folder>` instead of enumerating files - but note the staging
+flattens every mod's `assets/` into the same disc root, so the folder mapping has to be built
+per file unless the on-disc layout is given per-mod subdirectories too.
 
-## Open Questions
+**Boot order and deferred imports are already handled.** Mods boot in alphabetical order, so
+`archipelago` boots before `textbox` and defers its `Hoshi_ImportMod` to `OnSaveLoaded` - the
+first point past every mod's `OnBoot`, and therefore the first point where a failed import
+really means the mod is absent. Splitting into options does not change ordering, but any new
+exporter/consumer pair must keep imports out of `OnBoot`.
 
-- **Per-mod save data across toggles.** Each mod registers its own save blob via its
-  `GlobalMod`/`ModDesc`. If the save layout is keyed by mod name, toggling a mod off then on
-  across sessions is safe; if it is positional, disabling one mod could shift another mod's
-  data. Check `externals/hoshi/src/save.*` (`KARPlusSave_GetModSaveData`,
-  `Mods_SetDefaultSaveData`, `Mods_OnLoadSaveData`) before relying on free toggling.
-- **Settings-menu stability.** hoshi builds the settings menu at runtime from each active mod's
-  `OptionDesc` (`externals/hoshi/src/settings.c`). Confirm that menu cursor/index persistence
-  behaves when the set of active mods changes between boots.
+**Save data survives toggling.** Each mod's blob is located in the card save by a 32-bit hash of
+`ModDesc.name` (`KARPlusSave_Alloc` / `KARPlusSave_CheckModDataExists` in
+`externals/hoshi/src/save.c`), not by position, and a mod that is not loaded leaves its metadata
+entry untouched. Turning a mod off and back on across sessions keeps its data. Data *offsets*
+are still packed end-to-end, so a mod whose save grows between versions forces
+`KARPlusSave_VerifySize` to memmove every later mod's region up; that path is what breaks first
+if the total exceeds `SAVE_SIZE`.
+
+**Settings menu is rebuilt per boot.** hoshi assembles the settings menu at runtime from each
+active mod's `OptionDesc` and sorts it (`externals/hoshi/src/settings.c`), so the option list
+changes shape whenever the active set changes. Menu-save slots are per mod, so entries follow
+their mod, but cursor/index persistence across a changed roster is worth checking on hardware.

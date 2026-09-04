@@ -8,6 +8,7 @@
 #include "machine.h"
 #include "os.h"
 #include "energylink.h"
+#include "ap_announce.h"
 
 // PatchKind to the matching "+1" ITKIND.
 static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
@@ -39,6 +40,9 @@ PatchKind Patch_ItKindToPatchKind(ItemKind it_kind)
 int Patch_GiveItem(PatchKind kind, int num)
 {
     int use_item_spawn = (num > 0) && Gm_IsInCity() && (kind < PATCHKIND_NUM);
+    const char *kind_name = (kind < PATCHKIND_NUM) ? PatchKind_Names[kind] : "?";
+    int applied = 0;
+
     for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
@@ -59,10 +63,13 @@ int Patch_GiveItem(PatchKind kind, int num)
             // Rebase so the stat change doesn't refund energy into the pool.
             EnergyLink_RebaseStats(i);
         }
-        OSReport("[PatchItem] Giving %d patches of kind %d to player %d (%s)...\n",
-                 num, kind, i, use_item_spawn ? "item" : "direct");
+        applied++;
     }
-    return 1;
+
+    if (applied)
+        OSReport("[PatchItem] Gave %d %s patch(es) to %d player(s) (%s)\n",
+                 num, kind_name, applied, use_item_spawn ? "item" : "direct");
+    return applied;
 }
 
 // Same City Trial / Air Ride split as Patch_GiveItem. Returns 1 if at least one
@@ -91,10 +98,12 @@ int Patch_AllUp_GiveItem(int num)
             Machine_GiveAllUp(md, num);
             EnergyLink_RebaseStats(i);
         }
-        OSReport("[PatchItem] Giving %d all ups to player %d (%s)...\n",
-                 num, i, use_item_spawn ? "item" : "direct");
-        applied = 1;
+        applied++;
     }
+
+    if (applied)
+        OSReport("[PatchItem] Gave %d all-up(s) to %d player(s) (%s)\n",
+                 num, applied, use_item_spawn ? "item" : "direct");
     return applied;
 }
 
@@ -128,9 +137,10 @@ int PermanentPatch_GiveItem(PatchKind kind)
     if (ap_save->permanent_patches[kind] < PATCH_STAT_MAX)
         ap_save->permanent_patches[kind]++;
 
-    OSReport("[PatchItem] Permanent patch %d received (total: %d).\n", kind, ap_save->permanent_patches[kind]);
+    OSReport("[PatchItem] Permanent %s patch received (total %d)\n",
+             PatchKind_Names[kind], ap_save->permanent_patches[kind]);
     if (kind < PATCHKIND_NUM)
-        tb_api->EnqueueColoredNoun("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
+        APAnnounce_Grant("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
     return 1;
 }
 
@@ -144,8 +154,8 @@ int PermanentPatch_GiveAllUp()
             ap_save->permanent_patches[i]++;
     }
 
-    OSReport("[PatchItem] Permanent all-up received.\n");
-    tb_api->EnqueueColoredNoun("Received: permanent +1 ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
+    OSReport("[PatchItem] Permanent all-up received\n");
+    APAnnounce_Grant("Received: permanent +1 ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
     return 1;
 }
 
@@ -222,10 +232,7 @@ static int PermanentPatch_ShouldApply(void)
     {
         CityMode cm = Gm_GetCityMode();
         if (cm == CITYMODE_FREERUN)
-        {
-            OSReport("[PermanentPatch] Skipping in Free Run (item data not loaded).\n");
-            return 0;
-        }
+            return 0; // item data is not loaded; inflated stats crash patch ejection
         if (cm == CITYMODE_STADIUM)
             return ap_menu_settings.ct_stadium_permanent_patches_enabled;
         return ap_menu_settings.ct_permanent_patches_enabled;
@@ -245,6 +252,13 @@ void PermanentPatch_On3DLoadEnd()
         total += ap_save->permanent_patches[i];
     if (total == 0)
         return;
+
+    if (Scene_GetCurrentMajor() == MJRKIND_CITY && Gm_GetCityMode() == CITYMODE_FREERUN)
+    {
+        OSReport("[PatchItem] Free Run - holding %d permanent patch(es) (item data not loaded)\n",
+                 total);
+        return;
+    }
 
     permanent_patches_applied = 0;
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, PermanentPatch_PerFrame, 0, 0, 0, 0);

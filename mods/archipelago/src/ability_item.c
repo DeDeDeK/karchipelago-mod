@@ -1,6 +1,7 @@
 #include "ability_item.h"
 #include "main.h"
 #include "textbox_api.h"
+#include "ap_announce.h"
 
 // Give a copy ability to every human Kirby rider via the raw rider API. This is
 // the only path for AP copy-ability grants in every mode - no ITKIND_COPY* item
@@ -22,13 +23,16 @@ int Ability_GiveItem(CopyKind copy_kind)
         // which deref rd->machine_gobj (e.g. sleep -> Rider_CopyInputToMachine).
         if (!Rider_IsOnMachine(rd))
             continue;
-        OSReport("[AbilityItem] Giving ability %d to player %d...\n", copy_kind, rd->ply);
         Rider_GiveAbility(rd, copy_kind);
-        applied = 1;
+        applied++;
     }
+
+    OSReport("[AbilityItem] Gave the %s ability to %d player(s)\n",
+             (copy_kind < COPYKIND_NUM) ? CopyKind_Names[copy_kind] : "?", applied);
+
     if (applied && copy_kind < COPYKIND_NUM && CopyKind_Names[copy_kind])
-        tb_api->EnqueueColoredNoun("Received: ", CopyKind_Names[copy_kind],
-                                   tb_api->AbilityColors[copy_kind], " ability");
+        APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
+                         tb_api->AbilityColors[copy_kind], " ability");
     return applied;
 }
 

@@ -82,7 +82,10 @@ static void Tree_Enumerate(void)
     GOBJ *parents[TREE_MAX_PARENTS];
     int nparents = Tree_CollectParents(parents, TREE_MAX_PARENTS);
     if (nparents == 0)
+    {
+        OSReport("[Trees] No forest trees on this stage, sway is off\n");
         return;
+    }
 
     for (int i = 0; i < count && stc_tree_count < TREE_MAX; i++)
     {

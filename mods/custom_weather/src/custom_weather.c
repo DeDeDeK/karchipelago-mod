@@ -506,8 +506,9 @@ static void CustomWeather_OverrideSky(GrObj *grobj)
         }
     }
 
-    OSReport("[CustomWeather] Selected preset %d: %s (%d/%d enabled)\n",
-             preset, CustomWeather_GetPresetName(preset), enabled_count, WEATHER_TOTAL);
+    // WeatherRuntime names the winner a frame later, on the same path a mid-round
+    // sky transition takes, so only the pool size is reported here.
+    OSReport("[CustomWeather] Rolling from %d of %d presets\n", enabled_count, WEATHER_TOTAL);
 
     Sky_SetPresetIndex(grobj, preset);
 }

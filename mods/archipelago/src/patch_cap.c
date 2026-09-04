@@ -105,18 +105,23 @@ int PatchCap_GetMaxValue()
 
 void PatchCap_Increment()
 {
+    int before = PatchCap_GetCap();
     ap_save->patch_cap_count++;
     int cap = PatchCap_GetCap();
     int max = PatchCap_GetMax();
-    OSReport("[PatchCap] Patch cap increased to %d (max %d).\n", cap, max);
+
+    if (cap > before)
+        OSReport("[PatchCap] Cap %d -> %d (max %d)\n", before, cap, max);
+    else
+        OSReport("[PatchCap] Cap already at the %d max, item had no effect\n", max);
     tb_api->EnqueueColoredNounFmt(NULL, "Patch cap", tb_api->PatchColors[PATCHKIND_CHARGE],
                                   " increased! (%d/%d)", cap, max);
 }
 
 void PatchCap_OnBoot()
 {
-    OSReport("[PatchCap] Applying patch cap hooks...\n");
     CODEPATCH_REPLACEFUNC(Patch_GetMaxValue, PatchCap_GetMaxValue);
     CODEPATCH_REPLACEFUNC(Machine_GivePatch, PatchCap_GivePatch);
     CODEPATCH_REPLACEFUNC(Machine_GiveAllUp, PatchCap_GiveAllUp);
+    OSReport("[PatchCap] Hooks installed\n");
 }

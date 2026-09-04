@@ -94,11 +94,10 @@ static int SpawnForAllHumans(ProjectileKind kind, float distance, const char *la
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
         if (SpawnProjectileForPlayer(i, kind, distance))
-        {
-            OSReport("[SpawnProjectile] %s: spawned on ply %d\n", label, i);
             spawned++;
-        }
     }
+
+    OSReport("[SpawnProjectile] %s: spawned on %d player(s)\n", label, spawned);
     return spawned > 0;
 }
 

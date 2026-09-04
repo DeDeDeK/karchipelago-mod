@@ -12,16 +12,17 @@
 
 #include "main.h"
 #include "ap_check_detect.h"
+#include "gate_ap_star.h"
 
 // Sampling for the Archipelago checklist's objectives. The framework polls every
 // predicate each frame in every scene, so a predicate is only ever a read of state
-// latched by the two hooks below.
+// latched by the hooks below.
 
 // Objectives observed this boot, one bit per APCheckKind. Objectives that count
 // across boots read ap_save->checks instead.
 static u64 ap_observed;
 
-static void Observe(int ck)
+void APCheckDetect_Observe(int ck)
 {
     u64 bit = 1ULL << ck;
     if (ap_observed & bit)
@@ -37,6 +38,7 @@ int APCheckDetect_IsSet(int ck)
     case APCK_ALLUPS_5:           return ap_save->checks.allup_collect_total >= AP_ALLUP_TOTAL_NEED;
     case APCK_SR1_PURPLE_3X:      return ap_save->checks.purple_sr1_wins >= AP_PURPLE_SR1_NEED;
     case APCK_AIRRIDE_ALL_COLORS: return ap_save->checks.race_color_mask == AP_RACE_COLOR_MASK_ALL;
+    case APCK_ASSEMBLE_AP_STAR:   return GateApStar_WasAssembled();
     default:
         if (ck < 0 || ck >= APCK_NUM)
             return 0;
@@ -137,8 +139,15 @@ static int run_base[5][RUN_ITEM_NUM];
 static int prev_allup[5];
 static int needs_baseline[5];
 
-// Coral placed by the loaded stage, sampled once at load (0 outside City Trial).
+// Coral placed by the loaded stage, sampled once at load (0 outside City Trial),
+// and how much of it anyone has broken this round.
 static int coral_total;
+static int coral_broken;
+
+// Is a City Trial Trial round loaded? The three-legendary poll needs it, and that
+// poll cannot ride the per-rider sampler: assembly ends in
+// Rider_RespawnFullRecreate, which tears the rider's machine down under it.
+static int in_city_trial;
 
 // Kirbys KO'd by a human King Dedede in the current Destruction Derby game.
 static int dedede_kirby_kos;
@@ -194,7 +203,7 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     {
         int got = st->item_collect[run_item_checks[i].it_kind] - run_base[ply][i];
         if (got >= (int)run_item_checks[i].need)
-            Observe(run_item_checks[i].ck);
+            APCheckDetect_Observe(run_item_checks[i].ck);
     }
 
     // All Ups count across the whole save. Every pickup path bumps item_collect,
@@ -208,23 +217,19 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     }
     prev_allup[ply] = allup;
 
-    // yakumono_break is zeroed per game, so no baseline is needed.
-    if (coral_total > 0 && st->yakumono_break[AP_CORAL_DESC_ID] >= coral_total)
-        Observe(APCK_BREAK_ALL_CORAL);
-
     // Only the copy-wheel grant paths set this mask, so a Mic panel picked up off
     // the ground does not count - the same wheel-only demand vanilla's Bomb and
     // Sleep cells make.
     if (st->copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC))
-        Observe(APCK_MIC_COPY_CHANCE);
+        APCheckDetect_Observe(APCK_MIC_COPY_CHANCE);
 
     // Negative clearance is the engine's own out-of-bounds definition - what makes
     // Machine_CheckFallDeath respawn the player.
     if (calcDistanceFromOOB(&rd->pos) < 0.0f)
-        Observe(APCK_OUT_OF_BOUNDS);
+        APCheckDetect_Observe(APCK_OUT_OF_BOUNDS);
 
     if (rd->pos.Y >= AP_MAX_ALTITUDE_Y)
-        Observe(APCK_MAX_ALTITUDE);
+        APCheckDetect_Observe(APCK_MAX_ALTITUDE);
 
     if (!Rider_IsOnMachine(rd))
     {
@@ -232,7 +237,7 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
         {
             const FootVisitCheck *fv = &foot_visit_checks[i];
             if (WithinSphere(&rd->pos, &fv->pos, fv->radius))
-                Observe(fv->ck);
+                APCheckDetect_Observe(fv->ck);
         }
     }
 }
@@ -243,7 +248,7 @@ static void APCheckDetect_PerFrameMeadows(GOBJ *rg)
     RiderData *rd = rg->userdata;
 
     if (WithinSphere(&rd->pos, &meadows_shortcut_pos, AP_MEADOWS_SHORTCUT_RADIUS))
-        Observe(APCK_MEADOWS_SHORTCUT);
+        APCheckDetect_Observe(APCK_MEADOWS_SHORTCUT);
 }
 
 static int AttachSamplers(void *proc)
@@ -267,8 +272,10 @@ void APCheckDetect_On3DLoadEnd(void)
     for (int i = 0; i < 5; i++)
         needs_baseline[i] = 1;
     coral_total = 0;
+    coral_broken = 0;
     dedede_kirby_kos = 0;
     mic_enemy_kos = 0;
+    in_city_trial = 0;
 
     StadiumKind st = Gm_GetCurrentStadiumKind();
     in_kirby_melee = Scene_GetCurrentMajor() == MJRKIND_CITY &&
@@ -279,6 +286,12 @@ void APCheckDetect_On3DLoadEnd(void)
     // course selection and holds a stale value outside a race, while GrPlants1 is
     // Fantasy Meadows and GrSpace2 is Nebula Belt in every Air Ride mode.
     in_nebula = Scene_GetCurrentMajor() == MJRKIND_AIR && Gr_GetCurrentGrKind() == GR_SPACE2;
+
+    // The title screen's attract demo runs a real City Trial round with a CPU in
+    // every slot. The per-rider samplers below already skip it for want of a human,
+    // but the coral objective counts a break whoever made it, so nothing arms.
+    if (Gm_IsAutoDemo())
+        return;
 
     if (Scene_GetCurrentMajor() == MJRKIND_AIR)
     {
@@ -292,10 +305,35 @@ void APCheckDetect_On3DLoadEnd(void)
     if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
+    in_city_trial = 1;
     coral_total = Gr_GetYakumonoSpawnTotal(AP_CORAL_DESC_ID);
 
     OSReport("[APCheckDetect] Sampling %d player(s) (coral total %d)\n",
              AttachSamplers(APCheckDetect_PerFrame), coral_total);
+}
+
+void APCheckDetect_OnFrameStart(void)
+{
+    if (!in_city_trial || (ap_observed & (1ULL << APCK_ASSEMBLE_ALL_LEGENDARY)))
+        return;
+
+    for (int ply = 0; ply < 5; ply++)
+    {
+        if (Ply_GetPKind(ply) != PKIND_HMN)
+            continue;
+        PlayerStats *st = Ply_GetItemCollectArray(ply);
+        // flags_84d is per-round state, zeroed with the rest of PlayerStats on
+        // scene load, so this is the "in one game" scope vanilla's two-machine
+        // cell has.
+        if (st != NULL &&
+            (st->flags_84d & PLYSTATS_DRAGOON_ASSEMBLED) &&
+            (st->flags_84d & PLYSTATS_HYDRA_ASSEMBLED) &&
+            GateApStar_AssembledThisRound(ply))
+        {
+            APCheckDetect_Observe(APCK_ASSEMBLE_ALL_LEGENDARY);
+            return;
+        }
+    }
 }
 
 // Replaces the one bl Ply_AddDeath, the engine's unified KO recorder, inside
@@ -319,10 +357,11 @@ static void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int is_bike, Mac
         return;
 
     dedede_kirby_kos++;
-    OSReport("[APCheckDetect] Kirbys KO'd as King Dedede: %d/%d\n",
-             dedede_kirby_kos, AP_DEDEDE_KIRBY_KO_NEED);
+    if (dedede_kirby_kos <= AP_DEDEDE_KIRBY_KO_NEED)
+        OSReport("[APCheckDetect] Kirbys KO'd as King Dedede: %d/%d\n",
+                 dedede_kirby_kos, AP_DEDEDE_KIRBY_KO_NEED);
     if (dedede_kirby_kos >= AP_DEDEDE_KIRBY_KO_NEED)
-        Observe(APCK_DD_DEDEDE_KO_KIRBY);
+        APCheckDetect_Observe(APCK_DD_DEDEDE_KO_KIRBY);
 }
 
 // Replaces the one bl Ply_RecordEnemyDefeat, the enemy-side counterpart of the KO
@@ -341,10 +380,29 @@ static void APCheckDetect_EnemyDefeat(int ply, void *attacker_log, GOBJ *enemy)
         return;
 
     mic_enemy_kos++;
-    OSReport("[APCheckDetect] Enemies defeated as Mic Kirby: %d/%d\n",
-             mic_enemy_kos, AP_MIC_ENEMY_KO_NEED);
+    if (mic_enemy_kos <= AP_MIC_ENEMY_KO_NEED)
+        OSReport("[APCheckDetect] Enemies defeated as Mic Kirby: %d/%d\n",
+                 mic_enemy_kos, AP_MIC_ENEMY_KO_NEED);
     if (mic_enemy_kos >= AP_MIC_ENEMY_KO_NEED)
-        Observe(APCK_MIC_ENEMY_KOS);
+        APCheckDetect_Observe(APCK_MIC_ENEMY_KOS);
+}
+
+// Replaces the one bl Ply_IncrementYakumonoBreakCount, inside
+// GrYaku_IncrementBreakCount, the single path every break family credits through.
+// PlayerStats.yakumono_break only counts the props that player broke, so the coral
+// objective counts here instead - a CPU breaking coral fills the same round total.
+static void APCheckDetect_YakumonoBreak(int ply, int desc_id)
+{
+    Ply_IncrementYakumonoBreakCount(ply, desc_id);
+
+    if (desc_id != AP_CORAL_DESC_ID || coral_total <= 0)
+        return;
+
+    coral_broken++;
+    if (coral_broken <= coral_total)
+        OSReport("[APCheckDetect] Coral broken: %d/%d\n", coral_broken, coral_total);
+    if (coral_broken >= coral_total)
+        APCheckDetect_Observe(APCK_BREAK_ALL_CORAL);
 }
 
 // Stadium_ComputeRank* skip slots whose gate byte is nonzero, leaving their
@@ -440,9 +498,9 @@ static void SampleAirRide(const StadiumResults *r)
         {
             RiderKind rk = gd->ply_desc[p].rider_kind;
             if (rk == RDKIND_METAKNIGHT)
-                Observe(APCK_AIRRIDE_1ST_METAKNIGHT);
+                APCheckDetect_Observe(APCK_AIRRIDE_1ST_METAKNIGHT);
             else if (rk == RDKIND_DEDEDE)
-                Observe(APCK_AIRRIDE_1ST_DEDEDE);
+                APCheckDetect_Observe(APCK_AIRRIDE_1ST_DEDEDE);
         }
 
         if (!in_nebula)
@@ -450,9 +508,9 @@ static void SampleAirRide(const StadiumResults *r)
 
         if (won)
         {
-            Observe(APCK_NEBULA_1ST);
+            APCheckDetect_Observe(APCK_NEBULA_1ST);
             if (Ply_GetMachineKindAbs(p) == VCKIND_WHEELIESCOOTER)
-                Observe(APCK_NEBULA_1ST_SCOOTER);
+                APCheckDetect_Observe(APCK_NEBULA_1ST_SCOOTER);
         }
 
         // Both gates AirRide_CheckRaceDistanceObjectives runs behind, so the demand
@@ -461,13 +519,13 @@ static void SampleAirRide(const StadiumResults *r)
         if (Gm_GetCityKind() == AIRRIDE_RULE_TIME &&
             Gm_GetRaceTimeLimitSeconds() == 120 &&
             Gm_GetPlayerRaceDistance(p) * AP_FEET_PER_METRE >= AP_NEBULA_FEET_NEED)
-            Observe(APCK_NEBULA_DIST_2MIN);
+            APCheckDetect_Observe(APCK_NEBULA_DIST_2MIN);
 
         // AirRide_CheckRaceLapObjectives keys off the configured lap total rather
         // than laps completed, so a 3-lap race cannot pay out the 2-lap time.
         if (Gm_GetCityKind() == AIRRIDE_RULE_LAPS && Gm_GetRaceLapTotal() == 2 &&
             r->ply_race_time[p] != 0 && r->ply_race_time[p] <= AP_NEBULA_2LAP_FRAMES)
-            Observe(APCK_NEBULA_2LAP_TIME);
+            APCheckDetect_Observe(APCK_NEBULA_2LAP_TIME);
 
         // airborne_time is the longest single airborne stretch, and PlayerStats is
         // only zeroed on the next 3D scene load, so it still reads this race's run.
@@ -475,7 +533,7 @@ static void SampleAirRide(const StadiumResults *r)
         MachineKind mk = Ply_GetMachineKindAbs(p);
         if ((mk == VCKIND_DRAGOON || mk == VCKIND_FLIGHT || mk == VCKIND_WINGED) &&
             Ply_GetItemCollectArray(p)->airborne_time > AP_NEBULA_AIR_FRAMES)
-            Observe(APCK_NEBULA_AIRBORNE);
+            APCheckDetect_Observe(APCK_NEBULA_AIRBORNE);
     }
 }
 
@@ -484,7 +542,7 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
     if (st >= STKIND_DRAG1 && st <= STKIND_DRAG4)
     {
         if (PhotoFinish(r))
-            Observe(APCK_DRAG_PHOTO);
+            APCheckDetect_Observe(APCK_DRAG_PHOTO);
         return;
     }
 
@@ -501,11 +559,11 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
             // where 1st place is free the moment the player crosses the line.
             if (!r->ply_finished[p] || r->ply_placement[p] != 0 || OpponentCount(r, p) == 0)
                 continue;
-            Observe(APCK_SR1_FIRST + (st - STKIND_SINGLERACE1));
+            APCheckDetect_Observe(APCK_SR1_FIRST + (st - STKIND_SINGLERACE1));
             if (st != STKIND_SINGLERACE1)
                 continue;
             if (Ply_GetMachineKindAbs(p) == VCKIND_BULK)
-                Observe(APCK_SR1_BULK);
+                APCheckDetect_Observe(APCK_SR1_BULK);
             // Ply_GetColor reads PlayerDesc.color, a KirbyColor only for a Kirby
             // rider - the stadiums are reachable from a Dedede match too.
             if (Gm_GetGameData()->ply_desc[p].rider_kind == RDKIND_KIRBY &&
@@ -520,26 +578,26 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
         else if (st == STKIND_HIGHJUMP)
         {
             if (r->ply_dist[p] * AP_FEET_PER_METRE > 1500.0f)
-                Observe(APCK_HIGHJUMP_1500);
+                APCheckDetect_Observe(APCK_HIGHJUMP_1500);
         }
         else if (st == STKIND_AIRGLIDER)
         {
             if (r->ply_dist[p] * AP_FEET_PER_METRE > 2000.0f)
-                Observe(APCK_AIRGLIDER_2000);
+                APCheckDetect_Observe(APCK_AIRGLIDER_2000);
         }
         else if (st == STKIND_MELEE1 && r->ply_points[p] > 100)
         {
-            Observe(APCK_MELEE1_100);
+            APCheckDetect_Observe(APCK_MELEE1_100);
         }
         else if (st == STKIND_MELEE2 && r->ply_points[p] > 60)
         {
-            Observe(APCK_MELEE2_60);
+            APCheckDetect_Observe(APCK_MELEE2_60);
         }
         else if (st == STKIND_DESTRUCTION3 && r->ply_points[p] >= 10)
         {
             // ply_points is GameData.destruction_derby_ko_num here, the same field
             // the vanilla DD cells count against.
-            Observe(APCK_DD3_KO_10);
+            APCheckDetect_Observe(APCK_DD3_KO_10);
         }
     }
 }
@@ -564,7 +622,7 @@ void APCheckDetect_On3DExit(void)
         if (Gm_GetAirRideMode() != AIRRIDEMODE_RACE)
             return;
         if (PhotoFinish(&gd->stadium_results))
-            Observe(APCK_AIRRIDE_PHOTO);
+            APCheckDetect_Observe(APCK_AIRRIDE_PHOTO);
         SampleAirRide(&gd->stadium_results);
     }
 }
@@ -573,5 +631,6 @@ void APCheckDetect_OnBoot(void)
 {
     CODEPATCH_REPLACECALL(0x801e1f74, APCheckDetect_AddDeath);
     CODEPATCH_REPLACECALL(0x802022ec, APCheckDetect_EnemyDefeat);
+    CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
     OSReport("[APCheckDetect] Hooks installed\n");
 }

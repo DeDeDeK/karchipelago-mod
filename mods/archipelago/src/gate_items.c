@@ -6,6 +6,7 @@
 #include "gate_items.h"
 #include "textbox_api.h"
 #include "inline.h"
+#include "ap_announce.h"
 
 // Inverse of ItemKindToUnlockBit, so ItemKind_Names can be reused for display.
 static const ItemKind itunlock_to_itkind[ITUNLOCK_NUM] = {
@@ -225,9 +226,14 @@ void GateItems_FilterEventDropTables()
     }
 }
 
+// One bit per unlock index whose locked-spawn skip has been reported this round.
+static u32 stc_locked_reported;
+
 // Disable legendary piece spawns when all pieces of a type are locked.
 static void GateItems_FilterLegendaryPieces()
 {
+    stc_locked_reported = 0;
+
     LegendaryPieceData *lpd = *stc_legendary_piece_data;
     if (!lpd)
         return;
@@ -265,8 +271,13 @@ static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
     int bit = ItemKindToUnlockBit(item_kind);
     if (bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit)))
     {
-        OSReport("[GateItems] Legendary piece %d (%s) locked - skipping spawn\n",
-                 item_kind, ItemUnlockName(bit));
+        // The spawner retries a locked piece every cycle, so say it once per piece.
+        if (!(stc_locked_reported & (1u << bit)))
+        {
+            stc_locked_reported |= (1u << bit);
+            OSReport("[GateItems] Legendary piece %d (%s) locked - not spawning\n",
+                     item_kind, ItemUnlockName(bit));
+        }
         return;
     }
     LegendaryPiece_MarkAsSpawned(spawner, item_kind);
@@ -288,6 +299,6 @@ int GateItems_UnlockItem(ItemUnlockKind kind)
     ap_save->item_unlocked_mask |= (1 << kind);
     OSReport("[GateItems] Item %d (%s) unlocked (mask = %s)\n",
              kind, ItemUnlockName(kind), MaskBits(ap_save->item_unlocked_mask, 32));
-    tb_api->EnqueueColoredNoun("Unlocked Item: ", ItemUnlockName(kind), tb_api->ItemColor, NULL);
+    APAnnounce_Grant("Unlocked Item: ", ItemUnlockName(kind), tb_api->ItemColor, NULL);
     return 1;
 }

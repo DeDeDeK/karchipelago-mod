@@ -9,10 +9,11 @@
 #define TEXTBOX_MOD_NAME "textbox"
 
 #define TEXTBOX_API_MAJOR 1
-#define TEXTBOX_API_MINOR 0
+#define TEXTBOX_API_MINOR 2
 
-// Maximum colored runs per message; each becomes one subtext of the underlying Text GObj.
-#define TEXTBOX_MAX_SEGMENTS 5
+// Maximum colored runs per message. A run that wraps becomes more than one subtext of the
+// underlying Text GObj, so this is not the subtext count.
+#define TEXTBOX_MAX_SEGMENTS 8
 
 // One colored run of text. `text` is copied at enqueue, so it need not outlive the call.
 typedef struct TextSegment
@@ -38,23 +39,27 @@ typedef struct TextBoxAPI
     int (*EnqueueColoredNounFmt)(const char *prefix, const char *noun, GXColor noun_color,
                                  const char *suffix_format, ...);
 
+    // 1 when an Enqueue* would be accepted: the textbox is on and a screen canvas exists.
+    // A producer with its own queue polls this and holds instead of losing messages.
+    int (*IsReady)(void);
+
     // Named color palette. RGB only - the alpha byte is ignored, since alpha is set per-frame
     // by the fade machinery.
-    GXColor DefaultColor;     
-    GXColor MachineColor;     
-    GXColor EventColor;       
-    GXColor StadiumColor;     
-    GXColor StageColor;       
-    GXColor TopRideItemColor; 
-    GXColor ItemColor;        
-    GXColor TrapColor;        
-    GXColor DeathColor;       
-    GXColor EnergyColor;      
-    GXColor CheckColor;       
-    GXColor GoalColor;        
-    GXColor RewardColor;      
-    GXColor ShopColor;        
-    GXColor FillerColor;      
+    GXColor DefaultColor;
+    GXColor MachineColor;
+    GXColor EventColor;
+    GXColor StadiumColor;
+    GXColor StageColor;
+    GXColor TopRideItemColor;
+    GXColor ItemColor;
+    GXColor TrapColor;
+    GXColor DeathColor;
+    GXColor EnergyColor;
+    GXColor CheckColor;
+    GXColor GoalColor;
+    GXColor RewardColor;
+    GXColor ShopColor;
+    GXColor FillerColor;
 
     // Indexed palettes.
     const GXColor *AbilityColors; // [COPYKIND_NUM]

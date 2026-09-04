@@ -4,6 +4,7 @@
 #include "hoshi/settings.h"
 
 #include "main.h"
+#include "settings_menu.h"
 #include "textbox_api.h"
 #include "ap_item_handler.h"
 #include "energylink.h"
@@ -19,6 +20,15 @@ static int Buy(OptionDesc *self)
 {
     SpendEntry *entry = self->user_data;
 
+    if (!ap_menu_settings.energylink_enabled)
+    {
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: Energy Link is off\n",
+                 self->name, entry->item_id);
+        tb_api->EnqueueColoredNoun("Turn on ", "Energy Link", tb_api->EnergyColor,
+                                   " to spend energy");
+        return 0;
+    }
+
     // Event-trigger items are gated by the event-unlock mask so energy can't fire
     // an event out of logic.
     if (entry->item_id >= AP_EVENT_BASE && entry->item_id < AP_EVENT_BASE + EVKIND_NUM)
@@ -26,7 +36,7 @@ static int Buy(OptionDesc *self)
         int kind = entry->item_id - AP_EVENT_BASE;
         if (!(ap_save->event_unlocked_mask & (1 << kind)))
         {
-            OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: event not unlocked (mask = %s)\n",
+            OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: event not unlocked (mask = %s)\n",
                      self->name, entry->item_id, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
             tb_api->EnqueueColoredNoun("Event not unlocked: ", self->name, tb_api->EventColor, NULL);
             return 0;
@@ -35,7 +45,7 @@ static int Buy(OptionDesc *self)
 
     if (ap_data->energy_balance < entry->cost)
     {
-        OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: need %lld, have %lld\n",
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: need %lld, have %lld\n",
                  self->name, entry->item_id, entry->cost, ap_data->energy_balance);
         tb_api->EnqueueColoredNounFmt("Not enough ", "energy", tb_api->EnergyColor,
                                       "! Need %lld, have %lld", entry->cost, ap_data->energy_balance);
@@ -44,14 +54,13 @@ static int Buy(OptionDesc *self)
 
     // Queue it so APItems_PerFrame applies it when the scene/intro gate allows -
     // the same path as items received from AP.
-    if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
+    if (!APItems_Queue(entry->item_id))
     {
-        OSReport("[EnergyLink] Buy '%s' (id=%d) rejected: queue full\n",
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: queue full\n",
                  self->name, entry->item_id);
         tb_api->Enqueue("Queue full - try again later");
         return 0;
     }
-    ap_save->unprocessed_items[ap_save->unprocessed_count++] = entry->item_id;
 
     // The integer cost lands on the send counter immediately so the client diffs
     // it on the next poll in any scene - no gameplay frame runs in the menu to
@@ -59,7 +68,7 @@ static int Buy(OptionDesc *self)
     ap_data->energy_sent_total -= entry->cost;
     ap_data->energy_balance    -= entry->cost;
 
-    OSReport("[EnergyLink] Bought '%s' (id=%d) for %lld, balance %lld\n",
+    OSReport("[EnergyLinkSpend] Bought '%s' (id=%d) for %lld, balance %lld\n",
              self->name, entry->item_id, entry->cost, ap_data->energy_balance);
     tb_api->EnqueueColoredNounFmt("Bought ", self->name, tb_api->ShopColor,
                                   " for %lld energy", entry->cost);
@@ -162,16 +171,23 @@ static MenuDesc special_menu = {
 };
 
 static MenuDesc legendary_menu = {
-    .option_num = 8,
+    .option_num = 15,
     .options = {
-        BUY(AP_ITKIND_DRAGOON1,    5000, "Dragoon Part A"),
-        BUY(AP_ITKIND_DRAGOON2,    5000, "Dragoon Part B"),
-        BUY(AP_ITKIND_DRAGOON3,    5000, "Dragoon Part C"),
-        BUY(AP_ITKIND_HYDRA1,      5000, "Hydra Part X"),
-        BUY(AP_ITKIND_HYDRA2,      5000, "Hydra Part Y"),
-        BUY(AP_ITKIND_HYDRA3,      5000, "Hydra Part Z"),
-        BUY(AP_ITEM_GIVE_DRAGOON,  17500, "Full Dragoon"),
-        BUY(AP_ITEM_GIVE_HYDRA,    17500, "Full Hydra"),
+        BUY(AP_ITKIND_DRAGOON1,          5000,  "Dragoon Part A"),
+        BUY(AP_ITKIND_DRAGOON2,          5000,  "Dragoon Part B"),
+        BUY(AP_ITKIND_DRAGOON3,          5000,  "Dragoon Part C"),
+        BUY(AP_ITKIND_HYDRA1,            5000,  "Hydra Part X"),
+        BUY(AP_ITKIND_HYDRA2,            5000,  "Hydra Part Y"),
+        BUY(AP_ITKIND_HYDRA3,            5000,  "Hydra Part Z"),
+        BUY(AP_STAR_PIECE_GIVE_ROSE,     2500,  "Rose Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_GREEN,    2500,  "Green Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_VIOLET,   2500,  "Violet Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_TAN,      2500,  "Tan Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_BLUE,     2500,  "Blue Sphere"),
+        BUY(AP_STAR_PIECE_GIVE_YELLOW,   2500,  "Yellow Sphere"),
+        BUY(AP_ITEM_GIVE_DRAGOON,        17500, "Full Dragoon"),
+        BUY(AP_ITEM_GIVE_HYDRA,          17500, "Full Hydra"),
+        BUY(AP_ITEM_GIVE_AP_STAR,        17500, "Full AP Star"),
     },
 };
 
@@ -258,15 +274,15 @@ static MenuDesc cosmetic_menu = {
 MenuDesc energylink_spend_menu = {
     .option_num = 11,
     .options = {
-        CATEGORY("Stat Patches",      "Temporary stat patches for this round",   stat_patches_menu),
+        CATEGORY("Stat Patches",      "One-time stat patch gives",               stat_patches_menu),
         CATEGORY("Permanent Patches", "Permanent stat boosts across all rounds", permanent_patches_menu),
         CATEGORY("Copy Abilities",    "Give Kirby a copy ability",               copy_abilities_menu),
         CATEGORY("Food",              "Healing items",                           food_menu),
         CATEGORY("Special Items",     "Powerful one-use items",                  special_menu),
-        CATEGORY("Legendary Pieces",  "Dragoon and Hydra machine parts",         legendary_menu),
+        CATEGORY("Legendary Pieces",  "Dragoon, Hydra and AP Star parts",        legendary_menu),
         CATEGORY("City Trial Items",  "Boxes and other CT items",                ct_items_menu),
         CATEGORY("City Trial Events", "Trigger a City Trial event",              ct_events_menu),
-        CATEGORY("Top Ride Items",    "Spawn a Top Ride item at your position",  topride_items_menu),
+        CATEGORY("Top Ride Items",    "Give Kirby a Top Ride Item",              topride_items_menu),
         CATEGORY("Checkbox Fillers",  "Fill a checklist square of your choice",  checkbox_fillers_menu),
         CATEGORY("Cosmetic",          "Cosmetic items",                          cosmetic_menu),
     },

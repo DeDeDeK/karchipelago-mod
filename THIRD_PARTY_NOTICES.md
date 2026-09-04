@@ -11,14 +11,6 @@ Several files under `scripts/hsd/` contain code ported from HSDLib's C#
 implementation (<https://github.com/Ploaj/HSDLib>) - most notably the
 archive parser, the reachability walker, the public-symbol classifier,
 and the various GX / HSD enum tables used by the explorer and verifier.
-Affected files:
-
-- `scripts/hsd/__init__.py`
-- `scripts/hsd/archive.py`
-- `scripts/hsd/symbols.py`
-- `scripts/hsd/walker.py`
-- `scripts/hsd/explore.py`
-- `scripts/hsd/verify_carved.py`
 
 HSDLib is distributed under the MIT License, reproduced verbatim below.
 

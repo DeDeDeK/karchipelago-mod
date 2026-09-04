@@ -10,7 +10,10 @@
 #include "checklist_rewards.h"
 #include "ap_checklist.h"
 #include "ap_check_detect.h"
+#include "ap_announce.h"
 #include "textbox_api.h"
+#include "settings_menu.h"
+#include "ap_patches.h"
 
 // SFX cue the vanilla ClearChecker_SetNewUnlock plays on a first-this-frame
 // transition, guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
@@ -74,16 +77,17 @@ static void RecordCheck(int mode, int clear_kind)
     if (ChecklistRewards_ResolveCell(mode, clear_kind, &src_mode, &src_ri))
     {
         u8 rtype = stc_reward_table_ptrs[src_mode][src_ri].reward_type;
-        OSReport("[Check] mode=%d clear_kind=%d type=%s (%d) recorded\n",
+        OSReport("[CheckDetection] mode=%d clear_kind=%d type=%s (%d) recorded\n",
                  mode, clear_kind,
                  Reward_TypeName(rtype), rtype);
     }
     else
     {
-        OSReport("[Check] mode=%d clear_kind=%d recorded (no local reward placement)\n",
+        OSReport("[CheckDetection] mode=%d clear_kind=%d recorded (no local reward placement)\n",
                  mode, clear_kind);
     }
-    tb_api->EnqueueColoredNoun(NULL, "Check", tb_api->CheckColor, " sent");
+    if (APAnnounce_LocalEnabled(APLOCAL_CHECK))
+        tb_api->EnqueueColoredNoun(NULL, "Check", tb_api->CheckColor, " recorded");
 
     CheckDetection_EvaluateGoal();
 }
@@ -192,6 +196,10 @@ static int goal_satisfied(APGoalKind goal, int row, int count, int n)
     case GOAL_MAX_STATS_CT:
         // Mode-independent sticky save bit, latched during a City Trial round.
         return ap_save->max_stats_ct_achieved;
+    case GOAL_ASSEMBLE_AP_STAR:
+        return SENT_CHECK_BIT(AP_CHECKLIST_ROW, APCK_ASSEMBLE_AP_STAR);
+    case GOAL_ALL_LEGENDARIES_CT:
+        return SENT_CHECK_BIT(AP_CHECKLIST_ROW, APCK_ASSEMBLE_ALL_LEGENDARY);
     }
     return 0;
 }
@@ -223,32 +231,38 @@ static void AnnounceModeGoal(int row)
         { name,               color },
         { " goal complete!",  tb_api->GoalColor },
     };
-    tb_api->EnqueueSegments(segs, 2);
-    OSReport("[Check] %s goal satisfied\n", name);
+    if (APAnnounce_LocalEnabled(APLOCAL_GOAL))
+        tb_api->EnqueueSegments(segs, 2);
+    OSReport("[CheckDetection] %s goal satisfied\n", name);
 }
 
 void CheckDetection_EvaluateGoal(void)
 {
-    if (ap_save->goal_complete)
-        return;  // sticky once set
-
     APSlotOptions *opt = &ap_save->options;
 
     // Victory needs at least one non-NONE goal, all of them satisfied. If every
     // mode is GOAL_NONE it never fires.
+    u8 satisfied_mask = 0;
     int any_real_goal = 0;
     int all_ok = 1;
-    int newly_satisfied[CHECKLIST_MODE_NUM];
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         APGoalKind goal = (APGoalKind)opt->goal[r];
         int sat = goal_satisfied(goal, r, PopcountRow(r), opt->checklist_amount[r]);
-        newly_satisfied[r] = (goal != GOAL_NONE) && sat && !ap_save->goal_announced[r];
         if (goal != GOAL_NONE)
+        {
             any_real_goal = 1;
+            if (sat)
+                satisfied_mask |= (u8)(1 << r);
+        }
         if (!sat)
             all_ok = 0;
     }
+    // Published before the sticky return so a save load repopulates it after victory.
+    ap_data->goal_satisfied_mask = satisfied_mask;
+
+    if (ap_save->goal_complete)
+        return;  // sticky once set
 
     if (any_real_goal && all_ok)
     {
@@ -259,15 +273,16 @@ void CheckDetection_EvaluateGoal(void)
         for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
             if (opt->goal[r] != GOAL_NONE)
                 ap_save->goal_announced[r] = 1;
-        OSReport("[Check] GOALS COMPLETE\n");
-        tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
+        OSReport("[CheckDetection] GOALS COMPLETE\n");
+        if (APAnnounce_LocalEnabled(APLOCAL_GOAL))
+            tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
         return;
     }
 
     // Victory not reached yet: announce each mode goal that just became satisfied.
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        if (!newly_satisfied[r])
+        if (!(satisfied_mask & (1 << r)) || ap_save->goal_announced[r])
             continue;
         ap_save->goal_announced[r] = 1;
         AnnounceModeGoal(r);
@@ -288,6 +303,7 @@ static void ProcessBackfill(void)
         return;
 
     int processed_any = 0;
+    int backfilled = 0;
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         for (int word = 0; word < 2; word++)
@@ -308,6 +324,8 @@ static void ProcessBackfill(void)
                 u8 clear_kind = (u8)(word * 64 + bit);
                 if (clear_kind >= CLEAR_KIND_NUM)
                     continue;
+                if (r == AP_CHECKLIST_ROW && clear_kind >= APCK_NUM)
+                    continue; // blank AP cells back no location, same as RecordCheck
 
                 SetSentCheck(r, clear_kind);
 
@@ -321,6 +339,7 @@ static void ProcessBackfill(void)
                 }
 
                 processed_any = 1;
+                backfilled++;
             }
         }
     }
@@ -334,7 +353,7 @@ static void ProcessBackfill(void)
 
     if (processed_any)
     {
-        OSReport("[Check] Backfill processed\n");
+        OSReport("[CheckDetection] Backfill applied (%d new check(s))\n", backfilled);
         CheckDetection_EvaluateGoal();
     }
 }
@@ -417,6 +436,14 @@ static int FillerGate_IsRejected(u8 mode, u8 phys_slot)
         if (row != GMMODE_CITYTRIAL)
             return 0;
         return cd->grid_mapping[KD_CLEAR_KIND] == phys_slot;
+    case GOAL_ASSEMBLE_AP_STAR:
+        if (row != AP_CHECKLIST_ROW)
+            return 0;
+        return cd->grid_mapping[APCK_ASSEMBLE_AP_STAR] == phys_slot;
+    case GOAL_ALL_LEGENDARIES_CT:
+        if (row != AP_CHECKLIST_ROW)
+            return 0;
+        return cd->grid_mapping[APCK_ASSEMBLE_ALL_LEGENDARY] == phys_slot;
     case GOAL_CHECKLIST_LIST:
     {
         u64 *gc = ap_save->options.goal_checks[row];
@@ -499,7 +526,7 @@ void CheckDetection_OnSaveLoaded(void)
     // the active goal.
     CheckDetection_EvaluateGoal();
 
-    OSReport("[Check] Loaded sent_checks AR=%d TR=%d CT=%d AP=%d goal=%d\n",
+    OSReport("[CheckDetection] Loaded sent_checks AR=%d TR=%d CT=%d AP=%d goal=%d\n",
              PopcountRow(GMMODE_AIRRIDE),
              PopcountRow(GMMODE_TOPRIDE),
              PopcountRow(GMMODE_CITYTRIAL),
@@ -524,7 +551,7 @@ void CheckDetection_OnBoot(void)
 
     CODEPATCH_HOOKAPPLY(0x80180a64);  // Goal-aware filler gate
     CODEPATCH_HOOKAPPLY(0x80180dc4);  // Filler-apply: record the check
-    OSReport("[Check] Hooks installed\n");
+    OSReport("[CheckDetection] Hooks installed\n");
 }
 
 void CheckDetection_ResetAll(void)
@@ -536,43 +563,58 @@ void CheckDetection_ResetAll(void)
     }
     ap_save->goal_complete = 0;
     ap_data->goal_complete = 0;
+    ap_data->goal_satisfied_mask = 0;
     ap_save->max_stats_ct_achieved = 0;
+    ApPatches_ResetAll();
 }
 
 void CheckDetection_DebugClearAll(void)
 {
     CheckDetection_ResetAll();
     Hoshi_WriteSave();
-    OSReport("[Check] Debug: cleared all sent_checks and goal_complete\n");
+    OSReport("[CheckDetection] Debug: cleared all sent_checks and goal_complete\n");
 }
 
 void CheckDetection_DebugForceMarkAll(void)
 {
     _Static_assert(CLEAR_KIND_NUM > 64 && CLEAR_KIND_NUM <= 128,
                    "clear-kind packing assumes 2 u64 words");
+    _Static_assert(APCK_NUM <= 64, "the AP row's mask below assumes one word");
     const u64 lo_mask = ~0ULL;
     const u64 hi_mask = (CLEAR_KIND_NUM == 128) ? ~0ULL
                                                  : ((1ULL << (CLEAR_KIND_NUM - 64)) - 1);
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        ap_save->sent_checks[r][0] = lo_mask;
-        ap_save->sent_checks[r][1] = hi_mask;
-        ap_data->sent_checks[r][0] = lo_mask;
-        ap_data->sent_checks[r][1] = hi_mask;
+        // Only the AP tab's first APCK_NUM cells back a location, and its blank
+        // ones decode into the AP Patch code block, so they must stay clear.
+        int ap = (r == AP_CHECKLIST_ROW);
+        ap_save->sent_checks[r][0] = ap ? (1ULL << APCK_NUM) - 1 : lo_mask;
+        ap_save->sent_checks[r][1] = ap ? 0 : hi_mask;
+        ap_data->sent_checks[r][0] = ap_save->sent_checks[r][0];
+        ap_data->sent_checks[r][1] = ap_save->sent_checks[r][1];
         ap_save->goal_announced[r] = 1;
     }
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;
     ap_save->max_stats_ct_achieved = 1;
+    CheckDetection_EvaluateGoal();  // republish goal_satisfied_mask over the forced checks
+    ApPatches_DebugForceMarkAll();
     Hoshi_WriteSave();
-    OSReport("[Check] Debug: force-marked all sent_checks and goal_complete\n");
+    OSReport("[CheckDetection] Debug: force-marked all sent_checks and goal_complete\n");
 }
 
 void CheckDetection_DebugTriggerGoal(void)
 {
     ap_save->goal_complete = 1;
     ap_data->goal_complete = 1;
+    // goal_complete asserts every real goal is done, so the per-row mask has to agree -
+    // sent_checks are untouched here, so nothing else would set it.
+    u8 mask = 0;
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+        if (ap_save->options.goal[r] != GOAL_NONE)
+            mask |= (u8)(1 << r);
+    ap_data->goal_satisfied_mask = mask;
     Hoshi_WriteSave();
-    OSReport("[Check] Debug: goal_complete forced\n");
+    OSReport("[CheckDetection] Debug: goal_complete forced\n");
 }
 

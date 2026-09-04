@@ -91,7 +91,7 @@ static void StopPlayer(int p)
     Hypernova_VacuumFinishClaimedPlayer(p);
     RetargetScale(p);
     StopRainbowPlayer(p);
-    OSReport("[Hypernova] Player %d deactivated\n", p);
+    OSReport("[Hypernova] Player %d deactivated\n", p + 1);
 }
 
 // Scene change: models are recreated at scale 1.0, so snap to neutral with no ease.
@@ -153,8 +153,12 @@ int Hypernova_ActivatePlayer(int player, int duration_frames)
         }
         stc_active[player] = 1;
         RetargetScale(player);
+        OSReport("[Hypernova] Player %d activated for %d frames\n", player + 1, duration_frames);
     }
-    OSReport("[Hypernova] Player %d activated for %d frames\n", player, duration_frames);
+    else
+    {
+        OSReport("[Hypernova] Player %d extended to %d frames\n", player + 1, duration_frames);
+    }
     return 1;
 }
 

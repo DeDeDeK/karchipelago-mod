@@ -9,6 +9,7 @@
 
 #include "main.h"
 #include "settings_menu.h"
+#include "ap_announce.h"
 #include "textbox_api.h"
 #include "traplink.h"
 #include "ap_item_handler.h"
@@ -20,6 +21,14 @@
 #define TRAPLINK_RECV_GUARD_FRAMES 120
 static int recv_suppress_frames = 0;
 
+// Names the outgoing kind for the local line. The client puts the same strings on
+// the wire as trap_name.
+static const char *const traplink_kind_names[] = {
+    [TRAPLINK_KIND_BAD_PATCH]  = "Bad Patch",
+    [TRAPLINK_KIND_SLEEP]      = "Sleep",
+    [TRAPLINK_KIND_SPEED_DOWN] = "Speed Down",
+};
+
 void TrapLink_Send(TrapLinkKind kind)
 {
     if (!ap_menu_settings.traplink_enabled)
@@ -27,13 +36,17 @@ void TrapLink_Send(TrapLinkKind kind)
     if (kind == TRAPLINK_KIND_NONE)
         return;
     if (recv_suppress_frames > 0)
-    {
-        OSReport("[TrapLink] Suppressing send (kind %d) - within receive guard window\n", kind);
-        return;
-    }
+        return; // inside the receive guard window; a bounced trap is not ours to send
 
-    OSReport("[TrapLink] Traplink send triggered (kind %d)\n", kind);
+    OSReport("[TrapLink] Send triggered (kind %d)\n", kind);
     ap_data->traplink_send = (uint)kind;
+
+    // Both directions are narrated locally under Messages -> Local -> Links, off by
+    // default: a client attached to the same event posts a line naming the other
+    // player a poll later.
+    if (APAnnounce_LocalEnabled(APLOCAL_LINK))
+        tb_api->EnqueueColoredNounFmt(NULL, "TrapLink", tb_api->TrapColor, " sent! (%s)",
+                                      traplink_kind_names[kind]);
 }
 
 // Trap items that can be randomly selected when traplink is triggered
@@ -95,7 +108,7 @@ static int ApplyCityTrialTrap(void)
 
     if (count == 0)
     {
-        OSReport("[TrapLink] no eligible trap items, discarding\n");
+        OSReport("[TrapLink] No eligible trap items - discarding\n");
         return 1; // treat as handled so we clear the flag
     }
 
@@ -140,10 +153,12 @@ static int ApplyAirRideTrap(void)
         // calls Rider_CopyInputToMachine and derefs a null machine_gobj.
         if (!Rider_IsOnMachine(rd))
             continue;
-        OSReport("[TrapLink] giving sleep ability to ply %d\n", i);
         Rider_GiveAbility(rd, COPYKIND_SLEEP);
-        applied = 1;
+        applied++;
     }
+
+    if (applied)
+        OSReport("[TrapLink] Applied sleep-ability trap to %d player(s)\n", applied);
     return applied;
 }
 
@@ -187,12 +202,12 @@ static void TrapLink_PerFrame(GOBJ *g)
             // are always mounted, so they fall back to the AR sleep trap.
             if (Gm_GetCityMode() == CITYMODE_FREERUN)
             {
-                OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded).\n");
+                OSReport("[TrapLink] Dropping CT trap in Free Run (item data not loaded)\n");
                 handled = 1;
             }
             else if (CityTrial_IsInStadium())
             {
-                OSReport("[TrapLink] Stadium - falling back to sleep ability trap.\n");
+                OSReport("[TrapLink] Stadium - falling back to the sleep-ability trap\n");
                 handled = ApplyAirRideTrap();
             }
             else
@@ -208,7 +223,8 @@ static void TrapLink_PerFrame(GOBJ *g)
 
     if (handled)
     {
-        tb_api->EnqueueColoredNoun(NULL, "Trap", tb_api->TrapColor, " received!");
+        if (APAnnounce_LocalEnabled(APLOCAL_LINK))
+            tb_api->EnqueueColoredNoun(NULL, "TrapLink", tb_api->TrapColor, " received!");
         ap_data->traplink_receive = 0;
         // The apply is about to trigger our own send hooks.
         recv_suppress_frames = TRAPLINK_RECV_GUARD_FRAMES;
@@ -295,7 +311,6 @@ static void TrapLink_OnTopRideItemPickup(u8 item_kind, Vec3 *absorber_pos)
     if (TopRide_GetPlayerKind(picker->player_slot) != TR_PKIND_HMN)
         return; // CPU picked it up - don't send
 
-    OSReport("[TrapLink] TR ply %d picked up bad item %d\n", closest, item_kind);
     TrapLink_Send(TRAPLINK_KIND_SPEED_DOWN);
 }
 

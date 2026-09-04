@@ -5,10 +5,12 @@
 
 #include "custom_events.h"
 #include "cannon_event.h"
+#include "spawn_enemy.h"
 
 static void OnBoot(void)
 {
     CustomEvents_OnBoot();
+    SpawnEnemy_OnBoot();
 }
 
 static void On3DLoadEnd(void)

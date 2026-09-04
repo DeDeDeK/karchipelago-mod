@@ -56,11 +56,6 @@ static void OnChangeCpuAR(int val)
     OSReport("[CustomAI] Air Ride CPU preset set to %s\n", CpuAI_GetSelectionName(val));
 }
 
-static void OnChangeCpuTR(int val)
-{
-    OSReport("[CustomAI] Top Ride CPU preset set to %s\n", CpuAI_GetSelectionName(val));
-}
-
 static void OnChangeEnemyAR(int val)
 {
     OSReport("[CustomAI] Air Ride enemy preset set to %s\n", EnemyAI_GetSelectionName(val));
@@ -149,25 +144,9 @@ static MenuDesc ar_menu = {
     },
 };
 
-// Top Ride: CPU riders only.
-static MenuDesc tr_menu = {
-    .option_num = 1,
-    .options = {
-        &(OptionDesc){
-            .name = "CPU AI",
-            .description = "Behavior preset for Top Ride CPU riders",
-            .kind = OPTKIND_VALUE,
-            .val = &cpu_ai_preset_tr,
-            .value_num = CPU_AI_MENU_NUM,
-            .value_names = stc_cpu_names,
-            .on_change = OnChangeCpuTR,
-        },
-    },
-};
-
 // One submenu per mode, each exposing only the AI domains that mode has.
 static MenuDesc top_menu = {
-    .option_num = 3,
+    .option_num = 2,
     .options = {
         &(OptionDesc){
             .name = "City Trial AI",
@@ -181,18 +160,12 @@ static MenuDesc top_menu = {
             .kind = OPTKIND_MENU,
             .menu_ptr = &ar_menu,
         },
-        &(OptionDesc){
-            .name = "Top Ride AI",
-            .description = "AI presets for Top Ride",
-            .kind = OPTKIND_MENU,
-            .menu_ptr = &tr_menu,
-        },
     },
 };
 
 OptionDesc ModSettings = {
     .name = "Custom AI",
-    .description = "Behavior presets for CPU riders (all modes) and enemies (Air Ride + City Trial Melee)",
+    .description = "Behavior presets for City Trial and Air Ride CPU riders, plus Air Ride and CT Melee enemies",
     .kind = OPTKIND_MENU,
     .menu_ptr = &top_menu,
 };

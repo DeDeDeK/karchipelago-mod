@@ -6,16 +6,24 @@
 // New City Trial item kinds loaded from .dat archives in the FST items/ folder.
 
 #define CUSTOM_ITEMS_MOD_NAME  "custom_items"
-#define CUSTOM_ITEMS_API_MAJOR 1
-#define CUSTOM_ITEMS_API_MINOR 2
+#define CUSTOM_ITEMS_API_MAJOR 2
+#define CUSTOM_ITEMS_API_MINOR 0
 
 // Each custom-item .dat exports one public symbol named `customItem` whose
 // address is a CustomItemDesc. Magic is big-endian ASCII "CITM".
 #define CUSTOM_ITEM_SYMBOL        "customItem"
 #define CUSTOM_ITEM_MAGIC         0x4349544Du
-// v2 adds model_flag, v3 adds scale; older descriptors stay supported (the
-// loader rejects only versions newer than this one).
-#define CUSTOM_ITEM_DESC_VERSION  3
+// v2 adds model_flag, v3 adds scale, v4 adds flags, v5 adds joint_anim, v6 adds
+// mat_anim; older descriptors stay supported (the loader rejects only versions
+// newer than this one).
+#define CUSTOM_ITEM_DESC_VERSION  6
+
+// CustomItemDesc.flags (v4+).
+// NO_MAT_ANIM: the model is not the base kind's, so the base kind's material
+// animation - authored against its materials - must not be bound to it. The
+// state script still comes from the base kind, as does the joint animation
+// unless joint_anim overrides it. Takes precedence over mat_anim.
+#define CUSTOM_ITEM_FLAG_NO_MAT_ANIM 0x00000001u
 
 // Folder (relative to FST root) and extension scanned for drop-in items.
 #define CUSTOM_ITEM_DROPIN_DIR    "items"
@@ -45,10 +53,11 @@ typedef struct CustomItemDesc
     const char *name;   // 0x08 display name (NUL-terminated)
 
     int base_kind;      // 0x0c ItemKind to clone behavior from (0..ITKIND_NUM-1)
-    int reserved_group; // 0x10 unused; the BAD/GOOD/FAKE group comes from PatchEffectInfo.group
+    u32 flags;          // 0x10 (v4+) CUSTOM_ITEM_FLAG_*; 0 in older descriptors
 
     void *model;        // 0x14 optional JOBJDesc* model override (NULL = inherit base_kind)
-    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit)
+    void *effect_info;  // 0x18 optional PatchEffectInfo* stat-grant override (NULL = inherit);
+                        //      its group field is the kind's BAD/GOOD/FAKE group
 
     // The sky picker draws from the union of the three box pools, so weight_box
     // covers sky drops too and weight_free is unused. Box chances are u8 in the
@@ -59,6 +68,18 @@ typedef struct CustomItemDesc
 
     u32 model_flag;     // 0x30 (v2+) itData render flag (0x02000000 flat; 0x03/0x05/0x0b skinned)
     float scale;        // 0x34 (v3+) multiplier over the base kind's scale (0 or 1.0 = inherit)
+
+    // (v5+) optional AnimJointDesc* bound in place of the base kind's joint
+    // animation, in every anim slot. A joint animation is authored against one
+    // joint tree and binds by tree position, so the base kind's belongs to the
+    // base kind's model. NULL = inherit.
+    void *joint_anim;   // 0x38
+
+    // (v6+) optional MatAnimJointDesc* bound in place of the base kind's
+    // material animation, in every anim slot. Lets a carved model keep the base
+    // kind's texture-swap animation while pointing its image table at the
+    // carve's own textures. NULL = inherit.
+    void *mat_anim;     // 0x3c
 } CustomItemDesc;
 
 // Invoked when a rider collects a custom item; `player` is the 0..4 slot.
@@ -77,20 +98,18 @@ typedef struct CustomItemsAPI
     // Display name of the index-th item (NULL if out of range).
     const char *(*GetName)(int index);
 
-    // 1 if enabled for spawning (master toggle AND per-item gate).
+    // 1 if the item's consumer gate is open, i.e. it may spawn this round.
     int (*IsEnabled)(u32 id_hash);
 
-    // Enable/disable an item for spawning.
+    // Set this consumer's gate on an item. Gates default open, so an item
+    // nobody calls this on spawns freely.
     void (*SetEnabled)(u32 id_hash, int enabled);
 
     // ItemKind assigned this round, or -1 if not registered yet this scene.
     int (*GetAssignedKind)(u32 id_hash);
 
-    // Legacy (minor 1+): adds a handler (deduplicated); NULL clears all of them.
-    void (*SetPickupHandler)(CustomItemPickupFn handler);
-
-    // Subscribe/unsubscribe a pickup handler (minor 2+); every registered
-    // handler runs on each pickup. Add is a no-op if present or the list is full.
+    // Subscribe/unsubscribe a pickup handler; every registered handler runs on
+    // each pickup. Add is a no-op if present or the list is full.
     void (*AddPickupHandler)(CustomItemPickupFn handler);
     void (*RemovePickupHandler)(CustomItemPickupFn handler);
 } CustomItemsAPI;

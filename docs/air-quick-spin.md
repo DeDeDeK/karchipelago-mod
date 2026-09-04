@@ -6,8 +6,8 @@ in the airborne rider state so the spin also fires mid-air, in Air Ride and City
 three rider characters. It is a convenience enhancement, not an Archipelago gate: no items, no
 save state.
 
-Implementation: `air_quick_spin.c` / `air_quick_spin.h` in the archipelago mod, with the menu
-option in `settings_menu.c`.
+Implementation: `mods/archipelago/src/air_quick_spin.c`, with the menu option in
+`mods/archipelago/src/settings_menu.c`.
 
 ## Game System
 

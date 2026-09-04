@@ -214,7 +214,7 @@ static void Snow_Ensure(void)
         return;
     stc_snow_gobj = WeatherGX_EnsureLayer(SNOW_GOBJ_CLASS, SNOW_GOBJ_PLINK, Snow_GX,
                                           SNOW_GX_LINK, SNOW_GX_PRI,
-                                          "[Snow] World-space snow layer installed");
+                                          "[Snow] World-space snow layer");
 }
 
 // Latch the active preset's snow config, resolving each 0 field to its module default.

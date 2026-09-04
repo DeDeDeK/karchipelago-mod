@@ -9,6 +9,8 @@
 #include "checklist_rewards.h"
 #include "check_detection.h"
 #include "energylink.h"
+#include "gate_ap_star.h"
+#include "ap_patches.h"
 #include "textbox_api.h"
 
 u32 Unlock_GetMask(APUnlockCategory cat)
@@ -27,6 +29,7 @@ u32 Unlock_GetMask(APUnlockCategory cat)
         case AP_UNLOCK_COLOR:          return ap_save->color_unlocked_mask;
         case AP_UNLOCK_STADIUM:        return ap_save->stadium_unlocked_mask;
         case AP_UNLOCK_BASE_ABILITY:   return ap_save->base_ability_unlocked_mask;
+        case AP_UNLOCK_AP_STAR_PIECE:  return ap_save->ap_star_piece_unlocked_mask;
         default:                       return 0;
     }
 }
@@ -47,8 +50,14 @@ void Unlock_SetMask(APUnlockCategory cat, u32 mask)
         case AP_UNLOCK_COLOR:          ap_save->color_unlocked_mask          = (u8)mask;  break;
         case AP_UNLOCK_STADIUM:        ap_save->stadium_unlocked_mask        = (u32)mask; break;
         case AP_UNLOCK_BASE_ABILITY:   ap_save->base_ability_unlocked_mask   = (u8)mask;  break;
+        case AP_UNLOCK_AP_STAR_PIECE:  ap_save->ap_star_piece_unlocked_mask  = (u8)mask;  break;
         default: break;
     }
+
+    // ap_star reads its sphere gate at 3D load start, and it runs before this mod
+    // does, so the mask is pushed on every write rather than read back later.
+    if (cat == AP_UNLOCK_AP_STAR_PIECE)
+        GateApStar_PushMask();
 }
 
 static int ApiQueueItem(int ap_item_id)
@@ -141,6 +150,31 @@ static void ApiDebugTriggerTraplinkReceive(void)
     ap_data->traplink_receive = 1;
 }
 
+static int ApiDebugSpawnApStarPiece(int piece, int ply)
+{
+    return GateApStar_SpawnPiece(piece, ply);
+}
+
+static int ApiDebugSpawnApBox(int ply)
+{
+    return ApPatches_DebugSpawnBox(ply);
+}
+
+static int ApiDebugCollectApPatch(void)
+{
+    return ApPatches_DebugClaim();
+}
+
+static int ApiGetApPatchCount(void)
+{
+    return ApPatches_GetCount();
+}
+
+static void ApiDebugSetApPatchCount(int count)
+{
+    ApPatches_DebugSetCount(count);
+}
+
 static const ArchipelagoAPI api = {
     .GetUnlockMask                = Unlock_GetMask,
     .SetUnlockMask                = Unlock_SetMask,
@@ -162,6 +196,11 @@ static const ArchipelagoAPI api = {
     .DebugTriggerDeathlinkReceive = ApiDebugTriggerDeathlinkReceive,
     .DebugTriggerTraplinkReceive  = ApiDebugTriggerTraplinkReceive,
     .DebugRevealChecklist         = ApiDebugRevealChecklist,
+    .DebugSpawnApStarPiece        = ApiDebugSpawnApStarPiece,
+    .DebugSpawnApBox              = ApiDebugSpawnApBox,
+    .DebugCollectApPatch          = ApiDebugCollectApPatch,
+    .GetApPatchCount              = ApiGetApPatchCount,
+    .DebugSetApPatchCount         = ApiDebugSetApPatchCount,
 };
 
 void ArchipelagoAPI_Export(void)

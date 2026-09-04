@@ -7,13 +7,24 @@
 #include "item.h"
 #include "stage.h"
 #include "stadium.h"
+#include "inline.h"
 
 #include "archipelago_api.h"
+#include "custom_machines_api.h"
 #include "debug_menu.h"
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
 
-static int machine_state[VCKIND_NUM];
+static const CustomMachinesAPI *cm_api = 0;
+
+// Unlock-mask width for machines. Custom kinds occupy VCKIND_NUM and up, so the
+// vanilla ceiling only holds until the registry reports in.
+static int MachineNum(void)
+{
+    return cm_api ? cm_api->GetKindCeiling() : VCKIND_NUM;
+}
+
+static int machine_state[VCKIND_NUM + CUSTOM_MACHINE_MAX];
 static int ability_state[COPYKIND_NUM];
 static int event_state[EVKIND_NUM];
 static int patch_state[PATCHKIND_NUM];
@@ -25,6 +36,31 @@ static int tr_item_state[TRITEM_NUM];
 static int color_state[KIRBYCOLOR_NUM];
 static int stadium_state[STKIND_NUM];
 static int base_ability_state[BASEABILITY_NUM];
+static int star_piece_state[AP_STAR_PIECE_NUM];
+
+// Seed sizes the AP Patch count row offers. A build with no AP Patch seed reports
+// 0, and picking any nonzero row is what lets the drop-ins register at the next
+// round load.
+static char *ap_patch_count_values[] = {"Off", "8", "64", "512"};
+static const int ap_patch_count_map[] = {0, 8, 64, AP_PATCH_MAX};
+static int ap_patch_count_state;
+
+// Nearest row at or below the live count, so a seed's own value shows as the
+// closest offered size rather than snapping the option back to Off.
+static void RefreshApPatchCount(void)
+{
+    int n = ap_api ? ap_api->GetApPatchCount() : 0;
+    ap_patch_count_state = 0;
+    for (int i = 1; i < (int)(sizeof(ap_patch_count_map) / sizeof(ap_patch_count_map[0])); i++)
+        if (n >= ap_patch_count_map[i])
+            ap_patch_count_state = i;
+}
+
+// MaskBits' buffer holds 32 bits, and the machine ceiling can exceed that.
+static inline int MaskWidth(int count)
+{
+    return count > 32 ? 32 : count;
+}
 
 #define DEF_SYNC(name, cat, arr, count) \
     static void name(int v) { \
@@ -34,11 +70,11 @@ static int base_ability_state[BASEABILITY_NUM];
         for (int i = 0; i < (count); i++) \
             if (arr[i]) m |= ((u32)1 << i); \
         if (ap_api->GetUnlockMask(cat) != m) \
-            OSReport("[ApDebug] " #cat " = 0x%X\n", m); \
+            OSReport("[ApDebug] " #cat " = %s\n", MaskBits(m, MaskWidth(count))); \
         ap_api->SetUnlockMask(cat, m); \
     }
 
-DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  VCKIND_NUM)
+DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  MachineNum())
 DEF_SYNC(SyncAbilities, AP_UNLOCK_ABILITY,         ability_state,  COPYKIND_NUM)
 DEF_SYNC(SyncEvents,    AP_UNLOCK_EVENT,           event_state,    EVKIND_NUM)
 DEF_SYNC(SyncPatches,   AP_UNLOCK_PATCH,           patch_state,    PATCHKIND_NUM)
@@ -50,6 +86,7 @@ DEF_SYNC(SyncTRItems,   AP_UNLOCK_TOPRIDE_ITEM,    tr_item_state,  TRITEM_NUM)
 DEF_SYNC(SyncColors,    AP_UNLOCK_COLOR,           color_state,    KIRBYCOLOR_NUM)
 DEF_SYNC(SyncStadiums,  AP_UNLOCK_STADIUM,         stadium_state,  STKIND_NUM)
 DEF_SYNC(SyncBaseAbil,  AP_UNLOCK_BASE_ABILITY,    base_ability_state, BASEABILITY_NUM)
+DEF_SYNC(SyncStarPiece, AP_UNLOCK_AP_STAR_PIECE,   star_piece_state,   AP_STAR_PIECE_NUM)
 
 #define DEF_REFRESH(name, cat, arr, count) \
     static void name(void) { \
@@ -58,7 +95,7 @@ DEF_SYNC(SyncBaseAbil,  AP_UNLOCK_BASE_ABILITY,    base_ability_state, BASEABILI
             arr[i] = (m & ((u32)1 << i)) ? 1 : 0; \
     }
 
-DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  VCKIND_NUM)
+DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  MachineNum())
 DEF_REFRESH(RefreshAbilities, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM)
 DEF_REFRESH(RefreshEvents,    AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM)
 DEF_REFRESH(RefreshPatches,   AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM)
@@ -70,6 +107,7 @@ DEF_REFRESH(RefreshTRItems,   AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_N
 DEF_REFRESH(RefreshColors,    AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM)
 DEF_REFRESH(RefreshStadiums,  AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM)
 DEF_REFRESH(RefreshBaseAbil,  AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM)
+DEF_REFRESH(RefreshStarPiece, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   AP_STAR_PIECE_NUM)
 
 void DebugMenu_RefreshStateFromMasks(void)
 {
@@ -85,6 +123,8 @@ void DebugMenu_RefreshStateFromMasks(void)
     RefreshColors();
     RefreshStadiums();
     RefreshBaseAbil();
+    RefreshStarPiece();
+    RefreshApPatchCount();
 }
 
 #define DEF_ALL(prefix, cat, arr, count, label) \
@@ -94,7 +134,8 @@ void DebugMenu_RefreshStateFromMasks(void)
         u32 m = (count >= 32) ? 0xFFFFFFFFu : ((1u << (count)) - 1u); \
         ap_api->SetUnlockMask(cat, m); \
         for (int i = 0; i < (count); i++) arr[i] = 1; \
-        OSReport("[ApDebug] Unlock all " label ": " #cat " = 0x%X\n", m); \
+        OSReport("[ApDebug] Unlock all " label ": " #cat " = %s\n", \
+                 MaskBits(m, MaskWidth(count))); \
         ap_api->Textbox("All " label " unlocked"); \
         return 1; \
     } \
@@ -103,12 +144,13 @@ void DebugMenu_RefreshStateFromMasks(void)
         if (!ap_api) return 1; \
         ap_api->SetUnlockMask(cat, 0); \
         for (int i = 0; i < (count); i++) arr[i] = 0; \
-        OSReport("[ApDebug] Lock all " label ": " #cat " = 0x0\n"); \
+        OSReport("[ApDebug] Lock all " label ": " #cat " = %s\n", \
+                 MaskBits(0, MaskWidth(count))); \
         ap_api->Textbox("All " label " locked"); \
         return 1; \
     }
 
-DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  VCKIND_NUM,       "machines")
+DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  MachineNum(),     "machines")
 DEF_ALL(Abl, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM,     "abilities")
 DEF_ALL(Evt, AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM,       "events")
 DEF_ALL(Pch, AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM,    "patch types")
@@ -120,6 +162,7 @@ DEF_ALL(Tri, AP_UNLOCK_TOPRIDE_ITEM,   tr_item_state,  TRITEM_NUM,       "TR ite
 DEF_ALL(Clr, AP_UNLOCK_COLOR,          color_state,    KIRBYCOLOR_NUM,   "colors")
 DEF_ALL(Std, AP_UNLOCK_STADIUM,        stadium_state,  STKIND_NUM,       "stadiums")
 DEF_ALL(Bab, AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM, "base abilities")
+DEF_ALL(Sph, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   AP_STAR_PIECE_NUM, "AP Star spheres")
 
 #define GIVE_FN(name, id) \
     static int name(OptionDesc *self) { \
@@ -170,6 +213,20 @@ GIVE_FN(GiveUnlockInhale,    AP_BASE_ABILITY_UNLOCK_INHALE)
 GIVE_FN(GiveUnlockQuickSpin, AP_BASE_ABILITY_UNLOCK_QUICKSPIN)
 GIVE_FN(GiveUnlockCharge,    AP_BASE_ABILITY_UNLOCK_CHARGE)
 
+GIVE_FN(GiveSphereRose,   AP_STAR_PIECE_UNLOCK_ROSE)
+GIVE_FN(GiveSphereGreen,  AP_STAR_PIECE_UNLOCK_GREEN)
+GIVE_FN(GiveSphereViolet, AP_STAR_PIECE_UNLOCK_VIOLET)
+GIVE_FN(GiveSphereTan,    AP_STAR_PIECE_UNLOCK_TAN)
+GIVE_FN(GiveSphereBlue,   AP_STAR_PIECE_UNLOCK_BLUE)
+GIVE_FN(GiveSphereYellow, AP_STAR_PIECE_UNLOCK_YELLOW)
+
+GIVE_FN(GiveSphereItemRose,   AP_STAR_PIECE_GIVE_ROSE)
+GIVE_FN(GiveSphereItemGreen,  AP_STAR_PIECE_GIVE_GREEN)
+GIVE_FN(GiveSphereItemViolet, AP_STAR_PIECE_GIVE_VIOLET)
+GIVE_FN(GiveSphereItemTan,    AP_STAR_PIECE_GIVE_TAN)
+GIVE_FN(GiveSphereItemBlue,   AP_STAR_PIECE_GIVE_BLUE)
+GIVE_FN(GiveSphereItemYellow, AP_STAR_PIECE_GIVE_YELLOW)
+
 GIVE_FN(GiveMaximTomato,  AP_ITKIND_FOODMAXIMTOMATO)
 GIVE_FN(GiveEnergyDrink,  AP_ITKIND_FOODENERGYDRINK)
 GIVE_FN(GiveIceCream,     AP_ITKIND_FOODICECREAM)
@@ -218,6 +275,7 @@ GIVE_FN(Give1HPTrap,        AP_ITEM_1_HP_TRAP)
 GIVE_FN(GiveAllDown,        AP_ITEM_ALL_DOWN)
 GIVE_FN(GiveDragoon,        AP_ITEM_GIVE_DRAGOON)
 GIVE_FN(GiveHydra,          AP_ITEM_GIVE_HYDRA)
+GIVE_FN(GiveApStar,         AP_ITEM_GIVE_AP_STAR)
 GIVE_FN(GiveDropPatchesTrap,AP_ITEM_DROP_PATCHES_TRAP)
 
 GIVE_FN(GivePatchCap,    AP_ITEM_PATCH_CAP_INCREASE)
@@ -265,11 +323,15 @@ static int GiveEnergy1000(OptionDesc *self)
     return 1;
 }
 
-// Gate enable/disable toggle.
+// Gate enable/disable toggle. Never saved: every gate mirrors an AP unlock mask
+// that DebugMenu_RefreshStateFromMasks re-derives on save load, so a card copy
+// would only be overwritten - and the machine rows are renamed at runtime, which
+// would move their save hashes anyway.
 #define G(label, arr, idx, cb) \
     &(OptionDesc){ \
         .name = label, \
         .kind = OPTKIND_VALUE, \
+        .no_save = 1, \
         .val = &arr[idx], \
         .value_num = 2, \
         .value_names = toggle_values, \
@@ -300,6 +362,25 @@ static int CheckDbgForceMarkAll(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugForceMarkAllChecks();
     ap_api->Textbox("Force-marked all sent_checks");
+    return 1;
+}
+
+static void OnApPatchCountChange(int v)
+{
+    if (!ap_api) return;
+    int n = ap_patch_count_map[v];
+    ap_api->DebugSetApPatchCount(n);
+    OSReport("[ApDebug] ap_patches = %d, registers on the next round load\n", n);
+}
+
+static int ApPatchDbgCollect(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    if (ap_api->DebugCollectApPatch())
+        ap_api->Textbox("Collected an AP Patch");
+    else
+        ap_api->Textbox("No AP Patch left to collect");
     return 1;
 }
 
@@ -428,8 +509,39 @@ static MenuDesc machines_menu = {
         G("Rex Wheelie",       machine_state, VCKIND_REXWHEELIE,     SyncMachines),
         G("Wheelie Scooter",   machine_state, VCKIND_WHEELIESCOOTER, SyncMachines),
         G("Dedede Wheelie",    machine_state, VCKIND_WHEELDEDEDE,    SyncMachines),
+        // Trailing rows for whatever custom_machines registered. option_num hides
+        // them until DebugMenu_BindCustomMachines names the ones that exist.
+        G("Custom Machine 1",  machine_state, VCKIND_NUM + 0,        SyncMachines),
+        G("Custom Machine 2",  machine_state, VCKIND_NUM + 1,        SyncMachines),
+        G("Custom Machine 3",  machine_state, VCKIND_NUM + 2,        SyncMachines),
+        G("Custom Machine 4",  machine_state, VCKIND_NUM + 3,        SyncMachines),
+        G("Custom Machine 5",  machine_state, VCKIND_NUM + 4,        SyncMachines),
+        G("Custom Machine 6",  machine_state, VCKIND_NUM + 5,        SyncMachines),
     },
 };
+
+#define MACHINES_MENU_VANILLA_OPTIONS 24
+
+// machine_unlocked_mask is 32 bits, so only MachineKinds under 32 carry a gate to
+// toggle. That is what limits the rows here, not how many the registry can take.
+#define MACHINES_MENU_CUSTOM_ROWS (32 - VCKIND_NUM)
+
+_Static_assert(MACHINES_MENU_CUSTOM_ROWS == 6, "machines_menu needs one trailing row per gateable custom slot");
+
+void DebugMenu_BindCustomMachines(const CustomMachinesAPI *api)
+{
+    if (!api || cm_api)
+        return;
+    cm_api = api;
+
+    int count = api->GetCount();
+    if (count > MACHINES_MENU_CUSTOM_ROWS)
+        count = MACHINES_MENU_CUSTOM_ROWS;
+    for (int i = 0; i < count; i++)
+        machines_menu.options[MACHINES_MENU_VANILLA_OPTIONS + i]->name =
+            (char *)api->GetName(VCKIND_NUM + i);
+    machines_menu.option_num = MACHINES_MENU_VANILLA_OPTIONS + count;
+}
 
 static MenuDesc abilities_menu = {
     .option_num = 13,
@@ -551,6 +663,22 @@ static MenuDesc boxes_menu = {
     },
 };
 
+// A sphere held locked here is kept out of the custom_items registry entirely, so
+// it takes no delivery step and no carrier box can hold it.
+static MenuDesc star_pieces_menu = {
+    .option_num = 8,
+    .options = {
+        A("Unlock All", "Unlock all AP Star spheres", SphUnlockAll),
+        A("Lock All",   "Lock all AP Star spheres",   SphLockAll),
+        G("Rose Sphere",   star_piece_state, AP_STAR_PIECE_ROSE,   SyncStarPiece),
+        G("Green Sphere",  star_piece_state, AP_STAR_PIECE_GREEN,  SyncStarPiece),
+        G("Violet Sphere", star_piece_state, AP_STAR_PIECE_VIOLET, SyncStarPiece),
+        G("Tan Sphere",    star_piece_state, AP_STAR_PIECE_TAN,    SyncStarPiece),
+        G("Blue Sphere",   star_piece_state, AP_STAR_PIECE_BLUE,   SyncStarPiece),
+        G("Yellow Sphere", star_piece_state, AP_STAR_PIECE_YELLOW, SyncStarPiece),
+    },
+};
+
 static MenuDesc ar_stages_menu = {
     .option_num = 11,
     .options = {
@@ -583,8 +711,10 @@ static MenuDesc tr_stages_menu = {
     },
 };
 
+// One row per TRITEM kind, in enum order - Tri(Unlock|Lock)All drive the whole
+// TRITEM_NUM mask, so a missing row would leave a gate the menu cannot show.
 static MenuDesc tr_items_menu = {
-    .option_num = 19,
+    .option_num = 2 + TRITEM_NUM,
     .options = {
         A("Unlock All", "Unlock all TR items", TriUnlockAll),
         A("Lock All",   "Lock all TR items",   TriLockAll),
@@ -597,9 +727,14 @@ static MenuDesc tr_items_menu = {
         G("Invincible Candy",  tr_item_state, TRITEM_INVINCIBLE_CANDY, SyncTRItems),
         G("Buzz Saw",          tr_item_state, TRITEM_BUZZ_SAW,         SyncTRItems),
         G("Drill",             tr_item_state, TRITEM_DRILL,            SyncTRItems),
+        G("Freeze Fan",        tr_item_state, TRITEM_FREEZE_FAN,       SyncTRItems),
         G("Missile",           tr_item_state, TRITEM_MISSILE,          SyncTRItems),
+        G("Fire",              tr_item_state, TRITEM_FIRE,             SyncTRItems),
+        G("Party Ball (alt)",  tr_item_state, TRITEM_PARTY_BALL_ALT,   SyncTRItems),
+        G("Bomb",              tr_item_state, TRITEM_BOMB,             SyncTRItems),
         G("Step-boom",         tr_item_state, TRITEM_STEP_BOOM,        SyncTRItems),
         G("Lantern",           tr_item_state, TRITEM_LANTERN,          SyncTRItems),
+        G("Walky",             tr_item_state, TRITEM_WALKY,            SyncTRItems),
         G("Kracko",            tr_item_state, TRITEM_KRACKO,           SyncTRItems),
         G("Who? Paint",        tr_item_state, TRITEM_WHO_PAINT,        SyncTRItems),
         G("Smokescreen",       tr_item_state, TRITEM_SMOKESCREEN,      SyncTRItems),
@@ -714,6 +849,18 @@ static MenuDesc give_base_abilities_menu = {
     },
 };
 
+static MenuDesc give_spheres_menu = {
+    .option_num = 6,
+    .options = {
+        A("Rose Sphere",   "Grant the Rose sphere unlock item",   GiveSphereRose),
+        A("Green Sphere",  "Grant the Green sphere unlock item",  GiveSphereGreen),
+        A("Violet Sphere", "Grant the Violet sphere unlock item", GiveSphereViolet),
+        A("Tan Sphere",    "Grant the Tan sphere unlock item",    GiveSphereTan),
+        A("Blue Sphere",   "Grant the Blue sphere unlock item",   GiveSphereBlue),
+        A("Yellow Sphere", "Grant the Yellow sphere unlock item", GiveSphereYellow),
+    },
+};
+
 static MenuDesc give_food_menu = {
     .option_num = 12,
     .options = {
@@ -744,7 +891,7 @@ static MenuDesc give_special_menu = {
 };
 
 static MenuDesc give_legendary_menu = {
-    .option_num = 8,
+    .option_num = 15,
     .options = {
         A("Dragoon Part A", "Give Dragoon Part A", GiveDragoonA),
         A("Dragoon Part B", "Give Dragoon Part B", GiveDragoonB),
@@ -752,8 +899,15 @@ static MenuDesc give_legendary_menu = {
         A("Hydra Part X",   "Give Hydra Part X",   GiveHydraX),
         A("Hydra Part Y",   "Give Hydra Part Y",   GiveHydraY),
         A("Hydra Part Z",   "Give Hydra Part Z",   GiveHydraZ),
-        A("Give Dragoon",   "Assemble full Dragoon", GiveDragoon),
-        A("Give Hydra",     "Assemble full Hydra",   GiveHydra),
+        A("Rose Sphere",    "Collect the Rose sphere",   GiveSphereItemRose),
+        A("Green Sphere",   "Collect the Green sphere",  GiveSphereItemGreen),
+        A("Violet Sphere",  "Collect the Violet sphere", GiveSphereItemViolet),
+        A("Tan Sphere",     "Collect the Tan sphere",    GiveSphereItemTan),
+        A("Blue Sphere",    "Collect the Blue sphere",   GiveSphereItemBlue),
+        A("Yellow Sphere",  "Collect the Yellow sphere", GiveSphereItemYellow),
+        A("Give Dragoon",   "Assemble full Dragoon",  GiveDragoon),
+        A("Give Hydra",     "Assemble full Hydra",    GiveHydra),
+        A("Give AP Star",   "Assemble the full Archipelago Star", GiveApStar),
     },
 };
 
@@ -832,15 +986,16 @@ static MenuDesc give_topride_items_menu = {
 };
 
 static MenuDesc give_items_menu = {
-    .option_num = 11,
+    .option_num = 12,
     .options = {
         S("Stat Patches",      "Temporary stat patches",          give_stat_patches_menu),
         S("Permanent Patches", "Permanent stat boosts",           give_perm_patches_menu),
         S("Copy Abilities",    "Give Kirby a copy ability",       give_abilities_menu),
         S("Base Ability Unlocks", "Grant a base-ability unlock",  give_base_abilities_menu),
+        S("AP Star Spheres",   "Grant a sphere unlock item",      give_spheres_menu),
         S("Food",              "Healing items",                   give_food_menu),
         S("Special Items",     "Powerful one-use items",          give_special_menu),
-        S("Legendary Pieces",  "Dragoon and Hydra parts",        give_legendary_menu),
+        S("Legendary Pieces",  "Dragoon, Hydra and AP Star parts", give_legendary_menu),
         S("Top Ride Items",    "Spawn a Top Ride item for pickup", give_topride_items_menu),
         S("CT Events",         "Trigger a City Trial event",      give_events_menu),
         S("Traps & Events",    "Traps and event triggers",       give_traps_menu),
@@ -860,11 +1015,11 @@ static MenuDesc reveal_menu = {
 };
 
 static MenuDesc checks_menu = {
-    .option_num = 7,
+    .option_num = 9,
     .options = {
         &(OptionDesc){
             .name = "Auto-Grant on Z Unlock",
-            .description = "On: Z-unlock also grants the cell's reward (simulate AP). Off: only send the check; let AP client deliver.",
+            .description = "On: Z-unlock also grants the cell reward. Off: only send the check and let the AP client deliver.",
             .kind = OPTKIND_VALUE,
             .val = &auto_grant_on_debug_unlock,
             .value_num = 2,
@@ -877,11 +1032,22 @@ static MenuDesc checks_menu = {
         S("Reveal Checklists",       "Make checkboxes visible (visual only)",       reveal_menu),
         A("Simulate Location Data",  "Fill location arrays with a random shuffle",  CheckDbgSimulateLocationData),
         A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, and location shuffle", CheckDbgClearAllChecklistData),
+        &(OptionDesc){
+            .name = "AP Patches",
+            .description = "Override the seed's AP Patch location count; the drop-ins register at the next round load.",
+            .kind = OPTKIND_VALUE,
+            .no_save = 1,
+            .val = &ap_patch_count_state,
+            .value_num = 4,
+            .value_names = ap_patch_count_values,
+            .on_change = OnApPatchCountChange,
+        },
+        A("Collect AP Patch",        "Claim the lowest unclaimed AP Patch",         ApPatchDbgCollect),
     },
 };
 
 static MenuDesc debug_menu = {
-    .option_num = 14,
+    .option_num = 15,
     .options = {
         S("Machines",        "Toggle machine unlock gates",     machines_menu),
         S("Copy Abilities",  "Toggle ability unlock gates",     abilities_menu),
@@ -890,6 +1056,7 @@ static MenuDesc debug_menu = {
         S("Patch Types",     "Toggle patch type unlock gates",  patches_menu),
         S("CT Items",        "Toggle CT item unlock gates",     items_menu),
         S("Box Types",       "Toggle box type unlock gates",    boxes_menu),
+        S("AP Star Spheres", "Toggle AP Star sphere gates",     star_pieces_menu),
         S("AR Stages",       "Toggle Air Ride stage gates",     ar_stages_menu),
         S("TR Stages",       "Toggle Top Ride stage gates",     tr_stages_menu),
         S("TR Items",        "Toggle Top Ride item gates",      tr_items_menu),

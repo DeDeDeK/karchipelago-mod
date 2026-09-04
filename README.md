@@ -14,37 +14,9 @@ The repo is based on the [hoshi-mod template project](https://github.com/UnclePu
 - **APWorld (Archipelago integration):** https://github.com/DeDeDeK/KARchipelago
 - **Setup guide (full player walkthrough):** https://github.com/DeDeDeK/KARchipelago/blob/main/worlds/kirby_air_ride/docs/setup_en.md
 
-
 ## Installing the mod (Riivolution)
 
 See the [setup guide](https://github.com/DeDeDeK/KARchipelago/blob/main/worlds/kirby_air_ride/docs/setup_en.md) for the complete walkthrough, including installing the APWorld and connecting the client.
-
-## What the mod provides to the AP client
-
-The mod and the Python AP client (shipped with the [APWorld](https://github.com/DeDeDeK/KARchipelago)) communicate through a shared memory block. On boot the mod allocates an `APData` struct and publishes a pointer to it at the static address `0x805d52d4`; the client reads/writes that struct with `dolphin-memory-engine`. Through this interface the mod:
-
-- **Reports location checks** - checklist clears across all three modes (Air Ride, City Trial, Top Ride) are surfaced to the client as AP locations.
-- **Receives and applies items** - the client delivers item IDs; the mod unlocks the corresponding gated content (machines, abilities, colors, stadiums, events, items/patches/boxes, courses) or applies filler/trap/goal effects in-game.
-- **Bridges the link protocols** - DeathLink, EnergyLink, and TrapLink each have mailbox fields the two sides exchange.
-- **Exchanges slot options, goal state, and a handshake** - the client writes the slot's options and location layout, the mod signals when it's ready and reports goal completion.
-
-The client owns the multiworld networking; the mod owns everything that happens inside the game. The canonical field layout is the `APData` struct in `mods/archipelago/src/main.h`; the protocol is documented in `docs/client-game-protocol.md`.
-
-## Mods in this repository
-
-The build packages every mod found under `mods/` into a single Riivolution package (see [Excluding mods](#excluding-mods) below).
-
-**Shipped by default:**
-
-- **`archipelago`** - The main mod. All Archipelago integration: gating systems, checklist rewards, DeathLink/EnergyLink/TrapLink, goals, and the shared-memory interface above. Exposes an `ArchipelagoAPI`.
-- **`textbox`** - On-screen notification system (queued, color-segmented messages) used by the archipelago mod for grant/loss, DeathLink, and TrapLink notices. Exposes a `TextBoxAPI`.
-
-**Work in progress (excluded from the default build):**
-
-- **`custom_events`** - Custom City Trial event framework (e.g. Waddle Dee Swarm, Gravity Change, Scale Change, Gourmet Race). Not yet wired into the archipelago mod.
-- **`custom_weather`** - Adds custom sky/lighting presets to City Trial.
-
-A standalone **custom stadiums** mod is also planned; for now, stadium unlocking/gating lives inside the `archipelago` mod rather than as a separate module.
 
 ## Build Instructions
 
@@ -54,7 +26,7 @@ This project is written in **C** and uses `make`. It outputs `.bin` (code) and `
 
 1. **[devkitPPC](https://devkitpro.org/wiki/Getting_Started)** - the PowerPC cross-compiler. Install devkitPro and place (or symlink) it at `externals/devkitpro/` so the Makefile finds it automatically, or set the `DEVKITPPC` environment variable to point at your installation.
 2. **[uv](https://docs.astral.sh/uv/getting-started/installation/)** - manages the Python build dependencies (`pyelftools`, `pyisotools`). Scripts are invoked via `uv run`, so no manual dependency install is needed.
-3. **Original NTSC Kirby Air Ride ISO** - place your unmodified disc image in the repo root, named `kar.iso`. (The build extracts the original DOL from it.)
+3. **Original NTSC Kirby Air Ride ISO** - place your unmodified disc image in the repo root, named `kar.iso`.
 4. **[trash-cli](https://github.com/andreafrancia/trash-cli)** *(Linux only, optional)* - `make clean` uses `trash-put` to move Dolphin Riivolution/memory-card files to the trash instead of deleting them.
 
 ### Building
@@ -119,6 +91,7 @@ The patch is written to `out/patch.xdelta`.
 
 - Swiggity - karchipelago logo design
 - Taco - KAR Deluxe logo + font design
+- JC - miracle fruit art
 
 ---
 

@@ -21,6 +21,7 @@ static TextBoxAPI api = {
     .EnqueueSegments       = TextBox_EnqueueSegments,
     .EnqueueColoredNoun    = TextBox_EnqueueColoredNoun,
     .EnqueueColoredNounFmt = TextBox_EnqueueColoredNounFmt,
+    .IsReady               = TextBox_IsReady,
 };
 
 static void OnBoot(void)

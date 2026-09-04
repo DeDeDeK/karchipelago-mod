@@ -1,407 +1,275 @@
 # SIS Text System
 
-SIS (String Image Set) files are HSD archives that hold pre-composed text strings used for in-game UI. The runtime renders these (and ad-hoc C-format strings) through a single GX path, `Text_GXLink`, which walks a stream of opcodes, looks up 32x32 I4 glyph bitmaps, and emits one textured quad per character.
+SIS (String Image Set) files are HSD archives holding pre-composed text strings for in-game UI. The runtime renders those, and ad-hoc C-format strings, through a single GX path that walks a stream of opcodes, looks up 32x32 I4 glyph bitmaps, and emits one textured quad per character.
 
-## Rendering Paths
+A few entry points carry one name in the symbol map and another in `link.ld` / `externals/hoshi/include/text.h`; mod code links against the `link.ld` names. `Text_CreateTextCanvas` is exported as `Text_CreateCanvas` (0x8044f674), `Text_GXLink` as `Text_GX` (0x804516e4), and `Text_Create` as `Text_CreateText` (0x8044fa70).
 
-There are **three text rendering paths** in the binary:
+## Rendering paths
 
-1. **SIS Text** — the main UI path. All in-game text (menus, HUD, dialogue, results, event text, checklists, ending) goes through `Text_GXLink` (0x804516e4). Texture-mapped 32x32 I4 glyphs.
-2. **DevText / DevelopText** — debug-only stroke (vector) font drawn via `GX_LINES`. Used by `3DDebug_*` and the developer/debug menus. ASCII-only, ~10x16 px cells.
-3. **OS Font (IPL)** — the GameCube SDK font path (`OSInitFont` / `OSGetFontTexture` / `OSGetFontTexel`), used by the Top Ride 2D debug menu and CSS overlays via the `OSText_DrawString` family (0x8038BF64). SJIS-aware; mojibakes on NA without an encoding-cache pin.
+Three unrelated text paths exist in the binary:
+
+1. **SIS text** - the main UI path. Every menu, HUD, dialogue, results, event and checklist string goes through `Text_GXLink` (0x804516e4) as texture-mapped 32x32 I4 glyphs.
+2. **DevText** - a debug-only stroke (vector) font drawn with `GX_LINES`, used by `3DDebug_*` and the developer menus. 7-bit ASCII, 10x16 px cells.
+3. **OS font (IPL)** - the GameCube SDK font (`OSInitFont` 0x803d6e20, `OSGetFontTexture` 0x803d6f00, `OSGetFontTexel` 0x803d676c), driven by the `OSText_DrawString` family (0x8038bf64). Used only by the Top Ride 2D debug menu and CSS overlays. Shift-JIS aware; mojibakes on NA without an encoding-cache pin. `OSLoadFont` is absent from this build. Not reachable from a `Text` element.
 
 ## Loading
 
-```c
-Text_LoadSisFile(int slot, char *filename, char *symbol)  // 0x8044F800
-```
+`Text_LoadSisFile(slot, filename, symbol)` (0x8044f800) loads an HSD archive into one of five slots. The archive pointer lands in `stc_sis_archives[5]` (0x8059a848) and the relocated pointer array in `stc_sis_data[5]` (0x8059a85c); both are declared in `text.h`. Within a slot's array, `[0]` is the image data pointer, `[1]` the kerning data pointer, and `[2]` onward the text entries. Different scenes load different files into slots 0-4.
 
-Loads an HSD archive into one of 5 slots and stores its data in:
+## Glyph banks
 
-- `stc_sis_archives[5]` at `0x8059a848` — `HSD_Archive *`
-- `stc_sis_data[5]` at `0x8059a85c` — pointer arrays. For each slot, `[0]` = image data, `[1]` = kerning data, `[2+]` = text-entry data pointers.
+The renderer dispatches per character on the high bits of the 16-bit code.
 
-Different scenes load different SIS files into slots 0..4; see "Scene → SIS slot map" below.
+Codes `0x2000`-`0x3FFF` use the **master Latin bank** baked into `main.dol .data5`: images at `0x8050a040` (256 slots of `0x200` bytes each, I4 32x32, indexed by `(code - 0x2000) & 0xFF`) and kerning at `0x80509dc0` (320 x 2 bytes, `{u8 left_pad, u8 right_edge}`, running up to the image bank). Effective drawn width is `34 - left_pad - right_edge`, which is what `Text_GetStringWidth` in `text.h` reproduces. Vanilla populates roughly 90 slots (digits, A-Z, a-z, 22 scattered symbols up to `0x21xx`); the other ~165 are empty memory that a mod can write its own glyphs into. **All English UI in the game shares this one font.** SIS files carry no Latin glyphs at all.
 
-## Two Glyph Banks
+Codes `0x4000` and up use the **per-SIS bank** taken from the loading slot's `SISData` (`image_data_arr` / `kerning_data_arr`), same `0x200` stride and same 2-byte kerning layout, indexed by `(code - 0x4000) & 0xFF`. Only a few files supply one:
 
-The renderer dispatches per-character based on the high bits of the 16-bit text code:
+| SIS file | per-SIS image block | contents |
+|----------|---------------------|----------|
+| `SisSmmenu.dat` | ~`0x1B800` (~220 glyphs) | Japanese kana for sub-menu rule descriptions |
+| `SisClrChk2D/3D/CT.dat` | `0x200` | checkbox icon |
+| `SisSelply*.dat`, `SisSelrule.dat` | `0x200` | bullet icon |
+| all others | none | Latin-only, master bank |
 
-| code range | bank | source |
-|------------|------|--------|
-| `0x2000`–`0x3FFF` | Master (Latin) | shared, baked into `main.dol` |
-| `0x4000`+ | Per-SIS | from the loaded archive's `stc_sis_data[slot][0]` / `[1]` |
+Both banks reach GX through `GXInitTexObj` calls with literal `r5=32, r6=32`: master image at 0x80452478 (texel base `r28`, address computed at 0x80452464), per-SIS image at 0x804524a4 (texel base `r26`, computed at 0x80452490).
 
-### Master (Latin) bank — shared, in `main.dol .data5`
+The DevText stroke font is a separate blob at `0x805053f8`: a variable-length per-character stroke list terminated by `0xFF`, each byte packing two 4-bit nibbles as `(x << 4) | y` on a 16x16 logical grid, consumed in pairs as line-segment endpoints. `DevelopText_DrawStrokeGlyph` (0x80438898) emits them under `GXBegin(GX_LINES)` for the 3D debug text helper at 0x8007e964 and for `DevelopText_Create` / `DevelopText_AddString` (0x800ab2d4 / 0x800ab78c). It is not OS_FONT.
 
-| symbol | address | size | layout |
-|--------|---------|------|--------|
-| master image table | `0x8050a040` | 256 × `0x200` (I4 32×32) | indexed by `(code - 0x2000) & 0xFF` |
-| master kerning table | `0x80509dc0` | 256 × 2 bytes | `{u8 left_pad, u8 right_edge}` |
+## The opcode stream
 
-Effective drawn glyph width: `34 - kern.x0 - kern.x1` (matches `Text_GetStringWidth` in `text.h`). Vanilla populates ~90 slots (digits, A-Z, a-z, 22 symbols at scattered addresses up to `0x21XX`); ~165 slots are empty memory and free for mods to write their own glyphs into. **All English UI in the game uses this single shared font.** SIS files don't carry Latin glyphs — they store nulls in the [0]/[1] entries and rely on the master bank.
+Text data is a byte stream parsed from `text->text_start`. Bytes below `0x20` are opcodes; bytes `0x20` and up begin a 2-byte big-endian glyph code. The authoritative list is the `TextCmdOpcode` enum in `externals/hoshi/include/text.h`, which carries each opcode's byte size and operands. Three consumers interpret it: `Text_GXLink` (0x804516e4) draws, `Text_DetermineHeightAndWidth` (0x80451344) measures, and `Text_StorePremadeText` (0x8044f9d4) counts subtexts. Dispatch is a jump table at `0x8050983c` covering `0x00`-`0x1a`; glyphs and the `0x1b`-`0x1f` no-ops fall to the handler at 0x80452210.
 
-### Per-SIS bank — codes ≥ `0x4000`
+Functionally the opcodes group as:
 
-Used for Japanese hiragana/katakana and per-screen icon glyphs. Same 0x200/glyph stride, same 2-byte kerning layout, indexed by `(code - 0x4000) & 0xFF`.
+- **Structure**: `0x00` TERMINATE, `0x01` SUBTEXT_RESET, `0x02` SUBTEXT_BREAK, `0x07` POS (the subtext header: s16 x in pixels right of canvas-left, s16 y in lines down), `0x08` JUMP and `0x09` CALL (both take an HSD-relocated absolute pointer).
+- **Layout**: `0x03` LINEBREAK (advances `cursor.y` by `16 * scale_y * viewport_scale.y`), `0x04` LINEBREAK_REFLOW, `0x1a` SPACE (advances `cursor.x` by `scale_x * (32 + 16) * fit_squeeze`), `0x0a`/`0x0b` POSPUSH/POSPUSHEND for inline relative repositioning in 1/256 units, gated by `text->pospush_flags`.
+- **Style**: `0x0c`/`0x0d` COLOR, `0x0e`/`0x0f` SCALE (operands are u16 fixed-point over 256), `0x10`/`0x12`/`0x14` align center/left/right with `0x11`, `0x13` and `0x15` all aliasing the same pop, `0x16`/`0x17` kerning on/off, `0x18`/`0x19` aspect-fit on/off.
+- **Timing**: `0x05` DELAY (u16 frames into `temp.wait_countdown`), `0x06` TIMING (u16 char then u16 space, operand order at 0x80451e20; it updates the renderer's working registers and `temp.space_delay`, not `temp.char_delay`).
 
-| SIS file | per-SIS image block size | usage |
-|----------|--------------------------|-------|
-| `SisSmmenu.dat` | `~0x1B800` (~220 glyphs) | Japanese kana set for Sub-Menu rule descriptions |
-| `SisClrChk2D/3D/CT.dat` | `0x200` (1 glyph) | Checkbox icon |
-| `SisSelply*.dat`, `SisSelrule.dat` | `0x200` (1 glyph) | Bullet/icon |
-| All others | 0 / empty | Latin-only, master bank only |
+The style opcodes mutate the `temp.*` mirrors, never the public `use_aspect` / `kerning` / `align` fields at `+0x48`-`+0x4a`.
 
-Renderer call sites: master-image `GXInitTexObj` at `0x80452478` (texel base `r28`, addr-compute `add r4,r28,r0` at `0x80452464`), per-SIS-image `GXInitTexObj` at `0x804524a4` (texel base `r26`, addr-compute `add r4,r26,r0` at `0x80452490`) — both with literal `r5=32, r6=32` (the `li r5,32; li r6,32` pairs at `0x8045245c`/`0x80452488`).
+### State-history stack
 
-### DevText vector font
+`Text_PushState(text, value_ptr, kind)` (0x80450828) and `Text_PopState(text, kind)` (0x8045111c) maintain a lazily allocated per-Text buffer at `text->state_stack` (`+0x68`). `kind` is `1=POS`, `2=COLOR`, `3=SCALE`, `4=ALIGN`, `5=int` (the CALL return marker); bit `0x80` means pop without writing back, which the measuring pass uses. This is what makes the style opcodes nest properly, and what lets `0x00` TERMINATE double as "return from CALL": it pops a `kind=5` marker if one is on the stack and only ends rendering when there is none.
 
-Lives in `main.dol .data5` at `0x805053f8`. Per-character variable-length stroke list, terminated by `0xFF`. Each byte encodes two 4-bit nibbles `(x_nibble << 4) | y_nibble` (16×16 logical grid); bytes are processed in pairs as `(start, end)` line-segment endpoints. Rendered via `GXBegin(GX_LINES)` in `DevelopText_DrawStrokeGlyph` (0x80438898). Used by `3DDebug_CreateText` (0x8007e964) and `DevelopText_*` (`DevelopText_Create` 0x800ab2d4, `DevelopText_AddString` 0x800ab78c). 7-bit ASCII only, 10×16 px cells. **Not** OS_FONT.
+### Where parsing stops
 
-## SIS Text Command Format
-
-Text data is a byte stream of opcodes and 2-byte character codes, parsed from `text->text_start`. The opcode interpreter halts on the `0x00` TERMINATE byte at the buffer tail — **not** on `text->text_end`. `text_end` is consulted only by the per-frame typewriter dwell logic at `0x80451c44` (when `parse_ptr == text_end` and `wait_countdown != 0`, the parser pauses); when `wait_countdown == 0` the parser falls through to opcode dispatch regardless. The renderer resets `text_end` back to `0` at `0x01` SUBTEXT_RESET (`0x80451cbc`) and otherwise drives it itself (sets it to the reveal frontier as glyphs reveal). So manually writing `text_end` from a render_callback is **not** how you drive a typewriter — seed `temp.char_delay` instead (for `Text_AddSubtext` buffers; `char_delay_init` alone is dead — see "Typewriter Reveal" below).
-
-### Renderer state-history stack
-
-The renderer keeps a per-Text state-history buffer (`text->state_stack`, `+0x68`) and two helpers:
-
-- `Text_PushState(text, value_ptr, kind)` (`0x80450828`) — pushes the current value of one state field
-- `Text_PopState(text, kind)` (`0x8045111c`) — pops and restores
-
-`kind` tags identify which field: `1=POS`, `2=COLOR`, `3=SCALE`, `4=ALIGN`, `5=int (call return marker)`. The high bit `0x80` means "pop without write" (used by the sizer pass). This is what makes the alignment / color / scale opcodes properly nest.
-
-### Opcode table — complete
-
-"Size" is total bytes including the opcode byte itself. The opcodes are interpreted by `Text_GXLink` (0x804516e4), `Text_DetermineHeightAndWidth` (0x80451344), and the parse table in `Text_StorePremadeText` (0x8044f9d4).
-
-| Op | Size | Data | Behavior |
-|----|------|------|----------|
-| `0x00` TERMINATE | 1 | — | Pops a `kind=5` user int marker; if no marker, ends rendering. Doubles as subtext-end and document-end. |
-| `0x01` SUBTEXT_RESET | 1 | — | Resets cursor.x, copies static fields back into temp render state, clears state-history. Falls through into `0x02`. |
-| `0x02` SUBTEXT_BREAK | 1 | — | Bookmarks parse position (`text->text_data_ptr`) and resets the reveal counter (`temp.reveal_count` → 0). |
-| `0x03` LINEBREAK | 1 | — | Advances `cursor.y` by `16 * scale_y * pos_scale_y`. Newline. |
-| `0x04` LINEBREAK_REFLOW | 1 | — | Newline + sets `temp.x4b=1` so the next frame re-enters the renderer in reflow mode. |
-| `0x05` SET_DELAY | 3 | u16 frames | Sets `temp.delay_frames = u16` — typewriter pause. |
-| `0x06` SET_TIMING | 5 | u16 char, u16 space | Sets `temp.char_delay` then `temp.space_delay` (operand order @ `0x80451e20`). |
-| `0x07` POS (subtext header) | 5 | s16 x, s16 y | **Subtext header.** x = pixels right of canvas-left, y = lines down (`y * 16 * scale_y`). Width is measured, alignment offset applied (`temp.align`). |
-| `0x08` JUMP | 5 | s32 abs ptr | Absolute pointer jump (HSD-relocated). |
-| `0x09` CALL | 5 | s32 abs ptr | Push `kind=5` return marker, jump absolute. Subroutine into a glossary entry; `0x00` at the end of the callee returns. |
-| `0x0a` POS_PUSH | 5 | s16 x, s16 y | Push `kind=1`, set cursor to `(x/256, y/256)` units. Inline relative repositioning (gated by `text->x6c`). |
-| `0x0b` POS_POP | 1 | — | Pop `kind=1`. |
-| `0x0c` COLOR | 4 | u8 R, G, B | Push `kind=2`, write `temp.color.{r,g,b}`. **RGB only — alpha is preserved from `text->color.a`.** |
-| `0x0d` COLOR_POP | 1 | — | Pop `kind=2`. |
-| `0x0e` SCALE | 5 | u16 sx, u16 sy | Push `kind=3`, set `temp.scale.{x,y} = sx/256, sy/256`. |
-| `0x0f` SCALE_POP | 1 | — | Pop `kind=3`. |
-| `0x10` ALIGN_CENTER | 1 | — | Push `kind=4`, `temp.align = 1`. |
-| `0x11` ALIGN_POP | 1 | — | Pop `kind=4`. (`0x11`/`0x13`/`0x15` are aliases — same code path.) |
-| `0x12` ALIGN_LEFT | 1 | — | Push `kind=4`, `temp.align = 0`. |
-| `0x13` ALIGN_POP | 1 | — | Pop `kind=4`. |
-| `0x14` ALIGN_RIGHT | 1 | — | Push `kind=4`, `temp.align = 2`. |
-| `0x15` ALIGN_POP | 1 | — | Pop `kind=4`. |
-| `0x16` KERNING_ON | 1 | — | `temp.kerning = 1` (no push). |
-| `0x17` KERNING_OFF | 1 | — | `temp.kerning = 0`. |
-| `0x18` FIT_ON | 1 | — | `temp.use_aspect_fit = 1`. If line width exceeds `text->aspect.x`, the line is horizontally squeezed. |
-| `0x19` FIT_OFF | 1 | — | `temp.use_aspect_fit = 0`. |
-| `0x1a` SPACE | 1 | — | Advances cursor.x by `scale_x * (32 + 16) * fit_squeeze`. Word separator. |
-| `0x1b`–`0x1f` | 1 | — | Truly no-ops — fall through to default branch. |
-| `>=0x20` (char) | 2 | u16 code | Glyph render: dispatches to master / per-SIS bank by high nibble (see "Two Glyph Banks"). |
-
-### Character codes (`code >= 0x20`)
-
-ASCII → SIS code is mapped by `Text_CharToCommand` (`text.h`). Most commonly:
-
-| Range | Characters | Encoding |
-|-------|-----------|----------|
-| `0x2000`–`0x2009` | `0`-`9` | `0x2000 + (c - '0')` |
-| `0x200a`–`0x2023` | `A`-`Z` | `0x200a + (c - 'A')` |
-| `0x2024`–`0x203d` | `a`-`z` | `0x2024 + (c - 'a')` |
-
-Symbol codes — the 21-entry `symbol_lookup` table in `Text_CharToCommand` (`text.h`): `0x20e3` space, `0x20ec !`, `0x20f4 "`, `0x2106 #`, `0x2104 $`, `0x2105 %`, `0x2107 &`, `0x20f5 (`, `0x20f6 )`, `0x2108 *`, `0x20fd +`, `0x20e6 ,`, `0x20fe -`, `0x20e7 .`, `0x20f0 /`, `0x20e9 :`, `0x20ea ;`, `0x2100 =`, `0x20eb ?`, `0x2109 @`, `0x20ee _`. Any ASCII char not in this table (including `'`) returns -1 from `Text_CharToCommand` and is dropped by `ComposeSisText`. (The separate C-format path `Text_ConvertASCIIToShiftJIS` handles a few of these via a different mechanism — see below.)
-
-In pre-composed SIS text, spaces between words use the `0x1a` SPACE opcode, not the `0x20e3` character code.
+The interpreter halts on the `0x00` TERMINATE byte, **not** on `text->text_end`. `text_end` is the typewriter reveal frontier that the renderer sets itself; the loop head at 0x80451c44 consults it only to decide whether to pause. Writing `text_end` from outside is therefore not a way to drive a reveal.
 
 ### Standard event text layout
 
-All City Trial event text entries use this template:
+Every City Trial event string uses one template, which `ComposeSisText` in `mods/custom_events/src/custom_events.c` reproduces byte for byte for runtime-composed text:
 
 ```
 12              ALIGNLEFT
 18              FIT_ON
 16              KERNING_ON
-0c BB BB BB     COLOR(0xBB, 0xBB, 0xBB) — light gray
-0e 00 B3 00 B3  SCALE(0xB3/256, 0xB3/256) ≈ 0.70x
-[text body]     character codes + 0x1a spaces
-03              LINEBREAK
-0f              SCALE_POP
-0d              COLOR_POP
-17              KERNING_OFF
-19              FIT_OFF
-13              ALIGN_POP
-00              TERMINATE
+0c BB BB BB     COLOR light gray
+0e 00 B3 00 B3  SCALE ~0.70x
+[body]          2-byte glyph codes, 0x1a between words
+03 0f 0d 17 19 13 00   LINEBREAK, SCALE_POP, COLOR_POP, KERNING_OFF, FIT_OFF, ALIGN_POP, TERMINATE
 ```
 
-The `mods/custom_events/src/custom_events.c::ComposeSisText` helper emits exactly this layout for runtime-composed event text.
+## Character codes
 
-## Color Rendering Pipeline
+`Text_CharToCommand` in `text.h` maps ASCII to SIS codes: `0x2000 + (c - '0')` for digits, `0x200a + (c - 'A')` for capitals, `0x2024 + (c - 'a')` for lowercase, and a 21-entry symbol table for `space ! " # $ % & ( ) * + , - . / : ; = ? @ _`. Anything else, including the apostrophe, returns -1 and gets dropped by callers such as `ComposeSisText`.
 
-In `Text_GXLink` the static TEV setup (starts `0x80451a10`):
+In pre-composed SIS data, gaps between words are the `0x1a` SPACE opcode, not the `0x20e3` space glyph.
 
-- `GXSetNumTevStages(1)`
-- `GXSetTevColorIn(0, 0xF, 0xF, 0xF, 2)` (`0x80451a1c`) → output = `Reg1 (kColor)` (RGB from register, no texture color contribution)
-- `GXSetTevAlphaIn(0, 7, 4, 1, 7)` → **glyph alpha (from I4 texture) modulated by register-color alpha**
-- `GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, 0)`
-- `GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0)`
+## Color pipeline
 
-Per character (at `0x804524c4`):
+`Text_GXLink` sets one TEV stage once per draw (from 0x80451a10):
 
-- `GXSetTevColor(GX_TEVREG1, &temp.color)` — one color-register write per character (`temp.color` at `+0x8c`, copied to a stack temp then passed; 4 bytes RGBA).
-- `GXBegin(GX_QUADS, fmt 0, 4)` at `0x804524d4`, then 4 vertices with position + s/t.
+- `GXSetTevColorIn(0, 0xF, 0xF, 0xF, 2)` at 0x80451a1c, so RGB comes entirely from TEV register 1 with no texture color contribution.
+- `GXSetTevAlphaIn(0, 7, 4, 1, 7)`, so glyph alpha from the I4 texture is modulated by the register's alpha.
+- `GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, 0)` and `GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0)`.
 
-So **color is per-character RGB** (driven by the COLOR opcode stack) but **alpha is constant across all characters in a draw**, sourced from `text->color.a` at init. The `0x0c` COLOR opcode never touches alpha. Optional viewport background quad (drawn first if `text->viewport_color.a != 0`) covers the full `aspect`-rect with `viewport_color` RGBA.
+Per character (0x804524c4) it writes `GXSetTevColor(GX_TEVREG1, &temp.color)` and then `GXBegin(GX_QUADS, fmt 0, 4)` with four position + s/t vertices.
 
-**There is no gradient (no top-vs-bottom color), no outline TEV stage, and no shadow stage.** Vanilla outline effects in menus are achieved by stacking two separate Text GObjs (the darker one offset by 1 px). For a real outline/shadow pipeline, mods would need to install a custom TEV via `render_callback` (see below).
+The consequence: **RGB is per character**, driven by the COLOR opcode stack, but **alpha is constant for the whole draw**, sourced from `text->color.a` at subtext init. The `0x0c` opcode never touches alpha. If `text->viewport_color.a` is non-zero, a flat background quad covering `aspect * viewport_scale` is drawn first.
 
-## C-Format-String Composer
+There is no gradient, outline or shadow stage. Vanilla menu "outlines" are two stacked Text GObjs with the darker one offset by a pixel. A real outline or gradient requires installing a custom TEV from `render_callback`.
 
-`Text_AddSubtext(text, x_pixels, y_lines, fmt, ...)` (`0x8044fec4`) emits exactly this byte stream:
+## Composing from C format strings
+
+`Text_AddSubtext(text, x_pixels, y_lines, fmt, ...)` (0x8044fec4) appends a subtext and emits exactly:
 
 ```
-07 XH XL  YH YL                POS (s16, s16; truncates x,y to int)
-0c CR CG CB                    COLOR (copies text->color RGB; alpha NOT emitted)
-0e SXh SXl  SYh SYl            SCALE (`(int)scale<<8 | (int)(256*scale)&0xFF`)
-[converted format-string body]
-0f                             SCALE_POP
-0d                             COLOR_POP
-00                             TERMINATE
+07 XH XL YH YL       POS (x, y truncated to int)
+0c CR CG CB          COLOR (text->color RGB; alpha not emitted)
+0e SXh SXl SYh SYl   SCALE
+[converted body]
+0f 0d 00             SCALE_POP, COLOR_POP, TERMINATE
 ```
 
-`Text_SetText(text, subtext_idx, fmt, ...)` (`0x8045031c`) walks the buffer, finds the N-th `0x07`, and replaces only the body — so per-subtext color/pos/scale persist across `SetText` calls.
+`Text_SetText(text, subtext_idx, fmt, ...)` (0x8045031c) walks the buffer to the N-th `0x07` and replaces only the body, so per-subtext color, position and scale survive repeated `SetText` calls.
 
-Both `vsnprintf` into a stack buffer first, then run **`Text_ConvertASCIIToShiftJIS`** (`0x8044fb0c`). The name is only partly accurate: the output is a SIS opcode/character stream, but the 2-byte codes it emits for letters/digits are SIS glyph codes (`0x20xx`) while for a few punctuation marks it emits genuine full-width **Shift-JIS** codes (`0x81xx`):
+Both first `vsnprintf` into a stack buffer, then run `Text_ConvertASCIIToShiftJIS` (0x8044fb0c). The name is only half right: letters and digits become SIS glyph codes (`0x20xx`), but a handful of punctuation marks become genuine full-width Shift-JIS codes (`0x81xx`).
 
-| ASCII input | Emits |
-|------|-------|
-| `[A-Z]` | 2-byte char `0x200a + (c - 'A')` |
-| `[a-z]` | 2-byte char `0x2024 + (c - 'a')` |
-| `[0-9]` | `0a F4 00 00 00` (POS_PUSH, tight-spaced digit mode) + 2-byte digit |
-| `' '` (space) | `0a F4 00 00 00` then kerning lookup |
-| `.`, `:` | tight-mode prefix + symbol code |
-| `"` | `0b` (POS_POP) + Shift-JIS `0x8140` (`0x8044fbb0`) |
-| `'` | `0b` + Shift-JIS `0x8168` (`0x8044fbd4`) |
-| `,` | `0b` + Shift-JIS `0x8143` (`0x8044fbfc`) |
-| `-` | `0b` + Shift-JIS `0x817c` (`0x8044fc24`) |
-| Other printable | `0b` + symbol code (table lookup at `0x80509b40` / `0x805098c0`) |
+| ASCII input | Emitted |
+|-------------|---------|
+| `A-Z` | 2-byte code `0x200a + (c - 'A')` |
+| `a-z` | 2-byte code `0x2024 + (c - 'a')` |
+| `0-9` | `0a F4 00 00 00` (POSPUSH, tight-spacing mode) then the digit code |
+| space | `0a F4 00 00 00` then a kerning lookup |
+| `.` `:` | tight-mode prefix then the symbol code |
+| `"` | `0b` then Shift-JIS `0x8140` (0x8044fbb0) |
+| `'` | `0b` then Shift-JIS `0x8168` (0x8044fbd4) |
+| `,` | `0b` then Shift-JIS `0x8143` (0x8044fbfc) |
+| `-` | `0b` then Shift-JIS `0x817c` (0x8044fc24) |
+| other printable | `0b` then a symbol code from the tables at `0x80509b40` / `0x805098c0` |
 
-**`\n`, `\t`, and printf `\\n`/`\\t` are NOT mapped** — they fall into the table-lookup branch and produce no output. Multi-line text **must** use separate `Text_AddSubtext` calls (each emits its own `0x07` POS header). `%d`, `%s`, `%f` work as expected (resolved by `vsnprintf` before SIS conversion).
+**The converter reads at most 128 input bytes.** Its loop bails once the input index passes `0x7f`, so anything beyond that is dropped without a return code saying so - and since both `Text_SetText` and `Text_AddSubtext` route through it, that is the hard ceiling on one subtext's text. It is a byte limit, not a character one: pre-sanitized punctuation already costs 2 bytes apiece, so a symbol-heavy string hits it well before 128 characters. Measuring with `Text_GetWidthAndHeight` afterwards measures only what survived, so a caller that hands over more than fits gets a width for text that never rendered.
 
-There is no `{...}` brace syntax for inline opcodes. To inject COLOR/SCALE/POS mid-text, write opcode bytes directly into the buffer or call `Text_SetColor` / `Text_SetScale` / `Text_SetPosition` (which patch the per-subtext header bytes via `Text_GetCommand`).
+**`\n` and `\t` are not mapped.** They fall into the table-lookup branch and produce nothing, so multi-line text must be built from separate `Text_AddSubtext` calls, one `0x07` header each. `%d`, `%s` and `%f` work normally because `vsnprintf` resolves them first.
 
-### `Text_AddSubtext` chaining and the missing TERMINATE
+There is no brace syntax for inline opcodes. To change color or scale mid-buffer, write opcode bytes directly or call `Text_SetColor` / `Text_SetScale`, which patch the per-subtext header bytes located by `Text_GetCommand` (`text.h`). Position is the `0x07` header itself rather than an inline opcode, so `Text_SetSubtextPos` rewrites its two `s16` fields in place.
 
-Each `Text_AddSubtext` call writes the trailer `0f 0d 00` (SCALE_POP, COLOR_POP, TERMINATE) at the heap cell's write pointer **without advancing the pointer past the `0x00`** (`0x804502d8`-`0x804502dc`). The next `Text_AddSubtext` call overwrites that `0x00` with its own `0x07` POS header. Net result: a chain of N subtexts ends with a single `0x00` after the *last* subtext only — there is **no** inline TERMINATE between subtexts.
+### Chained subtexts share one TERMINATE
 
-This is what makes `Text_GetSubtext` (which stops walking on `0x00`) able to find subtext indices > 0.
+Each `Text_AddSubtext` writes its `0f 0d 00` trailer at the heap cell's write pointer **without advancing past the `0x00`** (0x804502d8-0x804502dc). The next call overwrites that `0x00` with its own `0x07` header. So a chain of N subtexts contains exactly one `0x00`, after the last one. That is what lets `Text_GetSubtext` (which stops walking at `0x00`) reach indices above 0, and it means the real buffer end can only be found by scanning from `text_start` for the trailing `0x00` - `Text_AddSubtext` never writes `text_end`.
 
-It also means `text_end` is never set by `Text_AddSubtext` — to derive the real buffer end you must scan from `text_start` for the trailing `0x00`.
+## Typewriter reveal
 
-## Typewriter Reveal
+The engine has a built-in dwell-paced reveal that costs nothing per frame: set the per-glyph dwell in frames and the renderer uncovers one glyph at a time on its own, with no buffer mutation. `0` reveals everything instantly.
 
-**The engine has a built-in, dwell-paced typewriter, and it works for `Text_AddSubtext` buffers — but for those you must seed `temp.char_delay` directly, not `char_delay_init`.** Set the per-glyph dwell (frames) to the desired speed before render; the renderer reveals one glyph every `char_delay` frames on its own — no buffer mutation, no per-frame work. `0` reveals everything instantly.
+Inside `Text_GXLink`, subtext setup loads `temp.reveal_count` (`+0x98`) at 0x80451c3c and `temp.char_delay` / `temp.space_delay` (`+0x90` / `+0x92`) into working registers at 0x80451c34. The opcode loop decrements the reveal counter for each already-revealed glyph while still drawing it; when the counter hits zero it has reached the frontier, so it draws that glyph, increments `reveal_count`, copies `char_delay` into `wait_countdown` (`+0x94`), and points `text_end` (`+0x60`) just past the glyph (0x80452618-0x80452640). SPACE reveals identically using `char_delay` (0x804521f4); LINEBREAK and DELAY consume steps too, using `space_delay` or their own operand. POS and COLOR are processed for free without consuming a step. On the next render the loop head pauses while `parse_ptr == text_end && wait_countdown != 0`, decrementing once per render (0x80451c44-0x80451c78), and releases after `char_delay` frames.
 
-How it works (`Text_GXLink` @ `0x804516e4`):
+**The `char_delay_init` trap.** The only write to `temp.char_delay` in the renderer is at 0x80451cec, inside the `0x01`/`0x02` SUBTEXT handler. `Text_AddSubtext` buffers are delimited by `0x07` POS headers and contain no `0x01` or `0x02`, so that copy never fires: `temp.char_delay` stays 0, every reveal sets `wait_countdown = 0`, and the whole buffer appears on frame one. Runtime-composed text must seed `temp.char_delay` (and `temp.space_delay`) directly. The renderer reloads them at every render top and never clears them, so a single write at creation persists.
 
-- The live reveal counter is loaded from `temp.reveal_count` (`+0x98`) at subtext setup (`0x80451c3c`); `temp.char_delay` (`+0x90`) and `temp.space_delay` (`+0x92`) are loaded into working registers at the same point (`0x80451c34`). As the opcode loop walks glyphs it decrements the reveal counter for each already-revealed glyph (still drawing it). When the counter hits 0 it has reached the reveal frontier: it draws that glyph, increments `reveal_count`, copies `char_delay` into `wait_countdown` (`+0x94`), and sets `text_end` (`+0x60`) to just past this glyph (`0x80452618`–`0x80452640`). SPACE (`0x1a`) reveals identically using `char_delay` (`0x804521f4`); LINEBREAK/DELAY count too (using `space_delay` / their operand). `0x07` POS and `0x0c` COLOR are processed "for free" — they advance the parser without consuming a reveal step.
-- The loop head pauses parsing while `parse_ptr == text_end && wait_countdown != 0`, decrementing `wait_countdown` once per render (`0x80451c44`–`0x80451c78`). After `char_delay` frames the pause releases and one more glyph reveals.
+The same asymmetry explains why a multi-segment buffer reveals **sequentially rather than in parallel**: the reveal state is reset only by the `0x01`/`0x02` handlers (0x80451cb4 / 0x80451d3c), and the `0x07` handler (0x80451e30) touches none of it, so one counter walks straight through every segment.
 
-**The `char_delay_init` trap (why a fresh `Text_AddSubtext` buffer reveals everything on frame 1 if you only set `char_delay_init`):** the *only* write to `temp.char_delay` in the renderer is at `0x80451cec`, inside the `0x01` SUBTEXT_RESET / `0x02` SUBTEXT_BREAK handler — that's where `char_delay_init` (`+0x44`) is copied into `temp.char_delay`. `Text_AddSubtext` delimits its segments with `0x07` POS headers and contains **no** `0x01`/`0x02`, so the copy never fires: `temp.char_delay` stays `0`, every reveal sets `wait_countdown = 0`, and the whole buffer reveals in one frame. **Fix: write `temp.char_delay`/`temp.space_delay` directly.** The renderer reloads them into its working registers at every render top and never clears them, so a single write at enqueue persists across all frames.
+`TextBox_ApplyTypewriter` in `mods/textbox/src/textbox.c` is the reference user: it seeds both the `_init` fields and the live `temp` fields from the typewriter-speed setting, and zeroes `temp.reveal_count` and `text_end` for a clean start.
 
-**Why it reveals multi-segment buffers sequentially (not in parallel):** the reveal state (`reveal_count`, the delays, `text_end`) is reset *only* by the `0x01`/`0x02` handlers (`0x80451cb4` / `0x80451d3c`). Since `Text_AddSubtext` never emits those, the counter is loaded once and walks straight through every `0x07` segment in the buffer — the `0x07` handler (`0x80451e30`) touches none of the reveal state.
-
-Opcode dispatch is a jump table at `0x8050983C` (entries `0x00`..`0x1a`, indexed by opcode); glyphs (`>= 0x20`) and the `0x1b`–`0x1f` no-ops branch to the glyph/no-op handler at `0x80452210`.
-
-Reference implementation: `mods/textbox/src/textbox.c` (`TextBox_ApplyTypewriter`) seeds `temp.char_delay` / `temp.space_delay` (and, for completeness, `char_delay_init` / `space_delay_init`) from the typewriter-speed setting at Text creation, and zeroes `temp.reveal_count` / `text_end` for a clean start.
-
-## Canvas / GObj / Render Pipeline
+## Canvas, GObj and render pipeline
 
 ### Coordinate system
 
-Text canvases are **orthographic 640×480 in raw pixels**:
-
-- x: `[0, 640]` left → right
-- y: `[0, -480]` top → bottom (the projection bottom is `-480`; vanilla code stores positive Y values and the renderer negates per-vertex)
-
-So `text->trans.x` is pixels right of canvas-left, `text->trans.y` is pixels above canvas-bottom (i.e., set `trans.y = 480 - desired_top_offset` for top-down positioning).
+Text canvases are orthographic 640x480 in raw pixels: x runs `[0, 640]` left to right, y runs `[0, -480]` top to bottom because the projection bottom is `-480` and the renderer negates per vertex. Code stores positive Y, so `trans.y` is pixels **above canvas bottom** - set `trans.y = 480 - desired_top_offset` to position from the top.
 
 ### Pass model
 
-`Text_GXLink(gobj, pass)` switches on `pass`:
+`Text_GXLink(gobj, pass)` handles two passes and early-returns on anything else.
 
-| Pass | What it does |
-|------|--------------|
-| `0` | Camera-level setup (invoked via `CObjThink_Common` / `0x8042a29c`). Sets up `GXSetViewport(0,0,640,480)`, `GXSetScissor(0,0,640,480)`, `C_MTXOrtho(0,-480,0,640,0,2)` via `HSD_StateSetMtx`. |
-| `2` | Per-Text rendering. Pulls `Text *t = gobj->userdata`, early-returns on `hidden` / null `text_start`, sets ZMode by `is_depth_compare`, loads view matrix, sets vertex format / TEV / blend mode, **invokes `render_callback`**, draws optional `viewport_color` background, then runs the opcode interpreter. |
-| other | Early return. |
+Pass 0 is camera-level setup, reached through `CObjThink_Common` (0x8042a29c): `GXSetViewport(0,0,640,480)`, `GXSetScissor(0,0,640,480)`, and `C_MTXOrtho(0,-480,0,640,0,2)`.
+
+Pass 2 is the per-Text draw. It pulls `Text *t` from `gobj->userdata`, early-returns if `hidden` or `text_start` is null, picks the Z mode from `is_depth_compare`, loads the view matrix, sets vertex format, TEV and blend state, **invokes `render_callback`**, draws the optional `viewport_color` background, and then runs the opcode interpreter.
 
 ### Canvas creation
 
-```c
-// Map symbol: Text_CreateTextCanvas. Declared in text.h as Text_CreateCanvas
-// (same address) — that's the name mod code calls (see the recipe below and
-// screen_cam.c). Both names refer to 0x8044f674.
-int Text_CreateTextCanvas(int sis_idx, int no_create_cam_gobj,
-                          int gobj_entityclass, int gobj_plink, int gobj_ppriority,
-                          int gxlink, int gxpri, int cobj_gxpri);  // 0x8044f674
-```
+`Text_CreateCanvas(sis_idx, no_create_cam_gobj, gobj_entityclass, gobj_plink, gobj_ppriority, gxlink, gxpri, cobj_gxpri)` (0x8044f674):
 
-1. Allocates a `TextCanvas` and chains it onto `stc_textcanvas_first` (`0x805de56c`).
-2. Creates a GObj on `(entityclass, plink, ppriority)`.
-3. `HSD_CObjLoadDesc(0x805096a0)` loads the canonical text-camera descriptor, then `HSD_CObjSetOrtho(0, -480, 0, 640)` makes it orthographic in pixel space.
-4. `GObj_AddObject(g, COBJ, cobj)` and `GObj_InitCamera(g, CObjThink_Common, cobj_gxpri)` register `CObjThink_Common` (`0x8042a29c`) as the pass-0 callback that sets the viewport/scissor for child gxlinks.
-5. The canvas's gxlink mask determines which Text GObjs render under it.
+1. Allocates a `TextCanvas` and chains it onto `stc_textcanvas_first` (0x805de56c).
+2. Creates a GObj on the given entity class / plink / priority.
+3. `HSD_CObjLoadDesc` on the canonical text-camera descriptor at `0x805096a0`, then `HSD_CObjSetOrtho(0, -480, 0, 640)`.
+4. `GObj_AddObject(g, COBJ, cobj)` and `GObj_InitCamera(g, CObjThink_Common, cobj_gxpri)`, which registers the pass-0 viewport/scissor callback for every gxlink beneath it.
 
-### Text struct fields — what each one does at render time
+The canvas's gxlink mask decides which Text GObjs render under it.
 
-| Off | Field | Behavior |
-|-----|-------|----------|
-| `0x00` | `trans` (Vec3) | Per-vertex anchor for every quad. Pixel coords in canvas ortho. `z` is written into vertex z (depth-compares against z-buffer when `is_depth_compare=1`). |
-| `0x0c` | `aspect` (Vec2) | Bounding box width/height in pixels. Used by `use_aspect` auto-shrink, `viewport_color` background size, and per-quad scissor reference. |
-| `0x14`-`0x20` | `scissor_top/bot/left/right` | Per-quad clip rectangle (gated by `is_scissor`). Quads outside are dropped; quads on edge get UV+vertex shrunk (around `0x80452200`-`0x804523f0`). **Not** `GXSetScissor`. |
-| `0x24` | `viewport_scale` (Vec2) | Multiplies everything: glyph quad size, X-advance, background rect, scissor reference. ~0.4 yields readable HUD-size text. Default 1.0. |
-| `0x2c` | `viewport_color` (GXColor RGBA) | If `alpha != 0`, drawn first as flat-shaded background quad (size = `aspect * viewport_scale`). |
-| `0x30` | `color` (GXColor RGBA) | Default per-character color. Loaded into `temp.color` at every subtext start. |
-| `0x34` | `scale` (Vec2) | Initial per-char scale; opcode `0x0e` overrides per glyph. |
-| `0x3c` | `x3c` (float) | Initial X cursor offset for the subtext (loaded into `temp.x78`). |
-| `0x40` | `x40` (float) | Initial Y cursor offset (`temp.x7c`). |
-| `0x44` | `char_delay_init` (u16) | *Designed* seed for `temp.char_delay` (per-glyph pause, frames; 0 = instant) — but copied in **only** at a `0x01`/`0x02` SUBTEXT opcode, so it's dead for `0x07`-delimited `Text_AddSubtext` buffers. Seed `temp.char_delay` directly for those. |
-| `0x46` | `space_delay_init` (u16) | Seeds `temp.space_delay` — per-space/linebreak pause in frames. |
-| `0x48` | `use_aspect` | Auto-shrink horizontally to fit `aspect.x`. |
-| `0x49` | `kerning` | Use kerning advances vs. fixed cell width. |
-| `0x4a` | `align` | 0=left, 1=center, 2=right. |
-| `0x4b` | `x4b` | Internal reflow flag (set by `0x04`). Leave at 0. |
-| `0x4c` | `is_depth_compare` | If 1, `GX_LEQUAL` Z mode (text z-tests). If 0, always on top. |
-| `0x4d` | `hidden` | Non-zero → `Text_GXLink` early-returns. |
-| `0x4e` | `is_scissor` | Enables `scissor_*` per-quad clipping. |
-| `0x4f` | `sis_id` | Index into `stc_sis_data[5]` for per-SIS image/kerning bank. |
-| `0x58` | `render_callback` | `void cb(GOBJ *text_gobj)`. **Invoked once per render in pass 2, after GX state setup, before any drawing.** See "Customization hooks" below. |
-| `0x5c` / `0x60` | `text_start` / `text_end` | Parse start. `text_end` is **not** a hard limit (see "SIS Text Command Format" above) — it's the typewriter reveal frontier the engine sets itself, reset to `0` at `0x01` SUBTEXT_RESET. `Text_AddSubtext` / `Text_SetText` never write `text_end`; only `Text_InitPremadeText` (`0x8044f8c8`) and `Text_LoadSisFile` (`0x8044f800`) do, and both set it to `0`. |
-| `0x70`–`0xa0` | `temp.*` | Per-subtext mutable state (cursor, color register, char counter, etc.). Modified by opcodes. |
+### Text fields worth knowing
 
-### Customization hooks (`render_callback`)
+The `Text` struct is fully described in `externals/hoshi/include/text.h`. The parts that surprise people:
 
-Loaded from `text->render_callback` (`+0x58`) at `0x804519f4`, null-checked, and invoked (`bctrl`) at `0x80451a08`. Signature: `void cb(GOBJ *text_gobj)`. `text_gobj->userdata` is the `Text *`. Capabilities from inside the callback:
+- `scissor_top/bot/left/right` gated by `is_scissor` are a **per-quad** clip, not `GXSetScissor`. Quads fully outside are dropped and edge quads have both UVs and vertices shrunk (0x80452200-0x804523f0).
+- `viewport_scale` multiplies everything at once: glyph quad size, X advance, background rect and the scissor reference frame. Around 0.4 gives readable HUD-size text; the default is 1.0.
+- `aspect` is the bounding box used by `use_aspect` auto-shrink, the background quad size and the scissor reference.
+- `sis_id` selects which `stc_sis_data` slot supplies the per-SIS glyph bank for codes at or above `0x4000`.
+- `text_end` is engine-owned (see above). `Text_InitPremadeText` (0x8044f8c8) and `Text_LoadSisFile` are the only functions that write it, and both write 0.
+- `reflow_flag` (`+0x4b`) is internal to `0x04` LINEBREAK_REFLOW; leave it at 0 from mod code.
 
-- Mutate `t->color`, `t->temp.color`, `t->trans`, `t->scale`, `t->viewport_scale` for per-frame effects (blink, fade, jitter, breathing scale, wave).
-- Override TEV state (e.g. install a custom multi-stage Tev for outline / shadow / gradient).
-- Read `t->temp.char_display_num` to drive per-glyph effects.
-- **Typewriter reveal**: seed `temp.char_delay` (for `Text_AddSubtext` buffers — `char_delay_init` alone is dead) and let the engine reveal — see "Typewriter Reveal". (Manually advancing `text_end` from a render_callback does **not** work; the engine manages `text_end` itself.)
-- Bind a custom texture via `GXLoadTexObj` (custom font for a single Text element).
+### render_callback
 
-The whole `gobj->gx_cb` can also be swapped (as `TextJoint_Create` in `text_joint.c` does) to wrap or replace `Text_GXLink` entirely — useful for premultiplying the view matrix to anchor text to a 3D bone, then calling the original draw.
+`text->render_callback` (`+0x58`) is loaded at 0x804519f4, null-checked, and called at 0x80451a08 with the Text's GObj, once per render, after GX state setup and before any drawing. From inside it you can:
 
-## Recipe — Arbitrary Mod Overlays
+- Mutate `t->color`, `t->temp.color`, `t->trans`, `t->scale` or `t->viewport_scale` for blink, fade, jitter, breathing or wave effects.
+- Override the TEV state to build outline, shadow or gradient pipelines the vanilla single stage cannot express.
+- Read `t->temp.reveal_count` to drive per-glyph effects.
+- Bind a different texture with `GXLoadTexObj` to give one element its own font.
 
-The minimum API for screen-space text floating above any scene (the reference user is `mods/textbox/src/textbox.c`, the textbox notification system):
+For deeper changes the whole `gobj->gx_cb` can be replaced: `TextJoint_Create` in `externals/hoshi/Lib/text_joint/text_joint.c` swaps it so the view matrix is premultiplied by a bone transform before delegating to the normal draw, which is how text gets anchored in 3D.
 
-1. **Once per scene** — create an ortho 640×480 canvas via hoshi's `ScreenCam_Create` (`externals/hoshi/src/screen_cam.c`):
-   ```c
-   canvas_idx = Text_CreateCanvas(/*sis_idx=*/1, /*no_cam=*/0,
-                                  /*entityclass=*/0, /*plink=*/0, /*ppri=*/0,
-                                  /*gxlink=*/HOSHI_SCREENCAM_GXLINK,
-                                  /*gxpri=*/0, /*cobj_gxpri=*/63);
-   ```
-   `cobj_gxpri=63` makes the camera draw last; `HOSHI_SCREENCAM_GXLINK` is a free GX link bit hoshi reserves so the canvas isn't culled by scene cameras.
+## Screen-space overlays from a mod
 
-2. **Per-message** — `Text_CreateText(1, canvas_idx)` returns a fresh `Text *`. Configure: `kerning=1`, `use_aspect=1`, `trans` (pixel coords), `viewport_scale ≈ 0.4`, `color`, `viewport_color` (alpha controls background visibility).
+hoshi reserves GX link bit 63 (`HOSHI_SCREENCAM_GXLINK` in `externals/hoshi/include/hoshi/screen_cam.h`) for a shared overlay canvas so it is never culled by scene cameras. `ScreenCam_Create` in `externals/hoshi/src/screen_cam.c` creates it once per scene with `Text_CreateCanvas(1, 0, 0, 0, 0, HOSHI_SCREENCAM_GXLINK, 0, 63)`; `cobj_gxpri = 63` makes that camera draw last.
 
-3. **Add content** — `Text_AddSubtext(t, x, y, "")` allocates a subtext slot, then `Text_SetText(t, 0, sanitized_string)`. Call `Text_Sanitize()` (`text_joint.c`) first to convert ASCII punctuation.
+Per message: `Text_CreateText(sis_idx, canvas_idx)` returns a fresh `Text *`, which typically wants `kerning = 1`, a pixel-space `trans`, `viewport_scale` around 0.4, a `color`, and a `viewport_color` whose alpha decides whether a background box appears. Content goes in with `Text_AddSubtext(t, x, y, "")` to allocate the slot followed by `Text_SetText(t, 0, string)`. `Text_GetWidthAndHeight(t, 0, &w, &h)` then gives the values to store into `t->aspect`. `Text_Destroy(t)` tears it down.
 
-4. **Auto-size** — `Text_GetWidthAndHeight(t, 0, &w, &h)` and set `t->aspect = (Vec2){w, h}`.
+`use_aspect` is a separate decision and defaults to 0: it makes the renderer shrink a subtext horizontally to fit `aspect.X`, so set it only when a hard width limit is wanted. Code that measures its own layout and then stores the result into `aspect` should leave it clear - the flag can only shave the text it just fitted. `aspect` still drives the `viewport_color` background rect and the scissor reference frame either way.
 
-5. **Per-frame effects** — store `Text *` and tweak fields each frame, or set `render_callback`.
+Run user strings through `Text_Sanitize(in, out, size)` (`externals/hoshi/Lib/text_joint/text_joint.c`) first: it pre-converts ASCII punctuation to the Shift-JIS codes the game's converter expects, spending 2 output bytes per converted symbol and 1 per alphanumeric or unlisted character. It reserves one byte for the terminator, so a `char[128]` holds at most 126 bytes of output; past that it truncates, terminates and returns 0.
 
-6. **Destroy** — `Text_Destroy(t)`.
+`mods/textbox/src/textbox.c` is the working example of all of this.
 
-## Capability Summary
+## What the path can and cannot do
 
-What's possible right now without engine changes:
+Per-character RGB, multi-line layout (as separate subtexts), alignment, variable scale, background rectangles, scissor clipping, typewriter reveal, whole-element fades and per-frame `render_callback` motion all work as described above. The constraints worth knowing before designing around them:
 
-| Capability | Possible? | How |
-|-----------|-----------|-----|
-| Per-character color (RGB) | Yes | `0x0c` COLOR opcode mid-stream |
-| Per-character alpha | No | Alpha is fixed across the draw (`text->color.a`); only `0x0c` opcode is RGB |
-| Multi-line text | Yes | Multiple `Text_AddSubtext` calls (each is a `0x07` subtext); `\n` does **not** work in format strings |
-| Centered / right-aligned | Yes | `0x10`/`0x14` opcodes, `text->align`, or `Text_AddSubtext` with right x |
-| Variable scale | Yes | `0x0e` SCALE opcode, `text->scale`, or `text->viewport_scale` |
-| Background rectangle | Yes | `text->viewport_color` (alpha must be non-zero) |
-| Scissor / clip rect | Yes | `text->is_scissor=1` + `scissor_*` fields |
-| Typewriter reveal | Yes | Seed `temp.char_delay` (frames/glyph) — the built-in reveal works for both pre-composed SIS text and `Text_AddSubtext` buffers (sequential across `0x07` segments). For runtime `Text_AddSubtext` buffers `char_delay_init` alone is dead (its copy fires only at `0x01`/`0x02`); write `temp.char_delay` directly. See "Typewriter Reveal". |
-| Fade in/out | Yes | Mutate `text->color.a` per frame (alpha is render-state) |
-| Wave / jitter / breathing | Yes | `render_callback` mutating `trans` / `scale` per frame |
-| Gradient (top-vs-bottom color) | Not in vanilla | Single TEV stage, single color register. Possible only by replacing TEV in `render_callback`. |
-| Drop shadow / outline | Not in vanilla | Standard trick: stack two `Text` GObjs (offset, darker). True outline needs custom TEV. |
-| Larger glyph cell (e.g. 64×64) | Patch | Hard-coded `r5=32, r6=32` at `GXInitTexObj` calls (`0x8045245c`/`0x80452488`); patch literals + the `rlwinm r0, r31, 9, 7, 22` (×0x200) shift to switch stride. |
-| Add new Latin glyphs/symbols | Yes | Master image table at `0x8050a040` has ~165 unused slots. Write your 0x200-byte I4 32×32 glyph and 2 kerning bytes; emit raw 2-byte code in text. |
-| Different font family for one element | Yes | Inject custom `image_data_arr` / `kerning_data_arr` into a SIS slot's `[0]`/`[1]`, compose text with codes ≥ `0x4000`. Renderer dispatches per-character, so other text on the same screen is unaffected. The `SisSmmenu.dat` Japanese-glyph mechanism already uses this. |
-| Italic / decorative variant | Yes | Same as above (per-SIS bank) — supply alternate I4 glyphs. |
-| Use OS_FONT (GC IPL ROM font) | Yes (separate path) | The IPL OS Font path **is** in the binary — `OSInitFont` (0x803d6e20), `OSGetFontTexture` (0x803d6f00), `OSGetFontTexel` (0x803d676c), `OSGetFontEncode` (0x803d6354), `OSText_InitFont` (0x80390b3c), `__OSExpandFont` (0x803d6a70) — and is driven by the `OSText_DrawString` family (0x8038bf64), not by `Text_GXLink`. It is a wholly separate rendering path (SJIS, different glyph format) used by the Top Ride 2D debug menu. (`OSLoadFont` specifically is absent — this game uses `OSInitFont`.) Not selectable from within a `Text` element. |
-| Render text in 3D (bone-attached) | Yes | Swap `gobj->gx_cb` to multiply the view matrix before calling `Text_GXLink` (`text_joint.c` does this). |
+| Want | Status |
+|------|--------|
+| Per-character alpha | Not possible. Alpha is fixed for the whole draw from `text->color.a`; the COLOR opcode is RGB only. |
+| `\n` in a format string | Not possible. Use one `Text_AddSubtext` per line. |
+| Gradient (top-vs-bottom color) | Needs a replacement TEV installed from `render_callback`; vanilla has one stage and one color register. |
+| Drop shadow / outline | Same. The vanilla trick is stacking two offset Text GObjs. |
+| Glyph cell other than 32x32 | Needs a binary patch: the `li r5,32; li r6,32` pairs at 0x8045245c / 0x80452488 feeding `GXInitTexObj`, plus the `rlwinm r0, r31, 9, 7, 22` that multiplies the glyph index by `0x200`. |
+| New Latin glyphs or symbols | Supported. ~165 unused slots in the master image table at `0x8050a040`; write a `0x200`-byte I4 32x32 glyph plus 2 kerning bytes and emit the raw code. |
+| A different font for one element | Supported. Point a SIS slot's `image_data_arr` / `kerning_data_arr` at custom glyphs and compose with codes at or above `0x4000`. Dispatch is per character, so other text on screen is unaffected. This is the same mechanism `SisSmmenu.dat` uses for kana. |
+| Text anchored to a 3D bone | Supported by swapping `gobj->gx_cb`, as `text_joint.c` does. |
 
-## SIS Files
+## SIS files
 
-21 SIS files in `iso/files/`:
+21 SIS archives ship in `iso/files/`. Entry counts include the two data pointers at indices 0-1; text entries start at index 2.
 
-| File | Entries | Description |
-|------|---------|-------------|
-| `SisBestrap.dat` | 42 | Boot strap / startup text |
+| File | Entries | Contents |
+|------|---------|----------|
+| `SisBestrap.dat` | 42 | boot strap / startup |
 | `SisCitytrial.dat` | 42 | City Trial event + prediction text |
 | `SisClrChk2D.dat` | 158 | Top Ride checklist reward names |
 | `SisClrChk3D.dat` | 171 | Air Ride checklist reward names |
 | `SisClrChkCT.dat` | 169 | City Trial checklist reward names |
-| `SisDialogue.dat` | 33 | In-game dialogue |
-| `SisEnding2d.dat` | 55 | Top Ride ending text |
-| `SisEnding3d.dat` | 92 | Air Ride ending text |
-| `SisLan.dat` | 39 | LAN mode text |
-| `SisMenu.dat` | 123 | Main menu text |
-| `SisProgressive.dat` | 7 | Progressive scan setup |
-| `SisResultCt.dat` | 10 | City Trial results screen |
+| `SisDialogue.dat` | 33 | in-game dialogue |
+| `SisEnding2d.dat` | 55 | Top Ride ending |
+| `SisEnding3d.dat` | 92 | Air Ride ending |
+| `SisLan.dat` | 39 | LAN mode |
+| `SisMenu.dat` | 123 | main menu |
+| `SisProgressive.dat` | 7 | progressive scan setup |
+| `SisResultCt.dat` | 10 | City Trial results |
 | `SisSelmap.dat` | 10 | Air Ride stage select |
 | `SisSelmap2d.dat` | 8 | Top Ride stage select |
 | `SisSelply.dat` | 48 | Air Ride player/machine select |
 | `SisSelply2d.dat` | 8 | Top Ride player select |
 | `SisSelplyCt.dat` | 48 | City Trial player/machine select |
-| `SisSelrule.dat` | 59 | Rule settings |
-| `SisSelstadium.dat` | 54 | Stadium select |
-| `SisSmmenu.dat` | 3 | Sub-menu (carries Japanese-kana glyph block) |
-| `SisStadiumTitle.dat` | 26 | Stadium title cards |
+| `SisSelrule.dat` | 59 | rule settings |
+| `SisSelstadium.dat` | 54 | stadium select |
+| `SisSmmenu.dat` | 3 | sub-menu (carries the kana glyph block) |
+| `SisStadiumTitle.dat` | 26 | stadium title cards |
 
-Entry counts include 2 data pointer entries (image + kerning) at indices 0–1. Text entries start at index 2.
+`SisSelply.dat` and `SisSelplyCt.dat` share a layout: entries 2-7 are screen furniture, 8-27 the 20 machine names, 28-47 their descriptions. Both load into slot 0, and both screens turn a `CharacterKind` into that index pair through tables of words read as signed bytes - `0x804aa3d8` / `0x804aa428` for `AirRideSelect_SetMachineText` (0x80153d2c), `0x804aa598` / `0x804aa5e8` for `CitySelect_SetMachineText` (0x8015e740). An index of -1 in either table suppresses both texts.
 
-## Scene → SIS Slot Map (Loaders)
+### Scene to slot map
 
-`Text_LoadSisFile` callers, by function-band:
+`Text_LoadSisFile` call sites, by address band:
 
-| Address band | Scene | Files loaded |
-|--------------|-------|--------------|
-| `0x800ad0c8` | Pre-game / mode menu | varies |
+| Band | Scene | Files |
+|------|-------|-------|
+| `0x800ad0c8` | pre-game / mode menu | varies |
 | `0x80116xxx` | City Trial event HUD | `SisCitytrial.dat` (slot 0) |
-| `0x8013Bxxx`–`0x8013Fxxx` | Main menu, mode select, stadium select, character/machine select (3D & CT) | `SisMenu.dat`, `SisSelmap.dat`, `SisSelstadium.dat`, `SisSelply.dat`, etc. |
-| `0x80140xxx`–`0x80146xxx` | Rule/options/sub-menus | `SisSelrule.dat`, `SisSmmenu.dat` |
-| `0x8017Cxxx`–`0x8017Dxxx` | Results / ending screens | `SisResultCt.dat`, `SisEnding2d/3d.dat` |
-| `0x80182xxx` | Checklist (3 SIS-load calls in one fn) | `SisClrChk3D.dat`, `SisClrChk2D.dat`, `SisClrChkCT.dat` |
-| `0x80186xxx`–`0x80187xxx` | LAN mode | `SisLan.dat` |
-| `0x8027Cxxx`–`0x80283xxx` | Top Ride mode | `SisSelmap2d.dat`, `SisSelply2d.dat` |
+| `0x8013bxxx`-`0x8013fxxx` | main menu, mode select, stadium select, character/machine select | `SisMenu.dat`, `SisSelmap.dat`, `SisSelstadium.dat`, `SisSelply.dat` |
+| `0x80140xxx`-`0x80146xxx` | rule / options / sub-menus | `SisSelrule.dat`, `SisSmmenu.dat` |
+| `0x8017cxxx`-`0x8017dxxx` | results / ending | `SisResultCt.dat`, `SisEnding2d/3d.dat` |
+| `0x80182xxx` | checklist (three loads in one function) | `SisClrChk3D/2D/CT.dat` |
+| `0x80186xxx`-`0x80187xxx` | LAN mode | `SisLan.dat` |
+| `0x8027cxxx`-`0x80283xxx` | Top Ride | `SisSelmap2d.dat`, `SisSelply2d.dat` |
 
-Pre-composed (`Text_InitPremadeText`) is the dominant pattern in the `0x8017Cxxx`–`0x80182xxx` band (results, checklists). Composed (`Text_AddSubtext`/`Text_SetText`) dominates the `0x80140xxx`–`0x80146xxx` band (rule/menu screens with dynamic text).
+Pre-composed text via `Text_InitPremadeText` dominates the results and checklist band; runtime composition via `Text_AddSubtext` / `Text_SetText` dominates the rule and menu band, where text is dynamic.
 
-## SisCitytrial.dat Entries
+## City Trial event text
 
-The SIS file loaded into slot 0 during City Trial gameplay. Event text uses `Text_InitPremadeText(text, sis_idx)` where `sis_idx` is looked up from the table at `0x804a7b98` as `event_kind + 2`.
+`SisCitytrial.dat` occupies slot 0 during City Trial. Event text is shown with `Text_InitPremadeText(text, sis_idx)`, where `sis_idx` comes from the table at `0x804a7b98`.
 
 | Index | Usage | Text |
 |-------|-------|------|
-| 0 | Image data | *(data pointer)* |
-| 1 | Kerning data | *(data pointer)* |
+| 0 | image data | *(data pointer)* |
+| 1 | kerning data | *(data pointer)* |
 | 2 | EVKIND_DYNABLADE | The mystery bird Dyna Blade appeared! Aim for his head! |
 | 3 | EVKIND_TAC | Tac stole items and fled the scene! He's hiding somewhere! |
 | 4 | EVKIND_METEOR | DANGER! DANGER! Huge meteors are incoming! |
@@ -443,90 +311,89 @@ The SIS file loaded into slot 0 during City Trial gameplay. Event text uses `Tex
 | 40 | Prediction (course hint 8) | Stadium Prediction: I see a vast universe that erases all your cares... |
 | 41 | Prediction (STGROUP_VSKINGDEDEDE) | Stadium Prediction: I see you meeting up with King Dedede... |
 
-### SIS ID lookup table (`stc_event_sis_id_table` @ `0x804a7b98`)
+### The SIS id lookup table
 
-`stadiumPrediction` (`0x80127864`) reads `int table[event_kind]` from `0x804a7b98` (declared as `static int *stc_event_sis_id_table = (int *)0x804a7b98;` in `event.h`) to get the SIS entry index. For vanilla events 0-15, the value is `event_kind + 2`.
+`stadiumPrediction` (0x80127864) indexes `stc_event_sis_id_table` (`int *` at `0x804a7b98`, declared in `externals/hoshi/include/event.h`) by event kind to get the SIS entry index. For vanilla kinds 0-15 the value is simply `kind + 2`.
 
-Entries at `table[16+]` contain sequential values (18, 19, 20...) and **are actively read** — the prediction event (kind 10) computes a derived index `stadium_kind + EVKIND_NUM` (= `stadium_kind + 16`; at `stadiumPrediction` `0x801279a4`/`0x801279b4`, a stadium index in `[0,STKIND_NUM)` is `+16`-offset), writes it back into the event-check struct's kind field (`+0x18`), and on the next pass reads `table[that_index]`. Indices 16-39 in the table (24 = `STKIND_NUM` entries) are used by this prediction lookup. Table entries at index 40+ (`EVKIND_NUM + STKIND_NUM`) are safe to overwrite for custom events.
+Entries from index 16 up are live, not padding. The prediction event (kind 10) computes `stadium_kind + EVKIND_NUM` (that is, `+16`; at 0x801279a4 / 0x801279b4), writes it back into the event-check struct's kind field at `+0x18`, and reads `table[that_index]` on the next pass. That claims indices 16 through 39, one per `STKIND_NUM`. **Index 40 (`EVKIND_NUM + STKIND_NUM`) is the first slot a mod may take.**
 
-### Extending for custom events
+`CustomEvents_InitSis` in `mods/custom_events/src/custom_events.c` uses that: it copies the original 42-entry `stc_sis_data[0]` array into a static extended array, appends one `ComposeSisText`-built buffer per custom event at index 42 and up, repoints `stc_sis_data[0]` at the extended array, and writes `sis_id_table[40 + i] = 42 + i`. The vanilla `stadiumPrediction` path then displays custom text with no further hooking. The mod's `mod_desc` runs it from `.On3DLoadEnd` whenever the loaded stage is `STAGEKIND_CITY1`, so the entries are reinstalled on every City Trial load.
 
-To add custom event text to the City Trial SIS system:
+## HSD archive layout
 
-1. Compose SIS text entries using the layout above (see `mods/custom_events/src/custom_events.c::ComposeSisText`).
-2. After `SisCitytrial.dat` loads, extend `stc_sis_data[0]` with custom entries at indices 42+.
-3. Write custom SIS IDs (42, 43, ...) into the lookup table at `stc_event_sis_id_table[CUSTOM_SIS_TABLE_OFFSET + i]` where `CUSTOM_SIS_TABLE_OFFSET = EVKIND_NUM + STKIND_NUM = 40`. Indices 16-39 are already used by the prediction event for stadium-kind lookups — do NOT write to those.
-4. The vanilla `stadiumPrediction` code path automatically displays the correct text.
-
-This is implemented by `CustomEvents_InitSis` in `custom_events.c`: it copies the original 42-entry `stc_sis_data[0]` array into a static `extended_sis_ptrs[]`, appends one `ComposeSisText`-built buffer per custom event at indices `SIS_CITYTRIAL_ENTRY_COUNT` (= 42) `+ i`, repoints `stc_sis_data[0]` at the extended array, and writes `sis_id_table[CUSTOM_SIS_TABLE_OFFSET + i] = 42 + i`. The framework's `mod_desc` wires `.OnBoot` (installs the state-handler wrappers + extended roll) and `.On3DLoadEnd` (calls `CustomEvents_InitSis` when `Gm_GetCurrentStageKind() == STAGEKIND_CITY1`), so these custom SIS entries are installed on each City Trial load. Note that nothing is built by default, so a plain `make deploy` omits `custom_events`; name it explicitly, e.g. `make deploy INCLUDE_MODS=archipelago,custom_events`.
-
-## HSD Archive Format (SIS Files)
-
-SIS files are standard HSD archives:
+SIS files are ordinary HSD archives:
 
 ```
-Offset  Size    Field
-0x00    4       File size
-0x04    4       Data section size
-0x08    4       Relocation entry count (= number of pointer entries)
-0x0C    4       Root node count (always 1 for SIS)
-0x10    16      Reserved (zeroes)
-0x20    N*4     Pointer array (offsets relative to 0x20)
-                  [0] = image data offset (often null for Latin-only files)
-                  [1] = kerning data offset (often null for Latin-only files)
-                  [2+] = text entry offsets
-...             Text entry data (SIS command format)
-...             Relocation table
-...             Root node table
-...             Symbol strings (e.g., "SIS_CityTrial")
+0x00  4      file size
+0x04  4      data section size
+0x08  4      relocation entry count
+0x0C  4      root node count (always 1 for SIS)
+0x10  16     reserved
+0x20  N*4    pointer array, offsets relative to 0x20
+               [0] image data (usually null for Latin-only files)
+               [1] kerning data (usually null)
+               [2+] text entries
+...          text entry data (opcode streams)
+...          relocation table
+...          root node table
+...          symbol strings, e.g. "SIS_CityTrial"
 ```
 
-When loaded via `Text_LoadSisFile`, the HSD loader relocates offsets to absolute memory pointers. The resulting pointer array is stored in `stc_sis_data[slot]`.
+`Text_LoadSisFile` relocates the offsets to absolute pointers and stores the resulting array in `stc_sis_data[slot]`.
 
-## Key Addresses
+## Address reference
 
 ### Functions
 
-| Address | Symbol (map) | Description |
-|---------|--------------|-------------|
-| `0x8044edec` | `Text_AllocFromHeap` | Internal heap alloc |
-| `0x8044efa8` | `Text_FreeAlloc` | Internal heap free |
-| `0x8044f128` | `Text_CreateGObj` | Create Text GObj with position params |
-| `0x8044f350` | `Text_Destroy` | Destroy a Text |
-| `0x8044f5b4` | `Text_CreateHeap` | Init the text heap |
-| `0x8044f674` | `Text_CreateTextCanvas` (text.h: `Text_CreateCanvas`) | Create canvas + ortho camera |
-| `0x8044f800` | `Text_LoadSisFile` | Load SIS file into a slot |
-| `0x8044f8c8` | `Text_InitPremadeText` | Set text from SIS entry by index |
-| `0x8044f9d4` | `Text_StorePremadeText` | Parse/count subtexts in SIS data |
-| `0x8044fa70` | `Text_Create` | Simple text creator |
-| `0x8044fb0c` | `Text_ConvertASCIIToShiftJIS` | ASCII → SIS opcode/char stream converter; emits `0x20xx` SIS glyph codes for letters/digits but real `0x81xx` Shift-JIS codes for some punctuation (`"`/`'`/`,`/`-`) |
-| `0x8044fec4` | `Text_AddSubtext` | Add positioned subtext from C format string |
-| `0x8045031c` | `Text_SetText` | Replace subtext body from C format string |
-| `0x80450774` | `Text_SetScale` | Patch scale opcode of a subtext |
-| `0x80450828` | `Text_PushState` | Push state-history frame |
-| `0x80451344` | `Text_DetermineHeightAndWidth` | Bounding-box computation |
-| `0x804516e4` | `Text_GXLink` (text.h: `Text_GX`) | **Renderer.** Pass 0 = camera setup, pass 2 = draw |
-| `0x8045111c` | `Text_PopState` | Pop state-history frame |
+| Address | Symbol | Role |
+|---------|--------|------|
+| `0x8044edec` | `Text_AllocFromHeap` | text heap alloc |
+| `0x8044efa8` | `Text_FreeAlloc` | text heap free |
+| `0x8044f128` | `Text_CreateGObj` | create Text GObj with position params |
+| `0x8044f350` | `Text_Destroy` | destroy a Text |
+| `0x8044f5b4` | `Text_CreateHeap` | init the text heap |
+| `0x8044f674` | `Text_CreateTextCanvas` (`Text_CreateCanvas`) | canvas + ortho camera |
+| `0x8044f800` | `Text_LoadSisFile` | load a SIS archive into a slot |
+| `0x8044f8c8` | `Text_InitPremadeText` | bind a SIS entry by index |
+| `0x8044f9d4` | `Text_StorePremadeText` | parse and count subtexts |
+| `0x8044fa70` | `Text_Create` (`Text_CreateText`) | create a Text under a canvas |
+| `0x8044fb0c` | `Text_ConvertASCIIToShiftJIS` | ASCII to opcode/glyph stream |
+| `0x8044fec4` | `Text_AddSubtext` | append a positioned subtext |
+| `0x8045031c` | `Text_SetText` | replace a subtext body |
+| `0x80450774` | `Text_SetScale` | patch a subtext's SCALE opcode |
+| `0x80450828` | `Text_PushState` | push a state-history frame |
+| `0x8045111c` | `Text_PopState` | pop a state-history frame |
+| `0x80451344` | `Text_DetermineHeightAndWidth` | bounding-box measure pass |
+| `0x804516e4` | `Text_GXLink` (`Text_GX`) | renderer; pass 0 camera, pass 2 draw |
 | `0x800ab2d4` | `DevelopText_Create` | DevText creator |
 | `0x800ab78c` | `DevelopText_AddString` | DevText print |
-| `0x80438898` | `DevelopText_DrawStrokeGlyph` | DevText `GX_LINES` glyph render |
+| `0x80438898` | `DevelopText_DrawStrokeGlyph` | DevText `GX_LINES` glyph |
+| `0x8042a29c` | `CObjThink_Common` | pass-0 camera GX callback |
+| `0x80112044` | `Gm_Get3dData` | 3D HUD data struct (unnamed in the map) |
+| `0x801168e8` | `CityTrial_CreateEventTextCamera` | event HUD canvas, slot 0 |
+| `0x80113fb4` | `CityEvent_ShowHudText` | mode gate into `stadiumPrediction` |
+| `0x80127864` | `stadiumPrediction` | event / prediction HUD text |
+| `0x801169fc` | `CityEvent_SetSisText` | creates the Text GObj and binds the entry |
+| `0x80153d2c` | `AirRideSelect_SetMachineText` | machine name/description lookup |
+| `0x8015e740` | `CitySelect_SetMachineText` | machine name/description lookup |
+| `0x8038bf64` | `OSText_DrawString` | IPL font path (separate from SIS) |
 
 ### Data
 
-| Address | Symbol | Description |
-|---------|--------|-------------|
-| `0x80509b40` | (ASCII pair table) | 320×2 bytes — ASCII → SIS code lookup |
-| `0x805098c0` | (SIS code table) | 320×2 bytes — SIS code values for above |
-| `0x80509dc0` | master kerning table | 256 × 2 bytes |
-| `0x8050a040` | master image table | 256 × `0x200` (I4 32×32) |
-| `0x805053f8` | DevText stroke font | Variable-length stroke list per character |
-| `0x805096a0` | text camera CObj desc | Used by `Text_CreateTextCanvas` |
-| `0x8042a29c` | `CObjThink_Common` | Pass-0 camera GX callback (the canonical CObj think/GX callback hoshi registers for text cameras) |
-| `0x8059a848` | `stc_sis_archives[5]` | HSD_Archive pointers per slot |
-| `0x8059a85c` | `stc_sis_data[5]` | SIS data pointer arrays per slot |
-| `0x804a7b98` | `stc_event_sis_id_table` (`event.h`) | `int[]` mapping `event_kind` → SIS entry index |
-| `0x80112044` | `Gm_Get3dData` (map: `3D_GetData`) | Returns 3D HUD data struct |
-| `0x801168e8` | `CityTrial_CreateEventTextCamera` | Creates event HUD text canvas (sis_idx=0) |
-| `0x80113fb4` | `CityEvent_ShowHudText` | Mode gate → calls `stadiumPrediction` |
-| `0x80127864` | `stadiumPrediction` | Event/prediction HUD text display |
-| `0x801169fc` | `CityEvent_SetSisText` | Creates Text GObj + calls `Text_InitPremadeText` |
+These are unnamed in the symbol map; hoshi headers pin them as literal-address pointers.
+
+| Address | Meaning |
+|---------|---------|
+| `0x8050a040` | master image table, 256 x `0x200` I4 32x32 |
+| `0x80509dc0` | master kerning table, 320 x 2 bytes |
+| `0x80509b40` | ASCII pair table, 320 x 2 bytes |
+| `0x805098c0` | SIS code table paired with the above |
+| `0x8050983c` | opcode dispatch jump table, entries `0x00`-`0x1a` |
+| `0x805053f8` | DevText stroke font |
+| `0x805096a0` | text camera CObj descriptor |
+| `0x8059a848` | `stc_sis_archives[5]` (`text.h`) |
+| `0x8059a85c` | `stc_sis_data[5]` (`text.h`) |
+| `0x805de56c` | `stc_textcanvas_first` (`text.h`) |
+| `0x804a7b98` | `stc_event_sis_id_table` (`event.h`) |
+| `0x804aa3d8` / `0x804aa428` | Air Ride select machine name / description indices |
+| `0x804aa598` / `0x804aa5e8` | City Trial select machine name / description indices |

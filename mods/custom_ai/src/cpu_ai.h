@@ -43,10 +43,10 @@ typedef struct CpuAIPresetDef
     int   ai_profile;            // Vanilla ai_state to force at init (CPU_PROFILE_*)
 } CpuAIPresetDef;
 
-// Independent per-mode selections, each of which may be CPU_AI_RANDOM.
+// Independent per-mode selections, each of which may be CPU_AI_RANDOM. Top Ride
+// has no entry: its CPUs run a separate AI that Rider_CPUInit never reaches.
 extern int cpu_ai_preset_ct;   // City Trial CPU riders
 extern int cpu_ai_preset_ar;   // Air Ride CPU riders
-extern int cpu_ai_preset_tr;   // Top Ride CPU riders
 
 const CpuAIPresetDef *CpuAI_GetPresetDef(int preset);
 const char *CpuAI_GetPresetName(int preset);

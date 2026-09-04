@@ -15,14 +15,10 @@ typedef struct CustomItemEntry
 {
     int  file_entrynum;             // FST entry of the .dat (re-openable across scenes)
     u32  id_hash;                   // stable identity = hash of the full FST path
-    char name[CUSTOM_ITEM_NAME_MAX]; // filename at discovery; descriptor name once loaded
-    char menu_label[CUSTOM_ITEM_NAME_MAX]; // filename minus extension; never overwritten, so the toggle's save hash is stable
-    int  enabled;                   // per-item spawn gate (menu / API)
+    char name[CUSTOM_ITEM_NAME_MAX]; // descriptor's display name, read at discovery; filename if unreadable
+    int  api_enabled;               // consumer-mod gate, default 1; closed keeps the item out of the round
     int  assigned_kind;             // ItemKind in the extended itData[] this scene; -1 until registered
 } CustomItemEntry;
-
-// Master toggle; off gates every custom item out of spawning.
-extern int custom_items_enabled;
 
 void CustomItems_OnBoot(void);
 

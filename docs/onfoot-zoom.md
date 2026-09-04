@@ -6,8 +6,8 @@ menu toggle feeds the on-foot camera the C-Stick's Y axis using the machine came
 math, so the two behave identically. It is a convenience enhancement, not an Archipelago gate:
 no items, no save state.
 
-Implementation: `onfoot_zoom.c` / `onfoot_zoom.h` in the archipelago mod, with the menu option
-in `settings_menu.c`.
+Implementation: `mods/archipelago/src/onfoot_zoom.c`, with the menu option in
+`mods/archipelago/src/settings_menu.c`.
 
 ## Game System
 
@@ -18,7 +18,7 @@ are 1 (riding a machine), 6 (on foot) and 9 (rail). Each descriptor holds the ca
 
 | Offset | Role | Kind 1 | Kind 6 |
 |---|---|---|---|
-| `+0x04` | on-enter, run by `PlyCam_SwitchKind` | `0x800c28c0` | `PlyCam_OnFootEnter` (`0x800cc050`) |
+| `+0x04` | on-enter, run by `PlyCam_SwitchKind` | `PlyCam_OnEnterNormal` (`0x800c28c0`) | `PlyCam_OnFootEnter` (`0x800cc050`) |
 | `+0x08` | input think, run last | `PlyCam_OnMachineThink` (`0x800c04b0`) | `PlyCam_OnFootThink` (`0x800cb3b4`) |
 | `+0x0c` | per-frame solve into `CamData.xc0` | `0x800c05ac` | `PlyCam_OnFootSolve` (`0x800cb500`) |
 | `+0x10` | smooth `xc0` into `CamData.xe8` | `0x800c24e8` | `PlyCam_OnFootBlend` (`0x800cbec8`) |

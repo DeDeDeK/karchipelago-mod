@@ -381,7 +381,7 @@ static void Moon_EnsureRender(void)
         return;
     stc_moon_gobj = WeatherGX_EnsureLayer(MOON_GOBJ_CLASS, MOON_GOBJ_PLINK, Moon_GX,
                                           MOON_GX_LINK, MOON_GX_PRI,
-                                          "[Moon] Moon layer installed");
+                                          "[Moon] Moon layer");
 }
 
 // Directional (INFINITE) moonlight. An INFINITE LOBJ uses only its position vector
@@ -425,9 +425,13 @@ static void MoonLight_Ensure(void)
     if (!gobj)
         return;
     s_moon_lobj = LObj_LoadDesc(&s_moon_lobj_desc);
+    if (!s_moon_lobj)
+    {
+        OSReport("[Moon] Moonlight LOBJ failed to load\n");
+        return;
+    }
     GObj_AddObject(gobj, HSD_OBJKIND_LOBJ, s_moon_lobj);
     GObj_AddGXLink(gobj, LObj_GX, 0, 0);
-    OSReport("[Moon] Moonlight LOBJ created\n");
 }
 
 static void MoonLight_Zero(void)

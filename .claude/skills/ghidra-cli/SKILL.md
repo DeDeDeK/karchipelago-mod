@@ -124,6 +124,10 @@ ghidra disasm TARGET [-n COUNT] [QUERY_OPTS]   # TARGET = name or 0xADDRESS; ali
 `--with-params` includes parameter details (name, type, storage) in the response.
 Both flags add structured data alongside the decompiled C code; use `--json` to see the full output.
 
+`decompile` emits JSON at every `-o` format, so the C arrives as one escaped
+string. To just read the code, use `uv run python scripts/kar.py decomp TARGET...`,
+which unwraps it (and accepts several targets per call).
+
 ### String Operations
 
 ```bash
@@ -240,6 +244,20 @@ ghidra script python CODE [--project P] [--program PROG]
 ghidra script java CODE [--project P] [--program PROG]
 ghidra script list
 ```
+
+**In bridge mode most of this does not work.** `script python` and `script java`
+are rejected outright ("Inline Java execution not supported in bridge mode"), and
+`script run` is far pickier than it looks:
+
+| Constraint | Consequence |
+|------------|-------------|
+| The client only accepts a path that exists relative to the **bridge's** working directory | a copy of the script must sit there, whatever your own cwd is |
+| The bridge resolves the **bare filename** against its script path (`~/.config/ghidra-cli/scripts`), never an absolute or relative path | a second copy must sit there, and the argument must be just `Name.java` |
+| `println` output is not returned - you only get `{"status":"executed"}` | the script has to write results to a file |
+| `-- ARGS` are not forwarded to `getScriptArgs()` | configuration has to come from a file at a fixed path |
+
+`scripts/ghidra/sync.py` already encapsulates all four; drive a new `.java`
+through its `run_bridge_script()` rather than rebuilding the plumbing.
 
 ### Batch
 

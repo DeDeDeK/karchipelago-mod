@@ -348,7 +348,7 @@ static void EnsureBoltRender(void)
         return;
     s_bolt_render = WeatherGX_EnsureLayer(BOLT_GOBJ_CLASS, BOLT_GOBJ_PLINK, Bolt_GX,
                                           BOLT_GX_LINK, BOLT_GX_PRI,
-                                          "[Lightning] Bolt render layer installed");
+                                          "[Lightning] Bolt render layer");
 }
 
 // Latch the active preset's lightning config, resolving each 0 field to its module
@@ -458,9 +458,6 @@ void Lightning_Tick(HSD_Fog *fog)
             int span = stc_max_lull - stc_min_lull;
             s_lull_frames = stc_min_lull + (span > 0 ? HSD_Randi(span) : 0);
             GenerateBolt();
-            OSReport("[Lightning] Strike (len %d, %d%% peak, %don/%doff, next in %d frames)\n",
-                     s_strike_len, (int)(s_strike_intensity * 100.0f),
-                     s_strike_on, s_strike_gap, s_lull_frames);
         }
     }
 }

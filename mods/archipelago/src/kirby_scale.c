@@ -7,6 +7,7 @@
 #include "main.h"
 #include "ap_item_handler.h"
 #include "textbox_api.h"
+#include "ap_announce.h"
 
 // Effects are multiplicative, kept inside [0.5, 2.0] so the model never grows
 // large enough to break the camera / collision feel. Neutral matches the vanilla
@@ -71,12 +72,12 @@ int KirbyScale_HandleItem(uint ap_item_id)
     if (ap_item_id == AP_ITEM_BIG_KIRBY)
     {
         kirby_scale_target = ClampScale(kirby_scale_target * KIRBY_SCALE_GROW);
-        tb_api->EnqueueColoredNoun("Received: ", "Big Kirby", tb_api->ItemColor, NULL);
+        APAnnounce_Grant("Received: ", "Big Kirby", tb_api->ItemColor, NULL);
     }
     else
     {
         kirby_scale_target = ClampScale(kirby_scale_target * KIRBY_SCALE_SHRINK);
-        tb_api->EnqueueColoredNoun("Received: ", "Small Kirby", tb_api->ItemColor, NULL);
+        APAnnounce_Grant("Received: ", "Small Kirby", tb_api->ItemColor, NULL);
     }
 
     OSReport("[KirbyScale] %s received; model scale now %d/1000\n",

@@ -1,12 +1,8 @@
 # Copy Ability Gating
 
-Each of Kirby's 11 copy abilities can be individually locked behind an Archipelago unlock item. A locked ability cannot be obtained from *any* source — copy panels, the copy chance wheel, or enemy inhale — and its item panels and themed enemies are filtered out of the spawn tables so the locked state is invisible rather than teasing.
+Each of Kirby's 11 copy abilities can be individually locked behind an Archipelago unlock item. AP items 760-770 (`AP_ABILITY_UNLOCK_BASE` + `CopyKind`) route through `ap_item_handler.c` to `GateAbilities_UnlockAbility`, which sets the bit in `APSave.ability_unlocked_mask` and posts a textbox. A locked ability cannot be obtained from *any* source - copy panels, the copy chance wheel, or enemy inhale - and its item panels and themed enemies are filtered out of the spawn tables so the locked state is invisible rather than teasing.
 
-This doc covers the gating only. The engine's grant / per-frame tick / teardown lifecycle for a held ability is in `copy-ability-system.md`.
-
-## What Is Gated
-
-The 11 `CopyKind`s (`rider.h`), one bit each in `ability_unlocked_mask`. Each has a copy panel ITKIND (mapped by `Ability_ItKindToCopyKind` in `ability_item.c`) and, for most, one or more themed enemies.
+**Files:** `mods/archipelago/src/gate_abilities.c` (gating hooks + enemy-spawn filtering); `ability_item.c` (`Ability_GiveItem` AP grant path, `Ability_ItKindToCopyKind` ITKIND to CopyKind mapping).
 
 | Bit | `CopyKind` | Panel ITKIND | AP item |
 |----:|------------|--------------|--------:|
@@ -22,191 +18,81 @@ The 11 `CopyKind`s (`rider.h`), one bit each in `ability_unlocked_mask`. Each ha
 | 9 | `COPYKIND_TORNADO` | `ITKIND_COPYTORNADO` | 769 |
 | 10 | `COPYKIND_BIRD` | `ITKIND_COPYBIRD` | 770 |
 
-## Entry Points
+The mask is a `u16` in `APSave` (`main.h`, via the global `ap_save`), exposed through `ArchipelagoAPI` as `AP_UNLOCK_ABILITY`. When the slot option `ability_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` (`main.c`) pre-fills it with `(1 << COPYKIND_NUM) - 1` at connect.
 
-**Files:** `mods/archipelago/src/gate_abilities.c` / `gate_abilities.h` (gating hooks + enemy-spawn filtering); `ability_item.c` / `ability_item.h` (`Ability_GiveItem` AP grant path, `Ability_ItKindToCopyKind` ITKIND → CopyKind mapping).
-
-| Symbol | Kind | Where | Role |
-|--------|------|-------|------|
-| `GateAbilities_OnBoot()` | mod | gate_abilities.c | Installs the two REPLACEFUNCs and two NOPs (called from `main.c`). |
-| `GateAbilities_CheckAndGiveAbility(GOBJ*, int kind)` | mod | gate_abilities.c | Replacement for `Rider_CheckAndGiveAbility`; gates item/enemy grants, sends the Sleep TrapLink. |
-| `GateAbilities_RandomGiveAbility(RiderData*, int kind)` | mod | gate_abilities.c | Replacement for `randomAbility_giveAbility`; substitutes a random unlocked ability. |
-| `GateAbilities_FilterSpawnTables()` | mod | gate_abilities.c | Removes locked copy panels from the three `grBoxGeneObj` box pools. |
-| `GateAbilities_FilterEventDropTables()` | mod | gate_abilities.c | Zeroes all six chance columns of locked copy panels in `event_source_drop[]`. |
-| `GateAbilities_On3DLoadEnd()` | mod | gate_abilities.c | Zeroes enemy spawn weights for locked-ability enemies. |
-| `GateAbilities_UnlockAbility(CopyKind)` | mod | gate_abilities.c | Sets the unlock bit and posts a textbox. Called from `ap_item_handler.c`. |
-| `EnemyIDToCopyKind(int enemy_id)` | mod (static) | gate_abilities.c | Enemy actor ID → themed `CopyKind`. |
-| `RandomUnlockedAbility()` | mod (static) | gate_abilities.c | Random unlocked `CopyKind`, or `-1` if none. |
-| `Rider_CheckAndGiveAbility` | game | 0x80192650 | Single entry point for non-wheel grants (replaced). |
-| `Rider_GiveAbility` | game | 0x801a81a4 | Master grant; **not** replaced, so AP grants bypass the gate. |
-| `randomAbility_giveAbility` | game | 0x801a61d4 | Copy-wheel commit (replaced). |
-| `stc_ability_init_table` | game | 0x804af4f0 | 11 per-`CopyKind` init function pointers (e.g. `ability_Fire` at `0x801af474`); the replacement calls it directly. |
-| `Rider_RecordCopyAbility(ply, kind)` | game | 0x8022ee00 | Records ability history, checks checklist sequences. |
-| `Rider_MarkCopyAbilityObtained(ply, kind)` | game | 0x8022f150 | Sets the bit in the per-player obtained-abilities mask. |
-| `Rider_ResolveQueuedAbility` | game | 0x801a8454 | Grants a pending queued ability/power-up, else runs the IASA fallback chain to `AS_StarWait`. |
-| `AS_StarWait` | game | 0x801ab1a0 | Neutral state (`RiderStateChange` 0x21); last resort of that chain. |
-| `Enemy_SpawnerDecideMode2` | game | 0x800f0efc | Kirby Melee 1's two-stage spawn picker. |
-
-## Game System
+## Acquisition Paths
 
 Copy abilities can be obtained four ways, all of which need gating.
 
-### Copy panels from boxes and event drops
+**Item pickup and enemy touch.** `Machine_OnTouchItem` (0x801db34c, case 0x1a) calls `Rider_CheckAndGiveAbility` (0x80192650), which checks `rd->kind == RDKIND_KIRBY` and then calls the master grant `Rider_GiveAbility` (0x801a81a4). `Rider_CheckAndGiveAbility` is the single entry point for every non-wheel grant.
 
-Copy ability panels are regular items in the `grBoxGeneObj` spawn table system and the `event_source_drop` table.
+**Copy chance wheel (inhale an enemy).** A roulette wheel spins and lands on a random ability. `randomAbility_mainLoop` (0x801a5fb8) runs it per frame through `rd->cb_copy_input` (+0x930); `randomAbility_checkIfaPress` (0x801ae7c8) and `randomAbility_aPress` (0x801ae7f4) stop it on A, `randomAbility_autoSelect` (0x801ae890) does the same on timer expiry, and `randomAbility_getItemID` (0x801aea30) reads the landed slot as `rd->x9b0[rd->x99c]`. Both stop paths commit through `randomAbility_giveAbility` (0x801a61d4), whose vanilla body is `Rider_AbilityRemoveModel` -> `Rider_AbilityClearQueued` -> `Rider_RecordCopyAbility` (0x8022ee00) -> `stc_ability_init_table[kind](rd)` (the 11 per-CopyKind init function pointers at 0x804af4f0, e.g. `ability_Fire` at 0x801af474). `randomAbility_queuedGive` (0x801aec60) is the timer-based give for a queued ability. `Rider_MarkCopyAbilityObtained` (0x8022f150) is called by `giveAbility`'s *callers* (0x801ae874 in `aPress`, 0x801ae910 in `autoSelect`), not by `giveAbility` itself - which matters for the hook below.
 
-Box spawn pools (`grBoxGeneObj` at `*(0x805dd0e0 + 0x608)`):
+**Ground copy panels (collision zone kind 15).** A collision zone box of kind 15 (`GrCZK_RandomAbility`) spins the wheel when a machine drives into it. `Machine_ProcessEnvColl` (0x801e5108) detects it via `zz_80246f40_` (0x80246f40), checks the zone differs from last frame's stored index, and calls `Rider_GiveRandomAbility` (0x80191fb8) -> `Rider_StartRandomCopyWheel` (0x801ae4ec), which rolls `HSD_Randi(0xB)`, looks the ability up in the table at 0x804af690 (`stc_copy_wheel_normal`, `rider.h` - 11 ints, an identity mapping to CopyKind; a weighted 29-entry melee alternative sits at 0x804af6bc as `stc_copy_wheel_melee`), and calls `Rider_StartCopyWheel` (0x801ae550), landing in `randomAbility_giveAbility`. It then bumps the Celestial-Valley checklist counter `PlayerStats+0x7f0` through `zz_80230f18_` (0x80230f18), unconditionally - the counter tracks the panel touch, not whether an ability came out.
 
-- `item_group_spawn[BOXKIND_NUM]` — per-box-type pools. Each has `it_kind[ITKIND_NUM-1]` (68), `chance[ITKIND_NUM-1]` (68), `num`.
-- `sameitem_it_kind/chance/num` — "All Same Item" event pool.
-- `subsequent_it_kind/chance/num` — blue box multi-item pool.
+`zz_80246f40_` scans `CollData.zone_hit` and `CollData.moving_zone_hit` against `(*stc_grobj)->coll.zone` (0x805dd6cc, 0x140 stride, face kinds at +0x24 + face*0x24), which `grZone_BuildRecord` (0x800dcf08) fills from `GrCollFace.kind_word`, so the path exists in City Trial and Air Ride only. Panels come from two places. City Trial has one baked into `GrCity1.dat`'s own zone array. Every Air Ride panel is instead a yakumono appended at load: `grdata->yakumono->entries[]` (YakumonoNode+0x10, count at +0x14; 0x0c stride `{kind, data_idx, common_group}`) dispatched through `grYakuFuncTable[12]` (`GrYaku_DispatchEntry12`, 0x800f9be0), each contributing a kind-15 zone plus a light zone past the terrain model's own. Only two courses ship any: **Nebula Belt** four - its sole ability source, since it spawns no enemies at all - and **Celestial Valley** the single one on top of the tree.
 
-Event drop table (`grBoxGeneInfo->item_desc->event_source_drop`, +0x18 with count at +0x1c): per-item entries with one chance field per drop source — `chance_dyna`, `chance_tac`, `chance_meteor`, `chance_destructible`, `chance_chamber`, `chance_ufo`.
+**Copy panels from boxes and event drops.** Copy panels are regular items in the `grBoxGeneObj` spawn table system (at `*(0x805dd0e0 + 0x608)`), whose pools are `item_group_spawn[BOXKIND_NUM]` (per box type, each with parallel `it_kind`/`chance` arrays and a `num`), `sameitem_*` ("All Same Item" event) and `subsequent_*` (blue box multi-item). The event drop table is `grBoxGeneInfo->item_desc->event_source_drop` (+0x18, count at +0x1c), per-item entries with one chance field per drop source: dyna, tac, meteor, destructible, chamber, ufo.
 
-### Copy chance wheel (inhale an enemy)
+## Acquisition Hooks
 
-When Kirby inhales an enemy, a roulette wheel spins and lands on a random ability.
+**`CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility)`** gates item and enemy pickups: it checks `rd->kind == RDKIND_KIRBY`, then the mask bit, before calling `Rider_GiveAbility`. It also sends a TrapLink (`TRAPLINK_KIND_SLEEP`) when a non-CPU player **successfully** receives COPYSLEEP - gated on `Rider_GiveAbility`'s nonzero return, since the grant can fail when the rider is in an unable state, which would otherwise emit a phantom trap.
 
-| Function | Address | Purpose |
-|----------|---------|---------|
-| `randomAbility_mainLoop` | 0x801a5fb8 | Per-frame wheel callback via `rd->cb_copy_input` (0x930) |
-| `randomAbility_checkIfaPress` | 0x801ae7c8 | Checks A press to stop wheel |
-| `randomAbility_aPress` | 0x801ae7f4 | Stops wheel, calls giveAbility |
-| `randomAbility_autoSelect` | 0x801ae890 | Auto-selects on timer expiry (same logic as aPress) |
-| `randomAbility_getItemID` | 0x801aea30 | Reads wheel position: `rd->x9b0[rd->x99c]` |
-| `randomAbility_giveAbility` | 0x801a61d4 | Commits the result: `Rider_AbilityRemoveModel` → `Rider_AbilityClearQueued` → `Rider_RecordCopyAbility` → `stc_ability_init_table[kind](rd)` |
-| `randomAbility_removeWheelModel` | 0x801a66d0 | Removes wheel 3D model |
-| `randomAbility_queuedGive` | 0x801aec60 | Timer-based give for queued abilities |
+`Rider_GiveAbility` itself is deliberately **not** replaced. `Ability_GiveItem` (the AP grant path) calls it directly, so an AP-granted ability - including one bought with EnergyLink - bypasses the gate and applies whether or not its unlock item has arrived. That path also reaches the rider without touching any per-kind item data (it only indexes `stc_ability_init_table`), which is why `APItems_HandleItem` runs the copy-ability branch above its Free Run / stadium gate: the grants land in every 3D mode, at the cost of no pickup visual.
 
-`Rider_MarkCopyAbilityObtained` is called by `randomAbility_giveAbility`'s *callers* (`randomAbility_aPress` at 0x801ae874, `randomAbility_autoSelect` at 0x801ae910), not by `giveAbility` itself.
+**`CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility)`** gates the wheel. If it lands on a locked ability, `RandomUnlockedAbility()` substitutes a random unlocked one, so inhaling an enemy stays worthwhile as soon as anything is unlocked.
 
-### Item pickup / enemy touch
+With nothing unlocked there is no substitute, and the replacement must still resolve the rider's state: it calls `Rider_AbilityRemoveModel` -> `Rider_AbilityClearQueued` -> `Rider_ResolveQueuedAbility` (0x801a8454) before returning 0. Both callers reach this function from an action-state with no other exit - the post-swallow state entered at 0x801b9a54 runs `randomAbility_queuedGive` every frame until the grant transitions the rider out, and the wheel commit has already torn down the wheel model and cleared `cb_copy_input` by the time it calls the grant. Returning without a transition leaves the rider stuck for the rest of the match with no inhale and no quick spin. `Rider_ResolveQueuedAbility` is the engine's own "nothing to give" step (the tail of `Rider_StartCopyWheel` and the exit of the inhale START state): it grants a pending queued ability if there is one, else runs the IASA fallback chain and settles on `AS_StarWait` (0x801ab1a0, `RiderStateChange` 0x21).
 
-When a machine touches a copy panel item: `Machine_OnTouchItem` (0x801db34c, case `0x1a`) → `Rider_CheckAndGiveAbility` (0x80192650) → `Rider_GiveAbility` (0x801a81a4). `Rider_CheckAndGiveAbility` checks `rd->kind == RDKIND_KIRBY` then calls `Rider_GiveAbility`. This is the single entry point for all non-wheel copy ability grants (items and enemies).
+On the success path the replacement reproduces the vanilla sequence and additionally calls `Rider_MarkCopyAbilityObtained` itself, with the possibly-substituted kind. `GateAbilities_OnBoot` therefore NOPs the callers' own calls with `CODEPATCH_REPLACEINSTRUCTION(addr, 0x60000000)` at 0x801ae874 and 0x801ae910, so the obtained-abilities bitmask tracks the ability actually given rather than the one the wheel showed.
 
-### Ground copy panels (collision attribute 0xF)
+## Spawn Table Filtering
 
-Floor polygons tagged with ground collision attribute 0xF spin the copy wheel when a machine drives over them:
+`item_spawn_filter.c` owns the two spawn-table hook points; `FilterAllSpawnTables()` calls each gate file's filters in a fixed order:
 
-```
-Machine_ProcessEnvColl (0x801e5108)
-  └─ detects attribute 0xF via zz_80246f40_ (0x80246f40)
-  └─ checks it's a new panel (different from last frame's stored ID)
-  └─ calls Rider_GiveRandomAbility (0x80191fb8)
-       └─ calls Rider_StartRandomCopyWheel (0x801ae4ec)
-            └─ HSD_Randi(0xB) picks ability index 0–10
-            └─ looks up ability from the table at 0x804af690
-            └─ calls Rider_StartCopyWheel (0x801ae550), which lands in randomAbility_giveAbility
-```
+1. `GateItems_EnsureAllUpInSpawnPools()` - injects All-Up (active only under the Max Stats Insanity CT goal).
+2. Box pools (`grBoxGeneObj`): `GateAbilities_FilterSpawnTables()` -> `GatePatches_FilterSpawnTables()` -> `GateItems_FilterSpawnTables()`.
+3. Event drop pools (`grBoxGeneInfo`): `GateAbilities_FilterEventDropTables()` -> `GatePatches_FilterEventDropTables()` -> `GateItems_FilterEventDropTables()`.
+4. `GoalMaxStatsCT_ApplyDropBias()` - biases +1 patch / All-Up weights (Max Stats Insanity goal only).
 
-The table at `0x804af690` is 11 ints, `{0 … 10}` — an identity mapping to CopyKind (`stc_copy_wheel_normal`, `rider.h`). A weighted 29-entry alternative for melee mode sits at `0x804af6bc` (`stc_copy_wheel_melee`).
-
-`zz_80246f40_` resolves the attribute out of the 3D stage collision data hanging off `stc_grobj` (0x805dd6cc), which only `grLoadStage` (0x800ce318) populates, so this path exists in City Trial and Air Ride only.
-
-## Implementation
-
-### Hooks
-
-**1. `CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility)`**
-
-Gates item/enemy copy ability pickups. Checks `rd->kind == RDKIND_KIRBY`, then the `ability_unlocked_mask` bit, before calling `Rider_GiveAbility`. Also sends a TrapLink (`TRAPLINK_KIND_SLEEP`) when a non-CPU player **successfully** receives COPYSLEEP (gated on `Rider_GiveAbility`'s non-zero return, since it can fail when the rider is in an unable state — avoids phantom traps). Since `Rider_GiveAbility` itself is NOT replaced, AP-granted abilities (via `Ability_GiveItem` → `Rider_GiveAbility` direct) bypass the gate automatically.
-
-**2. `CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility)`**
-
-Gates the copy chance wheel. If the wheel lands on a locked ability, `RandomUnlockedAbility()` picks a random unlocked one instead.
-
-If no abilities are unlocked at all there is no substitute, and the replacement must still resolve the rider's state: it calls `Rider_AbilityRemoveModel` → `Rider_AbilityClearQueued` → `Rider_ResolveQueuedAbility` (0x801a8454) before returning 0. Both callers reach this function from an action-state that has no other exit — the post-swallow state entered at 0x801b9a54 runs `randomAbility_queuedGive` every frame until the grant transitions the rider out, and the wheel commit (`randomAbility_aPress` / `randomAbility_autoSelect`) has already torn down the wheel model and cleared `cb_copy_input` by the time it calls the grant. Returning without a transition leaves the rider stuck for the rest of the match with no inhale and no quick spin. `Rider_ResolveQueuedAbility` is the engine's own "nothing to give" step (the tail of `Rider_StartCopyWheel` and the exit of the inhale START state): it grants a pending queued ability if there is one, else runs the IASA fallback chain and settles on `AS_StarWait`. The replacement reproduces the vanilla sequence (`Rider_AbilityRemoveModel` → `Rider_AbilityClearQueued` → `Rider_RecordCopyAbility` → `stc_ability_init_table[kind](rd)`) and additionally calls `Rider_MarkCopyAbilityObtained` itself with the possibly-substituted kind. `GateAbilities_OnBoot` therefore NOPs the callers' own calls with `CODEPATCH_REPLACEINSTRUCTION(addr, 0x60000000)` at `0x801ae874` (`randomAbility_aPress`) and `0x801ae910` (`randomAbility_autoSelect`), so the obtained-abilities bitmask tracks the ability actually given.
-
-**3. Spawn table filter chain (owned by `item_spawn_filter.c`)**
-
-`FilterAllSpawnTables()` in `item_spawn_filter.c` owns the two hook points and calls each gate file's filters in this order:
-
-1. `GateItems_EnsureAllUpInSpawnPools()` — injects All-Up (active only under the Max Stats Insanity CT goal).
-2. Box spawn pools (`grBoxGeneObj`): `GateAbilities_FilterSpawnTables()` → `GatePatches_FilterSpawnTables()` → `GateItems_FilterSpawnTables()`
-3. Event drop pools (`grBoxGeneInfo`): `GateAbilities_FilterEventDropTables()` → `GatePatches_FilterEventDropTables()` → `GateItems_FilterEventDropTables()`
-4. `GoalMaxStatsCT_ApplyDropBias()` — biases +1 patch / All-Up weights (Max Stats Insanity goal only).
-
-The two `GateAbilities_*` filters always run first within their respective groups. Box pools are compacted (`FilterCopyItemsFromPool`, stable two-pointer); event-drop entries stay in place with all six chance columns zeroed.
+The two `GateAbilities_*` filters always run first within their group. Box pools are compacted (`FilterCopyItemsFromPool`, a stable two-pointer); event-drop entries stay in place with all six chance columns zeroed.
 
 | Hook address | Function (entry) | Clobbered instruction | When |
 |-------------|-------------|----------------------|------|
-| `0x800eb558` | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` | After initial population |
-| `0x800ed7f0` | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `lwz r0, 0x14(r1)` | After event reinit |
+| 0x800eb558 | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` | After initial population |
+| 0x800ed7f0 | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `lwz r0, 0x14(r1)` | After event reinit |
 
-Both are function epilogue hooks — safe to call C with no arguments. `ItemSpawnFilter_On3DLoadEnd()` is the fallback for non-CT modes where these hooks don't fire.
+Both are function-epilogue hooks, so calling C with no arguments is safe. `ItemSpawnFilter_On3DLoadEnd()` is the fallback for non-CT modes where these hooks don't fire.
 
-### Enemy spawn filtering
+## Enemy Spawn Filtering
 
-Enemies themed around locked copy abilities are prevented from spawning by zeroing their weights in the spawn data. This is done in `GateAbilities_On3DLoadEnd()`, which reads `*stc_enemy_spawn_data` and dispatches by mode. The `.dat` data is modified in place; it is reloaded from disc on every stage load.
+Enemies themed around locked abilities never spawn: `GateAbilities_On3DLoadEnd()` zeroes their weights in the stage's enemy spawn data, which is reloaded from disc on every stage load so editing in place is safe. Zeroing weights beats rejecting at spawn time - substituting `enemy_id = -1` makes the spawner repeatedly select a locked enemy, get rejected and cycle through the respawn delay, which visibly thins enemy density.
 
-**Gate condition:** early-exit when `*stc_enemy_spawn_data == NULL` **or** its `config` pointer is NULL (`if (!data || !data->config) return;`). The spawn-data pointer is NULL in any mode without stage-based enemy spawning: City Trial city map, Top Ride, and stadiums other than Kirby Melee (Air Glider, Destruction Derby, Single Race, etc.). No explicit mode check is needed; the NULL check covers all enemy-less cases.
-
-**Spawn data structure** (`EnemySpawnData` in `enemy.h`; accessed via `stc_enemy_spawn_data` at r13 + 0x630 = `0x805dd710`):
-
-| Offset | Field | Meaning |
-|-------:|-------|---------|
-| 0x00 | `short spawn_count` | Number of entries in `spawn_entries` |
-| 0x04 | `EnemySpawnEntry *spawn_entries` | Primary spawn table, stride 0x38 |
-| 0x08 | `int x08` | — |
-| 0x0C | `int **secondary_table` | Meta-enemy sub-table array, indexed by `enemy_id - 0x50`; may be NULL |
-| 0x10 | `EnemySpawnConfig *config` | Mode at `config->mode` (+0x28) |
-
-**Three modes:**
+The filter reads `*stc_enemy_spawn_data` (`EnemySpawnData` in `enemy.h`, pointer at r13+0x630 = 0x805dd710) and early-exits when it or its `config` pointer is NULL. That covers every mode without stage-based enemy spawning - the City Trial city map, Top Ride, and every stadium but Kirby Melee - so no explicit mode check is needed. `config->mode` then selects one of three layouts:
 
 | Mode | Context | IDs offset | Weights offset | Max slots |
 |------|---------|-----------|---------------|-----------|
 | 1 | Air Ride courses | +0x1E | +0x26 | 4 |
-| 2 | `STKIND_MELEE1` (Kirby Melee 1) | Two-stage selection | Two-stage selection | — |
+| 2 | `STKIND_MELEE1` (Kirby Melee 1) | Two-stage selection | Two-stage selection | - |
 | 3 | `STKIND_MELEE2` (Kirby Melee 2) | +0x06 | +0x10 | 5 |
 
-**Mode 1 / mode 3 filtering** (`FilterMode1Or3`), per spawn entry's id/weight pairs (weight `-1` terminates):
+**Modes 1 and 3** (`FilterMode1Or3`) walk each spawn entry's id/weight pairs (weight -1 terminates) and zero the weight of any normal enemy whose ability is locked. Meta-enemy IDs (0x50-0x5E) instead index `data->secondary_table`, a sub-table array indexed by `enemy_id - 0x50`; the sub-table is filtered the same way, and if no entry with positive weight survives, the meta-enemy's own primary weight is zeroed too. Each sub-table is filtered only once, tracked in `meta_valid[]`.
 
-1. Normal enemies: zero the weight if their copy ability is locked (via `EnemyIDToCopyKind`).
-2. Meta-enemy IDs (0x50–0x5E): filter the secondary sub-table by zeroing weights for locked-ability enemies. If no entry with positive weight remains, zero the meta-enemy's primary weight too.
-3. Each meta-enemy sub-table is filtered only once (tracked via the `meta_valid[]` array).
+**Mode 2** (`FilterMode2`) covers Kirby Melee 1, whose `Enemy_SpawnerDecideMode2` (0x800f0efc) selects in two stages: stage 1 picks a meta-enemy category out of the `secondary_table[0]` sub-table, stage 2 picks an individual enemy from that category's weight column in the spawn entries (`enemy_id` at +0x06, weight columns at +0x08). Two details of the vanilla picker drive the filter:
 
-**Mode 2 filtering** (`FilterMode2`) — Kirby Melee 1 uses a two-stage selection: stage 1 picks a meta-enemy category from the `secondary_table[0]` sub-table, stage 2 picks an individual enemy from that category's weight column in the spawn entries. Entry layout: `enemy_id` at +0x06, weight columns at +0x08.
+- The **column index is the category's meta id minus 0x50**, not its position in the sub-table (`addi r0,r3,-80` at 0x800f0fdc, then `slwi r31,r0,1` at 0x800f1020 as the byte offset into the columns). Vanilla `GrPasture1` lists ids 0x50-0x59 in order so the two coincide there, but the filter derives the column from the id.
+- The sub-table's second short per pair is an **ascending threshold**, not a weight: stage 1 walks the pairs and takes the first whose value exceeds `total * (1 - EnemyMgr.time_progress)`. A threshold of 0 is therefore never selected, which is what makes zeroing it a valid way to retire a category.
 
-Two details of `Enemy_SpawnerDecideMode2` (0x800f0efc) drive the filter:
+So the filter zeroes the weight column of every category for entries whose enemy has a locked ability, then zeroes the threshold of any category left with no positive weight anywhere in its column.
 
-- The **column index is the category's meta id − 0x50**, not its position in the sub-table (`addi r0,r3,-80` at `0x800f0fdc`, then `slwi r31,r0,1` at `0x800f1020` as the byte offset into the columns). Vanilla `GrPasture1` lists ids 0x50–0x59 in order so the two coincide there, but the filter derives the column from the id.
-- The sub-table's second short per pair is an **ascending threshold**, not a weight: stage 1 walks the pairs and takes the first whose value exceeds `total * (1 - EnemyMgr.time_progress)`. A threshold of 0 is therefore never selected.
+`EnemySpawnEntry.mode2.weight_columns` is declared with the full width the entry has room for (20 shorts, +0x08..+0x2F) rather than the stage's category count. A shorter declaration lets the compiler assume every index is 0 and fold the zeroing loop down to a single store, leaving all columns but the first live and locked-ability enemies spawning.
 
-Filtering:
+**Enemy ID to CopyKind.** `enemy_slot_copykind[24]` is a per-tier-slot table (`ACTORID_ENEMIES_PER_TIER` = 0x18). T0/T1/T2 share one slot mapping because the ability is tied to the archive, not the tier flags - T1 Heat Phan-Phan is visually distinct but uses Phan-Phan's Fire archive. `EnemyIDToCopyKind(enemy_id)` mods into the slot table for IDs in `[ACTORID_TIER0_START, ACTORID_SPECIAL_START)` (0x00-0x47) and special-cases `ACTORID_SP_SWORD_KNIGHT` (0x49) as SWORD. All other special IDs (TAC, Dyna Blade, Meteor, etc.) are NONE.
 
-1. Zero the weight column of every category for entries whose `enemy_id` has a locked copy ability.
-2. For each category, check whether any entry still has positive weight in its column. If not, zero the category's threshold in the sub-table to prevent empty selections.
+## Mode Coverage
 
-`EnemySpawnEntry.mode2.weight_columns` is declared with the full width the entry has room for (20 shorts, +0x08..+0x2F) rather than the stage's category count. A shorter declaration lets the compiler assume every index is 0 and fold the zeroing loop down to a single store, which leaves all columns but the first live and locked-ability enemies spawning.
+The acquisition hooks are not mode-specific - they gate acquisition everywhere `RiderData` exists, so `GateAbilities_CheckAndGiveAbility` also covers Air Ride (callers: `Machine_OnTouchItem` and the debug menu) and `GateAbilities_RandomGiveAbility` covers Air Ride's static-stage copy wheels.
 
-**Enemy ID → CopyKind mapping:** `enemy_slot_copykind[24]` is a per-tier-slot table (`ACTORID_ENEMIES_PER_TIER` = 0x18). T0/T1/T2 share the same slot mapping because the copy ability is tied to the archive, not the tier flags — e.g. T1 Heat Phan-Phan is visually distinct but uses Phan-Phan's Fire archive. `EnemyIDToCopyKind(enemy_id)` mods into the slot table for IDs in `[ACTORID_TIER0_START, ACTORID_SPECIAL_START)` (0x00–0x47) and special-cases `ACTORID_SP_SWORD_KNIGHT` (0x49) → SWORD. All other special IDs (TAC, Dyna Blade, Meteor, etc.) are NONE.
+Top Ride has no copy abilities at all. Its scene creates neither `MachineData` nor `RiderData`, so `Rider_GiveAbility`, `Rider_GiveRandomAbility` and `randomAbility_giveAbility` are unreachable there, and it loads no 3D stage collision, so the attribute 0xF panels do not exist either. Every acquisition hook is a no-op in Top Ride.
 
-### Mode coverage
-
-The acquisition hooks are not mode-specific — they gate acquisition everywhere `RiderData` exists. `GateAbilities_CheckAndGiveAbility` covers Air Ride (callers: `Machine_OnTouchItem` and the debug menu) and `GateAbilities_RandomGiveAbility` covers Air Ride copy chance wheels (static stage objects).
-
-Top Ride has no copy abilities. Its scene creates neither `MachineData` nor `RiderData`, so `Rider_GiveAbility`, `Rider_GiveRandomAbility` and `randomAbility_giveAbility` are all unreachable there, and it loads no 3D stage collision, so the attribute 0xF copy panels do not exist either. Every acquisition hook above is a no-op in Top Ride.
-
-The one place `ability_unlocked_mask` still matters in Top Ride is the four ability-themed Top Ride **items** — Freeze Fan (TRITEM 9), Fire (11), Bomb (13), Walky (16). `GateTopRideItems_ApplyMask` in `gate_topride_items.c` treats the matching copy ability unlock (`COPYKIND_FREEZE`/`_FIRE`/`_BOMB`/`_MIC`) as an alternative key to the item's own bit in `topride_item_unlocked_mask`: either one enables it. The ability key only counts while `options.ability_gating_enabled` is set — otherwise the all-1s ungated mask would free all four items and strand their own AP unlocks.
-
-## Save Data
-
-`u16 ability_unlocked_mask` in `APSave` (`main.h`, accessed via the global `ap_save`) — bit N = `CopyKind` N.
-
-The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_ABILITY`. When the slot option `ability_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` in `main.c` pre-fills the mask with `(1 << COPYKIND_NUM) - 1` at connect.
-
-## AP Items
-
-11 AP items, `AP_ABILITY_UNLOCK_BASE` (760, `archipelago_api.h`) + `CopyKind` index → IDs 760–770. `ap_item_handler.c` routes IDs in `[760, 760 + COPYKIND_NUM)` to `GateAbilities_UnlockAbility(id - AP_ABILITY_UNLOCK_BASE)`, which sets the bit, logs, and enqueues `"Unlock Copy Ability: <name>"` via `tb_api->EnqueueColoredNoun` with `tb_api->AbilityColors[kind]`.
-
-## Design Decisions
-
-**Filter chain ownership:** `item_spawn_filter.c` owns the two spawn table hook points and `FilterAllSpawnTables()` dispatches to each gate file. This makes execution order explicit: All-Up injection → (per pool) abilities → patches → items → drop-weight bias.
-
-**Enemy spawn weight zeroing over spawn-time rejection:** Substituting `enemy_id = -1` at spawn time causes low enemy density because the spawner repeatedly selects locked enemies, gets rejected, and cycles through respawn delays. Weight zeroing preserves density because the spawner never selects locked enemies.
-
-**AP ability bypass:** `Ability_GiveItem` calls `Rider_GiveAbility` directly rather than through the hooked `Rider_CheckAndGiveAbility`. AP-granted abilities are never blocked by the gate, so an ability bought with EnergyLink applies whether or not its unlock item has been received.
-
-**AP grants spawn no pickup:** the grant reaches the rider through `Rider_GiveAbility`, which only indexes the static `stc_ability_init_table` (0x804af4f0). Nothing in the path touches the per-kind item data, so `APItems_HandleItem` runs the copy-ability branch above its Free Run / stadium gate and the grants land in every 3D mode - the open city, Free Run, Air Ride and all stadiums. The trade-off is no pickup visual.
-
-**Wheel substitution over wheel suppression:** A locked wheel result becomes a random unlocked ability rather than nothing, so inhaling an enemy stays worthwhile as soon as any ability is unlocked. With nothing unlocked the grant is declined, but the rider's state is always resolved on the way out — the engine offers no "grant failed" path of its own.
+The one place the mask still matters in Top Ride is the four ability-themed Top Ride **items** - Freeze Fan (TRITEM 9), Fire (11), Bomb (13), Walky (16). `GateTopRideItems_ApplyMask` in `gate_topride_items.c` treats the matching copy ability unlock (`COPYKIND_FREEZE`/`_FIRE`/`_BOMB`/`_MIC`) as an alternative key to the item's own bit in `topride_item_unlocked_mask`: either one enables it. The ability key counts only while `options.ability_gating_enabled` is set - otherwise the all-1s ungated mask would free all four items and strand their own AP unlocks.

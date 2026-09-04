@@ -4,7 +4,6 @@
 // May hold CPU_AI_RANDOM; resolve with CpuAI_Resolve.
 int cpu_ai_preset_ct = CPU_AI_DEFAULT;
 int cpu_ai_preset_ar = CPU_AI_DEFAULT;
-int cpu_ai_preset_tr = CPU_AI_DEFAULT;
 
 static const CpuAIPresetDef cpu_presets[CPU_AI_PRESET_NUM] = {
     [CPU_AI_DEFAULT] = {

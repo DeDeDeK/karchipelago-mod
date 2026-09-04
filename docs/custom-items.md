@@ -13,137 +13,185 @@ installs no hooks and leaves vanilla play untouched.
 
 ## Game System
 
-All item structs and accessors are in `externals/hoshi/include/item.h`.
+All item structs and accessors are in `externals/hoshi/include/item.h`; the
+`ItemKind` enum there is the authoritative list of the 69 vanilla kinds
+(`ITKIND_NUM = 69`), of which the legendary machine pieces are 55-60.
 
-- **`ItemKind`** — 69 vanilla kinds (`ITKIND_NUM = 69`, indices 0–68): 3 boxes,
-  the up/down stat patches, special patches, candy, 11 copy abilities, 12 foods,
-  3 traps, Gordo, 6 legendary-machine pieces, 8 fake patches.
-- **`itData`** — the per-kind static asset record, `0x18`-byte
-  stride, indexed positionally by `ItemKind`: `{ attr, unique_attr, model, anim,
-  hurt, trigger }`. The array lives in `Item.dat` (public `itData`) and is grafted
-  onto `itCommonDataAll` (`ItCommon.dat`, public `itCommonDataAll`) at
+- **`itData`** - the per-kind static asset record, `0x18`-byte stride, indexed
+  positionally by `ItemKind`: `{ attr, unique_attr, model, anim, hurt, trigger }`.
+  The array lives in `Item.dat` (public `itData`) and is grafted onto
+  `itCommonDataAll` (`ItCommon.dat`, public `itCommonDataAll`) at
   `itCommonDataAll + 0x8` during load. Reached at runtime via
   `Item_GetItDataPtr(kind)` (`0x80250038`) = `itCommonDataAll.itData + kind*0x18`.
-  There is no per-kind filename indirection — the model for kind N is simply the
+  There is no per-kind filename indirection - the model for kind N is simply the
   Nth entry's `model->j` pointer into the shared `Item.dat` archive.
-- **`ItemCommonAttr`** — per-kind scale/cull/land-offset/box-color,
-  plus `effect_info` (`PatchEffectInfo`, the authoritative stat-grant list and
+- **`ItemCommonAttr`** - per-kind scale/cull/land-offset/box-color, plus
+  `effect_info` (`PatchEffectInfo`, the authoritative stat-grant list and
   BAD/GOOD/FAKE group).
-- **Spawn pipeline** — periodic sky/box drops run
-  `CityItemSpawn_Think` (`0x800eb108`) → `CityItemSpawn_GetRandomItemID`
-  (`0x800eb7e4`, weighted) → `CityItem_Create` (`0x8024eef4`). Event/destructible
-  drops run `City_SpawnMiscItems` (`0x80104db0`) → `CityItem_GetEventItem`
-  (`0x80254114`) → `CityItem_Create`. Box breaks read a box's `forced_item` (+0x35c)
-  or pick from the pool, then `CityItem_Create` per contained item.
-- **Weight tables** — box/sky pools live in `grBoxGeneObj`
+- **Spawn pipeline** - periodic sky/box drops run `CityItemSpawn_Think`
+  (`0x800eb108`) -> `CityItemSpawn_GetRandomItemID` (`0x800eb7e4`, weighted) ->
+  `CityItem_Create` (`0x8024eef4`). Event/destructible drops run
+  `City_SpawnMiscItems` (`0x80104db0`) -> `CityItem_GetEventItem` (`0x80254114`)
+  -> `CityItem_Create`. Box breaks read a box's `forced_item` (+0x35c) or pick
+  from the pool, then `CityItem_Create` per contained item.
+- **Weight tables** - box/sky pools live in `grBoxGeneObj`
   (`item_group_spawn[BOXKIND_NUM]`, parallel `u8 it_kind[68]`/`chance[68]`/`num`);
   event drops live in `grBoxGeneInfo`'s `event_source_drop[]` (one row per kind,
   six `u16` chance columns: Dyna Blade / Tac / meteor / destructible / chamber /
   UFO). Populated at scene init by `CityItemSpawn_InitItemFallChances`
   (`0x800eb374`) and retuned per event by `CityEvent_ModifyItemFallDesc`
-  (`0x800ed784`) — the same hook points the gating mods use.
-- **Hard ceiling** — `CityItem_Create` asserts `kind < 69` at `0x8024efb4` (so
-  vanilla kinds 0–68 pass). The weight arrays are sized `ITKIND_NUM-1` (68). The
-  bound must be widened to admit kinds `>= ITKIND_NUM` (69+).
+  (`0x800ed784`) - the same hook points the gating mods use.
+- **Hard ceiling** - `CityItem_Create` asserts `kind < 69` at `0x8024efb4`. The
+  weight arrays are sized `ITKIND_NUM-1` (68). The bound must be widened to admit
+  kinds `>= ITKIND_NUM`.
 
 ## Drop-In Discovery
 
 `items/` is scanned at boot by `CustomItems_Discover` (`item_discovery.c`) using
-`FST_ForEachInFolder("items", ".dat", …)` in two passes (count, then index),
-mirroring KAR Deluxe's custom-song loader. Each `.dat` becomes a
+`FST_ForEachInFolder("items", ".dat", ...)` in two passes (count, then index) so the
+over-cap warning fires once before any entry is added. Each `.dat` becomes a
 `CustomItemEntry`:
 
-- `file_entrynum` — FST entry, re-openable across scenes.
-- `id_hash` — FNV-1a over the full FST path. Stable identity independent of
-  registry order, so per-item enable state (menu / AP gating) survives reboots
-  and folder changes.
-- `name` — the filename at discovery, superseded by the descriptor's own name
-  once the archive is loaded.
-- `enabled` / `assigned_kind` — per-item spawn gate, and the `ItemKind` assigned
-  in the extended tables for the current round (`-1` until registered).
+- `file_entrynum` - FST entry, re-openable across scenes.
+- `id_hash` - FNV-1a over the full FST path. Stable identity independent of
+  registry order, so a consumer mod's per-item gating survives reboots and folder
+  changes.
+- `name` - the descriptor's display name, the handle a consumer mod binds by. It
+  must be known before any round registers anything, and for an item held
+  disabled nothing ever registers it, so discovery reads each archive once here.
+  Boot has no scene heap, so `Archive_LoadFile` is unusable: the read is a raw
+  DVD read into an `HSD_MemAlloc` buffer parsed with `Archive_Init`, falling back
+  to the filename if the archive or descriptor is unusable. Only the name is kept
+  (by value), and each read is bracketed in an arena mark/release - `HSD_MemAlloc`
+  is a bump allocator for the whole of `OnBoot`, so a mark is the arena's next
+  address and a release rewinds to it. Boot's high-water mark is therefore one
+  `.dat`, not one per drop-in; holding them would cost the full file size of every
+  item permanently off the ~10.2 MB HSD heap.
+- `api_enabled` - the consumer-mod spawn gate, written by `SetEnabled` and
+  defaulting open, so an item nobody gates spawns as soon as it is discovered.
+  Closed keeps the item out of the round entirely.
+- `assigned_kind` - the `ItemKind` assigned in the extended tables for the current
+  round (`-1` until registered).
 
-The registry is a fixed `CUSTOM_ITEM_MAX` (16) array — the practical ceiling
+The registry is a fixed `CUSTOM_ITEM_MAX` (16) array - the practical ceiling
 imposed by the 68-entry weight arrays, not an arbitrary limit.
 
 ## Descriptor Contract
 
 A custom-item `.dat` exports one HSD public symbol, `customItem`, whose address
-is a `CustomItemDesc` (`include/custom_items_api.h`). It is a clone model: the new
-kind inherits behavior (state class, trigger, hurt, animation) from a vanilla
-`base_kind` and optionally overrides the visual `model`, stat-grant `effect_info`,
-and render `scale`, plus per-source spawn weights (`weight_box[3]`,
-`weight_event[6]`). `magic` is `'CITM'` (`0x4349544D`); `version` gates forward
-compatibility: v2 adds `model_flag`, the model's itData render flag - `0x02000000`
-for flat panels, `0x03/0x05/0x0b000000` for the legendary pieces - so skinned
-models render correctly; v3 adds `scale`, a render-scale multiplier over the base
-kind's native size (0 or 1.0 = inherit). Older descriptors stay supported; the
-loader rejects only versions newer than it knows. `weight_free` is reserved: the
-sky/free-fall picker draws from the union of the three box pools, so `weight_box`
-already governs sky drops too. The engine's box/sky pools store the chance as a
-`u8`, so `weight_box` values saturate at 255 (weights are relative - typical
-values are well under 255); `weight_event` is `u16` and used unclamped. The
-BAD/GOOD/FAKE group is not a standalone field: it is read from the effect record
-(`PatchEffectInfo.group`), so it follows `base_kind` (or the `effect_info`
-override), and the descriptor's `reserved_group` slot is unused.
+is a `CustomItemDesc` (`include/custom_items_api.h`, which carries the field
+layout). It is a clone model: the new kind inherits behavior (state class,
+trigger, hurt, animation) from a vanilla `base_kind` and optionally overrides the
+visual `model`, stat-grant `effect_info`, and render `scale`, plus per-source
+spawn weights (`weight_box[3]`, `weight_event[6]`). `magic` is `'CITM'`
+(`0x4349544D`); `version` gates forward compatibility - v2 added `model_flag`
+(the model's itData render flag: `0x02000000` for flat panels,
+`0x03/0x05/0x0b000000` for the skinned legendary pieces), v3 `scale`, v4 `flags`,
+v5 `joint_anim`, v6 `mat_anim`. Older descriptors stay supported; the loader
+rejects only versions newer than it knows.
+
+One flag is defined. `CUSTOM_ITEM_FLAG_NO_MAT_ANIM` says the supplied `model` is
+not the base kind's, so the base kind's material animation must not be bound to
+it. A material animation drives the diffuse/ambient/alpha tracks of the materials
+it was authored against; pointed at a foreign model it repaints whatever material
+sits in the same tree position. The legendary pieces are the sharp case - Hydra's
+animates diffuse R/G/B over a 240-frame loop, which cycles a solid-colored
+replacement model through colors that are not its own. Set the flag whenever the
+model comes from somewhere other than `base_kind`; leave it clear when the model
+was carved from the base kind itself.
+
+`mat_anim` is the other answer to the same problem: a `MatAnimJointDesc*` bound
+in place of the base kind's, in every anim slot. Where the flag drops the
+animation, this replaces it, so a carve that rewrote the textures the base kind's
+animation would have swapped can carry its own copy of that animation with the
+image table repointed at the rewritten textures - which is how the AP Box keeps
+the blue box's crack sequence on six recolored faces. The flag wins if both are
+set. Leave it NULL to inherit.
+
+`joint_anim` is the same argument for the other half of the animation record: an
+`AnimJointDesc*` bound in place of the base kind's, in every anim slot. A joint
+animation binds by tree position too, so the base kind's drives whatever joint of
+a foreign model sits where its own animated joint did. Hydra's piece animation
+squashes its second joint's X and Y between 1.0 and 0.7 on a 30-frame half period,
+which on a replacement model with geometry at that position throbs the whole
+thing. Leave it NULL to inherit; supply a tree mirroring the model's joints to
+replace it. Looping is not the animation's to decide - `CityItem_BindStateAnim`
+(`0x80251894`) loops every bound `AObj` when bit 30 of the inherited
+`ItemAnimEntry` flags is set. The state script still comes from the base kind
+either way; it drives the item's hurtbox and effect timing, so dropping it would
+change behavior, not just looks.
+
+`weight_free` is reserved: the sky/free-fall picker draws from the union of the
+three box pools, so `weight_box` already governs sky drops too. The engine's
+box/sky pools store the chance as a `u8`, so `weight_box` values saturate at 255
+(weights are relative - typical values are well under 255); `weight_event` is
+`u16` and used unclamped. The BAD/GOOD/FAKE group is not a standalone field: it is
+read from the effect record (`PatchEffectInfo.group`), so it follows `base_kind`
+(or the `effect_info` override).
 
 `CustomItems_LoadDescriptor` (`item_registry.c`) performs the load + validate:
-`Archive_LoadFile` → `Archive_GetPublicAddress(arc, "customItem")` → magic/version
-check. The archive and descriptor are valid only for the current scene
-(`Archive_LoadFile` allocates from the per-scene heap, wiped on 3D scene exit), so
-registration reloads per round.
+`Archive_LoadFile` -> `Archive_GetPublicAddress(arc, "customItem")` ->
+magic/version check. The archive and descriptor are valid only for the current
+scene (`Archive_LoadFile` allocates from the per-scene heap, wiped on 3D scene
+exit), so registration reloads per round.
 
 ## Registration / Engine Splice
 
 `CustomItemRegistry_RegisterAll` (`item_registry.c`) runs once per City Trial
-round via a hook on `CityItemSpawn_Init`'s epilogue (`0x800ec348`) — after
+round via a hook on `CityItemSpawn_Init`'s epilogue (`0x800ec348`) - after
 `CityItemSpawn_InitItemFallChances` has filled the spawn pools and the item data
 is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
 `[ITKIND_NUM, ITKIND_NUM + CUSTOM_ITEM_MAX)`.
 
-1. **Grow `itData[]`** — the `ITKIND_NUM` (69) vanilla entries are snapshotted into a persistent
+1. **Grow `itData[]`** - the 69 vanilla entries are snapshotted into a persistent
    `itData[ITKIND_NUM + CUSTOM_ITEM_MAX]` array (re-snapshotted each round because
    the vanilla array is re-allocated into per-scene memory), one cloned entry is
    appended per enabled custom item with `model`/`effect_info` overridden from the
    descriptor, and `itCommonDataAll->itData` is repointed at the grown array. The
    itData lookup in `CityItem_InitData` reads the raw kind from the `ItemDesc` arg,
-   so a custom kind resolves to its own appended entry (custom model/effect). The
-   overridden `model` points at a per-kind *synthesized* descriptor, not the raw
-   `JOBJDesc`: `CityItem_Create`'s part setup (`Item_InitPartsModel` `0x80252824`) reads three
+   so a custom kind resolves to its own appended entry. The overridden `model`
+   points at a per-kind *synthesized* descriptor, not the raw `JOBJDesc`:
+   `CityItem_Create`'s part setup (`Item_InitPartsModel`, `0x80252824`) reads three
    "item-parts" counts at descriptor `+0x8/+0xc/+0x10` and asserts each `<= 11`
    ("item parts model num over!"). Vanilla model descriptors are full-width with
    those counts zero, so each custom kind gets a full-width, zero-filled
-   `{ JOBJ *j; int flag; … }` (`stc_model_pair`) with only `j` and `flag` written —
-   an 8-byte pair would let `+0x8` read into the next array element and trip the
-   assert. `flag` carries the model's itData render flag (`model_flag`, v2+;
-   `0x02000000` flat for v1 descriptors).
-2. **Lift the ceiling** — `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
-   is patched to `cmpwi r4, ITKIND_NUM + CUSTOM_ITEM_MAX` once at boot.
-3. **Clamp behavior** — the state-handler table (`0x804b6088`, 69 entries) and the
+   `{ JOBJ *j; int flag; ... }` with only `j` and `flag` written - an 8-byte pair
+   would let `+0x8` read into the next array element and trip the assert. `flag`
+   carries the descriptor's `model_flag` (`0x02000000` flat for v1 descriptors). A
+   kind that sets `NO_MAT_ANIM` or supplies a `mat_anim` / `joint_anim` also gets
+   its own `anim_data`: the base kind's slots copied with `mat_anim` nulled or
+   repointed and/or `joint_anim` repointed, which is what `CityItem_StateChange`
+   (`0x8024f488`) hands to `CityItem_BindStateAnim` (`0x80251894`). Two slots are copied - the
+   widest anim array any vanilla kind has, since a state selects its slot by index
+   and nothing records how many exist.
+2. **Lift the ceiling** - `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
+   is patched to `ITKIND_NUM + CUSTOM_ITEM_MAX` once at boot.
+3. **Clamp behavior** - the state-handler table (`0x804b6088`, 69 entries) and the
    25-entry ascending threshold-category table (`0x804b5f18`) are both indexed by
-   `ItemData+0x1c` (the instance kind). A custom
-   kind has no entry, so a hook at `0x8024eb44` (right after `CityItem_InitData`
-   writes `ItemData+0x1c`) rewrites it to the descriptor's `base_kind`. The item
-   therefore behaves and is categorized as its base kind while rendering/applying
-   from its own `itData` entry.
-4. **Inject box/sky weights** — each custom kind is appended in place to the box
+   `ItemData+0x1c` (the instance kind). A custom kind has no entry, so a hook at
+   `0x8024eb44` (right after `CityItem_InitData` writes `ItemData+0x1c`) rewrites
+   it to the descriptor's `base_kind`. The item therefore behaves and is
+   categorized as its base kind while rendering/applying from its own `itData`
+   entry.
+4. **Inject box/sky weights** - each custom kind is appended in place to the box
    pools (`grBoxGeneObj.item_group_spawn[]`, which the sky picker scans as the
    union of all three colors and the box-break picker scans one color at a time)
    with the descriptor's `weight_box[]`. The 68-wide pools are sparsely filled, so
    a handful of kinds fit without growing them. The per-event re-bias
-   (`CityEvent_ModifyItemFallDesc` → `CityItemSpawn_SetEventsItemFallChances`)
+   (`CityEvent_ModifyItemFallDesc` -> `CityItemSpawn_SetEventsItemFallChances`)
    rebuilds these pools, so `CustomItemRegistry_ReinjectPools` re-appends the
-   custom kinds at that function's epilogue (`0x800ed7f0`) — the same seam the
+   custom kinds at that function's epilogue (`0x800ed7f0`) - the same seam the
    archipelago spawn filter hooks; hoshi chains the two.
-5. **Inject event-source weights** — `event_source_drop[]`
+5. **Inject event-source weights** - `event_source_drop[]`
    (`grBoxGeneInfo->item_desc`, stride `0x10`: `int it_kind` + six `u16` chance
    columns) is read straight from the table by `_CityItem_GetEventItem`
    (`0x800ebe44`) on every pick, so the stage's rows are snapshotted into a
-   persistent array, one row per
-   custom kind (carrying its `weight_event[6]`) is appended, and the table pointer
-   and `event_source_drop_num` are repointed/bumped. This covers Tac, meteor,
-   broken structures, secret chamber, UFO, and Dyna Blade drops.
+   persistent array, one row per custom kind (carrying its `weight_event[6]`) is
+   appended, and the table pointer and `event_source_drop_num` are repointed and
+   bumped. This covers Tac, meteor, broken structures, secret chamber, UFO, and
+   Dyna Blade drops.
 
-Effect and scale overrides. On pickup, `Machine_OnTouchItem` (`0x801db34c`)
+**Effect and scale overrides.** On pickup, `Machine_OnTouchItem` (`0x801db34c`)
 applies stat grants generically from the instance's `effect_data`
 (`ItemData+0x140`, copied from the kind's `attr->effect_info` by
 `CityItem_CopyCommonAttr`) via `Patch_GetEffectData` (`0x80252e90`), then reads
@@ -155,8 +203,8 @@ but the behavior clamp routes the category reaction through `base_kind`, so pick
 the cloned attribute record's `scale_factor`, so a model carved onto a
 differently-scaled base kind (a legendary piece on a flat-panel base) can render
 off its native size; the descriptor's `scale` (v3) multiplies `scale_factor` on
-the clone to correct it (the `custom_items` register step clones `attr` whenever
-`effect_info` or `scale` is overridden).
+the clone to correct it. `attr` is cloned only when `effect_info` or `scale` is
+overridden.
 
 ## Authoring a Custom Item
 
@@ -166,13 +214,11 @@ machinery (`scripts/hsd/walker.py`, `archive.py`). It emits the `CustomItemDesc`
 at data offset 0 with synthetic relocations for the `name` and `model` pointer
 fields, carries the source model's render flag into `model_flag`, and lists every
 texture (ImageDesc) in the model. The walker is type-complete, so a model of any
-complexity carves intact — including the multi-material, skinned legendary pieces
-(Hydra/Dragoon, kinds 55–60). Example — a Hydra-modeled item that spawns from
-boxes/sky and from broken structures, Tac, and UFOs:
+complexity carves intact - including the multi-material, skinned legendary pieces.
 
 ```
 uv run python scripts/hsd/carve_custom_item.py iso/files/Item.dat 55 \
-    mods/custom_items/assets/items/MegaHydra.dat "Mega Hydra" \
+    mods/<owning_mod>/assets/items/MegaHydra.dat "Mega Hydra" \
     --base-kind 3 --scale 1.2 \
     --weight-blue 40 --weight-green 40 --weight-red 40 \
     --ev-destructible 80 --ev-tac 40 --ev-ufo 40
@@ -184,56 +230,67 @@ multiplies the render size when the carved model's native size differs from the
 base kind's (default 1.0 = inherit). `--weight-*` set the box/sky weights (0-255,
 saturating); `--ev-*` (`dyna`/`tac`/`meteor`/`destructible`/`chamber`/`ufo`) set
 the event-source drop weights. `--texture PNG` re-encodes a custom texture
-(RGB5A3) into one ImageDesc;
-on a multi-texture model add `--texture-index N` to choose which slot, and
-`--texture-fit cover|contain` to center-crop or letterbox a mismatched aspect
-instead of stretching it. Dropping the output in `assets/items/` stages it to the
-FST `items/` folder, where it is discovered at boot.
+(RGB5A3) into one ImageDesc; on a multi-texture model add `--texture-index N` to
+choose which slot, and `--texture-fit cover|contain` to center-crop or letterbox a
+mismatched aspect instead of stretching it. `--no-effect` appends a zero-entry
+`PatchEffectInfo` and points the descriptor at it, so the carve keeps the base kind's
+look, state script and pickup SFX while granting nothing; `--effect-group` picks the
+BAD/GOOD/FAKE group that record carries (GOOD by default).
+
+A model `Item.dat` does not hold has to be generated instead of carved, and the
+descriptor is the same either way - `scripts/authoring/make_ap_star_pieces.py` builds the
+Archipelago Star's six spheres that way, emitting the `CustomItemDesc`, a generated
+JOBJ tree and its own zero-entry `PatchEffectInfo` into one archive.
+
+A third shape is a carve the script then rewrites: `scripts/authoring/make_ap_box.py` carves
+`ITKIND_BOXBLUE` and its material animation, grows the model's TEX0 index buffer from 4
+entries to 24, re-indexes the display list onto a generated texture atlas, repoints the
+animation's four-entry image table at one atlas per crack stage, and emits the descriptor
+itself, so the AP Box keeps the vanilla box's material, border and crack sequence while
+showing six different faces.
+
+`mods/*/assets/` is copied to the disc root by the ordinary asset step, so any mod's
+`assets/items/*.dat` lands at `items/` on disc with no packaging change, and this mod
+discovers it there without knowing the mod exists. An item whose pickup does something
+therefore ships with the mod that implements it - `mods/hypernova/assets/items/MiracleFruit.dat`
+is the Miracle Fruit, `mods/ap_star/assets/items/ApSphere*.dat` the Archipelago Star's
+six spheres, and `mods/archipelago/assets/items/ApPatch.dat` / `ApBox.dat` the Archipelago
+location patches and the box that drops them. An item that needs no code at all is not a mod:
+dropping its `.dat` into any built mod's `assets/items/` registers it, and it spawns and
+behaves as its `base_kind`.
+This mod ships no items of its own and has no `assets/`.
 
 ## API
 
-Exported via `Hoshi_ExportMod` for other mods (e.g. archipelago gating/granting
-custom items). Items are addressed by `id_hash`:
-
-```c
-int  GetCount(void);
-u32  GetIdHash(int index);
-const char *GetName(int index);
-int  IsEnabled(u32 id_hash);             // master toggle AND per-item gate
-void SetEnabled(u32 id_hash, int enabled);
-int  GetAssignedKind(u32 id_hash);       // ItemKind this round, or -1
-void SetPickupHandler(CustomItemPickupFn h);    // legacy single-handler setter
-void AddPickupHandler(CustomItemPickupFn h);    // subscribe (multiple allowed)
-void RemovePickupHandler(CustomItemPickupFn h); // unsubscribe
-```
+`CustomItemsAPI` (`include/custom_items_api.h`) is exported via `Hoshi_ExportMod`
+for other mods (e.g. archipelago gating/granting custom items). Items are
+addressed by `id_hash`, not registry index, so a consumer's binding survives a
+folder change. Beyond the enumeration accessors it offers `IsEnabled` and
+`SetEnabled` (the consumer gate),
+`GetAssignedKind` (this round's `ItemKind`, or -1), and add/remove for pickup
+handlers.
 
 A pickup handler is a `void (*)(u32 id_hash, const char *name, int player)` invoked
 from a hook on `Machine_OnTouchItem` (`0x801db34c`) whenever a custom item is
-collected — the collected kind is recovered from `ItemData->itData` (which still
+collected - the collected kind is recovered from `ItemData->itData` (which still
 points into the grown array after the behavior clamp), and the collector's slot
 comes from `Machine_GetRiderPly` (`0x801caa40`). Because hoshi's hook trampoline does
 not preserve registers across the C call, the hook's prologue/epilogue save and
 restore `r3` (MachineData), `r4` (ItemData), and `LR` around it. Up to four consumer
 mods may subscribe (`CUSTOM_ITEM_PICKUP_HANDLERS_MAX`); each is invoked on every pickup.
-`SetPickupHandler` is retained for compatibility — a non-NULL handler is added
-(deduplicated), NULL clears every subscriber. This is how the **Miracle Fruit**
-grants Hypernova: the `hypernova` mod adds a handler that calls
+This is how the **Miracle Fruit** grants Hypernova: the `hypernova` mod ships the item's
+archive in its own `assets/items/` and adds a handler that calls
 `HypernovaAPI.ActivatePlayer` for the collector when the picked-up item's name
 matches.
 
 ## File Layout
 
-- `src/main.c` — `ModDesc` and the settings menu, built at boot: a master enable
-  toggle plus one enable toggle per discovered item, each bound to its registry
-  entry's `enabled` flag and labeled by the stable `menu_label` (so the saved
-  per-item state, hashed on the option name, survives reboots).
-- `src/custom_items.c` — boot, registry storage, exported API.
-- `src/item_discovery.c` — FST scan + path hashing.
-- `src/item_registry.c` — descriptor load/validate, the per-round itData /
-  box-pool / event-source-drop splice, the per-event pool re-inject, the
-  kind-ceiling patch, the behavior-clamp hook, and the pickup hook
-  (`Machine_OnTouchItem`) that fires the registered pickup handler.
-- `scripts/hsd/carve_custom_item.py` — authoring tool: carve a model out of
-  `Item.dat` into a `customItem` `.dat`.
-- `include/custom_items_api.h` — public symbol, descriptor layout, API struct.
-- `assets/items/` — drop-in folder; staged to the FST root `items/` at build time.
+`src/main.c` is just the `ModDesc` and its `OnBoot`. The mod has no settings menu
+and contributes no entry to hoshi's: everything dropped into `items/` is discovered
+and enabled, and the only spawn gate is `api_enabled`, owned by consumer mods.
+
+`src/custom_items.c` holds boot, registry storage, and the exported API;
+`src/item_discovery.c` the FST scan and path hashing; `src/item_registry.c` the
+descriptor load/validate, the per-round itData / box-pool / event-source-drop
+splice, the per-event pool re-inject, the kind-ceiling patch, the behavior-clamp
+hook, and the `Machine_OnTouchItem` pickup hook.

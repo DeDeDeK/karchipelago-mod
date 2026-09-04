@@ -11,6 +11,33 @@
 #include "textbox_api.h"
 extern const TextBoxAPI *tb_api;
 
+// Required: it owns the widened kind space and the engine seams that widening
+// breaks, and this mod gates through the filters it takes. NULL only in a build
+// that left it out, where machine gating is off entirely.
+#include "custom_machines_api.h"
+extern const CustomMachinesAPI *cm_api;
+
+// Import the registry if it has not resolved yet. Idempotent; safe from any scene.
+void AP_ResolveCustomMachines(void);
+
+// The registry's own kind-space helpers, bound to our import.
+static inline int MachineKind_Num(void)
+{
+    return CustomMachines_KindNum(cm_api);
+}
+static inline int CharacterKind_Num(void)
+{
+    return CustomMachines_CharacterKindNum(cm_api);
+}
+static inline MachineKind MachineKind_Resolve(int is_bike, int class_index)
+{
+    return CustomMachines_ResolveKind(cm_api, is_bike, class_index);
+}
+static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
+{
+    return CustomMachines_ClassIndexOf(cm_api, kind, is_bike);
+}
+
 #define MAX_RECEIVED_ITEMS 512
 
 #define REWARD_COUNT_AIRRIDE   46
@@ -30,6 +57,11 @@ extern const TextBoxAPI *tb_api;
 // registering first pushes it higher. GMMODE_NUM until APChecklist_Register.
 extern int ap_checklist_mode;
 
+// Set while checklist rewards are re-applied from save data, so the gate unlockers
+// stay quiet instead of reprinting every already-owned unlock at boot. Read by
+// APAnnounce_Grant alongside the Messages -> Local -> Items toggle.
+extern int ap_regrant_quiet;
+
 // Absolute clamp ceiling for per-stat patch totals. Patch_GetMaxValue returns
 // through extsb, so anything above 127 sign-extends negative.
 #define PATCH_STAT_MAX 127
@@ -44,12 +76,22 @@ typedef enum APGoalKind
 {
     GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
     GOAL_N_CHECKLIST,           // Complete N checklist squares
+    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
     GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
     GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
-    GOAL_NONE,                  // No goal for this mode
-    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
     GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
+    GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
+    GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
+    GOAL_NONE,                  // No goal for this mode - always last, the AP world orders it last too
 } APGoalKind;
+
+// AP Patch locations get their own bitmask, sized so AP_PATCH_MAX packs into
+// whole u64 words.
+#define AP_PATCH_WORDS (AP_PATCH_MAX / 64)
+
+// Bits per checklist mode in APSlotOptions.checklist_reward_placed_types. RewardType
+// tops out at REWARD_PAUSE_POWERUPS (8), so all three modes pack into 27 bits.
+#define CHECKLIST_REWARD_MODE_BITS 9
 
 typedef struct APSlotOptions
 {
@@ -60,7 +102,7 @@ typedef struct APSlotOptions
     u32 reveal_checklists[CHECKLIST_MODE_NUM]; // Per checklist-mode row: 1 = every square starts revealed
 
     u32 goal[CHECKLIST_MODE_NUM];             // APGoalKind per checklist-mode row
-    u32 checklist_amount[CHECKLIST_MODE_NUM]; // 1-120 - threshold for GOAL_N_CHECKLIST per row
+    u32 checklist_amount[CHECKLIST_MODE_NUM]; // 1-120 squares for GOAL_N_CHECKLIST
 
     u32 city_trial_patch_cap_min;          // 1-127 - per-stat cap the player starts at
     u32 city_trial_patch_cap_max;          // 1-127 - per-stat cap ceiling; min == max -> flat cap
@@ -85,11 +127,34 @@ typedef struct APSlotOptions
     u32 stadium_gating_enabled;
     u32 base_ability_gating_enabled;
 
-    // Non-progression checklist rewards: 1 = each is an AP item, 0 = the mod
-    // pre-grants them all at connect. The 6 Dragoon/Hydra part markers are
-    // progression and are not affected.
-    u32 checklist_rewards_gating_enabled;
+    // Which checklist rewards the AP world placed as items, one bit per (mode,
+    // RewardType) pair at `mode * CHECKLIST_REWARD_MODE_BITS + reward_type`. Every
+    // unset pair is pre-granted at connect, so a mode the seed disabled has its
+    // rewards unlocked outright. The 6 Dragoon/Hydra part markers are progression
+    // and are not affected.
+    u32 checklist_reward_placed_types;
+
+    // GOALGATE_* bits. Unlocks the AP world shipped as items even though their
+    // category's gate is off, because this seed's goal is the thing they gate;
+    // an ungated pre-fill has to leave exactly these bits locked.
+    u32 goal_forced_gates;
+
+    // 0-AP_PATCH_MAX AP Patch locations in the seed; 0 = feature off. No goal reads
+    // it. APSlotOptions is 8-byte aligned, so the 4 bytes of tail padding past this
+    // field keep the block 200 bytes wide and every APData offset below it fixed.
+    u32 ap_patches;
 } APSlotOptions;
+
+// goal_forced_gates bits.
+#define GOALGATE_LEGENDARY_PIECES 0x1 // ITUNLOCK_HYDRA1-3 / ITUNLOCK_DRAGOON1-3
+#define GOALGATE_VS_KING_DEDEDE   0x2 // STKIND_VSKINGDEDEDE
+#define GOALGATE_AP_STAR_PIECES   0x4 // AP_STAR_PIECE_ROSE..YELLOW
+
+#define LEGENDARY_PIECE_ITEM_BITS                                                  \
+    ((1u << ITUNLOCK_HYDRA1) | (1u << ITUNLOCK_HYDRA2) | (1u << ITUNLOCK_HYDRA3) | \
+     (1u << ITUNLOCK_DRAGOON1) | (1u << ITUNLOCK_DRAGOON2) | (1u << ITUNLOCK_DRAGOON3))
+
+#define AP_STAR_PIECE_ITEM_BITS ((1u << AP_STAR_PIECE_NUM) - 1)
 
 // Cross-boot progress for AP checklist objectives whose predicate counts over
 // more than one session.
@@ -117,6 +182,7 @@ typedef struct APSave
     u32 topride_item_unlocked_mask;                     // Bit N = TopRideItemKind N unlocked
     u8 color_unlocked_mask;                             // Bit N = KirbyColor N unlocked
     u8 base_ability_unlocked_mask;                      // Bit N = BaseAbilityKind N unlocked
+    u8 ap_star_piece_unlocked_mask;                     // Bit N = APStarPiece N unlocked
     u8 patch_cap_count;                                 // Number of Patch Cap Increase items received
     u8 spawn_rate_level;                                // Number of Spawn Rate Up items received
     u8 permanent_patches[PATCHKIND_NUM];                // Accumulated permanent patch count per stat (0-PATCH_STAT_MAX)
@@ -124,6 +190,7 @@ typedef struct APSave
     u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX]; // (target_mode << 8) | clear_kind, 0xFFFF = remote
     u64 received_checklist_rewards[3];                  // [GMMODE_NUM] bit N = reward_index N received
     u64 sent_checks[CHECKLIST_MODE_NUM][2];             // Authoritative completed-checkbox bitmask per row
+    u64 ap_patch_collected[AP_PATCH_WORDS];             // Bit N = AP Patch N collected
     u8 goal_complete;                                   // Sticky once set
     u8 goal_announced[CHECKLIST_MODE_NUM];              // Sticky per row; fires that row's "goal complete" textbox once
     u8 max_stats_ct_achieved;                           // Sticky once a human hit the cap on all 9 stats in a CT round
@@ -131,6 +198,63 @@ typedef struct APSave
     uint unprocessed_items[MAX_RECEIVED_ITEMS];         // AP item IDs waiting to be applied
     APCheckProgress checks;
 } APSave;
+
+// Client-authored textbox messages. The client owns every name the mod cannot know -
+// other worlds' item and location names, player names - so it composes the whole line
+// and the mod only renders it.
+
+// Colored runs per message.
+#define AP_TEXT_SEG_NUM 8
+_Static_assert(AP_TEXT_SEG_NUM == TEXTBOX_MAX_SEGMENTS, "AP_TEXT_SEG_NUM must match TEXTBOX_MAX_SEGMENTS");
+// seg_count NUL-terminated strings back to back, so a whole message is at most
+// AP_TEXT_BLOB_LEN - seg_count rendered characters. Sized past anything the textbox
+// can show so the fit decision belongs to the mod, which knows the font size: the
+// textbox wraps onto three lines and truncates whatever is left over.
+#define AP_TEXT_BLOB_LEN 244
+
+// Archipelago's own palette (the CommonClient GUI names), plus a default that follows
+// the textbox's own DefaultColor.
+typedef enum APTextColor
+{
+    APTEXTCOLOR_DEFAULT = 0,
+    APTEXTCOLOR_BLACK,
+    APTEXTCOLOR_RED,
+    APTEXTCOLOR_GREEN,
+    APTEXTCOLOR_YELLOW,
+    APTEXTCOLOR_BLUE,
+    APTEXTCOLOR_MAGENTA,
+    APTEXTCOLOR_CYAN,
+    APTEXTCOLOR_WHITE,
+    APTEXTCOLOR_ORANGE,
+    APTEXTCOLOR_SLATEBLUE,
+    APTEXTCOLOR_PLUM,
+    APTEXTCOLOR_SALMON,
+    APTEXTCOLOR_NUM,
+} APTextColor;
+
+// What a message is about. Each kind has its own Settings menu toggle; the mod filters
+// on render and the client reads text_menu_mask so it can skip composing at all.
+typedef enum APTextKind
+{
+    APTEXT_KIND_CHECK = 0, // a location this slot completed was sent
+    APTEXT_KIND_ITEM,      // an item arrived for this slot
+    APTEXT_KIND_HINT,      // a server hint concerning this slot
+    APTEXT_KIND_STATUS,    // goal / release / collect, and client connect state
+    APTEXT_KIND_CHAT,      // player and server chat
+    APTEXT_KIND_LINK,      // DeathLink / TrapLink traffic, in both directions
+    APTEXT_KIND_NUM,
+} APTextKind;
+
+typedef struct APTextMessage
+{
+    u8 kind;                    // APTextKind
+    u8 seg_count;               // 1..AP_TEXT_SEG_NUM
+    u8 colors[AP_TEXT_SEG_NUM]; // APTextColor per segment
+    u8 pad[2];
+    char text[AP_TEXT_BLOB_LEN];
+} APTextMessage;
+
+_Static_assert(sizeof(APTextMessage) == 256, "APTextMessage stride is part of the wire contract");
 
 // Shared struct the Python AP client reads and writes with dolphin-memory-engine
 // (OnBoot stores the pointer at 0x805d52d4). Field order is the wire contract.
@@ -154,16 +278,57 @@ typedef struct APData
     u64 sent_checks[CHECKLIST_MODE_NUM][2];      // Game -> client. Bit (k%64) of word (k/64) = checkbox k complete on that row.
     u64 client_backfill[CHECKLIST_MODE_NUM][2];  // Client -> game, additive. Mod ORs into sent_checks each frame, then clears.
     u8 goal_complete;                            // Game -> client. Sticky once the active goal is satisfied.
+    u8 goal_satisfied_mask;                      // Game -> client. Bit r = row r's goal satisfied; 0 for GOAL_NONE rows. Sticky per row.
 
     // Live mirrors of the Settings menu toggles, game-owned. The client polls
     // them to forward mid-session enable/disable to the AP server.
     u32 deathlink_menu_enabled;
     u32 energylink_menu_enabled;
     u32 traplink_menu_enabled;
+
+    // Text mailbox, the same shape as incoming_item_id: the client fills text_msg and then
+    // sets text_pending, the game renders and clears it. The game holds a pending message
+    // while the textbox has no canvas, so a scene load backpressures the client.
+    u32 text_pending;
+    u32 text_menu_mask; // Game -> client. Bit (1 << APTextKind) set = that kind is shown.
+    APTextMessage text_msg;
+
+    // AP Patch locations, bit w*64+i of word w. Same single-writer split as
+    // sent_checks / client_backfill: the game owns the first, the client the
+    // second, and the game ORs the second in and clears it each frame.
+    u64 ap_patch_checks[AP_PATCH_WORDS];
+    u64 ap_patch_backfill[AP_PATCH_WORDS];
 } APData;
 
 extern APData *ap_data;
 extern APSave *ap_save;
+
+// machine_unlocked_mask is 32 bits, so only the first 32 MachineKinds can carry a
+// gate. custom_machines is free to register past that - its own cap is its own -
+// and the kinds beyond are treated as permanently available rather than shifted out
+// of range. OnSaveLoaded reports how many were left ungated.
+#define AP_MACHINE_GATE_NUM 32
+
+// The machine unlock item ids run from AP_MACHINE_UNLOCK_BASE up to where the box
+// unlock ids begin, so a build registering more MachineKinds than that block holds
+// has to stop at its edge instead of reading on into another category's ids. The
+// kinds past it get no unlock item and stay ungated like the ones past the mask.
+#define AP_MACHINE_UNLOCK_NUM (AP_BOX_UNLOCK_BASE - AP_MACHINE_UNLOCK_BASE)
+
+static inline int MachineUnlock_KindNum(void)
+{
+    int num = MachineKind_Num();
+    return num < AP_MACHINE_UNLOCK_NUM ? num : AP_MACHINE_UNLOCK_NUM;
+}
+
+static inline int MachineKind_IsUnlocked(int kind)
+{
+    if (kind < 0)
+        return 0;
+    if (kind >= AP_MACHINE_GATE_NUM)
+        return 1;
+    return (ap_save->machine_unlocked_mask >> kind) & 1;
+}
 
 void OnBoot();
 void OnSaveInit();

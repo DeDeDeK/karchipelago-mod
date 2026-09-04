@@ -1,227 +1,201 @@
 # Meteor Event Actor (0x4E)
 
-The meteor is a special event actor that falls from the sky and damages players on impact. Actor type ID `ACTORID_METEOR = 0x4E` (`enemy.h`), data_index `0x15`. It is created through the same universal factory as every other enemy/event actor, but its behavior is unusual: the vanilla City Trial event drives it with a JObj animation, while a standalone spawn must switch it to a physics-driven fall. Meteor globals are declared in `externals/hoshi/include/event.h`.
+The meteor falls out of the sky and damages whatever it lands on. It is `ACTORID_METEOR`
+(0x4E in `enemy.h`), data_index 0x15 (archive `EmMeteoData.dat`), and it is built by the same
+universal factory as every other enemy and event actor, `EventActor_Create` (0x801fbb50).
+What makes it unusual is that its fall parameters come from two globals owned by the City
+Trial meteor event rather than from its own descriptor, so spawning one outside that event
+means standing in for those globals. They are declared in `externals/hoshi/include/event.h`.
 
-## Normal Event Flow
+## The vanilla City Trial event
 
-During the City Trial meteor event (`EVKIND_METEOR` = 2 in `event.h`):
+`EVKIND_METEOR` (2) behaves like any other City Trial event:
 
-1. `event_meteor_start` (0x80110b74) allocates a 0x218-byte state struct -> `r13+0x650` (`stc_meteor_data`), looks up event data -> `r13+0x654` (`stc_meteor_event_data`), and calls `CityItem_SetMeteorEventFlag` (0x80254174).
-2. `event_meteor` (0x80110c0c) runs per-frame, creating meteors (`li r0,0x4E`) with randomized XZ positions within zone bounds. Spawn count is driven by `stc_meteor_spawn_count` plus event data, not a fixed cap.
-3. Each meteor is created via `EventActor_Create(ACTORID_METEOR)` with packed spawn params in `desc.x3C`.
+- `event_meteor_start` (0x80110b74) allocates a 0x218-byte state struct into
+  `stc_meteor_data` (r13+0x650, 0x805dd730), resolves the event's data block into
+  `stc_meteor_event_data` (r13+0x654), and marks the event active for the item system via
+  `CityItem_SetMeteorEventFlag` (0x80254174).
+- `event_meteor` (0x80110c0c) runs per frame, creating meteors at randomized XZ positions
+  inside the zone bounds. The count comes from `stc_meteor_spawn_count` (r13+0x658) plus the
+  event data, not a fixed cap.
 
-## EventActor_Create Lifecycle (0x801fbb50)
+`stc_meteor_data` doubles as the "event is running" guard: it is NULL outside the event, and
+`Meteor_BehaviorInit` bails early if either global is NULL.
 
-`EventActor_Create` is the universal actor factory. For meteors:
+### Packed spawn parameters
 
-1. Allocates GOBJ and 0xBC0-byte EnemyData (zeroed).
-2. Calls `EventActor_InitFromDesc` (0x801fb53c) — copies desc fields to EnemyData (position, scale, etc.).
-3. Spline/path init if available.
-4. **Init callback** (`0x8021dfc0`): sets render flags, disables rendering, stores state callback pointers at `ed->xACC`/`ed->xAD0`, and **nulls `ed->xB74` and `ed->xB78`** (collision sphere handles).
-5. Creates temporary collision at `ed->x594`.
-6. Registers 10+ GObj procs at various priorities.
-7. Zeros velocity.
-8. Render/audio init.
-9. **Post-init callback** (`0x8021e0d4`): destroys the temporary `x594` collision, zeros velocity again, hides the actor via `EventActor_Hide` (0x801fed40 — sets bit 7 of render_flags + disables rendering), disables rendering via `EventActor_DisableRendering`, enters state 14 via `EnemyStateChange(ed, 14, 0)` (0x801fc398), copies `pos` -> `initial_pos` (`xB50`-`xB58`), and clears `in_bounds_flag` (`xB4C = 0`).
-10. Returns GOBJ.
+The spawner packs zone, speed and approach angle into the descriptor's `x3C` field, which
+`EventActor_InitFromDesc` copies into `EnemyData.tier_flags` (+0x30). `Meteor_BehaviorInit`
+unpacks it:
 
-## Actor Function Table (at 0x804b4310)
+| Bits | Field | Resolves through |
+|------|-------|------------------|
+| 0-7 | zone index | `stc_meteor_event_data->+0x0C`, stride 12: Y offset, fall speed, angle |
+| 8-15 | speed index | `stc_meteor_event_data->+0x04`, stride 8: unused, angle in degrees |
+| 22-31 | approach angle | horizontal approach angle in degrees; 0 = straight down |
 
-| Index | Offset | Address | Purpose |
-|-------|--------|---------|---------|
-| 0 | +0x00 | 0x804b42c0 | State function table pointer |
-| 1 | +0x04 | NULL | — |
-| 2 | +0x08 | 0x8021dfc0 | Init callback |
-| 3 | +0x0C | 0x8021e01c | Copy actor_data to ed->x40C (21 words) |
-| 4 | +0x10 | 0x8021e058 | Copy actor_data to ed->x40C (duplicate of [3]) |
-| 5 | +0x14 | 0x8021e094 | Wrapper for 0x801fed1c |
-| 6 | +0x18 | 0x8021e0d4 | Post-init callback |
-| 7 | +0x1C | NULL | — |
+## Creation
 
-## Descriptor Field x3C (Packed Spawn Params)
+The meteor uses the standard per-type descriptor layout, at 0x804b4310: state table
+0x804b42c0, init callback 0x8021dfc0, the two actor_data copiers, spawn-slot unregister, and
+post-init callback 0x8021e0d4. Two of those slots do meteor-specific work:
 
-The event spawner packs zone/speed/angle into `desc.x3C` (copied to `ed->x30`). `Meteor_BehaviorInit` reads it:
+- **Init callback** (0x8021dfc0) ground-snaps, disables rendering, points both hit-reaction
+  callbacks at 0x8021e9b4, calls `EventActor_FinalizeInit` (0x802042fc), and nulls the two
+  collision-sphere handles (`ed+0xB74`/`0xB78`). `EventActor_FinalizeInit` is what hides the
+  model: it calls `HSD_JObjSetFlagsAll(root, JOBJ_HIDDEN)` on the model tree.
+- **Post-init callback** (0x8021e0d4) runs at the tail of `EventActor_Create`, after all
+  procs are registered. It zeroes velocity, hides the actor via `EventActor_Hide`
+  (0x801fed40), sets `grounded_active`, disables rendering again, enters **state 14** via
+  `EnemyStateChange(ed, 14, ...)`, saves `pos` into `initial_pos` (+0xB50) and clears
+  `in_bounds_flag`.
 
-| Bits | Field | Purpose |
-|------|-------|---------|
-| 0-7 | Zone index | Indexes `event_data+0x0C` (position table, stride 12: Y offset, speed, angle) |
-| 8-15 | Speed index | Indexes `event_data+0x04` (speed table, stride 8: ?, angle_degrees) |
-| 22-31 | Approach angle | Horizontal approach angle in degrees (0 = straight down) |
+## State machine
 
-## State Machine (table at 0x804b42c0)
+The per-type state table at 0x804b42c0 holds four 0x14-byte entries. `EnemyStateChange`
+(0x801fc398) indexes it as `entry = table[state - 14]`, so the meteor's states are **14-17**.
+Each entry is `{anim_idx, func1, func2, func3, func4}`; the four function pointers land in
+`ed+0xAB8`-`0xAC4` and are dispatched by the GObj procs at priorities 1, 4, 5 and 6. The
+meteor's func2 slot is NULL in every state, so it never runs pre-physics logic.
 
-Entries are stride `0x14` — 5 words each: `state_id, func1, func2, func3, func4`.
+| State | anim | func1 (pri 1) | func3 (pri 5) | func4 (pri 6) | Role |
+|-------|------|---------------|---------------|---------------|------|
+| 14 | -1 | 0x8021e15c | - | - | spawn / hand-off |
+| 15 | 0x0E | 0x8021e398 | 0x8021e3f8 | 0x8021e5e8 | falling |
+| 16 | 0x0F | 0x8021e934 (`blr`) | 0x8021e938 | 0x8021e5e8 | impact |
+| 17 | 0x10 | 0x8021ebfc | 0x8021ec84 | 0x8021e5e8 | landing, then destroy |
 
-- func1 (-> ed+0xAB8): called each frame from the priority-1 proc
-- func2 (-> ed+0xABC): called each frame from the priority-4 proc (before physics)
-- func3 (-> ed+0xAC0): called each frame from the priority-5 proc
-- func4 (-> ed+0xAC4): called each frame from the priority-6 proc
+The shared func4 (0x8021e5e8) updates the shadow and the `ed+0xB74` collision sphere's
+position and radius; it is the same function in states 15-17.
 
-The meteor's per-type table has exactly **four** entries — states `-1`, `14`, `15`, `16`. There is **no state 17 entry**: `Meteor_Landing` enters state 17, which has no per-type funcs.
+**State 14** is the entry state and does nothing on its own: its func1 (0x8021e15c) sets up
+the damage query, calls `EventActor_SetVisibility`, clears `ed+0xB48` and immediately calls
+`Meteor_BehaviorInit`, which leaves state 14 for state 15. Nothing else ever enters state 14.
 
-| State | func1 | func2 | func3 | func4 | Purpose |
-|-------|-------|-------|-------|-------|---------|
-| -1 (default) | 0x8021e15c | NULL | NULL | NULL | func1 calls `EventActor_SetVisibility` then `Meteor_BehaviorInit`. Entered when the JObj animation ends (ProcUpdate detects end -> transitions to default state). |
-| 14 | 0x8021e398 | NULL | 0x8021e3f8 (`Meteor_State14_BoundsAndHit`) | 0x8021e5e8 | Boundary detection + hit detection. Entry state from `EventActor_Create`. |
-| 15 | 0x8021e934 (blr) | NULL | 0x8021e938 | 0x8021e5e8 | Falling (from BehaviorInit). Physics-driven via vel.Y. func3 times out -> `Meteor_Landing` -> **state 17**. |
-| 16 | 0x8021ebfc | NULL | 0x8021ec84 | 0x8021e5e8 | Impact (from state 14 hit detection via `Meteor_HitTransition`). Impact VFX + damage sphere. |
+**State 15** is the fall. Motion is pure physics - `Meteor_BehaviorInit` sets `vel.Y` and
+`EnemyPhysicsProc` (priority 4) integrates it. func1 (0x8021e398) plays a one-shot falling
+sound (0x13001a) the first time `pos.Y` drops below 400.0, latched by `camera_flag`
+(+0xB4E). func3 (`Meteor_State14_BoundsAndHit`, 0x8021e3f8 - the map name is off by one
+state) does two things: while `in_bounds_flag` (+0xB4C) is 0 it tests the position against an
+XZ box (X in -300..100, Z in -200..200) plus a Y ceiling (250 inside the box, 500 outside),
+and on entry rebuilds the collision, sets `kb_active` and calls
+`EventActor_SetCollisionVisible` (0x80204b4c); once in bounds it updates the collision and
+checks for a hit, calling `Meteor_HitTransition` on contact. It also fires two SFX projectiles
+at `frame_counter` 2 and 6.
 
-### State 14: boundary detection + hit detection
+**State 16** is the impact. `Meteor_HitTransition` (0x8021e7c4) enters it: it normalizes the
+current velocity, rescales it by the impact speed from actor_data, disables rendering, resets
+the collision radii, creates the impact VFX and the `ed+0xB74` damage sphere, and fades the
+audio. func1 is a bare `blr`. func3 (0x8021e938) counts `frame_counter` up to
+`actor_data[1]->+0x08`, then removes the impact VFX, resets the color animation and calls
+`Meteor_Landing`.
 
-- **func1** (0x8021e398): one-shot camera effect when `pos.Y < 400.0` and `camera_flag == 0`.
-- **func3** (0x8021e3f8, `Meteor_State14_BoundsAndHit`): while `in_bounds_flag == 0`, checks whether pos is within map bounds (XZ range + Y threshold); on pass it recreates the `x594` collision, enables collision rendering via `EventActor_SetCollisionVisible(ed, 1)` (0x80204b4c), and sets `in_bounds_flag = 1`. While `in_bounds_flag == 1` it updates the x594 collision and checks hit results; on a hit it calls `Meteor_HitTransition`.
-- **func4** (0x8021e5e8): shared across states 14/15/16 — updates the shadow sphere and the xB74 collision sphere position/radius.
-
-State 14 uses **animation-driven motion** (HSD JObj animation keyframes), not physics velocity. That only works with the event system's specific animation setup and produces no meaningful falling motion for standalone spawns.
-
-### State 15: falling (physics-driven)
-
-Entered by `Meteor_BehaviorInit`. Uses physics velocity (`vel.Y = -speed`) integrated each frame by `EnemyPhysicsProc`.
-
-- **func1**: `blr` (no-op).
-- **func3** (0x8021e938): increments `frame_counter` (xB4A). When it exceeds the per-actor max (`actor_data+0x08`) it calls `Meteor_Landing` (0x8021ea5c), which enters **state 17** (`EnemyStateChange(ed, 17, 0)`), zeros velocity, disables rendering, and creates the landing VFX + xB74 damage sphere. State 17 has no per-type func entry, so the physics-driven path lands in state 17, not state 16.
-- **func4** (0x8021e5e8): same shared function as state 14.
-
-### State 16: impact (state-14 hit-detection path only)
-
-Entered **only** from state 14 via `Meteor_HitTransition` (ground contact during the animation-driven event path).
-
-- **func1** (0x8021ebfc): updates the xB74 damage sphere while the timer is below threshold.
-- **func3** (0x8021ec84): increments the timer and monitors VFX handles (via 0x802361a0). When the VFX finish it cleans up (`EventActor_CleanupCollisionSphere` 0x8021f1bc, `EventActor_CleanupVfxA40` 0x8020c70c, `EventActor_CleanupVfxA3C` 0x8020c6e0) and calls `EventActor_Destroy` (0x801fbf2c). State 16 therefore self-destroys; state 17 does not.
+**State 17** is the landing and cleanup. `Meteor_Landing` (0x8021ea5c) enters it, zeroes
+velocity, disables rendering, and creates the landing VFX plus the `ed+0xB74` damage sphere.
+func1 (0x8021ebfc) keeps that sphere positioned and sized while `frame_counter` is below the
+actor_data threshold. func3 (0x8021ec84) waits for the landing VFX handles to finish (via
+0x802361a0), then destroys the collision sphere (`EventActor_CleanupCollisionSphere`
+0x8021f1bc), the two VFX handles (`EventActor_CleanupVfxA3C` 0x8020c6e0 /
+`EventActor_CleanupVfxA40` 0x8020c70c), the secondary sphere GOBJ, and finally the actor
+itself via `EventActor_Destroy` (0x801fbf2c). **The meteor self-destructs at the end of state
+17** - no external cleanup is required on any spawn path.
 
 ## Meteor_BehaviorInit (0x8021e1a0)
 
-Enter function of default state -1. Called during transitions **to** state -1 (e.g. animation end), not during initial creation.
+The function that turns a freshly created meteor into a falling one, and the only place the
+two event globals are read:
 
-1. Disables rendering via `EventActor_DisableRendering(gobj)` (sets bit 4 of render_flags) and sets `JOBJ_HIDDEN`.
-2. Zeros velocity.
-3. Enters state 15 via `EnemyStateChange(ed, 15, 0)`.
-4. Reads the zone position offset from `stc_meteor_event_data->+0x0C` (NULL returns early).
-5. Reads fall speed from `stc_meteor_event_data->+0x04` (NULL returns early).
-6. Sets forward `{0,0,1}` and up `{0,1,0}`.
-7. If angle == 0 (straight down): `pos.Y = initial_pos.Y + zone_offset`, `vel.Y = -speed`.
-8. If angle != 0 (angled): rotates the direction and applies velocity in all components.
-9. Sets collision sphere radii from actor_data.
-10. Calls the model transform update and audio init.
+1. Zeroes velocity and disables rendering.
+2. `EnemyStateChange(ed, 15, ...)`.
+3. Looks up the zone entry from `stc_meteor_event_data->+0x0C` by `tier_flags & 0xFF`,
+   filling `zone_offset` (+0xB5C), fall speed and angle; then overrides the angle from the
+   speed table at `+0x04` by `(tier_flags >> 8) & 0xFF`.
+4. Sets forward to {0,0,1} and up to {0,1,0}.
+5. Straight down (angle 0): `pos.Y = initial_pos.Y + zone_offset`, `vel.Y = -speed`.
+   Angled: rotates the basis by the packed approach angle and distributes the speed across
+   all three velocity components, offsetting `pos` along the rotated up axis.
+6. Sets the collision sphere radii from actor_data, updates the model transform, inits audio.
 
-## Visibility System
+## Visibility
 
-Meteor visibility involves two independent mechanisms, and both must be addressed to make a standalone meteor visible.
+Making a meteor visible means clearing three independent things, because the creation path
+sets all three:
 
-**EnemyData render_flags byte** (+0xB08):
+- **`render_flags` bit 4** (byte at `ed+0xB08`), "rendering disabled" - set by
+  `EventActor_DisableRendering` (0x802041b0), cleared by `EventActor_EnableRendering`
+  (0x80204198). Both take a GOBJ.
+- **`render_flags` bit 7**, "invisible" - set by `EventActor_Hide` (0x801fed40). Its counterpart
+  `EventActor_SetVisibility` (0x801fed74) clears bit 7 but then branches on actor ID: for
+  IDs < 0x4C it enables rendering, for IDs >= 0x4C it **disables** it. The meteor is 0x4E, so
+  calling `SetVisibility` leaves it render-disabled - clearing bit 7 by hand and calling
+  `EnableRendering` separately is the only way to get both bits clear.
+- **`JOBJ_HIDDEN` on the model tree** - set by `EventActor_FinalizeInit` during the init
+  callback. Nothing on a standalone path clears it, so it has to be cleared explicitly with
+  `JObj_ClearFlagsAll(root_jobj, JOBJ_HIDDEN)` on the root reached from `gobj->hsd_object`.
 
-- Bit 4 "rendering disabled" — set by `EventActor_DisableRendering(gobj)`, cleared by `EventActor_EnableRendering(gobj)`.
-- Bit 7 "invisible" — set by `EventActor_Hide(ed)` (0x801fed40), cleared by `EventActor_SetVisibility(ed)`.
-- `EventActor_SetVisibility` clears bit 7, then calls EnableRendering for actor_id < 0x4C or **DisableRendering** for actor_id >= 0x4C. The meteor is 0x4E, so SetVisibility actually leaves it render-disabled.
+## Standalone spawn
 
-**JObj JOBJ_HIDDEN flag** (+0x14 of JObj, bit 4) controls whether the HSD render system draws the model. `Meteor_BehaviorInit` sets it via its `EventActor_DisableRendering` call path, so a standalone spawn must clear it with `JObj_ClearFlagsAll(root_jobj, JOBJ_HIDDEN)`.
+`mods/custom_events/src/spawn_enemy.c` drops a meteor on every human player:
+`SpawnEnemy_MeteorTrap` loops the player slots and calls `SpawnMeteorOnPlayer`. Nothing
+invokes it - `SpawnEnemy_MeteorTrap`, `SpawnEnemy_Random` and `SpawnEnemy_OnBoot` are
+scaffolding, so the trap and its two global patches are not live.
 
-## Meteor_HitTransition (0x8021e7c4)
+Constants: `METEOR_FALL_SPEED` 8.0, `METEOR_DROP_HEIGHT` 400.0, `METEOR_SCALE` 2.0,
+`METEOR_LANDING_FRAMES` 210.
 
-Called by state 14 func3 when ground contact is detected:
+The spawn position is 400 units above the rider, with XZ lead-targeted by
+`rider.self_vel * (DROP_HEIGHT / FALL_SPEED)` so the meteor lands on a moving player. The
+descriptor uses `spawn_index = -1`, `spawn_slot = -1`, `bounds_flag = -1.0` - the standalone
+sentinels that keep it out of the spawn-slot pool.
 
-1. Normalizes current velocity.
-2. Computes impact speed from actor_data.
-3. Sets velocity to the normalized direction * speed.
-4. Enters **state 16** (`EnemyStateChange(ed, 16, 0)`).
-5. Disables rendering.
-6. Resets collision radii.
-7. Creates impact VFX.
-8. Creates the xB74 collision sphere (impact damage sphere).
-9. Audio fade.
+The sequence around `EventActor_Create` is what matters:
 
-## Standalone Meteor Spawn (Trap)
+1. Save the real `stc_meteor_data` / `stc_meteor_event_data`.
+2. Write `*stc_meteor_data = 1` and point `*stc_meteor_event_data` at a fake event-data
+   struct (zone speed 8.0, all angles 0) laid out to match the two tables `Meteor_BehaviorInit`
+   indexes.
+3. `EventActor_Create` -> post-init callback -> state 14.
+4. Call `Meteor_BehaviorInit(ed)` inline -> state 15, `vel.Y = -8.0`.
+5. Restore the real globals immediately.
+6. Clear all three visibility flags (see above).
+7. Attach `MeteorDespawnProc` at priority 0x14.
 
-Implemented in `mods/custom_events/src/spawn_enemy.c` (`SpawnEnemy_MeteorTrap` -> `SpawnMeteorOnPlayer`): a meteor above each human player that falls, impacts with VFX + damage, and self-destructs. `SpawnEnemy_MeteorTrap`, `SpawnEnemy_Random` and `SpawnEnemy_OnBoot` are defined but not called from anywhere — this is scaffolding, not a live trap.
+**Why BehaviorInit is called by hand.** State 14's func1 would call it anyway, but not until
+the priority-1 proc runs on the *next* frame - by which time the real globals are back. The
+fake globals only exist for the few instructions between steps 2 and 5, so the call has to
+happen inside that window.
 
-Constants: `METEOR_FALL_SPEED = 8.0f`, `METEOR_DROP_HEIGHT = 400.0f`, `METEOR_SCALE = 2.0f`, `METEOR_LANDING_FRAMES = 210` (3.5s).
+**Why the save/restore matters.** These globals belong to the vanilla meteor event. During an
+active event they point at live data, and `*stc_meteor_data = 1` is not a pointer - if vanilla
+meteor code dereferenced it on the same frame it would crash. Restoring them before returning
+keeps the window to a single straight-line stretch of code with no engine calls in between.
 
-### Approach
+**MeteorDespawnProc** ticks `ed->lifetime_counter` every frame, records the frame the meteor
+first reaches state 16 in `ed->spawn_index`, and after `METEOR_LANDING_FRAMES` runs the same
+cleanup the vanilla state-17 func3 does and destroys the actor. It is a backstop rather than a
+requirement: the vanilla chain (state 15 hit -> 16 -> `Meteor_Landing` -> 17 -> VFX complete ->
+`EventActor_Destroy`) already destroys the meteor on this path, and whichever fires first
+takes the GOBJ and its procs with it.
 
-1. Spawn position is computed per human player: `pos.Y = rider.pos.Y + 400`, and XZ is lead-targeted — offset by `rider.self_vel.{X,Z} * (DROP_HEIGHT / FALL_SPEED)` so the meteor lands on a moving player. `desc.scale = METEOR_SCALE` (2.0).
-2. Save the real `stc_meteor_data` / `stc_meteor_event_data` globals.
-3. Set fake globals: `*stc_meteor_data = 1`, `*stc_meteor_event_data = &s_fake_event_data` (zone_speed = 8.0, all angles 0).
-4. `EventActor_Create` -> post-init callback -> state 14.
-5. `Meteor_BehaviorInit(ed)` — reads the fake globals, transitions to state 15 with `vel.Y = -8.0`.
-6. Restore the real globals immediately.
-7. Fix visibility: `EventActor_EnableRendering(meteor)` (clears bit 4), clear bit 7 manually (`render_flags &= ~0x80`), and `JObj_ClearFlagsAll(root_jobj, JOBJ_HIDDEN)` on the model tree (root from `meteor->hsd_object`).
-8. `MeteorDespawnProc` (priority 0x14) increments `ed->lifetime_counter` each frame. When `ed->state == 16` it records the impact frame in `ed->spawn_index`, waits `METEOR_LANDING_FRAMES`, then runs cleanup (`EventActor_CleanupCollisionSphere`, `EventActor_CleanupVfxA3C`, `EventActor_CleanupVfxA40`) and `EventActor_Destroy`.
+### Global patches
 
-**Known defect:** `MeteorDespawnProc` waits for `ed->state == 16`, but the physics-driven path `Meteor_BehaviorInit` puts standalone meteors into lands in **state 17** via `Meteor_Landing`, never state 16 (state 16 is reachable only from state 14's hit detection). The despawn timer therefore never fires for these spawns and they leak. The check should test `state == 17` (or `state >= 16`). Vanilla state 17 / `Meteor_Landing` has no func3 self-destruct, which is why `MeteorDespawnProc` exists at all.
+`SpawnEnemy_OnBoot` replaces two engine functions that assume the spawn-slot/event context:
 
-### Why BehaviorInit is required
+- `EventActor_GetParentAnimRate` (0x802049b8) -> a null-checked version; standalone spawns have
+  no parent GOBJ and the vanilla one dereferences it unconditionally.
+- `splArcLengthPoint` (0x80415958) -> a null-checked version; standalone spawns have no
+  spline assigned.
 
-State 14 uses animation-driven motion that depends on the event system's animation setup; without it a standalone meteor hangs in the air. BehaviorInit enters state 15, which uses physics velocity (`vel.Y = -speed`) and falls reliably with no event-system involvement.
+## Key addresses
 
-### Why save/restore of globals is critical
-
-`Meteor_BehaviorInit` reads `stc_meteor_data` and `stc_meteor_event_data` to compute fall velocity and position offset. These globals are owned by the vanilla meteor event: during an active event they point at live event data, and outside it they may be NULL or stale. Without save/restore, writing fake values corrupts the running event — `*stc_meteor_data = 1` is a non-pointer value that crashes if vanilla meteor code dereferences it on the same frame.
-
-### Global patches (in SpawnEnemy_OnBoot)
-
-- `EventActor_GetParentScale` -> `EventActor_GetParentScale_Safe`: null-checks the parent GOBJ (standalone spawns have no parent).
-- `splArcLengthPoint` -> `splArcLengthPoint_Safe`: null-checks the spline pointer (standalone spawns have no path).
-
-### Lifecycle
-
-1. Meteor spawns 400 units above the lead-targeted XZ of a player at scale 2.0; BehaviorInit runs -> state 15, `vel.Y = -8.0`.
-2. Vanilla `EnemyPhysicsProc` integrates velocity each frame.
-3. State 15 func3 counts frames; on timeout `Meteor_Landing` runs -> **state 17** (impact VFX + xB74 damage sphere). State 16 is not reached on this path.
-4. `MeteorDespawnProc` waits 210 frames after impact, then cleans up and destroys — subject to the state-16 defect above.
-
-## Key EnemyData Fields (Meteor)
-
-All offsets are defined in `externals/hoshi/include/enemy.h` (`EnemyData`).
-
-| Offset | Type | Field | Purpose |
-|--------|------|-------|---------|
-| +0x24 | int | spawn_index | -1 for standalone. Repurposed by `MeteorDespawnProc` to store the impact-frame timestamp. |
-| +0x2C | int | lifetime_counter | Generic per-frame counter; `MeteorDespawnProc` uses it as its own frame tick. |
-| +0x34 | int | state | Current state ID (written by `EnemyStateChange`) |
-| +0x2EC | Vec3 | vel | Added to position each frame by the physics proc |
-| +0x2F8 | Vec3 | pos | Current world position |
-| +0xB08 | int | render_flags | Byte-accessed. Bit 4: rendering disabled. Bit 7: invisible. |
-| +0xB4A | s16 | frame_counter | Counts frames in the current state |
-| +0xB4C | s16 | in_bounds_flag | Set to 1 when the meteor enters the map area (state 14) |
-| +0xB4E | s16 | camera_flag | Set to 1 once the state-14 camera effect fires |
-| +0xB50 | Vec3 | initial_pos | Saved by the post-init callback |
-| +0xB5C | float | zone_offset | Height offset from the zone table (read by BehaviorInit) |
-| +0xB68 | Vec3 | collision_radii | Base collision sphere radii (from actor_data) |
-| +0xB74 | ptr | collision_sphere | Collision sphere handle (nulled by init; created by `Meteor_HitTransition` / `Meteor_Landing`) |
-
-## Key Functions
-
-`Meteor_InitCallback` and `Meteor_PostInitCallback` are descriptive labels used only in this doc — those two are still `zz_XXXXXXXX_` in `GKYE01.map` and are not exported from `link.ld`. Every other name below resolves through `GKYE01.map` or `link.ld`.
-
-| Function | Address | Purpose |
-|----------|---------|---------|
-| Meteor_BehaviorInit | 0x8021e1a0 | Sets velocity, enters state 15. Reads zone/speed from event globals. Disables rendering. |
-| Meteor_HitTransition | 0x8021e7c4 | Ground collision (state-14 path) -> state 16, impact VFX + damage sphere |
-| Meteor_Landing | 0x8021ea5c | State-15 timeout -> **state 17**, landing VFX + xB74 damage sphere. Called by state 15 func3. |
-| Meteor_State14_BoundsAndHit | 0x8021e3f8 | State 14 func3: bounds check, then hit detection -> `Meteor_HitTransition` |
-| Meteor_InitCallback (`zz_8021dfc0_`) | 0x8021dfc0 | Init callback (table[2]): render flags, null xB74/xB78, store hit reaction callbacks |
-| Meteor_PostInitCallback (`zz_8021e0d4_`) | 0x8021e0d4 | Post-init callback (table[6]): destroy x594, zero velocity, hide actor, enter state 14 |
-| EventActor_Create | 0x801fbb50 | Universal actor factory |
-| EventActor_Destroy | 0x801fbf2c | Destroys actor GOBJ + EnemyData |
-| EventActor_InitFromDesc | 0x801fb53c | Copies EventActorDesc fields into EnemyData |
-| EnemyStateChange | 0x801fc398 | Writes the new state to ed+0x34, resolves per-type func slots |
-| EventActor_Hide | 0x801fed40 | Sets bit 7 (invisible) of render_flags, then DisableRendering. Takes EnemyData. |
-| EventActor_SetVisibility | 0x801fed74 | Clears bit 7 of render_flags. Calls Enable/DisableRendering based on actor_id (>= 0x4C -> Disable). Takes EnemyData. |
-| EventActor_EnableRendering | 0x80204198 | Clears bit 4 of render_flags (+0xB08). Takes GOBJ. |
-| EventActor_DisableRendering | 0x802041b0 | Sets bit 4 of render_flags (+0xB08). Takes GOBJ. |
-| EventActor_SetCollisionVisible | 0x80204b4c | Enables/disables collision rendering (state 14 bounds entry) |
-| EventActor_CleanupCollisionSphere | 0x8021f1bc | Destroys + nulls the xB74 collision sphere |
-| EventActor_CleanupVfxA3C / ...VfxA40 | 0x8020c6e0 / 0x8020c70c | VFX handle cleanup |
-| event_meteor_start | 0x80110b74 | City Trial meteor event start (allocs the 0x218 state struct -> stc_meteor_data) |
-| event_meteor | 0x80110c0c | City Trial meteor event per-frame spawn logic |
-| CityItem_SetMeteorEventFlag | 0x80254174 | Marks the meteor event active for the item system |
-
-## Data Addresses
-
-| Data | Address | Description |
-|------|---------|-------------|
-| stc_meteor_data | r13+0x650 (0x805dd730) | Meteor event state struct pointer. Non-null = event active. |
-| stc_meteor_event_data | r13+0x654 (0x805dd734) | Meteor event data pointer (zone table at +0x0C, speed table at +0x04). |
-| stc_meteor_spawn_count | r13+0x658 (0x805dd738) | Meteor spawn counter. |
-| Meteor actor function table | 0x804b4310 | 8 slots: state table ptr, init/post-init callbacks, actor_data copiers. |
-| Meteor state function table | 0x804b42c0 | 4 entries of stride 0x14 (states -1, 14, 15, 16). |
+| Symbol | Address | Notes |
+|--------|---------|-------|
+| `Meteor_BehaviorInit` | 0x8021e1a0 | state 14 -> 15, reads the event globals. Exported via `link.ld`; map row is still `zz_`. |
+| `Meteor_HitTransition` | 0x8021e7c4 | state 15 hit -> 16, impact VFX + damage sphere |
+| `Meteor_Landing` | 0x8021ea5c | state 16 timeout -> 17, landing VFX + damage sphere |
+| `Meteor_State14_BoundsAndHit` | 0x8021e3f8 | state **15** func3: bounds gate then hit detection |
+| Meteor per-type descriptor | 0x804b4310 | state table, init/post-init callbacks, actor_data copiers |
+| Meteor state table | 0x804b42c0 | 4 entries of 0x14 bytes, states 14-17 |
+| `stc_meteor_data` | 0x805dd730 (r13+0x650) | event state struct pointer; non-null = event active |
+| `stc_meteor_event_data` | 0x805dd734 (r13+0x654) | zone table at +0x0C, speed table at +0x04 |
+| `stc_meteor_spawn_count` | 0x805dd738 (r13+0x658) | spawn counter |

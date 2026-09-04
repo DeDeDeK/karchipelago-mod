@@ -9,6 +9,7 @@
 #include "main.h"
 #include "gate_base_abilities.h"
 #include "textbox_api.h"
+#include "ap_announce.h"
 
 static const char *const BaseAbility_Names[BASEABILITY_NUM] = {
     "Inhale",
@@ -156,6 +157,6 @@ int GateBaseAbilities_UnlockAbility(BaseAbilityKind kind)
     OSReport("[GateBaseAbilities] Base ability %d (%s) unlocked (mask = %s)\n",
              kind, BaseAbility_Names[kind],
              MaskBits(ap_save->base_ability_unlocked_mask, BASEABILITY_NUM));
-    tb_api->EnqueueColoredNoun("Unlock: ", BaseAbility_Names[kind], tb_api->DefaultColor, NULL);
+    APAnnounce_Grant("Unlock: ", BaseAbility_Names[kind], tb_api->DefaultColor, NULL);
     return 1;
 }

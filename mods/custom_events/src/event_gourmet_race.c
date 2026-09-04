@@ -6,6 +6,7 @@
 #include "enemy.h"
 #include "hud.h"
 #include "hsd.h"
+#include "obj.h"
 
 #include "event_gourmet_race.h"
 
@@ -103,9 +104,6 @@ static int scores[5]; // per-player scores
 #define HUD_GAUGE_Y_OFFSET  35.0f   // nudge gauge up to align with label
 #define GOURMET_HUD_FG_GXLINK   23  // labels + digits
 
-// CObjThink_Common, the CObj render-pass dispatcher (not in link.ld).
-static void (*CObj_GX)(GOBJ *g, int pass) = (void *)0x8042a29c;
-
 static GOBJ *hud_camera_gobj;
 
 typedef struct ScoreHUD
@@ -129,7 +127,7 @@ static void ScoreHUD_Create(void)
     JOBJSet **plynum_sets = Archive_GetPublicAddress(*arch, "ScInfPlynum_scene_models");
     if (!gauge_sets || !plynum_sets)
     {
-        OSReport("[GourmetRace] Failed to load HUD archives!\n");
+        OSReport("[GourmetRace] HUD archives not found, no score display\n");
         return;
     }
 
@@ -138,7 +136,7 @@ static void ScoreHUD_Create(void)
                                       0, 0,
                                       HSD_OBJKIND_COBJ, (COBJDesc *)0x805096a0,
                                       0, 0,
-                                      CObj_GX, 0, 5);
+                                      CObjThink_Common, 0, 5);
     hud_camera_gobj->cobj_links = (1ULL << GOURMET_HUD_FG_GXLINK);
     COBJ *cam_cobj = hud_camera_gobj->hsd_object;
     CObj_SetOrtho(cam_cobj, 0.0f, -480.0f, 0.0f, 640.0f);
@@ -196,7 +194,6 @@ static void ScoreHUD_Create(void)
         num_score_huds++;
     }
 
-    OSReport("[GourmetRace] Score HUD created for %d players\n", num_score_huds);
 }
 
 static void ScoreHUD_Update(void)
@@ -429,7 +426,6 @@ static void GourmetRace_WatcherProc(GOBJ *gobj)
                 {
                     int pts = slot->is_big ? GOURMET_BIG_POINTS : GOURMET_REGULAR_POINTS;
                     scores[ply] += pts;
-                    OSReport("[GourmetRace] P%d +%d pts (total: %d)\n", ply, pts, scores[ply]);
                 }
 
                 slot->gobj = NULL;
@@ -465,12 +461,6 @@ static void GourmetRace_WatcherProc(GOBJ *gobj)
 
 static void GourmetRace_SpawnFood(void)
 {
-    if (!Gm_IsInCity())
-    {
-        OSReport("[GourmetRace] Not in City Trial\n");
-        return;
-    }
-
     total_spawned = 0;
     num_food_slots = 0;
 
@@ -491,7 +481,6 @@ static void GourmetRace_SpawnFood(void)
             spawned_big++;
         }
     }
-    OSReport("[GourmetRace] Pass 1 (big): %d/%d\n", spawned_big, GOURMET_BIG_COUNT);
 
     // Pass 2: regular foods at 5-10 of the 15 pre-placed locations.
     int preplaced_target = GOURMET_PREPLACED_MIN
@@ -525,18 +514,15 @@ static void GourmetRace_SpawnFood(void)
             spawned_pre++;
         }
     }
-    OSReport("[GourmetRace] Pass 2 (preplaced): %d/%d\n", spawned_pre, preplaced_target);
 
     int remaining = GOURMET_MAX_FOOD - total_spawned;
     if (remaining <= 0)
     {
-        OSReport("[GourmetRace] Done! %d total\n", total_spawned);
         return;
     }
 
     static Vec3 candidates[MAX_CANDIDATES];
     int num_candidates = CollectCandidates(candidates, MAX_CANDIDATES);
-    OSReport("[GourmetRace] Collected %d candidate points\n", num_candidates);
 
     // Pass 3: half of the remainder, dropped from high up onto the ground.
     int pass3_target = remaining / 2;
@@ -562,7 +548,6 @@ static void GourmetRace_SpawnFood(void)
             spawned_s++;
         }
     }
-    OSReport("[GourmetRace] Pass 3 (surface): %d/%d\n", spawned_s, pass3_target);
 
     // Pass 4: the other half, underground (Y < 44).
     int pass4_target = remaining - spawned_s;
@@ -590,7 +575,6 @@ static void GourmetRace_SpawnFood(void)
             spawned_u++;
         }
     }
-    OSReport("[GourmetRace] Pass 4 (underground): %d/%d\n", spawned_u, pass4_target);
 
     // Pass 5: if pass 4 ran out of underground candidates, fill the rest as surface.
     int spawned_overflow = 0;
@@ -618,11 +602,8 @@ static void GourmetRace_SpawnFood(void)
                 spawned_overflow++;
             }
         }
-        OSReport("[GourmetRace] Pass 5 (overflow surface): %d/%d\n", spawned_overflow, pass5_target);
     }
 
-    OSReport("[GourmetRace] Done! %d big + %d preplaced + %d surface + %d underground + %d overflow = %d total\n",
-             spawned_big, spawned_pre, spawned_s, spawned_u, spawned_overflow, total_spawned);
 }
 
 void GourmetRace_Start(EventCheckData *ev_chk)
@@ -634,9 +615,11 @@ void GourmetRace_Start(EventCheckData *ev_chk)
 
     watcher_gobj = GObj_Create(0, GAMEPLINK_SYS, 0);
     GObj_AddProc(watcher_gobj, GourmetRace_WatcherProc, 0);
-    OSReport("[GourmetRace] Watcher GObj created, tracking %d food slots\n", num_food_slots);
 
     ScoreHUD_Create();
+
+    OSReport("[GourmetRace] Started: %d food spawned, %d player HUD(s)\n",
+             total_spawned, num_score_huds);
 }
 
 void GourmetRace_Active(EventCheckData *ev_chk)
@@ -668,11 +651,11 @@ void GourmetRace_End2(EventCheckData *ev_chk)
 
     int best_score = 0;
     for (int i = 0; i < 5; i++)
-    {
-        OSReport("[GourmetRace] P%d score: %d\n", i, scores[i]);
         if (scores[i] > best_score)
             best_score = scores[i];
-    }
+
+    OSReport("[GourmetRace] Final scores: P1=%d P2=%d P3=%d P4=%d P5=%d\n",
+             scores[0], scores[1], scores[2], scores[3], scores[4]);
 
     if (best_score == 0)
     {
@@ -696,6 +679,6 @@ void GourmetRace_End2(EventCheckData *ev_chk)
             continue;
         for (int j = 0; j < allups; j++)
             SpawnItemPlayer(i, ITKIND_ALLUP);
-        OSReport("[GourmetRace] P%d wins! (%d all-ups)\n", i, allups);
+        OSReport("[GourmetRace] P%d wins, %d all-up(s) awarded\n", i + 1, allups);
     }
 }

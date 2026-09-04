@@ -11,18 +11,51 @@
 #include "hoshi/mod.h"
 #include "hoshi/func.h"
 
+#include "main.h"
 #include "main_menu.h"
+#include "gate_ap_star.h"
 
 static HSD_Archive *menu_archive = 0;
 static void (*title_exit_vanilla)(void *data) = 0;
 static void (*title_think_vanilla)(void) = 0;
-static float wagon_idle_floor = 0.0f;
-static int wagon_idle_floor_saved = 0;
+static float demo_idle_floor = 0.0f;
+static int demo_idle_floor_saved = 0;
+
+// The demo ride, as a star-class slot. Resolves to the Archipelago Star once
+// custom_machines has registered it, which is the point: the title screen shows the
+// machine the goal awards, before it is earned.
+static int demo_star_slot = VCKIND_WAGON;
+static int demo_rider = RDKIND_DEDEDE;
+
+// The demo-player setup at 0x8000d300 picks the idle slot-0 rider's ride through three
+// `li r4` operands (RiderKind, IsBike, class slot). Must stay star-class (is_bike = 0) -
+// the demo init uses hardcoded star-only state ids, so a wheel-class machine crashes.
+// Re-applied per title entry because the registry only resolves after every mod boots.
+static void MainMenu_SelectDemoMachine(void)
+{
+    int kind = GateApStar_MachineKind();
+
+    if (kind >= 0)
+    {
+        int is_bike;
+        int slot = MachineKind_ClassIndexOf((MachineKind)kind, &is_bike);
+        if (!is_bike)
+        {
+            demo_star_slot = slot;
+            demo_rider = RDKIND_KIRBY;
+        }
+    }
+
+    CODEPATCH_REPLACEINSTRUCTION(0x8000d340, 0x38800000 | demo_rider);
+    CODEPATCH_REPLACEINSTRUCTION(0x8000d34c, 0x38800000 | 0);
+    CODEPATCH_REPLACEINSTRUCTION(0x8000d358, 0x38800000 | demo_star_slot);
+}
 
 // Title file load (0x8000d2b4). Gm_LoadGameFile appends ".dat" and reads it from the
 // disc overlay.
 void MainMenu_OnTitleLoad(void)
 {
+    MainMenu_SelectDemoMachine();
     Gm_LoadGameFile(&menu_archive, "MnTitleKarchi");
 }
 CODEPATCH_HOOKCREATE(0x8000d2b4, "", MainMenu_OnTitleLoad, "", 0)
@@ -60,17 +93,17 @@ static GOBJ *MainMenu_GetMachines(void)
 }
 
 // The Wagon Star's engine loop holds an idle volume floor of 20.0, which clamps to full
-// volume, so the demo machine hums constantly where the vanilla Warp Star is silent. The
-// two kinds share an engine_volume_coef of 0.1, so zeroing the floor makes the Wagon's
-// volume arithmetic identical to the Warp Star's. Machine_UpdateEngineLoop re-reads the
-// record every frame, and the loop is only ever created at volume 0.0 and ramped up from
-// there, so this never lets an audible frame through.
-static MachineAudioParams *MainMenu_GetWagonAudioParams(void)
+// volume, so the demo machine hums constantly where the vanilla Warp Star is silent.
+// Zeroing the floor makes its volume arithmetic identical to the Warp Star's.
+// Machine_UpdateEngineLoop re-reads the record every frame, and the loop is only ever
+// created at volume 0.0 and ramped up from there, so this never lets an audible frame
+// through. Kinds whose floor is already 0.0 pass through unchanged.
+static MachineAudioParams *MainMenu_GetDemoAudioParams(void)
 {
     if (*stc_machineAudioParams == 0)
         return 0;
 
-    return &(*stc_machineAudioParams)->params[0][VCKIND_WAGON];
+    return &(*stc_machineAudioParams)->params[0][demo_star_slot];
 }
 
 // Title minor cb_ThinkPreGObjProc, wrapped around the vanilla one. vcLoadCommon runs partway
@@ -78,15 +111,15 @@ static MachineAudioParams *MainMenu_GetWagonAudioParams(void)
 // running; the demo machine existing at all proves it is.
 static void MainMenu_TitleThink(void)
 {
-    if (!wagon_idle_floor_saved)
+    if (!demo_idle_floor_saved)
     {
-        MachineAudioParams *params = MainMenu_GetWagonAudioParams();
+        MachineAudioParams *params = MainMenu_GetDemoAudioParams();
 
         if (params != 0)
         {
-            wagon_idle_floor = params->engine_idle_floor;
+            demo_idle_floor = params->engine_idle_floor;
             params->engine_idle_floor = 0.0f;
-            wagon_idle_floor_saved = 1;
+            demo_idle_floor_saved = 1;
         }
     }
 
@@ -101,12 +134,12 @@ static void MainMenu_TitleThink(void)
 static void MainMenu_TitleExit(void *data)
 {
     GOBJ *gobj = MainMenu_GetMachines();
-    MachineAudioParams *params = MainMenu_GetWagonAudioParams();
+    MachineAudioParams *params = MainMenu_GetDemoAudioParams();
 
-    if (wagon_idle_floor_saved && params != 0)
+    if (demo_idle_floor_saved && params != 0)
     {
-        params->engine_idle_floor = wagon_idle_floor;
-        wagon_idle_floor_saved = 0;
+        params->engine_idle_floor = demo_idle_floor;
+        demo_idle_floor_saved = 0;
     }
 
     while (gobj != 0)
@@ -139,13 +172,7 @@ void MainMenu_OnBoot(void)
     title_think_vanilla = minor_descs[MNRKIND_TITLESCREEN].cb_ThinkPreGObjProc;
     minor_descs[MNRKIND_TITLESCREEN].cb_ThinkPreGObjProc = MainMenu_TitleThink;
 
-    // The demo-player setup at 0x8000d300 picks the idle slot-0 rider's ride via three
-    // `li r4` operands (RiderKind, IsBike, MachineKind). Must stay star-class
-    // (is_bike=0) - the demo init uses hardcoded star-only state ids, so a wheel-class
-    // machine crashes here.
-    CODEPATCH_REPLACEINSTRUCTION(0x8000d340, 0x38800000 | RDKIND_DEDEDE);
-    CODEPATCH_REPLACEINSTRUCTION(0x8000d34c, 0x38800000 | 0);
-    CODEPATCH_REPLACEINSTRUCTION(0x8000d358, 0x38800000 | VCKIND_WAGON);
+    MainMenu_SelectDemoMachine();
 
     CODEPATCH_HOOKAPPLY(0x8000d2b4);
     CODEPATCH_HOOKAPPLY(0x8017b5d8);
