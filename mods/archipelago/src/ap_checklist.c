@@ -153,6 +153,11 @@ static const CustomChecklistDesc ap_desc = {
     .is_ready = APChecklist_IsReady,
 };
 
+int APChecklist_GetBuildMode(void)
+{
+    return cc_api && cc_api->GetBuildMode ? cc_api->GetBuildMode() : -1;
+}
+
 void APChecklist_RevealAll(void)
 {
     if (!cc_api)

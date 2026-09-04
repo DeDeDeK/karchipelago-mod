@@ -780,11 +780,28 @@ CODEPATCH_HOOKCREATE(
     0x80182178                  // skip vanilla mode load at 0x80182174, go straight to bl
 )
 
+// The reward_param lookup that decides whether the icon is drawn at all, one call
+// earlier in the same function. It is passed ClearCheckerUI.mode, which on a custom
+// tab is past City Trial and trips the callee's own mode assert.
+static u8 ChecklistRewards_GetHoverRewardParam(GameMode mode, u8 reward_index)
+{
+    if (hover.source_mode >= GMMODE_NUM)
+        return 0;
+    return stc_reward_table_ptrs[hover.source_mode][reward_index].reward_param;
+}
+
 // Mirror has_reward onto cross-mode reward checkboxes for their display badge:
 // vanilla's reward loop only iterates the current mode's table and ShouldSkipReward
 // drops cross-mode placements. The filler token is granted at AP receipt instead.
 static void ChecklistRewards_ApplyCrossModeHasReward(u8 current_mode)
 {
+    // A custom tab's build runs under GMMODE_CITYTRIAL while gmGetClearcheckerTypeP
+    // already serves the tab's block, so the UI mode would pair City Trial's slots
+    // with the AP board.
+    int build_mode = APChecklist_GetBuildMode();
+    if (build_mode >= 0)
+        current_mode = (u8)build_mode;
+
     // Includes the AP tab, which hosts cross-mode rewards like any other mode. Any
     // other custom tab has no row and is skipped.
     int row = ChecklistModeRow(current_mode);
@@ -1145,6 +1162,7 @@ void ChecklistRewards_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8018201c);  // Cross-mode reward text display
     CODEPATCH_HOOKAPPLY(0x80181f8c);  // Blank text sis_id fix
     CODEPATCH_HOOKAPPLY(0x80182170);  // Cross-mode reward type icon
+    CODEPATCH_REPLACECALL(0x8018213c, ChecklistRewards_GetHoverRewardParam);
     OSReport("[ChecklistRewards] Reward tables reallocated, hooks installed\n");
 
     ClearCrossModeSlots();

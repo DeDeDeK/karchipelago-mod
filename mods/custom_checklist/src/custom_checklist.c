@@ -151,12 +151,17 @@ static GameClearData *CC_GetClearcheckerTypeP(GameMode mode)
 #define CC_REWARD_COUNT_CITYTRIAL 44
 
 // REPLACEFUNC for Checklist_GetRewardNum (0x80049c20): 0 for custom tabs gates the
-// reward loops off and dodges the vanilla mode>=3 assert.
+// reward loops off and dodges the vanilla mode>=3 assert. A build reads CITYTRIAL from
+// ClearCheckerUI.mode while gmGetClearcheckerTypeP already serves the tab's block, so
+// it answers 0 there too - otherwise Checklist_SetRewardFlagOnUnlocks walks City
+// Trial's reward table and sets has_reward on the custom tab's cells.
 static u8 CC_GetRewardNum(GameMode mode)
 {
     static const u8 counts[GMMODE_NUM] = {
         CC_REWARD_COUNT_AIRRIDE, CC_REWARD_COUNT_TOPRIDE, CC_REWARD_COUNT_CITYTRIAL,
     };
+    if (g_build_active >= 0 && mode == GMMODE_CITYTRIAL)
+        return 0;
     return mode < GMMODE_NUM ? counts[mode] : 0;
 }
 
@@ -1008,9 +1013,16 @@ static void CC_RevealAll(int mode)
              g_lists[idx].desc.check_num);
 }
 
+// The tab whose build is in progress, as a checklist mode; -1 outside a build.
+static int CC_GetBuildMode(void)
+{
+    return g_build_active >= 0 ? g_lists[g_build_active].mode : -1;
+}
+
 static const CustomChecklistAPI g_api = {
     .Register = CC_Register,
     .RevealAll = CC_RevealAll,
+    .GetBuildMode = CC_GetBuildMode,
 };
 
 static void OnBoot(void)

@@ -20,6 +20,11 @@ void APChecklist_Register(void);
 // in the build the vanilla accessor asserts on a mode past City Trial.
 int APChecklist_IsRegistered(void);
 
+// The checklist mode of the tab the framework is building, or -1 outside a build.
+// The build runs under GMMODE_CITYTRIAL, so a hook reading ClearCheckerUI.mode gets
+// CITYTRIAL while the clear data is already the custom tab's.
+int APChecklist_GetBuildMode(void);
+
 // Make every AP checklist cell that backs an objective visible. Only the cells in
 // ap_checks[] are revealed - the rest of the 120-cell grid has no objective behind
 // it. No-op if the tab is not registered.

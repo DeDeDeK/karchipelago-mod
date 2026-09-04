@@ -9,7 +9,7 @@
 
 #define CUSTOM_CHECKLIST_MOD_NAME  "custom_checklist"
 #define CUSTOM_CHECKLIST_API_MAJOR 2
-#define CUSTOM_CHECKLIST_API_MINOR 1
+#define CUSTOM_CHECKLIST_API_MINOR 2
 
 // Grid cells. A tab may define any subset; undefined cells render blank.
 #define CC_CLEAR_KIND_NUM 120
@@ -69,6 +69,13 @@ typedef struct CustomChecklistAPI
     // latch is not saved - a consumer whose option outlives a boot calls this each
     // OnSaveLoaded, right after Register.
     void (*RevealAll)(int mode);
+
+    // Mode of the tab currently being built, or -1 outside a build. The build runs
+    // Checklist_Init under GMMODE_CITYTRIAL, so ClearCheckerUI.mode reads CITYTRIAL
+    // while gmGetClearcheckerTypeP already serves the tab's block. A hook that keys
+    // off the UI mode must remap it through this or it applies City Trial's reward
+    // rows to the custom tab's board.
+    int (*GetBuildMode)(void);
 } CustomChecklistAPI;
 
 #endif // CUSTOM_CHECKLIST_API_H
