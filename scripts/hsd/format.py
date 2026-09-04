@@ -769,7 +769,7 @@ def _d_fgmentry(arc, off):
 
 
 def _d_yakumononode(arc, off):
-    return f" entries={u32(arc.data, off + 0x04)}"
+    return f" data={u32(arc.data, off + 0x04)} entries={u32(arc.data, off + 0x14)}"
 
 
 def _d_yakumonoaudio(arc, off):
@@ -806,7 +806,7 @@ def _d_itemnode(arc, off):
 
 
 def _d_typedata(arc, off):
-    return f" entries={u32(arc.data, off + 0x04)}"
+    return f" data={u32(arc.data, off + 0x04)} entries={u32(arc.data, off + 0x14)}"
 
 
 def _d_lightgroup(arc, off):

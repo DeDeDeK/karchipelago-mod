@@ -419,9 +419,10 @@ def _yakumono(arc, yn):
     count = u32(arc.data, yn + 0x04)
     arr = _deref(arc, yn)
     print(
-        f"\n  YakumonoNode @ {yn:#x}:  entries={count} "
+        f"\n  YakumonoNode @ {yn:#x}:  data={count} "
         f"(array holds {array_length(arc, arr) if arr else 0})"
     )
+    _yaku_entries(arc, yn)
     for i in range(array_length(arc, arr) if arr else 0):
         d = _deref(arc, arr + i * 4)
         if not d:
@@ -439,6 +440,21 @@ def _yakumono(arc, yn):
             )
             + (f"{describe(arc, 'HurtCollision', hurt)}" if hurt else "")
             + (f"{describe(arc, 'YakumonoAudio', audio)}" if audio else "")
+        )
+
+
+# YakumonoNode+0x10 is the spawn list the generic walker in grInitYakumono reads, independent of the
+# data_array above it. Each entry is {kind, data_idx, common_group}; kind indexes grYakuFuncTable, and
+# kind 12 is the ground copy panel.
+def _yaku_entries(arc, yn):
+    entries = _deref(arc, yn + 0x10)
+    count = u32(arc.data, yn + 0x14)
+    print(f"    entries={count} @ {entries:#x}" if entries else f"    entries={count}")
+    for i in range(count if entries else 0):
+        e = entries + i * 0x0C
+        print(
+            f"      [{i:2d}] kind={u32(arc.data, e):2d} data_idx={u32(arc.data, e + 4):2d} "
+            f"group={s32(arc.data, e + 8):d}"
         )
 
 
