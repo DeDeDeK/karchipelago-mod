@@ -136,11 +136,29 @@ int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
     return Item_Create(&desc) != NULL;
 }
 
-static void SpawnBoxHumansForward(ItemKind kind)
+// Both return the number of human riders the item actually reached. A rider on
+// foot has no machine to spawn at and both paths skip them, so a give that landed
+// on nobody has to stay queued rather than report itself applied.
+static int SpawnBoxHumansForward(ItemKind kind)
 {
+    int gave = 0;
     for (int i = 0; i < 5; i++)
         if (Ply_GetPKind(i) == PKIND_HMN)
-            APItems_SpawnForward(i, kind, -1, -1);
+            gave += APItems_SpawnForward(i, kind, -1, -1);
+    return gave;
+}
+
+static int SpawnItemHumansCounted(ItemKind kind)
+{
+    int gave = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        if (Ply_GetPKind(i) != PKIND_HMN || Ply_GetMachineGObj(i) == NULL)
+            continue;
+        SpawnItemPlayer(i, kind);
+        gave++;
+    }
+    return gave;
 }
 
 // Handle an AP item by its raw ID. Returns an APItemResult: APPLIED on success,
@@ -410,21 +428,22 @@ int APItems_HandleItem(uint ap_item_id)
         {
             if (major != MJRKIND_CITY && major != MJRKIND_AIR)
                 return 0;
-            Patch_GiveItem(patch_kind, 1);
+            if (!Patch_GiveItem(patch_kind, 1))
+                return AP_ITEM_RETRY;
             NotifyItemReceived(it_kind);
-            return 1;
+            return AP_ITEM_APPLIED;
         }
 
         if (Gm_IsInCity())
         {
             // Boxes spawn ahead of the rider (to drive into and break) rather
             // than on top of them; everything else spawns at the rider.
-            if (it_kind <= ITKIND_BOXRED)
-                SpawnBoxHumansForward(it_kind);
-            else
-                SpawnItemHumans(it_kind);
+            int gave = (it_kind <= ITKIND_BOXRED) ? SpawnBoxHumansForward(it_kind)
+                                                  : SpawnItemHumansCounted(it_kind);
+            if (!gave)
+                return AP_ITEM_RETRY;
             NotifyItemReceived(it_kind);
-            return 1;
+            return AP_ITEM_APPLIED;
         }
         return 0;
     }

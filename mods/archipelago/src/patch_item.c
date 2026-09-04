@@ -66,9 +66,10 @@ int Patch_GiveItem(PatchKind kind, int num)
         applied++;
     }
 
-    OSReport("[PatchItem] Gave %d %s patch(es) to %d player(s) (%s)\n",
-             num, kind_name, applied, use_item_spawn ? "item" : "direct");
-    return 1;
+    if (applied)
+        OSReport("[PatchItem] Gave %d %s patch(es) to %d player(s) (%s)\n",
+                 num, kind_name, applied, use_item_spawn ? "item" : "direct");
+    return applied;
 }
 
 // Same City Trial / Air Ride split as Patch_GiveItem. Returns 1 if at least one
@@ -100,8 +101,9 @@ int Patch_AllUp_GiveItem(int num)
         applied++;
     }
 
-    OSReport("[PatchItem] Gave %d all-up(s) to %d player(s) (%s)\n",
-             num, applied, use_item_spawn ? "item" : "direct");
+    if (applied)
+        OSReport("[PatchItem] Gave %d all-up(s) to %d player(s) (%s)\n",
+                 num, applied, use_item_spawn ? "item" : "direct");
     return applied;
 }
 

@@ -292,6 +292,10 @@ same, so no GObj is created from inside the collision call that collected the sp
 Icons are destroyed on assembly, which is also when the vanilla mount clears its own masks
 and the vanilla icons vanish.
 
+The row is built for every City Trial round, whatever the gate says: the icon archive
+loads and the anchors are read before the delivery schedule is rolled, because a sphere
+given through `CollectPiece` lands whether or not any sphere is in play that round.
+
 The art is `mods/ap_star/assets/ApPieceIcons.dat`, one alpha-cut textured quad per
 color under a single `apPieceIcons_scene_models` public, each a 32x32 RGB5A3 shaded ball
 on a 2.0-unit quad, inside the 2.5-unit anchor spacing it is hung on.

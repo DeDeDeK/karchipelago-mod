@@ -532,11 +532,11 @@ typedef enum APItemId
     AP_ITEM_BIG_KIRBY = 972,                    // grow Kirby's model
     AP_ITEM_SMALL_KIRBY,                        // shrink Kirby's model
 
-    // Archipelago Star sphere give items (980-985, in APStarPiece order). Drop
-    // the sphere itself in front of every human rider, the way the 300-band
-    // ITKIND gives drop a Hydra or Dragoon part. The sphere has to be unlocked as
-    // of the round's load to have an ItemKind at all, so one whose unlock has not
-    // arrived retries rather than spawning.
+    // Archipelago Star sphere give items (980-985, in APStarPiece order). Add the
+    // sphere to every human rider's collected set, the way the 300-band ITKIND
+    // gives hand over a Hydra or Dragoon part. Collected directly rather than
+    // spawned as a pickup, so a sphere lands whether or not its unlock has
+    // arrived; it retries while no rider is in a City Trial round to take it.
     AP_STAR_PIECE_GIVE_BASE = 980,
     AP_STAR_PIECE_GIVE_ROSE = 980,
     AP_STAR_PIECE_GIVE_GREEN,

@@ -546,6 +546,7 @@ void ApStarPieces_On3DLoadEnd(void)
         for (int p = 0; p < APSTARPIECE_NUM; p++)
             piece_hud[i].icon[p] = NULL;
         piece_hud[i].count = 0;
+        piece_hud[i].shown_mask = 0;
     }
     icon_sets = NULL;
     anchors_valid = 0;
@@ -575,8 +576,21 @@ void ApStarPieces_On3DLoadEnd(void)
         if (piece_kind[i] >= 0)
             sched.order[num++] = (u8)i;
     }
+
+    // Loaded whether or not a sphere is armed: a give collects one regardless of the
+    // gate, so a round with none in play still needs the tracker to show it.
+    HSD_Archive *icons = NULL;
+    Gm_LoadGameFile(&icons, "ApPieceIcons");
+    if (icons != NULL)
+        icon_sets = Archive_GetPublicAddress(icons, "apPieceIcons_scene_models");
+    ReadAnchors();
+
     if (num == 0)
+    {
+        OSReport("[ApStarPieces] No spheres armed, tracker %s\n",
+                 (icon_sets && anchors_valid) ? "ready" : "unavailable");
         return;
+    }
     sched.num = (u8)num;
 
     // Shuffle the delivery order, as vanilla rotates which of a machine's three
@@ -595,12 +609,6 @@ void ApStarPieces_On3DLoadEnd(void)
         sched.progress[i] = 0.01f * (float)(lo + HSD_Randi(hi - lo));
     }
     sched.enabled = 1;
-
-    HSD_Archive *icons = NULL;
-    Gm_LoadGameFile(&icons, "ApPieceIcons");
-    if (icons != NULL)
-        icon_sets = Archive_GetPublicAddress(icons, "apPieceIcons_scene_models");
-    ReadAnchors();
 
     OSReport("[ApStarPieces] %d of %d spheres armed, first at %d%% of the round, tracker %s\n",
              num, APSTARPIECE_NUM, (int)(sched.progress[0] * 100.0f),

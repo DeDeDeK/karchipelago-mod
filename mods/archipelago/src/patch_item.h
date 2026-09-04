@@ -4,8 +4,11 @@
 #include "item.h"
 #include "obj.h"
 
-int Patch_GiveItem(PatchKind kind, int num);
 PatchKind Patch_ItKindToPatchKind(ItemKind it_kind);
+
+// Both return the number of human riders they reached, 0 while every one of them
+// is on foot and has no machine to give to.
+int Patch_GiveItem(PatchKind kind, int num);
 int Patch_AllUp_GiveItem(int num);
 
 int PermanentPatch_GiveItem(PatchKind kind);
