@@ -36,11 +36,16 @@ or to everyone at once:
 - The exported `HypernovaAPI` offers `ActivatePlayer(player, duration)` for a single slot and
   `Activate(duration)` for every human at once, plus `Deactivate`, `IsActive`, and
   `FramesRemaining`.
-- The **Miracle Fruit** custom item grants it to its collector: the mod's boot (and every scene
-  change, so mod load order does not matter) registers a `custom_items` pickup handler that
-  matches the item name and calls `ActivatePlayer` for the player who picked it up. The item's
-  archive is this mod's, at `mods/hypernova/assets/items/MiracleFruit.dat`, so it is staged to
-  the disc's `items/` folder and discovered only when this mod is in the build.
+- The **Miracle Fruit** custom item grants it to its collector. `main.c` binds to
+  `custom_items` on every scene change until it succeeds - not at boot, because mods load in
+  FST order and the export may not exist yet - scanning that registry for the descriptor name
+  `Miracle Fruit`, keeping its id hash, and registering a pickup handler that calls
+  `ActivatePlayer` when the hash matches. `On3DLoadStart` then drives the item's `custom_items`
+  gate from `hypernova_enabled && !Gm_IsAutoDemo() && Gm_IsInCity()`, which runs before
+  `CityItemSpawn_Init` hands out kinds: with Hypernova off, outside the city, or in the title
+  screen's attract demo the fruit is never given an `ItemKind` and no path can spawn it. The
+  item's archive is this mod's, at `mods/hypernova/assets/items/MiracleFruit.dat`, so it is
+  staged to the disc's `items/` folder and discovered only when this mod is in the build.
 - `duration <= 0` means "use the menu setting": `hypernova_duration_table` is
   `{300, 600, 1200}` frames (Short / Medium / Long at 60 fps), selected by
   `hypernova_duration_sel`.
@@ -648,3 +653,21 @@ engine on scene teardown, so the mod only caches the handle to avoid recreating 
 it (never destroys it) on the scene/leave-CT reset path - a manual destroy would risk a double
 free. Tuning constants live in `hypernova.h` (`HYPERNOVA_DEBUG_CONE_RGBA`, `..._CONE_SEGS`,
 `..._GX_LINK`).
+
+## Authoring the Miracle Fruit
+
+The archive is a `custom_items` descriptor carved out of the vanilla item table: the Bomb copy
+panel's model (kind 28) carrying `art/miracle-fruit.png` as its texture, cloning the Maxim
+Tomato's behavior (kind 39) so it reads as food. Equal weight in all three box pools, plus Tac
+and destructible drops. This is the command that produced the shipped archive:
+
+```
+uv run --with pillow python scripts/hsd/carve_custom_item.py iso/files/Item.dat 28 \
+    mods/hypernova/assets/items/MiracleFruit.dat "Miracle Fruit" \
+    --base-kind 39 --texture art/miracle-fruit.png \
+    --weight-blue 40 --weight-green 40 --weight-red 40 \
+    --ev-tac 40 --ev-destructible 40
+```
+
+The descriptor's `name` is the handle `main.c` binds by, so changing one without the other
+silently unbinds the fruit.

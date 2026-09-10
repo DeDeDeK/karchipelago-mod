@@ -188,11 +188,10 @@ rather than letting `ap_star` read, because mods run in the order their `.bin` f
 the FST and `ap_star` sorts before `archipelago`: by the time `archipelago`'s own load-start
 callback runs, `ap_star` has already armed the round.
 
-`SetEnabled` writes `custom_items`' consumer gate, which is a field of its own alongside
-the per-item settings-menu toggle rather than the same one - so driving it on every scene
-load never overwrites the player's saved menu choice. Both gates have to be open for a
-sphere to reach the field, which means an unlocked sphere still stays out of the round if
-its `custom_items` menu toggle is off.
+`SetEnabled` writes `custom_items`' one per-item gate, which every consumer of that
+registry shares - there is no separate menu toggle behind it. Last writer per scene wins,
+so a sphere reaches the field exactly when the last `SetEnabled` before
+`CityItemSpawn_Init` opened it.
 
 The Archipelago mask is its own `APSave` field rather than six more bits of
 `item_unlocked_mask`, which `ITUNLOCK_NUM` has all but filled, and it is reached through

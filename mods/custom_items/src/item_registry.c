@@ -11,7 +11,6 @@
 #include "fst/fst.h"
 
 #include "custom_items.h"
-#include "custom_items_api.h"
 
 // Custom kinds occupy indices [ITKIND_NUM, ITKIND_NUM + CUSTOM_ITEM_MAX).
 #define CUSTOM_KIND_CEILING (ITKIND_NUM + CUSTOM_ITEM_MAX)
@@ -20,14 +19,13 @@
 // Static so it outlives the per-scene heap; the engine is repointed here.
 static itData stc_ext_itdata[CUSTOM_KIND_CEILING];
 
-// itData.model must point at a full-width, zero-filled descriptor rather than a
-// bare j/flag pair: CityItem_Create's part setup reads part counts at
-// +0x8/+0xc/+0x10 and asserts each <= 11, so rest[] has to stay zero.
-static struct ItemModelDesc { void *j; int flag; int rest[14]; } stc_model_pair[CUSTOM_ITEM_MAX];
+// itData.model must point at a descriptor whose parts[] counts are zero:
+// Item_InitPartsModel (0x80252824) asserts each is <= 11.
+static ItemModelDesc stc_model_pair[CUSTOM_ITEM_MAX];
 static ItemCommonAttr stc_custom_attr[CUSTOM_ITEM_MAX];
 
-// Anim slots for NO_MAT_ANIM items, copied from the base kind with the material
-// track dropped. Two slots is the widest anim array any vanilla kind has.
+// Anim slots cloned from the base kind when a descriptor overrides an animation.
+// Only ITKIND_ALLUP has two; every other kind's array holds one entry.
 #define CUSTOM_ITEM_ANIM_SLOTS 2
 static ItemAnimEntry stc_custom_anim[CUSTOM_ITEM_MAX][CUSTOM_ITEM_ANIM_SLOTS];
 
@@ -38,24 +36,14 @@ static int stc_active_count;
 // Remembered so the per-event re-bias hook can re-append without reloading archives.
 static u16 stc_box_weight[CUSTOM_ITEM_MAX][BOXKIND_NUM];
 
-// Mirrors one row of the anonymous struct in grBoxGeneInfo->item_desc (stride 0x10).
-typedef struct EventSourceDropRow
-{
-    int it_kind;
-    u16 chance[CUSTOM_ITEM_EVSRC_NUM];
-} EventSourceDropRow;
-
 // The stage's event_source_drop rows (re-snapshotted each round) plus appended
 // custom rows; repointed into item_desc and read directly by the picker.
-static EventSourceDropRow stc_ext_event_drop[CUSTOM_KIND_CEILING];
+static ItemEventSourceDrop stc_ext_event_drop[CUSTOM_KIND_CEILING];
 static int stc_event_drop_active; // 1 if we repointed event_source_drop this round
 static int stc_event_drop_num;    // row count we repointed it to
 
-const CustomItemDesc *CustomItems_LoadDescriptor(int file_entrynum, HSD_Archive **out_archive)
+const CustomItemDesc *CustomItems_LoadDescriptor(int file_entrynum, int report)
 {
-    if (out_archive != NULL)
-        *out_archive = NULL;
-
     char *path = FST_GetFilePathFromEntrynum(file_entrynum);
     if (path == NULL)
         return NULL;
@@ -63,7 +51,8 @@ const CustomItemDesc *CustomItems_LoadDescriptor(int file_entrynum, HSD_Archive 
     HSD_Archive *arc = Archive_LoadFile(path);
     if (arc == NULL)
     {
-        OSReport("[CustomItems] Archive_LoadFile(%s) failed\n", path);
+        if (report)
+            OSReport("[CustomItems] Archive_LoadFile(%s) failed\n", path);
         return NULL;
     }
 
@@ -71,23 +60,24 @@ const CustomItemDesc *CustomItems_LoadDescriptor(int file_entrynum, HSD_Archive 
         (const CustomItemDesc *)Archive_GetPublicAddress(arc, CUSTOM_ITEM_SYMBOL);
     if (desc == NULL)
     {
-        OSReport("[CustomItems] %s missing '%s' symbol\n", path, CUSTOM_ITEM_SYMBOL);
+        if (report)
+            OSReport("[CustomItems] %s missing '%s' symbol\n", path, CUSTOM_ITEM_SYMBOL);
         return NULL;
     }
     if (desc->magic != CUSTOM_ITEM_MAGIC)
     {
-        OSReport("[CustomItems] %s bad magic 0x%08x\n", path, desc->magic);
+        if (report)
+            OSReport("[CustomItems] %s bad magic 0x%08x\n", path, desc->magic);
         return NULL;
     }
-    if (desc->version > CUSTOM_ITEM_DESC_VERSION)
+    if (desc->version != CUSTOM_ITEM_DESC_VERSION)
     {
-        OSReport("[CustomItems] %s descriptor v%d newer than supported v%d\n",
-                 path, desc->version, CUSTOM_ITEM_DESC_VERSION);
+        if (report)
+            OSReport("[CustomItems] %s descriptor v%d, expected v%d\n",
+                     path, desc->version, CUSTOM_ITEM_DESC_VERSION);
         return NULL;
     }
 
-    if (out_archive != NULL)
-        *out_archive = arc;
     return desc;
 }
 
@@ -101,17 +91,16 @@ static int ResolveBaseKind(int kind)
     return ITKIND_ACCEL;
 }
 
-// Rewrite the instance kind to the base kind, keeping the state-class table
-// (0x804b6088) and threshold table (0x804b5f18), both indexed by this field, in
-// bounds.
-static void ClampInstanceKind(ItemData *item_data)
+// Rewrite the instance kind to the base kind. The 69-entry state-handler table at
+// 0x804b6088 is indexed by this field, so a custom kind would read past it.
+static void CustomItemRegistry_ClampInstanceKind(ItemData *item_data)
 {
     if (item_data->kind >= ITKIND_NUM)
         item_data->kind = ResolveBaseKind(item_data->kind);
 }
 
-// Append (kind, weight) to one box pool's parallel arrays, or update the weight
-// if the kind is already there. The 68-wide pools are sparsely filled.
+// Append (kind, weight) to one box pool, or update the weight if already there.
+// The 68-wide pools are sparsely filled.
 static void PoolAppend(grBoxGeneObj *g, int box, int kind, int weight)
 {
     if (weight <= 0)
@@ -137,7 +126,14 @@ static void PoolAppend(grBoxGeneObj *g, int box, int kind, int weight)
     (*num)++;
 }
 
-int CustomItemRegistry_RegisterAll(void)
+void CustomItemRegistry_ResetScene(void)
+{
+    stc_active_count = 0;
+    stc_event_drop_active = 0;
+    stc_event_drop_num = 0;
+}
+
+void CustomItemRegistry_RegisterAll(void)
 {
     int count = CustomItems_GetCount();
     for (int i = 0; i < count; i++)
@@ -146,12 +142,11 @@ int CustomItemRegistry_RegisterAll(void)
         if (e != NULL)
             e->assigned_kind = -1;
     }
-    stc_active_count = 0;
-    stc_event_drop_active = 0;
+    CustomItemRegistry_ResetScene();
 
     itCommonDataAll *all = *stc_it_common_data;
     if (all == NULL || all->itData == NULL)
-        return 0; // item data not loaded - not a City Trial round with items
+        return; // item data not loaded - not a City Trial round with items
 
     itData *vanilla = all->itData;
     for (int k = 0; k < ITKIND_NUM; k++)
@@ -160,11 +155,11 @@ int CustomItemRegistry_RegisterAll(void)
     // Snapshot the stage's rows so custom ones can be appended without moving
     // the vanilla rows, which are referenced by index.
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    EventSourceDropRow *ev_src = NULL;
+    ItemEventSourceDrop *ev_src = NULL;
     int ev_base = 0, ev_num = 0;
     if (info != NULL && info->item_desc != NULL && info->item_desc->event_source_drop != NULL)
     {
-        ev_src = (EventSourceDropRow *)info->item_desc->event_source_drop;
+        ev_src = info->item_desc->event_source_drop;
         ev_base = info->item_desc->event_source_drop_num;
         if (ev_base < 0)
             ev_base = 0;
@@ -184,9 +179,12 @@ int CustomItemRegistry_RegisterAll(void)
         if (e == NULL || !e->api_enabled)
             continue;
 
-        const CustomItemDesc *desc = CustomItems_LoadDescriptor(e->file_entrynum, NULL);
+        const CustomItemDesc *desc = CustomItems_LoadDescriptor(e->file_entrynum, !e->load_reported);
         if (desc == NULL)
+        {
+            e->load_reported = 1;
             continue;
+        }
 
         if (desc->name != NULL)
             CustomItems_CopyName(e->name, desc->name);
@@ -201,21 +199,19 @@ int CustomItemRegistry_RegisterAll(void)
 
         if (desc->model != NULL)
         {
-            // v1 descriptors carry no render flag, so assume the flat-panel value.
-            u32 flag = (desc->version >= 2) ? desc->model_flag : 0x02000000u;
-            stc_model_pair[n].j = desc->model;
-            stc_model_pair[n].flag = (int)flag;
-            stc_ext_itdata[kind].model = (void *)&stc_model_pair[n];
+            stc_model_pair[n].j = (JOBJ *)desc->model;
+            stc_model_pair[n].flag = desc->model_flag;
+            stc_ext_itdata[kind].model = &stc_model_pair[n];
         }
 
-        u32 flags = (desc->version >= 4) ? desc->flags : 0;
-        void *joint_anim = (desc->version >= 5) ? desc->joint_anim : NULL;
-        void *mat_anim = (desc->version >= 6) ? desc->mat_anim : NULL;
-        int drop_mat_anim = (flags & CUSTOM_ITEM_FLAG_NO_MAT_ANIM) != 0;
+        void *joint_anim = desc->joint_anim;
+        void *mat_anim = desc->mat_anim;
+        int drop_mat_anim = (desc->flags & CUSTOM_ITEM_FLAG_NO_MAT_ANIM) != 0;
         if ((drop_mat_anim || joint_anim != NULL || mat_anim != NULL) &&
             stc_ext_itdata[base].anim_data != NULL)
         {
-            for (int a = 0; a < CUSTOM_ITEM_ANIM_SLOTS; a++)
+            int slots = (base == ITKIND_ALLUP) ? CUSTOM_ITEM_ANIM_SLOTS : 1;
+            for (int a = 0; a < slots; a++)
             {
                 stc_custom_anim[n][a] = stc_ext_itdata[base].anim_data[a];
                 if (drop_mat_anim)
@@ -228,18 +224,16 @@ int CustomItemRegistry_RegisterAll(void)
             stc_ext_itdata[kind].anim_data = stc_custom_anim[n];
         }
 
-        // Effect / scale overrides clone the base kind's attribute record.
         // A 0 or 1.0 scale means inherit the base's native size.
         int want_effect = (desc->effect_info != NULL);
-        float scale = (desc->version >= 3) ? desc->scale : 0.0f;
-        int want_scale = (scale > 0.0f && scale != 1.0f);
+        int want_scale = (desc->scale > 0.0f && desc->scale != 1.0f);
         if ((want_effect || want_scale) && stc_ext_itdata[base].attr != NULL)
         {
             stc_custom_attr[n] = *stc_ext_itdata[base].attr;
             if (want_effect)
                 stc_custom_attr[n].effect_info = (PatchEffectInfo *)desc->effect_info;
             if (want_scale)
-                stc_custom_attr[n].scale_factor *= scale;
+                stc_custom_attr[n].scale_factor *= desc->scale;
             stc_ext_itdata[kind].attr = &stc_custom_attr[n];
         }
 
@@ -256,21 +250,27 @@ int CustomItemRegistry_RegisterAll(void)
             if (g != NULL)
                 PoolAppend(g, b, kind, desc->weight_box[b]);
         }
-        if (clamped)
+        if (clamped && !e->load_reported)
+        {
+            e->load_reported = 1;
             OSReport("[CustomItems] %s: %d box weight(s) over 255, clamped (weights are relative)\n",
                      e->name, clamped);
+        }
 
-        // One event-source row, kept only if some source is nonzero.
         if (ev_src != NULL && ev_num < CUSTOM_KIND_CEILING)
         {
-            EventSourceDropRow *row = &stc_ext_event_drop[ev_num];
-            int any = 0;
+            ItemEventSourceDrop *row = &stc_ext_event_drop[ev_num];
             row->it_kind = kind;
+            row->chance_dyna = desc->weight_event[CUSTOM_ITEM_EVSRC_DYNABLADE];
+            row->chance_tac = desc->weight_event[CUSTOM_ITEM_EVSRC_TAC];
+            row->chance_meteor = desc->weight_event[CUSTOM_ITEM_EVSRC_METEOR];
+            row->chance_destructible = desc->weight_event[CUSTOM_ITEM_EVSRC_DESTRUCTIBLE];
+            row->chance_chamber = desc->weight_event[CUSTOM_ITEM_EVSRC_CHAMBER];
+            row->chance_ufo = desc->weight_event[CUSTOM_ITEM_EVSRC_UFO];
+
+            int any = 0;
             for (int s = 0; s < CUSTOM_ITEM_EVSRC_NUM; s++)
-            {
-                row->chance[s] = desc->weight_event[s];
                 any |= desc->weight_event[s];
-            }
             if (any)
                 ev_num++;
         }
@@ -280,24 +280,24 @@ int CustomItemRegistry_RegisterAll(void)
 
     stc_active_count = n;
     if (n > 0)
-        all->itData = stc_ext_itdata; // repoint the engine at the grown array
+        all->itData = stc_ext_itdata;
 
     if (ev_src != NULL && ev_num > ev_base)
     {
-        info->item_desc->event_source_drop = (void *)stc_ext_event_drop;
+        info->item_desc->event_source_drop = stc_ext_event_drop;
         info->item_desc->event_source_drop_num = ev_num;
         stc_event_drop_active = 1;
         stc_event_drop_num = ev_num;
     }
 
-    OSReport("[CustomItems] Registered %d custom kind%s this round (%d event-drop row%s)\n",
-             n, n == 1 ? "" : "s", ev_num - ev_base, (ev_num - ev_base) == 1 ? "" : "s");
-    return n;
+    if (n > 0)
+        OSReport("[CustomItems] Registered %d custom kind%s this round (%d event-drop row%s)\n",
+                 n, n == 1 ? "" : "s", ev_num - ev_base, (ev_num - ev_base) == 1 ? "" : "s");
 }
 
 // The per-event re-bias wipes the box/sky pools and the event_source_drop
 // repoint, so both are re-applied here (PoolAppend is idempotent).
-void CustomItemRegistry_ReinjectPools(void)
+static void CustomItemRegistry_ReinjectPools(void)
 {
     if (stc_active_count == 0)
         return;
@@ -318,7 +318,7 @@ void CustomItemRegistry_ReinjectPools(void)
         grBoxGeneInfo *info = *stc_grBoxGeneInfo;
         if (info != NULL && info->item_desc != NULL)
         {
-            info->item_desc->event_source_drop = (void *)stc_ext_event_drop;
+            info->item_desc->event_source_drop = stc_ext_event_drop;
             info->item_desc->event_source_drop_num = stc_event_drop_num;
         }
     }
@@ -326,23 +326,25 @@ void CustomItemRegistry_ReinjectPools(void)
 
 // CityItemSpawn_Init epilogue (0x800ec348): the spawn pools are filled and item
 // data is loaded, and the first spawn tick has not run.
-static void RegisterAllHook(void)
-{
-    CustomItemRegistry_RegisterAll();
-}
-CODEPATCH_HOOKCREATE(0x800ec348, "", RegisterAllHook, "", 0);
+CODEPATCH_HOOKCREATE(0x800ec348, "", CustomItemRegistry_RegisterAll, "", 0);
 
-// CityItem_InitData just after ItemData+0x1c is written; r31 holds ItemData and
-// the clobbered `li r4,-1` at 0x8024eb44 is replayed.
-CODEPATCH_HOOKCREATE(0x8024eb44, "mr 3,31\n\t", ClampInstanceKind, "", 0x8024eb48);
+// CityItem_InitData (0x8024eaf4) just after ItemData+0x1c is written; r31 holds
+// ItemData. r0 (loop count) and r6 (threshold table pointer) are loaded before
+// 0x8024eb44 and read after it, so both are carried across the call.
+CODEPATCH_HOOKCREATE(0x8024eb44,
+                     "stwu 1,-0x20(1)\n\t"
+                     "stw 0,0x10(1)\n\t"
+                     "stw 6,0x14(1)\n\t"
+                     "mr 3,31\n\t",
+                     CustomItemRegistry_ClampInstanceKind,
+                     "lwz 0,0x10(1)\n\t"
+                     "lwz 6,0x14(1)\n\t"
+                     "addi 1,1,0x20\n\t",
+                     0);
 
-// CityEvent_ModifyItemFallDesc epilogue (0x800ed7f0), whose re-bias rebuilds the
-// box/sky pools and drops the appended kinds.
-static void ReinjectPoolsHook(void)
-{
-    CustomItemRegistry_ReinjectPools();
-}
-CODEPATCH_HOOKCREATE(0x800ed7f0, "", ReinjectPoolsHook, "", 0);
+// Shared exit of CityEvent_ModifyItemFallDesc (0x800ed784), reached both after a
+// re-bias and by its early-out, so the re-append has to tolerate no re-bias.
+CODEPATCH_HOOKCREATE(0x800ed7f0, "", CustomItemRegistry_ReinjectPools, "", 0);
 
 // Recovers the custom kind from the instance's itData pointer, which the +0x1c
 // clamp leaves alone. Returns -1 for vanilla items.
@@ -357,10 +359,15 @@ static int CustomKindFromItemData(ItemData *id)
     return (kind >= ITKIND_NUM && kind < CUSTOM_KIND_CEILING) ? kind : -1;
 }
 
-static void OnTouchItem(MachineData *md, ItemData *id)
+static void CustomItemRegistry_OnTouchItem(MachineData *md, ItemData *id)
 {
     int kind = CustomKindFromItemData(id);
     if (kind < 0)
+        return;
+
+    // Machine_GetRiderPly returns 5 for a riderless machine; nobody collected it.
+    int player = Machine_GetRiderPly(md);
+    if (player < 0 || player > 4)
         return;
 
     int count = CustomItems_GetCount();
@@ -369,7 +376,7 @@ static void OnTouchItem(MachineData *md, ItemData *id)
         CustomItemEntry *e = CustomItems_GetEntry(i);
         if (e != NULL && e->assigned_kind == kind)
         {
-            CustomItems_FirePickup(e->id_hash, e->name, Machine_GetRiderPly(md));
+            CustomItems_FirePickup(e->id_hash, e->name, player);
             return;
         }
     }
@@ -383,7 +390,7 @@ CODEPATCH_HOOKCREATE(0x801db34c,
                      "stw 4,0x14(1)\n\t"
                      "mflr 0\n\t"
                      "stw 0,0x18(1)\n\t",
-                     OnTouchItem,
+                     CustomItemRegistry_OnTouchItem,
                      "lwz 3,0x10(1)\n\t"
                      "lwz 4,0x14(1)\n\t"
                      "lwz 0,0x18(1)\n\t"
@@ -391,7 +398,7 @@ CODEPATCH_HOOKCREATE(0x801db34c,
                      "addi 1,1,0x20\n\t",
                      0);
 
-void CustomItemRegistry_InstallHook(void)
+void CustomItemRegistry_InstallHooks(void)
 {
     // Lift the kind ceiling in CityItem_Create: cmpwi r4,69 -> cmpwi r4,CEILING.
     CODEPATCH_REPLACEINSTRUCTION(0x8024efb4, 0x2c040000 | CUSTOM_KIND_CEILING);
@@ -399,5 +406,4 @@ void CustomItemRegistry_InstallHook(void)
     CODEPATCH_HOOKAPPLY(0x800ec348);
     CODEPATCH_HOOKAPPLY(0x800ed7f0);
     CODEPATCH_HOOKAPPLY(0x801db34c);
-    OSReport("[CustomItems] Engine splice installed (kind ceiling %d)\n", CUSTOM_KIND_CEILING);
 }

@@ -133,7 +133,7 @@ int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
     ItemDesc desc;
     Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &md->up, &md->forward,
                   box_kind, size, 1, 3, -1, -1);
-    return Item_Create(&desc) != NULL;
+    return CityItem_Create(&desc) != NULL;
 }
 
 // Both return the number of human riders the item actually reached. A rider on

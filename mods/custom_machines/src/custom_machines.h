@@ -73,14 +73,6 @@ void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
 // the engine roots the instance.
 JOBJ *CustomMachines_GetMachineJoint(MachineData *md, int joint_index);
 
-// Read an archive off the disc during OnBoot, before the HSD heap exists. The
-// storage comes from hoshi's persistent arena and stays resident; a caller that
-// only reads the file and drops it brackets the load in ArenaMark/ArenaRelease,
-// which is valid only while nothing allocated in between is still held.
-HSD_Archive *CustomMachines_LoadArchiveAtBoot(char *path);
-void *CustomMachines_ArenaMark(void);
-void CustomMachines_ArenaRelease(void *mark);
-
 // A machine's side-car path: its own with the extension swapped. Returns 0 if it
 // does not fit or the source has no extension to swap.
 int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *ext);

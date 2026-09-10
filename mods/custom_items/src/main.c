@@ -2,15 +2,11 @@
 
 #include "custom_items.h"
 
-static void OnBoot(void)
-{
-    CustomItems_OnBoot();
-}
-
 ModDesc mod_desc = {
-    .name = "custom_items",
+    .name = CUSTOM_ITEMS_MOD_NAME,
     .author = "DeDeDK",
-    .version.major = 1,
-    .version.minor = 0,
-    .OnBoot = OnBoot,
+    .version.major = CUSTOM_ITEMS_API_MAJOR,
+    .version.minor = CUSTOM_ITEMS_API_MINOR,
+    .OnBoot = CustomItems_OnBoot,
+    .On3DLoadStart = CustomItems_On3DLoadStart,
 };

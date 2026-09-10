@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "os.h"
+#include "game.h"
 #include "hoshi/mod.h"
 #include "hoshi/settings.h"
 
@@ -13,35 +14,37 @@
 #define HYPERNOVA_TRIGGER_ITEM_NAME "Miracle Fruit"
 
 static const CustomItemsAPI *stc_ci_api;
-static const HypernovaAPI   *stc_hn_api;
-static int stc_pickup_registered;
+static u32 stc_item_hash;
 
 // Grants Hypernova to the player who collected the Miracle Fruit, and to nobody else.
 static void OnCustomItemPickup(u32 id_hash, const char *name, int player)
 {
-    (void)id_hash;
-    if (name == NULL || strcmp(name, HYPERNOVA_TRIGGER_ITEM_NAME) != 0)
-        return;
-    if (stc_hn_api == NULL)
-        stc_hn_api = (const HypernovaAPI *)Hoshi_ImportMod(
-            (char *)HYPERNOVA_MOD_NAME, HYPERNOVA_API_MAJOR, HYPERNOVA_API_MINOR);
-    if (stc_hn_api != NULL && stc_hn_api->ActivatePlayer != NULL)
-        stc_hn_api->ActivatePlayer(player, 0);
+    (void)name;
+    if (id_hash == stc_item_hash)
+        Hypernova_ActivatePlayer(player, 0);
 }
 
-// Called from boot and scene change, so registration succeeds regardless of mod load order.
-static void TryRegisterPickupHandler(void)
+// Retried every scene change: mods boot in FST order, so custom_items' export
+// may not exist yet when this one boots.
+static void TryBind(void)
 {
-    if (stc_pickup_registered)
+    if (stc_item_hash != 0)
         return;
     if (stc_ci_api == NULL)
         stc_ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
-    if (stc_ci_api != NULL)
+    if (stc_ci_api == NULL)
+        return;
+
+    for (int i = 0; i < stc_ci_api->GetCount(); i++)
     {
+        const char *n = stc_ci_api->GetName(i);
+        if (n == NULL || strcmp(n, HYPERNOVA_TRIGGER_ITEM_NAME) != 0)
+            continue;
+        stc_item_hash = stc_ci_api->GetIdHash(i);
         stc_ci_api->AddPickupHandler(OnCustomItemPickup);
-        stc_pickup_registered = 1;
-        OSReport("[Hypernova] Miracle Fruit pickup handler registered\n");
+        OSReport("[Hypernova] Bound %s\n", HYPERNOVA_TRIGGER_ITEM_NAME);
+        return;
     }
 }
 
@@ -57,21 +60,22 @@ static char *stc_duration_names[] = {
     "Long",    // 1200 frames (~20s)
 };
 
-static void OnBoot(void)
-{
-    Hypernova_OnBoot();
-    TryRegisterPickupHandler();
-}
-
 static void OnSceneChange(void)
 {
     Hypernova_OnSceneChange();
-    TryRegisterPickupHandler(); // retry until custom_items is available
+    TryBind();
 }
 
-static void OnFrameEnd(void)
+// custom_items assigns kinds at CityItemSpawn_Init, after this, and skips a
+// disabled item - so a fruit held out here is never handed an ItemKind and no
+// path can spawn it. The title screen's attract demo is a City Trial round in
+// every respect, and a fruit in it is a fruit no player can use.
+static void On3DLoadStart(void)
 {
-    Hypernova_OnFrameEnd();
+    TryBind();
+    if (stc_item_hash != 0)
+        stc_ci_api->SetEnabled(stc_item_hash,
+                               hypernova_enabled && !Gm_IsAutoDemo() && Gm_IsInCity());
 }
 
 static void OnChangeEnabled(int val)
@@ -159,7 +163,8 @@ ModDesc mod_desc = {
     .version.major = HYPERNOVA_API_MAJOR,
     .version.minor = HYPERNOVA_API_MINOR,
     .option_desc = &ModSettings,
-    .OnBoot = OnBoot,
+    .OnBoot = Hypernova_OnBoot,
     .OnSceneChange = OnSceneChange,
-    .OnFrameEnd = OnFrameEnd,
+    .On3DLoadStart = On3DLoadStart,
+    .OnFrameEnd = Hypernova_OnFrameEnd,
 };

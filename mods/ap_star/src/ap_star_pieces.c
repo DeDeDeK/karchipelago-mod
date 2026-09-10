@@ -706,7 +706,7 @@ int ApStarPieces_SpawnPiece(int piece, int ply)
     ItemDesc desc;
     Item_InitDesc(&desc, (ItemKind)kind, 1.0f, 0, &pos, &md->up, &md->forward,
                   -1, -1, 1, 3, -1, -1);
-    Item_Create(&desc);
+    CityItem_Create(&desc);
     OSReport("[ApStarPieces] Spawned %s for player %d (kind %d)\n",
              piece_names[piece], ply + 1, kind);
     return 1;

@@ -129,53 +129,6 @@ void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
     CODEPATCH_REPLACEINSTRUCTION(addi_addr, (*(u32 *)addi_addr & 0xFFFF0000) | lo);
 }
 
-static void FileLoadCallback(int result, void *arg)
-{
-    (void)result;
-    *(volatile int *)arg = 1;
-}
-
-// Boot-safe archive load. HSD_MemAlloc is code-patched to hoshi's bump allocator
-// for the whole of OnBoot, so the storage is persistent and there is no free -
-// a caller that wants it back brackets the load in a mark/release pair.
-HSD_Archive *CustomMachines_LoadArchiveAtBoot(char *path)
-{
-    int entrynum = DVDConvertPathToEntrynum(path);
-    if (entrynum == -1)
-        return NULL;
-
-    int size = File_GetSize(path);
-    if (size <= 0)
-        return NULL;
-
-    void *buffer = HSD_MemAlloc(OSRoundUp32B(size));
-    if (buffer == NULL)
-        return NULL;
-
-    volatile int loaded = 0;
-    File_Read(entrynum, 0, buffer, OSRoundUp32B(size), 0x21, 1, FileLoadCallback, (void *)&loaded);
-    while (!loaded)
-        ;
-
-    HSD_Archive *archive = HSD_MemAlloc(sizeof(HSD_Archive));
-    if (archive == NULL)
-        return NULL;
-    Archive_Init(archive, buffer, size);
-    return archive;
-}
-
-void *CustomMachines_ArenaMark(void)
-{
-    return *stc_hsd_heap_start;
-}
-
-// Gives back everything allocated since the mark, so it is only correct while
-// nothing allocated in between is still held.
-void CustomMachines_ArenaRelease(void *mark)
-{
-    *stc_hsd_heap_start = (u8 *)mark;
-}
-
 int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *ext)
 {
     int n = 0;
@@ -343,18 +296,18 @@ static void IndexCb(int entrynum, void *args)
 
     // The descriptor is copied out whole, so the archive is dropped before the next
     // one loads rather than holding every machine's file for the run.
-    void *mark = CustomMachines_ArenaMark();
-    HSD_Archive *arc = CustomMachines_LoadArchiveAtBoot(path);
+    void *mark = HSD_ArenaMark();
+    HSD_Archive *arc = Archive_LoadFile(path);
     if (arc == NULL)
     {
         OSReport("[CustomMachines] %s failed to load\n", path);
-        CustomMachines_ArenaRelease(mark);
+        HSD_ArenaRelease(mark);
         return;
     }
 
     TakeDescriptor(path, entrynum,
                    (CustomMachineDesc *)Archive_GetPublicAddress(arc, CUSTOM_MACHINE_SYMBOL));
-    CustomMachines_ArenaRelease(mark);
+    HSD_ArenaRelease(mark);
 }
 
 int CustomMachines_Discover(void)

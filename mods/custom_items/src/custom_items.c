@@ -3,12 +3,10 @@
 #include "hoshi/mod.h"
 
 #include "custom_items.h"
-#include "custom_items_api.h"
 
 static CustomItemEntry stc_registry[CUSTOM_ITEM_MAX];
 static int stc_registry_count;
 
-// Pickup subscribers; multiple consumer mods may register, each runs on every pickup.
 #define CUSTOM_ITEM_PICKUP_HANDLERS_MAX 4
 static CustomItemPickupFn stc_pickup_handlers[CUSTOM_ITEM_PICKUP_HANDLERS_MAX];
 
@@ -45,6 +43,7 @@ CustomItemEntry *CustomItems_AppendEntry(void)
     e->name[0] = '\0';
     e->api_enabled = 1;
     e->assigned_kind = -1;
+    e->load_reported = 0;
     return e;
 }
 
@@ -59,11 +58,6 @@ void CustomItems_CopyName(char *dst, const char *src)
     dst[i] = '\0';
 }
 
-static int Api_GetCount(void)
-{
-    return stc_registry_count;
-}
-
 static u32 Api_GetIdHash(int index)
 {
     CustomItemEntry *e = CustomItems_GetEntry(index);
@@ -76,13 +70,6 @@ static const char *Api_GetName(int index)
     return e != NULL ? e->name : NULL;
 }
 
-static int Api_IsEnabled(u32 id_hash)
-{
-    CustomItemEntry *e = CustomItems_FindByHash(id_hash);
-    return (e != NULL && e->api_enabled) ? 1 : 0;
-}
-
-// Gates default open, so an item nobody calls this on spawns freely.
 static void Api_SetEnabled(u32 id_hash, int enabled)
 {
     CustomItemEntry *e = CustomItems_FindByHash(id_hash);
@@ -104,26 +91,17 @@ static void Api_AddPickupHandler(CustomItemPickupFn handler)
     for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
     {
         if (stc_pickup_handlers[i] == handler)
-            return; // already subscribed
+            return;
         if (stc_pickup_handlers[i] == NULL && free_slot < 0)
             free_slot = i;
     }
     if (free_slot < 0)
     {
-        OSReport("[CustomItems] pickup handler table full (max %d)\n",
+        OSReport("[CustomItems] Pickup handler table full (max %d)\n",
                  CUSTOM_ITEM_PICKUP_HANDLERS_MAX);
         return;
     }
     stc_pickup_handlers[free_slot] = handler;
-}
-
-static void Api_RemovePickupHandler(CustomItemPickupFn handler)
-{
-    for (int i = 0; i < CUSTOM_ITEM_PICKUP_HANDLERS_MAX; i++)
-    {
-        if (stc_pickup_handlers[i] == handler)
-            stc_pickup_handlers[i] = NULL;
-    }
 }
 
 void CustomItems_FirePickup(u32 id_hash, const char *name, int player)
@@ -136,15 +114,22 @@ void CustomItems_FirePickup(u32 id_hash, const char *name, int player)
 }
 
 static const CustomItemsAPI stc_api = {
-    .GetCount         = Api_GetCount,
+    .GetCount         = CustomItems_GetCount,
     .GetIdHash        = Api_GetIdHash,
     .GetName          = Api_GetName,
-    .IsEnabled        = Api_IsEnabled,
     .SetEnabled       = Api_SetEnabled,
     .GetAssignedKind  = Api_GetAssignedKind,
     .AddPickupHandler = Api_AddPickupHandler,
-    .RemovePickupHandler = Api_RemovePickupHandler,
 };
+
+// Every assignment is per-scene, so the previous round's is dropped before the
+// next one can be read back.
+void CustomItems_On3DLoadStart(void)
+{
+    for (int i = 0; i < stc_registry_count; i++)
+        stc_registry[i].assigned_kind = -1;
+    CustomItemRegistry_ResetScene();
+}
 
 void CustomItems_OnBoot(void)
 {
@@ -152,10 +137,10 @@ void CustomItems_OnBoot(void)
 
     // With nothing to register, install no hooks so vanilla play is untouched.
     if (n > 0)
-        CustomItemRegistry_InstallHook();
+        CustomItemRegistry_InstallHooks();
 
     Hoshi_ExportMod((void *)&stc_api);
 
-    OSReport("[CustomItems] Initialized (%d custom item%s discovered)\n",
+    OSReport("[CustomItems] Initialized (%d custom item%s discovered), API exported\n",
              n, n == 1 ? "" : "s");
 }

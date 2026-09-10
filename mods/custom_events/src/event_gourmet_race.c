@@ -330,7 +330,7 @@ static GOBJ *SpawnFoodItem(ItemKind kind, Vec3 *pos, float scale, int coll_kind)
     Item_InitDesc(&desc, kind, scale, 0,
                   pos, NULL, &forward, -1, -1,
                   0, coll_kind, -1, -1);
-    GOBJ *item = Item_Create(&desc);
+    GOBJ *item = CityItem_Create(&desc);
     if (item)
     {
         ItemData *id = item->userdata;

@@ -5,10 +5,12 @@ custom item ships as a self-contained `.dat` dropped into the FST `items/`
 folder; the mod discovers it at boot and registers it as a new `ItemKind` that
 spawns from the sky and boxes with author-specified weights.
 
-Custom items spawn from every source - box breaks, sky falls, and event drops (Tac,
-meteor, broken structures, secret chamber, UFO, Dyna Blade) - and the model may be
-any item model carved from `Item.dat`, including the multi-texture, skinned
-Hydra/Dragoon legendary pieces. A build with no custom item `.dat`s in `items/`
+Custom items spawn from box breaks, sky falls, and event drops (Tac, meteor, broken
+structures, secret chamber, UFO, Dyna Blade). The two narrower pools in
+`grBoxGeneObj` - `sameitem_*` (the "same item" event) and `subsequent_*`
+(multi-patch blue boxes) - are left alone, so a custom kind never appears through
+those. The model may be any item model carved from `Item.dat`, including the
+multi-texture, skinned Hydra/Dragoon legendary pieces. A build with no custom item `.dat`s in `items/`
 installs no hooks and leaves vanilla play untouched.
 
 ## Game System
@@ -18,7 +20,7 @@ All item structs and accessors are in `externals/hoshi/include/item.h`; the
 (`ITKIND_NUM = 69`), of which the legendary machine pieces are 55-60.
 
 - **`itData`** - the per-kind static asset record, `0x18`-byte stride, indexed
-  positionally by `ItemKind`: `{ attr, unique_attr, model, anim, hurt, trigger }`.
+  positionally by `ItemKind`: `{ attr, unique_attr, model, anim_data, hurt, trigger }`.
   The array lives in `Item.dat` (public `itData`) and is grafted onto
   `itCommonDataAll` (`ItCommon.dat`, public `itCommonDataAll`) at
   `itCommonDataAll + 0x8` during load. Reached at runtime via
@@ -58,18 +60,22 @@ over-cap warning fires once before any entry is added. Each `.dat` becomes a
   changes.
 - `name` - the descriptor's display name, the handle a consumer mod binds by. It
   must be known before any round registers anything, and for an item held
-  disabled nothing ever registers it, so discovery reads each archive once here.
-  Boot has no scene heap, so `Archive_LoadFile` is unusable: the read is a raw
-  DVD read into an `HSD_MemAlloc` buffer parsed with `Archive_Init`, falling back
-  to the filename if the archive or descriptor is unusable. Only the name is kept
-  (by value), and each read is bracketed in an arena mark/release - `HSD_MemAlloc`
-  is a bump allocator for the whole of `OnBoot`, so a mark is the arena's next
-  address and a release rewinds to it. Boot's high-water mark is therefore one
-  `.dat`, not one per drop-in; holding them would cost the full file size of every
-  item permanently off the ~10.2 MB HSD heap.
-- `api_enabled` - the consumer-mod spawn gate, written by `SetEnabled` and
-  defaulting open, so an item nobody gates spawns as soon as it is discovered.
-  Closed keeps the item out of the round entirely.
+  disabled nothing ever registers it, so discovery loads and validates each
+  archive once here, falling back to the filename if either is unusable. This is
+  also where a malformed `.dat` is reported, so the per-round registration does
+  not repeat the message every scene. For the whole of `OnBoot` hoshi redirects
+  `HSD_MemAlloc` to a bump allocator and `Archive_LoadFile` to a matching
+  persistent loader, so discovery uses the ordinary loader and brackets each read
+  in an arena mark/release - a mark is the arena's next address and a release
+  rewinds to it. Boot's high-water mark is therefore one `.dat`, not one per
+  drop-in; holding them would cost the full file size of every item permanently
+  off the ~10.2 MB HSD heap.
+- `api_enabled` - the spawn gate, written by `SetEnabled` and defaulting open, so
+  an item nobody gates spawns as soon as it is discovered. Closed keeps the item
+  out of the round entirely. There is one gate per item shared by every consumer,
+  so two consumers gating the same item is last-writer-wins.
+- `load_reported` - latches the first round-time load failure so a permanently
+  bad `.dat` is reported once rather than every scene.
 - `assigned_kind` - the `ItemKind` assigned in the extended tables for the current
   round (`-1` until registered).
 
@@ -79,16 +85,30 @@ imposed by the 68-entry weight arrays, not an arbitrary limit.
 ## Descriptor Contract
 
 A custom-item `.dat` exports one HSD public symbol, `customItem`, whose address
-is a `CustomItemDesc` (`include/custom_items_api.h`, which carries the field
-layout). It is a clone model: the new kind inherits behavior (state class,
+is a `CustomItemDesc` (`src/custom_items.h`, which carries the field layout - it
+is the `.dat` file format, not the mod-to-mod API, so it does not live in the
+public header). It is a clone model: the new kind inherits behavior (state class,
 trigger, hurt, animation) from a vanilla `base_kind` and optionally overrides the
-visual `model`, stat-grant `effect_info`, and render `scale`, plus per-source
-spawn weights (`weight_box[3]`, `weight_event[6]`). `magic` is `'CITM'`
-(`0x4349544D`); `version` gates forward compatibility - v2 added `model_flag`
-(the model's itData render flag: `0x02000000` for flat panels,
-`0x03/0x05/0x0b000000` for the skinned legendary pieces), v3 `scale`, v4 `flags`,
-v5 `joint_anim`, v6 `mat_anim`. Older descriptors stay supported; the loader
-rejects only versions newer than it knows.
+visual `model`, stat-grant `effect_info`, render `model_flag` (`0x02000000` for
+flat panels, `0x03/0x05/0x0b000000` for the skinned legendary pieces) and `scale`,
+plus per-source spawn weights (`weight_box[3]`, `weight_event[6]`). `magic` is
+`'CITM'` (`0x4349544D`).
+
+`version` is a layout stamp, not a compatibility ladder. The `.dat`s and the DOL
+are separate Riivolution files and a player can end up with a stale `items/`
+folder, so the loader rejects any descriptor whose version is not exactly
+`CUSTOM_ITEM_DESC_VERSION` rather than reading it against the wrong offsets.
+Every producer writes the current version, so changing the layout means bumping
+the constant in `src/custom_items.h` and in each of the three authoring scripts,
+then regenerating all nine shipped archives.
+
+The sky/free-fall picker draws from the union of the three box pools, so
+`weight_box` governs sky drops too and there is no separate free-fall weight. The
+engine's box/sky pools store the chance as a `u8`, so `weight_box` values saturate at 255
+(weights are relative - typical values are well under 255); `weight_event` is
+`u16` and used unclamped. The BAD/GOOD/FAKE group is not a standalone field: it is
+read from the effect record (`PatchEffectInfo.group`), so it follows `base_kind`
+(or the `effect_info` override).
 
 One flag is defined. `CUSTOM_ITEM_FLAG_NO_MAT_ANIM` says the supplied `model` is
 not the base kind's, so the base kind's material animation must not be bound to
@@ -121,19 +141,13 @@ replace it. Looping is not the animation's to decide - `CityItem_BindStateAnim`
 either way; it drives the item's hurtbox and effect timing, so dropping it would
 change behavior, not just looks.
 
-`weight_free` is reserved: the sky/free-fall picker draws from the union of the
-three box pools, so `weight_box` already governs sky drops too. The engine's
-box/sky pools store the chance as a `u8`, so `weight_box` values saturate at 255
-(weights are relative - typical values are well under 255); `weight_event` is
-`u16` and used unclamped. The BAD/GOOD/FAKE group is not a standalone field: it is
-read from the effect record (`PatchEffectInfo.group`), so it follows `base_kind`
-(or the `effect_info` override).
-
 `CustomItems_LoadDescriptor` (`item_registry.c`) performs the load + validate:
 `Archive_LoadFile` -> `Archive_GetPublicAddress(arc, "customItem")` ->
-magic/version check. The archive and descriptor are valid only for the current
-scene (`Archive_LoadFile` allocates from the per-scene heap, wiped on 3D scene
-exit), so registration reloads per round.
+magic/version check. Both discovery and registration go through it; its `report`
+argument is what keeps a bad `.dat` from logging every round. Outside `OnBoot` the
+archive and descriptor are valid only for the current scene (`Archive_LoadFile`
+allocates from the per-scene heap, wiped on 3D scene exit), so registration
+reloads per round.
 
 ## Registration / Engine Splice
 
@@ -150,29 +164,32 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    descriptor, and `itCommonDataAll->itData` is repointed at the grown array. The
    itData lookup in `CityItem_InitData` reads the raw kind from the `ItemDesc` arg,
    so a custom kind resolves to its own appended entry. The overridden `model`
-   points at a per-kind *synthesized* descriptor, not the raw `JOBJDesc`:
+   points at a per-kind *synthesized* `ItemModelDesc`, not the raw `JOBJDesc`:
    `CityItem_Create`'s part setup (`Item_InitPartsModel`, `0x80252824`) reads three
    "item-parts" counts at descriptor `+0x8/+0xc/+0x10` and asserts each `<= 11`
-   ("item parts model num over!"). Vanilla model descriptors are full-width with
-   those counts zero, so each custom kind gets a full-width, zero-filled
-   `{ JOBJ *j; int flag; ... }` with only `j` and `flag` written - an 8-byte pair
-   would let `+0x8` read into the next array element and trip the assert. `flag`
-   carries the descriptor's `model_flag` (`0x02000000` flat for v1 descriptors). A
-   kind that sets `NO_MAT_ANIM` or supplies a `mat_anim` / `joint_anim` also gets
-   its own `anim_data`: the base kind's slots copied with `mat_anim` nulled or
-   repointed and/or `joint_anim` repointed, which is what `CityItem_StateChange`
-   (`0x8024f488`) hands to `CityItem_BindStateAnim` (`0x80251894`). Two slots are copied - the
-   widest anim array any vanilla kind has, since a state selects its slot by index
-   and nothing records how many exist.
+   ("item parts model num over!"), so the synthesized descriptor is the full
+   `{ JOBJ *j; u32 flag; int parts[3]; }` with `parts[]` left zero and `flag`
+   carrying the descriptor's `model_flag`. A kind that sets `NO_MAT_ANIM` or
+   supplies a `mat_anim` / `joint_anim` also gets its own `anim_data`: the base
+   kind's slots copied with `mat_anim` nulled or repointed and/or `joint_anim`
+   repointed, which is what `CityItem_StateChange` (`0x8024f488`) hands to
+   `CityItem_BindStateAnim` (`0x80251894`). Only `ITKIND_ALLUP` has two anim slots;
+   every other kind's array holds one, so exactly as many slots as the base kind
+   owns are copied.
 2. **Lift the ceiling** - `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
    is patched to `ITKIND_NUM + CUSTOM_ITEM_MAX` once at boot.
-3. **Clamp behavior** - the state-handler table (`0x804b6088`, 69 entries) and the
-   25-entry ascending threshold-category table (`0x804b5f18`) are both indexed by
-   `ItemData+0x1c` (the instance kind). A custom kind has no entry, so a hook at
-   `0x8024eb44` (right after `CityItem_InitData` writes `ItemData+0x1c`) rewrites
-   it to the descriptor's `base_kind`. The item therefore behaves and is
+3. **Clamp behavior** - the 69-entry state-handler table (`0x804b6088`) is indexed
+   by `ItemData+0x1c` (the instance kind), so a custom kind would read past it. A
+   hook at `0x8024eb44` (right after `CityItem_InitData` writes `ItemData+0x1c`)
+   rewrites it to the descriptor's `base_kind`, so the item behaves and is
    categorized as its base kind while rendering/applying from its own `itData`
-   entry.
+   entry. The 25-entry threshold-category table at `0x804b5f18` is scanned
+   linearly by value rather than indexed, so it cannot overrun either way; the
+   clamp is what gives a custom kind a real category instead of the `-1` a kind
+   above 68 would fall through to. The hook's prologue and epilogue carry `r0` and
+   `r6` across the call - `CityItem_InitData` loads both (the threshold scan's
+   count and table pointer) before the patch site and reads them after it, and the
+   trampoline's `bl` destroys both.
 4. **Inject box/sky weights** - each custom kind is appended in place to the box
    pools (`grBoxGeneObj.item_group_spawn[]`, which the sky picker scans as the
    union of all three colors and the box-break picker scans one color at a time)
@@ -180,8 +197,10 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    a handful of kinds fit without growing them. The per-event re-bias
    (`CityEvent_ModifyItemFallDesc` -> `CityItemSpawn_SetEventsItemFallChances`)
    rebuilds these pools, so `CustomItemRegistry_ReinjectPools` re-appends the
-   custom kinds at that function's epilogue (`0x800ed7f0`) - the same seam the
-   archipelago spawn filter hooks; hoshi chains the two.
+   custom kinds at that function's shared exit (`0x800ed7f0`) - the same seam the
+   archipelago spawn filter hooks; hoshi chains the two. That exit is also the
+   target of the function's early-out, so the re-append runs on a path where no
+   re-bias happened and has to be idempotent.
 5. **Inject event-source weights** - `event_source_drop[]`
    (`grBoxGeneInfo->item_desc`, stride `0x10`: `int it_kind` + six `u16` chance
    columns) is read straight from the table by `_CityItem_GetEventItem`
@@ -189,7 +208,9 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    persistent array, one row per custom kind (carrying its `weight_event[6]`) is
    appended, and the table pointer and `event_source_drop_num` are repointed and
    bumped. This covers Tac, meteor, broken structures, secret chamber, UFO, and
-   Dyna Blade drops.
+   Dyna Blade drops. A stage with no `event_source_drop` table gets no custom rows
+   at all - such an item still reaches the box and sky pools, just never an event
+   source.
 
 **Effect and scale overrides.** On pickup, `Machine_OnTouchItem` (`0x801db34c`)
 applies stat grants generically from the instance's `effect_data`
@@ -202,7 +223,7 @@ but the behavior clamp routes the category reaction through `base_kind`, so pick
 `base_kind` in the intended family (e.g. a stat patch). The model is rendered at
 the cloned attribute record's `scale_factor`, so a model carved onto a
 differently-scaled base kind (a legendary piece on a flat-panel base) can render
-off its native size; the descriptor's `scale` (v3) multiplies `scale_factor` on
+off its native size; the descriptor's `scale` multiplies `scale_factor` on
 the clone to correct it. `attr` is cloned only when `effect_info` or `scale` is
 overridden.
 
@@ -263,18 +284,22 @@ This mod ships no items of its own and has no `assets/`.
 ## API
 
 `CustomItemsAPI` (`include/custom_items_api.h`) is exported via `Hoshi_ExportMod`
-for other mods (e.g. archipelago gating/granting custom items). Items are
-addressed by `id_hash`, not registry index, so a consumer's binding survives a
-folder change. Beyond the enumeration accessors it offers `IsEnabled` and
-`SetEnabled` (the consumer gate),
-`GetAssignedKind` (this round's `ItemKind`, or -1), and add/remove for pickup
-handlers.
+for other mods (e.g. archipelago gating/granting custom items), which import it
+with `CUSTOM_ITEMS_MOD_NAME` and `CUSTOM_ITEMS_API_MAJOR`/`_MINOR`; `ModDesc`
+carries the same version, which is what makes hoshi's import check able to reject
+a stale consumer. Items are addressed by `id_hash`, not registry index, so a
+consumer's binding survives a folder change. Beyond the enumeration accessors it
+offers `SetEnabled` (the spawn gate), `GetAssignedKind` (this round's `ItemKind`,
+or -1), and `AddPickupHandler`. `assigned_kind` is cleared for every item at
+`On3DLoadStart`, so it answers -1 in any scene that has not registered.
 
 A pickup handler is a `void (*)(u32 id_hash, const char *name, int player)` invoked
 from a hook on `Machine_OnTouchItem` (`0x801db34c`) whenever a custom item is
 collected - the collected kind is recovered from `ItemData->itData` (which still
 points into the grown array after the behavior clamp), and the collector's slot
-comes from `Machine_GetRiderPly` (`0x801caa40`). Because hoshi's hook trampoline does
+comes from `Machine_GetRiderPly` (`0x801caa40`), which answers 5 for a riderless
+machine; those pickups are dropped rather than dispatched, so a handler always
+sees a real 0-4 slot. Because hoshi's hook trampoline does
 not preserve registers across the C call, the hook's prologue/epilogue save and
 restore `r3` (MachineData), `r4` (ItemData), and `LR` around it. Up to four consumer
 mods may subscribe (`CUSTOM_ITEM_PICKUP_HANDLERS_MAX`); each is invoked on every pickup.
@@ -285,12 +310,15 @@ matches.
 
 ## File Layout
 
-`src/main.c` is just the `ModDesc` and its `OnBoot`. The mod has no settings menu
-and contributes no entry to hoshi's: everything dropped into `items/` is discovered
-and enabled, and the only spawn gate is `api_enabled`, owned by consumer mods.
+`src/main.c` is just the `ModDesc`, its `OnBoot` and its `On3DLoadStart`. The mod
+has no settings menu and contributes no entry to hoshi's: everything dropped into
+`items/` is discovered and enabled, and the only spawn gate is `api_enabled`,
+owned by consumer mods.
 
-`src/custom_items.c` holds boot, registry storage, and the exported API;
-`src/item_discovery.c` the FST scan and path hashing; `src/item_registry.c` the
-descriptor load/validate, the per-round itData / box-pool / event-source-drop
-splice, the per-event pool re-inject, the kind-ceiling patch, the behavior-clamp
-hook, and the `Machine_OnTouchItem` pickup hook.
+`src/custom_items.c` holds boot, registry storage, the per-scene reset and the
+exported API; `src/custom_items.h` the descriptor contract and the internal
+declarations; `src/item_discovery.c` the FST scan and path hashing;
+`src/item_registry.c` the descriptor load/validate, the per-round itData /
+box-pool / event-source-drop splice, the per-event pool re-inject, the
+kind-ceiling patch, the behavior-clamp hook, and the `Machine_OnTouchItem` pickup
+hook.

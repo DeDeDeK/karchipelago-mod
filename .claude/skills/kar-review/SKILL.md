@@ -49,9 +49,7 @@ serial in step 3 so two fixes cannot collide in one file.
 
 Every finding needs evidence. A claim about a game address is checked with
 `uv run python scripts/kar.py disasm`/`sym`/`decomp`, not inferred from a
-comment - the comment is what is under review. A claim about runtime state is
-checked in Dolphin via the `dolphin-memory` skill if it is running, and flagged
-as unverified if it is not.
+comment - the comment is what is under review.
 
 ## Step 3 - Apply
 
@@ -88,8 +86,8 @@ check` must be as clean as it was before the pass.
 ## Step 5 - Report
 
 One list of what changed, grouped by axis, each entry one line with a
-`file:line`. Then, separately: findings deferred to the user, findings outside
-the mod, and anything asserted without runtime verification.
+`file:line`. Then, separately: findings deferred to the user, and findings
+outside the mod.
 
 ---
 

@@ -264,11 +264,11 @@ static int LoadMachineArt(void)
         if (DVDConvertPathToEntrynum(path) == -1)
             continue;
 
-        void *mark = CustomMachines_ArenaMark();
-        HSD_Archive *arc = CustomMachines_LoadArchiveAtBoot(path);
+        void *mark = HSD_ArenaMark();
+        HSD_Archive *arc = Archive_LoadFile(path);
         if (arc == NULL)
         {
-            CustomMachines_ArenaRelease(mark);
+            HSD_ArenaRelease(mark);
             continue;
         }
 
@@ -278,7 +278,7 @@ static int LoadMachineArt(void)
             art->version > CUSTOM_MACHINE_ART_VERSION || art->count == 0)
         {
             OSReport("[UiFrames] %s is not a machine art side-car\n", path);
-            CustomMachines_ArenaRelease(mark);
+            HSD_ArenaRelease(mark);
             continue;
         }
 
@@ -307,7 +307,7 @@ static void MoveDiverts(void)
 
 void CustomMachineUiFrames_OnBoot(void)
 {
-    HSD_Archive *archive = CustomMachines_LoadArchiveAtBoot(UI_FRAMES_FILE);
+    HSD_Archive *archive = Archive_LoadFile(UI_FRAMES_FILE);
     UiFrameFile *files;
     int slots = 0;
     int ramps = 0;
