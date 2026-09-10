@@ -1,8 +1,5 @@
 // Widens the engine's star machine class from 19 slots to 19 + CUSTOM_MACHINE_MAX
-// so registered machines can load archives of their own. The name table is reached
-// through a pointer and simply repointed; stc_vcDataLookup is relocated wholesale
-// and every read of it goes through this file; the two machine-specific handler
-// tables are relocated by rewriting the lis/addi pair inside their one reader.
+// so registered machines can load archives of their own.
 
 #include "os.h"
 #include "hsd.h"
@@ -17,11 +14,10 @@ static char *stc_star_names[CUSTOM_VCSTAR_NUM * 2];
 // indexed the same way; only slots 0-6 of it are ever filled.
 static vcData *stc_vc_lookup[2][CUSTOM_VCSTAR_NUM];
 
-// Each holds the machine-specific handler that Machine_Star_Init and
-// Machine_Star_Think end by calling: the vanilla table, then the lis / addi pair
-// that forms it inside the one function that reads it. Only Hydra, Formula, Wagon
-// and Turbo have handlers; the other 15 slots are NULL, as is any custom slot
-// whose donor is one of them.
+// Each holds the machine-specific handler that Machine_Star_Init (0x801e7f3c) and
+// Machine_Star_Think (0x801eacbc) end by calling: the vanilla table, then the lis /
+// addi pair that forms it inside the one function that reads it. Only Hydra,
+// Formula, Wagon and Turbo have one; every other slot is NULL.
 static const u32 stc_handler_tables[2][3] = {
     { 0x804b15c0, 0x801e80dc, 0x801e80e0 }, // Machine_Star_Init
     { 0x804b160c, 0x801eb524, 0x801eb528 }, // Machine_Star_Think
@@ -133,14 +129,13 @@ CODEPATCH_HOOKCREATE(0x801c8d8c,
     0
 )
 
-// Repoint Machine_StoreVcDataPtr's inline `stc_vcDataLookup[is_bike][kind]` read
-// at stc_vc_lookup: the lis/addi pair that forms the base, plus the class-stride
-// multiply. Patching the arithmetic rather than hooking keeps the caller-saved
-// registers the surrounding code still needs (r0, r4, r5) untouched.
+// Repoint Machine_StoreVcDataPtr's (0x801c4f98) inline `stc_vcDataLookup[is_bike][kind]`
+// read at stc_vc_lookup. Patching the arithmetic rather than hooking keeps the
+// caller-saved registers the surrounding code still needs (r0, r4, r5) untouched.
 static void PatchLookupBase(void)
 {
     CustomMachines_RepointTable(0x801c4fd0, 0x801c4fe8, stc_vc_lookup);
-    CODEPATCH_REPLACEINSTRUCTION(0x801c5034, 0x1CE70000 | (CUSTOM_VCSTAR_NUM * 4)); // mulli r7, r7, N
+    CustomMachines_SetImmediate(0x801c5034, CUSTOM_VCSTAR_NUM * 4); // mulli r7, r7, N
 }
 
 void CustomMachineRegistry_OnBoot(void)

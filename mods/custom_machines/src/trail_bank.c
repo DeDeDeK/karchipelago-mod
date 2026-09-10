@@ -1,8 +1,7 @@
 // Private copies of shared vehicle particle bank generators, so a machine can tint
-// its exhaust without tinting every machine emitting the same index. Generators 3
-// and 8 of EfPtclVehicle.dat's 52 go unreferenced by any vanilla machine. The copy
-// is made at bank load because Ptcl_Alloc (0x8043294c) hands a generator node the
-// descriptor's program pointer once, at creation, and the node keeps it for life.
+// its exhaust without tinting every machine emitting the same index. The copy is made
+// at bank load because Ptcl_Alloc (0x8043294c) hands a generator node the descriptor's
+// program pointer once, at creation, and the node keeps it for life.
 
 #include <string.h>
 
@@ -12,14 +11,12 @@
 
 #include "custom_machines.h"
 
-#define PTCL_BANK_VEHICLE 0
 #define TRAIL_CLONE_MAX 4
 
 // Descriptors sit back to back in the bank with no length in front of them, so a
 // clone takes a fixed span instead of a measured one. This clears the largest
-// generator in the vehicle bank with room over; the slack past a shorter one is
-// still inside the loaded archive, and the program it copies ends at its own 0xff
-// wherever that falls.
+// generator in the vehicle bank with room over, and the program it copies ends at
+// its own 0xff wherever that falls.
 #define TRAIL_CLONE_SIZE 256
 
 static u8 stc_clone[TRAIL_CLONE_MAX][TRAIL_CLONE_SIZE];

@@ -6,8 +6,8 @@
 ModDesc mod_desc = {
     .name = "custom_machines",
     .author = "DeDeDK",
-    .version.major = 1,
-    .version.minor = 0,
+    .version.major = CUSTOM_MACHINES_API_MAJOR,
+    .version.minor = CUSTOM_MACHINES_API_MINOR,
     .affects_gameplay = 1,
     .OnBoot = CustomMachines_OnBoot,
     .On3DLoadStart = CustomMachines_On3DLoadStart,

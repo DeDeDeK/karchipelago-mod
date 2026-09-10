@@ -97,6 +97,10 @@ void APCheckDetect_Observe(int ck);
 
 // Installs the two KO recorder interceptions - the rival one the Destruction Derby
 // objective needs, and the enemy one the Mic objective needs.
+// Handed to custom_machines' KO seam once the registry resolves. Counts the Kirbys
+// a human King Dedede has KO'd in Destruction Derby.
+void APCheckDetect_AddDeath(int victim, struct DmgLog *dmg_log, int machine_kind);
+
 void APCheckDetect_OnBoot(void);
 
 // Attaches the per-frame sampler to every human rider - the City Trial one for a

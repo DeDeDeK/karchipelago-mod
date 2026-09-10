@@ -1,10 +1,11 @@
 // Registry for drop-in machine archives found in the FST machines/ folder.
 //
-// Discovery runs at boot, before any scene heap exists, so descriptors are read
-// with a self-contained loader (DVD read into an HSD_MemAlloc buffer, then
-// Archive_Init) rather than Archive_LoadFile. Everything the registry keeps is
-// copied out of the descriptor and the archive freed again; the engine loads its
-// own copy later, by filename, through the widened name table.
+// Discovery loads each candidate through Archive_LoadFile, which allocates out of
+// hoshi's boot arena, and rewinds that arena once the descriptor is copied out. A
+// machine archive runs to six figures of bytes and the engine loads its own copy
+// later, by filename, through the widened name table.
+
+#include <string.h>
 
 #include "os.h"
 #include "hsd.h"
@@ -63,6 +64,16 @@ CustomMachineEntry *CustomMachines_FindByCharacterKind(int character_kind)
     return NULL;
 }
 
+CustomMachineEntry *CustomMachines_FindByStarSlot(int star_slot)
+{
+    for (int i = 0; i < stc_count; i++)
+    {
+        if (stc_entries[i].star_slot == star_slot)
+            return &stc_entries[i];
+    }
+    return NULL;
+}
+
 static JOBJDesc *DescAtIndex(JOBJDesc *desc, int *countdown)
 {
     for (; desc != NULL; desc = desc->next)
@@ -116,17 +127,19 @@ void CustomMachines_CopyStr(char *dst, const char *src, int max)
     dst[i] = '\0';
 }
 
-// Rewrite the `lis rD, hi` / `addi rD, rS, lo` pair an accessor uses to form a
-// table address. Both instructions keep their register fields; only the
-// immediates change.
+void CustomMachines_SetImmediate(u32 addr, u32 imm)
+{
+    CODEPATCH_REPLACEINSTRUCTION(addr, (*(u32 *)addr & 0xFFFF0000) | (imm & 0xFFFF));
+}
+
 void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
 {
     u32 addr = (u32)table;
     u32 lo = addr & 0xFFFF;
     u32 hi = (addr >> 16) + ((lo & 0x8000) ? 1 : 0); // addi sign-extends its immediate
 
-    CODEPATCH_REPLACEINSTRUCTION(lis_addr, (*(u32 *)lis_addr & 0xFFFF0000) | hi);
-    CODEPATCH_REPLACEINSTRUCTION(addi_addr, (*(u32 *)addi_addr & 0xFFFF0000) | lo);
+    CustomMachines_SetImmediate(lis_addr, hi);
+    CustomMachines_SetImmediate(addi_addr, lo);
 }
 
 int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *ext)
@@ -171,9 +184,9 @@ static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
         OSReport("[CustomMachines] %s bad magic 0x%08x\n", path, desc->magic);
         return 0;
     }
-    if (desc->version > CUSTOM_MACHINE_DESC_VERSION)
+    if (desc->version != CUSTOM_MACHINE_DESC_VERSION)
     {
-        OSReport("[CustomMachines] %s descriptor v%d newer than supported v%d\n",
+        OSReport("[CustomMachines] %s descriptor v%d, expected v%d\n",
                  path, desc->version, CUSTOM_MACHINE_DESC_VERSION);
         return 0;
     }
@@ -194,9 +207,7 @@ static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
     CustomMachines_CopyStr(e->name, desc->name != NULL ? desc->name
                                                        : FST_GetFilenameFromEntrynum(entrynum),
                            CUSTOM_MACHINE_NAME_MAX);
-    // The description arrived in v2; a v1 descriptor ends where the field starts.
-    CustomMachines_CopyStr(e->description, desc->version >= 2 ? desc->description : NULL,
-                           CUSTOM_MACHINE_DESCRIPTION_MAX);
+    CustomMachines_CopyStr(e->description, desc->description, CUSTOM_MACHINE_DESCRIPTION_MAX);
     e->star_slot = VCSTAR_NUM + stc_count;
     e->machine_kind = VCKIND_NUM + stc_count;
     e->character_kind = -1;
@@ -204,10 +215,10 @@ static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
     e->clone_kind = desc->clone_kind;
     e->spawn_weight = desc->spawn_weight;
 
-    // The material cycle arrived in v3. The colors are copied rather than pointed
-    // at, because the archive they sit in goes away with this call.
+    // The colors are copied rather than pointed at, because the archive they sit
+    // in goes away with this call.
     e->palette_joint = -1;
-    if (desc->version >= 3 && desc->palette_joint >= 0 && desc->palette_count > 0 &&
+    if (desc->palette_joint >= 0 && desc->palette_count > 0 &&
         desc->palette != NULL && desc->palette_period > 0.0f)
     {
         int count = desc->palette_count;
@@ -225,11 +236,9 @@ static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
     }
 
     // The trail tint rides the same cycle, so it only means anything on a machine
-    // that asked for a palette. It took its present shape in v5; a v4 descriptor
-    // laid the field out differently and is read as asking for none.
+    // that asked for a palette.
     e->trail_count = 0;
-    if (desc->version >= 5 && e->palette_joint >= 0 &&
-        desc->trail_count > 0 && desc->trail_count <= 8)
+    if (e->palette_joint >= 0 && desc->trail_count > 0 && desc->trail_count <= 8)
     {
         e->trail_count = desc->trail_count;
         for (int i = 0; i < desc->trail_count; i++)
@@ -241,8 +250,7 @@ static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
 
     // Clones are only worth installing for a machine that goes on to tint them.
     e->trail_clone_count = 0;
-    if (desc->version >= 6 && e->trail_count > 0 &&
-        desc->trail_clone_count > 0 && desc->trail_clone_count <= 4)
+    if (e->trail_count > 0 && desc->trail_clone_count > 0 && desc->trail_clone_count <= 4)
     {
         e->trail_clone_count = desc->trail_clone_count;
         for (int i = 0; i < desc->trail_clone_count; i++)
@@ -252,11 +260,10 @@ static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
         }
     }
 
-    // The assembly cinematic arrived in v7. Both archives are needed - one carries
-    // the parts that fly in, the other the streaks they ride and the camera - so a
-    // descriptor naming only one asks for none.
+    // Both archives are needed - one carries the parts that fly in, the other the
+    // streaks they ride and the camera - so a descriptor naming only one asks for none.
     e->cine_machine_index = -1;
-    if (desc->version >= 7 && desc->cine_glow_file != NULL && desc->cine_parts_file != NULL &&
+    if (desc->cine_glow_file != NULL && desc->cine_parts_file != NULL &&
         desc->cine_glow_symbol != NULL && desc->cine_cam_symbol != NULL &&
         desc->cine_parts_symbol != NULL)
     {
@@ -310,7 +317,7 @@ static void IndexCb(int entrynum, void *args)
     HSD_ArenaRelease(mark);
 }
 
-int CustomMachines_Discover(void)
+static int Discover(void)
 {
     int found = 0;
     FST_ForEachInFolder((char *)CUSTOM_MACHINE_DROPIN_DIR, (char *)CUSTOM_MACHINE_DROPIN_EXT,
@@ -327,20 +334,13 @@ int CustomMachines_Discover(void)
     return stc_count;
 }
 
-static int Api_GetKindCeiling(void)
-{
-    return CustomMachines_GetKindCeiling();
-}
-
 static int Api_KindFromClassIndex(int is_bike, int class_index)
 {
     if (!is_bike)
     {
-        for (int i = 0; i < stc_count; i++)
-        {
-            if (stc_entries[i].star_slot == class_index)
-                return stc_entries[i].machine_kind;
-        }
+        CustomMachineEntry *e = CustomMachines_FindByStarSlot(class_index);
+        if (e != NULL)
+            return e->machine_kind;
     }
     return MachineKind_FromClassIndex(is_bike, class_index);
 }
@@ -350,12 +350,10 @@ static int Api_ClassIndexFromKind(int kind, int *out_is_bike)
     CustomMachineEntry *e = CustomMachines_FindByKind(kind);
     if (e != NULL)
     {
-        if (out_is_bike != NULL)
-            *out_is_bike = 0;
+        *out_is_bike = 0;
         return e->star_slot;
     }
-    if (out_is_bike != NULL)
-        *out_is_bike = MachineKind_IsBike(kind);
+    *out_is_bike = MachineKind_IsBike(kind);
     return MachineKind_ClassIndex(kind);
 }
 
@@ -371,23 +369,10 @@ static int Api_FindKindByName(const char *name)
         return -1;
     for (int i = 0; i < stc_count; i++)
     {
-        const char *a = stc_entries[i].name;
-        const char *b = name;
-        while (*a != '\0' && *a == *b)
-        {
-            a++;
-            b++;
-        }
-        if (*a == '\0' && *b == '\0')
+        if (strcmp(stc_entries[i].name, name) == 0)
             return stc_entries[i].machine_kind;
     }
     return -1;
-}
-
-static float Api_GetSpawnWeight(int kind)
-{
-    CustomMachineEntry *e = CustomMachines_FindByKind(kind);
-    return e != NULL ? e->spawn_weight : 0.0f;
 }
 
 static int Api_SetStarInitHandler(int kind, CustomMachineStarHandler fn)
@@ -400,11 +385,6 @@ static int Api_SetStarThinkHandler(int kind, CustomMachineStarHandler fn)
     return CustomMachineRegistry_SetStarHandler(1, kind, fn);
 }
 
-static JOBJ *Api_GetMachineJoint(MachineData *md, int joint_index)
-{
-    return CustomMachines_GetMachineJoint(md, joint_index);
-}
-
 static const u32 *Api_GetPalette(int kind, int *out_count)
 {
     CustomMachineEntry *e = CustomMachines_FindByKind(kind);
@@ -415,33 +395,26 @@ static const u32 *Api_GetPalette(int kind, int *out_count)
     return e->palette;
 }
 
-static int Api_AddCityPreload(const char *path)
-{
-    return CustomMachinePreload_Add(path);
-}
-
 static const CustomMachinesAPI stc_api = {
     .GetGridCols = CustomMachineCharacter_GetGridCols,
-    .GetGridSentinel = CustomMachineCharacter_GetSentinel,
     .GetSelectIconMax = CustomMachineSelect_GetIconMax,
-    .SetAirRideRowSplit = CustomMachineSelect_SetAirRideRowSplit,
     .SetAvailabilityFilter = CustomMachineSelect_SetAvailabilityFilter,
+    .SetDeathHandler = CustomMachineStats_SetDeathHandler,
+    .SetAirRideRowSplit = CustomMachineSelect_SetAirRideRowSplit,
     .SetSpawnWeightFilter = CustomMachineSpawn_SetWeightFilter,
     .GetCount = CustomMachines_GetCount,
-    .GetKindCeiling = Api_GetKindCeiling,
+    .GetKindCeiling = CustomMachines_GetKindCeiling,
     .GetCharacterKindCeiling = CustomMachines_GetCharacterKindCeiling,
     .KindFromClassIndex = Api_KindFromClassIndex,
     .ClassIndexFromKind = Api_ClassIndexFromKind,
     .GetName = Api_GetName,
     .FindKindByName = Api_FindKindByName,
-    .GetSpawnWeight = Api_GetSpawnWeight,
     .SetStarInitHandler = Api_SetStarInitHandler,
     .SetStarThinkHandler = Api_SetStarThinkHandler,
-    .GetMachineJoint = Api_GetMachineJoint,
+    .GetMachineJoint = CustomMachines_GetMachineJoint,
     .GetPalette = Api_GetPalette,
     .StartAssembly = CustomMachineCinematic_Start,
-    .IsAssemblyRunning = CustomMachineCinematic_IsRunning,
-    .AddCityPreload = Api_AddCityPreload,
+    .AddCityPreload = CustomMachinePreload_Add,
 };
 
 void CustomMachines_On3DLoadStart(void)
@@ -463,7 +436,7 @@ void CustomMachines_OnBoot(void)
     // the weight filter whether or not one is present.
     CustomMachineSpawn_OnBoot();
 
-    if (CustomMachines_Discover() == 0)
+    if (Discover() == 0)
         OSReport("[CustomMachines] No machines found in /%s\n", CUSTOM_MACHINE_DROPIN_DIR);
     else
     {

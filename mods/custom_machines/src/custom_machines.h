@@ -23,6 +23,23 @@
 #define CUSTOM_VCKIND_NUM (VCKIND_NUM + CUSTOM_MACHINE_MAX)
 #define CUSTOM_CKIND_NUM  (CKIND_NUM + CUSTOM_MACHINE_MAX)
 
+// Controller slots the engine carries player state for.
+#define CUSTOM_MACHINE_PLY_NUM 5
+
+// Columns per row of the vanilla select-screen character grid.
+#define VANILLA_GRID_COLS 10
+
+// Icons a select screen can carry, and where each screen's block keeps its packed
+// list: a count byte, then one CharacterKind per icon. City Trial's headroom past
+// the list decides the ceiling for both screens.
+#define SELECT_ICON_MAX 33
+#define SELECT_COUNT    0x65
+#define SELECT_LIST     0x66
+
+// The particle bank EfPtclVehicle.dat installs, which is what a machine's
+// animation bank names its exhaust out of.
+#define PTCL_BANK_VEHICLE 0
+
 typedef struct CustomMachineEntry
 {
     char name[CUSTOM_MACHINE_NAME_MAX];    // descriptor name, or the filename if it has none
@@ -62,23 +79,22 @@ int                 CustomMachines_GetCharacterKindCeiling(void);
 CustomMachineEntry *CustomMachines_GetEntry(int index);
 CustomMachineEntry *CustomMachines_FindByKind(int machine_kind);
 CustomMachineEntry *CustomMachines_FindByCharacterKind(int character_kind);
+CustomMachineEntry *CustomMachines_FindByStarSlot(int star_slot);
 void                CustomMachines_CopyStr(char *dst, const char *src, int max);
 
 // Point an accessor's `lis` / `addi` pair at a relocated copy of its table.
 void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table);
 
+// Rewrite the low half of one instruction, keeping its opcode and registers.
+void CustomMachines_SetImmediate(u32 addr, u32 imm);
+
 // The live joint for a depth-first index into the machine archive's own joint
-// tree. The index is resolved against the JObjDesc tree and the joint found by
-// the back-pointer JObjLoad (0x8040add4) leaves at JOBJ+0x84, which holds however
-// the engine roots the instance.
+// tree, found through the back-pointer JObjLoad (0x8040add4) leaves at JOBJ+0x84.
 JOBJ *CustomMachines_GetMachineJoint(MachineData *md, int joint_index);
 
 // A machine's side-car path: its own with the extension swapped. Returns 0 if it
 // does not fit or the source has no extension to swap.
 int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *ext);
-
-// FST scan of machines/, validating each descriptor. Returns the count.
-int CustomMachines_Discover(void);
 
 // machine_registry.c - the widened star class.
 void CustomMachineRegistry_OnBoot(void);
@@ -90,7 +106,6 @@ int  CustomMachineRegistry_SetStarHandler(int table, int machine_kind,
 // character_registry.c - appended CharacterDesc rows and select-grid cells.
 void CustomMachineCharacter_OnBoot(void);
 int  CustomMachineCharacter_GetGridCols(void);
-int  CustomMachineCharacter_GetSentinel(void);
 
 // select_text.c - the select screens' machine name and description text.
 void CustomMachineText_OnBoot(void);
@@ -107,6 +122,7 @@ void CustomMachinePalette_OnBoot(void);
 // machine_stats.c - the widened per-machine counter arrays.
 void CustomMachineStats_OnBoot(void);
 void CustomMachineStats_On3DLoadStart(void);
+void CustomMachineStats_SetDeathHandler(CustomMachineDeathHandler handler);
 
 // machine_blip.c - the City Trial blip a custom machine borrows.
 void CustomMachineBlip_OnBoot(void);
@@ -123,7 +139,6 @@ int  CustomMachinePreload_Add(const char *path);
 void CustomMachineCinematic_OnBoot(void);
 void CustomMachineCinematic_On3DLoadStart(void);
 int  CustomMachineCinematic_Start(int machine_kind, int ply);
-int  CustomMachineCinematic_IsRunning(void);
 
 // ui_frames.c - the 21st frame spliced into each character-indexed art bank.
 void CustomMachineUiFrames_OnBoot(void);

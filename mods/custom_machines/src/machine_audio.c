@@ -1,12 +1,8 @@
-// A drop-in machine's sounds, and the star class's per-kind audio parameter row.
-//
-// The row array is authored in VcCommon.dat, sized to the 19 vanilla star slots and
+// A drop-in machine's sounds, and the star class's per-kind audio parameter row. The
+// row array is authored in VcCommon.dat, sized to the 19 vanilla star slots and
 // reloaded per scene, so it is re-copied wider and repointed on every vcLoadCommon,
 // each custom row starting as its clone_kind's. A companion .ssm then takes its own
-// samples over that row, which needs an SSM slot, a range of global sound indices
-// past the vanilla 0-614, and a script per sound in an SEM bank appended past the
-// vanilla 20 - all set up on the first vcLoadCommon, and the bank reinstalled after
-// every FGM_InitSEM.
+// samples over that row.
 
 #include "os.h"
 #include "audio.h"
@@ -19,6 +15,10 @@
 // are the whole of a machine's voice. A bank holds one entry per slot and marks the
 // ones it does not supply with a sample rate of 0.
 #define SOUND_ROLE_NUM 13
+
+// The (int *) casts below walk those slots, so nothing else may precede the floats.
+_Static_assert(__builtin_offsetof(MachineAudioParams, surface_speed_max) == SOUND_ROLE_NUM * 4,
+               "MachineAudioParams must open with SOUND_ROLE_NUM FGM ids");
 
 // Retail's longest script is 70 commands.
 #define SCRIPT_CMD_MAX 72
@@ -86,7 +86,7 @@ static SSMSound *ChunkSound(SSMChunk *chunk, int index)
 {
     SSMSound *s = (SSMSound *)(chunk + 1);
     for (int i = 0; i < index; i++)
-        s = (SSMSound *)((u8 *)s + 0x10 + s->channel_num * 0x40);
+        s = (SSMSound *)((u8 *)s + sizeof(SSMSound) + s->channel_num * 0x40);
     return s;
 }
 
@@ -159,7 +159,7 @@ static void LoadDropinBanks(void)
                 b->sound[r] = s->index;
         }
         next_index += chunk->sound_num;
-        OSReport("[MachineAudio] %s -> SSM slot %d, sounds %d..%d\n",
+        OSReport("[MachineAudio] %s -> SSM slot %d, sounds %d-%d\n",
                  path, slot, chunk->sound_base, next_index - 1);
     }
 }
@@ -197,8 +197,8 @@ static u32 *CloneScript(const u32 *donor, int sound_index)
 
 // The FGM id a drop-in sound's script is copied from: the clone kind's, or the
 // first vanilla star row carrying one where the clone kind leaves the slot at -1.
-// Every star but Wagon has no boost release of its own, so a drop-in supplying
-// one has nothing on its own kind to inherit an envelope from.
+// The Slick Star, the Wagon Star and the two wing riders leave all three boost
+// tiers at -1, so a drop-in cloning one of them has no envelope to inherit there.
 static int DonorSfx(int clone, int role)
 {
     const int *row = (const int *)&stc_star_audio[clone];
@@ -375,4 +375,5 @@ void CustomMachineAudio_OnBoot(void)
     CODEPATCH_HOOKAPPLY(0x80447eb8); // FGM_LoadBankCallback, past its prologue
     CODEPATCH_HOOKAPPLY(0x8005c654); // FGM_LoadAirride.sem, after FGM_InitSEM
     CODEPATCH_HOOKAPPLY(0x801c6d64); // vcLoadCommon epilogue
+    OSReport("[MachineAudio] Hooks installed\n");
 }

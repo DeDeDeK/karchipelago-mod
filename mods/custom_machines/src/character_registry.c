@@ -1,18 +1,13 @@
-// Appends a CharacterKind for each registered machine that asks for one.
-//
-// The four DOL roster tables sit back to back with no slack, and each is read by
-// exactly one accessor that does nothing but form an address, so all four are
-// relocated by rewriting the lis/addi pair inside the accessor. The grid grows a
-// column per two appended characters; the at most one leftover cell holds
-// SENTINEL_CKIND, which every availability predicate rejects.
+// Appends a CharacterKind for each registered machine that asks for one. The four
+// DOL roster tables sit back to back with no slack, and each is read by exactly one
+// accessor that does nothing but form an address, so all four are relocated by
+// rewriting the lis/addi pair inside the accessor.
 
 #include "os.h"
 #include "menu.h"
 #include "code_patch/code_patch.h"
 
 #include "custom_machines.h"
-
-#define VANILLA_GRID_COLS 10
 
 // One row past the last real character, so every availability predicate rejects it.
 #define SENTINEL_CKIND CUSTOM_CKIND_NUM
@@ -21,7 +16,7 @@
 
 static u8 stc_char_desc[(CUSTOM_CKIND_NUM + 1) * 3];
 static u8 stc_icon_linear[CUSTOM_CKIND_NUM + 1];
-// Flat, because its row stride is the runtime column count Icon_GetCKind is
+// Flat, because its row stride is the runtime column count SelIcon_GetCKind is
 // patched to multiply by - not the compile-time maximum.
 static u8 stc_icon_grid[2 * MAX_GRID_COLS];
 
@@ -36,11 +31,6 @@ static int stc_grid_cols = VANILLA_GRID_COLS;
 int CustomMachineCharacter_GetGridCols(void)
 {
     return stc_grid_cols;
-}
-
-int CustomMachineCharacter_GetSentinel(void)
-{
-    return SENTINEL_CKIND;
 }
 
 void CustomMachineCharacter_OnBoot(void)
@@ -105,10 +95,10 @@ void CustomMachineCharacter_OnBoot(void)
     }
 
     CustomMachines_RepointTable(0x8000b9a8, 0x8000b9b0, stc_icon_linear);  // SelIcon_GetCKindLinear
-    CustomMachines_RepointTable(0x8000b9c0, 0x8000b9cc, stc_icon_grid);    // Icon_GetCKind
+    CustomMachines_RepointTable(0x8000b9c0, 0x8000b9cc, stc_icon_grid);    // SelIcon_GetCKind
     CustomMachines_RepointTable(0x8000b9e0, 0x8000b9e8, stc_char_desc);    // Character_GetDesc
     CustomMachines_RepointTable(0x8000b9fc, 0x8000ba04, stc_star_ckind);   // Machine_GetCKind
-    CODEPATCH_REPLACEINSTRUCTION(0x8000b9c4, 0x1CA00000 | stc_grid_cols); // mulli r5, r0, cols
+    CustomMachines_SetImmediate(0x8000b9c4, stc_grid_cols); // mulli r5, r0, cols
 
     OSReport("[CharacterRegistry] %d character(s) appended, grid is 2x%d\n",
              appended, stc_grid_cols);

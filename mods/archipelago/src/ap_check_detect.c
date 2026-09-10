@@ -336,15 +336,13 @@ void APCheckDetect_OnFrameStart(void)
     }
 }
 
-// Replaces the one bl Ply_AddDeath, the engine's unified KO recorder, inside
-// Machine_GiveDamage. Who was KO'd is only available here: the per-player KO tally
+// Handed every KO by custom_machines, which owns the one bl Ply_AddDeath inside
+// Machine_GiveDamage. Who was KO'd is only available there: the per-player KO tally
 // the Destruction Derby cells read records the killer alone, and a stadium CPU can
 // be Meta Knight or King Dedede once those are unlocked, so a rival is not always
 // a Kirby.
-static void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int is_bike, MachineKind machine_kind)
+void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int machine_kind)
 {
-    Ply_AddDeath(victim, dmg_log, is_bike, machine_kind);
-
     if (!Gm_IsDestructionDerby())
         return;
 
@@ -629,7 +627,6 @@ void APCheckDetect_On3DExit(void)
 
 void APCheckDetect_OnBoot(void)
 {
-    CODEPATCH_REPLACECALL(0x801e1f74, APCheckDetect_AddDeath);
     CODEPATCH_REPLACECALL(0x802022ec, APCheckDetect_EnemyDefeat);
     CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
     OSReport("[APCheckDetect] Hooks installed\n");

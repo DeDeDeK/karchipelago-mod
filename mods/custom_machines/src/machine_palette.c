@@ -1,7 +1,6 @@
-// Wall-clock material cycle for a machine whose descriptor asks for one, written
-// into the live materials from Machine_ColAnimThink each frame. An archive cannot
-// animate this itself: a MatAnim's frame is the machine's state, not elapsed time.
-// The same color is written over the exhaust generators' color operands, which
+// Wall-clock material cycle for a machine whose descriptor asks for one. An archive
+// cannot animate this itself: a MatAnim's frame is the machine's state, not elapsed
+// time. The same color is written over the exhaust generators' color operands, so it
 // paints the particles born that frame and leaves those in flight alone.
 
 #include "os.h"
@@ -12,10 +11,6 @@
 #include "code_patch/code_patch.h"
 
 #include "custom_machines.h"
-
-// The particle bank EfPtclVehicle.dat installs, which is what a machine's
-// animation bank names its exhaust out of.
-#define PTCL_BANK_VEHICLE 0
 
 typedef struct PaletteTarget
 {
@@ -119,8 +114,8 @@ static void Saturate(GXColor *c)
 }
 
 // The bank is rebuilt on every 3D load, so descriptors are re-resolved rather than
-// cached. An offset is only written when the two bytes ahead of it are still a color
-// opcode and its duration operand, which keeps this off a stale table.
+// cached. An offset is only written when the byte two ahead of it is still a color
+// opcode, which keeps this off a stale table.
 static void TintTrail(const PaletteTarget *t, const GXColor *color)
 {
     u8 **descs;
@@ -178,9 +173,10 @@ static void PaintMachine(MachineData *md)
     TintTrail(t, &color);
 }
 
-// Tail of Machine_AnimThink, which runs once per machine per frame. Taking it
-// here puts the write after the ColAnim overlays and before the draw.
-static void MachinePalette_AnimThinkTail(MachineData *md)
+// Replaces the bl Machine_ColAnimThink at 0x801c6274, the tail of Machine_AnimThink
+// (0x801c618c), which runs once per machine per frame after the ColAnim overlays and
+// before the draw.
+static void AnimThinkTail(MachineData *md)
 {
     Machine_ColAnimThink(md);
     PaintMachine(md);
@@ -193,7 +189,7 @@ void CustomMachinePalette_OnBoot(void)
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
-        if (e->palette_joint < 0 || stc_target_count >= CUSTOM_MACHINE_MAX)
+        if (e->palette_joint < 0)
             continue;
 
         PaletteTarget *t = &stc_targets[stc_target_count++];
@@ -208,13 +204,11 @@ void CustomMachinePalette_OnBoot(void)
             t->trail_gen[k] = e->trail_gen[k];
             t->trail_rgb[k] = e->trail_rgb[k];
         }
-        OSReport("[MachinePalette] %s: joint %d cycles %d colors every %.1fs, %d trail tints\n",
-                 e->name, t->joint, t->count, e->palette_period, t->trail_count);
     }
 
     if (stc_target_count == 0)
         return;
 
-    CODEPATCH_REPLACECALL(0x801c6274, MachinePalette_AnimThinkTail);
+    CODEPATCH_REPLACECALL(0x801c6274, AnimThinkTail); // bl Machine_ColAnimThink
     OSReport("[MachinePalette] %d machine(s) cycling, hooks installed\n", stc_target_count);
 }

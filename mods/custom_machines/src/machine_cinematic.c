@@ -1,10 +1,7 @@
-// The legendary assembly cutscene, driven by a machine's own archives.
-//
-// Every machine-specific decision the engine's cinematic takes is at a bl, so a
-// machine reaches the whole of it by standing in at three: which archive loads,
+// The legendary assembly cutscene, driven by a machine's own archives, by standing
+// in at the three bl sites where the engine's cinematic decides which archive loads,
 // which frees, and which machine the rider mounts. One run at a time, which is the
-// engine's own limit - GameData+0xa8c holds a single controller GObj. Dragoon and
-// Hydra are accepted here too and fall through to the engine's own archives.
+// engine's own limit - GameData+0xa8c holds a single controller GObj.
 
 #include "os.h"
 #include "hsd.h"
@@ -25,16 +22,24 @@ static CustomMachineEntry *stc_running;
 // Dragoon, bit 1 = Hydra.
 static u8 stc_vanilla_assembled;
 
-int CustomMachineCinematic_IsRunning(void)
+static void FreeMachineArchives(void)
 {
-    return stc_running != NULL || Gm_IsLegendaryAssembling();
+    if (stc_glow_arc != NULL)
+    {
+        Archive_Free(0, stc_glow_arc);
+        stc_glow_arc = NULL;
+    }
+    if (stc_parts_arc != NULL)
+    {
+        Archive_Free(0, stc_parts_arc);
+        stc_parts_arc = NULL;
+    }
 }
 
-// Replaces the bl at 0x80283914 in LegendaryMachine_CreateAssembly. Vanilla picks
-// VsDragoon.dat or VsHydra.dat off the machine index and returns the archive's
-// vsData: a glow-model triple, a parts-model triple and a pointer to the camera
-// animation descriptor. A machine's two archives carry one half each, so the
-// three-pointer block is assembled here.
+// Replaces the bl at 0x80283914 in LegendaryMachine_CreateAssembly. Vanilla returns
+// the archive's vsData: a glow-model triple, a parts-model triple and a pointer to
+// the camera animation descriptor. A machine's two archives carry one half each, so
+// the three-pointer block is assembled here.
 static void *LoadArchive(int machine_index)
 {
     CustomMachineEntry *e = stc_running;
@@ -49,8 +54,16 @@ static void *LoadArchive(int machine_index)
     lbLoadArchive(&stc_parts_arc, e->cine_parts_file, &parts, e->cine_parts_symbol, 0);
     if (glow == NULL || cam == NULL || parts == NULL)
     {
-        OSReport("[MachineCinematic] '%s' archive load failed (glow %d cam %d parts %d)\n",
-                 e->name, glow != NULL, cam != NULL, parts != NULL);
+        // Latched: the same descriptor fails the same way on every run.
+        static int reported;
+
+        if (!reported)
+        {
+            reported = 1;
+            OSReport("[MachineCinematic] '%s' archive load failed (glow %d cam %d parts %d)\n",
+                     e->name, glow != NULL, cam != NULL, parts != NULL);
+        }
+        FreeMachineArchives();
         stc_running = NULL;
         return LegendaryMachine_LoadAssemblyArchive(machine_index);
     }
@@ -61,8 +74,9 @@ static void *LoadArchive(int machine_index)
     return &stc_vsdata;
 }
 
-// Replaces the bl at 0x80283c98 in phase 3. The latch clears here rather than at
-// the mount, so every seam downstream of the load still sees our run.
+// Replaces the bl at 0x80283c98, in phase 3 of LegendaryMachine_AssemblyThink
+// (0x802839b8). The latch clears here rather than at the mount, so every seam
+// downstream of the load still sees our run.
 static void FreeArchive(int machine_index)
 {
     if (stc_running == NULL)
@@ -72,22 +86,13 @@ static void FreeArchive(int machine_index)
     }
 
     stc_running = NULL;
-    if (stc_glow_arc != NULL)
-    {
-        Archive_Free(0, stc_glow_arc);
-        stc_glow_arc = NULL;
-    }
-    if (stc_parts_arc != NULL)
-    {
-        Archive_Free(0, stc_parts_arc);
-        stc_parts_arc = NULL;
-    }
+    FreeMachineArchives();
 }
 
-// Replaces the bl at 0x80283b70. Vanilla's Enter poses the rider and stages the
-// (is_bike, class slot) pair the substate's motion script feeds to
-// Rider_RespawnFullRecreate 150 frames later; overwriting that pair is the whole
-// of pointing the mount at a different machine.
+// Replaces the bl at 0x80283b70 in LegendaryMachine_AssemblyThink (0x802839b8).
+// Vanilla's Enter poses the rider and stages the (is_bike, class slot) pair the
+// substate's motion script feeds to Rider_RespawnFullRecreate 150 frames later;
+// overwriting that pair is the whole of pointing the mount at a different machine.
 static void EnterAssembly(int ply, int machine_index)
 {
     Ply_EnterLegendaryAssembly(ply, machine_index);
@@ -98,8 +103,8 @@ static void EnterAssembly(int ply, int machine_index)
         return;
 
     RiderData *rd = rg->userdata;
-    rd->x944 = 0;
-    rd->x948 = e->star_slot;
+    rd->respawn_is_bike = 0;
+    rd->respawn_class_slot = e->star_slot;
     rd->starting_machine_idx = (MachineKind)e->machine_kind;
 }
 
@@ -131,13 +136,14 @@ int CustomMachineCinematic_Start(int machine_kind, int ply)
     else
         return 0;
 
-    if (machine_index < 0 || ply < 0 || ply >= 5)
+    if (machine_index < 0 || ply < 0 || ply >= CUSTOM_MACHINE_PLY_NUM)
         return 0;
 
     // The cutscene stages its models on the open City Trial map and drives that
     // scene's sky and area lights, so a stadium or an Air Ride race dereferences a
-    // null jobj or trips the area-light assert.
-    if (!Gm_IsInCity())
+    // null jobj or trips the area-light assert. The title demo runs a real City
+    // Trial round, where a cutscene would take over the attract loop.
+    if (!Gm_IsInCity() || Gm_IsAutoDemo())
         return 0;
 
     // A machine's own archives are reloaded per run; the vanilla pair's are freed

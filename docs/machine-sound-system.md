@@ -28,10 +28,12 @@ Six of the thirteen are what makes a machine sound like itself: engine, surface,
 rumble, spin and the two starts all come out of the `star` bank and every star
 kind names a different one. The charge loops, the boost releases and the
 overheat are shared - seventeen of the nineteen stars name the same
-`SFX_wstar_charge*_lp` trio, and only the Wagon Star has its own
-(`SFX_rocket_charge*_lp`). Boost is the emptiest slot in vanilla: eleven stars
-name the `SFX_dash_l/m/s` trio, four fill it partly, and Slick, Jet and the two
-wing riders leave all three at -1 and release silently.
+`SFX_wstar_charge*_lp` trio, the Rocket Star has its own
+(`SFX_rocket_charge*_lp`, on a 0.10 / 0.30 split rather than 0.33 / 0.66), and
+the Wagon Star leaves all three at -1. Boost is the emptiest slot in vanilla:
+twelve stars name a full trio, three fill it partly (Hydra and Bulk each name
+one tier, Swerve two), and Slick, Wagon and the two wing riders leave all three
+at -1 and release silently.
 
 The star slots and the sample family each names:
 

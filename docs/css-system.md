@@ -60,13 +60,15 @@ CharacterKind (20 entries, `menu.h`) maps to MachineKind/VCKIND (26 entries) thr
 
 Six VCKINDs have no CharacterKind and are city-spawn or transformation only: FREE, STEER, WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE.
 
-The `CharacterDesc` table, the grid table at `0x80495800` and the linear strip at `0x804957ec` sit back to back with no slack, so a 21st CharacterKind cannot be appended in place. The `custom_machines` mod relocates all three into wider mod-owned copies by rewriting the `lis`/`addi` pair inside each of the three accessors, and writes the grid's runtime column count into `Icon_GetCKind`'s `mulli r5, r0, cols` at `0x8000b9c4` (10 in vanilla, one more column per two appended characters).
+The `CharacterDesc` table, the grid table at `0x80495800`, the linear strip at `0x804957ec` and the star class's slot-to-`CharacterKind` map at `0x80495850` sit back to back with no slack, so a 21st CharacterKind cannot be appended in place. The `custom_machines` mod relocates all four into wider mod-owned copies by rewriting the `lis`/`addi` pair inside each of the four accessors, and writes the grid's runtime column count into `SelIcon_GetCKind`'s `mulli r5, r0, cols` at `0x8000b9c4` (10 in vanilla, one more column per two appended characters).
 
 ### The packed icon list
 
 Each screen keeps the icons it is offering in its own block of `GameData`, at the same shape off a base of `0x10a` (Air Ride) or `0x1d0` (City Trial): an icon count at `+0x65` and one `CharacterKind` per icon from `+0x66`. Every access is a `+101` / `+102` displacement off that base. Air Ride's block runs `0x10a`..`0x196` (`CSS_airRide_InitSelectData` memsets 0x8d bytes) and City Trial's `0x1d0`..`0x25b` (0x8c bytes).
 
-The byte right after each 20-entry list is live: Air Ride's row-layout flag - 1 when the icons wrap to two rows, read by the input grabbers and the race/free-time updates - and City Trial's debug-grid flag. `+0x7d` is untouched on both screens and inside both memsets, so `custom_machines` relocates each flag there by rewriting the displacement of its nine (Air Ride) and six (City Trial) `lbz`/`stb` sites, freeing the 21st list slot.
+The bytes right after each 20-entry list are live, and there is no slack behind them. Air Ride carries its row-layout flag - 1 when the icons wrap to two rows, read by the input grabbers and the race/free-time updates - at `+0x7a` and its debug-grid flag at `+0x7b`, then four 4-byte per-player arrays at `+0x7c`, `+0x80`, `+0x84` and `+0x88`. City Trial carries its debug-grid flag at `+0x7a` and the same four arrays at `+0x7b`, `+0x7f`, `+0x83` and `+0x87`. `CitySelect_Think+0x98` (`0x80037b28`) walks `r22 = 0..3` reading `base[0x83 + ply]` - a per-player save-file index into a `0x110`-stride checklist table - and `base[0x87 + ply]`, a latch whose `-1` means nothing is pending; `CSS_airRide_inputGrabber+0xa10` (`0x80027940`) does the same at `+0x84` and `+0x88`.
+
+`custom_machines` widens both lists to 33 entries, `base+0x66` through `base+0x86`, and relocates the three flags past that span by rewriting the displacement of every `lbz`/`stb` that reaches them - Air Ride's row-split to `+0x87` across nine sites and its debug-grid to `+0x88` across six, City Trial's to `+0x87` across six. The widened span covers the per-player arrays above, so those arrays are cleared whenever a list is packed and each relocated flag lands on the first byte of one of them.
 
 `AirRide_PopulateSelectIcons` (0x80020a08) and the tail of `CitySelect_CreateMachineIcons` (from 0x8002f0b8) fill their list, call the layout pass, then create one icon GObj per entry. Both pack into two 10-byte stack rows first and cannot carry an 11th column, so a mod offering 21 characters has to replace them rather than widen a bound.
 
@@ -82,13 +84,13 @@ top row    x = -H + i * spacing               y = top row
 bottom row x = -H + spacing/2 + i * spacing   y = bottom row
 ```
 
-At 20 icons that is 10 + 10 at 6.445 apart, at 19 it is 10 + 9 at 6.811, and at 21 it would be 11 + 10 at 6.124. The anchors have no key past frame 20 and there is no 21st anchor to pose, so `custom_machines` replaces the two layout wrappers: up to 20 icons the engine's own pass runs untouched, and past that the same arithmetic is redone in mod code straight into the userdata, with the shared icon scale multiplied by the spacing ratio so the tiles still fit their columns. The icon that has no anchor is kept in the mod rather than in the userdata, where its `Vec3` would land on the trailing fields, and `AirRideSelect_GetIconPos` / `CitySelect_GetIconPos` are replaced to hand it out.
+At 20 icons that is 10 + 10 at 6.445 apart, at 19 it is 10 + 9 at 6.811, and at 21 it would be 11 + 10 at 6.124. The anchors have no key past frame 20 and there is no 21st anchor to pose, so `custom_machines` replaces the two layout wrappers: up to 20 icons the engine's own pass runs untouched, and past that the same arithmetic is redone in mod code straight into the userdata, with the shared icon scale multiplied by the spacing ratio so the tiles still fit their columns. Icons with no anchor are kept in the mod rather than in the userdata, where their `Vec3`s would land on the trailing fields, and `AirRideSelect_GetIconPos` / `CitySelect_GetIconPos` are replaced to hand them out.
 
 Icon index maps to joint index through a byte table read by the creator: `0x804ab048` for Air Ride and `0x804ab728` for City Trial, both `02 03 ... 15` (joint 1 is the model root).
 
 The ipos userdata is laid out the same way on both screens up to the positions and differently after them: 20 anchor `JObj` pointers at `+0x10`, one `Vec3` per icon at `+0x60`, then Air Ride's shared icon scale at `+0x150` and count at `+0x15c` against City Trial's count at `+0x150` and scale at `+0x154`.
 
-Icon GObjs go into a 20-entry array in `ScMenuCommon` (`0x80558788`): `airride_select.sicon_gobj[20]` at `+0x520` and City Trial's at `+0x80c`. Each is written by one unguarded store and read nowhere, so a 21st icon overwrites the `JOBJSet` pointer that follows (`+0x570` and `+0x85c`); `custom_machines` puts that pointer back right after the store lands.
+Icon GObjs go into a 20-entry array in `ScMenuCommon` (`0x80558788`): `airride_select.sicon_gobj[20]` at `+0x520` and City Trial's at `+0x80c`. Each is written by one unguarded store and read nowhere, so a 21st icon would overwrite the `JOBJSet` pointer that follows (`+0x570` and `+0x85c`); `custom_machines` takes the store itself over with a hook at `0x8015181c` (Air Ride) and `0x8015c2dc` (City Trial), keeping indices under 20 and dropping the rest.
 
 #### Cursor rows
 

@@ -34,7 +34,7 @@ them to match.
 
 The output exports one public:
 
-  apUiFrames  - UiFrameFile[], terminated by a zero name
+  cmUiFrames  - UiFrameFile[], terminated by a zero name
 
 whose layout must match mods/custom_machines/src/ui_frames.c. A bank names the
 donor by data-section offset: those are fixed for GKYE01, and the mod adds the
@@ -71,7 +71,7 @@ from hsd.ui_banks import (
     track_chain,
 )
 
-PUBLIC = "apUiFrames"
+PUBLIC = "cmUiFrames"
 
 BANK_SIZE = 0x34
 RAMP_SIZE = 0x10

@@ -199,6 +199,10 @@ void AP_ResolveCustomMachines(void)
     // engine's own.
     cm_api->SetAvailabilityFilter(GateMachines_FilterSelectCharacter);
     cm_api->SetSpawnWeightFilter(GateMachines_SpawnWeight);
+
+    // It owns the engine's only KO recorder call too, which is where the Destruction
+    // Derby check that counts KO'd Kirbys reads the victim from.
+    cm_api->SetDeathHandler(APCheckDetect_AddDeath);
     OSReport("[Main] custom_machines: %d machine(s), %d kinds, %d characters\n",
              cm_api->GetCount(), cm_api->GetKindCeiling(),
              cm_api->GetCharacterKindCeiling());

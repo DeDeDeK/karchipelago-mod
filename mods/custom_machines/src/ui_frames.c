@@ -1,9 +1,8 @@
-// Grows every character-indexed UI art bank so the appended characters have
-// frames. Twenty banks across eight archives are TexAnims whose animation frame
-// is the CharacterKind; each gains CUSTOM_MACHINE_MAX frames out of the
-// CmUiFrames.dat side-car, plus the quad-scale tracks that size them, every time
-// its archive loads through Gm_LoadGameFile (0x80059818). A machine's own .art
-// overrides the placeholder in its own slot.
+// Grows every character-indexed UI art bank so the appended characters have frames.
+// Twenty banks across eight archives are TexAnims whose animation frame is the
+// CharacterKind; each gains CUSTOM_MACHINE_MAX frames out of the CmUiFrames.dat
+// side-car, plus the quad-scale tracks that size them, every time its archive loads
+// through Gm_LoadGameFile (0x80059818).
 
 #include "os.h"
 #include "hsd.h"
@@ -14,7 +13,7 @@
 #include "custom_machines.h"
 
 #define UI_FRAMES_FILE   "CmUiFrames.dat"
-#define UI_FRAMES_PUBLIC "apUiFrames"
+#define UI_FRAMES_PUBLIC "cmUiFrames"
 
 // The widest bank grows 34 -> 47; the pool holds a table per bank for the run of
 // the game, because a donor is rebuilt on every scene entry.
@@ -41,7 +40,7 @@ static const u32 stc_divert_sites[] = {
 };
 #define DIVERT_METAKNIGHT_OFF 0x14
 
-// Authored by scripts/authoring/make_ui_frames.py; the layouts must match.
+// Laid out byte for byte by whatever authors the side-car.
 typedef struct UiFrameBank
 {
     u32 texanim_off;       // 0x00 data-section offset of the TexAnim
@@ -210,14 +209,14 @@ static void PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
 // preload-hit and cold-read paths are still ahead. The name is stashed rather
 // than read at the tail because the preload path reuses r25 as an allocation
 // size; the loader is synchronous, so one slot is enough.
-static void UiFrames_OnLoadBegin(char *name)
+static void OnLoadBegin(char *name)
 {
     CustomMachines_CopyStr(stc_loading, name, UI_FRAME_NAME_MAX);
 }
-CODEPATCH_HOOKCREATE(0x80059834, "mr 3,25\n\t", UiFrames_OnLoadBegin, "", 0)
+CODEPATCH_HOOKCREATE(0x80059834, "mr 3,25\n\t", OnLoadBegin, "", 0)
 
 // Where the two paths converge, r30 holding the archive each built.
-static void UiFrames_OnLoadEnd(HSD_Archive *archive)
+static void OnLoadEnd(HSD_Archive *archive)
 {
     int f;
 
@@ -243,7 +242,7 @@ static void UiFrames_OnLoadEnd(HSD_Archive *archive)
         return;
     }
 }
-CODEPATCH_HOOKCREATE(0x800599f8, "mr 3,30\n\t", UiFrames_OnLoadEnd, "", 0)
+CODEPATCH_HOOKCREATE(0x800599f8, "mr 3,30\n\t", OnLoadEnd, "", 0)
 
 // Load each registered machine's art side-car into the slot its CharacterKind
 // takes. The archives are never freed - the banks point straight into them.
@@ -275,7 +274,7 @@ static int LoadMachineArt(void)
         CustomMachineArt *art =
             (CustomMachineArt *)Archive_GetPublicAddress(arc, CUSTOM_MACHINE_ART_SYMBOL);
         if (art == NULL || art->magic != CUSTOM_MACHINE_ART_MAGIC ||
-            art->version > CUSTOM_MACHINE_ART_VERSION || art->count == 0)
+            art->version != CUSTOM_MACHINE_ART_VERSION || art->count == 0)
         {
             OSReport("[UiFrames] %s is not a machine art side-car\n", path);
             HSD_ArenaRelease(mark);
@@ -298,15 +297,14 @@ static void MoveDiverts(void)
         u32 dedede = stc_divert_sites[i];
         u32 metaknight = dedede + DIVERT_METAKNIGHT_OFF;
 
-        CODEPATCH_REPLACEINSTRUCTION(dedede, (*(u32 *)dedede & 0xFFFF0000)
-                                                 | (DIVERT_DEDEDE_FRAME + stc_appended));
-        CODEPATCH_REPLACEINSTRUCTION(metaknight, (*(u32 *)metaknight & 0xFFFF0000)
-                                                     | (DIVERT_METAKNIGHT_FRAME + stc_appended));
+        CustomMachines_SetImmediate(dedede, DIVERT_DEDEDE_FRAME + stc_appended);
+        CustomMachines_SetImmediate(metaknight, DIVERT_METAKNIGHT_FRAME + stc_appended);
     }
 }
 
 void CustomMachineUiFrames_OnBoot(void)
 {
+    void *mark = HSD_ArenaMark();
     HSD_Archive *archive = Archive_LoadFile(UI_FRAMES_FILE);
     UiFrameFile *files;
     int slots = 0;
@@ -316,6 +314,7 @@ void CustomMachineUiFrames_OnBoot(void)
     if (archive == NULL)
     {
         OSReport("[UiFrames] %s did not load, appended characters have no art\n", UI_FRAMES_FILE);
+        HSD_ArenaRelease(mark);
         return;
     }
 
@@ -323,6 +322,7 @@ void CustomMachineUiFrames_OnBoot(void)
     if (files == NULL)
     {
         OSReport("[UiFrames] %s has no %s public\n", UI_FRAMES_FILE, UI_FRAMES_PUBLIC);
+        HSD_ArenaRelease(mark);
         return;
     }
 
@@ -330,7 +330,7 @@ void CustomMachineUiFrames_OnBoot(void)
     {
         if (slots + (int)files[f].n_banks > UI_FRAME_BANK_MAX)
         {
-            OSReport("[UiFrames] more than %d banks, %s onward dropped\n",
+            OSReport("[UiFrames] More than %d banks, %s onward dropped\n",
                      UI_FRAME_BANK_MAX, files[f].name);
             break;
         }
@@ -347,8 +347,15 @@ void CustomMachineUiFrames_OnBoot(void)
     {
         OSReport("[UiFrames] %s adds no frames\n", UI_FRAMES_FILE);
         stc_files = NULL;
+        HSD_ArenaRelease(mark);
         return;
     }
+
+    // The ramps are authored keyframe data, so the side-car decides how many frames
+    // every bank grows by. A CharacterKind past that run falls off the last key.
+    if (stc_appended != CUSTOM_MACHINE_MAX)
+        OSReport("[UiFrames] %s adds %d frames, not the %d appended kinds allow\n",
+                 UI_FRAMES_FILE, stc_appended, CUSTOM_MACHINE_MAX);
 
     int art = LoadMachineArt();
     MoveDiverts();

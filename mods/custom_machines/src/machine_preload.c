@@ -1,10 +1,7 @@
-// Files this mod adds to City Trial's preload set.
-//
-// City Trial is the only scene with a preload seam here: Preload_AllCityFiles
-// ends by calling LegendaryMachine_PreloadAssemblyArchives, which queues
-// VsDragoon.dat and VsHydra.dat. Replacing that call queues the vanilla pair plus
-// everything registered, so an archive a cinematic loads synchronously mid-round
-// is already resident and never hits the disc.
+// Files this mod adds to City Trial's preload set, so an archive a cinematic loads
+// synchronously mid-round is already resident and never hits the disc.
+
+#include <string.h>
 
 #include "os.h"
 #include "preload.h"
@@ -29,14 +26,7 @@ int CustomMachinePreload_Add(const char *path)
 
     for (int i = 0; i < stc_count; i++)
     {
-        const char *a = stc_path[i];
-        const char *b = path;
-        while (*a != '\0' && *a == *b)
-        {
-            a++;
-            b++;
-        }
-        if (*a == '\0' && *b == '\0')
+        if (strcmp(stc_path[i], path) == 0)
             return 1;
     }
 
@@ -44,9 +34,9 @@ int CustomMachinePreload_Add(const char *path)
     return 1;
 }
 
-// Replaces the bl at 0x80262be8 in Preload_AllCityFiles. The arguments are the
-// ones the vanilla legendary archives are queued with, which is what a mid-round
-// synchronous load off a scene heap needs.
+// Replaces the bl LegendaryMachine_PreloadAssemblyArchives at 0x80262be8, the tail
+// of Preload_AllCityFiles (0x80262ba4). The arguments are the ones the vanilla
+// legendary archives are queued with.
 static void PreloadCityFiles(int scene)
 {
     LegendaryMachine_PreloadAssemblyArchives(scene);
@@ -59,5 +49,6 @@ static void PreloadCityFiles(int scene)
 
 void CustomMachinePreload_OnBoot(void)
 {
-    CODEPATCH_REPLACECALL(0x80262be8, PreloadCityFiles); // bl LegendaryMachine_PreloadAssemblyArchives
+    CODEPATCH_REPLACECALL(0x80262be8, PreloadCityFiles);
+    OSReport("[MachinePreload] %d file(s) queued with City Trial\n", stc_count);
 }

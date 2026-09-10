@@ -40,26 +40,12 @@ static const u32 stc_city_debuggrid_sites[] = {
     0x8002e444, 0x80038d00, 0x8003a150, 0x8003a15c, 0x8003ac3c, 0x8003ac48,
 };
 
-// Icons the widened lists and the layout below can carry, which City Trial's
-// headroom decides for both screens. The engine's cursor navigation is built for
-// two rows, so the extra icons are absorbed by tightening the rows rather than
-// adding a third.
-#define SELECT_ICON_MAX 33
+// City Trial's base arrives in a register; Air Ride's is a fixed offset.
+#define AIRRIDE_SELECT_BASE 0x10a
 
 // Anchor joints each screen's ipos model ships with, and so the icons the engine
 // can pose by itself.
 #define ANCHOR_NUM 20
-
-// Both screens keep the icons they offer in the same shape at their own base in
-// GameData: a count, then one CharacterKind per icon. City Trial's base arrives in
-// a register; Air Ride's is a fixed offset.
-#define AIRRIDE_SELECT_BASE 0x10a
-#define SELECT_COUNT        0x65
-#define SELECT_LIST         0x66
-
-// Columns per row before this mod widens the grid, and so also the count at which
-// a drawn row is full and the icons wrap to two.
-#define VANILLA_GRID_COLS 10
 
 // ipos GObj userdata: one Vec3 per icon at +0x60, then the scale every icon shares
 // and the icon count - in the opposite order on the two screens, so the scale's
@@ -91,13 +77,10 @@ static float RowSpread(int count)
 }
 
 // Redo the whole grid arithmetically, for the counts the anchor animation has no key
-// for; up to 20 the engine's own pass has already run.
-//
-// The block the rows span is measured off the strip the engine just posed rather
-// than named as a constant: Air Ride hangs its twenty anchors under a joint the
-// layout animation scales, so an authored coordinate is not the one that reaches the
-// position array, while City Trial's anchors carry that scale themselves. Past
-// twenty the animation holds its twenty-icon pose.
+// for; up to 20 the engine's own pass has already run. The block the rows span is
+// measured off the strip the engine just posed, because Air Ride hangs its anchors
+// under a joint the layout animation scales; past twenty that animation holds its
+// twenty-icon pose, so the strip always arrives in that layout.
 static void Relayout(IconLayout *lay, int count, GOBJ *ipos)
 {
     Vec3 *pos;
@@ -179,28 +162,12 @@ static void CityGetIconPos(s8 index, Vec3 *out)
 // Each screen's array of icon GObjs holds 20 pointers and its writer indexes it
 // unguarded, so an icon past the strip walks into the scene-model pointers that
 // follow it. Both writers end in the same `extsb`/`slwi`/`add`/`stw` before the
-// epilogue, so the store is taken over here and appended indices go to storage of
-// our own. Nothing reads either array.
-static GOBJ *stc_extra_icon[2][SELECT_ICON_MAX - ANCHOR_NUM];
-
-static void StoreIcon(int screen, int index, GOBJ *gobj, u8 *table_base)
+// epilogue, so the store is taken over here and an appended index is dropped.
+// Nothing reads either array.
+static void StoreIcon(int index, GOBJ *gobj, u8 *table_base)
 {
-    if (index < 0 || index >= SELECT_ICON_MAX)
-        return;
-    if (index < ANCHOR_NUM)
+    if (index >= 0 && index < ANCHOR_NUM)
         ((GOBJ **)(table_base + 4))[index] = gobj;
-    else
-        stc_extra_icon[screen][index - ANCHOR_NUM] = gobj;
-}
-
-static void StoreAirRideIcon(int index, GOBJ *gobj, u8 *table_base)
-{
-    StoreIcon(0, index, gobj, table_base);
-}
-
-static void StoreCityIcon(int index, GOBJ *gobj, u8 *table_base)
-{
-    StoreIcon(1, index, gobj, table_base);
 }
 
 // r28 is the icon index, r30 the GObj, r31 the array's base less four. Exiting past
@@ -209,7 +176,7 @@ CODEPATCH_HOOKCREATE(0x8015181c,
     "extsb 3, 28\n\t"
     "mr 4, 30\n\t"
     "mr 5, 31\n\t",
-    StoreAirRideIcon,
+    StoreIcon,
     "",
     0x8015182c
 )
@@ -218,7 +185,7 @@ CODEPATCH_HOOKCREATE(0x8015c2dc,
     "extsb 3, 28\n\t"
     "mr 4, 30\n\t"
     "mr 5, 31\n\t",
-    StoreCityIcon,
+    StoreIcon,
     "",
     0x8015c2ec
 )
@@ -400,7 +367,7 @@ void CustomMachineSelect_SetAirRideRowSplit(void *select_base, int two_rows)
 static void MoveFlag(const u32 *sites, int num, u32 offset)
 {
     for (int i = 0; i < num; i++)
-        CODEPATCH_REPLACEINSTRUCTION(sites[i], (*(u32 *)sites[i] & 0xFFFF0000) | offset);
+        CustomMachines_SetImmediate(sites[i], offset);
 }
 
 #define MOVE_FLAG(sites, off) MoveFlag(sites, sizeof(sites) / sizeof(u32), off)
@@ -413,9 +380,9 @@ void CustomMachineSelect_OnBoot(void)
 
     // AirRide_CheckCharacterAvailable switches on a 20-entry jump table and reaches
     // the checklist query with an uninitialised reward index for anything past it.
-    // Send appended characters to the `return 1` arm instead; a gating mod replaces
-    // the whole function and never runs this.
-    CODEPATCH_REPLACEINSTRUCTION(0x80020924, (*(u32 *)0x80020924 & 0xFFFF0000) | 0x24);
+    // Retarget its out-of-range branch to the `return 1` arm at 0x80020948; a gating
+    // mod replaces the whole function and never runs this.
+    CustomMachines_SetImmediate(0x80020924, 0x24); // bgt 0x80020948
 
     CODEPATCH_REPLACEFUNC(AirRideSelect_LayoutIcons, AirRideLayoutIcons);
     CODEPATCH_REPLACEFUNC(AirRideSelect_GetIconPos, AirRideGetIconPos);

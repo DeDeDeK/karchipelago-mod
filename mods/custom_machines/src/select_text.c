@@ -1,9 +1,8 @@
 // Machine name and description text on both select screens. Each screen turns a
-// CharacterKind into a pair of SIS text indices through two 20-entry tables with
-// no spare entry, so all four are relocated widened and each appended character
-// gets a name and a description entry composed here and appended to the loaded SIS
-// pointer array. A machine with no description still gets one, empty: the screen
-// draws neither text unless both indices are valid.
+// CharacterKind into a pair of SIS text indices through two 20-entry tables with no
+// spare entry, so all four are relocated widened and each appended character gets a
+// name and a description entry composed here. A machine with no description still
+// gets one, empty: the screen draws neither text unless both indices are valid.
 
 #include "os.h"
 #include "hsd.h"
@@ -112,7 +111,7 @@ static void ComposeDescription(u8 *buf, const char *description)
 // Re-point SIS slot 0 at a copy of the archive's pointer array with the appended
 // entries after it. The array lives in the scene's heap, so this runs on every
 // load of either screen's SIS file.
-static void CustomMachineText_ExtendSis(void)
+static void ExtendSis(void)
 {
     void **loaded = (void **)stc_sis_data[0];
 
@@ -129,14 +128,14 @@ static void CustomMachineText_ExtendSis(void)
 // Text_LoadSisFile that fills the slot.
 CODEPATCH_HOOKCREATE(0x8013baf0,
     "",
-    CustomMachineText_ExtendSis,
+    ExtendSis,
     "",
     0
 )
 
 CODEPATCH_HOOKCREATE(0x8013c4cc,
     "",
-    CustomMachineText_ExtendSis,
+    ExtendSis,
     "",
     0
 )
