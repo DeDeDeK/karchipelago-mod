@@ -45,9 +45,6 @@ static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
 #define REWARD_COUNT_CITYTRIAL 44
 #define REWARD_COUNT_MAX       REWARD_COUNT_AIRRIDE
 
-// Checkboxes per mode (clear_kind 0..119).
-#define CLEAR_KIND_NUM 120
-
 // GMMODE_NUM (3) stays "the three real game modes" and sizes the reward tables.
 // Per-checklist-mode recorded state is one row wider (CHECKLIST_MODE_NUM), with the
 // AP tab at the fixed row AP_CHECKLIST_ROW.

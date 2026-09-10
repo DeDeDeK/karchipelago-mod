@@ -108,11 +108,9 @@ static const CustomCheck ap_checks[] = {
 // any progression item fill places on it.
 _Static_assert(AP_CHECK_NUM == APCK_NUM, "ap_checks[] must cover every APCheckKind");
 
-// Already recorded as sent this save? Out-of-range cells report "done".
+// Already recorded as sent this save? The framework range-checks clear_kind first.
 static int APChecklist_IsRecorded(int clear_kind)
 {
-    if (clear_kind < 0 || clear_kind >= CLEAR_KIND_NUM)
-        return 1;
     return (ap_save->sent_checks[AP_CHECKLIST_ROW][clear_kind >> 6] >> (clear_kind & 63)) & 1ULL;
 }
 

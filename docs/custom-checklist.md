@@ -12,7 +12,7 @@ The framework owns the **presentation + per-frame evaluation**; a registering mo
 the **objectives** (a static check table) and optionally **where a completion is
 recorded** (persistence callbacks). With nothing registered the installed REPLACEFUNCs
 reproduce vanilla behavior, so a build with no consumer is inert. The archipelago mod is
-the first consumer (`mods/archipelago/src/ap_checklist.c`).
+the consumer (`mods/archipelago/src/ap_checklist.c`).
 
 An extra tab is cheap because the in-game checklist is **one shared, mode-parameterized
 screen**, not three separate ones, and it **already cycles through the three modes with
@@ -32,23 +32,37 @@ everything renders for free once the synthetic mode is plumbed through.
 
 ## Engine Levers (mode-keyed surfaces)
 
-The framework installs these REPLACEFUNCs at boot. They reproduce vanilla for the real
-modes and handle the synthetic ones; with no tab registered they are behaviour-neutral.
+The framework installs these patches at boot. They reproduce vanilla for the real modes
+and handle the synthetic ones; with no tab registered they are behavior-neutral. All are
+`CODEPATCH_REPLACEFUNC` except the last, which is a `CODEPATCH_REPLACECALL`.
 
 | Function | Address | Custom-mode behavior |
 |---|---|---|
 | `gmGetClearcheckerTypeP` | `0x800076a0` | serve the registered tab's `GameClearData` for its mode; NULL for unknown modes (no assert) |
-| `Checklist_GetRewardNum` | `0x80049c20` | `0` (custom tabs host no native rewards) - gates every reward loop in the render path off and dodges the `mode>=3` assert. Real modes keep the vanilla counts (AR 46 / TR 33 / CT 44), restated as constants |
+| `Checklist_GetRewardNum` | `0x80049c20` | `0` (custom tabs host no native rewards) - gates every reward loop in the render path off and dodges the `mode>=3` assert. Also `0` for `CITYTRIAL` while a tab build is active, since the build runs under that mode and `Checklist_SetRewardFlagOnUnlocks` would otherwise walk City Trial's reward table onto the tab's cells. Real modes read the vanilla count table `stc_clear_num` (`0x805d51d0`, AR 46 / TR 33 / CT 44) rather than restating it |
 | `Checklist_GetClearKindFromRewardIndex` | `0x80049c84` | `0` (no rewards) - keeps `Checklist_ProcessUnlock`'s first new-unlock scan inert so the cell flip-animation can run, and dodges the assert |
 | `Checklist_MinorThink` | `0x8004a648` | reimplements the tab cycle with custom tabs folded into the ring |
 | `ClearChecker_CheckForNewUnlocks` | `0x8004a1a4` | vanilla result OR any custom tab pending - routes the post-run checklist even when only a custom check went new |
 | `Scene_SetNextMinor` | `0x800088c8` | post-run retarget to a custom tab when the played mode has nothing to animate |
+| `ClearChecker_GetRewardFromClearKind` call site in `Checklist_Think` | `0x801804dc` | `*out_reward_index = 0xFF` for custom tabs; real modes fall through to the untouched function |
 
-Because `Checklist_GetRewardNum` reports 0 for the custom mode, the per-mode reward tables
-(`stc_reward_table_ptrs`, the reward counts, the audio-preview and special-reward tables)
-are never indexed at the custom mode, so no table relocation is needed.
+Because `Checklist_GetRewardNum` reports 0 for the custom mode, every reward loop bounded by
+it leaves `stc_reward_table_ptrs` unindexed at that mode, so no table relocation is needed.
 `Checklist_InitGridMapping` and `Checklist_UpdateCellInfo` are already mode-safe (they key
 off the `GameClearData*` and cell geometry).
+
+**One mode-keyed surface is not covered by that count.** `ClearChecker_GetRewardFromClearKind`
+(`0x80049ec4`) - the audio/ending preview lookup, reached when A is pressed on a cell that is
+`is_unlocked` or `is_filler` - bounds the mode itself and indexes `stc_clear_num[mode]` and
+`stc_reward_table_ptrs[mode]` directly, without consulting `Checklist_GetRewardNum`, so a
+completed cell on a custom tab would `OSReport` `error Clearchecker Type %d` and `__assert`
+inside it. The framework covers it at the **call site** instead of the entry: a
+`CODEPATCH_REPLACECALL` at `0x801804dc` in `Checklist_Think` routes the call through
+`CC_GetRewardFromClearKind`, which answers `0xFF` for a custom mode and otherwise calls the
+real function unchanged. The entry is left free deliberately - a consumer that shuffles
+rewards replaces it for its own table (archipelago does), and two mods must never patch one
+function entry. Because `_CodePatch_ReplaceFunc` branches from the entry, the framework's
+pass-through lands in that replacement when one is installed.
 
 ## Registration
 
@@ -56,8 +70,8 @@ A consumer imports the API via `Hoshi_ImportMod(CUSTOM_CHECKLIST_MOD_NAME, ...)`
 `Register(desc)`. Because the framework mod boots after most others (alphabetical order),
 import + register run from **`OnSaveLoaded`**, not `OnBoot`. `Register` returns the
 assigned mode (`GMMODE_NUM` for the first registrant, then `+1` each) or `-1` on failure.
-The API's other entry, `RevealAll(mode)`, opens every cell of a registered tab that has a
-check behind it (below).
+The API's `RevealAll(mode)` entry opens every cell of a registered tab that has a check
+behind it (below), and `GetBuildMode()` reports which tab a build is running for (below).
 
 `CustomChecklistDesc` in `custom_checklist_api.h` is the authoring contract: a name, a
 theme RGB, an optional `tex_file`/`banner_symbol`/`emblem_symbol` art triple, the static
@@ -84,7 +98,7 @@ up. A mod owning persistence may instead notify inside `record_complete` (the ar
 tab does); then `on_complete` is left NULL.
 
 A `CustomCheck` is `{ clear_kind, label, is_complete }`. `clear_kind` is the grid cell
-index (`0..CC_CLEAR_KIND_NUM-1`, the 12x10 = 120-cell board); a tab may define any subset,
+index (`0..CLEAR_KIND_NUM-1`, the 12x10 = 120-cell board); a tab may define any subset,
 the rest render blank. `is_complete` is handed its own row's `clear_kind`, so a tab whose
 cells all resolve through one lookup points every row at the same function instead of
 generating a predicate per cell.
@@ -105,6 +119,11 @@ reachable through the tab cycle. The shared `cb_Load` resolves which tab it is f
   when one of its checks is freshly completed.
 - Flips the UI mode (`ClearCheckerUI.mode`) to the tab's synthetic mode, so the per-frame
   think/update path also reads the tab's block.
+- Exposes the tab's mode through `GetBuildMode()` for the duration of the build. While the
+  build runs, `ClearCheckerUI.mode` still reads `CITYTRIAL` even though
+  `gmGetClearcheckerTypeP` is already serving the tab's block, so a consumer hook keyed off
+  the UI mode has to remap through `GetBuildMode()` or it will apply City Trial's reward
+  rows to the custom tab's board.
 - Repoints SIS slot 0 and loads the tab art (below).
 
 The tab's `GameClearData` carries a **full `grid_mapping` permutation** over all 120 cells,
@@ -119,8 +138,9 @@ available.
 
 The checklist shows the selected cell's objective text via `stc_sis_data[0][clear_kind + 4]`.
 `Checklist_Init` loads City Trial's `SisClrChkCT` into slot 0; after the build the framework
-repoints slot 0 at its own pointer array (CT's header entries 0..3 kept, the rest blank, each
-check's label composed in and slotted at `clear_kind + 4`). Only one custom tab is on screen
+repoints slot 0 at its own pointer array (CT's header entries 0..3 kept, every other slot
+pointed at one shared bare-terminator entry, each check's label composed in and slotted at
+`clear_kind + 4`). Only one custom tab is on screen
 at a time, so a single shared buffer set is recomposed per build. The CT tab reloads slot 0
 from the archive on its own `cb_Load`, so its labels stay intact.
 
@@ -161,6 +181,11 @@ material **diffuse** values (`ScMenuCommon.clearchecker.bg_gobj` and the
 the recolor runs each frame from `OnFrameEnd` (after that pass), not once at load. It is a
 no-op unless a custom tab is the current scene.
 
+Both the recolor and the banner swap run over one traversal (`CC_WalkGObj`), which visits the
+GObj's root JOBJ and its child subtree but not the root's siblings, which belong to other
+scenes. Siblings *within* the subtree are a flat list and are iterated, not recursed, so only
+descent is charged against the depth cap.
+
 A descriptor supplies a target RGB (`theme_r/g/b`). For each green-dominant diffuse the
 framework preserves the material's brightness range `[min, green]` and redistributes it onto
 the theme hue: `out[c] = min + (green - min) * theme[c] / max(theme)`. The **green-dominant
@@ -178,9 +203,9 @@ names a loadable HSD archive staged to the FST root that exports two `_HSD_Image
 - the **banner** - RGB5A3 248x128 panel that backs the checkbox grid (the scrolling quad on
   `ScMenuCommon.clearchecker.frame_gobj`, found by its unique 248 width); and
 - the **emblem** - the tab-indicator silhouette (a quad inside the background scene). The
-  *vanilla* TObj to replace is identified by its unique **40x40 I4** signature; the
+  *vanilla* TObj to replace is identified by its unique **40-wide I4** signature; the
   replacement descriptor's own dimensions are unconstrained, since after the swap the walk
-  recognises it by pointer identity. It rides the recolor walk and takes the theme tint.
+  recognizes it by pointer identity. It rides the recolor walk and takes the theme tint.
 
 The archive is loaded **per tab build** into the **reclaimable per-scene heap**
 (`Gm_LoadGameFile`, after `Checklist_Init` so the build can't reset the heap under the load),
@@ -252,7 +277,7 @@ bits are RAM-only and come up blank each boot, so a consumer whose option persis
 ### Recorded state: framework-managed by default
 
 A tab that leaves `is_recorded`/`record_complete` NULL delegates its recorded state to the
-framework. `custom_checklist` carries its own hoshi save (`CCSave`): a per-tab
+framework. `custom_checklist` carries its own hoshi save (`CCSave`): a `u32` stamp, a per-tab
 completed-`clear_kind` bitmask (2 x `u64`), in slots **keyed by the FNV-1a hash of the tab's
 `name`** (not its registry index, so saved bits survive mods being added/removed or
 reordered). On completion the framework sets the bit; on query it reads it back; the slot is
@@ -260,6 +285,17 @@ resolved (and lazily claimed) on first access, after the save loads. There are a
 as tabs, so there is always room, and an unresolved slot reports not-recorded so the check
 simply re-evaluates next frame. A typical tab is fully persistent with **zero persistence
 code**.
+
+`CCSave` carries its own version word (`stamp`, `CC_SAVE_STAMP`) as its **first** member, and
+`OnSaveLoaded` re-initializes the block when it does not match. That is the only protection
+the block has: hoshi matches a card block to a mod by the hash of the mod's name plus the
+total size it asks for, and re-allocates only when that size changes - it never consults
+`ModDesc.version`, whose `major` it uses solely for the `Hoshi_ImportMod` compatibility gate
+and the replay-determinism backup. So a `CCSave` layout change that happens to keep the same
+size would otherwise be read as data, and a change that grows it would shift `layout_seed`
+into bytes the resize path leaves holding the neighbouring mod's contents. Bumping the stamp
+is what fails that closed. `mod_desc.save_ptr` is also NULL when hoshi's save pool has no
+room, so every reader - `OnSaveInit` included - checks it.
 
 The framework never calls `Hoshi_WriteSave` itself. That call mounts the card and rewrites the
 whole `"hoshi"` file synchronously, stalling the frame, and checks complete mid-run - so
@@ -280,7 +316,7 @@ remains mod-specific; everything else is identical for every tab.
 Vanilla scatters a tab's cells with `Checklist_InitGridMapping` and persists the resulting
 `grid_mapping` inside `GameClearData`. A custom tab's clear storage is BSS, so `CCSave`
 instead holds a single 4-byte `layout_seed` (minted from `OSGetTime` and avalanched, once per
-save file) and each tab regenerates its own permutation from it: `seed ^ name_hash` drives a
+save file) and each tab regenerates its own permutation from it: `seed ^ name_hash`, hash-mixed, seeds a
 private xorshift32 Fisher-Yates over `0..119`. Per-tab streams mean tabs don't share a layout
 and adding or removing one doesn't reshuffle the others; the private PRNG - rather than
 `HSD_Randi`, whose one global state every other caller advances by an unknowable amount - is
@@ -322,14 +358,28 @@ own to animate. The post-run session is flagged (`g_postrun`) so the exit chokep
 through any remaining pending custom tabs, and is cleared on exit and on leaving for an ending
 movie - confining the chain to runs.
 
+The retarget is restricted to the transition *into* the checklist: `CODEPATCH_REPLACEFUNC`
+branches from the patched function's entry, so `Checklist_MinorThink`'s own
+`Scene_SetNextMinor` calls re-enter the replacement too. A post-run checklist session runs
+under the played mode's major, not `MJRKIND_MENU`, so without the extra guard an L/R step
+onto a vanilla tab would satisfy the retarget condition and be bounced straight back to the
+pending custom tab - the player could never reach the Air Ride, Top Ride or City Trial tabs
+while a custom check was still unviewed. The guard is therefore "the current minor is not
+itself a checklist tab", which only the engine's `*_MinorExit` callers satisfy.
+
+`ClearChecker_CheckForNewUnlocks` honours vanilla's cache-valid short-circuit for the custom
+tabs as well as the real ones: when the unlock cache is valid the engine considers unlocks
+already presented, and answering otherwise would route every mode exit into the checklist
+over a custom cell the player never visits.
+
 ## Files
 
 - `mods/custom_checklist/include/custom_checklist_api.h` - the public API: the
   `CustomChecklistDesc` / `CustomCheck` authoring contract and the `CustomChecklistAPI`
-  (`Register`, `RevealAll`).
+  (`Register`, `RevealAll`, `GetBuildMode`).
 - `mods/custom_checklist/src/custom_checklist.c` - the registry, `CCSave`, the minor-scene
   install + shared `cb_Load`, the six REPLACEFUNCs, the per-frame evaluator, the grid shuffle
-  and neighbour reveal, the SIS slot-0 override, the target-color recolor, and the
-  banner/emblem texture swap.
+  and neighbour reveal, the SIS slot-0 override, and the JOBJ walk that carries the
+  target-color recolor and the banner/emblem texture swap.
 - `Makefile` - `mods/custom_checklist/include` added to `INCLUDES` (public header consumed by
   the archipelago mod).

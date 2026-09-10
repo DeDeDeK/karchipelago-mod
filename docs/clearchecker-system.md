@@ -49,11 +49,11 @@ unlock animation has played), `has_reward` (0x08, set by
 | `0x80049c20` | `Checklist_GetRewardNum(mode)` | Returns reward count for a mode (AR 46 / TR 33 / CT 44) |
 | `0x80049c84` | `Checklist_GetClearKindFromRewardIndex(mode, idx)` | Returns `clear_kind` for a reward_index |
 | `0x80049e24` | `ClearChecker_CheckUnlocked(mode, idx)` | "Is this reward unlocked?" - vanilla checks the `has_reward` bit for the reward's clear_kind. The whole game asks this, from the checklist UI to the sound test and the rules menus. Replaced by the mod |
-| `0x80049ec4` | `ClearChecker_GetRewardFromClearKind(mode, ck, &idx, &param)` | Reverse lookup: clear_kind -> reward_index + reward_param. Sole caller is the audio/ending preview path in `Checklist_Think` (`0x801804dc`). Replaced by the mod |
+| `0x80049ec4` | `ClearChecker_GetRewardFromClearKind(mode, ck, &idx, &param)` | Reverse lookup: clear_kind -> reward_index + reward_param. Sole caller is the audio/ending preview path in `Checklist_Think` (`0x801804dc`). Bounds the mode itself, so custom checklist tabs assert in it; the entry is replaced by archipelago and the call site is replaced by custom_checklist |
 | `0x80049fcc` | `ClearChecker_SetNewUnlockSilent(mode, ck)` | Sets `is_new` with no SFX; the Top Ride evaluators' funnel |
 | `0x8004a054` | `ClearChecker_SetNewUnlock(mode, ck)` | Sets `is_new` + unlock SFX; the main gameplay funnel |
 | `0x8004a1a4` | `ClearChecker_CheckForNewUnlocks(mode)` | Scans a mode for `is_new && !is_unlocked` |
-| `0x8004a2bc` | `Checklist_InitGridMapping(mode)` | Fills `grid_mapping[120]` - meta cells pre-placed, remainder randomized with `HSD_Randi` |
+| `0x8004a2bc` | `Checklist_InitGridMapping(mode)` | Fills `grid_mapping[CLEAR_KIND_NUM]` - meta cells pre-placed, remainder randomized with `HSD_Randi` |
 | `0x80049d10` | Reward type lookup (unnamed) | Returns `stc_reward_table_ptrs[mode][reward_index].reward_type`. Called from the icon display function at `0x80182178` |
 | `0x80180508` | Audio preview scan | Inside `Checklist_Think`. Scans `stc_audio_preview_tables[current_mode]` for `reward_index`, calls `BGM_Play`, persists song to `MainMenuData.soundtest_bgm_kind` (`GameData+0x4e`). **Hooked** to redirect to the source mode's table for cross-mode music rewards |
 | `0x8017df5c` | `Checklist_SetRewardFlagOnUnlocks()` | Sets `has_reward` on unlocked slots, rebuilds the grid, manages filler counters |
