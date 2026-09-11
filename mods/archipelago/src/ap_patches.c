@@ -10,6 +10,7 @@
 #include "inline.h"
 #include "code_patch/code_patch.h"
 #include "hoshi/mod.h"
+#include "hoshi/func.h"
 
 #include "custom_items_api.h"
 
@@ -558,6 +559,17 @@ void ApPatches_DebugSetCount(int count)
 int ApPatches_DebugClaim(void)
 {
     return Claim();
+}
+
+// The client's backfill is ORed straight back into both arrays on its next push, so
+// a clear that left it alone would be undone and the patch stay unclaimable.
+void ApPatches_DebugClearCollected(void)
+{
+    ApPatches_ResetAll();
+    for (int w = 0; w < AP_PATCH_WORDS; w++)
+        ap_data->ap_patch_backfill[w] = 0;
+    Hoshi_WriteSave();
+    OSReport("[APPatches] Debug: cleared every collected bit\n");
 }
 
 int ApPatches_DebugSpawnBox(int ply)

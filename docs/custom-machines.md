@@ -347,7 +347,7 @@ That header documents every call. The ones carrying a design decision rather tha
 
 The API is exported even when the FST folder holds no machine at all, because this mod owns the select screens' packing either way and a consumer still needs the filter.
 
-Three mods import it. `ap_star` owns the Archipelago Star's own behavior and resolves the machine by name to reach it. `archipelago` requires it: the unlock mask and every ceiling it reads come from here, and its gating is three filters - the select-screen availability filter, the spawn weight filter, and the legendary hand-out, which goes through `StartAssembly` rather than driving the cutscene itself. `archipelago_debug` grows its Machines page and its random-give pool by the registered kinds, so a drop-in machine can be locked, unlocked and handed out from the debug menu like any vanilla one.
+Three mods import it. `ap_star` owns the Archipelago Star's own behavior and resolves the machine by name to reach it. `archipelago` requires it: the unlock mask and every ceiling it reads come from here, and its gating is three filters - the select-screen availability filter, the spawn weight filter, and the legendary hand-out, which goes through `StartAssembly` rather than driving the cutscene itself. `archipelago_debug` grows its Machines page and its D-Pad Right random-give pool by the registered kinds, so a drop-in machine can be locked, unlocked and handed out like any vanilla one. The page adds a row per custom kind only up to bit 31 of the 32-bit unlock mask, which leaves room for six; the registry's own cap is higher, and kinds past the mask are permanently available rather than gateable.
 
 ## The Archipelago Star
 

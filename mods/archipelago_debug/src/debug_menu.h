@@ -14,11 +14,19 @@ void DebugMenu_BindCustomMachines(const CustomMachinesAPI *api);
 
 extern OptionDesc DebugMod_RootOption;
 
-// Pull every gate mask into the local toggle state arrays; the reverse of the
-// menu's on_change writeback. Call after masks change outside the menu.
-void DebugMenu_RefreshStateFromMasks(void);
+// Pull every gate mask, slot option and progress counter into the local row state;
+// the reverse of the menu's on_change writeback. Call after any of them changes
+// outside the menu, and before boot replays every on_change.
+void DebugMenu_RefreshState(void);
 
-// Nonzero if the "Auto-Grant on Z Unlock" toggle is enabled.
+// Player slot the pad bindings that drop an item act on, 0-3.
+int DebugMenu_TargetPlayer(void);
+
 int DebugMenu_ShouldAutoGrantOnUnlock(void);
+
+// Queue one item at random: any AP unlock or persistent progression item, or one
+// appropriate to the major mode a round is running under.
+void DebugMenu_GiveRandomUnlock(void);
+void DebugMenu_GiveRandomModeItem(MajorKind major);
 
 #endif // ARCHIPELAGO_DEBUG_MENU_H

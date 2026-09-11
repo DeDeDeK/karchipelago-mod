@@ -95,6 +95,11 @@ int APCheckDetect_IsSet(int ck);
 // Latch an objective, here or elsewhere in the mod. Idempotent.
 void APCheckDetect_Observe(int ck);
 
+// The cross-session progress counters, and a debug override of one. Setting a
+// counter to one below its target lets the next real event complete the check.
+int APCheckDetect_GetProgress(APCheckProgressKind which);
+void APCheckDetect_DebugSetProgress(APCheckProgressKind which, int value);
+
 // Handed to custom_machines' KO seam once the registry resolves. Counts the Kirbys
 // a human King Dedede has KO'd in Destruction Derby.
 void APCheckDetect_AddDeath(int victim, struct DmgLog *dmg_log, int machine_kind);

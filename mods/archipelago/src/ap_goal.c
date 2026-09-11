@@ -56,6 +56,10 @@ static int GoalSatisfied(APGoalKind goal, int row, int count, int n)
     {
         u64 *gc = ap_save->options.goal_checks[row];
         u64 *sc = ap_save->sent_checks[row];
+        // An empty list is a row that was never given a list, not one already met.
+        // A subset test against zero is vacuously true and would hand out victory.
+        if (!gc[0] && !gc[1])
+            return 0;
         return ((sc[0] & gc[0]) == gc[0]) && ((sc[1] & gc[1]) == gc[1]);
     }
     case GOAL_MAX_STATS_CT:
@@ -253,6 +257,37 @@ void APGoal_Reset(void)
     ap_data->goal_complete = 0;
     ap_data->goal_satisfied_mask = 0;
     ap_save->max_stats_ct_achieved = 0;
+}
+
+int APGoal_Get(int row, int *out_amount)
+{
+    if (row < 0 || row >= CHECKLIST_MODE_NUM)
+        return GOAL_NONE;
+    if (out_amount)
+        *out_amount = (int)ap_save->options.checklist_amount[row];
+    return (int)ap_save->options.goal[row];
+}
+
+// Goals the seed did not ship, for testing the predicates without re-rolling one.
+// All four rows at once, because evaluation is over the whole set: a half-applied set
+// can satisfy every row and hand out a victory the caller never asked for. `amount`
+// reaches only the rows actually on the count goal, so the others keep their own.
+// GOAL_MAX_STATS_CT is the exception to taking effect here: its rider proc is armed at
+// round load against this same option, so it starts watching from the next round.
+void APGoal_DebugSetGoals(const int *goals, int amount)
+{
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+    {
+        int goal = goals[r];
+        if (goal < 0 || goal > GOAL_NONE)
+            continue;
+        ap_save->options.goal[r] = (u32)goal;
+        if (goal == GOAL_N_CHECKLIST && amount > 0)
+            ap_save->options.checklist_amount[r] = (u32)amount;
+    }
+
+    APGoal_Evaluate();
+    Hoshi_WriteSave();
 }
 
 void APGoal_DebugComplete(void)

@@ -12,7 +12,14 @@ void APGoal_Evaluate(void);
 // Clear goal_complete, the per-row announce flags and the published satisfied mask.
 void APGoal_Reset(void);
 
-// Debug menu helper.
+// The goal set for a checklist-mode row, and the square count its count form needs.
+// out_amount may be null.
+int APGoal_Get(int row, int *out_amount);
+
+// Debug menu helpers. DebugSetGoals overrides all CHECKLIST_MODE_NUM slot options at
+// once and re-evaluates; `amount` is the square count the count goal needs and reaches
+// only the rows set to it.
+void APGoal_DebugSetGoals(const int *goals, int amount);
 void APGoal_DebugComplete(void);
 
 #endif // ARCHIPELAGO_AP_GOAL_H

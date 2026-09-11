@@ -91,7 +91,7 @@ So the filter zeroes the weight column of every category for entries whose enemy
 
 ## Mode Coverage
 
-The acquisition hooks are not mode-specific - they gate acquisition everywhere `RiderData` exists, so `GateAbilities_CheckAndGiveAbility` also covers Air Ride (callers: `Machine_OnTouchItem` and the debug menu) and `GateAbilities_RandomGiveAbility` covers Air Ride's static-stage copy wheels.
+The acquisition hooks are not mode-specific - they gate acquisition everywhere `RiderData` exists, so `GateAbilities_CheckAndGiveAbility` also covers Air Ride (its caller is `Machine_OnTouchItem`) and `GateAbilities_RandomGiveAbility` covers Air Ride's static-stage copy wheels.
 
 Top Ride has no copy abilities at all. Its scene creates neither `MachineData` nor `RiderData`, so `Rider_GiveAbility`, `Rider_GiveRandomAbility` and `randomAbility_giveAbility` are unreachable there, and it loads no 3D stage collision, so the attribute 0xF panels do not exist either. Every acquisition hook is a no-op in Top Ride.
 

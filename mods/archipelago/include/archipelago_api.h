@@ -5,7 +5,7 @@
 
 // Bump major on breaking changes, minor on additions.
 #define ARCHIPELAGO_API_MAJOR 4
-#define ARCHIPELAGO_API_MINOR 0
+#define ARCHIPELAGO_API_MINOR 1
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
@@ -636,6 +636,50 @@ typedef enum APStarPiece
     AP_STAR_PIECE_NUM,
 } APStarPiece;
 
+// Absolute clamp ceiling for per-stat patch totals, and so for the City Trial patch
+// cap range. Patch_GetMaxValue returns through extsb, so anything above 127
+// sign-extends negative.
+#define PATCH_STAT_MAX 127
+
+// What a client text message is about. Each kind has its own Settings menu toggle;
+// the mod filters on render and the client reads the toggle mask so it can skip
+// composing at all.
+typedef enum APTextKind
+{
+    APTEXT_KIND_CHECK = 0, // a location this slot completed was sent
+    APTEXT_KIND_ITEM,      // an item arrived for this slot
+    APTEXT_KIND_HINT,      // a server hint concerning this slot
+    APTEXT_KIND_STATUS,    // goal / release / collect, and client connect state
+    APTEXT_KIND_CHAT,      // player and server chat
+    APTEXT_KIND_LINK,      // DeathLink / TrapLink traffic, in both directions
+    APTEXT_KIND_NUM,
+} APTextKind;
+
+// What a checklist-mode row's goal is, one per row of APSlotOptions.goal. The AP
+// world orders them the same way and ships GOAL_NONE last.
+typedef enum APGoalKind
+{
+    GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
+    GOAL_N_CHECKLIST,           // Complete N checklist squares
+    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
+    GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
+    GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
+    GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
+    GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
+    GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
+    GOAL_NONE,                  // No goal for this mode - always last, the AP world orders it last too
+} APGoalKind;
+
+// The AP checklist objectives whose predicate counts across sessions, so their
+// progress lives in the save rather than in a per-round observation.
+typedef enum APCheckProgressKind
+{
+    AP_PROGRESS_ALLUP_TOTAL,  // All Ups a human collected in City Trial; 5 completes the check
+    AP_PROGRESS_PURPLE_SR1,   // SINGLE RACE 1 wins taken as Purple Kirby; 3 completes it
+    AP_PROGRESS_RACE_COLORS,  // Bit N = an Air Ride race finished as KirbyColor N; 0xFF completes it
+    AP_PROGRESS_NUM,
+} APCheckProgressKind;
+
 // Public function-table API. Importer obtains a pointer via
 // `Hoshi_ImportMod(ARCHIPELAGO_MOD_NAME, ARCHIPELAGO_API_MAJOR, ARCHIPELAGO_API_MINOR)`.
 typedef struct ArchipelagoAPI
@@ -719,6 +763,72 @@ typedef struct ArchipelagoAPI
     // takes effect at the next round load.
     int (*GetApPatchCount)(void);
     void (*DebugSetApPatchCount)(int count);
+
+    // Clear every collected AP Patch bit, in the save and in the wire mirror, and
+    // drop the client's pending backfill so it cannot restore them. The lowest
+    // patch becomes claimable again without a round reload.
+    void (*DebugClearApPatchCollected)(void);
+
+    // Simulate the client's TrapLink side-channel write. Which trap lands is chosen
+    // by the mode that receives it, not by the caller. The per-frame receive proc
+    // only exists while the Trap Link setting was on as the scene loaded.
+    void (*DebugTriggerTraplinkReceive)(void);
+
+    // Post a canned client-authored text line of the given APTextKind, or one that
+    // fills all 8 colored runs and overflows the three rendered lines. Both return
+    // 0 if an earlier message is still waiting on the textbox.
+    int (*DebugSendText)(int kind);
+    int (*DebugSendOverlongText)(void);
+
+    // The goal for one checklist-mode row, and a debug override of it. `amount` is
+    // the square count GOAL_N_CHECKLIST needs and is ignored by every other kind;
+    // out_amount may be null. Setting a goal re-evaluates immediately, but
+    // GOAL_MAX_STATS_CT arms its rider proc at round load, so it only takes effect
+    // from the next round.
+    int (*GetGoal)(int row, int *out_amount);
+
+    // Override all CHECKLIST_MODE_NUM goals at once and re-evaluate. It is one call
+    // because victory is decided over the whole set, so applying rows one at a time
+    // can satisfy every row in passing and latch a goal the caller never asked for.
+    // `amount` reaches only the rows set to GOAL_N_CHECKLIST.
+    void (*DebugSetGoals)(const int *goals, int amount);
+
+    // Per-category access gating, mirroring the slot option the seed shipped.
+    // AP_UNLOCK_AP_STAR_PIECE has no flag of its own and reads as gated.
+    int (*GetGating)(APUnlockCategory cat);
+    void (*DebugSetGating)(APUnlockCategory cat, int enabled);
+
+    // The City Trial per-stat patch cap range and the item spawn-rate floor.
+    void (*GetPatchCapRange)(int *out_min, int *out_max);
+    int (*GetSpawnRateMin)(void);
+    void (*DebugSetPatchCapMin)(int min);
+    void (*DebugSetPatchCapMax)(int max);
+    void (*DebugSetSpawnRateMin)(int percent);
+
+    // Zero every unlock mask and re-run the connect-time pre-fill from the current
+    // slot options, the way a fresh connect would. Needed because the pre-fill only
+    // ever sets bits, so turning a category's gating back on is otherwise invisible.
+    void (*DebugReapplySlotOptions)(void);
+
+    // Cross-session AP checklist progress counters.
+    int (*GetCheckProgress)(APCheckProgressKind which);
+    void (*DebugSetCheckProgress)(APCheckProgressKind which, int value);
+
+    // The EnergyLink balance in whole MJ, and a debug override of it. The override
+    // is a pure balance store: the deposit and withdraw totals the client diffs are
+    // rising counters and are never moved. A connected client overwrites the balance
+    // on its next poll.
+    s64 (*GetEnergyBalance)(void);
+    void (*DebugSetEnergyBalance)(s64 mj);
+
+    // Log the whole AP save and wire state to the console.
+    void (*DebugReportState)(void);
+
+    // Reset everything AP receipts accumulate - patch cap, spawn rate, permanent
+    // patches, cross-session check progress and the item queue. Unlock masks are left
+    // alone; DebugReapplySlotOptions is what rebuilds those, and the slot options
+    // themselves are left as received.
+    void (*DebugResetProgression)(void);
 } ArchipelagoAPI;
 
 #endif // ARCHIPELAGO_API_H

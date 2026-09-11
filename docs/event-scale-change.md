@@ -71,7 +71,7 @@ All `#define`s at the top of `event_scale_change.c`:
 | `SCALE_TELEPORT_SPEED_MULT` | 5.0 | Per-frame jump above `this x top_speed_current` is passed through unscaled |
 | `SCALE_AFFECTS_RIDER_MODEL` / `_MACHINE_MODEL` / `_COLLISION` / `_SPEED` / `_CAMERA` | 1 | Each lever independently toggleable so one can be isolated when tuning in-game. `_CAMERA` gates only the scaling math inside the shim; the boot-time call replacement is unconditional but a pure passthrough. |
 
-`archipelago_debug` fires the event on **D-Pad Up** (no L modifier) in City Trial via `ce_api->Do(CUSTOM_EVKIND_SCALE_CHANGE)`, so a test build needs it in `INCLUDE_MODS` alongside `custom_events`.
+`archipelago_debug` fires the event on **D-Pad Up** (no L modifier) during a City Trial round via `ce_api->Do(CUSTOM_EVKIND_SCALE_CHANGE)`, so a test build needs it in `INCLUDE_MODS` alongside `custom_events`. The binding only reads while a round is live, because the settings menu navigates on the same D-Pad.
 
 ## Known Limitations
 

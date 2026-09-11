@@ -137,7 +137,7 @@ never faults on its own. Whether that is survivable depends on the consumer:
 - Its other imports degrade cleanly: `custom_machines` (`AP_ResolveCustomMachines` in
   `mods/archipelago/src/main.c`) leaves machines ungated, and `ap_star`
   (`GateApStar_Resolve` in `mods/archipelago/src/gate_ap_star.c`) simply installs no assemble
-  handler. `archipelago_debug` guards all three of its imports the same way.
+  handler. `archipelago_debug` guards its three imports - `archipelago`, `custom_events` and `custom_machines` - with a plain NULL check at each use, and routes its own text through `ArchipelagoAPI.Textbox` rather than importing textbox.
 
 **Assets travel with their mod, not core.** `ApIcon.dat` belongs to the `archipelago` patch,
 `ApStarShot.dat` to `ap_star`. Since each mod's `assets/` folder already stages its own files,

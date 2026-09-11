@@ -31,6 +31,10 @@ void ApPatches_DebugForceMarkAll(void);
 // is off or every patch is already collected.
 int ApPatches_DebugClaim(void);
 
+// Clear every collected bit in the save, the wire mirror and the client's pending
+// backfill, so the lowest patch is claimable again. Persists.
+void ApPatches_DebugClearCollected(void);
+
 // Spawn one AP Box in front of a player's machine, bypassing the spawner. Returns
 // 0 if the item was not registered when this scene loaded.
 int ApPatches_DebugSpawnBox(int ply);

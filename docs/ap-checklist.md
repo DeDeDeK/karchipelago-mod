@@ -111,7 +111,7 @@ undefined stay dark until their own check fires.
 `APChecklist_RevealAll` is the exception. Reveal is per checklist-mode row: the
 `reveal_checklists[row]` slot option asks for one row at a time, and `RevealChecklist(row)`
 opens either a vanilla mode's 120 cells or, for `AP_CHECKLIST_ROW`, the AP tab.
-`RevealAllChecklists` (the debug menu's "All Checklists") is that call over every row. The AP
+`RevealAllChecklists` is that call over every row. The debug menu drives both: its Reveal Checklists page has an "All Checklists" row plus one per mode row. The AP
 tab reveals only the cells in `ap_checks[]` - the other 68 have no objective behind them, so
 revealing them would show boxes that can never be checked. It sets `is_visible` only, leaving
 `is_unlocked` to the normal completion path, and no-ops when the framework never registered

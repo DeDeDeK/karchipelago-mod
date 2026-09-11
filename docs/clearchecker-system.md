@@ -724,7 +724,7 @@ from clear_kind to physical slot via `cd->grid_mapping[]`:
 | `GOAL_100_CHECKLIST` | that row's "Fill in over 100 Checklist blocks!" cell, from `Fill100ClearKind(row)` - a filler there would satisfy the goal without filling 100 boxes. Nothing to protect on the AP row, which has no such cell (`Fill100ClearKind` returns `0xFF`) |
 | `GOAL_HYDRA_AND_DRAGOON` | (CT only) CT clear_kind `0x77` ("In one match, complete both Dragoon and Hydra!"). On non-CT rows the gate returns 0 |
 | `GOAL_BEAT_KING_DEDEDE`  | (CT only) CT clear_kind `KD_CLEAR_KIND` (`0x2F`). On non-CT rows the gate returns 0 |
-| `GOAL_CHECKLIST_LIST` | every clear_kind whose bit is set in `options.goal_checks[row]` (iterated via `__builtin_ctzll` over both u64 words). Per-row - protects exactly the cells the AP slot listed as required |
+| `GOAL_CHECKLIST_LIST` | every clear_kind whose bit is set in `options.goal_checks[row]` (iterated via `__builtin_ctzll` over both u64 words). Per-row - protects exactly the cells the AP slot listed as required. An empty list protects nothing and, in the evaluator, satisfies nothing: a subset test against zero is vacuously true, so a row carrying the kind without a list would otherwise hand out victory outright |
 | `GOAL_N_CHECKLIST` | none - a count threshold, and filler'ing any cell still costs a filler token |
 | `GOAL_MAX_STATS_CT` | none - the goal is a runtime save bit independent of any specific cell |
 | `GOAL_NONE` | none |
@@ -812,6 +812,30 @@ one.
 `APChecks_ResetAll()` clears `sent_checks`, `goal_announced`, `goal_complete` and
 `max_stats_ct_achieved`; `APChecks_DebugForceMarkAll()` sets all of them.
 
+### Testing a goal the seed did not ship
+
+`options.goal[row]` is a slot option fixed at connect, so without an override each of the nine
+kinds needs its own seed. `APGoal_DebugSetGoals(goals, amount)` writes all `CHECKLIST_MODE_NUM`
+options, calls `APGoal_Evaluate()` once and saves once; `APGoal_Get(row, &amount)` reads one
+back. `archipelago_debug` drives both from its Goals page, where the rows select and an Apply
+action commits.
+
+It takes the whole set deliberately. Victory is decided over every row at once, and a row on
+`GOAL_NONE` counts as satisfied, so applying rows one at a time can satisfy the set in passing
+and latch `goal_complete` - sticky, and reported to the server - on a value the caller was only
+scrolling through. `amount` reaches only the rows set to `GOAL_N_CHECKLIST`, so setting an
+unrelated row's goal does not rewrite its threshold.
+
+Two properties decide what a tester sees. `goal_complete` is sticky and short-circuits the
+evaluator, so a new goal on a save that already goaled needs `APChecks_DebugClearAll()` first.
+And `GOAL_MAX_STATS_CT` is the one kind not evaluated from the option directly: its per-rider
+proc is attached in `GoalMaxStatsCT_On3DLoadEnd` only when the City Trial row already holds that
+goal, so setting it mid-round arms nothing until the next round loads.
+
+The two engine-driven kinds - `GOAL_HYDRA_AND_DRAGOON` and `GOAL_BEAT_KING_DEDEDE` - only flip
+their clear kind when the vanilla results screen runs, which is what makes the debug mod's
+end-the-round binding part of testing them.
+
 ### Collect / release semantics
 
 When another player releases items destined for us, the items arrive via the existing
@@ -851,7 +875,8 @@ backfill, and not at all if the check was earned with no client attached.
 The paths that still write immediately are one-shot and outside gameplay: the slot-options copy
 at save load, `ApplyLocations` (once per client connection), the EnergyLink purchase (the pool
 withdrawal reaches the server immediately, so the queued goods must not be able to rewind), and
-the debug menu commands.
+the debug menu's check-state commands (clear, force-mark, clear-all-checklist-data). The reveal
+commands and the AP Patch rows write no card.
 
 ### Lifecycle (check detection)
 

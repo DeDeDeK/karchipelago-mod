@@ -172,9 +172,10 @@ consumer that only cares about human players filters on the `ply` its assemble h
 given; the handler is the only signal, and `AssembledThisRound` the only other read, so there
 is no boot-wide flag to poll that would hide the distinction.
 
-For testing, `archipelago_debug` drops one sphere in front of player 1 on each **R + D-Pad
-Down**, walking the six in order, so six presses and six drive-overs run the whole assembly
-without waiting on the schedule. It goes through `ArchipelagoAPI.DebugSpawnApStarPiece`, which
+For testing, `archipelago_debug` drops one sphere in front of player slot 0 on each **R + D-Pad
+Down** during a round, walking the six in order from the Rose sphere and restarting the cycle at
+each round load, so six presses and six drive-overs run the whole assembly without waiting on the
+schedule. It goes through `ArchipelagoAPI.DebugSpawnApStarPiece`, which
 reads the sphere's `ItemKind` out of the `custom_items` registry - a sphere that was locked when the
 scene loaded was never registered and cannot be spawned until it is unlocked and the round
 reloads. Deathlink's trigger is **L + D-Pad Down**, and a bare **D-Pad Down** spawns an AP Box.

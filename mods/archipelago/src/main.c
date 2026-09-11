@@ -9,6 +9,7 @@
 #include "stage.h"
 #include "stadium.h"
 #include "rider.h"
+#include "inline.h"
 
 #include "main.h"
 #include "version.h"
@@ -543,6 +544,212 @@ static void APOptions_TransferToSave()
 
     Hoshi_WriteSave();
     OSReport("[Main] AP slot options saved to memory card\n");
+}
+
+// The 12 gating flags in APUnlockCategory order. AP_UNLOCK_AP_STAR_PIECE has no flag
+// of its own - the spheres follow the item category.
+static u32 *GatingFlag(APUnlockCategory cat)
+{
+    APSlotOptions *o = &ap_save->options;
+
+    switch (cat)
+    {
+    case AP_UNLOCK_MACHINE:       return &o->machine_gating_enabled;
+    case AP_UNLOCK_ABILITY:       return &o->ability_gating_enabled;
+    case AP_UNLOCK_EVENT:         return &o->event_gating_enabled;
+    case AP_UNLOCK_PATCH:         return &o->patch_gating_enabled;
+    case AP_UNLOCK_ITEM:          return &o->item_gating_enabled;
+    case AP_UNLOCK_BOX:           return &o->box_gating_enabled;
+    case AP_UNLOCK_AIRRIDE_STAGE: return &o->airride_stage_gating_enabled;
+    case AP_UNLOCK_TOPRIDE_STAGE: return &o->topride_stage_gating_enabled;
+    case AP_UNLOCK_TOPRIDE_ITEM:  return &o->topride_item_gating_enabled;
+    case AP_UNLOCK_COLOR:         return &o->color_gating_enabled;
+    case AP_UNLOCK_STADIUM:       return &o->stadium_gating_enabled;
+    case AP_UNLOCK_BASE_ABILITY:  return &o->base_ability_gating_enabled;
+    default:                      return 0;
+    }
+}
+
+// Normalized, because the menu row that renders it indexes a two-entry name table
+// with no bounds check of its own.
+int APOptions_DebugGetGating(APUnlockCategory cat)
+{
+    u32 *flag = GatingFlag(cat);
+    return (!flag || *flag) ? 1 : 0;
+}
+
+void APOptions_DebugSetGating(APUnlockCategory cat, int enabled)
+{
+    u32 *flag = GatingFlag(cat);
+    if (flag)
+        *flag = enabled ? 1u : 0u;
+}
+
+void APOptions_GetPatchCapRange(int *out_min, int *out_max)
+{
+    if (out_min)
+        *out_min = (int)ap_save->options.city_trial_patch_cap_min;
+    if (out_max)
+        *out_max = (int)ap_save->options.city_trial_patch_cap_max;
+}
+
+int APOptions_GetSpawnRateMin(void)
+{
+    return (int)ap_save->options.spawn_rate_min;
+}
+
+// One bound each: the menu offers fixed steps and shows the nearest at or below the
+// live value, so writing both from the two rows would round the untouched one down.
+void APOptions_DebugSetPatchCapMin(int min)
+{
+    ap_save->options.city_trial_patch_cap_min = (u32)min;
+}
+
+void APOptions_DebugSetPatchCapMax(int max)
+{
+    ap_save->options.city_trial_patch_cap_max = (u32)max;
+}
+
+void APOptions_DebugSetSpawnRateMin(int percent)
+{
+    ap_save->options.spawn_rate_min = (u32)percent;
+}
+
+// The pre-fill only ever sets bits, so a category whose gating was turned back on
+// would keep the all-ones mask its ungated pass gave it. Clearing every mask first
+// is what makes this a fresh connect rather than an addition to the last one.
+// received_checklist_rewards is deliberately left alone: it also holds rewards the
+// player genuinely received, and clearing those is the Checks page's job.
+void APOptions_DebugReapply(void)
+{
+    // Every flag reads 0 before a connect, which the pre-fill treats as ungated, so
+    // this unlocks the whole seed rather than reproducing any particular one.
+    if (!ap_save->options_received)
+        OSReport("[Main] No slot options received - every category re-applies as ungated\n");
+
+    for (int cat = 0; cat < AP_UNLOCK_NUM; cat++)
+        Unlock_SetMask((APUnlockCategory)cat, 0);
+
+    APOptions_ApplyRevealChecklists();
+    APOptions_ApplyUngatedCategories();
+
+    Hoshi_WriteSave();
+}
+
+static const char *const unlock_cat_names[AP_UNLOCK_NUM] = {
+    [AP_UNLOCK_MACHINE]       = "machines",
+    [AP_UNLOCK_ABILITY]       = "abilities",
+    [AP_UNLOCK_EVENT]         = "events",
+    [AP_UNLOCK_PATCH]         = "patch types",
+    [AP_UNLOCK_ITEM]          = "CT items",
+    [AP_UNLOCK_BOX]           = "boxes",
+    [AP_UNLOCK_AIRRIDE_STAGE] = "AR stages",
+    [AP_UNLOCK_TOPRIDE_STAGE] = "TR stages",
+    [AP_UNLOCK_TOPRIDE_ITEM]  = "TR items",
+    [AP_UNLOCK_COLOR]         = "colors",
+    [AP_UNLOCK_STADIUM]       = "stadiums",
+    [AP_UNLOCK_BASE_ABILITY]  = "base abilities",
+    [AP_UNLOCK_AP_STAR_PIECE] = "AP Star spheres",
+};
+
+// Bits worth printing per category. Machines are the one dynamic width, since the
+// registry decides how many kinds exist.
+static int UnlockCatBits(APUnlockCategory cat)
+{
+    static const u8 bits[AP_UNLOCK_NUM] = {
+        [AP_UNLOCK_ABILITY]       = COPYKIND_NUM,
+        [AP_UNLOCK_EVENT]         = EVKIND_NUM,
+        [AP_UNLOCK_PATCH]         = PATCHKIND_NUM,
+        [AP_UNLOCK_ITEM]          = ITUNLOCK_NUM,
+        [AP_UNLOCK_BOX]           = BOXKIND_NUM,
+        [AP_UNLOCK_AIRRIDE_STAGE] = AIRRIDE_NUM,
+        [AP_UNLOCK_TOPRIDE_STAGE] = TOPRIDE_NUM,
+        [AP_UNLOCK_TOPRIDE_ITEM]  = TRITEM_NUM,
+        [AP_UNLOCK_COLOR]         = KIRBYCOLOR_NUM,
+        [AP_UNLOCK_STADIUM]       = STKIND_NUM,
+        [AP_UNLOCK_BASE_ABILITY]  = BASEABILITY_NUM,
+        [AP_UNLOCK_AP_STAR_PIECE] = AP_STAR_PIECE_NUM,
+    };
+
+    if (cat == AP_UNLOCK_MACHINE)
+    {
+        int num = MachineKind_Num();
+        return num > AP_MACHINE_GATE_NUM ? AP_MACHINE_GATE_NUM : num;
+    }
+    return bits[cat];
+}
+
+void APDebug_ReportState(void)
+{
+    OSReport("[Main] Boot %d, %d items received, %d queued, options received %d\n",
+             ap_save->boot_num, ap_save->item_received_count,
+             ap_save->unprocessed_count, ap_save->options_received);
+
+    for (int cat = 0; cat < AP_UNLOCK_NUM; cat++)
+    {
+        int bits = UnlockCatBits((APUnlockCategory)cat);
+        OSReport("[Main] %s gated %d, mask %s\n", unlock_cat_names[cat],
+                 APOptions_DebugGetGating((APUnlockCategory)cat),
+                 MaskBits(Unlock_GetMask((APUnlockCategory)cat), bits));
+    }
+
+    OSReport("[Main] Patch cap %d (%d received, seed range %d-%d), spawn rate floor %d%%\n",
+             PatchCap_GetCap(), ap_save->patch_cap_count,
+             ap_save->options.city_trial_patch_cap_min,
+             ap_save->options.city_trial_patch_cap_max,
+             ap_save->options.spawn_rate_min);
+
+    char perm[64];
+    int n = 0;
+    for (int i = 0; i < PATCHKIND_NUM; i++)
+        n += sprintf(&perm[n], "%s%d", i ? " " : "", ap_save->permanent_patches[i]);
+    OSReport("[Main] Permanent patches (PatchKind order): %s\n", perm);
+
+    char goal_buf[24];
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+        OSReport("[Main] %s: goal %s, %d squares done, announced %d\n",
+                 ChecklistRowName(r), GoalName(&ap_save->options, r, goal_buf),
+                 APChecks_PopcountRow(r), ap_save->goal_announced[r]);
+
+    OSReport("[Main] goal_complete %d, satisfied %s, max stats CT %d\n",
+             ap_save->goal_complete,
+             MaskBits(ap_data->goal_satisfied_mask, CHECKLIST_MODE_NUM),
+             ap_save->max_stats_ct_achieved);
+
+    OSReport("[Main] AP Patches %d collected of %d, %d left\n",
+             ApPatches_CollectedCount(), ApPatches_GetCount(), ApPatches_Remaining());
+
+    OSReport("[Main] Energy %lld MJ, %u deposited, %u withdrawn this boot\n",
+             ap_data->energy_balance, ap_data->energy_deposit_total,
+             ap_data->energy_withdraw_total);
+
+    OSReport("[Main] Check progress: %d/%d All Ups, %d/%d purple SR1 wins, race colors %s\n",
+             ap_save->checks.allup_collect_total, AP_ALLUP_TOTAL_NEED,
+             ap_save->checks.purple_sr1_wins, AP_PURPLE_SR1_NEED,
+             MaskBits(ap_save->checks.race_color_mask, KIRBYCOLOR_NUM));
+}
+
+// Permanent patches already applied to a rider stay on it for the rest of the round -
+// the apply latch is per-scene - so the effect of this shows from the next round load.
+void APDebug_ResetProgression(void)
+{
+    ap_save->patch_cap_count = 0;
+    ap_save->spawn_rate_level = 0;
+    for (int i = 0; i < PATCHKIND_NUM; i++)
+        ap_save->permanent_patches[i] = 0;
+
+    ap_save->checks.allup_collect_total = 0;
+    ap_save->checks.purple_sr1_wins = 0;
+    ap_save->checks.race_color_mask = 0;
+    ap_save->max_stats_ct_achieved = 0;
+
+    ap_save->item_received_count = 0;
+    ap_save->unprocessed_count = 0;
+    ap_data->item_received_index = 0;
+
+    Hoshi_WriteSave();
+    OSReport("[Main] Progression reset to pre-connect: patch cap, spawn rate, "
+             "permanent patches, check progress and the item queue\n");
 }
 
 void OnMainMenuLoad()

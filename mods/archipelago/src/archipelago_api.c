@@ -12,6 +12,8 @@
 #include "energylink.h"
 #include "gate_ap_star.h"
 #include "ap_patches.h"
+#include "ap_text.h"
+#include "ap_check_detect.h"
 #include "textbox_api.h"
 
 u32 Unlock_GetMask(APUnlockCategory cat)
@@ -167,6 +169,106 @@ static void ApiDebugSetApPatchCount(int count)
     ApPatches_DebugSetCount(count);
 }
 
+static void ApiDebugClearApPatchCollected(void)
+{
+    ApPatches_DebugClearCollected();
+}
+
+static void ApiDebugTriggerTraplinkReceive(void)
+{
+    ap_data->traplink_receive = 1;
+}
+
+static int ApiDebugSendText(int kind)
+{
+    return APText_DebugSend(kind);
+}
+
+static int ApiDebugSendOverlongText(void)
+{
+    return APText_DebugSendOverlong();
+}
+
+static int ApiGetGoal(int row, int *out_amount)
+{
+    return APGoal_Get(row, out_amount);
+}
+
+static void ApiDebugSetGoals(const int *goals, int amount)
+{
+    APGoal_DebugSetGoals(goals, amount);
+}
+
+static int ApiGetGating(APUnlockCategory cat)
+{
+    return APOptions_DebugGetGating(cat);
+}
+
+static void ApiDebugSetGating(APUnlockCategory cat, int enabled)
+{
+    APOptions_DebugSetGating(cat, enabled);
+}
+
+static void ApiGetPatchCapRange(int *out_min, int *out_max)
+{
+    APOptions_GetPatchCapRange(out_min, out_max);
+}
+
+static int ApiGetSpawnRateMin(void)
+{
+    return APOptions_GetSpawnRateMin();
+}
+
+static void ApiDebugSetPatchCapMin(int min)
+{
+    APOptions_DebugSetPatchCapMin(min);
+}
+
+static void ApiDebugSetPatchCapMax(int max)
+{
+    APOptions_DebugSetPatchCapMax(max);
+}
+
+static void ApiDebugSetSpawnRateMin(int percent)
+{
+    APOptions_DebugSetSpawnRateMin(percent);
+}
+
+static void ApiDebugReapplySlotOptions(void)
+{
+    APOptions_DebugReapply();
+}
+
+static int ApiGetCheckProgress(APCheckProgressKind which)
+{
+    return APCheckDetect_GetProgress(which);
+}
+
+static void ApiDebugSetCheckProgress(APCheckProgressKind which, int value)
+{
+    APCheckDetect_DebugSetProgress(which, value);
+}
+
+static s64 ApiGetEnergyBalance(void)
+{
+    return EnergyLink_GetBalance();
+}
+
+static void ApiDebugSetEnergyBalance(s64 mj)
+{
+    EnergyLink_DebugSetBalance(mj);
+}
+
+static void ApiDebugReportState(void)
+{
+    APDebug_ReportState();
+}
+
+static void ApiDebugResetProgression(void)
+{
+    APDebug_ResetProgression();
+}
+
 static const ArchipelagoAPI api = {
     .GetUnlockMask                = Unlock_GetMask,
     .SetUnlockMask                = Unlock_SetMask,
@@ -191,6 +293,26 @@ static const ArchipelagoAPI api = {
     .DebugCollectApPatch          = ApiDebugCollectApPatch,
     .GetApPatchCount              = ApiGetApPatchCount,
     .DebugSetApPatchCount         = ApiDebugSetApPatchCount,
+    .DebugClearApPatchCollected   = ApiDebugClearApPatchCollected,
+    .DebugTriggerTraplinkReceive  = ApiDebugTriggerTraplinkReceive,
+    .DebugSendText                = ApiDebugSendText,
+    .DebugSendOverlongText        = ApiDebugSendOverlongText,
+    .GetGoal                      = ApiGetGoal,
+    .DebugSetGoals                = ApiDebugSetGoals,
+    .GetGating                    = ApiGetGating,
+    .DebugSetGating               = ApiDebugSetGating,
+    .GetPatchCapRange             = ApiGetPatchCapRange,
+    .GetSpawnRateMin              = ApiGetSpawnRateMin,
+    .DebugSetPatchCapMin          = ApiDebugSetPatchCapMin,
+    .DebugSetPatchCapMax          = ApiDebugSetPatchCapMax,
+    .DebugSetSpawnRateMin         = ApiDebugSetSpawnRateMin,
+    .DebugReapplySlotOptions      = ApiDebugReapplySlotOptions,
+    .GetCheckProgress             = ApiGetCheckProgress,
+    .DebugSetCheckProgress        = ApiDebugSetCheckProgress,
+    .GetEnergyBalance             = ApiGetEnergyBalance,
+    .DebugSetEnergyBalance        = ApiDebugSetEnergyBalance,
+    .DebugReportState             = ApiDebugReportState,
+    .DebugResetProgression        = ApiDebugResetProgression,
 };
 
 void ArchipelagoAPI_Export(void)

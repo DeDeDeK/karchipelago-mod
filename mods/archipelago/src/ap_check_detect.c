@@ -7,6 +7,7 @@
 #include "item.h"
 #include "hurt.h"
 #include "code_patch/code_patch.h"
+#include "hoshi/func.h"
 
 #include "inline.h"
 
@@ -636,4 +637,42 @@ void APCheckDetect_OnBoot(void)
     CODEPATCH_REPLACECALL(0x802022ec, APCheckDetect_EnemyDefeat);
     CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
     OSReport("[APCheckDetect] Hooks installed\n");
+}
+
+int APCheckDetect_GetProgress(APCheckProgressKind which)
+{
+    switch (which)
+    {
+    case AP_PROGRESS_ALLUP_TOTAL: return ap_save->checks.allup_collect_total;
+    case AP_PROGRESS_PURPLE_SR1:  return ap_save->checks.purple_sr1_wins;
+    case AP_PROGRESS_RACE_COLORS: return ap_save->checks.race_color_mask;
+    default:                      return 0;
+    }
+}
+
+// The objectives these feed are latched in ap_observed for the rest of the boot, so
+// a counter lowered past a check already recorded this session does not un-record it.
+void APCheckDetect_DebugSetProgress(APCheckProgressKind which, int value)
+{
+    if (value < 0)
+        value = 0;
+
+    switch (which)
+    {
+    case AP_PROGRESS_ALLUP_TOTAL:
+        ap_save->checks.allup_collect_total = (u16)value;
+        break;
+    case AP_PROGRESS_PURPLE_SR1:
+        ap_save->checks.purple_sr1_wins = (u8)value;
+        break;
+    case AP_PROGRESS_RACE_COLORS:
+        ap_save->checks.race_color_mask = (u8)value;
+        break;
+    default:
+        return;
+    }
+
+    // No card write: Hoshi_WriteSave stalls the frame and the menu fires this on every
+    // D-pad tick. The counters ride in the save block to the game's own save point.
+    OSReport("[APCheckDetect] Debug: progress %d set to %d\n", which, value);
 }

@@ -94,3 +94,11 @@ A single `SpawnRate_GetScale()` drives both CT and TR from one `spawn_rate_min` 
 ## GObj Pool Ceiling
 
 Items are GObj-allocated by `CityItem_Create` (0x8024eef4) from a heap-allocated pool. There is no fixed-size array indexed by `item_max`, so raising the cap is structurally safe, but pool exhaustion at extreme levels is possible. The failure mode is silent rather than fatal: `CityItem_Create` returns a null GObj and the spawn simply does not happen. A sustained 3x-cap CT round is the scenario to watch.
+
+## Debug override
+
+`spawn_rate_min` is a slot option fixed at connect. `archipelago_debug`'s Slot Options page
+writes it through `ArchipelagoAPI.DebugSetSpawnRateMin` (25 / 50 / 75 / 100 percent) and reads it
+back through `GetSpawnRateMin`, so the floor and the per-item climb above it can be exercised
+without re-rolling a seed. A stored 0 means options were never received, which `SpawnRate_GetScale`
+already treats as 100, and the row displays it that way.

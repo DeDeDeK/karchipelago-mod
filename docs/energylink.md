@@ -119,4 +119,20 @@ Neither omission costs the player anything. During post-release depletion (`char
 
 `ResetTracking` zeros all per-player snapshots. It does **not** touch the two energy counters or `energy_frac_accumulator` - those are the session-cumulative send channel and persist across scene loads, resetting only on a fresh mod boot via the `OnBoot` `memset`. It does clear `withdraw_balance_remainder`, which is only local display rounding that `set_notify` overwrites anyway. Procs die with their host GObj at scene exit; nothing is detached manually.
 
-`energylink.h` exports only `EnergyLink_On3DLoadEnd`, `EnergyLink_OnTopRideLoadEnd`, `EnergyLink_Deposit` (a debug-only local balance bump that queues no server send) and `EnergyLink_RebaseStats`. `EnergyLink_Emit`, `EnergyLink_Withdraw`, `AutoCharge_Gain`, `ResetTracking` and the two per-frame procs are static to `energylink.c`, so the send channel has exactly one writer by construction.
+`energylink.h` exports only `EnergyLink_On3DLoadEnd`, `EnergyLink_OnTopRideLoadEnd`, `EnergyLink_Deposit` (a local balance bump that queues no server send, driven by `archipelago_debug`'s EnergyLink > Add 1000 row through `ArchipelagoAPI.AddEnergy`), the `EnergyLink_GetBalance` / `EnergyLink_DebugSetBalance` pair behind that same page's Balance and Drain to Zero rows, and `EnergyLink_RebaseStats`. `EnergyLink_Emit`, `EnergyLink_Withdraw`, `AutoCharge_Gain`, `ResetTracking` and the two per-frame procs are static to `energylink.c`, so the send channel has exactly one writer by construction.
+
+## Debug balance
+
+`EnergyLink_DebugSetBalance` writes `ap_data->energy_balance` and nothing else. That is the whole
+constraint: `energy_deposit_total` and `energy_withdraw_total` are rising counters the client
+read-and-diffs, so lowering either would decode as a ~4.29e9 delta that the pool's `max: 0` clamp
+cannot undo. A debug balance is therefore never accompanied by a counter adjustment.
+
+The value only holds with no client attached - a connected one overwrites the balance
+unconditionally on its next poll. A drain to exactly 0 can still go slightly negative afterwards,
+because the withdraw path carries under 1 MJ of fractional remainder that the next Auto-Charge
+frame applies.
+
+Inflating the balance and then spending is the direction that leaves a mark: the purchase path
+adds the cost to `energy_withdraw_total` regardless, and the client forwards that as a genuine
+withdrawal the shared pool may not cover. Draining only ever under-spends.

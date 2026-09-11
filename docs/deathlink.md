@@ -136,3 +136,15 @@ Around each `apply(kirby)` call the proc zeros the kirby's charge-component velo
 ### Round-state gate
 
 The receive proc gates on `mgr->round_state == 2` (race active). The kirby state machine is not fully wired up before this - the state wrappers dereference `state_handler` and its vtable, which are NULL or partially initialized during countdown and would crash. A `deathlink_receive` flag arriving early simply persists until the race starts and is consumed on the first qualifying frame.
+
+## Debug trigger
+
+`ArchipelagoAPI.DebugTriggerDeathlinkReceive` sets the `deathlink_receive` side-channel flag
+the client would otherwise write, so the receive path can be exercised with no server attached.
+`archipelago_debug` binds it to **L + D-Pad Down** and also carries it as Links > Arm DeathLink
+in its menu. The flag goes through the same round-state gate as a real one, so a press during
+countdown is consumed on the first frame of the race, and one armed from the menu - which is a
+main-menu scene - lands at the next round rather than being dropped.
+
+The receive proc is installed at scene load only when the Death Link setting was on at that
+moment, so a flag armed while the link is off sits until a round that has the proc.

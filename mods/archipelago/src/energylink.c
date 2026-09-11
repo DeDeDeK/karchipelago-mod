@@ -247,6 +247,20 @@ void EnergyLink_Deposit(float amount)
     ap_data->energy_balance += (s64)(s32)amount;
 }
 
+s64 EnergyLink_GetBalance(void)
+{
+    return ap_data->energy_balance;
+}
+
+// Debug only, and a pure balance store: energy_deposit_total and
+// energy_withdraw_total are rising counters the client read-and-diffs, so lowering
+// either would decode as a ~4.29e9 delta. The withdraw remainder carries less than
+// 1 MJ that can still decrement an exact 0 on a later Auto-Charge frame.
+void EnergyLink_DebugSetBalance(s64 mj)
+{
+    ap_data->energy_balance = mj;
+}
+
 void EnergyLink_RebaseStats(int ply)
 {
     if (ply < 0 || ply >= 5)

@@ -95,3 +95,20 @@ When a receive applies, `TrapLink_PerFrame` enqueues a "TrapLink received!" text
 - Human-vs-CPU filtering stays at each call site, since the two engines discriminate differently: the 3D hooks use `Ply_CheckIfCPU`, the Top Ride hook uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`.
 - Because the toggle is checked inside `TrapLink_Send`, individual hooks do not re-check it. The toggle also gates GObj installation, so the receive proc is not even created while TrapLink is off.
 - `TrapLink_OnBoot()`, called from `main.c`'s `OnBoot`, applies both code patches.
+
+## Debug trigger
+
+`ArchipelagoAPI.DebugTriggerTraplinkReceive` sets `ap_data->traplink_receive`, the side-channel
+flag the client would otherwise write, so the receive path can be exercised with no server
+attached. `archipelago_debug` binds it to **R + D-Pad Up** and carries it as Links > Arm TrapLink
+in its menu.
+
+The flag is a signal, not a payload: which trap lands is chosen by the receiving mode, exactly as
+it is for a real Bounce, so there is nothing for the caller to select. It is held rather than
+consumed whenever the poll cannot apply it - during the 3D intro, in City Trial Free Run, outside
+the three gameplay majors - so one armed from the main menu lands at the next qualifying round.
+The 120-frame guard the poll arms after a successful receive is a send-side suppressor and never
+blocks an injected receive, though it does mute the mod's own organic sends for that window.
+
+Like the send side, the receive proc only exists while the Trap Link setting was on as the scene
+loaded, so a flag armed with the link off waits for a round that has one.

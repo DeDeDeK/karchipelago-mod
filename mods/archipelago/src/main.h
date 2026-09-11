@@ -57,28 +57,11 @@ extern int ap_checklist_mode;
 // APAnnounce_Grant alongside the Messages -> Local -> Items toggle.
 extern int ap_regrant_quiet;
 
-// Absolute clamp ceiling for per-stat patch totals. Patch_GetMaxValue returns
-// through extsb, so anything above 127 sign-extends negative.
-#define PATCH_STAT_MAX 127
-
 // Targets of the AP checklist objectives backed by APSave.checks counters.
 #define AP_ALLUP_TOTAL_NEED 5
 #define AP_PURPLE_SR1_NEED  3
 // One bit per KirbyColor, all 8 set.
 #define AP_RACE_COLOR_MASK_ALL 0xFF
-
-typedef enum APGoalKind
-{
-    GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
-    GOAL_N_CHECKLIST,           // Complete N checklist squares
-    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
-    GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
-    GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
-    GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
-    GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
-    GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
-    GOAL_NONE,                  // No goal for this mode - always last, the AP world orders it last too
-} APGoalKind;
 
 // AP Patch locations get their own bitmask, sized so AP_PATCH_MAX packs into
 // whole u64 words.
@@ -233,19 +216,6 @@ typedef enum APTextColor
     APTEXTCOLOR_NUM,
 } APTextColor;
 
-// What a message is about. Each kind has its own Settings menu toggle; the mod filters
-// on render and the client reads text_menu_mask so it can skip composing at all.
-typedef enum APTextKind
-{
-    APTEXT_KIND_CHECK = 0, // a location this slot completed was sent
-    APTEXT_KIND_ITEM,      // an item arrived for this slot
-    APTEXT_KIND_HINT,      // a server hint concerning this slot
-    APTEXT_KIND_STATUS,    // goal / release / collect, and client connect state
-    APTEXT_KIND_CHAT,      // player and server chat
-    APTEXT_KIND_LINK,      // DeathLink / TrapLink traffic, in both directions
-    APTEXT_KIND_NUM,
-} APTextKind;
-
 typedef struct APTextMessage
 {
     u8 kind;                    // APTextKind
@@ -391,6 +361,23 @@ void OnFrameStart();
 // Register the public API instance with hoshi so other mods can import it via
 // Hoshi_ImportMod(). Call once from OnBoot.
 void ArchipelagoAPI_Export(void);
+
+// Debug overrides of the slot options the client normally owns. The gating flags,
+// the patch cap range and the spawn rate floor are read at connect, so a change to
+// any of them needs APOptions_DebugReapply to become observable.
+int APOptions_DebugGetGating(APUnlockCategory cat);
+void APOptions_GetPatchCapRange(int *out_min, int *out_max);
+int APOptions_GetSpawnRateMin(void);
+void APOptions_DebugSetGating(APUnlockCategory cat, int enabled);
+void APOptions_DebugSetPatchCapMin(int min);
+void APOptions_DebugSetPatchCapMax(int max);
+void APOptions_DebugSetSpawnRateMin(int percent);
+void APOptions_DebugReapply(void);
+
+// Log the whole save and wire state, and roll received-item progression back to
+// what a save holds before its first connect.
+void APDebug_ReportState(void);
+void APDebug_ResetProgression(void);
 
 // Per-category unlock-mask access. Set truncates to the underlying width.
 u32  Unlock_GetMask(APUnlockCategory cat);

@@ -455,8 +455,8 @@ independently, and its own option tops out at 200.
 
 ## Debug
 
-`archipelago_debug` drops one AP Box in front of player 1 on each **D-Pad Down**, so a break and
-its patches can be watched without waiting on the spawner. It goes through
+`archipelago_debug` drops one AP Box in front of its Target Player slot on each **D-Pad Down**
+during a round, so a break and its patches can be watched without waiting on the spawner. It goes through
 `ArchipelagoAPI.DebugSpawnApBox`, which reads the box's `ItemKind` out of the `custom_items`
 registry - an item held out when the scene loaded was never registered and cannot be spawned
 until the round reloads. The AP Star sphere cycle is on **R + D-Pad Down**.
@@ -465,7 +465,18 @@ The Checks menu carries the two that are not spawns: **AP Patches**, which overr
 `ap_patches` (Off / 8 / 64 / 512) so a build with no AP Patch seed can still register the
 drop-ins at the next round load, and **Collect AP Patch**, which claims the lowest unclaimed
 patch outright. Lowering the count drops the collected bits above the new ceiling, so the
-collected total never reads past the window the count describes.
+collected total never reads past the window the count describes - which is why the row only
+writes when the player moves it, and never when hoshi replays its `on_change` at boot with the
+bucketed value a seed between sizes was displayed as.
+
+**Clear Collected AP Patches** is the inverse of Collect: it clears the save bits, the
+`ap_patch_checks` mirror and the client's pending `ap_patch_backfill` together, then writes the
+card. All three matter. Clearing only the save leaves the mirror to be republished over it at the
+next `ApPatches_OnSaveLoaded`; clearing only the mirror leaves the claim loop still skipping the
+index, since that tests the save word; and leaving the backfill alone lets the client's next push
+OR every bit straight back in. Nothing else needs resetting for a drop to re-arm - the remaining
+count is recomputed per call, so a mid-round clear makes the box drop patches again without a
+scene reload.
 
 ## Logging
 
