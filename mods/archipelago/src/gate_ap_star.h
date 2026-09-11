@@ -38,9 +38,7 @@ int GateApStar_GivePiece(int piece);
 // the six spheres.
 int GateApStar_GiveStar(void);
 
-// 1 once a player has assembled the star this boot; 1 if this player assembled
-// it in the round currently loaded.
-int GateApStar_WasAssembled(void);
+// 1 if this player assembled the star in the round currently loaded.
 int GateApStar_AssembledThisRound(int ply);
 
 #endif

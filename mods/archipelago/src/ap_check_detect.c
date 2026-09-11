@@ -38,7 +38,6 @@ int APCheckDetect_IsSet(int ck)
     case APCK_ALLUPS_5:           return ap_save->checks.allup_collect_total >= AP_ALLUP_TOTAL_NEED;
     case APCK_SR1_PURPLE_3X:      return ap_save->checks.purple_sr1_wins >= AP_PURPLE_SR1_NEED;
     case APCK_AIRRIDE_ALL_COLORS: return ap_save->checks.race_color_mask == AP_RACE_COLOR_MASK_ALL;
-    case APCK_ASSEMBLE_AP_STAR:   return GateApStar_WasAssembled();
     default:
         if (ck < 0 || ck >= APCK_NUM)
             return 0;

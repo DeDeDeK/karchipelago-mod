@@ -356,7 +356,7 @@ skip between frames.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 50 | City Trial: Collect all 6 spheres and assemble the Archipelago Star! | `GateApStar_WasAssembled()` - a read of the sticky flag the `ap_star` mod sets when a human player collects the sixth sphere, forwarded through `gate_ap_star.c` |
+| 50 | City Trial: Collect all 6 spheres and assemble the Archipelago Star! | Latched by the `ap_star` assemble handler in `gate_ap_star.c`, which fires for every rider and keeps only `PKIND_HMN` |
 | 51 | City Trial: In one game, assemble Dragoon, Hydra and Archipelago Star! | A per-frame poll over the human players: `PlayerStats.flags_84d` bits `0x04` and `0x08`, the per-round flags `Ply_MarkLegendaryMachineAssembled` (`0x80231198`) sets, plus `GateApStar_AssembledThisRound(ply)` |
 
 The six spheres are custom items scheduled into City Trial's forced-content red boxes

@@ -27,10 +27,10 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
 
     // Projectile_Create copies these into proj->owner_gobj. The gordo path needs
     // a real rider GObj there - it reads bone basis vectors through it.
-    int owner = 0;
+    GOBJ *owner = NULL;
     GOBJ *rg = Ply_GetRiderGObj(ply_idx);
     if (rg && rg->userdata)
-        owner = *(int *)rg->userdata;  // rd->x0
+        owner = ((RiderData *)rg->userdata)->gobj;
 
     Vec3 throw_pos;
     throw_pos.X = md->pos.X + md->forward.X * distance;
@@ -45,8 +45,8 @@ static int SpawnProjectileForPlayer(int ply_idx, ProjectileKind kind, float dist
     ProjectileDesc desc;
     memset(&desc, 0, sizeof(desc));
     desc.kind = kind;
-    desc.owner_gobj = (void *)owner;
-    desc.owner_unk2 = owner;
+    desc.owner_gobj = owner;
+    desc.owner_unk2 = (int)owner;
     desc.owner_byte = 0;
     desc.position = throw_pos;
     desc.forward = md->forward;

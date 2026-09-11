@@ -278,7 +278,7 @@ CODEPATCH_HOOKCREATE(0x800ec284,
 // REPLACECALL'd at the two LegendaryPiece_MarkAsSpawned bl sites in
 // CityItemSpawn_SpawnLegendaryPiece. Skipping the call leaves the box on its default
 // forced_item (-1 = random roll); the caller still advances next_piece_index.
-static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
+static void GateItems_MarkAsSpawnedGated(GOBJ *box, int item_kind)
 {
     int bit = ItemKindToUnlockBit(item_kind);
     if (bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit)))
@@ -292,7 +292,7 @@ static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
         }
         return;
     }
-    LegendaryPiece_MarkAsSpawned(spawner, item_kind);
+    LegendaryPiece_MarkAsSpawned(box, item_kind);
 }
 
 void GateItems_OnBoot()

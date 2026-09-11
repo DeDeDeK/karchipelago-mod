@@ -6,14 +6,12 @@
 #include "ap_star.h"
 #include "ap_star_handling.h"
 
-// A profile is a copy of the star's own two attribute blocks, with named fields
-// overwritten or a stock machine's blocks laid over them whole. Machine_AdjustAttributes
-// rebuilds a machine out of md->vcData, so a profile is applied by pointing the machine
-// at a vcData of ours and asking for that rebuild, which re-applies the patch stats too.
+// Machine_AdjustAttributes (0x801c7278) rebuilds a machine out of md->vcData, so a
+// profile is applied by pointing the machine at a vcData of ours and asking for that
+// rebuild, which re-applies the patch stats too.
 
-// Warp Star's and Flight Warp Star's shipped blocks, word for word out of
-// VcStarNormal.dat and VcStarFlight.dat, so the profiles built from them carry the
-// unnamed terms - the x028/x044/x06c rows and the fall tiers - as well as the named.
+// Warp Star's and Flight Warp Star's shipped blocks, word for word, so the profiles
+// built from them carry the unnamed terms as well as the named.
 static const u32 stc_warp_attr[sizeof(vcAttributes) / 4] = {
     0x0000000c, 0x00000007, 0x3f800000, 0x3f800000, 0x3fd9999a, 0x3fd9999a,
     0x3e99999a, 0x3e99999a, 0x00000000, 0x00000000, 0x3f94dd2f, 0x40800000,
@@ -271,9 +269,8 @@ int ApStarHandling_ProfileForPods(int pods)
     return AP_STAR_PROFILE_NUM - pods;
 }
 
-// Seeded from the machine's own vcData rather than from the archive, so the
-// blocks pick up whatever the scene loaded. Every profile is built at once and
-// held for the round; only a machine that leaves profile 0 is ever pointed at one.
+// Seeded from the machine's own vcData, so the blocks pick up whatever the scene
+// loaded. Built all at once and held for the round.
 static int Build(MachineData *md)
 {
     if (stc_built)
@@ -295,7 +292,6 @@ static int Build(MachineData *md)
     }
 
     stc_built = 1;
-    OSReport("[ApStarHandling] Built %d profiles\n", AP_STAR_PROFILE_NUM);
     return 1;
 }
 
@@ -310,13 +306,14 @@ void ApStarHandling_Apply(MachineData *md, int profile)
     Machine_AdjustAttributes(md);
 
     // The rebuild refreshes the attribute block but not the three fields
-    // Machine_Star_Init seeds off it once, so those are carried over by hand.
-    vcAttributes *live = (vcAttributes *)&md->base_attributes;
+    // Machine_Star_Init (0x801e7f3c) seeds off it once, so those are carried by hand.
+    vcAttributes *live = Machine_BaseAttributes(md);
     md->ground_grip = live->ground_grip;
     md->air_grip = live->air_grip;
     md->lift_max = md->attr->handling.lift_ceiling;
     if (md->lift_accum > md->lift_max)
         md->lift_accum = md->lift_max;
 
-    OSReport("[ApStarHandling] Profile %s\n", stc_names[profile]);
+    OSReport("[ApStarHandling] Player %d on %s\n",
+             Machine_GetRiderPly(md) + 1, stc_names[profile]);
 }

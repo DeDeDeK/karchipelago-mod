@@ -15,9 +15,8 @@
 #include "ap_star.h"
 #include "ap_star_pieces.h"
 
-// CustomItemDesc.name of each sphere, indexed by APStarPieceKind. The name is the
-// handle that binds a drop-in .dat to this code, the same convention
-// AP_STAR_MACHINE_NAME uses for the machine.
+// CustomItemDesc.name of each sphere, indexed by APStarPieceKind. The name is what
+// binds a drop-in .dat to this code.
 static const char *const piece_names[APSTARPIECE_NUM] = {
     "AP Sphere Rose",
     "AP Sphere Green",
@@ -27,16 +26,14 @@ static const char *const piece_names[APSTARPIECE_NUM] = {
     "AP Sphere Yellow",
 };
 
-// Match progress (0..1) windows the n-th delivery step falls in. Vanilla spreads
-// three pieces over 15-30 / 25-50 / 50-80 percent of a round; these six divide the
-// same span so a full set lands inside one round. A round with fewer spheres in
-// play uses the first rows, keeping the deliveries early.
+// Progress window, in percent of the round, that the n-th delivery step draws its
+// threshold from. A round with fewer spheres in play uses the first rows, keeping
+// the deliveries early.
 static const u8 piece_progress_range[APSTARPIECE_NUM][2] = {
     { 10, 20 }, { 20, 32 }, { 32, 45 }, { 45, 58 }, { 58, 70 }, { 70, 85 },
 };
 
 static const CustomItemsAPI *ci_api;
-static int pickup_registered;
 
 static u32 piece_hash[APSTARPIECE_NUM]; // 0 until the registry has been scanned
 static int piece_kind[APSTARPIECE_NUM]; // ItemKind assigned this round, -1 if none
@@ -44,27 +41,21 @@ static int pieces_matched = -1;         // -1 before the first scan, then the ma
 
 static u8 piece_mask[5];      // per-player collected spheres, cleared each round
 static u8 assembled_mask;     // per-player assembly this round, cleared each round
-static u8 ever_assembled;     // sticky for the boot; polled long after the round
 
 // This round's delivery schedule, mirroring LegendaryPieceData's shape: a spawn
 // order, one progress threshold per step, and a one-tick request flag the carrier
 // box path reads back. Only the spheres in play this round are in it.
 static struct
 {
-    u8 enabled;
     u8 next;
     u8 num;
     u8 req_spawn;
     u8 order[APSTARPIECE_NUM];
     float progress[APSTARPIECE_NUM];
-    float claim_progress; // round progress when the pending carrier was claimed
 } sched;
 
-// The collection tracker, built the way the vanilla one is: an icon element per
-// collected piece, hung on the anchors of the legendary HUD's position model and packed
-// left to right in collection order. Its own row, one icon height below the vanilla
-// one, whose six anchors Hydra and Dragoon already claim.
-#define AP_PIECE_HUD_KIND    0x3b
+// The tracker's own row, one icon height below the vanilla one, whose six anchors
+// Hydra and Dragoon already claim.
 #define AP_PIECE_HUD_ROW_DY  -3.4f
 
 static JOBJSet **icon_sets;
@@ -79,16 +70,9 @@ static struct
     u8 shown_mask;
 } piece_hud[5];
 
-// Players whose mount is owed. Collection lands inside Machine_OnTouchItem, and
-// the mount tears down the machine that call is running on, so it waits for the
-// frame boundary - the same deferral the vanilla assembly gets from running its
-// mount out of the cinematic's own proc rather than the pickup arm.
+// Mounts owed. Collection lands inside Machine_OnTouchItem, which the mount would
+// tear down, so it waits for the frame boundary.
 static u8 pending_mount_mask;
-
-static int IsPieceEnabled(int piece)
-{
-    return (ap_star_piece_gate & (1u << piece)) != 0;
-}
 
 const char *ApStarPieces_GetName(int piece)
 {
@@ -107,12 +91,11 @@ static int PieceSlotForHash(u32 id_hash)
     return -1;
 }
 
-// Match each sphere .dat to its slot by display name. The hashes are stable
-// across scenes, so a complete set is scanned for once; a short one is rescanned
-// and reported only when the count moves.
+// Match each sphere .dat to its slot by display name. The hashes are stable across
+// scenes, so a complete set is scanned for once.
 static void ResolvePieces(void)
 {
-    if (ci_api == NULL || pieces_matched == APSTARPIECE_NUM)
+    if (pieces_matched == APSTARPIECE_NUM)
         return;
 
     for (int i = 0; i < ci_api->GetCount(); i++)
@@ -142,10 +125,9 @@ static void ResolvePieces(void)
                  found, APSTARPIECE_NUM);
 }
 
-// Anchor positions come off the position model's descriptor rather than an
-// instance of it: the six anchors are children of the root with no rotation and
-// unit scale, so a world position is the root's translation plus the anchor's.
-// That also keeps the AP row from needing a position-model element of its own.
+// The six anchors are children of the root with no rotation and unit scale, so a
+// world position is the sum of two translations. Reading the descriptor rather than
+// an instance keeps the AP row from needing a position-model element of its own.
 static void ReadAnchors(void)
 {
     anchors_valid = 0;
@@ -184,8 +166,6 @@ static int ViewForPly(int ply)
     return 0;
 }
 
-// One icon element per collected sphere, created the way the vanilla piece icons
-// are: a player HUD element on the pause-HUD p_link, positioned at its anchor.
 static void ShowPieceIcon(int ply, int piece)
 {
     int slot = piece_hud[ply].count;
@@ -198,7 +178,7 @@ static void ShowPieceIcon(int ply, int piece)
     if (g == NULL)
         return;
     GObj_SetPLink(g, GAMEPLINK_PAUSEHUD, 0);
-    HUD_AddElementData(g, AP_PIECE_HUD_KIND, ply, ViewForPly(ply));
+    HUD_AddElementData(g, HUDKIND_LEGENDARYPIECE, ply, ViewForPly(ply));
 
     JOBJ *j = g->hsd_object;
     j->trans = anchor_pos[slot];
@@ -209,8 +189,7 @@ static void ShowPieceIcon(int ply, int piece)
     piece_hud[ply].count = (u8)(slot + 1);
 }
 
-// Take one icon off the row and close the gap behind it, so the icons that
-// outlive a dropped sphere keep the left-packed order they were collected in.
+// The icons behind a removed one slide left, so the row keeps collection order.
 static void RemovePieceIcon(int ply, int slot)
 {
     if (piece_hud[ply].icon[slot] != NULL)
@@ -244,9 +223,8 @@ static void ClearPieceIcons(int ply)
     piece_hud[ply].shown_mask = 0;
 }
 
-// The vanilla tracker updates by diffing the piece mask against a cached copy
-// once a frame rather than reacting to the pickup itself; this does the same, so
-// no GObj is created from inside the collision call that collected the sphere.
+// Diffed once a frame rather than driven off the pickup, so no GObj is created from
+// inside the collision call that collected the sphere.
 static void UpdatePieceHud(int ply)
 {
     u8 mask = piece_mask[ply];
@@ -263,9 +241,8 @@ static void UpdatePieceHud(int ply)
         piece_hud[ply].shown_mask = mask;
         return;
     }
-    // A dropped sphere clears its bit, so the diff has to run both ways: an icon
-    // left standing for a sphere the player no longer holds would be shown a
-    // second time when they collect that color again.
+    // A dropped sphere clears its bit, so the diff runs both ways: an icon left
+    // standing would be shown twice if that color were collected again.
     for (int s = 0; s < piece_hud[ply].count;)
     {
         if (mask & (1 << piece_hud[ply].piece[s]))
@@ -282,14 +259,12 @@ static void UpdatePieceHud(int ply)
     piece_hud[ply].shown_mask = mask;
 }
 
-// Put the assembling player on the star without the cinematic: the recreate the
-// cinematic's own substate would have fired 150 frames in. Re-mounting a player already
-// riding the star costs them their patches, as vanilla does on a duplicate Hydra set.
+// The recreate the cinematic's own substate would have fired 150 frames in.
+// Re-mounting a player already riding the star costs them their patches, as vanilla
+// does on a duplicate Hydra set.
 static void MountStar(int ply)
 {
     int kind = ApStar_MachineKind();
-    int is_bike = 0;
-    int class_index = ApStar_ClassIndex(&is_bike);
     if (kind < 0)
     {
         OSReport("[ApStarPieces] Player %d not mounted: no %s registered\n",
@@ -297,6 +272,8 @@ static void MountStar(int ply)
         return;
     }
 
+    int is_bike = 0;
+    int class_index = CustomMachines_ClassIndexOf(cm_api, (MachineKind)kind, &is_bike);
     GOBJ *rg = Ply_GetRiderGObj(ply);
     if (class_index < 0 || rg == NULL)
     {
@@ -316,18 +293,15 @@ static void Assemble(int ply)
     assembled_mask |= (u8)(1 << ply);
     piece_mask[ply] = 0;
 
-    // The cinematic owns the mount and plays the completion sounds itself. With none -
-    // no machine to build the shot around, or one already running - both are owed
-    // directly, and the mount waits for the frame boundary: collection lands inside
-    // Machine_OnTouchItem, which is no place to tear down the machine it runs on. The
-    // count-4 rung is the pair of sounds a machine completes on, not a fourth piece.
+    // The cinematic owns the mount and the completion sounds; with none, both are owed
+    // here and the mount waits for the frame boundary. Rung 4 is the pair of sounds a
+    // machine completes on, not a fourth piece.
     if (!ApStar_StartAssembly(ply))
     {
         pending_mount_mask |= (u8)(1 << ply);
         Ply_OnLegendaryPieceCollect(ply, 4);
     }
 
-    ever_assembled = 1;
     ApStar_FireAssemble(ply);
     OSReport("[ApStarPieces] Player %d assembled the %s\n", ply + 1, AP_STAR_MACHINE_NAME);
 }
@@ -363,18 +337,26 @@ static void OnPickup(u32 id_hash, const char *name, int player)
     Collect(player, slot);
 }
 
-// Dropping a sphere. Rider_TickDropAllUp (0x8019d55c) throws a collected legendary
-// piece when a rider is hit hard enough, and every part of it is written against the two
-// vanilla masks: the candidate list is their six bits, the thrown kind is the list index
-// plus 0x37, and the bit cleared afterwards is indexed back off that kind. A sphere is
-// held in piece_mask[] and its ItemKind is a custom one past the vanilla table, so it is
-// invisible to all three and unsafe for any of them. Four seams put it in.
+// The kind the candidate roll produces when its list is empty: the array is seeded to
+// -1 and 0x37 is added unconditionally. Vanilla never throws it because the quota is
+// zero when no piece is held; adding spheres to the quota makes it reachable, so it is
+// read here as "the rider holds no vanilla piece".
+#define AP_DROP_NO_VANILLA (ITKIND_HYDRA1 - 1)
 
-// The kind the candidate roll produces when the list is empty: local_68[0] is still -1
-// and 0x37 is added unconditionally. Vanilla never throws it because the quota is zero
-// when no piece is held; adding spheres to the quota makes it reachable, so it is read
-// here as "the rider holds no vanilla piece".
-#define AP_DROP_NO_VANILLA 54
+// The rider's spheres that have an ItemKind this round. A sphere collected through
+// CollectPiece while its gate was shut has none, so nothing can throw it - and putting
+// it in the pool would throw AP_DROP_NO_VANILLA, an ordinary Gordo, and leave the bit
+// set so the quota never drains.
+static u8 DroppableSpheres(int ply)
+{
+    u8 mask = 0;
+    for (int i = 0; i < APSTARPIECE_NUM; i++)
+    {
+        if ((piece_mask[ply] & (1 << i)) && piece_kind[i] >= 0)
+            mask |= (u8)(1 << i);
+    }
+    return mask;
+}
 
 static int SphereSlotForKind(int kind)
 {
@@ -388,28 +370,29 @@ static int SphereSlotForKind(int kind)
     return -1;
 }
 
-// REPLACECALL on the bl Ply_GetDragoonCollection in Rider_DropPatches. The sum of the two
-// collection counts is the rider's legendary-drop quota, and allups_dropped is capped
-// against it - so without the spheres in that sum a rider holding nothing else queues no
-// drop at all and Rider_TickDropAllUp is never dispatched.
+// REPLACECALL on the bl Ply_GetDragoonCollection in Rider_DropPatches (0x8019d330). The
+// sum of the two collection counts is the rider's legendary-drop quota, and
+// allups_dropped is capped against it - so without the spheres in that sum a rider
+// holding nothing else queues no drop and Rider_TickDropAllUp is never dispatched.
 static int DropQuotaDragoon(int ply)
 {
     int n = Ply_GetDragoonCollection(ply);
     if (ply >= 0 && ply < 5)
-        n += Popcount64(piece_mask[ply]);
+        n += Popcount64(DroppableSpheres(ply));
     return n;
 }
 
-// HOOKCREATE on the stw that stores the kind about to be thrown. Vanilla has already
-// rolled uniformly over the pieces in its two masks; re-rolling over those plus the
-// rider's spheres keeps every piece they hold equally likely to come out.
+// HOOKCREATE on the stw of the kind about to be thrown, in Rider_TickDropAllUp
+// (0x8019d55c). r0 holds that kind and r30 the RiderData. Vanilla has already rolled
+// uniformly over the pieces in its two masks; re-rolling over those plus the rider's
+// droppable spheres keeps every piece that can be thrown equally likely to come out.
 static int PickDropKind(int kind, RiderData *rd)
 {
     int ply = rd->ply;
     if (ply >= 5)
         return kind;
 
-    u8 mask = piece_mask[ply];
+    u8 mask = DroppableSpheres(ply);
     int spheres = Popcount64(mask);
     if (spheres == 0)
     {
@@ -432,15 +415,15 @@ static int PickDropKind(int kind, RiderData *rd)
         if (!(mask & (1 << i)))
             continue;
         if (pick-- == 0)
-            return piece_kind[i] >= 0 ? piece_kind[i] : kind;
+            return piece_kind[i];
     }
     return kind;
 }
 
-// REPLACECALL on the bl Ply_DecrementItemCollectNum in Rider_TickDropAllUp. item_collect
-// is 0x45 entries indexed by ItemKind and the callee bounds-checks neither end, so a
-// sphere's kind would write past PlayerStats. The pickup counted the clamped base kind,
-// so the drop takes it back off the same slot.
+// REPLACECALL on the bl Ply_DecrementItemCollectNum in Rider_TickDropAllUp (0x8019d55c).
+// item_collect is 0x45 entries indexed by ItemKind and the callee bounds-checks neither
+// end, so a sphere's kind would write past PlayerStats. The pickup counted the clamped
+// base kind, so the drop takes it back off the same slot.
 static void DropDecrementCollect(int ply, ItemKind kind)
 {
     if (SphereSlotForKind(kind) >= 0)
@@ -448,10 +431,10 @@ static void DropDecrementCollect(int ply, ItemKind kind)
     Ply_DecrementItemCollectNum(ply, kind);
 }
 
-// HOOKCONDITIONALCREATE on the lwz that reloads the thrown kind for the mask clear. Both
-// vanilla branches XOR a mask by 1 << (kind - 0x37) or 1 << (kind - 0x3a); a sphere kind
-// runs both off the end, so it clears its own bit and exits past them to the cooldown
-// reset. The HUD row diffs piece_mask each frame, so the icon leaves with the bit.
+// HOOKCONDITIONALCREATE on the lwz that reloads the thrown kind for the mask clear, in
+// Rider_TickDropAllUp (0x8019d55c); r30 holds the RiderData. Both vanilla branches XOR a
+// mask by 1 << (kind - 0x37) or 1 << (kind - 0x3a); a sphere kind runs both off the end,
+// so it clears its own bit and exits past them to the cooldown reset.
 static int DropClearSphere(RiderData *rd)
 {
     int slot = SphereSlotForKind(rd->drop_piece_kind);
@@ -481,31 +464,30 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8019d8f8,
     0x8019d950   // sphere: skip both branches, resume at the cooldown reset
 )
 
-// REPLACECALL on the bl in CityItemSpawn_UpdateAndCheckToSpawn. Vanilla returns 2
-// when one of its own pieces wants the next carrier box and 3 when neither does;
-// the AP set only claims a carrier vanilla passed on.
+// REPLACECALL on the bl in CityItemSpawn_UpdateAndCheckToSpawn (0x800ea6e0). Vanilla
+// returns 2 when one of its own pieces wants the next carrier box and 3 when neither
+// does; the AP set only claims a carrier vanilla passed on.
 static int CheckToSpawn(float progress)
 {
     int ret = CityItemSpawn_CheckToSpawnLegendaryPiece(progress);
 
     sched.req_spawn = 0;
-    if (ret != 3 || !sched.enabled || sched.next >= sched.num)
+    if (ret != 3 || sched.next >= sched.num)
         return ret;
     if (progress <= sched.progress[sched.next])
         return ret;
 
     sched.req_spawn = 1;
-    sched.claim_progress = progress;
     return 2;
 }
 
-// REPLACECALL on the bl in CityItemSpawn_Think, which has just spawned the red
-// carrier box. Writing forced_item is all it takes to make that box hold a piece.
-static void SpawnPiece(int spawner, int p2, int p3)
+// REPLACECALL on the bl in CityItemSpawn_Think (0x800eb108), which has just spawned the
+// red carrier box. Writing forced_item is all it takes to make that box hold a piece.
+static void SpawnPiece(GOBJ *box, int area, int p3)
 {
     if (!sched.req_spawn)
     {
-        CityItemSpawn_SpawnLegendaryPiece(spawner, p2, p3);
+        CityItemSpawn_SpawnLegendaryPiece(box, area, p3);
         return;
     }
 
@@ -515,12 +497,11 @@ static void SpawnPiece(int spawner, int p2, int p3)
 
     int piece = sched.order[sched.next];
     int kind = piece_kind[piece];
-    if (kind >= 0)
-        LegendaryPiece_MarkAsSpawned(spawner, kind);
+    LegendaryPiece_MarkAsSpawned(box, kind);
     sched.next++;
-    LegendaryPiece_ClearSpawnRequest(spawner);
-    OSReport("[ApStarPieces] %s loaded into a carrier box at %d%% of the round (kind %d)\n",
-             piece_names[piece], (int)(sched.claim_progress * 100.0f), kind);
+    LegendaryPiece_ClearSpawnRequest(box);
+    OSReport("[ApStarPieces] %s loaded into a carrier box (kind %d)\n",
+             piece_names[piece], kind);
 }
 
 void ApStarPieces_OnBoot(void)
@@ -532,8 +513,8 @@ void ApStarPieces_OnBoot(void)
     CODEPATCH_REPLACECALL(0x800eb27c, SpawnPiece);    // bl CityItemSpawn_SpawnLegendaryPiece
     CODEPATCH_REPLACECALL(0x8019d4bc, DropQuotaDragoon);      // bl Ply_GetDragoonCollection in Rider_DropPatches
     CODEPATCH_REPLACECALL(0x8019d8d4, DropDecrementCollect);  // bl Ply_DecrementItemCollectNum in Rider_TickDropAllUp
-    CODEPATCH_HOOKAPPLY(0x8019d868);                          // sphere in the drop candidate roll
-    CODEPATCH_HOOKAPPLY(0x8019d8f8);                          // ... and out of the collected mask
+    CODEPATCH_HOOKAPPLY(0x8019d868);  // sphere into the drop candidate roll
+    CODEPATCH_HOOKAPPLY(0x8019d8f8);  // sphere out of the collected mask
     OSReport("[ApStarPieces] Spawn and drop hooks installed\n");
 }
 
@@ -546,11 +527,7 @@ static void ImportRegistry(void)
         return;
 
     ResolvePieces();
-    if (!pickup_registered)
-    {
-        ci_api->AddPickupHandler(OnPickup);
-        pickup_registered = 1;
-    }
+    ci_api->AddPickupHandler(OnPickup);
 }
 
 void ApStarPieces_On3DLoadStart(void)
@@ -559,15 +536,14 @@ void ApStarPieces_On3DLoadStart(void)
     if (ci_api == NULL)
         return;
 
-    // Held out of the registry entirely until its own item arrives, so a locked
-    // sphere has no ItemKind and cannot be spawned by any path. The title screen's
-    // attract demo is held out the same way: it is a City Trial round with a CPU in
-    // every slot, and a CPU assembling the star would award its check.
+    // A closed sphere is held out of the registry entirely, so it has no ItemKind and
+    // no path can spawn it. The attract demo is held out the same way - it is a real
+    // City Trial round with a CPU in every slot.
     int demo = Gm_IsAutoDemo();
     for (int i = 0; i < APSTARPIECE_NUM; i++)
     {
         if (piece_hash[i] != 0)
-            ci_api->SetEnabled(piece_hash[i], !demo && IsPieceEnabled(i));
+            ci_api->SetEnabled(piece_hash[i], !demo && ApStar_IsPieceEnabled(i));
     }
 }
 
@@ -587,10 +563,7 @@ void ApStarPieces_On3DLoadEnd(void)
     anchors_valid = 0;
     pending_mount_mask = 0;
     assembled_mask = 0;
-    sched.enabled = 0;
-    sched.next = 0;
-    sched.num = 0;
-    sched.req_spawn = 0;
+    memset(&sched, 0, sizeof(sched));
     for (int i = 0; i < APSTARPIECE_NUM; i++)
         piece_kind[i] = -1;
 
@@ -598,38 +571,43 @@ void ApStarPieces_On3DLoadEnd(void)
         !Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
-    // The kinds are assigned by custom_items at CityItemSpawn_Init, so they are
-    // only valid from here on and only for this scene. A locked sphere was never
-    // registered, so it has no kind and takes no delivery step - the set is only
-    // completable once all six of its items are in.
+    // custom_items assigns the kinds in CityItemSpawn_Init, so they are valid only
+    // from here and only for this scene. A closed sphere has no kind and takes no
+    // delivery step.
     int num = 0;
     for (int i = 0; i < APSTARPIECE_NUM; i++)
     {
-        if (piece_hash[i] == 0 || !IsPieceEnabled(i))
+        if (piece_hash[i] == 0 || !ApStar_IsPieceEnabled(i))
             continue;
         piece_kind[i] = ci_api->GetAssignedKind(piece_hash[i]);
         if (piece_kind[i] >= 0)
             sched.order[num++] = (u8)i;
     }
 
-    // Loaded whether or not a sphere is armed: a give collects one regardless of the
-    // gate, so a round with none in play still needs the tracker to show it.
+    // Loaded whether or not a sphere is armed: a give collects one regardless of the gate.
     HSD_Archive *icons = NULL;
     Gm_LoadGameFile(&icons, "ApPieceIcons");
     if (icons != NULL)
         icon_sets = Archive_GetPublicAddress(icons, "apPieceIcons_scene_models");
     ReadAnchors();
 
+    // A tracker that cannot build fails the same way every round, so it says so once.
+    static int tracker_reported;
+    int tracker_ok = (icon_sets != NULL && anchors_valid);
+    if (!tracker_ok && !tracker_reported)
+    {
+        tracker_reported = 1;
+        OSReport("[ApStarPieces] Sphere tracker unavailable\n");
+    }
+
     if (num == 0)
     {
-        OSReport("[ApStarPieces] No spheres armed, tracker %s\n",
-                 (icon_sets && anchors_valid) ? "ready" : "unavailable");
+        OSReport("[ApStarPieces] No spheres armed\n");
         return;
     }
     sched.num = (u8)num;
 
-    // Shuffle the delivery order, as vanilla rotates which of a machine's three
-    // parts comes first, and draw each step's threshold from its window.
+    // Shuffle, as vanilla rotates which of a machine's three parts comes first.
     for (int i = num - 1; i > 0; i--)
     {
         int j = HSD_Randi(i + 1);
@@ -643,11 +621,8 @@ void ApStarPieces_On3DLoadEnd(void)
         int hi = piece_progress_range[i][1];
         sched.progress[i] = 0.01f * (float)(lo + HSD_Randi(hi - lo));
     }
-    sched.enabled = 1;
-
-    OSReport("[ApStarPieces] %d of %d spheres armed, first at %d%% of the round, tracker %s\n",
-             num, APSTARPIECE_NUM, (int)(sched.progress[0] * 100.0f),
-             (icon_sets && anchors_valid) ? "ready" : "unavailable");
+    OSReport("[ApStarPieces] %d of %d spheres armed, first at %d%% of the round\n",
+             num, APSTARPIECE_NUM, (int)(sched.progress[0] * 100.0f));
 }
 
 void ApStarPieces_OnFrameStart(void)
@@ -663,9 +638,8 @@ void ApStarPieces_OnFrameStart(void)
     }
 }
 
-// Distance ahead of the machine to drop a sphere spawned outside the delivery
-// schedule, matching the granted-box offset so it lands in front of the rider to
-// drive into rather than on them.
+// Matches the granted-box offset, so a sphere lands in front of the rider to drive
+// into rather than on them.
 #define AP_PIECE_SPAWN_FORWARD 10.0f
 
 int ApStarPieces_SpawnPiece(int piece, int ply)
@@ -679,9 +653,8 @@ int ApStarPieces_SpawnPiece(int piece, int ply)
         return 0;
     }
 
-    // A sphere held out of the registry never got an ItemKind, and the registry
-    // is only written at CityItemSpawn_Init, so opening its gate mid-round is not
-    // enough to spawn it.
+    // The registry is only written at CityItemSpawn_Init, so opening a gate mid-round
+    // is not enough to spawn its sphere.
     int kind = ci_api->GetAssignedKind(piece_hash[piece]);
     if (kind < 0)
     {
@@ -718,8 +691,8 @@ int ApStarPieces_CollectPiece(int piece, int ply)
         return 0;
 
     // Per-round state cleared on every load, so there is nothing to collect into
-    // outside a City Trial round.
-    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
+    // outside a City Trial round - and the attract demo is one, with a CPU in every slot.
+    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL || Gm_IsAutoDemo())
         return 0;
     if (Ply_GetRiderGObj(ply) == NULL)
         return 0;
@@ -733,20 +706,13 @@ int ApStarPieces_Assemble(int ply)
     if (ply < 0 || ply >= 5)
         return 0;
 
-    // Assemble either hands the player to the cutscene or mounts them directly,
-    // and both want a City Trial round and a rider to act on.
-    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
+    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL || Gm_IsAutoDemo())
         return 0;
     if (ApStar_MachineKind() < 0 || Ply_GetRiderGObj(ply) == NULL)
         return 0;
 
     Assemble(ply);
     return 1;
-}
-
-int ApStarPieces_WasAssembled(void)
-{
-    return ever_assembled;
 }
 
 int ApStarPieces_AssembledThisRound(int ply)

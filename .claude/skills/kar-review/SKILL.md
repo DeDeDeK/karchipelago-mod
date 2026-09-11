@@ -201,8 +201,8 @@ For `CODEPATCH_REPLACECALL` / `REPLACEFUNC`:
 comment, and the address must not be a branch target from elsewhere in the
 function.
 
-Every patch address needs a named symbol in `GKYE01.map` and `link.ld`, and a
-comment naming the containing function and its address.
+Every patch site's containing function needs a named symbol in `GKYE01.map` and
+`link.ld`, and a comment beside the patch naming that function and its address.
 
 ## 6. API surface
 
@@ -292,6 +292,22 @@ Any address the mod newly depends on must be recorded, not just used:
   than added to `link.ld`.
 - Pushed to Ghidra with `uv run python scripts/ghidra/sync.py`.
 - `uv run python scripts/kar.py check` clean.
+
+An address written where a name already works is a finding:
+
+- A game function called through a cast address instead of its `link.ld`
+  symbol. `uv run python scripts/kar.py sym 0xADDR` says whether the address is
+  named and whether `link.ld` and a hoshi header already carry it; if it is
+  still `zz_`, `rename` and prototype it rather than casting.
+- `CODEPATCH_REPLACEFUNC` targets a function entry, so it takes the name -
+  `CODEPATCH_REPLACEFUNC(Machine_GivePatch, PatchCap_GivePatch)`, never the hex.
+- A global reached by casting an address in mod code instead of the
+  `static TYPE *name = (TYPE*)0xADDR;` declaration in a hoshi header.
+
+A literal address is correct only where the site has no symbol of its own: the
+mid-function `CODEPATCH_REPLACECALL` and `REPLACEINSTRUCTION` targets, hook exit
+addresses, and `CODEPATCH_HOOKCREATE`/`HOOKAPPLY`, whose macro pastes the
+address into an asm label and so cannot take a name.
 
 A raw hex offset into a game struct is a finding of the same kind - an address
 the mod depends on that nothing records. Name the member in the hoshi struct

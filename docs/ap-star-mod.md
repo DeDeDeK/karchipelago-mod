@@ -78,20 +78,23 @@ Consumers import it with
 |---|---|
 | `GetMachineKind` | the registered `MachineKind`, or -1 |
 | `GetPieceName` | one sphere's display name, which is its archive's `CustomItemDesc.name` |
-| `SetPieceEnabled` / `IsPieceEnabled` | one sphere's gate bit |
-| `SetPieceMask` / `GetPieceMask` | all six at once, one bit per `APStarPieceKind` |
-| `AddAssembleHandler` / `Remove...` | called as a player completes a set |
-| `WasAssembled` | boot-sticky, 1 once anyone has assembled |
+| `SetPieceMask` | the sphere gate, one bit per `APStarPieceKind` |
+| `AddAssembleHandler` | called as a player completes a set |
 | `AssembledThisRound` | per-player, cleared on every 3D load |
 | `SpawnPiece` | drop one sphere in front of a machine |
 | `CollectPiece` | add one sphere to a player's set with no pickup |
 | `Assemble` | award the star outright, spheres not required |
 
-The gate starts at `AP_STAR_PIECE_ALL`. A closed sphere is held out of the item registry
+The gate starts with all six bits set. A closed sphere is held out of the item registry
 entirely, so it never receives an `ItemKind` and no path can spawn it; a round arms only
 the open ones and a partial set delivers but cannot complete. The gate is read at 3D load
 start, because `custom_items` registers its items in `CityItemSpawn_Init`'s epilogue and
 that is the last moment a held item can be skipped.
+
+A sphere with no `ItemKind` also stays out of the drop pool. `CollectPiece` ignores the
+gate, so a player can hold a sphere that was never registered this round; there is no item
+to throw for it, and putting it in the pool would throw `ITKIND_GORDO` and leave the bit
+set, so the rider's drop quota would never drain.
 
 `CollectPiece` and `Assemble` are the collection path entered from outside it, and neither
 consults the gate: a sphere with no `ItemKind` this round can still be collected, and the
@@ -102,9 +105,10 @@ rather than about what a player can be handed.
 `Assemble` is the set-completion path itself, entered without the set: the cutscene (or
 the mount and completion sounds when it cannot run), the assembled flags and the assemble
 handlers, with the player's collected spheres cleared the way a completed set clears them.
-It answers 0 outside a City Trial round, with the star unregistered, or with the player not
-riding. A consumer awarding the star as an item goes through it rather than through the
-machine registry, so everything watching the assembly still sees one.
+It answers 0 outside a City Trial round - the title screen's attract demo included, since
+that is a real City Trial round with a CPU in every slot - with the star unregistered, or
+with the player not riding. A consumer awarding the star as an item goes through it rather
+than through the machine registry, so everything watching the assembly still sees one.
 
 The API is a gate, not an unlock: whether a sphere is earned, bought or awarded is the
 consumer's idea, and all this mod knows is which spheres are in play. It says nothing to
@@ -151,7 +155,7 @@ the machine-unlock mask, and the star's unlock item falls in the appended range 
 ## Settings
 
 The mod carries its own `ModDesc` settings page, **Archipelago Star**, with one toggle and
-its own hoshi save slot. **Star Shot** (default on) is whether a full-charge release fires a
+its own hoshi save slot. **Sphere Shot** (default on) is whether a full-charge release fires a
 pod.
 
 `ap_star_settings.handling_enabled` gates the handling ladder, and nothing on the page is

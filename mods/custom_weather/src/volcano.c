@@ -52,12 +52,6 @@
 #define VOLC_SCALE_MIN     0.5f
 #define VOLC_SCALE_MAX     3.5f
 
-// Per-kind data lives at 0x8055a9a8[kind], registered in one pass when the first
-// rider is created from the ability archive. Between scene load (the table is
-// zeroed) and that point every slot is NULL, and Projectile_Create dereferences the
-// slot without checking.
-static void **stc_proj_kind_data = (void **)0x8055a9a8;
-
 // Projectile kinds per theme. A volley picks uniformly within the theme's list.
 // Every kind here spawns and flies with no owner rider; see VolcanoTheme for the
 // ones that cannot.
@@ -202,7 +196,7 @@ static int PickKind(void)
 
     const ThemeKinds *t = &theme_table[theme];
     int kind = t->kinds[HSD_Randi(t->count)];
-    if (stc_proj_kind_data[kind] == NULL)
+    if (proj_kind_data[kind] == NULL)
         return -1;
     return kind;
 }

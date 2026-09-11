@@ -93,7 +93,16 @@ delivers their parts on schedule; the AP spheres take the carriers left over.
 
 The schedule is rolled per round in `ApStarPieces_On3DLoadEnd`, mirroring
 `LegendaryPieces_Init` (`0x800ecfac`): the unlocked pieces are shuffled into a delivery
-order, and each step draws a match-progress threshold out of its own window.
+order, and each step draws a match-progress threshold out of its own window. The six
+windows, in percent of the round, are the n-th step's - not the n-th sphere's, since the
+order is shuffled:
+
+| Step | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| Window | 10-20 | 20-32 | 32-45 | 45-58 | 58-70 | 70-85 |
+
+A round with fewer spheres in play takes the first rows, so a short set still delivers
+early.
 
 Vanilla spreads three parts over 15-30 / 25-50 / 50-80 and rolls a flat 30% per machine
 for whether that machine's set appears at all. The AP set is always armed, so a full round
@@ -153,8 +162,15 @@ single `ItemKind` and `Box_OutcomeLogic` (`0x80250ae8`) spawns one item from it.
 
 The set arms only in `CITYMODE_TRIAL`. Free Run and the stadiums leave it disabled, and so
 does the title screen's attract demo - `Gm_IsAutoDemo()`, a real City Trial round run inside
-`MJRKIND_TITLE` with a CPU in every slot. Nothing in the assembly path asks who the player
-is, so a CPU completing the set there would award the star's location check.
+`MJRKIND_TITLE` with a CPU in every slot. The demo is held out at four points: no sphere is
+registered for it, no schedule is rolled, and `CollectPiece` and `Assemble` both refuse it,
+so neither an item give nor a debug spawn can complete a set there.
+
+Outside the demo the assembly path asks nothing about who the player is, and it should not -
+a CPU assembling the star gets the cutscene and the machine exactly as it gets Hydra's. So a
+consumer that only cares about human players filters on the `ply` its assemble handler is
+given; the handler is the only signal, and `AssembledThisRound` the only other read, so there
+is no boot-wide flag to poll that would hide the distinction.
 
 For testing, `archipelago_debug` drops one sphere in front of player 1 on each **R + D-Pad
 Down**, walking the six in order, so six presses and six drive-overs run the whole assembly
@@ -175,8 +191,7 @@ the spheres that are in, taking the first rows of the delivery schedule, so a pa
 still delivers - it just cannot complete.
 
 Every bit of the gate starts set, so the mod on its own assembles the star the way Hydra
-and Dragoon assemble. A consumer narrows it through `ApStarAPI.SetPieceEnabled` or
-`SetPieceMask`. The API is phrased as a gate rather than an unlock, because whether a
+and Dragoon assemble. A consumer narrows it through `ApStarAPI.SetPieceMask`. The API is phrased as a gate rather than an unlock, because whether a
 sphere is earned, bought or awarded is the consumer's idea - all the mod knows is which
 spheres are in play, and announcing anything about one arriving belongs to whatever
 narrowed the gate.
@@ -217,7 +232,10 @@ trip mid-trial restarts the collection - the same scope the vanilla sets have.
 Each pickup climbs `Ply_OnLegendaryPieceCollect` (`0x8027a4e8`), whose ladder is written
 for a three-piece set: counts 1, 2 and 3 play rising tones, and 4 plays the pair of
 sounds the assembly cinematic uses on completion. Six pieces climb the same three rungs
-two at a time, and the sixth plays the completion pair.
+two at a time. The sixth plays no rung of its own - it hands off to the cinematic, which
+plays the completion pair itself 150 frames later; rung 4 is used only on the fallback
+path, where the cinematic could not run and the mount and the sounds are both owed
+directly.
 
 ### Dropping a sphere
 
@@ -242,13 +260,19 @@ index.
 
 **The quota.** `allups_dropped` is capped against
 `Ply_GetHydraCollection + Ply_GetDragoonCollection`, so a rider holding only spheres queues
-no legendary drop at all and `Rider_TickDropAllUp` is never dispatched. The seam adds
-`Popcount(piece_mask[ply])` to the Dragoon half of that sum, which is the whole of it - the
-quota and the masks then drain together, one decrement per successful throw.
+no legendary drop at all and `Rider_TickDropAllUp` is never dispatched. The seam adds the
+rider's *droppable* sphere count to the Dragoon half of that sum, which is the whole of it -
+the quota and the masks then drain together, one decrement per successful throw.
+
+Droppable means the sphere has an `ItemKind` this round. `CollectPiece` ignores the gate, so
+a player can hold a sphere that was never registered, and there is no item to throw for one.
+Counting it would put it in the roll below, which would then fall through to kind 54 -
+`ITKIND_GORDO` - and throw a Gordo while leaving the sphere's bit set, so the quota would
+never drain and the rider would keep throwing one per cooldown for the rest of the round.
 
 **The roll.** Vanilla has already picked uniformly among the pieces in its two masks by the
-time the kind is stored. The hook re-rolls over that count plus the rider's spheres, so
-every piece held is equally likely to be the one that comes out. It reads a kind of **54**
+time the kind is stored. The hook re-rolls over that count plus the rider's droppable
+spheres, so every piece that can be thrown is equally likely to be the one that comes out. It reads a kind of **54**
 as "no vanilla piece": `local_68[0]` is still `-1` when the candidate list is empty and the
 code adds `0x37` regardless. Vanilla never throws that value because its quota is zero when
 no piece is held, and putting spheres in the quota is exactly what makes it reachable.
@@ -285,7 +309,7 @@ the per-player-count spacing (2.5 / 2.4 / 2.1 units) for free.
 
 An icon is created exactly the way a vanilla one is: `HUD_CreateElement` on the
 collecting player, relinked to `GAMEPLINK_PAUSEHUD` with `GObj_SetPLink`, given element
-data of kind `0x3b`, and positioned at its anchor. The vanilla tracker diffs the piece
+data of `HUDKIND_LEGENDARYPIECE` (59), and positioned at its anchor. The vanilla tracker diffs the piece
 mask against a cached copy once a frame rather than reacting to the pickup; this does the
 same, so no GObj is created from inside the collision call that collected the sphere.
 The diff runs both ways: a dropped sphere clears its bit, its icon is destroyed and the

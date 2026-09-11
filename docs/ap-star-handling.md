@@ -135,5 +135,5 @@ machine as shipped on its next tick rather than freezing it on whatever it was d
 setting it puts it straight onto the profile its pods call for. A machine that never fired
 is never pointed at a profile `vcData` at all.
 
-The **Star Shot** toggle gates the firing itself. With shots off the ring never loses a pod,
+The **Sphere Shot** toggle gates the firing itself. With shots off the ring never loses a pod,
 so the star stays on the first profile whatever the flag says.

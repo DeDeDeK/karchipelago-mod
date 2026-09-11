@@ -13,11 +13,17 @@
 #include "ap_star_api.h"
 #include "ap_announce.h"
 
+_Static_assert((int)AP_STAR_PIECE_NUM == (int)APSTARPIECE_NUM,
+               "APStarPiece and APStarPieceKind must number the same spheres");
+
 static const ApStarAPI *ap_star_api;
 
+// ap_star fires this for every rider, CPUs included, the way vanilla gives a CPU the
+// Hydra cutscene. The objective is the player's, so a CPU set does not claim it.
 static void OnAssemble(int ply)
 {
-    (void)ply;
+    if (Ply_GetPKind(ply) != PKIND_HMN)
+        return;
     APCheckDetect_Observe(APCK_ASSEMBLE_AP_STAR);
 }
 
@@ -38,8 +44,8 @@ void GateApStar_Resolve(void)
 
 void GateApStar_PushMask(void)
 {
-    // ap_star sorts before us, so the import already answers during our own OnBoot -
-    // earlier than hoshi hands us a save. OnSaveLoaded pushes the real mask.
+    // The box and sphere masks both push through here, and GateBoxes_UnlockBox can
+    // run before hoshi hands us a save.
     if (ap_star_api == NULL || ap_save == NULL)
         return;
 
@@ -51,7 +57,7 @@ void GateApStar_PushMask(void)
 
 int GateApStar_UnlockPiece(int piece)
 {
-    if (piece < 0 || piece >= AP_STAR_PIECE_NUM)
+    if (piece < 0 || piece >= AP_STAR_PIECE_NUM || ap_save == NULL)
         return 0;
 
     ap_save->ap_star_piece_unlocked_mask |= (u8)(1 << piece);
@@ -132,11 +138,6 @@ int GateApStar_GiveStar(void)
         }
     }
     return AP_ITEM_RETRY;
-}
-
-int GateApStar_WasAssembled(void)
-{
-    return ap_star_api ? ap_star_api->WasAssembled() : 0;
 }
 
 int GateApStar_AssembledThisRound(int ply)
