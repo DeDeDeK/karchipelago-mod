@@ -72,7 +72,7 @@ The three L/R hooks sit at each cycler's convergence point, where all vanilla pa
 
 ## CPU Colors
 
-CPUs get a **random unlocked color** in every mode via `GateColors_RandomUnlockedColorExcept()`. It builds the unlocked set from the mask, drops the colors the other visible slots already show, and `HSD_Randi`-picks from what is left; if every unlocked color is taken it repeats one rather than failing, and an empty mask falls back to 0. `GateColors_RandomUnlockedColor()` is the no-exclusions wrapper. Without any of this a CPU would inherit the per-slot `{0,1,2,3}` default - validated to unlocked, but the same every race - and without the exclusion pass several CPUs would land on the same color whenever the unlocked set is small, which vanilla's per-slot seeding never did.
+CPUs get a **random unlocked color** in every mode via `GateColors_RandomUnlockedColorExcept()`. It builds the unlocked set from the mask, drops the colors the other visible slots already show, and `HSD_Randi`-picks from what is left; if every unlocked color is taken it repeats one rather than failing, and an empty mask falls back to 0. Without any of this a CPU would inherit the per-slot `{0,1,2,3}` default - validated to unlocked, but the same every race - and without the exclusion pass several CPUs would land on the same color whenever the unlocked set is small, which vanilla's per-slot seeding never did.
 
 | Mode | Where | Kind field | Color field |
 |------|-------|-----------|-------------|
@@ -95,6 +95,9 @@ Both Top Ride hooks land on `stw r31, 12(r1)`, past the `mflr`/`stw` LR save and
 A CPU takes a fresh color **only on the frame its panel's kind becomes 2**. Cycling a CPU panel's color with L/R never triggers one, so a color the player sets by hand stands until the panel is toggled away from CPU and back. Both screens let the player do this: City Trial's input path reaches `CitySelect_ChangeColor` when `x215` is 0 for the player's own slot *or* 2 for any slot (0x80034980), and `CSS_topRide_colorChanger` takes the plain-store path for panel kinds 2 and 3 (0x8002a5bc).
 
 City Trial gets this for free: the hook fires only on the 3 -> 2 transition, so a panel that is *already* CPU when the screen loads keeps the color it has, and a manual pick survives leaving and re-entering - `x215` and `ply_color` persist together, both reset by the same guarded init blocks, so they never disagree. Top Ride's mirror is seeded from the kinds the lobby opens with, for the same effect within a session. Top Ride has nothing to preserve across entries: `TopRide_InitSelectData` (0x8002cfd8) unconditionally reopens every panel as CPU with `color[i] = i` in its 0..3 loop at 0x8002d03c, and `GateMachines_FixupTRInit` at 0x8002d070 gives those panels their random colors right after.
+
+The Air Ride CPU hook at 0x800236a8 in `loadCPU` passes the loop's slot index from `r28`
+(`clrlwi 3, 28, 24`) and writes `airride_select_ply.color[slot]` by name.
 
 Air Ride re-rolls rather than preserves, matching vanilla: `loadCPU` fills the CPU slots only when every other slot is inactive (the guard at 0x80023624-0x80023680) and re-randomizes each one's machine as well as its color, so a re-confirm regenerates the whole CPU set.
 

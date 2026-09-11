@@ -13,19 +13,14 @@
 
 #define DEATHLINK_PLY_MAX 5
 
-// Stops the send hooks echoing the receive path's own kills back out. This is a
-// countdown rather than a guard around the kill call because the HP-death path
-// is asynchronous: Ply_SetHP only zeroes HP, the machine is not flagged dead
-// until a later machine-think frame sets is_dead, and the send hook inside
-// Rider_CheckToDieOnMachine only trips after that. 60 frames is far short of the
-// 150-frame respawn timer, so it cannot swallow a genuine death.
+// A countdown, not a guard around the kill call: the HP-death path is asynchronous,
+// so the send hook trips frames after Ply_SetHP. Far short of the 150-frame respawn
+// timer, so it cannot swallow a genuine death.
 #define DEATHLINK_SUPPRESS_FRAMES 60
 
 static u8 deathlink_suppress[DEATHLINK_PLY_MAX];
 
-// Both directions are narrated locally under Messages -> Local -> Links, off by
-// default: a client attached to the same event posts a line naming the other
-// player a poll later.
+// Behind Messages -> Local -> Links, off by default.
 static void Announce(const char *suffix)
 {
     if (APAnnounce_LocalEnabled(APLOCAL_LINK))
@@ -80,16 +75,16 @@ static void SendDeathLink(int ply, const char *cause)
 }
 
 // Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0, where
-// Machine_IsDead returns true. Fall deaths use a different bit in md->x0C35 and
-// do not reach here.
+// Rider_IsMachineDead returned true. Fall deaths use a different bit in md->x0C35
+// and do not reach here.
 static void DeathLink_OnHpDeath(RiderData *rd)
 {
     SendDeathLink(rd->ply, "HP");
 }
 CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", DeathLink_OnHpDeath, "", 0)
 
-// Hook inside Machine_SetFallDead (0x801e6540), where a machine falls out of
-// bounds. r31 = MachineData*, rider_gobj known non-null.
+// Hook at 0x801e6540, inside Machine_SetFallDead (0x801e6520), where a machine falls
+// out of bounds. r31 = MachineData*, rider_gobj known non-null.
 // Clobbered: stw r4, 0x1b48(r31)
 static void DeathLink_OnFallDeath(MachineData *md)
 {
@@ -169,6 +164,11 @@ static void DeathLink_PerFrame(GOBJ *g)
         killed++;
     }
 
+    // Nothing killable this frame (every human on foot, or none in the round):
+    // leave the flag set and retry rather than swallowing the death.
+    if (!killed)
+        return;
+
     OSReport("[DeathLink] Received - killed %d human(s)\n", killed);
     Announce(" received!");
     ap_data->deathlink_receive = 0;
@@ -184,7 +184,7 @@ void DeathLink_On3DLoadEnd()
 // Top Ride send hook for the SAND-course sand-pit enemy, which swallows a kirby
 // and spits it out via the KirbyDoodlebugOut wrapper (vt+0xD0). This call site
 // catches only the sand-pit eject, not Doodlebug-item ejection (same wrapper at
-// 0x802e2804). r31 = kirby.
+// 0x802e2804). The site is in TopRideSandPit_Update (0x80331564); r31 = kirby.
 static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
 {
     if (!DeathLinkSendAllowed(kirby->player_slot))
@@ -254,10 +254,8 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
 
         SuppressSend(kirby->player_slot);
 
-        // Zero charge.velocity before AND after apply() so the state produces a
-        // static stun with no knockback: pre-zero pre-empts setters that scale
-        // it, post-zero overrides setters that overwrite it (e.g. a NaN from
-        // normalizing a zero vector).
+        // Zeroed on both sides of apply() so the state is a static stun: the pre-zero
+        // pre-empts setters that scale velocity, the post-zero those that overwrite it.
         Vec3 *vel = &kirby->charge.velocity;
         vel->X = vel->Y = vel->Z = 0.0f;
         apply(kirby);
@@ -265,7 +263,10 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
         hits++;
     }
 
-    OSReport("[DeathLink] Received (TR) - applied %s to %d humans\n",
+    if (!hits)
+        return;
+
+    OSReport("[DeathLink] Received (TR) - applied %s to %d human(s)\n",
              deathlink_state_names[idx], hits);
     Announce(" received!");
     ap_data->deathlink_receive = 0;

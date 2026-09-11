@@ -15,7 +15,7 @@ Each row is 0x10 bytes: an `ItemKind` followed by six `u16` weight columns, one 
 
 Star pole, event pillar, volcano walls and houses all share the destructible pool; only Dyna Blade keys off `chance_dyna`.
 
-**The array is indexed positionally by other code, so rows must never be reordered or compacted.** Gating a kind off means zeroing all six of its columns in place - that is what `GatePatches_FilterEventDropTables` (`gate_patches.c`), `GateAbilities_FilterEventDropTables` (`gate_abilities.c`) and `GateItems_FilterEventDropTables` (`gate_items.c`) do, all driven from `item_spawn_filter.c`. `custom_items` adds rows by copying the stage's rows into a static array, appending after them, and repointing `item_desc->event_source_drop`/`_num` at the copy (`item_registry.c`); the per-event re-bias overwrites that pointer, so it is re-applied by `CustomItemRegistry_ReinjectPools`.
+**The array is indexed positionally by other code, so rows must never be reordered or compacted.** Gating a kind off means zeroing all six of its columns in place - that is what `item_spawn_filter.c` does in one pass, over every row the archipelago mod's combined locked predicate (abilities, patches, individual items) rejects. `custom_items` adds rows by copying the stage's rows into a static array, appending after them, and repointing `item_desc->event_source_drop`/`_num` at the copy (`item_registry.c`); the per-event re-bias overwrites that pointer, so it is re-applied by `CustomItemRegistry_ReinjectPools`.
 
 ## Drop Pipeline
 

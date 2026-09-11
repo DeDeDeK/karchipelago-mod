@@ -4,8 +4,8 @@
 #include "archipelago_api.h"
 
 void GateItems_OnBoot();
-void GateItems_FilterSpawnTables();
-void GateItems_FilterEventDropTables();
+// 1 if it_kind is individually gated and still locked.
+int GateItems_IsItemLocked(u8 it_kind);
 void GateItems_EnsureAllUpInSpawnPools();
 int GateItems_UnlockItem(ItemUnlockKind kind);
 

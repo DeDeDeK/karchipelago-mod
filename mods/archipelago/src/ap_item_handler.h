@@ -13,8 +13,6 @@ typedef enum APItemResult
 } APItemResult;
 
 int APItems_HandleItem(uint ap_item_id);
-int APItems_CheckMailbox();
-void APItems_PerFrame(GOBJ *g);
 void APItems_OnSceneChange();
 
 // Append an AP item ID to the unprocessed queue. Returns 1 on success, 0 if full.

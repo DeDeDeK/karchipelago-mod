@@ -48,19 +48,19 @@ On the success path the replacement reproduces the vanilla sequence and addition
 
 ## Spawn Table Filtering
 
-`item_spawn_filter.c` owns the two spawn-table hook points; `FilterAllSpawnTables()` calls each gate file's filters in a fixed order:
+`item_spawn_filter.c` owns the two spawn-table hook points and the compaction itself; `FilterAllSpawnTables()` runs:
 
 1. `GateItems_EnsureAllUpInSpawnPools()` - injects All-Up (active only under the Max Stats Insanity CT goal).
-2. Box pools (`grBoxGeneObj`): `GateAbilities_FilterSpawnTables()` -> `GatePatches_FilterSpawnTables()` -> `GateItems_FilterSpawnTables()`.
-3. Event drop pools (`grBoxGeneInfo`): `GateAbilities_FilterEventDropTables()` -> `GatePatches_FilterEventDropTables()` -> `GateItems_FilterEventDropTables()`.
+2. Box pools (`grBoxGeneObj`): one stable two-pointer compaction pass, dropping every kind the combined locked predicate rejects.
+3. Event drop pools (`grBoxGeneInfo`): one pass zeroing all six chance columns of every rejected row, which cannot compact because callers index the table directly.
 4. `GoalMaxStatsCT_ApplyDropBias()` - biases +1 patch / All-Up weights (Max Stats Insanity goal only).
 
-The two `GateAbilities_*` filters always run first within their group. Box pools are compacted (`FilterCopyItemsFromPool`, a stable two-pointer); event-drop entries stay in place with all six chance columns zeroed.
+Each gate file contributes just a predicate, and this one is `GateAbilities_IsItemLocked(it_kind)`: `Ability_ItKindToCopyKind` maps the kind to a `CopyKind` and the answer is whether that ability is still locked. A kind that is not a copy item is never locked by it, so the three predicates compose with an `||`.
 
 | Hook address | Function (entry) | Clobbered instruction | When |
 |-------------|-------------|----------------------|------|
 | 0x800eb558 | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` | After initial population |
-| 0x800ed7f0 | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `lwz r0, 0x14(r1)` | After event reinit |
+| 0x800ed7f4 | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `mtlr r0` | After event reinit |
 
 Both are function-epilogue hooks, so calling C with no arguments is safe. `ItemSpawnFilter_On3DLoadEnd()` is the fallback for non-CT modes where these hooks don't fire.
 

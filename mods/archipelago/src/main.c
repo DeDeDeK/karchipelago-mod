@@ -23,7 +23,8 @@
 #include "fake_patches.h"
 #include "patch_item.h"
 #include "checklist_rewards.h"
-#include "check_detection.h"
+#include "ap_checks.h"
+#include "ap_goal.h"
 #include "ap_checklist.h"
 #include "ap_check_detect.h"
 #include "gate_ap_star.h"
@@ -36,7 +37,6 @@
 #include "onfoot_zoom.h"
 #include "gate_boxes.h"
 #include "gate_items.h"
-#include "gate_machines.h"
 #include "gate_airride_stages.h"
 #include "gate_topride_stages.h"
 #include "gate_topride_items.h"
@@ -84,35 +84,76 @@ static const TextBoxAPI tb_stub = {
 const TextBoxAPI *tb_api = &tb_stub;
 
 // The AP client hardcodes an offset for every APData field and reads them by
-// address, so a silent layout shift desyncs it with no error anywhere. These pin
-// the block boundaries and both edges of every per-checklist-mode array; they and
-// the client's offset table move together, never one alone.
+// address, so a silent layout shift desyncs it with no error anywhere. Every field the
+// client addresses is pinned, not just the block boundaries - a reorder inside a run of
+// same-width fields is otherwise invisible. These and the client's offset table move
+// together, never one alone.
+_Static_assert(offsetof(APData, energy_balance) == 0x000, "ENERGY_BALANCE");
+_Static_assert(offsetof(APData, energy_deposit_total) == 0x008, "ENERGY_DEPOSIT_TOTAL");
+_Static_assert(offsetof(APData, energy_withdraw_total) == 0x00C, "ENERGY_WITHDRAW_TOTAL");
+_Static_assert(offsetof(APData, deathlink_receive) == 0x010, "DEATHLINK_RECEIVE");
+_Static_assert(offsetof(APData, deathlink_send) == 0x014, "DEATHLINK_SEND");
+_Static_assert(offsetof(APData, traplink_receive) == 0x018, "TRAPLINK_RECEIVE");
+_Static_assert(offsetof(APData, traplink_send) == 0x01C, "TRAPLINK_SEND");
+_Static_assert(offsetof(APData, incoming_item_id) == 0x020, "INCOMING_ITEM_ID");
+_Static_assert(offsetof(APData, item_received_index) == 0x024, "ITEM_RECEIVED_INDEX");
+_Static_assert(offsetof(APData, game_ready) == 0x028, "GAME_READY");
+_Static_assert(offsetof(APData, options_valid) == 0x02C, "OPTIONS_VALID");
 _Static_assert(offsetof(APData, options) == 0x030, "APSlotOptions block moved");
+_Static_assert(offsetof(APData, options.death_link_enabled) == 0x030, "OPTION_DEATH_LINK_ENABLED");
+_Static_assert(offsetof(APData, options.energy_link_enabled) == 0x034, "OPTION_ENERGY_LINK_ENABLED");
+_Static_assert(offsetof(APData, options.trap_link_enabled) == 0x038, "OPTION_TRAP_LINK_ENABLED");
 _Static_assert(offsetof(APData, options.reveal_checklists) == 0x03C, "OPTION_REVEAL_CHECKLIST_AIRRIDE");
 _Static_assert(offsetof(APData, options.reveal_checklists[AP_CHECKLIST_ROW]) == 0x048, "OPTION_REVEAL_CHECKLIST_ARCHIPELAGO");
 _Static_assert(offsetof(APData, options.goal) == 0x04C, "OPTION_GOAL_AIRRIDE");
 _Static_assert(offsetof(APData, options.goal[AP_CHECKLIST_ROW]) == 0x058, "OPTION_GOAL_ARCHIPELAGO");
 _Static_assert(offsetof(APData, options.checklist_amount) == 0x05C, "OPTION_CHECKLIST_AMOUNT_AIRRIDE");
+_Static_assert(offsetof(APData, options.checklist_amount[AP_CHECKLIST_ROW]) == 0x068, "OPTION_CHECKLIST_AMOUNT_ARCHIPELAGO");
+_Static_assert(offsetof(APData, options.city_trial_patch_cap_min) == 0x06C, "OPTION_CT_PATCH_CAP_MIN");
+_Static_assert(offsetof(APData, options.city_trial_patch_cap_max) == 0x070, "OPTION_CT_PATCH_CAP_MAX");
+_Static_assert(offsetof(APData, options.spawn_rate_min) == 0x074, "OPTION_SPAWN_RATE_MIN");
 _Static_assert(offsetof(APData, options.goal_checks) == 0x078, "OPTION_GOAL_CHECKS_AIRRIDE");
 _Static_assert(offsetof(APData, options.goal_checks[AP_CHECKLIST_ROW]) == 0x0A8, "OPTION_GOAL_CHECKS_ARCHIPELAGO");
-_Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B8, "gating block moved");
+_Static_assert(offsetof(APData, options.machine_gating_enabled) == 0x0B8, "OPTION_MACHINE_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.ability_gating_enabled) == 0x0BC, "OPTION_ABILITY_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.event_gating_enabled) == 0x0C0, "OPTION_EVENT_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.patch_gating_enabled) == 0x0C4, "OPTION_PATCH_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.item_gating_enabled) == 0x0C8, "OPTION_ITEM_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.box_gating_enabled) == 0x0CC, "OPTION_BOX_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.airride_stage_gating_enabled) == 0x0D0, "OPTION_AIRRIDE_STAGE_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.topride_stage_gating_enabled) == 0x0D4, "OPTION_TOPRIDE_STAGE_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.topride_item_gating_enabled) == 0x0D8, "OPTION_TOPRIDE_ITEM_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.color_gating_enabled) == 0x0DC, "OPTION_COLOR_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.stadium_gating_enabled) == 0x0E0, "OPTION_STADIUM_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.base_ability_gating_enabled) == 0x0E4, "OPTION_BASE_ABILITY_GATING_ENABLED");
+_Static_assert(offsetof(APData, options.checklist_reward_placed_types) == 0x0E8, "OPTION_CHECKLIST_REWARD_PLACED_TYPES");
 _Static_assert(offsetof(APData, options.goal_forced_gates) == 0x0EC, "OPTION_GOAL_FORCED_GATES");
 _Static_assert(offsetof(APData, options.ap_patches) == 0x0F0, "OPTION_AP_PATCHES");
+_Static_assert(sizeof(APSlotOptions) == 0x0C8, "APSlotOptions is 200 bytes including its tail padding");
 _Static_assert(offsetof(APData, location_data_valid) == 0x0F8, "LOCATION_DATA_VALID");
 _Static_assert(offsetof(APData, locations) == 0x0FC, "LOCATIONS_AIRRIDE");
+_Static_assert(offsetof(APData, locations[GMMODE_TOPRIDE]) == 0x158, "LOCATIONS_TOPRIDE");
+_Static_assert(offsetof(APData, locations[GMMODE_CITYTRIAL]) == 0x1B4, "LOCATIONS_CITYTRIAL");
 _Static_assert(offsetof(APData, sent_checks) == 0x210, "SENT_CHECKS_AIRRIDE");
+_Static_assert(offsetof(APData, sent_checks[GMMODE_TOPRIDE]) == 0x220, "SENT_CHECKS_TOPRIDE");
+_Static_assert(offsetof(APData, sent_checks[GMMODE_CITYTRIAL]) == 0x230, "SENT_CHECKS_CITYTRIAL");
 _Static_assert(offsetof(APData, sent_checks[AP_CHECKLIST_ROW]) == 0x240, "SENT_CHECKS_ARCHIPELAGO");
 _Static_assert(offsetof(APData, client_backfill) == 0x250, "CLIENT_BACKFILL_AIRRIDE");
+_Static_assert(offsetof(APData, client_backfill[GMMODE_TOPRIDE]) == 0x260, "CLIENT_BACKFILL_TOPRIDE");
+_Static_assert(offsetof(APData, client_backfill[GMMODE_CITYTRIAL]) == 0x270, "CLIENT_BACKFILL_CITYTRIAL");
 _Static_assert(offsetof(APData, client_backfill[AP_CHECKLIST_ROW]) == 0x280, "CLIENT_BACKFILL_ARCHIPELAGO");
 _Static_assert(offsetof(APData, goal_complete) == 0x290, "GOAL_COMPLETE");
 _Static_assert(offsetof(APData, goal_satisfied_mask) == 0x291, "GOAL_SATISFIED_MASK");
 _Static_assert(CHECKLIST_MODE_NUM <= 8, "goal_satisfied_mask is one byte");
 _Static_assert(offsetof(APData, deathlink_menu_enabled) == 0x294, "DEATHLINK_MENU_ENABLED");
+_Static_assert(offsetof(APData, energylink_menu_enabled) == 0x298, "ENERGYLINK_MENU_ENABLED");
+_Static_assert(offsetof(APData, traplink_menu_enabled) == 0x29C, "TRAPLINK_MENU_ENABLED");
 _Static_assert(offsetof(APData, text_pending) == 0x2A0, "TEXT_PENDING");
 _Static_assert(offsetof(APData, text_menu_mask) == 0x2A4, "TEXT_MENU_MASK");
 _Static_assert(offsetof(APData, text_msg) == 0x2A8, "TEXT_MSG");
 _Static_assert(offsetof(APData, ap_patch_checks) == 0x3A8, "AP_PATCH_CHECKS");
 _Static_assert(offsetof(APData, ap_patch_backfill) == 0x3E8, "AP_PATCH_BACKFILL");
+_Static_assert(offsetof(APData, backfill_valid) == 0x428, "BACKFILL_VALID");
 
 int ap_checklist_mode = GMMODE_NUM;
 int ap_regrant_quiet = 0;
@@ -120,8 +161,11 @@ int ap_regrant_quiet = 0;
 ModDesc mod_desc = {
     .name = "KARchipelago",
     .author = "DeDeDK",
-    .version.major = ARCHIPELAGO_API_MAJOR,
-    .version.minor = ARCHIPELAGO_API_MINOR,
+    .affects_gameplay = 1,
+    // Hoshi reads these to decide whether a backed-up save block is still readable,
+    // so they track APSave's shape, not the exported API's.
+    .version.major = APSAVE_VERSION_MAJOR,
+    .version.minor = APSAVE_VERSION_MINOR,
     .save_size = sizeof(struct APSave),
     .save_ptr = 0,                              // Updated by hoshi at runtime, read-only
     .option_desc = &ModSettings,
@@ -137,7 +181,6 @@ ModDesc mod_desc = {
     .On3DExit = On3DExit,
     .OnSceneChange = OnSceneChange,
     .OnFrameStart = OnFrameStart,
-    .OnFrameEnd = OnFrameEnd,
     .OnTopRideLoadEnd = OnTopRideLoadEnd,
 };
 
@@ -152,9 +195,8 @@ void OnBoot()
     memset(ap_data, 0, sizeof(APData));
     OSReport("[Main] APData at 0x%08x (%d bytes)\n", (uint)ap_data, sizeof(APData));
 
-    // Static address the Python client polls to find the struct.
-    APData **static_ptr = (APData **)0x805d52d4;
-    (*static_ptr) = ap_data;
+    APData **anchor = (APData **)AP_DATA_ANCHOR;
+    (*anchor) = ap_data;
 
     // Give the shared hoshi memory-card file an Archipelago tile. The art is loaded
     // from disc when the save is created, so no image is baked into this mod. Banner
@@ -164,8 +206,10 @@ void OnBoot()
 
     ChecklistRewards_OnBoot();
 
-    // After ChecklistRewards_OnBoot - they patch related code.
-    CheckDetection_OnBoot();
+    // After ChecklistRewards_OnBoot: both patch Checklist_ProcessUnlock, and the
+    // reward hooks have to be in place before the unlock interceptions run.
+    APChecks_OnBoot();
+    APGoal_OnBoot();
 
     APCheckDetect_OnBoot();
     GateStadiums_OnBoot();
@@ -193,7 +237,6 @@ void OnBoot()
     ArchipelagoAPI_Export();
 }
 
-// Runs on boot when hoshi creates save data for the mod.
 void OnSaveInit()
 {
     ap_save = (APSave *)mod_desc.save_ptr;
@@ -211,9 +254,7 @@ static void APOptions_ApplyRevealChecklists(void)
             RevealChecklist(row);
 }
 
-// Deferred past OnBoot because mods boot alphabetically and the registry boots after
-// us. A failed import says nothing on its own - only OnSaveLoaded is past every
-// mod's OnBoot, so that is where absence is decided. Idempotent.
+// Idempotent, so a scene that needs the registry earlier than OnSaveLoaded can ask.
 void AP_ResolveCustomMachines(void)
 {
     if (cm_api)
@@ -255,8 +296,6 @@ void OnSaveLoaded()
 {
     ap_save = (APSave *)mod_desc.save_ptr;
 
-    // Deferred here because mods boot alphabetically and textbox boots after us,
-    // so Hoshi_ImportMod would return NULL during our own OnBoot.
     if (tb_api == &tb_stub)
     {
         const TextBoxAPI *imported = (const TextBoxAPI *)Hoshi_ImportMod(
@@ -286,9 +325,8 @@ void OnSaveLoaded()
 
     ap_data->item_received_index = ap_save->item_received_count;
 
-    // Deferred past OnBoot: the custom_checklist framework mod boots after us, so its
-    // API only resolves once every mod has exported. Ahead of the reward regrant,
-    // which marks cells on the AP tab and so needs its clear data to exist.
+    // Ahead of the reward regrant, which marks cells on the AP tab and so needs its
+    // clear data to exist.
     APChecklist_Register();
 
     ChecklistRewards_OnSaveLoaded();
@@ -299,7 +337,7 @@ void OnSaveLoaded()
 
     // Mirrors sent_checks/goal_complete into shared memory and runs the initial
     // goal evaluation.
-    CheckDetection_OnSaveLoaded();
+    APChecks_OnSaveLoaded();
 
     // Re-applied every boot, not just at option transfer: the vanilla modes' reveal
     // rides along in the game's own clear data, but the AP tab's cells live in RAM
@@ -326,7 +364,6 @@ static u32 MachineGateMask(void)
     return (1u << num) - 1;
 }
 
-// Comma-joins names into buf, tracking the write position in *pos.
 static void AppendCsv(char *buf, int *pos, const char *name)
 {
     if (*pos)
@@ -450,12 +487,10 @@ static void APOptions_ApplyUngatedCategories(void)
         OSReport("[Main] Gating forced by the goal: %s\n", list);
 }
 
-// Copy the client's slot options into save data on first detection. Options are
-// immutable per AP slot, so the copy runs once per save file, but every client write
-// is acknowledged by clearing options_valid with the menu mirrors already
-// republished. The client holds off diffing the link toggles until that clears -
-// before it, the mirrors still hold the save's own defaults, which reads as the
-// player having turned the links off in the menu.
+// Options are immutable per AP slot, so the copy runs once per save file. Every client
+// write is still acknowledged by clearing options_valid with the menu mirrors already
+// republished - the client treats that clear as the signal that the mirrors are the
+// player's choices rather than the save's defaults.
 static void APOptions_TransferToSave()
 {
     if (!ap_data->options_valid)
@@ -515,7 +550,6 @@ void OnMainMenuLoad()
     OSReport("[Main] Entering the main menu\n");
 }
 
-// Runs when entering the player select menu (Air Ride or City Trial).
 void OnPlayerSelectLoad()
 {
     OSReport("[Main] Entering player select (minor %d)\n", Scene_GetCurrentMinor());
@@ -530,6 +564,7 @@ void OnPlayerSelectLoad()
 // of the round's registry, which is written at CityItemSpawn_Init.
 void On3DLoadStart()
 {
+    GoalMaxStatsCT_On3DLoadStart();
     ApPatches_On3DLoadStart();
 }
 
@@ -539,40 +574,38 @@ void On3DLoadEnd()
 {
     static const char *const ar_mode_names[] = { "Race", "Time Attack", "Free Run" };
     static const char *const city_mode_names[] = { "Trial", "Stadium", "Free Run" };
+    const char *mode_label;
+    const char *what;
+
     // Gm_IsInCity() only returns true on the CT main map (stage_kind 9/52);
     // stadiums load their own stages and would be misreported as Air Ride.
     // The CT major (MJRKIND_CITY) covers Trial, Free Run, and all stadiums.
     if (Scene_GetCurrentMajor() == MJRKIND_CITY)
     {
         CityMode cm = Gm_GetCityMode();
+        what = "City Trial";
         if (cm == CITYMODE_STADIUM)
         {
             StadiumKind sk = Gm_GetCurrentStadiumKind();
-            const char *sk_name = ((unsigned)sk < STKIND_NUM) ? StadiumKind_Names[sk] : "?";
-            OSReport("[Main] Starting City Trial: Stadium (%s) Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                     sk_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
-                     Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
-                     Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
+            mode_label = ((unsigned)sk < STKIND_NUM) ? StadiumKind_Names[sk] : "?";
         }
         else
-        {
-            const char *cm_name = ((unsigned)cm < 3) ? city_mode_names[cm] : "?";
-            OSReport("[Main] Starting City Trial: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                     cm_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
-                     Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
-                     Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
-        }
+            mode_label = ((unsigned)cm < 3) ? city_mode_names[cm] : "?";
     }
     else
     {
         AirRideMode ar_mode = Gm_GetAirRideMode();
-        const char *ar_mode_name = ((unsigned)ar_mode < 3) ? ar_mode_names[ar_mode] : "?";
-        OSReport("[Main] Starting Air Ride: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
-                 ar_mode_name, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
-                 Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
-                 Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
+        what = "Air Ride";
+        mode_label = ((unsigned)ar_mode < 3) ? ar_mode_names[ar_mode] : "?";
     }
 
+    OSReport("[Main] Starting %s: %s Ground=%d Stage=%d CityMode=%d Stadium=%d(%d) Damage=%d ItemData=%d\n",
+             what, mode_label, Gr_GetCurrentGrKind(), Gm_GetCurrentStageKind(),
+             Gm_GetCityMode(), Gm_GetCurrentStadiumKind(),
+             Gm_GetCurrentStadiumGroup(), Gm_IsDamageEnabled(), Item_CheckIsLoaded());
+
+    char roster[160];
+    int n = 0;
     for (int i = 0; i < 5; i++)
     {
         if (Ply_GetPKind(i) == PKIND_NONE)
@@ -580,10 +613,11 @@ void On3DLoadEnd()
 
         GOBJ *rg = Ply_GetRiderGObj(i);
         RiderData *rd = rg->userdata;
-        MachineKind machine_kind = rd->starting_machine_idx;
-        OSReport("[Main] Player %d: rider %d, color %d, machine %d\n",
-                 i + 1, rd->kind, rd->color_idx, machine_kind);
+        n += sprintf(&roster[n], "%sP%d r%d/c%d/m%d", n ? ", " : "",
+                     i + 1, rd->kind, rd->color_idx, rd->starting_machine_idx);
     }
+    if (n)
+        OSReport("[Main] Players - %s\n", roster);
 
     if (Gm_IsAutoDemo())
         OSReport("[Main] Title attract demo round - no check counts toward the seed\n");
@@ -662,6 +696,9 @@ void OnSceneChange()
 
 void OnFrameStart()
 {
+    if (!ap_save)
+        return;
+
     APOptions_TransferToSave();
 
     // ChecklistRewards_ApplyLocations clears location_data_valid and persists, so
@@ -669,12 +706,14 @@ void OnFrameStart()
     if (ap_data->location_data_valid)
         ChecklistRewards_ApplyLocations();
 
-    CheckDetection_OnFrameStart();
-    ApPatches_OnFrameStart();
+    // One flag publishes both backfill arrays, so neither is read half-written.
+    if (ap_data->backfill_valid)
+    {
+        APChecks_ApplyBackfill();
+        ApPatches_ApplyBackfill();
+        ap_data->backfill_valid = 0;
+    }
+
     APCheckDetect_OnFrameStart();
     APText_OnFrameStart();
-}
-
-void OnFrameEnd()
-{
 }

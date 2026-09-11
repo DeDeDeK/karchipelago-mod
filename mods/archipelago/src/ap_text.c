@@ -7,9 +7,9 @@
 
 // Archipelago's CommonClient GUI palette, indexed by APTextColor. Black is lifted off
 // 000000 so it stays readable on the textbox's dark background; the rest are AP's own
-// hex values, which were already picked for a dark UI.
+// hex values, which were already picked for a dark UI. APTEXTCOLOR_DEFAULT has no row -
+// APText_Color answers it from the textbox's own default first.
 static const GXColor ap_text_colors[APTEXTCOLOR_NUM] = {
-    [APTEXTCOLOR_DEFAULT]   = {255, 255, 255, 255},
     [APTEXTCOLOR_BLACK]     = { 80,  80,  80, 255},
     [APTEXTCOLOR_RED]       = {238,   0,   0, 255},
     [APTEXTCOLOR_GREEN]     = {  0, 255, 127, 255},

@@ -3,9 +3,10 @@
 #include "textbox_api.h"
 #include "ap_announce.h"
 
-// Give a copy ability to every human Kirby rider via the raw rider API. This is
-// the only path for AP copy-ability grants in every mode - no ITKIND_COPY* item
-// is spawned, so it needs no item data tables and works in stadiums and Free Run.
+// Give a copy ability to every human Kirby rider via the raw rider API. The AP
+// copy-ability path for City Trial and Air Ride - no ITKIND_COPY* item is spawned,
+// so it needs no item data tables and works in stadiums and Free Run. Top Ride maps
+// abilities to their TR item analog instead.
 int Ability_GiveItem(CopyKind copy_kind)
 {
     int applied = 0;
@@ -27,12 +28,14 @@ int Ability_GiveItem(CopyKind copy_kind)
         applied++;
     }
 
-    OSReport("[AbilityItem] Gave the %s ability to %d player(s)\n",
-             (copy_kind < COPYKIND_NUM) ? CopyKind_Names[copy_kind] : "?", applied);
-
-    if (applied && copy_kind < COPYKIND_NUM && CopyKind_Names[copy_kind])
-        APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
-                         tb_api->AbilityColors[copy_kind], " ability");
+    if (applied)
+    {
+        OSReport("[AbilityItem] Gave the %s ability to %d player(s)\n",
+                 CopyKind_Names[copy_kind], applied);
+        if (CopyKind_Names[copy_kind])
+            APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
+                             tb_api->AbilityColors[copy_kind], " ability");
+    }
     return applied;
 }
 

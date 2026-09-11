@@ -19,25 +19,12 @@
 #include "ap_patches.h"
 #include "settings_menu.h"
 
-// The two levers of the AP Box rate, one row per APBOXRATE_ setting.
-//
-// percent is the share of the city's box-category spawn ticks that come up as an AP
-// Box. It cannot stand alone, because the tick a box rolls on is not the throttled
-// quantity: the spawner's item cap is checked ahead of the roll, so a full field kills
-// a tick before it ever reaches here, and a field that gating has emptied lets every
-// one of them through. Left to itself the category would pay out most when the seed is
-// most locked down.
-//
-// interval is the frames a roll waits after a winning one, and is what holds the rate
-// steady across that. A five-minute round offers roughly 125 box ticks unthrottled, so
-// each row's floor is set to 300 s / (1.25 * percent) - the two limits bind at the same
-// number of boxes, and a gated round pays out like an ungated one. Boxes per round:
-// 3.75 / 7.5 / 15 / 25, at 1.55 patches each.
-//
-// The floor is divided by the spawn-rate scale at use, so the Spawn Rate Up item still
-// moves the cadence. Its clock is grBoxGeneInfo.match_frames_left, which the spawner
-// rebuilds from the round timer every frame - nothing has to be counted down, and a
-// paused or ended round stops the interval on its own.
+// The two levers of the AP Box rate, one row per APBOXRATE_ setting. percent is the
+// share of box-category spawn ticks that come up an AP Box; interval is the frame floor
+// between winning rolls, divided by the spawn-rate scale at use so Spawn Rate Up still
+// moves the cadence. Both are needed because the tick count itself is not throttled -
+// the field's item cap is checked before the roll, so a round that gating has emptied
+// offers every tick through.
 static const struct
 {
     int percent;
@@ -170,12 +157,9 @@ static int RollBoxSize(void)
 }
 
 // REPLACECALL on the bl GrBoxGeneratorDetermine at 0x800eb20c, the one call site
-// CityItemSpawn_Think reaches when its tick came up an item box. The picker's
-// return is the box's ItemKind, so an AP box is one more outcome of the vanilla
-// roll - it keeps the color and size the roll landed on and inherits the fall timer.
-// What it does not inherit is the throttle: the field's item cap is checked before
-// this runs, so gating that empties the field hands the roll every tick the timer
-// makes. The interval floor is what holds the cadence steady across that.
+// CityItemSpawn_Think reaches when its tick came up an item box. The picker's return
+// is the box's ItemKind, so an AP box is one more outcome of the vanilla roll, keeping
+// the color, size and fall timer the roll landed on.
 static int DetermineBox(int *box_color, int *box_size)
 {
     int kind = GrBoxGeneratorDetermine(box_color, box_size);
@@ -376,7 +360,8 @@ static int SuppressItemCollect(ItemData *id)
     return IsApKind(id, patch_kind) || IsApKind(id, box_kind);
 }
 
-// 0x801db91c: lwz r4, 28(r21) - the call's own kind argument, reloaded from r21
+// 0x801db91c in Machine_OnTouchItem: lwz r4, 28(r21) - the call's own kind argument,
+// reloaded from r21
 // (ItemData) on the accept path. Accept falls through to 0x801db920, which
 // re-materializes r3 and r5; reject jumps past the call.
 CODEPATCH_HOOKCONDITIONALCREATE(0x801db91c, "mr 3, 21\n\t", SuppressItemCollect, "", 0, 0x801db92c)
@@ -391,9 +376,8 @@ static void OnPickup(u32 id_hash, const char *name, int player)
     Claim();
 }
 
-// Match both drop-ins to their hashes by display name, the same lazy resolve the
-// AP Star spheres use: mod load order follows FST order, so an export is not
-// available until its owner's OnBoot has run.
+// Match both drop-ins to their hashes by display name. Lazy because mod load order
+// follows FST order, so an export is not available until its owner's OnBoot has run.
 static void ResolveItems(void)
 {
     if (ci_api == NULL || items_matched == 2)
@@ -455,9 +439,8 @@ void ApPatches_On3DLoadStart(void)
 
     // custom_items registers at CityItemSpawn_Init's epilogue and skips a disabled
     // item, so a held-out kind is never handed an ItemKind and nothing can spawn it.
-    // The title screen's attract demo is a City Trial round in every respect the
-    // gate below reads, so it is held out here rather than at the roll: a CPU
-    // collecting a patch claims a location the same way a player does.
+    // The attract demo satisfies every other term here, and a CPU collecting a patch
+    // would claim a location, so it is held out at the registry rather than the roll.
     int on = ApPatches_GetCount() > 0 && !Gm_IsAutoDemo() &&
              Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL;
     if (patch_hash != 0)
@@ -501,14 +484,9 @@ void ApPatches_On3DExit(void)
     round_armed = 0;
 }
 
-void ApPatches_OnFrameStart(void)
+// Called only under ap_data->backfill_valid, so the array is whole.
+void ApPatches_ApplyBackfill(void)
 {
-    int any = 0;
-    for (int w = 0; w < AP_PATCH_WORDS && !any; w++)
-        any = ap_data->ap_patch_backfill[w] != 0;
-    if (!any)
-        return;
-
     int applied = 0;
     for (int w = 0; w < AP_PATCH_WORDS; w++)
     {

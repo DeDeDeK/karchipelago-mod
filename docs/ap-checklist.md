@@ -8,7 +8,7 @@ multiworld items can be placed *on* its cells for display.
 The framework owns the presentation (synthetic-mode plumbing, minor scene, grid build,
 theme recolor, banner/emblem swap) and polls every check predicate once per frame. This
 doc covers only the AP-specific wiring - `mods/archipelago/src/ap_checklist.c`, with the
-AP-side reward/check integration in `checklist_rewards.c` / `check_detection.c`.
+AP-side reward/check integration in `checklist_rewards.c` / `ap_checks.c`.
 
 ## Two Mode Identities
 
@@ -24,7 +24,7 @@ each registered tab to the next free mode index, so the AP tab's mode is whateve
 lands on, `>= GMMODE_NUM`. `APChecklist_Register` stores it in the global
 `ap_checklist_mode` (defaulting to `GMMODE_NUM`).
 
-`ChecklistModeRow(mode)` in `check_detection.h` maps a runtime mode to its row, returning
+`ChecklistModeRow(mode)` in `main.h` maps a runtime mode to its row, returning
 `-1` for a checklist mode this mod does not record (`ChecklistRowMode(row)` goes back, for
 the game APIs like `gmGetClearcheckerTypeP` that index by runtime mode). It is the single
 answer to "which row is this mode" - consumers call it rather than re-deriving the mapping.
@@ -82,8 +82,8 @@ The descriptor's callbacks bind the framework's presentation to AP's authoritati
   permanently complete, shown with no replay on a later boot). An out-of-range `clear_kind`
   reports "done", so the framework never tries to complete it.
 - `record_complete(clear_kind)` calls `ClearChecker_SetNewUnlock(ap_checklist_mode,
-  clear_kind)`, which `check_detection`'s `CODEPATCH_REPLACEFUNC`
-  (`CheckDetection_SetNewUnlockReplacement`) intercepts for `ap_checklist_mode`: on a fresh
+  clear_kind)`, which `ap_checks`'s `CODEPATCH_REPLACEFUNC`
+  (`APChecks_SetNewUnlockReplacement`) intercepts for `ap_checklist_mode`: on a fresh
   cell it runs `RecordCheck`, which resolves the row via `ChecklistModeRow`, sets the
   `sent_checks` bit, fires the "Check sent" textbox and re-evaluates goals - and, mid-run
   (unlock cache invalid), sets `clear[].is_new` and plays the unlock SFX. The framework
@@ -92,10 +92,10 @@ The descriptor's callbacks bind the framework's presentation to AP's authoritati
   cache-valid short-circuit.
 
 So the AP tab's completion path is unchanged from a plain checklist objective:
-predicate -> `ClearChecker_SetNewUnlock` -> `check_detection` -> `sent_checks` row -> AP.
+predicate -> `ClearChecker_SetNewUnlock` -> `ap_checks` -> `sent_checks` row -> AP.
 The framework only adds the cell flags and animation around it.
 
-`check_detection` reads and writes the AP cells through
+`ap_checks` reads and writes the AP cells through
 `gmGetClearcheckerTypeP(ap_checklist_mode)`, which the framework serves from the AP tab's
 `GameClearData` block - so the AP record path and the framework presentation operate on the
 same block.
@@ -295,7 +295,8 @@ Both per-frame procs below are attached by `AttachSamplers`, which walks the fiv
 slots and hangs the proc on every `PKIND_HMN` rider's GObj at `RDPRI_HITCOLL + 1`.
 
 `APCheckDetect_On3DLoadEnd` returns without arming anything when `Gm_IsAutoDemo()` - the
-title screen's attract demo, a real City Trial round run inside `MJRKIND_TITLE` with a CPU in
+title screen's attract demo, a real 3D round run inside `MJRKIND_TITLE` - City Trial on one of
+its rotating slots, Air Ride or Top Ride on the others - with a CPU in
 every slot. The samplers would find no human to attach to anyway, but the coral objective
 counts a break whoever made it, so the whole round is skipped rather than each hook.
 
@@ -368,12 +369,15 @@ Cell 51 is scoped to one round because all three of its inputs are: `flags_84d` 
 `PlayerStats`, which is zeroed on every 3D scene load, and the star's assembly mask is
 cleared at the same point. It is polled from `APCheckDetect_OnFrameStart` rather than the
 per-rider sampler the other City Trial objectives use, because assembling the star ends in
-`Rider_RespawnFullRecreate` (`0x80193900`) - the rider the sampler proc hangs off is torn
-down and rebuilt under it, and a poll keyed to the mod's own frame callback is unaffected.
+`Rider_RespawnFullRecreate` (`0x80193900`) - it destroys the rider's `machine_gobj` and
+calls `Machine_Create` for the legendary, tearing the machine down under the sampler, and a
+poll keyed to the mod's own frame callback is unaffected.
 
-**The rival KO recorder - the Destruction Derby box.** `APCheckDetect_OnBoot` repoints the
-single `bl Ply_AddDeath` at `0x801e1f74`, inside `Machine_GiveDamage` (`0x801e1ee8`), at a
-wrapper that runs the vanilla recorder and then counts. `Ply_AddDeath` (`0x8022f648`) is the
+**The rival KO recorder - the Destruction Derby box.** `custom_machines` owns the
+`REPLACECALL` on the single `bl Ply_AddDeath` at `0x801e1f74`, inside `Machine_GiveDamage`
+(`0x801e1ee8`), and hands the KO on through its death-handler seam; `main.c` registers
+`APCheckDetect_AddDeath` there with `cm_api->SetDeathHandler` once the registry resolves. The Dedede and Mic tallies are `[5]` arrays indexed by the crediting player, because both
+cells read "in one game" of a single player's KOs. `Ply_AddDeath` (`0x8022f648`) is the
 engine's unified KO-event recorder, reached only from that one call site - where a machine's
 HP crosses zero - and it is the only place the KO'd rider is named: its first argument is the
 ply riding the destroyed machine and `dmg_log->attacker_ply` (`MachineData.dmg_log` + 0x1c)
@@ -469,8 +473,10 @@ boxes that need something to ride, the eight colors for the all-colors race.
 - `scripts/authoring/make_checklist_textures.py` - authors `ApChecklistTex.dat`.
 - `mods/archipelago/src/main.h` / `main.c` - the wire structs, `CHECKLIST_MODE_NUM` /
   `AP_CHECKLIST_ROW`, the runtime `ap_checklist_mode`, and the offset assertions.
-- `mods/archipelago/src/check_detection.c` / `.h` - `ChecklistModeRow` / `ChecklistRowMode`,
-  and the `ClearChecker_SetNewUnlock` REPLACEFUNC that records AP completions.
+- `mods/archipelago/src/ap_checks.c` / `.h` - the `ClearChecker_SetNewUnlock` REPLACEFUNC
+  that records AP completions, and the client backfill.
+- `mods/archipelago/src/ap_goal.c` / `.h` - goal evaluation and the filler gate that keeps
+  a filler token off a goal cell.
 - `mods/archipelago/src/checklist_rewards.c` - cross-mode reward placement onto AP cells.
 - `mods/archipelago/src/gate_ap_star.c` - the `ap_star` mod import behind clear_kinds 50/51.
 - `mods/custom_checklist/` - the framework that renders the tab.

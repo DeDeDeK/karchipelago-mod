@@ -4,8 +4,8 @@
 #include "game.h"
 
 // Bump major on breaking changes, minor on additions.
-#define ARCHIPELAGO_API_MAJOR 3
-#define ARCHIPELAGO_API_MINOR 5
+#define ARCHIPELAGO_API_MAJOR 4
+#define ARCHIPELAGO_API_MINOR 0
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
@@ -14,8 +14,8 @@
 #define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
 #define AP_CHECKLIST_ROW   GMMODE_NUM
 
-// Ceiling on the AP Patch locations a seed may carry, matching the apworld's
-// ap_patches range end.
+// Width of the AP Patch location bitmask on the wire. The apworld's own option
+// range stops well short of it.
 #define AP_PATCH_MAX 512
 
 // AP item IDs - must match the IDs defined in the APWorld Python code.
@@ -407,6 +407,11 @@ typedef enum APItemId
     // Dedede stadium's CPU-only machine and no game code reads its unlock bit.
     // 856 and up continue the alignment into the MachineKinds custom_machines
     // registers, in the order it discovers them.
+    // The ids stay aligned to MachineKind, so three of them name a machine the
+    // AP world ships no item for and whose unlock bit therefore never clears:
+    // WINGKIRBY (847) and WHEELKIRBY (850) are copy-ability states, and
+    // WHEELNORMAL (849) is the enemy form whose rideable counterpart is
+    // WHEELIEBIKE (851).
     AP_MACHINE_UNLOCK_BASE = 830,
     AP_MACHINE_UNLOCK_WARP = 830,          // VCKIND_WARP
     AP_MACHINE_UNLOCK_COMPACT,             // VCKIND_COMPACT
@@ -689,28 +694,26 @@ typedef struct ArchipelagoAPI
     void (*DebugForceMarkAllChecks)(void);
     void (*DebugTriggerGoalComplete)(void);
 
-    // Simulate AP client side-channel writes, for testing the receive path.
-    void (*DebugWriteIncomingItem)(int ap_item_id);
+    // Simulate an AP client side-channel write, for testing the receive path.
     void (*DebugTriggerDeathlinkReceive)(void);
-    void (*DebugTriggerTraplinkReceive)(void);
 
     // Reveal every checkbox on one checklist-mode row (visual-only). Rows 0..2 are
     // the vanilla GameModes; row 3 is the AP tab.
     void (*DebugRevealChecklist)(int mode);
 
-    // (minor 2+) Drop one Archipelago Star sphere in front of a player's machine,
+    // Drop one Archipelago Star sphere in front of a player's machine,
     // bypassing the delivery schedule. `piece` is an APStarPiece. Returns 0 if
     // the sphere was locked when this scene loaded, since it has no ItemKind then.
     int (*DebugSpawnApStarPiece)(int piece, int ply);
 
-    // (minor 4+) Drop one AP Box in front of a player's machine, and claim the
+    // Drop one AP Box in front of a player's machine, and claim the
     // lowest unclaimed AP Patch outright. Both return 0 when the AP Patch
     // category is off, or when the drop-ins were not registered as this scene
     // loaded, since they have no ItemKind then.
     int (*DebugSpawnApBox)(int ply);
     int (*DebugCollectApPatch)(void);
 
-    // (minor 5+) The seed's AP Patch location count, and a debug override of it.
+    // The seed's AP Patch location count, and a debug override of it.
     // The drop-ins are held out of the item registry while the count is 0, so the
     // override is what lets a build with no such seed exercise the category; it
     // takes effect at the next round load.

@@ -197,10 +197,13 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    a handful of kinds fit without growing them. The per-event re-bias
    (`CityEvent_ModifyItemFallDesc` -> `CityItemSpawn_SetEventsItemFallChances`)
    rebuilds these pools, so `CustomItemRegistry_ReinjectPools` re-appends the
-   custom kinds at that function's shared exit (`0x800ed7f0`) - the same seam the
-   archipelago spawn filter hooks; hoshi chains the two. That exit is also the
-   target of the function's early-out, so the re-append runs on a path where no
-   re-bias happened and has to be idempotent.
+   custom kinds at that function's shared exit (`0x800ed7f0`). The archipelago
+   spawn filter has to run after this re-append, and gets that ordering by hooking
+   one instruction later (`0x800ed7f4`) rather than sharing this address - hoshi
+   chains same-address hooks last-applied-first, which would otherwise make the
+   order depend on which mod boots first. That exit is also the target of the
+   function's early-out, so the re-append runs on a path where no re-bias happened
+   and has to be idempotent.
 5. **Inject event-source weights** - `event_source_drop[]`
    (`grBoxGeneInfo->item_desc`, stride `0x10`: `int it_kind` + six `u16` chance
    columns) is read straight from the table by `_CityItem_GetEventItem`

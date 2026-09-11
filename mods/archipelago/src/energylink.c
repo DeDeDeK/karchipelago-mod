@@ -30,25 +30,27 @@ static float withdraw_balance_remainder;
 
 static void EnergyLink_Withdraw(float amount);
 
-// Commit energy into the cumulative game -> client counter (+ deposit,
-// - withdrawal). Whole MJ land on ap_data->energy_sent_total and the remainder
-// rolls forward. The cast goes through s32 deliberately: PPC has hardware
-// float->s32 (fctiwz) but not float->s64, and we don't link the libgcc soft
-// routines; per-frame deltas fit s32.
+// Commit energy into the cumulative game -> client counters (+ deposit,
+// - withdrawal). Whole MJ land on the matching rising counter and the remainder rolls
+// forward. The cast goes through s32 deliberately: PPC has hardware float->s32 (fctiwz)
+// but not float->s64, and we don't link the libgcc soft routines; per-frame deltas fit s32.
 static void EnergyLink_Emit(float amount)
 {
     energy_frac_accumulator += amount;
     s32 whole = (s32)energy_frac_accumulator;  // truncate toward zero
     if (whole != 0)
     {
-        ap_data->energy_sent_total += whole;
+        if (whole > 0)
+            ap_data->energy_deposit_total += (u32)whole;
+        else
+            ap_data->energy_withdraw_total += (u32)-whole;
         energy_frac_accumulator -= (float)whole;
     }
 }
 
-// Per-frame charge-meter gain for each Auto-Charge Rate setting. Capping the gain
-// makes the meter rise steadily and stack with the player's own charging instead
-// of snapping straight to full.
+// Per-frame charge-meter gain per Auto-Charge setting, which is 0 for off and
+// otherwise this table's index plus one. Capping the gain makes the meter rise
+// steadily and stack with the player's own charging instead of snapping to full.
 #define AUTOCHARGE_RATE_NUM 3
 static const float AUTOCHARGE_RATES[AUTOCHARGE_RATE_NUM] = {
     0.00555f, // Slow   ~180 frames (~3.0s)
@@ -63,7 +65,7 @@ static float AutoCharge_Gain(float charge_value)
 {
     if (ap_data->energy_balance <= 0)
         return 0.0f;
-    int ri = ap_menu_settings.energylink_autocharge_rate;
+    int ri = ap_menu_settings.energylink_autocharge - 1;
     if (ri < 0)
         ri = 0;
     else if (ri >= AUTOCHARGE_RATE_NUM)

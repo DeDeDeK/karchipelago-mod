@@ -33,16 +33,16 @@ Two pool families are filtered, the same ones the patch and copy-ability gates u
 - **Box pools** (`grBoxGeneObj`, `*stc_grBoxGeneObj` at r13+0x608): the per-box-kind `item_group_spawn[BOXKIND_NUM]` arrays (also used for sky and ground drops), the `sameitem_*` pool, and the `subsequent_*` blue-box pool. Each is a parallel `it_kind[]` / `chance[]` array with a `num` count.
 - **Event drop table** (`grBoxGeneInfo`, `*stc_grBoxGeneInfo` at r13+0x610): `item_desc->event_source_drop[]` (+0x18, count at +0x1c), one entry per ITKIND with six per-source weight columns - `chance_dyna`, `chance_tac`, `chance_meteor`, `chance_destructible` (yaku-break objects: star pole, event pillar, volcano walls, houses), `chance_chamber`, `chance_ufo`.
 
-`FilterAllSpawnTables()` in `item_spawn_filter.c` runs the whole pipeline in order: `GateItems_EnsureAllUpInSpawnPools()` (inject, Max Stats goal only), then the ability/patch/item box-pool filters, then the ability/patch/item event-drop filters, then `GoalMaxStatsCT_ApplyDropBias()`. There is no cross-chaining between gate files - each filter touches only its own categories. It is `HOOKCREATE`d at two function-epilogue points:
+`FilterAllSpawnTables()` in `item_spawn_filter.c` runs the whole pipeline in order: `GateItems_EnsureAllUpInSpawnPools()` (inject, Max Stats goal only), then one compaction pass over the box pools and one zeroing pass over the event-drop table, then `GoalMaxStatsCT_ApplyDropBias()`. Each gate file contributes only a predicate - `GateAbilities_IsItemLocked`, `GatePatches_IsItemLocked`, `GateItems_IsItemLocked` - and reports only on kinds in its own category, so a kind no gate covers is never locked. It is `HOOKCREATE`d at two function-epilogue points:
 
 | Hook address | Hooked function (entry) | Clobbered instruction |
 |---------|-----------------|-----------------|
 | 0x800eb558 | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` |
-| 0x800ed7f0 | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `lwz r0, 0x14(r1)` |
+| 0x800ed7f4 | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `mtlr r0` |
 
 Stadium and Air Ride modes don't run the CT init path, so `ItemSpawnFilter_On3DLoadEnd()` calls `FilterAllSpawnTables()` at scene load as a fallback, guarded by `!Gm_IsInCity() && *stc_grBoxGeneObj`.
 
-`GateItems_FilterSpawnTables()` compacts box pools with `FilterItemsFromPool()`, a stable two-pointer forward compaction that copies each surviving `it_kind`/`chance` pair down to the next write slot and rewrites `num`. Order is preserved - this is not a swap-with-last delete. `GateItems_FilterEventDropTables()` cannot compact, since the entry's index is its ITKIND, so it leaves the entry in place and zeroes all six `chance_*` columns.
+The box-pool pass is a stable two-pointer forward compaction: each surviving `it_kind`/`chance` pair is copied down to the next write slot and `num` rewritten. Order is preserved - this is not a swap-with-last delete. The event-drop table cannot compact, since the entry's index is its ITKIND, so a locked row stays in place with all six `chance_*` columns zeroed.
 
 ## Legendary Piece Spawn Gating
 

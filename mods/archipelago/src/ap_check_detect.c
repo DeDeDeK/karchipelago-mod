@@ -21,6 +21,7 @@
 // Objectives observed this boot, one bit per APCheckKind. Objectives that count
 // across boots read ap_save->checks instead.
 static u64 ap_observed;
+_Static_assert(APCK_NUM <= 64, "ap_observed is one u64");
 
 void APCheckDetect_Observe(int ck)
 {
@@ -145,25 +146,26 @@ static int coral_broken;
 
 // Is a City Trial Trial round loaded? The three-legendary poll needs it, and that
 // poll cannot ride the per-rider sampler: assembly ends in
-// Rider_RespawnFullRecreate, which tears the rider's machine down under it.
+// Rider_RespawnFullRecreate (0x80193900), which tears the rider's machine down.
 static int in_city_trial;
 
-// Kirbys KO'd by a human King Dedede in the current Destruction Derby game.
-static int dedede_kirby_kos;
+// Kirbys KO'd by each human King Dedede in the current Destruction Derby game. The
+// cell reads "KO 10 Kirbys in one game", so the ten are one player's.
+static int dedede_kirby_kos[5];
 
 #define AP_DEDEDE_KIRBY_KO_NEED 10
 
-// Enemies a human defeated mid-Mic-blast in the current KIRBY MELEE round, and
+// Enemies each human defeated mid-Mic-blast in the current KIRBY MELEE round, and
 // whether such a round is what is loaded. The melee stadiums are the only City
 // Trial stages that spawn the AI enemy pool at all.
-static int mic_enemy_kos;
+static int mic_enemy_kos[5];
 static int in_kirby_melee;
+
+#define AP_MIC_ENEMY_KO_NEED 10
 
 // Is Nebula Belt the loaded Air Ride course? Latched at load like in_kirby_melee,
 // because the objectives keyed off it are sampled once the round is already over.
 static int in_nebula;
-
-#define AP_MIC_ENEMY_KO_NEED 10
 
 // Is this player's rider singing? The Mic's damage lands over the blast animation
 // and its recovery, so both states count.
@@ -272,8 +274,11 @@ void APCheckDetect_On3DLoadEnd(void)
         needs_baseline[i] = 1;
     coral_total = 0;
     coral_broken = 0;
-    dedede_kirby_kos = 0;
-    mic_enemy_kos = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        dedede_kirby_kos[i] = 0;
+        mic_enemy_kos[i] = 0;
+    }
     in_city_trial = 0;
 
     StadiumKind st = Gm_GetCurrentStadiumKind();
@@ -286,7 +291,8 @@ void APCheckDetect_On3DLoadEnd(void)
     // Fantasy Meadows and GrSpace2 is Nebula Belt in every Air Ride mode.
     in_nebula = Scene_GetCurrentMajor() == MJRKIND_AIR && Gr_GetCurrentGrKind() == GR_SPACE2;
 
-    // The title screen's attract demo runs a real City Trial round with a CPU in
+    // The title screen's attract demo runs a real 3D round (City Trial on one of its
+// rotating slots) with a CPU in
     // every slot. The per-rider samplers below already skip it for want of a human,
     // but the coral objective counts a break whoever made it, so nothing arms.
     if (Gm_IsAutoDemo())
@@ -353,11 +359,11 @@ void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int machine_kind)
     if (Ply_GetRiderKind(killer) != RDKIND_DEDEDE || Ply_GetRiderKind(victim) != RDKIND_KIRBY)
         return;
 
-    dedede_kirby_kos++;
-    if (dedede_kirby_kos <= AP_DEDEDE_KIRBY_KO_NEED)
-        OSReport("[APCheckDetect] Kirbys KO'd as King Dedede: %d/%d\n",
-                 dedede_kirby_kos, AP_DEDEDE_KIRBY_KO_NEED);
-    if (dedede_kirby_kos >= AP_DEDEDE_KIRBY_KO_NEED)
+    dedede_kirby_kos[killer]++;
+    if (dedede_kirby_kos[killer] == AP_DEDEDE_KIRBY_KO_NEED)
+        OSReport("[APCheckDetect] Player %d KO'd %d Kirbys as King Dedede\n",
+                 killer + 1, AP_DEDEDE_KIRBY_KO_NEED);
+    if (dedede_kirby_kos[killer] >= AP_DEDEDE_KIRBY_KO_NEED)
         APCheckDetect_Observe(APCK_DD_DEDEDE_KO_KIRBY);
 }
 
@@ -376,11 +382,11 @@ static void APCheckDetect_EnemyDefeat(int ply, void *attacker_log, GOBJ *enemy)
     if (!IsMidMicBlast(ply))
         return;
 
-    mic_enemy_kos++;
-    if (mic_enemy_kos <= AP_MIC_ENEMY_KO_NEED)
-        OSReport("[APCheckDetect] Enemies defeated as Mic Kirby: %d/%d\n",
-                 mic_enemy_kos, AP_MIC_ENEMY_KO_NEED);
-    if (mic_enemy_kos >= AP_MIC_ENEMY_KO_NEED)
+    mic_enemy_kos[ply]++;
+    if (mic_enemy_kos[ply] == AP_MIC_ENEMY_KO_NEED)
+        OSReport("[APCheckDetect] Player %d defeated %d enemies as Mic Kirby\n",
+                 ply + 1, AP_MIC_ENEMY_KO_NEED);
+    if (mic_enemy_kos[ply] >= AP_MIC_ENEMY_KO_NEED)
         APCheckDetect_Observe(APCK_MIC_ENEMY_KOS);
 }
 
@@ -396,8 +402,8 @@ static void APCheckDetect_YakumonoBreak(int ply, int desc_id)
         return;
 
     coral_broken++;
-    if (coral_broken <= coral_total)
-        OSReport("[APCheckDetect] Coral broken: %d/%d\n", coral_broken, coral_total);
+    if (coral_broken == coral_total)
+        OSReport("[APCheckDetect] All %d coral broken\n", coral_total);
     if (coral_broken >= coral_total)
         APCheckDetect_Observe(APCK_BREAK_ALL_CORAL);
 }
@@ -626,6 +632,7 @@ void APCheckDetect_On3DExit(void)
 
 void APCheckDetect_OnBoot(void)
 {
+    // The one bl Ply_RecordEnemyDefeat, in EventActor_ResolveHit (0x802021fc).
     CODEPATCH_REPLACECALL(0x802022ec, APCheckDetect_EnemyDefeat);
     CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
     OSReport("[APCheckDetect] Hooks installed\n");

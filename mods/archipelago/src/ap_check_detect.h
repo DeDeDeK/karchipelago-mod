@@ -95,12 +95,12 @@ int APCheckDetect_IsSet(int ck);
 // Latch an objective, here or elsewhere in the mod. Idempotent.
 void APCheckDetect_Observe(int ck);
 
-// Installs the two KO recorder interceptions - the rival one the Destruction Derby
-// objective needs, and the enemy one the Mic objective needs.
 // Handed to custom_machines' KO seam once the registry resolves. Counts the Kirbys
 // a human King Dedede has KO'd in Destruction Derby.
 void APCheckDetect_AddDeath(int victim, struct DmgLog *dmg_log, int machine_kind);
 
+// Installs the enemy-defeat and yakumono-break interceptions the Mic and coral
+// objectives read from. The rival KO arrives through custom_machines instead.
 void APCheckDetect_OnBoot(void);
 
 // Attaches the per-frame sampler to every human rider - the City Trial one for a
@@ -109,8 +109,8 @@ void APCheckDetect_OnBoot(void);
 void APCheckDetect_On3DLoadEnd(void);
 
 // Polls the three-legendary objective. Not part of the per-rider sampler because
-// assembly ends in Rider_RespawnFullRecreate, which rebuilds the rider it would
-// be attached to.
+// assembly ends in Rider_RespawnFullRecreate, which tears the rider's machine down
+// under it.
 void APCheckDetect_OnFrameStart(void);
 
 // Samples the stadium results block, which Stadium_ExitMinor finishes latching

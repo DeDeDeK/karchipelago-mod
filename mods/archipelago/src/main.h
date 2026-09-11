@@ -6,9 +6,10 @@
 
 #include "archipelago_api.h"
 
-// Resolved in OnSaveLoaded, not OnBoot: mods boot alphabetically and textbox
-// boots after us, so Hoshi_ImportMod returns NULL during our own OnBoot. Never
-// null - it starts at a stub that drops every message.
+// Mods boot in FST order, so every Hoshi_ImportMod in this mod is deferred to
+// OnSaveLoaded - the first point past every mod's OnBoot, and so the only place an
+// absent export really means absent. tb_api is never null: it starts at a stub that
+// drops every message.
 #include "textbox_api.h"
 extern const TextBoxAPI *tb_api;
 
@@ -45,10 +46,6 @@ static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
 #define REWARD_COUNT_TOPRIDE   33
 #define REWARD_COUNT_CITYTRIAL 44
 #define REWARD_COUNT_MAX       REWARD_COUNT_AIRRIDE
-
-// GMMODE_NUM (3) stays "the three real game modes" and sizes the reward tables.
-// Per-checklist-mode recorded state is one row wider (CHECKLIST_MODE_NUM), with the
-// AP tab at the fixed row AP_CHECKLIST_ROW.
 
 // Runtime checklist mode the custom_checklist framework assigned to the AP tab.
 // Always >= GMMODE_NUM but not necessarily AP_CHECKLIST_ROW - another custom tab
@@ -163,6 +160,12 @@ typedef struct APCheckProgress
     u8 race_color_mask;      // APCK_AIRRIDE_ALL_COLORS: bit N = an Air Ride race finished as KirbyColor N
 } APCheckProgress;
 
+// Bumped whenever APSave's layout changes, so hoshi discards a stale block instead of
+// reinterpreting it. Independent of ARCHIPELAGO_API_MAJOR/MINOR, which version the
+// struct other mods import.
+#define APSAVE_VERSION_MAJOR 4
+#define APSAVE_VERSION_MINOR 0
+
 typedef struct APSave
 {
     uint boot_num;
@@ -254,12 +257,24 @@ typedef struct APTextMessage
 
 _Static_assert(sizeof(APTextMessage) == 256, "APTextMessage stride is part of the wire contract");
 
-// Shared struct the Python AP client reads and writes with dolphin-memory-engine
-// (OnBoot stores the pointer at 0x805d52d4). Field order is the wire contract.
+// Where OnBoot parks the APData pointer, so the client can find the struct by
+// address. Changing it needs a paired client change.
+#define AP_DATA_ANCHOR 0x805d52d4
+
+// Shared struct the Python AP client reads and writes with dolphin-memory-engine.
+// Field order is the wire contract.
 typedef struct APData
 {
-    s64 energy_balance;    // EnergyLink pool, raw MJ. Client -> game; the game may decrement locally for purchase UI, the next client write wins.
-    s64 energy_sent_total; // Cumulative net MJ emitted this session. Game -> client, single-writer; the client reads-and-diffs and never writes. Resets each mod boot.
+    s64 energy_balance; // EnergyLink pool, raw MJ. Client -> game; the game may decrement locally for purchase UI, the next client write wins.
+
+    // Raw MJ in and out this session, game -> client single-writer; the client diffs each
+    // and nets them, and never writes either. Both reset each mod boot. Two rising u32s
+    // rather than one signed net total because a 64-bit store is not atomic on PPC32: a
+    // read straddling a net value crossing zero decodes a small negative as ~4.29e9, and
+    // the client's max:0 clamp cannot undo the deposit that follows. A u32 is one store,
+    // and a counter that only rises reads either the old or the new value, never a mix.
+    u32 energy_deposit_total;
+    u32 energy_withdraw_total;
     uint deathlink_receive;
     uint deathlink_send;
     uint traplink_receive;
@@ -296,10 +311,41 @@ typedef struct APData
     // second, and the game ORs the second in and clears it each frame.
     u64 ap_patch_checks[AP_PATCH_WORDS];
     u64 ap_patch_backfill[AP_PATCH_WORDS];
+
+    // Publishes both backfill arrays at once: the client fills client_backfill and
+    // ap_patch_backfill, then sets this; the game consumes both, zeroes them, and clears
+    // this last. Without it the game can read a half-written u64, consume the bits that
+    // arrived and zero away the ones that had not - a permanent loss, since the client
+    // has already moved on. Being a u32 it is never itself torn.
+    u32 backfill_valid;
 } APData;
 
 extern APData *ap_data;
 extern APSave *ap_save;
+
+// Map a runtime checklist mode to its row in the per-checklist-mode arrays
+// (sent_checks, goal_checks, cross_mode_slots, ...), or -1 for a mode this mod does
+// not record. The 3 real game modes map to themselves; the AP checklist tab maps to
+// AP_CHECKLIST_ROW wherever the custom_checklist framework placed it. The single
+// answer to "which row is this mode" - do not re-derive it per consumer.
+static inline int ChecklistModeRow(int mode)
+{
+    if (mode >= 0 && mode < GMMODE_NUM)
+        return mode;
+    if (mode == ap_checklist_mode)
+        return AP_CHECKLIST_ROW;
+    return -1;
+}
+
+// Inverse, for handing a row back to game code (gmGetClearcheckerTypeP and friends
+// index by runtime mode).
+static inline int ChecklistRowMode(int row)
+{
+    return row == AP_CHECKLIST_ROW ? ap_checklist_mode : row;
+}
+
+// Is checkbox `k` of row `r` recorded complete?
+#define SENT_CHECK_BIT(r, k)  ((ap_save->sent_checks[(r)][(k) >> 6] >> ((k) & 63)) & 1ULL)
 
 // machine_unlocked_mask is 32 bits, so only the first 32 MachineKinds can carry a
 // gate. custom_machines is free to register past that - its own cap is its own -
@@ -341,7 +387,6 @@ void On3DExit();
 void OnSceneChange();
 void OnTopRideLoadEnd();
 void OnFrameStart();
-void OnFrameEnd();
 
 // Register the public API instance with hoshi so other mods can import it via
 // Hoshi_ImportMod(). Call once from OnBoot.

@@ -63,11 +63,11 @@ static int Buy(OptionDesc *self)
         return 0;
     }
 
-    // The integer cost lands on the send counter immediately so the client diffs
-    // it on the next poll in any scene - no gameplay frame runs in the menu to
-    // drive a per-frame flush. The balance decrement feeds the UI and the gate above.
-    ap_data->energy_sent_total -= entry->cost;
-    ap_data->energy_balance    -= entry->cost;
+    // The integer cost lands on the withdrawal counter immediately so the client diffs
+    // it on the next poll in any scene - no gameplay frame runs in the menu to drive a
+    // per-frame flush. The balance decrement feeds the UI and the gate above.
+    ap_data->energy_withdraw_total += (u32)entry->cost;
+    ap_data->energy_balance        -= entry->cost;
 
     OSReport("[EnergyLinkSpend] Bought '%s' (id=%d) for %lld, balance %lld\n",
              self->name, entry->item_id, entry->cost, ap_data->energy_balance);

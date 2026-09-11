@@ -115,7 +115,7 @@ static int APChecklist_IsRecorded(int clear_kind)
 }
 
 // Record a completed AP check. The ClearChecker_SetNewUnlock REPLACEFUNC in
-// check_detection intercepts ap_checklist_mode and sets the AP row's sent_checks
+// ap_checks intercepts ap_checklist_mode and sets the AP row's sent_checks
 // bit, fires the "Check sent" textbox and re-evaluates goals. The framework seeds
 // the cell's is_new/is_visible afterward, so the animation runs on the next entry.
 static void APChecklist_RecordComplete(int clear_kind)
@@ -156,16 +156,6 @@ int APChecklist_GetBuildMode(void)
     return cc_api && cc_api->GetBuildMode ? cc_api->GetBuildMode() : -1;
 }
 
-void APChecklist_RevealAll(void)
-{
-    if (!cc_api)
-        return;
-
-    // Through the framework rather than by writing is_visible here: it latches the tab
-    // open for the session, so a reveal that lands before the grid shuffle survives it.
-    cc_api->RevealAll(ap_checklist_mode);
-}
-
 // Set only once custom_checklist has accepted the tab, so callers can tell a live tab
 // from ap_checklist_mode's GMMODE_NUM default - the framework hands out that same mode
 // when the AP tab registers first.
@@ -176,12 +166,20 @@ int APChecklist_IsRegistered(void)
     return ap_tab_registered;
 }
 
+void APChecklist_RevealAll(void)
+{
+    if (!ap_tab_registered)
+        return;
+
+    // Through the framework rather than by writing is_visible here: it latches the tab
+    // open for the session, so a reveal that lands before the grid shuffle survives it.
+    cc_api->RevealAll(ap_checklist_mode);
+}
+
 void APChecklist_Register(void)
 {
-    static int registered = 0;
-    if (registered)
+    if (cc_api)
         return;
-    registered = 1;
 
     cc_api = (const CustomChecklistAPI *)Hoshi_ImportMod(
         (char *)CUSTOM_CHECKLIST_MOD_NAME, CUSTOM_CHECKLIST_API_MAJOR, CUSTOM_CHECKLIST_API_MINOR);

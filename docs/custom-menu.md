@@ -9,9 +9,10 @@ screen (background, Kirby, menu options) is untouched.
 
 ## Demo Machine
 
-`MainMenu_SelectDemoMachine` rewrites the three `li r4` operands of the idle demo-player setup
-inside `SceneLoad_TitleScreen` - RiderKind at `0x8000d340`, IsBike at `0x8000d34c`, class slot at
-`0x8000d358`. It asks `GateApStar_MachineKind()` for the Archipelago Star; if that resolves to a
+`MainMenu_SelectDemoMachine` rewrites two of the three `li r4` operands of the idle demo-player
+setup inside `SceneLoad_TitleScreen` (`0x8000d26c`) - RiderKind at `0x8000d340` and class slot at
+`0x8000d358`. The third, IsBike at `0x8000d34c`, is left alone: it already encodes `li r4, 0` and
+the selection only ever picks a star-class slot, so patching it wrote back the same word. It asks `GateApStar_MachineKind()` for the Archipelago Star; if that resolves to a
 star-class kind the demo becomes Kirby riding it, otherwise it falls back to Dedede on the Wagon
 Star. Showing the Archipelago Star on the title screen is the point: it is the machine the goal
 awards, on display before it is earned.
@@ -28,8 +29,9 @@ translucent black panel.
 
 The string is `KARCHIPELAGO_VERSION` from `mods/archipelago/src/version.h`, a hand-maintained
 literal matching the repo's release tag. It is deliberately separate from `mod_desc.version`,
-which hoshi reads as the exported-API and save-compatibility number and which tracks
-`ARCHIPELAGO_API_MAJOR`/`MINOR` instead. The same string is printed once at boot as
+which hoshi reads as the save-compatibility number and which tracks
+`APSAVE_VERSION_MAJOR`/`MINOR` - the shape of `APSave` - not the exported
+`ARCHIPELAGO_API_MAJOR`/`MINOR` other mods import against. The same string is printed once at boot as
 `[Main] KARchipelago <version>`.
 
 The stamp is a `Text` on hoshi's screen-space canvas (640x480 raw pixels,

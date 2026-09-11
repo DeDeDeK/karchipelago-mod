@@ -156,75 +156,10 @@ void GateItems_EnsureAllUpInSpawnPools()
     }
 }
 
-static void FilterItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_num)
+int GateItems_IsItemLocked(u8 it_kind)
 {
-    u8 num = *pool_num;
-    u8 write = 0;
-    u32 mask = ap_save->item_unlocked_mask;
-
-    for (u8 read = 0; read < num; read++)
-    {
-        int bit = ItemKindToUnlockBit(pool_kinds[read]);
-        if (bit >= 0 && !(mask & (1 << bit)))
-            continue;
-
-        if (write != read)
-        {
-            pool_kinds[write] = pool_kinds[read];
-            pool_chances[write] = pool_chances[read];
-        }
-        write++;
-    }
-
-    *pool_num = write;
-}
-
-void GateItems_FilterSpawnTables()
-{
-    grBoxGeneObj *obj = *stc_grBoxGeneObj;
-    if (!obj)
-        return;
-
-    for (int box = 0; box < BOXKIND_NUM; box++)
-    {
-        FilterItemsFromPool(
-            obj->item_group_spawn[box].it_kind,
-            obj->item_group_spawn[box].chance,
-            &obj->item_group_spawn[box].num);
-    }
-
-    FilterItemsFromPool(
-        obj->sameitem_it_kind,
-        obj->sameitem_chance,
-        &obj->sameitem_num);
-
-    FilterItemsFromPool(
-        obj->subsequent_it_kind,
-        obj->subsequent_chance,
-        &obj->subsequent_num);
-}
-
-void GateItems_FilterEventDropTables()
-{
-    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (!info || !info->item_desc)
-        return;
-
-    u32 mask = ap_save->item_unlocked_mask;
-
-    for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
-    {
-        int bit = ItemKindToUnlockBit(info->item_desc->event_source_drop[i].it_kind);
-        if (bit >= 0 && !(mask & (1 << bit)))
-        {
-            info->item_desc->event_source_drop[i].chance_dyna = 0;
-            info->item_desc->event_source_drop[i].chance_tac = 0;
-            info->item_desc->event_source_drop[i].chance_meteor = 0;
-            info->item_desc->event_source_drop[i].chance_destructible = 0;
-            info->item_desc->event_source_drop[i].chance_chamber = 0;
-            info->item_desc->event_source_drop[i].chance_ufo = 0;
-        }
-    }
+    int bit = ItemKindToUnlockBit(it_kind);
+    return bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit));
 }
 
 // One bit per unlock index whose locked-spawn skip has been reported this round.
@@ -300,7 +235,7 @@ void GateItems_OnBoot()
     CODEPATCH_HOOKAPPLY(0x800ec284);
     CODEPATCH_REPLACECALL(0x800ed41c, GateItems_MarkAsSpawnedGated); // Dragoon piece bl
     CODEPATCH_REPLACECALL(0x800ed49c, GateItems_MarkAsSpawnedGated); // Hydra piece bl
-    OSReport("[GateItems] Legendary piece gating hooks installed\n");
+    OSReport("[GateItems] Hooks installed\n");
 }
 
 int GateItems_UnlockItem(ItemUnlockKind kind)

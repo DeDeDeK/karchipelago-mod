@@ -72,11 +72,9 @@ int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
     return *box_color;
 }
 
-// The legendary-piece carrier hardcodes its color instead of going through the picker,
-// so the piece gates ask this rather than reading the mask themselves.
 int GateBoxes_IsUnlocked(BoxKind kind)
 {
-    if (ap_save == NULL || kind < 0 || kind >= BOXKIND_NUM)
+    if (kind < 0 || kind >= BOXKIND_NUM)
         return 0;
     return (ap_save->box_unlocked_mask & (1 << kind)) != 0;
 }
@@ -84,7 +82,7 @@ int GateBoxes_IsUnlocked(BoxKind kind)
 void GateBoxes_OnBoot()
 {
     CODEPATCH_REPLACEFUNC(GrBoxGeneratorDetermine, GateBoxes_DetermineBoxType);
-    OSReport("[GateBoxes] Box type gating hook installed\n");
+    OSReport("[GateBoxes] Hooks installed\n");
 }
 
 int GateBoxes_UnlockBox(BoxKind kind)

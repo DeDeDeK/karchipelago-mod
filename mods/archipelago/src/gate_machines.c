@@ -31,9 +31,7 @@
 // Weight handed to an unlocked machine the vanilla table gives 0 chance, so it can
 // still appear on the field. Only these four vanilla kinds reach it - every other
 // VCKIND either carries a real weight in all three table windows or sits in
-// CT_SPAWN_EXCLUDED_MASK. Vanilla per-machine weights run 6-10 out of a ~111-119
-// table total, so these land well under the machines the table actually wants:
-// Compact ~4% of spawns, Flight ~1.7%, each legendary ~0.8%.
+// CT_SPAWN_EXCLUDED_MASK. Set well under the per-machine weights the table does carry.
 static float ZeroChanceSpawnWeight(int vckind)
 {
     switch (vckind)
@@ -127,52 +125,59 @@ static TopRideMachineKind GetRandomUnlockedTRMachine()
     return unlocked[HSD_Randi(count)];
 }
 
-// Post-init fixup for TopRide_InitSelectData (0x8002cfd8), whose per-slot loop
-// unconditionally writes panel_machine[slot] = 0 (Free Star). Only the RaceInit site
-// (0x8002d748) runs after the panel-kind field is filled, so the other sites see
-// non-CPU and fall through to first-unlocked.
-void GateMachines_FixupTRInit(u8 *lobby_base)
+// Post-init fixup for the three TR lobby init paths, each of whose per-slot loop
+// writes panel_machine[slot] = 0 (Free Star) unconditionally. All three hook sites
+// sit past their loop, so panel_pkind is filled by the time this runs: at
+// InitSelectData every panel reads CPU, at SoloInit every panel but the active one.
+static void GateMachines_FixupTRInit(void)
 {
+    GameData *gd = Gm_GetGameData();
+    if (!gd)
+        return;
+
+    u8 *pkind   = gd->topride_select_ply.panel_pkind;
+    u8 *color   = gd->topride_select_ply.color;
+    u8 *machine = gd->topride_select_ply.panel_machine;
     TopRideMachineKind first = GetFirstUnlockedTRMachine();
-    // Relative to lobby base (GameData+0x197): 0x2f = panel_machine[slot], 0x23 = color[slot].
+
     for (int i = 0; i < 4; i++)
     {
-        if (lobby_base[0x1b + i] == 2) // CPU panel
+        if (pkind[i] != 2) // not a CPU panel
         {
-            // panel_pkind: 1 = HMN, 2 = CPU. Only the visible panels' colors are
-            // worth avoiding.
-            u8 taken[4];
-            int num_taken = 0;
-            for (int j = 0; j < 4; j++)
-            {
-                u8 pkind = lobby_base[0x1b + j];
-                if (j != i && (pkind == 1 || pkind == 2))
-                    taken[num_taken++] = lobby_base[0x23 + j];
-            }
-            lobby_base[0x2f + i] = (u8)GetRandomUnlockedTRMachine();
-            lobby_base[0x23 + i] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
+            machine[i] = (u8)first;
+            continue;
         }
-        else
-            lobby_base[0x2f + i] = (u8)first;
+
+        // panel_pkind: 1 = HMN, 2 = CPU. Only the visible panels' colors are
+        // worth avoiding.
+        u8 taken[4];
+        int num_taken = 0;
+        for (int j = 0; j < 4; j++)
+        {
+            if (j != i && (pkind[j] == 1 || pkind[j] == 2))
+                taken[num_taken++] = color[j];
+        }
+        machine[i] = (u8)GetRandomUnlockedTRMachine();
+        color[i] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
     }
 }
 
 // Hook at 0x8002d070 in TopRide_InitSelectData, just after the per-slot init loop
-// (0x8002d06c is already hooked). r31 = lobby base. The three following
-// `stb r3, {6,2,3}(r31)` lobby-flag clears rely on r3 = 0, which the C call wipes.
+// (0x8002d06c is already hooked). The three following `stb r3, {6,2,3}(r31)`
+// lobby-flag clears rely on r3 = 0, which the C call wipes.
 CODEPATCH_HOOKCREATE(0x8002d070,
-    "mr 3, 31\n\t",
+    "",
     GateMachines_FixupTRInit,
     "li 3, 0\n\t",
-    0x8002d074
+    0
 )
 
-// Race-init counterpart. TopRide_RaceInit re-zeros all four panel_machine slots at
-// 0x8002d6c4, after InitSelectData's fixup. Hook at 0x8002d748 (`bl gmGetGlobalP`),
-// past the panel_pkind CPU-fill loop whose caller-saved iterator r7 rules out landing
-// earlier; the re-executed bl restores r3 = GameData*, so no epilogue is needed.
+// Race-init counterpart. TopRide_RaceInit (0x8002d6c4) re-zeros all four
+// panel_machine slots. Hook at 0x8002d748 (`bl gmGetGlobalP`), past the panel_pkind
+// CPU-fill loop whose caller-saved iterator r7 rules out landing earlier; the
+// re-executed bl restores r3 = GameData*, so no epilogue is needed.
 CODEPATCH_HOOKCREATE(0x8002d748,
-    "mr 3, 31\n\t",
+    "",
     GateMachines_FixupTRInit,
     "",
     0
@@ -183,7 +188,7 @@ CODEPATCH_HOOKCREATE(0x8002d748,
 // 0x8002b8a8 and solo TopRide_SoloPanelThink 0x8002ca80) carry identical cyclers,
 // so one gate serves both hook sites. panel_base[0x2f] = panel_machine[panel];
 // input_bits = direction-edge bits (0x80002 = RIGHT, 0x40001 = LEFT).
-int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
+static int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
 {
     u8 current = panel_base[0x2f];
     u8 new_val = current;
@@ -232,13 +237,15 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002cb98,
     0x8002cbf0
 )
 
-// Solo-mode counterpart. TopRide_SoloInit hardcodes all four panel_machine slots to 0
-// at 0x8002db70, bypassing InitSelectData. Hook at 0x8002db90 (`add r30, r31, r28`),
-// one instruction past the already-hooked `li r28, 0`, so r28 = 0 and r31 = lobby base.
-CODEPATCH_HOOKCREATE(0x8002db90,
-    "mr 3, 31\n\t",
-    GateMachines_FixupTRInit,
+// Solo-mode counterpart. TopRide_SoloInit (0x8002d9e8) hardcodes all four
+// panel_machine slots to 0 at 0x8002db70, bypassing InitSelectData. Hook at
+// 0x8002dc48, the first instruction past the per-slot loop - 0x8002db90 is that
+// loop's back-edge target, so hooking there ran the fixup once per slot. The
+// clobbered `stb r0, 6(r31)` and the two stores after it all want r0 = 0.
+CODEPATCH_HOOKCREATE(0x8002dc48,
     "",
+    GateMachines_FixupTRInit,
+    "li 0, 0\n\t",
     0
 )
 
@@ -246,7 +253,7 @@ CODEPATCH_HOOKCREATE(0x8002db90,
 // defaults to Free, so Start would launch a machine the player doesn't own. Both hook
 // sites reach this only on the Start rising edge, so the buzzer fires once per press.
 // Returns 0 = allow start, 1 = block start.
-int GateMachines_TRLobbyCanStart(void)
+static int GateMachines_TRLobbyCanStart(void)
 {
     u32 tr_mask = (1u << VCKIND_FREE) | (1u << VCKIND_STEER);
     if (ap_save->machine_unlocked_mask & tr_mask)
@@ -436,7 +443,7 @@ void GateMachines_OnBoot()
     // each with its own init, cycler, and start-match handler.
     CODEPATCH_HOOKAPPLY(0x8002d070);  // TopRide_InitSelectData post-loop fixup (main-menu reset)
     CODEPATCH_HOOKAPPLY(0x8002d748);  // TopRide_RaceInit post-reset fixup (TR Main Game)
-    CODEPATCH_HOOKAPPLY(0x8002db90);  // TopRide_SoloInit post-zero fixup (Free Run / Time Attack)
+    CODEPATCH_HOOKAPPLY(0x8002dc48);  // TopRide_SoloInit post-zero fixup (Free Run / Time Attack)
     CODEPATCH_HOOKAPPLY(0x8002be44);  // TopRide_CSS_PanelThink L/R cycler (race lobby)
     CODEPATCH_HOOKAPPLY(0x8002cb98);  // TopRide_SoloPanelThink L/R cycler (Free Run / Time Attack)
     CODEPATCH_HOOKAPPLY(0x8002c52c);  // TopRide_PreGameThink start-match gate (race)
@@ -446,7 +453,7 @@ void GateMachines_OnBoot()
 }
 
 // Display name for any MachineKind, vanilla or registered custom.
-const char *GateMachines_GetName(MachineKind kind)
+static const char *GateMachines_GetName(MachineKind kind)
 {
     if (kind >= 0 && kind < VCKIND_NUM)
         return MachineKind_Names[kind];

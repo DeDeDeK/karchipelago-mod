@@ -11,7 +11,6 @@ APMenuSettings ap_menu_settings = {
     .ct_permanent_patches_enabled         = 1,
     .ct_stadium_permanent_patches_enabled = 1,
     .ar_permanent_patches_enabled         = 1,
-    .energylink_autocharge_rate           = 1,
     .ct_random_start_machine              = 1,
     .ap_box_rate                          = APBOXRATE_LOW,
     .text_messages = {
@@ -31,7 +30,7 @@ APMenuSettings ap_menu_settings = {
 };
 
 static const char *stc_off_on[] = {"Off", "On"};
-static const char *stc_slow_med_fast[] = {"Slow", "Medium", "Fast"};
+static const char *stc_autocharge[] = {"Off", "Slow", "Medium", "Fast"};
 static const char *stc_ap_box_rate[] = {"Rare", "Low", "Med", "High"};
 
 void SyncMenuStateToAPData(void)
@@ -51,8 +50,7 @@ void SyncMenuStateToAPData(void)
 
 static void OnToggleDeathLink(int val)          { OSReport("[Settings] DeathLink toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleEnergyLink(int val)         { OSReport("[Settings] EnergyLink toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
-static void OnToggleAutoCharge(int val)         { OSReport("[Settings] EnergyLink AutoCharge toggled %s\n", stc_off_on[val]); }
-static void OnChangeAutoChargeRate(int val)     { OSReport("[Settings] EnergyLink AutoCharge rate set to %s\n", stc_slow_med_fast[val]); }
+static void OnChangeAutoCharge(int val)         { OSReport("[Settings] EnergyLink AutoCharge set to %s\n", stc_autocharge[val]); }
 static void OnToggleTrapLink(int val)           { OSReport("[Settings] TrapLink toggled %s\n", stc_off_on[val]); SyncMenuStateToAPData(); }
 static void OnToggleCTPermanent(int val)        { OSReport("[Settings] CT Permanent Patches toggled %s\n", stc_off_on[val]); }
 static void OnToggleCTStadiumPermanent(int val) { OSReport("[Settings] CT Stadium Permanent Patches toggled %s\n", stc_off_on[val]); }
@@ -206,7 +204,7 @@ static MenuDesc messages_menu = {
         },
         &(OptionDesc){
             .name = "Local",
-            .description = "Offline messages settings",
+            .description = "Messages the mod writes itself, with or without a client",
             .kind = OPTKIND_MENU,
             .menu_ptr = &local_messages_menu,
         },
@@ -257,164 +255,155 @@ static MenuDesc permanent_patches_menu = {
     },
 };
 
+static MenuDesc energylink_menu = {
+    .option_num = 3,
+    .options = {
+        &(OptionDesc){
+            .name = "Enabled",
+            .description = "Enable or Disable Energy Link",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.energylink_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleEnergyLink,
+        },
+        &(OptionDesc){
+            .name = "Auto-Charge",
+            .description = "Spend pooled energy to fill the machine charge meter, and how fast",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.energylink_autocharge,
+            .value_num = 4,
+            .value_names = (char **)stc_autocharge,
+            .on_change = OnChangeAutoCharge,
+        },
+        &(OptionDesc){
+            .name = "Spend",
+            .description = "Purchase items with pooled energy",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &energylink_spend_menu,
+        },
+    },
+};
+
+// Named rather than a compound literal: GCC sizes a MenuDesc compound literal as if its
+// flexible options[] were empty, which buries any option_num / entry-count mismatch in a
+// bogus padding warning instead of reporting it.
+static MenuDesc root_menu = {
+    .option_num = 10,
+    .options = {
+        &(OptionDesc){
+            .name = "Death Link",
+            .description = "Enable or Disable Death Link",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.deathlink_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleDeathLink,
+        },
+        &(OptionDesc){
+            .name = "Energy Link",
+            .description = "Energy Link settings and shop",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &energylink_menu,
+        },
+        &(OptionDesc){
+            .name = "Trap Link",
+            .description = "Enable or Disable Trap Link",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.traplink_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleTrapLink,
+        },
+        &(OptionDesc){
+            .name = "Messages",
+            .description = "Choose which Archipelago messages appear in the text box",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &messages_menu,
+        },
+        &(OptionDesc){
+            .name = "Permanent Patches",
+            .description = "Control whether permanent patches are re-applied at round start",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &permanent_patches_menu,
+        },
+        &(OptionDesc){
+            .name = "Random Start Machine",
+            .description = "Start a City Trial run on a random unlocked machine instead of Compact",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.ct_random_start_machine,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleRandomStartMachine,
+        },
+        &(OptionDesc){
+            .name = "AP Box Rate",
+            .description = "How often AP Boxes fall in City Trial",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.ap_box_rate,
+            .value_num = APBOXRATE_NUM,
+            .value_names = (char *[]){
+                "Rare",
+                "Low",
+                "Med",
+                "High",
+            },
+            .on_change = OnChangeApBoxRate,
+        },
+        &(OptionDesc){
+            .name = "Drop Ability",
+            .description = "Press Z to discard your copy ability, or your item/power in Top Ride",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.drop_ability_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleDropAbility,
+        },
+        &(OptionDesc){
+            .name = "Air Quick Spin",
+            .description = "Allow quick spinning in the air",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.air_quick_spin_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleAirQuickSpin,
+        },
+        &(OptionDesc){
+            .name = "On-Foot Zoom",
+            .description = "Allow camera zoom control when off of a machine",
+            .kind = OPTKIND_VALUE,
+            .val = &ap_menu_settings.onfoot_zoom_enabled,
+            .value_num = 2,
+            .value_names = (char *[]){
+                "Off",
+                "On",
+            },
+            .on_change = OnToggleOnFootZoom,
+        },
+    },
+};
+
 OptionDesc ModSettings = {
     .name = "Archipelago Settings",
     .description = "Interface with mod settings here",
     .kind = OPTKIND_MENU,
-    .menu_ptr = &(MenuDesc){
-        .option_num = 10,
-        .options = {
-            &(OptionDesc){
-                .name = "Death Link",
-                .description = "Enable or Disable Death Link",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.deathlink_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleDeathLink,
-            },
-            &(OptionDesc){
-                .name = "Energy Link",
-                .description = "Energy Link settings and shop",
-                .kind = OPTKIND_MENU,
-                .menu_ptr = &(MenuDesc){
-                    .option_num = 4,
-                    .options = {
-                        &(OptionDesc){
-                            .name = "Enabled",
-                            .description = "Enable or Disable Energy Link",
-                            .kind = OPTKIND_VALUE,
-                            .val = &ap_menu_settings.energylink_enabled,
-                            .value_num = 2,
-                            .value_names = (char *[]){
-                                "Off",
-                                "On",
-                            },
-                            .on_change = OnToggleEnergyLink,
-                        },
-                        &(OptionDesc){
-                            .name = "Auto-Charge",
-                            .description = "Automatically spend energy to fill machine charge meter",
-                            .kind = OPTKIND_VALUE,
-                            .val = &ap_menu_settings.energylink_autocharge,
-                            .value_num = 2,
-                            .value_names = (char *[]){
-                                "Off",
-                                "On",
-                            },
-                            .on_change = OnToggleAutoCharge,
-                        },
-                        &(OptionDesc){
-                            .name = "Auto-Charge Rate",
-                            .description = "How fast Auto-Charge fills the meter",
-                            .kind = OPTKIND_VALUE,
-                            .val = &ap_menu_settings.energylink_autocharge_rate,
-                            .value_num = 3,
-                            .value_names = (char *[]){
-                                "Slow",
-                                "Medium",
-                                "Fast",
-                            },
-                            .on_change = OnChangeAutoChargeRate,
-                        },
-                        &(OptionDesc){
-                            .name = "Spend",
-                            .description = "Purchase items with pooled energy",
-                            .kind = OPTKIND_MENU,
-                            .menu_ptr = &energylink_spend_menu,
-                        },
-                    },
-                },
-            },
-            &(OptionDesc){
-                .name = "Trap Link",
-                .description = "Enable or Disable Trap Link",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.traplink_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleTrapLink,
-            },
-            &(OptionDesc){
-                .name = "Messages",
-                .description = "Choose which Archipelago messages appear in the text box",
-                .kind = OPTKIND_MENU,
-                .menu_ptr = &messages_menu,
-            },
-            &(OptionDesc){
-                .name = "Permanent Patches",
-                .description = "Control whether permanent patches are re-applied at round start",
-                .kind = OPTKIND_MENU,
-                .menu_ptr = &permanent_patches_menu,
-            },
-            &(OptionDesc){
-                .name = "Random Start Machine",
-                .description = "Start City Trial on a random unlocked machine instead of Compact",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.ct_random_start_machine,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleRandomStartMachine,
-            },
-            &(OptionDesc){
-                .name = "AP Box Rate",
-                .description = "How often AP Boxes fall in City Trial",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.ap_box_rate,
-                .value_num = APBOXRATE_NUM,
-                .value_names = (char *[]){
-                    "Rare",
-                    "Low",
-                    "Med",
-                    "High",
-                },
-                .on_change = OnChangeApBoxRate,
-            },
-            &(OptionDesc){
-                .name = "Drop Ability",
-                .description = "Press Z to discard your copy ability, or your item/power in Top Ride",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.drop_ability_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleDropAbility,
-            },
-            &(OptionDesc){
-                .name = "Air Quick Spin",
-                .description = "Allow quick spinning in the air",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.air_quick_spin_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleAirQuickSpin,
-            },
-            &(OptionDesc){
-                .name = "On-Foot Zoom",
-                .description = "Allow camera zoom control when off of a machine",
-                .kind = OPTKIND_VALUE,
-                .val = &ap_menu_settings.onfoot_zoom_enabled,
-                .value_num = 2,
-                .value_names = (char *[]){
-                    "Off",
-                    "On",
-                },
-                .on_change = OnToggleOnFootZoom,
-            },
-        },
-    },
+    .menu_ptr = &root_menu,
 };

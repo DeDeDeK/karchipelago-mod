@@ -42,7 +42,7 @@ The hook's prologue saves r4/r5 to the stack and the epilogue restores all three
 
 ## Receiving Deaths
 
-`DeathLink_PerFrame` runs as a GObj update function created in `DeathLink_On3DLoadEnd`, called from `On3DLoadEnd` for the 3D modes (Air Ride, City Trial, the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) currently on a machine (`Rider_IsOnMachine`), arms that slot's echo suppression and calls `KillPlayer(rd, md)`. After killing everyone it enqueues a "DeathLink received!" textbox and clears `deathlink_receive`.
+`DeathLink_PerFrame` runs as a GObj update function created in `DeathLink_On3DLoadEnd`, called from `On3DLoadEnd` for the 3D modes (Air Ride, City Trial, the stadiums). It early-returns until `Gm_GetIntroState() == GMINTRO_END`, then on `deathlink_receive == 1` walks all 5 player slots and, for each human rider (`Ply_GetPKind(i) == PKIND_HMN`) currently on a machine (`Rider_IsOnMachine`), arms that slot's echo suppression and calls `KillPlayer(rd, md)`. It enqueues a "DeathLink received!" textbox and clears `deathlink_receive` **only if it killed at least one human**; a frame with nobody killable - every human on foot, or none in the round, which includes the attract demo - leaves the flag set and retries, so an arriving death is never silently swallowed.
 
 ### Kill mechanism by mode
 
@@ -112,7 +112,7 @@ The hook site `0x80331a94` is inside the per-frame TR-stage function at `0x80331
 
 ## Top Ride Receive
 
-`DeathLink_TopRidePerFrame`, created by `DeathLink_OnTopRideLoadEnd`, picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)` and applies that **same** state to every human kirby in `mgr->kirbys[0..3]`, arming each slot's echo suppression first. It then enqueues a "DeathLink received!" textbox and clears `deathlink_receive`.
+`DeathLink_TopRidePerFrame`, created by `DeathLink_OnTopRideLoadEnd`, picks **one** random state from a damage-class pool via `HSD_Randi(DEATHLINK_STATE_COUNT)` and applies that **same** state to every human kirby in `mgr->kirbys[0..3]`, arming each slot's echo suppression first. As in the 3D path, it enqueues the "DeathLink received!" textbox and clears `deathlink_receive` only if it reached at least one human kirby.
 
 This replaces the AR/CT kill path entirely: Top Ride has no rider/machine/HP/fall-death system, so there is nothing to zero or to fall off of. A damage state is the closest analog to "death".
 

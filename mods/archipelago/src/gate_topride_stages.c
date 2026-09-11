@@ -9,36 +9,30 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// Callers must pre-check the random-button case (course >= TOPRIDE_NUM).
-static int GateTopRideStages_CheckCourseUnlocked(int course)
-{
-    return (ap_save->topride_stage_unlocked_mask & (1 << course)) ? 1 : 0;
-}
-
 // The course-select grid has 8 positions: 0-6 = courses, 7 = the random button (the
 // grid-to-course table at 0x805d51a8 is identity for 0-6 and maps 7 to value 8). The
 // random button needs at least one unlocked course.
-static int IsGridPosSelectable(int pos)
+static int GateTopRideStages_IsGridPosSelectable(int pos)
 {
     if (pos >= TOPRIDE_NUM)
         return ap_save->topride_stage_unlocked_mask != 0;
-    return GateTopRideStages_CheckCourseUnlocked(pos);
+    return (ap_save->topride_stage_unlocked_mask & (1 << pos)) ? 1 : 0;
 }
 
-static void AdjustCursorToUnlocked(void)
+static void GateTopRideStages_AdjustCursorToUnlocked(void)
 {
     if (!ap_save)
         return;
     u8 *cursor_ptr = &Gm_GetGameData()->topride_course_select.cursor;
     int pos = *cursor_ptr;
 
-    if (IsGridPosSelectable(pos))
+    if (GateTopRideStages_IsGridPosSelectable(pos))
         return;
 
-    for (int i = 1; i <= 8; i++)
+    for (int i = 1; i < 8; i++)
     {
         int next = (pos + i) % 8;
-        if (IsGridPosSelectable(next))
+        if (GateTopRideStages_IsGridPosSelectable(next))
         {
             *cursor_ptr = (u8)next;
             return;
@@ -62,7 +56,7 @@ static int GateTopRideStages_CourseSelectCanLaunch(u32 launch_buttons)
         return 0;
 
     int cursor = Gm_GetGameData()->topride_course_select.cursor;
-    if (IsGridPosSelectable(cursor))
+    if (GateTopRideStages_IsGridPosSelectable(cursor))
         return 0;
 
     playSoundFX_errorNoise();
@@ -94,15 +88,10 @@ CODEPATCH_HOOKCONDITIONALCREATE(
 // Cursor-movement convergence at 0x8003cd18 (`lbz r0, 0x2(r31)`), where all D-pad paths
 // meet after writing topride_course_select.cursor. Adjusting the cursor before the
 // clobbered lbz reads it makes the visual update highlight the corrected position.
-static void GateTopRideStages_SkipLockedCursor(void)
-{
-    AdjustCursorToUnlocked();
-}
-
 CODEPATCH_HOOKCREATE(
     0x8003cd18,
     "",
-    GateTopRideStages_SkipLockedCursor,
+    GateTopRideStages_AdjustCursorToUnlocked,
     "",
     0
 );
@@ -138,12 +127,18 @@ static int GateTopRideStages_RandomPick(int unused)
         }
     }
 
+    // No course is unlocked at all. The caller re-rolls until the returned index's
+    // used bit is clear, so course 0 has to be left selectable or it spins forever.
     if (count == 0)
+    {
+        *used_ptr &= ~1;
         return 0;
+    }
 
     int pick = candidates[HSD_Randi(count)];
     OSReport("[GateTopRideStages] Random pick %d (%s) from %d candidates (unlocked = %s, used = %s)\n",
-             pick, TopRideCourse_Names[pick], count, MaskBits(unlock, 8), MaskBits(used, 8));
+             pick, TopRideCourse_Names[pick], count,
+             MaskBits(unlock, TOPRIDE_NUM), MaskBits(used, TOPRIDE_NUM));
     return pick;
 }
 
@@ -165,7 +160,7 @@ int GateTopRideStages_UnlockStage(int course)
 
     ap_save->topride_stage_unlocked_mask |= (1 << course);
     OSReport("[GateTopRideStages] Top Ride course %d (%s) unlocked (mask = %s)\n",
-             course, TopRideCourse_Names[course], MaskBits(ap_save->topride_stage_unlocked_mask, 8));
+             course, TopRideCourse_Names[course], MaskBits(ap_save->topride_stage_unlocked_mask, TOPRIDE_NUM));
     APAnnounce_Grant("Unlocked Course: ", TopRideCourse_Names[course], tb_api->StageColor, NULL);
     return 1;
 }

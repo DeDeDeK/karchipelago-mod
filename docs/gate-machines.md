@@ -104,7 +104,7 @@ The threshold is patched to `cmpwi r3, 10` (`0x2c03000a`) so `num<=10` is single
 - **Trial** (`city_select_ply.x1d0 == 0`): vanilla hardcodes Compact for every slot. The free-roam start has no machine grid - nobody, human or CPU, picks.
 - **Stadium / Free Run** (`x1d0 != 0`): vanilla sets `ckind = machine_select.c_kind_arr[icon[slot]]` from the gated grid, and the mod returns without touching it. The player can roam the single cursor onto any CPU panel and pick that CPU's machine (the icon-grid write at 0x800315ac in `CitySelect_Cursor1InputThink`); a CPU the player never touches is seeded a random gated machine by the vanilla loaders (`icon[slot] = HSD_Randi(machine_select.num)`). Either way the machine is already an unlocked one, because the grid it indexes is the filtered `c_kind_arr`.
 
-A single `CODEPATCH_HOOKCREATE` at 0x8002dea0 (prologue `mr 3, 26` -> slot; skip target 0 re-executes the clobbered `lbz`, reloading the updated ckind) runs `GateMachines_FinalizeCTMachine(slot)` for each slot. `r26` = slot index and `r28` = `city_select_ply + slot` are both callee-saved, so they survive the C call. `x215[slot]` is `0` = human, `2` = CPU, anything else = inactive (left untouched). CPU slots also get `ply_color[slot] = GateColors_RandomUnlockedColor()` here, independent of the machine toggle.
+A single `CODEPATCH_HOOKCREATE` at 0x8002dea0 (prologue `mr 3, 26` -> slot; skip target 0 re-executes the clobbered `lbz`, reloading the updated ckind) runs `GateMachines_FinalizeCTMachine(slot)` for each slot. `r26` = slot index and `r28` = `city_select_ply + slot` are both callee-saved, so they survive the C call. `x215[slot]` is `0` = human, `2` = CPU, anything else = inactive (left untouched). Color is not touched here - City Trial CPU colors are repainted from `gate_colors.c`'s own CSS hook.
 
 The **Random Start Machine** menu toggle (`ap_menu_settings.ct_random_start_machine`, default On) governs the **Trial branch only**, where nobody picks: On -> `RandomUnlockedKirbyCKind()` for every active slot, Off -> Compact when unlocked, else `RandomUnlockedKirbyCKind()`. Stadium and Free Run have a machine grid, so the grid is the only authority there - a human's pick, a CPU's pick made by a human roaming the cursor onto its panel, and the vanilla random seed for a CPU nobody touched all stand as they are, whatever the toggle says.
 
@@ -126,9 +126,20 @@ Seven hooks cover the surface:
 
 | Hook address | Function | Role |
 |-------------|----------|------|
-| 0x8002d070 | `TopRide_InitSelectData` | Post-init fixup (main-menu reset): vanilla writes `panel_machine = 0` (Free); when Free is locked, override to the first unlocked TR machine for all 4 panels |
-| 0x8002d748 | `TopRide_RaceInit` | Post-reset fixup: vanilla's conditional reset block at 0x8002d6c4..0x8002d700 overwrites `panel_machine = 0` again, undoing InitSelectData's fixup. This is the only fixup site that runs after `panel_pkind` (lobby +0x1b) is filled, so it is the only one where CPU panels (`panel_pkind == 2`) can take a *random* unlocked control type plus a random unlocked color; human panels get the first unlocked machine |
-| 0x8002db90 | `TopRide_SoloInit` | Same fixup for the solo flow, which hardcodes `panel_machine = 0` at 0x8002db70..0x8002db88 |
+| 0x8002d070 | `TopRide_InitSelectData` | Post-init fixup (main-menu reset): vanilla writes `panel_machine = 0` (Free) for every panel |
+| 0x8002d748 | `TopRide_RaceInit` | Post-reset fixup: vanilla's conditional reset block at 0x8002d6c4..0x8002d700 overwrites `panel_machine = 0` again, undoing InitSelectData's fixup |
+| 0x8002dc48 | `TopRide_SoloInit` | Same fixup for the solo flow, which hardcodes `panel_machine = 0` at 0x8002db70..0x8002db88 |
+
+All three sites land past their own per-slot loop, so `panel_pkind` (`topride_select_ply`
++0x1b) is filled by the time `GateMachines_FixupTRInit` runs: at `InitSelectData` every
+panel reads CPU, at `SoloInit` every panel but the active one. CPU panels
+(`panel_pkind == 2`) therefore take a *random* unlocked control type plus a random
+unlocked color at every site; human panels get the first unlocked machine. The solo hook
+has to be at 0x8002dc48 rather than 0x8002db90: the latter is the per-slot loop's own
+back-edge target (`blt 0x8002db90` at 0x8002dc44), so hooking it ran the whole fixup once
+per slot and re-rolled every CPU panel on each pass. The function reads the lobby through
+`Gm_GetGameData()->topride_select_ply` rather than a passed base pointer, so no site needs
+a prologue.
 | 0x8002be44 | `TopRide_CSS_PanelThink` | Race L/R cycler gate: replaces the cycle block + post-write compare through 0x8002be94. Conditional - 0 (no change) skips to function end 0x8002c054, 1 falls through to the SFX + UI update at 0x8002be98 |
 | 0x8002cb98 | `TopRide_SoloPanelThink` | Solo L/R cycler gate, same function; 0 -> 0x8002cc18, 1 -> 0x8002cbf0. Without it, solo had no unlock check on the Control Type row |
 | 0x8002c52c | `TopRide_PreGameThink` | Start-match gate (race): `GateMachines_TRLobbyCanStart` blocks the confirm + commit-and-launch sequence when neither `VCKIND_FREE` nor `VCKIND_STEER` is unlocked; blocked -> 0x8002c878 |

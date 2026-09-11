@@ -30,15 +30,13 @@
 #include "settings_menu.h"
 #include "ap_announce.h"
 
-// Bump the received counter, append to the unprocessed list, and acknowledge.
-// Returns 1 if an item was received.
-int APItems_CheckMailbox()
+static void APItems_CheckMailbox(void)
 {
     static int warned_full = 0;
 
     uint incoming = ap_data->incoming_item_id;
     if (incoming == 0)
-        return 0;
+        return;
 
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
@@ -52,7 +50,7 @@ int APItems_CheckMailbox()
                      MAX_RECEIVED_ITEMS, incoming);
             warned_full = 1;
         }
-        return 0;
+        return;
     }
     warned_full = 0;
 
@@ -68,7 +66,6 @@ int APItems_CheckMailbox()
 
     // Clear the mailbox so the client can write the next item
     ap_data->incoming_item_id = 0;
-    return 1;
 }
 
 // TextBox color for a directly-received ITKIND item, by category.
@@ -174,15 +171,15 @@ int APItems_HandleItem(uint ap_item_id)
         case AP_ITEM_CHECKBOX_FILLER_AIRRIDE:
             Checklist_GrantFiller(GMMODE_AIRRIDE);
             Checklist_AnnounceFiller(GMMODE_AIRRIDE);
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_TOPRIDE:
             Checklist_GrantFiller(GMMODE_TOPRIDE);
             Checklist_AnnounceFiller(GMMODE_TOPRIDE);
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_CITYTRIAL:
             Checklist_GrantFiller(GMMODE_CITYTRIAL);
             Checklist_AnnounceFiller(GMMODE_CITYTRIAL);
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO:
             // If the custom_checklist framework never registered the AP tab, drop
             // the item rather than dereference a NULL clear-data pointer.
@@ -193,10 +190,10 @@ int APItems_HandleItem(uint ap_item_id)
             return AP_ITEM_APPLIED;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_SPAWN_RATE_UP:
             SpawnRate_Increment();
-            return 1;
+            return AP_ITEM_APPLIED;
     }
 
     // Above the 3D-only scene gate below because it also applies in Top Ride
@@ -331,7 +328,7 @@ int APItems_HandleItem(uint ap_item_id)
         // Notify here rather than in the give handler - TrapLink also calls it
         // and shows its own "TrapLink received!" message.
         int ok = GateTopRideItems_GiveItem(kind);
-        if (ok && (unsigned)kind < TRITEM_NUM && TopRideItemKind_Names[kind])
+        if (ok && TopRideItemKind_Names[kind])
             APAnnounce_Grant("Received: TR ", TopRideItemKind_Names[kind],
                              tb_api->TopRideItemColor, NULL);
         return ok;
@@ -409,7 +406,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         EventKind kind = ap_item_id - AP_EVENT_BASE;
         int ok = Event_GiveItem(kind);
-        if (ok && kind < EVKIND_NUM && EventKind_Names[kind])
+        if (ok && EventKind_Names[kind])
             APAnnounce_Grant("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
         return ok;
     }
@@ -429,7 +426,7 @@ int APItems_HandleItem(uint ap_item_id)
         {
             if (major != MJRKIND_CITY && major != MJRKIND_AIR)
                 return 0;
-            if (!Patch_GiveItem(patch_kind, 1))
+            if (!Patch_GiveItem(patch_kind))
                 return AP_ITEM_RETRY;
             NotifyItemReceived(it_kind);
             return AP_ITEM_APPLIED;
@@ -541,14 +538,9 @@ int APItems_Queue(uint ap_item_id)
     return 1;
 }
 
-void APItems_OnSceneChange()
-{
-    GOBJ_EZCreator(0, 0, 0, 0, HSD_Free, HSD_OBJKIND_NONE, 0, APItems_PerFrame, 0, 0, 0, 0);
-}
-
 // Resolve at most one queued item per frame. Items that can't apply yet are
 // skipped so items behind them still process; only RETRY items stay in the queue.
-void APItems_PerFrame(GOBJ *g)
+static void APItems_PerFrame(GOBJ *g)
 {
     APItems_CheckMailbox();
 
@@ -566,5 +558,9 @@ void APItems_PerFrame(GOBJ *g)
         ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
         break;
     }
+}
 
+void APItems_OnSceneChange()
+{
+    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, APItems_PerFrame, 0, 0, 0, 0);
 }

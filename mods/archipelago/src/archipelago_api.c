@@ -7,7 +7,8 @@
 #include "main.h"
 #include "ap_item_handler.h"
 #include "checklist_rewards.h"
-#include "check_detection.h"
+#include "ap_checks.h"
+#include "ap_goal.h"
 #include "energylink.h"
 #include "gate_ap_star.h"
 #include "ap_patches.h"
@@ -123,32 +124,22 @@ static void ApiDebugClearAllChecklistData(void)
 
 static void ApiDebugClearAllSentChecks(void)
 {
-    CheckDetection_DebugClearAll();
+    APChecks_DebugClearAll();
 }
 
 static void ApiDebugForceMarkAllChecks(void)
 {
-    CheckDetection_DebugForceMarkAll();
+    APChecks_DebugForceMarkAll();
 }
 
 static void ApiDebugTriggerGoalComplete(void)
 {
-    CheckDetection_DebugTriggerGoal();
-}
-
-static void ApiDebugWriteIncomingItem(int ap_item_id)
-{
-    ap_data->incoming_item_id = (uint)ap_item_id;
+    APGoal_DebugComplete();
 }
 
 static void ApiDebugTriggerDeathlinkReceive(void)
 {
     ap_data->deathlink_receive = 1;
-}
-
-static void ApiDebugTriggerTraplinkReceive(void)
-{
-    ap_data->traplink_receive = 1;
 }
 
 static int ApiDebugSpawnApStarPiece(int piece, int ply)
@@ -193,9 +184,7 @@ static const ArchipelagoAPI api = {
     .DebugClearAllSentChecks      = ApiDebugClearAllSentChecks,
     .DebugForceMarkAllChecks      = ApiDebugForceMarkAllChecks,
     .DebugTriggerGoalComplete     = ApiDebugTriggerGoalComplete,
-    .DebugWriteIncomingItem       = ApiDebugWriteIncomingItem,
     .DebugTriggerDeathlinkReceive = ApiDebugTriggerDeathlinkReceive,
-    .DebugTriggerTraplinkReceive  = ApiDebugTriggerTraplinkReceive,
     .DebugRevealChecklist         = ApiDebugRevealChecklist,
     .DebugSpawnApStarPiece        = ApiDebugSpawnApStarPiece,
     .DebugSpawnApBox              = ApiDebugSpawnApBox,

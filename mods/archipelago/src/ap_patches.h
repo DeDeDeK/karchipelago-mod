@@ -17,8 +17,10 @@ void ApPatches_OnBoot(void);
 void ApPatches_On3DLoadStart(void);
 void ApPatches_On3DLoadEnd(void);
 void ApPatches_On3DExit(void);
-void ApPatches_OnFrameStart(void);
 void ApPatches_OnSaveLoaded(void);
+
+// Apply the AP Patches the client backfilled. Call only while ap_data->backfill_valid is set.
+void ApPatches_ApplyBackfill(void);
 
 // Clear every collected bit in both save and mirror, or fill the first
 // ap_patches of them. Neither persists - the caller owns the card write.

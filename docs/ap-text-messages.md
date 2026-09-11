@@ -92,7 +92,7 @@ The decision is the toggle and nothing else. The mod does not try to work out wh
 
 Every grant announce goes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`) rather than calling the text box itself. That is deliberate: the toggle is a property of the whole category, and a new unlock handler that copies its neighbour gets it without anyone remembering a guard. Announces that carry something the AP item name does not - `Patch cap increased (50%)`, `Spawn rate increased (60%)` - are the exception and call the text box directly, which is what marks them as exceptional. So does every non-AP path: EnergyLink purchases, in-game pickups, gate prompts. The boot regrant suppresses the same category through the same funnel, via `ap_regrant_quiet`.
 
-The check and goal lines have one call site each, in `check_detection.c`, so they test `APAnnounce_LocalEnabled` directly instead of routing through a funnel of their own. So do the link lines, which sit at the send and receive points in `deathlink.c` and `traplink.c`.
+The check and goal lines have one call site each, in `ap_checks.c`, so they test `APAnnounce_LocalEnabled` directly instead of routing through a funnel of their own. So do the link lines, which sit at the send and receive points in `deathlink.c` and `traplink.c`.
 
 ## Client Status
 

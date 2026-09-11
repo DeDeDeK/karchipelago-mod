@@ -25,13 +25,10 @@ static float CamStickAxis(float raw)
     return (raw > 0.0f ? raw - CAM_STICK_DEADZONE : raw + CAM_STICK_DEADZONE) / CAM_STICK_RANGE;
 }
 
-// Hook body at 0x800cb4dc, past every input gate PlyCam_OnFootThink already
-// cleared (rail transition, camera lock, HUD takeover) and after its C-Stick X
-// rotation store. Only the accumulator and the x84_80 enable are set here:
-// PlyCam_MachineZoomAdjust runs for every camera kind and turns them into the
-// final eye position, so raising the flag is what actually connects the on-foot
-// camera to the zoom. Nothing else on this path writes these three fields, so
-// clearing them is all a mid-round toggle-off needs to snap back to vanilla.
+// Hook body at 0x800cb4dc, past every input gate PlyCam_OnFootThink already cleared.
+// Raising x84_80 is what connects the on-foot camera to the zoom: PlyCam_MachineZoomAdjust
+// runs for every camera kind and turns these fields into the final eye position. Nothing
+// else on this path writes them, so clearing them is all a toggle-off needs.
 void OnFootZoom_Update(CamData *cam, int pad_index)
 {
     cmMainParamCommon *param = stc_plycam_lookup->param;

@@ -31,10 +31,12 @@ static Text *version_text = 0;
 static int demo_star_slot = VCKIND_WAGON;
 static int demo_rider = RDKIND_DEDEDE;
 
-// The demo-player setup at 0x8000d300 picks the idle slot-0 rider's ride through three
-// `li r4` operands (RiderKind, IsBike, class slot). Must stay star-class (is_bike = 0) -
-// the demo init uses hardcoded star-only state ids, so a wheel-class machine crashes.
-// Re-applied per title entry because the registry only resolves after every mod boots.
+// SceneLoad_TitleScreen (0x8000d26c) picks the idle slot-0 rider's ride through three
+// `li r4` operands: RiderKind at 0x8000d340, IsBike at 0x8000d34c, class slot at
+// 0x8000d358. Only the two that vary are patched - is_bike stays the 0 already
+// encoded there, because the demo init uses hardcoded star-only state ids and a
+// wheel-class machine crashes it. Re-applied per title entry because the registry
+// only resolves after every mod boots.
 static void MainMenu_SelectDemoMachine(void)
 {
     int kind = GateApStar_MachineKind();
@@ -50,9 +52,8 @@ static void MainMenu_SelectDemoMachine(void)
         }
     }
 
-    CODEPATCH_REPLACEINSTRUCTION(0x8000d340, 0x38800000 | demo_rider);
-    CODEPATCH_REPLACEINSTRUCTION(0x8000d34c, 0x38800000 | 0);
-    CODEPATCH_REPLACEINSTRUCTION(0x8000d358, 0x38800000 | demo_star_slot);
+    CODEPATCH_REPLACEINSTRUCTION(0x8000d340, 0x38800000 | demo_rider);     // li r4, demo_rider
+    CODEPATCH_REPLACEINSTRUCTION(0x8000d358, 0x38800000 | demo_star_slot); // li r4, demo_star_slot
 }
 
 // Title file load (0x8000d2b4). Gm_LoadGameFile appends ".dat" and reads it from the
@@ -87,6 +88,8 @@ void MainMenu_OnTitleCreate(void)
     element = MenuElement_Create(set[0]->jobj);
     MenuElement_AddData(element, 99);
 }
+// In TitleScreen_CreateForegroundElements (0x8017b4c0), after both title element
+// GObjs exist.
 CODEPATCH_HOOKCREATE(0x8017b5d8, "", MainMenu_OnTitleCreate, "", 0)
 
 // The title demo machine is never registered in PlayerData, so it is reached through the
@@ -104,7 +107,7 @@ static GOBJ *MainMenu_GetMachines(void)
 // through. Kinds whose floor is already 0.0 pass through unchanged.
 static MachineAudioParams *MainMenu_GetDemoAudioParams(void)
 {
-    if (*stc_machineAudioParams == 0)
+    if (*stc_machineAudioParams == 0 || (*stc_machineAudioParams)->params[0] == 0)
         return 0;
 
     return &(*stc_machineAudioParams)->params[0][demo_star_slot];
