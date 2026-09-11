@@ -6,12 +6,9 @@
 
 #include "textbox_api.h"
 
-// Ring buffer with one slot reserved to tell empty from full, so capacity is one less than the
-// size; "Max On Screen" tops out at 8.
+// One slot reserved to tell empty from full; capacity 8 matches the highest "Max On Screen".
 #define TEXTBOX_QUEUE_SIZE 9
 
-// A whole message's text, however it is split into segments. Both the first render and the
-// rebuild after a scene change read this, so what is stored is what is drawn.
 #define TEXTBOX_MESSAGE_TEXT_SIZE 248
 
 typedef struct TextBoxMessage
@@ -23,14 +20,12 @@ typedef struct TextBoxMessage
     Vec2 scale;
     Text *text;
 
-    u8 typewriter_active;    // sampled at enqueue so a mid-reveal toggle can't change it
     u16 chars_total;         // fade is held until temp.reveal_count reaches this
     u16 chars_revealed;      // mirrors temp.reveal_count so a scene-change rebuild can resume
-    u8 typewriter_dwell;     // frames per glyph reveal (fed to temp.char_delay)
+    u8 typewriter_dwell;     // frames per glyph reveal, 0 revealing instantly
     u8 bg_alpha_target;      // background quad alpha when fully visible
 } TextBoxMessage;
 
-// Screen corner the textbox stack anchors to.
 typedef enum TextBoxCorner
 {
     TEXTBOX_CORNER_TOP_LEFT = 0,
@@ -40,12 +35,11 @@ typedef enum TextBoxCorner
     TEXTBOX_CORNER_NUM,
 } TextBoxCorner;
 
-// Mod-owned settings, bound to the Settings menu.
+// Settings-menu storage, saved in hoshi's per-mod menu block.
 typedef struct TextBoxSettings
 {
     int enabled;
-    int typewriter_enabled;
-    int typewriter_speed;     // 0=Slow, 1=Med, 2=Fast
+    int typewriter;           // 0=Off, 1=Slow, 2=Med, 3=Fast
     int font_size;            // 0=Small, 1=Med, 2=Large
     int colored_names;        // 0=Off, 1=On
     int message_spacing;      // 0=Tight, 1=Normal, 2=Wide
@@ -57,13 +51,11 @@ typedef struct TextBoxSettings
 
 extern TextBoxSettings textbox_settings;
 
-void CreateTextBox_OnSceneChange();
+void TextBox_OnSceneChange(void);
 
-// Re-issues the screen canvas's render pass, so the textbox survives Top Ride's post-render
-// second HSD_StartRender pass. Call after TopRide_CustomRenderer runs.
+// Redraws the screen canvas after TopRide_CustomRenderer's pass wipes it.
 void TextBox_TopRideReRender(void);
 
-// Concrete implementations exported through TextBoxAPI.
 int TextBox_Enqueue(const char *format, ...);
 int TextBox_IsReady(void);
 int TextBox_EnqueueSegments(const TextSegment *segs, int seg_count);
@@ -72,6 +64,11 @@ int TextBox_EnqueueColoredNounFmt(const char *prefix, const char *noun, GXColor 
                                   const char *suffix_format, ...);
 
 // Reflows the on-screen stack for the current corner/spacing settings.
-void TextBoxQueue_RepositionAll();
+void TextBoxQueue_RepositionAll(void);
+
+// Drops oldest messages until the stack fits the current "Max On Screen".
+void TextBoxQueue_TrimToCap(void);
+
+void TextBoxQueue_Flush(void);
 
 #endif // TEXTBOX_H

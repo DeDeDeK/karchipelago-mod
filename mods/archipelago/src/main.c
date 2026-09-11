@@ -8,6 +8,7 @@
 #include "hoshi/func.h"
 #include "stage.h"
 #include "stadium.h"
+#include "rider.h"
 
 #include "main.h"
 #include "version.h"
@@ -50,8 +51,37 @@
 
 APData *ap_data;
 APSave *ap_save;
-const TextBoxAPI *tb_api = 0;
 const CustomMachinesAPI *cm_api = 0;
+
+// Stands in when textbox is absent from the build. Every tb_api-> site in this mod reads
+// a color or enqueues a message, and most pass the color as an argument that is evaluated
+// before the caller's own message-enabled gate runs, so a null tb_api would fault at far
+// more places than could be guarded. The stub turns all of them into a dropped message.
+static int TextBoxStub_Enqueue(const char *format, ...) { return 0; }
+static int TextBoxStub_EnqueueSegments(const TextSegment *segs, int seg_count) { return 0; }
+static int TextBoxStub_EnqueueColoredNoun(const char *prefix, const char *noun, GXColor noun_color,
+                                          const char *suffix) { return 0; }
+static int TextBoxStub_EnqueueColoredNounFmt(const char *prefix, const char *noun, GXColor noun_color,
+                                             const char *suffix_format, ...) { return 0; }
+static int TextBoxStub_IsReady(void) { return 0; }
+
+// Widest of the palettes the API hands out, so any index a caller uses lands inside it.
+static const GXColor tb_stub_palette[COPYKIND_NUM];
+
+static const TextBoxAPI tb_stub = {
+    .Enqueue               = TextBoxStub_Enqueue,
+    .EnqueueSegments       = TextBoxStub_EnqueueSegments,
+    .EnqueueColoredNoun    = TextBoxStub_EnqueueColoredNoun,
+    .EnqueueColoredNounFmt = TextBoxStub_EnqueueColoredNounFmt,
+    .IsReady               = TextBoxStub_IsReady,
+    .AbilityColors         = tb_stub_palette,
+    .KirbyColors           = tb_stub_palette,
+    .ModeColors            = tb_stub_palette,
+    .PatchColors           = tb_stub_palette,
+    .BoxColors             = tb_stub_palette,
+};
+
+const TextBoxAPI *tb_api = &tb_stub;
 
 // The AP client hardcodes an offset for every APData field and reads them by
 // address, so a silent layout shift desyncs it with no error anywhere. These pin
@@ -227,12 +257,14 @@ void OnSaveLoaded()
 
     // Deferred here because mods boot alphabetically and textbox boots after us,
     // so Hoshi_ImportMod would return NULL during our own OnBoot.
-    if (!tb_api)
+    if (tb_api == &tb_stub)
     {
-        tb_api = (const TextBoxAPI *)Hoshi_ImportMod(
+        const TextBoxAPI *imported = (const TextBoxAPI *)Hoshi_ImportMod(
             (char *)TEXTBOX_MOD_NAME, TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR);
-        if (!tb_api)
-            OSReport("[Main] textbox missing from this build: ITEM NOTIFICATIONS WILL CRASH\n");
+        if (imported)
+            tb_api = imported;
+        else
+            OSReport("[Main] textbox missing from this build: notifications are dropped\n");
     }
 
     AP_ResolveCustomMachines();

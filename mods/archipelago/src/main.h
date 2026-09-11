@@ -7,7 +7,8 @@
 #include "archipelago_api.h"
 
 // Resolved in OnSaveLoaded, not OnBoot: mods boot alphabetically and textbox
-// boots after us, so Hoshi_ImportMod returns NULL during our own OnBoot.
+// boots after us, so Hoshi_ImportMod returns NULL during our own OnBoot. Never
+// null - it starts at a stub that drops every message.
 #include "textbox_api.h"
 extern const TextBoxAPI *tb_api;
 

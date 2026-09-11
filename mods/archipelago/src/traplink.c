@@ -11,6 +11,7 @@
 #include "settings_menu.h"
 #include "ap_announce.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 #include "traplink.h"
 #include "ap_item_handler.h"
 #include "gate_topride_items.h"
@@ -45,7 +46,7 @@ void TrapLink_Send(TrapLinkKind kind)
     // default: a client attached to the same event posts a line naming the other
     // player a poll later.
     if (APAnnounce_LocalEnabled(APLOCAL_LINK))
-        tb_api->EnqueueColoredNounFmt(NULL, "TrapLink", tb_api->TrapColor, " sent! (%s)",
+        tb_api->EnqueueColoredNounFmt(NULL, "TrapLink", APColor_Trap, " sent! (%s)",
                                       traplink_kind_names[kind]);
 }
 
@@ -224,7 +225,7 @@ static void TrapLink_PerFrame(GOBJ *g)
     if (handled)
     {
         if (APAnnounce_LocalEnabled(APLOCAL_LINK))
-            tb_api->EnqueueColoredNoun(NULL, "TrapLink", tb_api->TrapColor, " received!");
+            tb_api->EnqueueColoredNoun(NULL, "TrapLink", APColor_Trap, " received!");
         ap_data->traplink_receive = 0;
         // The apply is about to trigger our own send hooks.
         recv_suppress_frames = TRAPLINK_RECV_GUARD_FRAMES;

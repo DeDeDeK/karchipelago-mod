@@ -9,6 +9,7 @@
 #include "deathlink.h"
 #include "ap_announce.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 
 #define DEATHLINK_PLY_MAX 5
 
@@ -28,7 +29,7 @@ static u8 deathlink_suppress[DEATHLINK_PLY_MAX];
 static void Announce(const char *suffix)
 {
     if (APAnnounce_LocalEnabled(APLOCAL_LINK))
-        tb_api->EnqueueColoredNoun(NULL, "DeathLink", tb_api->DeathColor, suffix);
+        tb_api->EnqueueColoredNoun(NULL, "DeathLink", APColor_Death, suffix);
 }
 
 static void SuppressSend(int ply)

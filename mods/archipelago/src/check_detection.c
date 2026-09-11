@@ -12,6 +12,7 @@
 #include "ap_check_detect.h"
 #include "ap_announce.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 #include "settings_menu.h"
 #include "ap_patches.h"
 
@@ -87,7 +88,7 @@ static void RecordCheck(int mode, int clear_kind)
                  mode, clear_kind);
     }
     if (APAnnounce_LocalEnabled(APLOCAL_CHECK))
-        tb_api->EnqueueColoredNoun(NULL, "Check", tb_api->CheckColor, " recorded");
+        tb_api->EnqueueColoredNoun(NULL, "Check", APColor_Check, " recorded");
 
     CheckDetection_EvaluateGoal();
 }
@@ -229,7 +230,7 @@ static void AnnounceModeGoal(int row)
     }
     TextSegment segs[2] = {
         { name,               color },
-        { " goal complete!",  tb_api->GoalColor },
+        { " goal complete!",  APColor_Goal },
     };
     if (APAnnounce_LocalEnabled(APLOCAL_GOAL))
         tb_api->EnqueueSegments(segs, 2);
@@ -275,7 +276,7 @@ void CheckDetection_EvaluateGoal(void)
                 ap_save->goal_announced[r] = 1;
         OSReport("[CheckDetection] GOALS COMPLETE\n");
         if (APAnnounce_LocalEnabled(APLOCAL_GOAL))
-            tb_api->EnqueueColoredNoun(NULL, "All Goals", tb_api->GoalColor, " complete!");
+            tb_api->EnqueueColoredNoun(NULL, "All Goals", APColor_Goal, " complete!");
         return;
     }
 

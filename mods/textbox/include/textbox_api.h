@@ -1,18 +1,14 @@
 #ifndef TEXTBOX_API_H
 #define TEXTBOX_API_H
 
-#include "datatypes.h"
-#include "structs.h"
 #include "gx.h"
-#include "rider.h"
 
 #define TEXTBOX_MOD_NAME "textbox"
 
-#define TEXTBOX_API_MAJOR 1
-#define TEXTBOX_API_MINOR 2
+#define TEXTBOX_API_MAJOR 2
+#define TEXTBOX_API_MINOR 0
 
-// Maximum colored runs per message. A run that wraps becomes more than one subtext of the
-// underlying Text GObj, so this is not the subtext count.
+// Maximum colored runs per message.
 #define TEXTBOX_MAX_SEGMENTS 8
 
 // One colored run of text. `text` is copied at enqueue, so it need not outlive the call.
@@ -22,8 +18,8 @@ typedef struct TextSegment
     GXColor color;
 } TextSegment;
 
-// Exported via Hoshi_ExportMod; every Enqueue* returns 1 on success, 0 if the message was
-// dropped (textbox disabled, bad segment count, or no screen canvas yet).
+// Exported via Hoshi_ExportMod; every Enqueue* returns 1 on success, 0 if the message was dropped
+// (textbox disabled, bad or empty segment count, no screen canvas yet, or the Text failed to build).
 typedef struct TextBoxAPI
 {
     // printf-style single segment in DefaultColor.
@@ -40,11 +36,9 @@ typedef struct TextBoxAPI
                                  const char *suffix_format, ...);
 
     // 1 when an Enqueue* would be accepted: the textbox is on and a screen canvas exists.
-    // A producer with its own queue polls this and holds instead of losing messages.
     int (*IsReady)(void);
 
-    // Named color palette. RGB only - the alpha byte is ignored, since alpha is set per-frame
-    // by the fade machinery.
+    // Palette for the game's own nouns; RGB only, alpha is owned by the fade.
     GXColor DefaultColor;
     GXColor MachineColor;
     GXColor EventColor;
@@ -52,16 +46,7 @@ typedef struct TextBoxAPI
     GXColor StageColor;
     GXColor TopRideItemColor;
     GXColor ItemColor;
-    GXColor TrapColor;
-    GXColor DeathColor;
-    GXColor EnergyColor;
-    GXColor CheckColor;
-    GXColor GoalColor;
-    GXColor RewardColor;
-    GXColor ShopColor;
-    GXColor FillerColor;
 
-    // Indexed palettes.
     const GXColor *AbilityColors; // [COPYKIND_NUM]
     const GXColor *KirbyColors;   // [KIRBYCOLOR_NUM]
     const GXColor *ModeColors;    // [GMMODE_NUM] - mode name (AR/TR/CT)

@@ -39,9 +39,13 @@ The DevText stroke font is a separate blob at `0x805053f8`: a variable-length pe
 
 Text data is a byte stream parsed from `text->text_start`. Bytes below `0x20` are opcodes; bytes `0x20` and up begin a 2-byte big-endian glyph code. The authoritative list is the `TextCmdOpcode` enum in `externals/hoshi/include/text.h`, which carries each opcode's byte size and operands. Three consumers interpret it: `Text_GXLink` (0x804516e4) draws, `Text_DetermineHeightAndWidth` (0x80451344) measures, and `Text_StorePremadeText` (0x8044f9d4) counts subtexts. Dispatch is a jump table at `0x8050983c` covering `0x00`-`0x1a`; glyphs and the `0x1b`-`0x1f` no-ops fall to the handler at 0x80452210.
 
+A walker advances by the opcode's operand count plus one, or by two for a glyph code. `Text_NextOpcode` in `externals/hoshi/include/text.h` is that step, and `Text_GetSubtext` / `Text_GetCommand` are built on it. Only `0x05` DELAY (2), `0x06` TIMING (4), `0x07` POS (4), `0x08` JUMP (4), `0x09` CALL (4), `0x0a` POSPUSH (4), `0x0c` COLOR (3) and `0x0e` SCALE (4) carry operands; everything else below `0x20` is a bare byte. JUMP and CALL are only nominally that width - the renderer follows their absolute pointer instead, so a linear walk cannot cross one.
+
+The game's own `Text_SetScale` (0x80450774) walks with a size table at `0x80509790` that disagrees with the renderer. It advances 2 bytes for `0x01`-`0x06`, `0x08` and `0x09`, where the renderer advances 1 for `0x01`-`0x04`, 3 for DELAY and 5 for TIMING, JUMP and CALL; and 2 for everything from `0x10` up, where the renderer advances 1. Hoshi replaces that function, and its walker follows the renderer. The premade streams the game patches happen not to contain the mismatched opcodes ahead of the target, which is why the original works.
+
 Functionally the opcodes group as:
 
-- **Structure**: `0x00` TERMINATE, `0x01` SUBTEXT_RESET, `0x02` SUBTEXT_BREAK, `0x07` POS (the subtext header: s16 x in pixels right of canvas-left, s16 y in lines down), `0x08` JUMP and `0x09` CALL (both take an HSD-relocated absolute pointer).
+- **Structure**: `0x00` TERMINATE, `0x01` SUBTEXT_RESET, `0x02` SUBTEXT_BREAK, `0x07` POS (the subtext header: s16 x in pixels right of canvas-left, s16 y in the same pre-viewport-scale units the measured height uses, 32 per line at scale 1), `0x08` JUMP and `0x09` CALL (both take an HSD-relocated absolute pointer).
 - **Layout**: `0x03` LINEBREAK (advances `cursor.y` by `16 * scale_y * viewport_scale.y`), `0x04` LINEBREAK_REFLOW, `0x1a` SPACE (advances `cursor.x` by `scale_x * (32 + 16) * fit_squeeze`), `0x0a`/`0x0b` POSPUSH/POSPUSHEND for inline relative repositioning in 1/256 units, gated by `text->pospush_flags`.
 - **Style**: `0x0c`/`0x0d` COLOR, `0x0e`/`0x0f` SCALE (operands are u16 fixed-point over 256), `0x10`/`0x12`/`0x14` align center/left/right with `0x11`, `0x13` and `0x15` all aliasing the same pop, `0x16`/`0x17` kerning on/off, `0x18`/`0x19` aspect-fit on/off.
 - **Timing**: `0x05` DELAY (u16 frames into `temp.wait_countdown`), `0x06` TIMING (u16 char then u16 space, operand order at 0x80451e20; it updates the renderer's working registers and `temp.space_delay`, not `temp.char_delay`).
@@ -108,8 +112,8 @@ Both first `vsnprintf` into a stack buffer, then run `Text_ConvertASCIIToShiftJI
 
 | ASCII input | Emitted |
 |-------------|---------|
-| `A-Z` | 2-byte code `0x200a + (c - 'A')` |
-| `a-z` | 2-byte code `0x2024 + (c - 'a')` |
+| `A-Z` | `0b` then the 2-byte code `0x200a + (c - 'A')` |
+| `a-z` | `0b` then the 2-byte code `0x2024 + (c - 'a')` |
 | `0-9` | `0a F4 00 00 00` (POSPUSH, tight-spacing mode) then the digit code |
 | space | `0a F4 00 00 00` then a kerning lookup |
 | `.` `:` | tight-mode prefix then the symbol code |
@@ -119,7 +123,9 @@ Both first `vsnprintf` into a stack buffer, then run `Text_ConvertASCIIToShiftJI
 | `-` | `0b` then Shift-JIS `0x817c` (0x8044fc24) |
 | other printable | `0b` then a symbol code from the tables at `0x80509b40` / `0x805098c0` |
 
-**The converter reads at most 128 input bytes.** Its loop bails once the input index passes `0x7f`, so anything beyond that is dropped without a return code saying so - and since both `Text_SetText` and `Text_AddSubtext` route through it, that is the hard ceiling on one subtext's text. It is a byte limit, not a character one: pre-sanitized punctuation already costs 2 bytes apiece, so a symbol-heavy string hits it well before 128 characters. Measuring with `Text_GetWidthAndHeight` afterwards measures only what survived, so a caller that hands over more than fits gets a width for text that never rendered.
+**The converter reads at most 128 input bytes.** Its loop bails once the input index passes `0x7f` (`cmpwi r5,128` at 0x8044fea8), so anything beyond that is dropped without a return code saying so - and since both `Text_SetText` and `Text_AddSubtext` route through it, that bounds one subtext's input.
+
+**Its output buffer is the tighter limit, and it overlaps the input.** `Text_SetText` hands the converter an output pointer at `r1+120` and an input pointer at `r1+248` in the same 416-byte frame (`Text_AddSubtext` uses the same pair), so only 128 bytes separate them - while the converter emits *more* bytes than it consumes: 3 for a letter (`0b` plus its 2-byte code), and 7 for a digit or `.` that enters tight-spacing mode. Once output runs more than 128 bytes ahead of input - about 64 plain letters - the write pointer overtakes the read pointer and the converter starts re-reading its own output as input, emitting garbage for the remainder of the run. Nothing reports this, so a caller composing long runs must bound predicted output, not input length; `TextBox_ConvertCost` in `mods/textbox/src/textbox.c` is the reference implementation. It is a byte limit, not a character one: pre-sanitized punctuation already costs 2 bytes apiece, so a symbol-heavy string hits it well before 128 characters. Measuring with `Text_GetWidthAndHeight` afterwards measures only what survived, so a caller that hands over more than fits gets a width for text that never rendered.
 
 **`\n` and `\t` are not mapped.** They fall into the table-lookup branch and produce nothing, so multi-line text must be built from separate `Text_AddSubtext` calls, one `0x07` header each. `%d`, `%s` and `%f` work normally because `vsnprintf` resolves them first.
 
@@ -139,13 +145,13 @@ Inside `Text_GXLink`, subtext setup loads `temp.reveal_count` (`+0x98`) at 0x804
 
 The same asymmetry explains why a multi-segment buffer reveals **sequentially rather than in parallel**: the reveal state is reset only by the `0x01`/`0x02` handlers (0x80451cb4 / 0x80451d3c), and the `0x07` handler (0x80451e30) touches none of it, so one counter walks straight through every segment.
 
-`TextBox_ApplyTypewriter` in `mods/textbox/src/textbox.c` is the reference user: it seeds both the `_init` fields and the live `temp` fields from the typewriter-speed setting, and zeroes `temp.reveal_count` and `text_end` for a clean start.
+`TextBox_ApplyTypewriter` in `mods/textbox/src/textbox.c` is the reference user: it seeds the live `temp` fields from the typewriter-speed setting and leaves the `_init` fields alone, then resumes `temp.reveal_count` from its own mirrored count and nulls `text_end` so the engine re-derives the frontier.
 
 ## Canvas, GObj and render pipeline
 
 ### Coordinate system
 
-Text canvases are orthographic 640x480 in raw pixels: x runs `[0, 640]` left to right, y runs `[0, -480]` top to bottom because the projection bottom is `-480` and the renderer negates per vertex. Code stores positive Y, so `trans.y` is pixels **above canvas bottom** - set `trans.y = 480 - desired_top_offset` to position from the top.
+Text canvases are orthographic 640x480 in raw pixels (`TEXT_CANVAS_W` / `TEXT_CANVAS_H` in hoshi's `text.h`): x runs `[0, 640]` left to right, and the projection runs top `0` to bottom `-480`. The renderer negates Y per vertex (`fneg` at 0x804524e0), so code stores **positive** Y and `trans.y` is pixels **below canvas top** - `trans.y = 10` sits 10 px down from the top edge.
 
 ### Pass model
 

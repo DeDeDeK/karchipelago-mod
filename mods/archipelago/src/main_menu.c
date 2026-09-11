@@ -113,8 +113,6 @@ static MachineAudioParams *MainMenu_GetDemoAudioParams(void)
 // Bottom-right version stamp on the title screen. Created from the title's think and destroyed
 // from its cb_Exit, so it lives exactly as long as the scene does - a Text is not reliably
 // reclaimed by scene teardown, and one left behind draws over whatever comes next.
-#define VERSION_CANVAS_W 640.0f
-#define VERSION_CANVAS_H 480.0f
 #define VERSION_MARGIN   12.0f
 #define VERSION_SCALE    0.30f
 #define VERSION_PAD      12.0f
@@ -139,8 +137,8 @@ static void MainMenu_CreateVersionText(void)
     Text_GetWidthAndHeight(t, 0, &w, &h);
 
     t->aspect = (Vec2){w + 2.0f * VERSION_PAD, h};
-    t->trans = (Vec3){VERSION_CANVAS_W - VERSION_MARGIN - t->aspect.X * VERSION_SCALE,
-                      VERSION_CANVAS_H - VERSION_MARGIN - t->aspect.Y * VERSION_SCALE,
+    t->trans = (Vec3){TEXT_CANVAS_W - VERSION_MARGIN - t->aspect.X * VERSION_SCALE,
+                      TEXT_CANVAS_H - VERSION_MARGIN - t->aspect.Y * VERSION_SCALE,
                       0};
 
     version_text = t;

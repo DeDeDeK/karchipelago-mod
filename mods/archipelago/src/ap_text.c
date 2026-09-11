@@ -65,7 +65,7 @@ static void APText_Render(const APTextMessage *msg)
 
 void APText_OnFrameStart(void)
 {
-    if (!ap_data || !tb_api)
+    if (!ap_data)
         return;
 
     // Holding the mailbox while the textbox has no canvas (scene transitions) is what

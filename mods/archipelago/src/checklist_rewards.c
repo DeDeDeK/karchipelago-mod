@@ -17,6 +17,7 @@
 #include "gate_topride_items.h"
 #include "gate_stadiums.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 #include "ap_announce.h"
 
 static const int reward_counts[GMMODE_NUM] = {
@@ -324,7 +325,7 @@ void Checklist_AnnounceFiller(GameMode mode)
 
     TextSegment segs[5] = {
         {"Received: ",      tb_api->DefaultColor},
-        {"Checkbox Filler", tb_api->FillerColor},
+        {"Checkbox Filler", APColor_Filler},
         {" (",              tb_api->DefaultColor},
         {mode_name,         mode_color},
         {")",               tb_api->DefaultColor},
@@ -415,7 +416,7 @@ static const char *ChecklistRewardName(GameMode mode, u8 reward_index)
 static void ChecklistRewardStyle(u8 reward_type, const char **out_prefix, GXColor *out_color)
 {
     *out_prefix = "Received: ";
-    *out_color  = tb_api->RewardColor;
+    *out_color  = APColor_Reward;
 
     if (reward_type == REWARD_SOUND_TEST)
         *out_prefix = "Received Sound Test: ";

@@ -7,6 +7,7 @@
 #include "checklist_rewards.h"
 #include "kirby_scale.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 #include "city_trial_event.h"
 #include "ability_item.h"
 #include "patch_item.h"
@@ -82,7 +83,7 @@ static GXColor ItemReceiveColor(ItemKind k)
         case ITKIND_ACCELFAKE:   case ITKIND_TOPSPEEDFAKE: case ITKIND_OFFENSEFAKE:
         case ITKIND_DEFENSEFAKE: case ITKIND_TURNFAKE:     case ITKIND_GLIDEFAKE:
         case ITKIND_CHARGEFAKE:  case ITKIND_WEIGHTFAKE:
-            return tb_api->TrapColor;
+            return APColor_Trap;
         case ITKIND_WEIGHT:                            return tb_api->PatchColors[PATCHKIND_WEIGHT];
         case ITKIND_ACCEL:                             return tb_api->PatchColors[PATCHKIND_ACCEL];
         case ITKIND_TOPSPEED:   case ITKIND_SPEEDMAX:  return tb_api->PatchColors[PATCHKIND_TOPSPEED];
@@ -455,7 +456,7 @@ int APItems_HandleItem(uint ap_item_id)
             return 0;
         int ok = Patch_DropTrap();
         if (ok)
-            APAnnounce_Grant("Received: ", "Drop Patches", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "Drop Patches", APColor_Trap, NULL);
         return ok;
     }
 
@@ -490,7 +491,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         int ok = Patch_AllUp_GiveItem(-1);
         if (ok)
-            APAnnounce_Grant("Received: ", "All Down", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "All Down", APColor_Trap, NULL);
         return ok;
     }
 
@@ -522,7 +523,7 @@ int APItems_HandleItem(uint ap_item_id)
             }
         }
         if (applied)
-            APAnnounce_Grant("Received: ", "1 HP", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "1 HP", APColor_Trap, NULL);
         return applied;
     }
 
