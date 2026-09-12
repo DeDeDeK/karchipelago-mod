@@ -82,8 +82,6 @@
 #define HYPERNOVA_WHIRLWIND_TINT       0.45f
 
 #define HYPERNOVA_INHALE_EFFECT_ID   0x3a982  // inhale suction whirlwind Effect kind
-#define HYPERNOVA_EFFECT_PLINK       16       // model-effect GObj p_link bucket
-#define HYPERNOVA_EFFECT_GOBJ_KIND   25       // model-effect entity_class
 
 // Fabricated break collider: force = radius * impactSpeed^2, so FORCE_RADIUS is huge (but under
 // FLT_MAX) for a one-hit break. Only FORCE_DELTA's direction matters (it points into the surface).

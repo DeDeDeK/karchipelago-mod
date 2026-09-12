@@ -22,13 +22,16 @@ this struct - HSD's `KAR_grModel`. Its slots don't point straight at `JOBJDesc`s
 those *leads with* its root `JOBJDesc *` (the main model then carries jobj/dobj/pobj
 counts + a bounding record; the skybox carries a model-motion joint). Because the root
 pointer is the first field, dereferencing a slot as a `JOBJDesc **` yields the root joint
-- which is all `3D_CreateStageModel` ever reads, so the loader can treat the whole thing
+- which is all the loader ever reads, so it can treat the whole thing
 as a `ModelSection` of `JOBJDesc **`s.
 
 So loading a foreign stage's archive and taking `donor_ms.backdrop` gives you a backdrop
 you can graft into any other stage that respects `ModelSection`.
 
-### 3D_CreateStageModel (0x800dcbf0) - the loader
+### CreateStageModel_3D (0x800dcbf0) - the loader
+
+Spelled `3D_CreateStageModel` in `GKYE01.map`; the leading digit is illegal in a linker
+symbol, so `link.ld` and the hoshi prototype reverse it.
 
 Reads `grdata->model_section` and instantiates each populated slot with
 `HSD_JObjLoadJoint`. The terrain joint goes to `GObj_AddObject` on the ground GObj; the
@@ -47,7 +50,7 @@ source of the size-normalization problem solved at carve time below.
 ## Implementation
 
 `mods/custom_weather/src/custom_backdrops.c` owns the swap. It installs two hooks into
-`3D_CreateStageModel` and a settings menu; both hooks are guarded on
+`CreateStageModel_3D` and a settings menu; both hooks are guarded on
 `grobj->gr_kind == GR_CITY1` so no other stage's backdrop is touched.
 
 ### Override hook
@@ -226,7 +229,7 @@ resolves into Table A. The field at `+0x30` is the "is City" flag - `Gm_IsGrKind
 
 `make_backdrop_manifest.py` plans 23 entries (one per `Gr*Model.dat` with a non-NULL
 `ms[1]`). `backdrop_defs[]` in `custom_backdrops.c` references 21 of them by `key`, plus a
-"Vanilla" no-op entry at index 0, for 22 menu options. Two entries are deliberately
+"Vanilla" no-op entry at index 0, for 22 pool entries. Two entries are deliberately
 unreferenced: `City1` (it would duplicate the Vanilla option) and `Simple` (a 4 KB
 placeholder, almost certainly a dummy). The other 4 archives skipped during planning
 (`GrSimple2`, `GrTest`, `GrTest6`, `GrTest7`) all have `ms[1] == NULL`.

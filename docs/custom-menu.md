@@ -215,4 +215,4 @@ The pieces are static. Adding motion takes one of two forms. A rigged animation 
 HSDRaw/Blender needs the C side to add proc `TitleScreenForeground_Proc` (`0x8017b424`) and a
 `JObj_AddSetAnim` call after `MenuElement_Create`. Simple effects - cycling the Archipelago
 icon through the logo colors, say - are a per-frame material-color or texture swap driven from a
-think proc, the same shape as the moon/stars weather effects.
+think proc.

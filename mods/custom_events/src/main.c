@@ -28,6 +28,7 @@ ModDesc mod_desc = {
     .author = "DeDeDK",
     .version.major = CUSTOM_EVENTS_API_MAJOR,
     .version.minor = CUSTOM_EVENTS_API_MINOR,
+    .affects_gameplay = 1,
     .OnBoot = OnBoot,
     .On3DLoadEnd = On3DLoadEnd,
 };

@@ -10,6 +10,7 @@
 #include "code_patch/code_patch.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
 // `grobj` is reused across CT exit/re-entry, so it can't signal a fresh entry.
 // GrObj.fade_slot_id can: ScreenFade_Alloc hands out an incrementing id per entry.
@@ -70,8 +71,8 @@ static void ApplyTerrainTint(const CustomPresetDef *def)
 }
 
 // CT's ambient LOBJ (slot 8) is full white, so it keeps unlit faces bright when
-// only the directional sun is dimmed. The slot pointer resolves lazily: the HW
-// slot table is populated by GX rendering, which lags the think hook by a frame.
+// only the directional sun is dimmed. The HW slot table is populated by GX
+// rendering, which lags the think hook by a frame, so the slot resolves lazily.
 static void ApplyAmbientTint(const CustomPresetDef *def)
 {
     if (!s_ambient_lobj)
@@ -102,7 +103,7 @@ static u32 FogCurveToGX(u32 curve)
     case FOG_CURVE_EXP2:    return GX_FOG_PERSP_EXP2;
     case FOG_CURVE_REVEXP:  return GX_FOG_PERSP_REVEXP;
     case FOG_CURVE_REVEXP2: return GX_FOG_PERSP_REVEXP2;
-    default:                return GX_FOG_PERSP_LIN; // LINEAR / INHERIT
+    default:                return GX_FOG_PERSP_LIN;
     }
 }
 
@@ -115,17 +116,56 @@ static void ApplyFogCurve(HSD_Fog *fog, const CustomPresetDef *def)
     fog->type = FogCurveToGX(def ? def->fog_curve : FOG_CURVE_INHERIT);
 }
 
-// Comma-joins effect names into buf, tracking the write position in *pos.
-static void AppendFx(char *buf, int *pos, const char *name)
+// Comma-joins the names of the layers this preset switched on. Sized for every
+// name plus its separator.
+static char stc_fx_list[224];
+
+static void ListActiveFx(const CustomPresetDef *def)
 {
-    if (*pos)
+    static const char *const names[] = {
+        "terrain", "ambient", "tint", "rain", "hail", "snow", "lightning",
+        "wind", "puddles", "clouds", "moon", "stars", "volcano", "tornado",
+    };
+    int on[sizeof(names) / sizeof(names[0])] = {0};
+
+    if (def)
     {
-        buf[(*pos)++] = ',';
-        buf[(*pos)++] = ' ';
+        on[0] = def->terrain_diffuse != 0;
+        on[1] = def->char_ambient != 0 || def->char_ambient_specular != 0;
+        on[2] = def->screen_tint != 0;
+        on[3] = def->rain.enabled;
+        on[4] = def->hail.enabled;
+        on[5] = def->snow.enabled;
+        on[6] = def->lightning.enabled;
+        on[7] = def->wind.enabled;
+        on[8] = def->puddles.enabled;
+        on[9] = def->clouds.enabled;
+        on[10] = def->moon.enabled;
+        on[11] = def->stars.enabled;
+        on[12] = def->volcano.enabled;
+        on[13] = def->tornado.enabled;
     }
-    while (*name)
-        buf[(*pos)++] = *name++;
-    buf[*pos] = '\0';
+
+    int pos = 0;
+    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++)
+    {
+        if (!on[i])
+            continue;
+        if (pos)
+        {
+            stc_fx_list[pos++] = ',';
+            stc_fx_list[pos++] = ' ';
+        }
+        for (const char *c = names[i]; *c; c++)
+            stc_fx_list[pos++] = *c;
+    }
+    if (pos == 0)
+    {
+        const char *none = "none";
+        while (*none)
+            stc_fx_list[pos++] = *none++;
+    }
+    stc_fx_list[pos] = '\0';
 }
 
 void CustomWeatherRuntime_Tick(GrObj *grobj)
@@ -133,7 +173,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     if (!grobj)
         return;
 
-    // City Trial only; every other mode keeps its own fog and sky.
+    // Every other mode keeps its own fog and sky.
     if (grobj->gr_kind != GR_CITY1)
         return;
 
@@ -180,30 +220,14 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
             Sky_BeginFade(grobj, &tint, 30);
         }
 
-        OSReport("[WeatherRuntime] Preset %d (%s) active, terrain=%s, char_ambient=%s, tint=%s, fog_curve=%d, rain=%s, snow=%s, hail=%s, lightning=%s, wind=%s, puddles=%s, clouds=%s, moon=%s, stars=%s, volcano=%s, tornado=%s\n",
-                 idx,
-                 CustomWeather_GetPresetName(idx),
-                 (s_active_def && s_active_def->terrain_diffuse) ? "tinted" : "vanilla",
-                 (s_active_def && s_active_def->char_ambient) ? "tinted" : "vanilla",
-                 (s_active_def && s_active_def->screen_tint) ? "on" : "off",
-                 s_active_def ? (int)s_active_def->fog_curve : 0,
-                 (s_active_def && s_active_def->rain.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->snow.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->hail.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->lightning.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->wind.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->puddles.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->clouds.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->moon.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->stars.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->volcano.enabled) ? "on" : "off",
-                 (s_active_def && s_active_def->tornado.enabled) ? "on" : "off");
+        ListActiveFx(s_active_def);
+        OSReport("[WeatherRuntime] Preset %d (%s) active: %s\n",
+                 idx, CustomWeather_GetPresetName(idx), stc_fx_list);
     }
-    else if (s_active_def && s_active_def->char_ambient && !s_ambient_lobj)
+    else if (s_active_def && !s_ambient_lobj
+             && (s_active_def->char_ambient || s_active_def->char_ambient_specular))
     {
-        // The HW slot table lags think by a frame on the first CT frame; retry
-        // until the ambient slot resolves, then apply once and stop.
-        ApplyAmbientTint(s_active_def);
+        ApplyAmbientTint(s_active_def);  // slot table not up yet on the first CT frame
     }
 
     // Sky_Update leaves HSD_Fog.scale at 1.0, so this field is ours. Written every
@@ -226,7 +250,8 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     Tornado_Tick();
 }
 
-// Immediately after `bl Sky_Update`; r31 = grobj, callee-saved across the bl.
+// In Gr_Think (0x800ce618), immediately after `bl Sky_Update`; r31 = grobj,
+// callee-saved across the bl.
 CODEPATCH_HOOKCREATE(0x800ce648,
                      "mr 3, 31\n\t",
                      CustomWeatherRuntime_Tick,
@@ -236,5 +261,5 @@ CODEPATCH_HOOKCREATE(0x800ce648,
 void CustomWeatherRuntime_OnBoot(void)
 {
     CODEPATCH_HOOKAPPLY(0x800ce648);
-    OSReport("[WeatherRuntime] Per-frame hook installed at 0x800ce648\n");
+    OSReport("[WeatherRuntime] Hooks installed\n");
 }

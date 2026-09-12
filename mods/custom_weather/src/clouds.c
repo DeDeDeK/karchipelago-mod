@@ -62,11 +62,8 @@
 // ghosts in/out at the walls rather than popping. Y clearance is ignored.
 #define CLOUD_EDGE_FADE  260.0f
 
-// Render GObj on the world camera's gx_link 0, XLU sub-pass.
 #define CLOUD_GOBJ_CLASS  205
 #define CLOUD_GOBJ_PLINK  29
-#define CLOUD_GX_LINK     0
-#define CLOUD_GX_PRI      0
 
 typedef struct CloudPuff
 {
@@ -99,8 +96,7 @@ static float   stc_puff_var = CLOUD_DEF_PUFF_VAR;
 static float   stc_pre_height = 0.0f;   // absolute preset height, or 0 = derive from OOB box
 static float   stc_height_var = CLOUD_DEF_HEIGHT_VAR;
 
-// Menu knobs layered over the active preset's CloudDef: master coverage/opacity/
-// size scalars, a height offset, and an optional tint override.
+// Index 0 ("Preset") is the pass-through value on every knob below.
 static const float cover_factors[] = {1.0f, 0.0f, 0.55f, 1.0f, 1.6f};
 static char *cover_names[] = {"Preset", "Off", "Sparse", "Normal", "Dense"};
 #define CLOUD_COVER_NUM ((int)(sizeof(cover_factors) / sizeof(cover_factors[0])))
@@ -136,14 +132,6 @@ static char *color_names[] = {"Preset", "White", "Gray", "Storm"};
 static int color_index = 0;
 
 static void Cloud_GX(GOBJ *g, int pass);
-
-static StageNode *CloudStageNode(void)
-{
-    GrObj *gr = *stc_grobj;
-    if (!gr || !gr->gr_data || !gr->gr_data->stage_node)
-        return NULL;
-    return gr->gr_data->stage_node;
-}
 
 // Unit-sphere vertex directions (latitude rows x longitude), doubling as vertex
 // normals; each puff scales/translates these into world space.
@@ -210,11 +198,10 @@ static void SeedShape(Cloud *c)
     c->alpha_scale = 0.82f + HSD_Randf() * 0.18f;
 }
 
-// Scatter the field across the OOB box at the deck height. Needs the stage loaded;
-// if not ready it leaves stc_inited 0 to retry next frame.
+// Leaves stc_inited 0 to retry next frame when the stage is not loaded yet.
 static void Cloud_Arm(void)
 {
-    StageNode *sn = CloudStageNode();
+    StageNode *sn = Weather_StageNode();
     if (!sn)
         return;
 
@@ -225,10 +212,8 @@ static void Cloud_Arm(void)
         want = 0;
     stc_count = want;
 
-    float cx = 0.5f * (sn->oob_min.X + sn->oob_max.X);
-    float cz = 0.5f * (sn->oob_min.Z + sn->oob_max.Z);
-    float hx = 0.5f * (sn->oob_max.X - sn->oob_min.X);
-    float hz = 0.5f * (sn->oob_max.Z - sn->oob_min.Z);
+    float cx, cz, hx, hz;
+    Weather_PlayBox(sn, &cx, &cz, &hx, &hz);
 
     for (int i = 0; i < stc_count; i++)
     {
@@ -247,14 +232,12 @@ static void Cloud_Ensure(void)
 {
     if (stc_cloud_gobj)
         return;
-    stc_cloud_gobj = WeatherGX_EnsureLayer(CLOUD_GOBJ_CLASS, CLOUD_GOBJ_PLINK, Cloud_GX,
-                                           CLOUD_GX_LINK, CLOUD_GX_PRI,
-                                           "[Clouds] Cloud deck layer");
+    stc_cloud_gobj = WeatherGX_EnsureLayer(CLOUD_GOBJ_CLASS, CLOUD_GOBJ_PLINK,
+                                           Cloud_GX, "Clouds");
 }
 
-// GX callback on the world camera link. Draws each cloud as a cluster of translucent
-// spheroids on the XLU pass (pass 1): flat per-vertex color, alpha blend,
-// depth-tested but not depth-writing so stage geometry occludes clouds behind it.
+// GX callback on the world camera link, XLU pass. Each cloud is a cluster of
+// translucent spheroids.
 static void Cloud_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -266,7 +249,7 @@ static void Cloud_GX(GOBJ *g, int pass)
     COBJ *cam = COBJ_GetCurrent();
     if (!cam)
         return;
-    StageNode *sn = CloudStageNode();
+    StageNode *sn = Weather_StageNode();
     if (!sn)
         return;
 
@@ -348,8 +331,6 @@ static void Cloud_GX(GOBJ *g, int pass)
     HSD_StateInvalidate(-1);
 }
 
-// Latch the active preset's cloud config, resolving each 0 field to its module
-// default and applying the menu Color override.
 void Cloud_SetActive(const CloudDef *def)
 {
     if (!def || !def->enabled || cover_factors[cover_index] <= 0.0f)
@@ -393,7 +374,7 @@ void Cloud_Tick(void)
     if (stc_count <= 0)
         return;
 
-    StageNode *sn = CloudStageNode();
+    StageNode *sn = Weather_StageNode();
     if (!sn)
         return;
 
@@ -465,8 +446,6 @@ void Cloud_Tick(void)
 
 void Cloud_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop the cached handle
-    // so the next active frame recreates it.
     stc_cloud_gobj = NULL;
     stc_inited = 0;
     stc_count = 0;
@@ -510,7 +489,7 @@ MenuDesc clouds_menu = {
         },
         &(OptionDesc){
             .name = "Height",
-            .description = "Raise or lower the cloud deck from its default (about mid-height)",
+            .description = "Raise or lower the cloud deck from its default (about a third up the play volume)",
             .kind = OPTKIND_VALUE,
             .val = &height_index,
             .value_num = CLOUD_HEIGHT_NUM,

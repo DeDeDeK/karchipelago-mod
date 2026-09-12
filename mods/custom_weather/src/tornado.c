@@ -1,13 +1,6 @@
 // Tornado for custom_weather: a funnel wanders City Trial on a random path, drawing
 // loose items, breakable props and parked machines into an orbit around its core and
-// dragging at riders who stray inside. Appearances are spread across the round by the
-// match timer, the same way volcano eruptions are.
-//
-// The work is split across two entry points on purpose. Tornado_Tick runs from the
-// weather runtime (inside the stage think) and decides where the funnel is, drives its
-// model, and claims new targets. Tornado_OnFrameEnd runs after the frame's game procs,
-// which is the only place a position override survives - item physics, machine physics
-// and the ground snap all run at proc priorities 4-6 and would otherwise stomp it.
+// dragging at riders who stray inside.
 
 #include <string.h>
 
@@ -29,10 +22,7 @@
 
 #define TORN_PI 3.14159265358979f
 
-#define ITEM_GOBJ_KIND    22  // gobj->entity_class for a City Trial item
-#define MACHINE_GOBJ_KIND GAMEENTITY_MACHINE
-#define EFFECT_GOBJ_KIND  25  // gobj->entity_class for a model effect
-#define EFFECT_PLINK      16
+#define EFFECT_PLINK 16
 
 // The inhale suction whirlwind, borrowed as the funnel model. Anchor mode 1 spawns
 // it detached instead of bolted to a mouth bone: no follow proc is installed, so the
@@ -65,8 +55,8 @@
 #define TORN_MODEL_WIDTH   0.66f   // visible funnel radius as a fraction of the capture reach
 #define TORN_MODEL_SPIN    0.28f   // radians/frame the funnel turns about its own axis
 
-// The funnel forms and ropes out over TORN_FADE_FRAMES at each end of its life. The ramp
-// narrows the column and scales every material's authored opacity; each MObj owns a
+// The funnel forms and ropes out over TORN_FADE_FRAMES at each end of its life: the ramp
+// narrows the column and scales every material's authored opacity. Each MObj owns a
 // copied HSD_Material, so the opacity write dims this funnel alone and never a player's
 // inhale whirlwind.
 #define TORN_FADE_FRAMES     120   // 2s at 60fps, each way
@@ -81,10 +71,9 @@
 #define TORN_INHALE_RATE   0.05f   // fraction of the excess radius shed per frame
 #define TORN_LIFT          3.0f    // world units/frame a captured target climbs
 
-// Per-target orbit variation, drawn once when a target is claimed and then fixed. The
-// orbit is otherwise a pure function of position, so everything at the same radius laps
-// at the same rate and converges on the same ring - one rigid spiral. These spread the
-// debris across rings, let objects overtake each other, and breathe each ring in and out.
+// Drawn once when a target is claimed and then fixed. The orbit is otherwise a pure
+// function of position, so everything at the same radius would converge on one rigid
+// spiral; re-rolling per frame would instead read as jitter.
 #define TORN_VARY_SPIN_LO  0.75f
 #define TORN_VARY_SPIN_HI  1.35f
 #define TORN_VARY_RING_LO  0.55f   // ring a target settles into, as a multiple of the core
@@ -110,12 +99,8 @@
 #define TORN_SHAKE_REACH   1.6f    // multiple of the influence radius
 #define TORN_SHAKE_AMP     2.4f    // world units of camera offset at the center
 
-// The engine's own per-view shake, driven instead of patching the camera solve.
-
-// Wander: the funnel crosses a disc of play area between random waypoints. Waypoints
-// rather than a free heading walk, because a walk that only turns when it would leave
-// the box ends up sliding along the boundary for the whole tornado. Nothing here reads
-// the wind - the path is the funnel's own.
+// Waypoints rather than a free heading walk: a walk that only turns when it would leave
+// the box slides along the boundary for the whole tornado. Nothing here reads the wind.
 #define TORN_PLAY_FRACTION 0.68f   // play radius as a fraction of the OOB half-extent
 #define TORN_STEER         0.045f  // per-frame blend of the heading toward the waypoint
 #define TORN_TURN          0.030f  // radians/frame of random jitter on top of the steer
@@ -126,8 +111,12 @@
 #define TORN_MAX_MACHINES  24
 #define TORN_MAX_PARENTS   16
 
-// Weak break families pin their debris to a node at the prop's baked spot, so their
-// dragged mesh must be collapsed by hand after the break.
+// A funnel scaled to nothing would divide by zero in TornadoOrbit.
+#define TORN_MIN_CORE      1.0f
+
+// One Effect_SpawnSync attempt per this many frames, so a spawn that never adopts
+// cannot fire one per frame for the whole tornado.
+#define TORN_SPAWN_RETRY   30
 
 static int stc_active = 0;
 
@@ -160,6 +149,7 @@ static float stc_dirx = 0.0f, stc_dirz = 1.0f;  // unit wander heading
 static float stc_wpx = 0.0f, stc_wpz = 0.0f;    // waypoint being crossed to
 static float stc_spin = 0.0f;               // funnel model's roll about its own axis
 static GOBJ *stc_model = NULL;              // borrowed whirlwind effect GObj
+static int   stc_spawn_cd = 0;              // frames until the next spawn attempt
 
 // The model's materials and the opacity each was authored with, which is what the fade
 // scales. Collected once per spawn.
@@ -208,61 +198,30 @@ static int          stc_yaku_count = 0;
 static MachineClaim stc_machines[TORN_MAX_MACHINES];
 static int          stc_machine_count = 0;
 
-// Menu overrides. Index 0 is "Preset" on every knob.
-static char *toggle_names[] = {"Preset", "Off", "On"};
+// Menu overrides. Index 0 is "Preset", the pass-through value, on every knob.
 static int show_index = 0;
 
-static const int count_values[] = {0, 0, 1, 2, 3, 5};
-static char *count_names[] = {"Preset", "Off", "1", "2", "3", "5"};
+static const int count_values[] = {0, 1, 2, 3, 5};
+static char *count_names[] = {"Preset", "1", "2", "3", "5"};
 #define TORN_COUNT_NUM (int)(sizeof(count_values) / sizeof(count_values[0]))
 static int count_index = 0;
 
-static const float duration_factors[] = {0.0f, 0.45f, 1.0f, 1.8f, 3.0f};
+static const float duration_factors[] = {1.0f, 0.45f, 1.0f, 1.8f, 3.0f};
 static char *duration_names[] = {"Preset", "Brief", "Normal", "Long", "Sustained"};
 #define TORN_DURATION_NUM (int)(sizeof(duration_factors) / sizeof(duration_factors[0]))
 static int duration_index = 0;
 
-static const float size_factors[] = {0.0f, 0.55f, 1.0f, 1.6f, 2.4f};
+static const float size_factors[] = {1.0f, 0.55f, 1.0f, 1.6f, 2.4f};
 static char *size_names[] = {"Preset", "Small", "Normal", "Large", "Colossal"};
 #define TORN_SIZE_NUM (int)(sizeof(size_factors) / sizeof(size_factors[0]))
 static int size_index = 0;
 
-static const float strength_factors[] = {0.0f, 0.5f, 1.0f, 1.7f};
+static const float strength_factors[] = {1.0f, 0.5f, 1.0f, 1.7f};
 static char *strength_names[] = {"Preset", "Gentle", "Normal", "Violent"};
 #define TORN_STRENGTH_NUM (int)(sizeof(strength_factors) / sizeof(strength_factors[0]))
 static int strength_index = 0;
 
-static char *shake_names[] = {"On", "Off"};
-static int shake_index = 0;
-
-static StageNode *TornadoStageNode(void)
-{
-    GrObj *gr = *stc_grobj;
-    if (!gr || !gr->gr_data || !gr->gr_data->stage_node)
-        return NULL;
-    return gr->gr_data->stage_node;
-}
-
-// Ground height under (x, z), or `fallback` where the raycast finds nothing (the
-// funnel is over a gap or off the plaza).
-static float TornadoGroundY(StageNode *sn, float x, float z, float fallback)
-{
-    Vec3 start = {x, sn->oob_max.Y + 50.0f, z};
-    Vec3 end = {x, sn->oob_min.Y - 50.0f, z};
-    Vec3 hit;
-    if (Raycast_Ground(&start, &end, &hit) < 0)
-        return fallback;
-    return hit.Y;
-}
-
-// The whirlwind is a plain model GObj with no think proc, so once spawned nothing
-// re-anchors it and its root JObj transform is ours to write.
-static JOBJ *TornadoModelRoot(void)
-{
-    if (!stc_model)
-        return NULL;
-    return (JOBJ *)stc_model->hsd_object;
-}
+static int shake_index = 1;
 
 // True while `g` is still in the model-effect bucket as our whirlwind. The effect's
 // lifetime counter despawns it on its own, so the pointer is re-validated by walking
@@ -275,25 +234,11 @@ static int TornadoModelAlive(GOBJ *g)
     {
         if (e != g)
             continue;
-        if (e->entity_class != EFFECT_GOBJ_KIND || !e->userdata)
+        if (e->entity_class != GAMEENTITY_EFFECT || !e->userdata)
             return 0;
         return ((struct Effect *)e->userdata)->kind == TORN_EFFECT_ID;
     }
     return 0;
-}
-
-// Any live rider works: the spawn only reads the parent to resolve the anchor, and
-// the funnel overwrites the placement immediately afterwards.
-static GOBJ *TornadoDonorRider(void)
-{
-    for (int i = 0; i < 4; i++)
-    {
-        GOBJ *rg = stc_playerdata[i].rider_gobj;
-        if (stc_playerdata[i].player_kind == PKIND_NONE || !rg || !rg->userdata)
-            continue;
-        return rg;
-    }
-    return NULL;
 }
 
 // Every part of the whirlwind is its own MObj with its own material, and the parts sit
@@ -317,14 +262,10 @@ static void TornadoCollectMaterials(JOBJ *j)
     }
 }
 
-// One-time setup on the model tree, deferred to the first frame the root is reachable
-// rather than done in the spawn callback: the callback is handed the spawn node, and a
-// root that is not attached yet there would silently leave the swirl unanimated and the
-// fade with no materials to scale.
-//
-// Mode 1 skips the effect's one-shot init, so nothing arms the anim loop and no proc
-// advances it. Arming the loop here and stepping it from the tick is what keeps the
-// swirl moving instead of frozen on its first frame.
+// Deferred to the first frame the root is reachable: the spawn callback is handed the
+// spawn node, and a root not yet attached there would leave both the swirl unanimated
+// and the fade with no materials to scale. Anchor mode 1 skips the effect's one-shot
+// init, so the anim loop is armed here and stepped from the tick.
 static void TornadoPrepareModel(JOBJ *root)
 {
     JObj_SetAllAOBJLoopByFlags(root, ALL_ANIM);
@@ -338,7 +279,7 @@ static void TornadoPrepareModel(JOBJ *root)
 static void TornadoAdoptEffect(void *node)
 {
     GOBJ *g = *(GOBJ **)((char *)node + EFFECT_NODE_GOBJ);
-    if (!g || g->entity_class != EFFECT_GOBJ_KIND || !g->userdata)
+    if (!g || g->entity_class != GAMEENTITY_EFFECT || !g->userdata)
         return;
 
     stc_model = g;
@@ -349,8 +290,8 @@ static void TornadoAdoptEffect(void *node)
 // group the inhale spawns its whirlwind into.
 static void TornadoSpawnModel(void)
 {
-    GOBJ *rider_gobj = TornadoDonorRider();
-    if (!rider_gobj || !rider_gobj->userdata)
+    GOBJ *rider_gobj = Weather_FindDonorRider();
+    if (!rider_gobj)
         return;
 
     RiderData *rd = (RiderData *)rider_gobj->userdata;
@@ -379,27 +320,31 @@ static void TornadoApplyFade(float fade)
         stc_mats[i]->alpha = stc_mat_alpha[i] * fade;
 }
 
-// Plant the funnel model on the axis, standing it upright and spinning it. The world
-// matrix is written directly rather than the root's SRT: it puts the model's local +Z
-// axis on world +Y with no euler-order guesswork, lets the length and the cross section
-// scale independently, and overrides whatever the effect's own animation does to the
-// root joint.
+// The world matrix is written directly rather than the root's SRT: it puts the model's
+// local +Z axis on world +Y with no euler-order guesswork, and overrides whatever the
+// effect's own animation does to the root joint.
 static void TornadoPlaceModel(void)
 {
     if (!TornadoModelAlive(stc_model))
         stc_model = NULL;
-    if (!stc_model)
+    if (!stc_model && --stc_spawn_cd <= 0)
+    {
         TornadoSpawnModel();
+        stc_spawn_cd = TORN_SPAWN_RETRY;
+    }
+    if (!stc_model)
+        return;
 
-    JOBJ *root = TornadoModelRoot();
+    // No think proc re-anchors a detached effect, so the root transform is ours.
+    JOBJ *root = (JOBJ *)stc_model->hsd_object;
     if (!root)
         return;
     if (!stc_model_ready)
         TornadoPrepareModel(root);
 
-    // The funnel ropes out as it fades: the whirlwind's own alpha stage is its texture's,
-    // so scaling the materials alone is not guaranteed to reach the screen, and narrowing
-    // the column to nothing is what makes the ends unmistakably gradual.
+    // The width ramp is the load-bearing half of the fade: this model's TEV alpha stage
+    // takes the texture's alpha and discards RASA, so the material write may never reach
+    // the screen.
     float fade = TornadoFade();
     float wide = (fade < TORN_FADE_MIN_WIDTH) ? TORN_FADE_MIN_WIDTH : fade;  // never a degenerate matrix
     float sa = stc_top / TORN_MODEL_LENGTH;
@@ -418,11 +363,9 @@ static void TornadoPlaceModel(void)
     TornadoApplyFade(fade);
 }
 
-// The funnel model is spawned once and then kept for the rest of the stage. The effect
-// system's own spawn node still points at the GObj, so destroying it by hand leaves that
-// node dangling and the engine double-frees the GObj the next time it retires the group
-// - which corrupts the GObj free list and asserts out of the next GObj_AddUserData.
-// Hiding the whole tree is what ends a tornado instead.
+// The effect must never be destroyed by hand: its spawn node still points at the GObj,
+// so the engine double-frees it when the group is retired. Hiding the tree is what ends
+// a tornado, and the model is reused for the rest of the stage.
 static void TornadoHideModel(void)
 {
     if (!TornadoModelAlive(stc_model))
@@ -452,9 +395,8 @@ static int TornadoIsWeakFamily(GOBJ *yaku_gobj)
     return Yaku_GetDescCollFunc(yd->desc_id) == (void *)hitWeakObject;
 }
 
-// Break a carried prop through its own family coll_func so the break runs with every
-// genuine consequence - debris, item drops, break-count credit, broken state. The
-// collider is synthesized: a huge radius clears any prop's HP in one hit, and the
+// Break a carried prop through its own family coll_func, so debris, item drops,
+// break-count credit and broken state all follow. The collider is synthesized: the
 // frame delta has to point INTO the contacted region's outward normal or the engine
 // clamps the impact speed to zero and nothing breaks.
 static int TornadoBreakInstance(GrCollRecord *record)
@@ -521,7 +463,8 @@ static int TornadoBreakInstance(GrCollRecord *record)
     {
         // The weak families never hide the dragged intact mesh inline, so clearing
         // USER_DEF_MTX drops the joint back to its degenerate SRT instead of leaving
-        // a whole tree frozen in mid-air.
+        // a whole tree frozen in mid-air. Their debris still spawns at the prop's
+        // baked ground spot, since that anchor node is per-family.
         if (record->jobj && TornadoIsWeakFamily(yaku_gobj))
             JObj_ClearFlags(record->jobj, JOBJ_USER_DEFINED_MTX);
         return 1;
@@ -545,24 +488,17 @@ static int TornadoInReach(Vec3 *p, float *out_dist)
     return p->Y >= stc_ground_y - TORN_BELOW && p->Y <= stc_ground_y + stc_top;
 }
 
-static float TornadoRange(float lo, float hi)
-{
-    return lo + (hi - lo) * HSD_Randf();
-}
-
 static void TornadoDrawVary(OrbitVary *v)
 {
-    v->spin   = TornadoRange(TORN_VARY_SPIN_LO, TORN_VARY_SPIN_HI);
-    v->ring   = TornadoRange(TORN_VARY_RING_LO, TORN_VARY_RING_HI);
-    v->lift   = TornadoRange(TORN_VARY_LIFT_LO, TORN_VARY_LIFT_HI);
-    v->wobble = TornadoRange(TORN_VARY_WOB_LO, TORN_VARY_WOB_HI);
+    v->spin   = Weather_RandRange(TORN_VARY_SPIN_LO, TORN_VARY_SPIN_HI);
+    v->ring   = Weather_RandRange(TORN_VARY_RING_LO, TORN_VARY_RING_HI);
+    v->lift   = Weather_RandRange(TORN_VARY_LIFT_LO, TORN_VARY_LIFT_HI);
+    v->wobble = Weather_RandRange(TORN_VARY_WOB_LO, TORN_VARY_WOB_HI);
     v->phase  = HSD_Randf() * 2.0f * TORN_PI;
 }
 
-// Advance one carried position around the funnel: rotate about the axis, shed part of
-// the distance to the target's own ring, and climb. Derived from the live position every
-// frame, so a target nudged by something else self-corrects instead of drifting out of
-// the swirl.
+// Derived from the live position every frame, so a target nudged by something else
+// self-corrects instead of drifting out of the swirl.
 static void TornadoOrbit(Vec3 *p, OrbitVary *v)
 {
     float dx = p->X - stc_cx;
@@ -631,7 +567,7 @@ static int TornadoYakuClaimed(GrCollRecord *record)
 // Boxes are left alone - only loose power-ups get swept.
 static int TornadoItemIsTarget(GOBJ *g, ItemData **out)
 {
-    if (g->entity_class != ITEM_GOBJ_KIND)
+    if (g->entity_class != GAMEENTITY_ITEM)
         return 0;
     ItemData *it = (ItemData *)g->userdata;
     if (!it || it->item_category == 0)
@@ -661,7 +597,7 @@ static void TornadoClaimMachines(void)
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_MACHINE];
          g != NULL && stc_machine_count < TORN_MAX_MACHINES; g = g->next)
     {
-        if (g->entity_class != MACHINE_GOBJ_KIND)
+        if (g->entity_class != GAMEENTITY_MACHINE)
             continue;
         MachineData *md = (MachineData *)g->userdata;
         if (!md || md->rider_gobj != NULL) // ridden machines are pushed, not carried
@@ -794,7 +730,7 @@ static void TornadoProcessItems(void)
         it->vel.Y = 0.0f;
         it->vel.Z = 0.0f;
         it->is_airborne = -1;
-        it->x35a &= (u8)~0x10; // clear grounded
+        it->flags_x35a &= (u8)~ITEM_X35A_GROUNDED;
     }
 }
 
@@ -814,7 +750,7 @@ static int TornadoMachineIsLive(MachineData *md)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_MACHINE]; g != NULL; g = g->next)
     {
-        if (g->entity_class != MACHINE_GOBJ_KIND)
+        if (g->entity_class != GAMEENTITY_MACHINE)
             continue;
         if ((MachineData *)g->userdata == md)
             return md->rider_gobj == NULL && !md->is_dead && !md->is_fall_dead;
@@ -952,7 +888,7 @@ static void TornadoShakeCameras(void)
     if (!lookup)
         return;
 
-    int on = (shake_index == 0);
+    int on = shake_index;
     float outer = stc_reach * TORN_SHAKE_REACH;
 
     for (int i = 0; i < CM_CAMERA_MAX; i++)
@@ -1010,27 +946,12 @@ static void TornadoEndFunnel(void)
     stc_frames_left = 0;
 }
 
-// Spread the round's tornadoes over the match, one per equal slice with jitter inside
-// the slice. Entries already behind `p` are skipped so re-planning mid-round does not
-// replay them.
-static void SeedSchedule(int n, float p)
-{
-    for (int i = 0; i < n; i++)
-        stc_schedule[i] = ((float)i + 0.15f + 0.70f * HSD_Randf()) / (float)n;
-    stc_next = 0;
-    while (stc_next < n && stc_schedule[stc_next] <= p)
-        stc_next++;
-    stc_scheduled = n;
-}
-
 // The disc the funnel is allowed to roam: centered on the out-of-bounds box, with the
 // radius taken from its shorter half-extent so the funnel never leans on a wall.
 static void TornadoPlayArea(StageNode *sn, float *cx, float *cz, float *radius)
 {
-    float hx = 0.5f * (sn->oob_max.X - sn->oob_min.X);
-    float hz = 0.5f * (sn->oob_max.Z - sn->oob_min.Z);
-    *cx = 0.5f * (sn->oob_min.X + sn->oob_max.X);
-    *cz = 0.5f * (sn->oob_min.Z + sn->oob_max.Z);
+    float hx, hz;
+    Weather_PlayBox(sn, cx, cz, &hx, &hz);
     *radius = ((hx < hz) ? hx : hz) * TORN_PLAY_FRACTION;
 }
 
@@ -1063,7 +984,7 @@ static void TornadoTouchDown(StageNode *sn)
     stc_dirx = dx / d;
     stc_dirz = dz / d;
 
-    stc_ground_y = TornadoGroundY(sn, stc_cx, stc_cz, sn->oob_min.Y);
+    stc_ground_y = Weather_GroundYAt(sn, stc_cx, stc_cz, sn->oob_min.Y);
     stc_live = 1;
     stc_frames_left = stc_duration;
     stc_item_count = 0;
@@ -1123,12 +1044,12 @@ static void TornadoWander(StageNode *sn)
         stc_cz = cz + oz / od * r;
     }
 
-    stc_ground_y = TornadoGroundY(sn, stc_cx, stc_cz, stc_ground_y);
+    stc_ground_y = Weather_GroundYAt(sn, stc_cx, stc_cz, stc_ground_y);
 }
 
 // Fold the menu overrides over the latched preset config. Returns 0 when no tornado
 // can appear this round.
-static int ResolveConfig(void)
+static int Tornado_ResolveConfig(void)
 {
     if (!WeatherToggle(show_index, stc_active))
         return 0;
@@ -1139,17 +1060,17 @@ static int ResolveConfig(void)
     if (stc_count > TORN_MAX_COUNT)
         stc_count = TORN_MAX_COUNT;
 
-    stc_duration = (duration_index > 0)
-                       ? (int)(stc_def_duration * duration_factors[duration_index])
-                       : stc_def_duration;
+    stc_duration = (int)(stc_def_duration * duration_factors[duration_index]);
     if (stc_duration < 1)
         stc_duration = 1;
 
-    stc_size = (size_index > 0) ? size_factors[size_index] : stc_def_size;
-    stc_strength = (strength_index > 0) ? strength_factors[strength_index] : stc_def_strength;
+    stc_size = size_factors[size_index] * stc_def_size;
+    stc_strength = strength_factors[strength_index] * stc_def_strength;
     stc_speed = stc_def_speed;
 
     stc_core = TORN_CORE_RADIUS * stc_size;
+    if (stc_core < TORN_MIN_CORE)
+        stc_core = TORN_MIN_CORE;
     stc_reach = TORN_INFLUENCE * stc_size;
     stc_top = TORN_HEIGHT * stc_size;
     return 1;
@@ -1173,14 +1094,14 @@ void Tornado_SetActive(const TornadoDef *def)
 
 void Tornado_Tick(void)
 {
-    if (!ResolveConfig())
+    if (!Tornado_ResolveConfig())
     {
         if (stc_live)
             TornadoEndFunnel();
         return;
     }
 
-    StageNode *sn = TornadoStageNode();
+    StageNode *sn = Weather_StageNode();
     if (!sn)
         return;
 
@@ -1189,7 +1110,10 @@ void Tornado_Tick(void)
         return;
 
     if (stc_scheduled != stc_count)
-        SeedSchedule(stc_count, p);
+    {
+        stc_next = Weather_SeedSchedule(stc_schedule, stc_count, p);
+        stc_scheduled = stc_count;
+    }
 
     if (stc_live)
     {
@@ -1221,8 +1145,8 @@ void Tornado_Tick(void)
     }
 }
 
-// Runs after the frame's game procs, so these position writes are the last word over
-// item physics, machine physics and the ground snap.
+// Item physics, machine physics and the ground snap run at proc priorities 4-6, after
+// the priority-1 weather tick, so this is the only place a position override survives.
 void Tornado_OnFrameEnd(void)
 {
     if (!stc_live)
@@ -1232,7 +1156,7 @@ void Tornado_OnFrameEnd(void)
     // City Trial entry - so leaving CT with a funnel up would otherwise walk claims
     // full of freed pointers. Drop everything the moment the stage stops being CT.
     GrObj *gr = *stc_grobj;
-    if (!gr || gr->gr_kind != GR_CITY1 || !TornadoStageNode())
+    if (!gr || gr->gr_kind != GR_CITY1 || !Weather_StageNode())
     {
         Tornado_Reset();
         return;
@@ -1258,6 +1182,33 @@ void Tornado_Reset(void)
     stc_model = NULL;
     stc_mat_count = 0;  // the materials belong to that GObj
     stc_model_ready = 0;
+    stc_spawn_cd = 0;
+    stc_spin = 0.0f;
+}
+
+static void OnTornadoShowChange(int val)
+{
+    OSReport("[Tornado] Tornado %s\n", weather_toggle_names[val]);
+}
+
+static void OnTornadoCountChange(int val)
+{
+    OSReport("[Tornado] Appearances %s\n", count_names[val]);
+}
+
+static void OnTornadoDurationChange(int val)
+{
+    OSReport("[Tornado] Duration %s\n", duration_names[val]);
+}
+
+static void OnTornadoSizeChange(int val)
+{
+    OSReport("[Tornado] Size %s\n", size_names[val]);
+}
+
+static void OnTornadoStrengthChange(int val)
+{
+    OSReport("[Tornado] Strength %s\n", strength_names[val]);
 }
 
 MenuDesc tornado_menu = {
@@ -1269,7 +1220,8 @@ MenuDesc tornado_menu = {
             .kind = OPTKIND_VALUE,
             .val = &show_index,
             .value_num = 3,
-            .value_names = toggle_names,
+            .value_names = weather_toggle_names,
+            .on_change = OnTornadoShowChange,
         },
         &(OptionDesc){
             .name = "Appearances",
@@ -1278,6 +1230,7 @@ MenuDesc tornado_menu = {
             .val = &count_index,
             .value_num = TORN_COUNT_NUM,
             .value_names = count_names,
+            .on_change = OnTornadoCountChange,
         },
         &(OptionDesc){
             .name = "Duration",
@@ -1286,6 +1239,7 @@ MenuDesc tornado_menu = {
             .val = &duration_index,
             .value_num = TORN_DURATION_NUM,
             .value_names = duration_names,
+            .on_change = OnTornadoDurationChange,
         },
         &(OptionDesc){
             .name = "Size",
@@ -1294,6 +1248,7 @@ MenuDesc tornado_menu = {
             .val = &size_index,
             .value_num = TORN_SIZE_NUM,
             .value_names = size_names,
+            .on_change = OnTornadoSizeChange,
         },
         &(OptionDesc){
             .name = "Strength",
@@ -1302,6 +1257,7 @@ MenuDesc tornado_menu = {
             .val = &strength_index,
             .value_num = TORN_STRENGTH_NUM,
             .value_names = strength_names,
+            .on_change = OnTornadoStrengthChange,
         },
         &(OptionDesc){
             .name = "Screen Shake",
@@ -1309,7 +1265,7 @@ MenuDesc tornado_menu = {
             .kind = OPTKIND_VALUE,
             .val = &shake_index,
             .value_num = 2,
-            .value_names = shake_names,
+            .value_names = weather_onoff_names,
         },
     },
 };

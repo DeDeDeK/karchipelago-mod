@@ -175,6 +175,7 @@ ModDesc mod_desc = {
     .author = "DeDeDK",
     .version.major = 1,
     .version.minor = 0,
+    .affects_gameplay = 1,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
 };

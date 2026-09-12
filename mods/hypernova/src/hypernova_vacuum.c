@@ -12,7 +12,6 @@
 
 #include "hypernova.h"
 
-#define ITEM_GOBJ_KIND 22  // gobj->entity_class for a City Trial item
 
 // True if `target` is inside RANGE and within the half-angle of unit `aim_unit`.
 static int Hypernova_InCone(Vec3 *origin, Vec3 *aim_unit, Vec3 *target)
@@ -142,7 +141,7 @@ static void Hypernova_PullItem(RiderData *rd, ItemData *id)
     id->vel.Y = 0.0f;
     id->vel.Z = 0.0f;
     id->is_airborne = -1; // skip the per-frame ground raycast
-    id->x35a &= ~0x10;    // clear grounded flag (bit 4)
+    id->flags_x35a &= (u8)~ITEM_X35A_GROUNDED;
 }
 
 // Breakable City Trial props by desc_id (YakumonoData+0x04): 29 star pole, 32 forest pitfall,
@@ -446,7 +445,7 @@ static int Hypernova_ItemIsLivePowerup(ItemData *id)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_ITEM]; g != NULL; g = g->next)
     {
-        if (g->entity_class != ITEM_GOBJ_KIND)
+        if (g->entity_class != GAMEENTITY_ITEM)
             continue;
         if ((ItemData *)g->userdata == id)
             return id->item_category != 0; // reject if the slot is now a box
@@ -458,7 +457,7 @@ static void Hypernova_ClaimItems(int player, RiderData *rd, Vec3 *aim)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_ITEM]; g != NULL; g = g->next)
     {
-        if (g->entity_class != ITEM_GOBJ_KIND)
+        if (g->entity_class != GAMEENTITY_ITEM)
             continue;
         ItemData *id = (ItemData *)g->userdata;
         if (id == NULL)
@@ -640,7 +639,6 @@ void Hypernova_VacuumProcessClaimed(void)
 
 // Claimed unridden machines, keyed by MachineData and re-validated against the live bucket each
 // frame, so one that despawns, gets mounted, or dies self-heals out of the set.
-#define MACHINE_GOBJ_KIND         GAMEENTITY_MACHINE  // gobj->entity_class for a machine (16)
 #define HYPERNOVA_MAX_MACHINE_CLAIMS 32
 
 typedef struct
@@ -684,7 +682,7 @@ static int Hypernova_MachineIsLiveTarget(MachineData *md)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_MACHINE]; g != NULL; g = g->next)
     {
-        if (g->entity_class != MACHINE_GOBJ_KIND)
+        if (g->entity_class != GAMEENTITY_MACHINE)
             continue;
         if ((MachineData *)g->userdata == md)
             return md->rider_gobj == NULL && !md->is_dead && !md->is_fall_dead;
@@ -696,7 +694,7 @@ static void Hypernova_ClaimMachines(int player, RiderData *rd, Vec3 *aim)
 {
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_MACHINE]; g != NULL; g = g->next)
     {
-        if (g->entity_class != MACHINE_GOBJ_KIND)
+        if (g->entity_class != GAMEENTITY_MACHINE)
             continue;
         MachineData *md = (MachineData *)g->userdata;
         if (md == NULL)

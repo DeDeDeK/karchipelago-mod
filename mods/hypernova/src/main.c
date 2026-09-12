@@ -162,6 +162,7 @@ ModDesc mod_desc = {
     .author = "DeDeDK",
     .version.major = HYPERNOVA_API_MAJOR,
     .version.minor = HYPERNOVA_API_MINOR,
+    .affects_gameplay = 1,
     .option_desc = &ModSettings,
     .OnBoot = Hypernova_OnBoot,
     .OnSceneChange = OnSceneChange,

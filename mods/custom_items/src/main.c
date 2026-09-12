@@ -7,6 +7,7 @@ ModDesc mod_desc = {
     .author = "DeDeDK",
     .version.major = CUSTOM_ITEMS_API_MAJOR,
     .version.minor = CUSTOM_ITEMS_API_MINOR,
+    .affects_gameplay = 1,
     .OnBoot = CustomItems_OnBoot,
     .On3DLoadStart = CustomItems_On3DLoadStart,
 };

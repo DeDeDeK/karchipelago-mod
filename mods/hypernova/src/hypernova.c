@@ -378,9 +378,9 @@ static void RecolorEffectTree(JOBJ *j, u8 r, u8 g, u8 b)
 // bucket and matching the Effect kind.
 static void RecolorWhirlwinds(u8 r, u8 g, u8 b)
 {
-    for (GOBJ *g_eff = (*stc_gobj_lookup)[HYPERNOVA_EFFECT_PLINK]; g_eff != NULL; g_eff = g_eff->next)
+    for (GOBJ *g_eff = (*stc_gobj_lookup)[GAMEPLINK_EFFECTMODEL]; g_eff != NULL; g_eff = g_eff->next)
     {
-        if (g_eff->entity_class != HYPERNOVA_EFFECT_GOBJ_KIND)
+        if (g_eff->entity_class != GAMEENTITY_EFFECT)
             continue;
         Effect *eff = g_eff->userdata;
         if (eff == NULL)

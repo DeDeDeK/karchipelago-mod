@@ -8,6 +8,7 @@
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
+#include "weather_fx.h"
 
 // Custom presets in enum order, WEATHER_BLOOD_RAIN .. WEATHER_TORNADO.
 const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
@@ -340,7 +341,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .eruptions = 4,
       },
     },
-    // Tornado - the sickly green supercell sky that goes with a funnel on the ground.
+    // Tornado
     { .base_preset = WEATHER_GRAY_SKY,
       .fog_color = RGBA(98, 106, 78, 255),
       .fog_start = 90.0f,
@@ -382,13 +383,15 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .puff_var = 0.9f,
           .height_var = 100.0f,
       },
-      // Tuned for testing: several touchdowns per round so one is never far off.
       .tornado = {
           .enabled = 1,
           .count = 3,
       },
     },
 };
+
+_Static_assert(sizeof(custom_defs) / sizeof(custom_defs[0]) == WEATHER_CUSTOM_NUM,
+               "custom_defs must carry one entry per custom preset");
 
 const CustomPresetDef *CustomWeather_GetPresetDef(int weather_kind)
 {
@@ -407,6 +410,9 @@ static const char *preset_names[WEATHER_TOTAL] = {
     "Tornado",
 };
 
+_Static_assert(sizeof(preset_names) / sizeof(preset_names[0]) == WEATHER_TOTAL,
+               "preset_names must carry one name per preset");
+
 const char *CustomWeather_GetPresetName(int weather_kind)
 {
     if (weather_kind < 0 || weather_kind >= WEATHER_TOTAL)
@@ -417,7 +423,7 @@ const char *CustomWeather_GetPresetName(int weather_kind)
 // Vanilla entries copied from the stage file, custom entries appended.
 static SkyPresetEntry extended_presets[WEATHER_TOTAL];
 
-// Per-preset pool toggle, persisted by hoshi menu save (keyed by option name hash).
+// Per-preset pool toggle, persisted by hoshi menu save.
 static int weather_enabled[WEATHER_TOTAL] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -426,10 +432,8 @@ static int weather_enabled[WEATHER_TOTAL] = {
 _Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_TOTAL,
                "weather_enabled init must match WEATHER_TOTAL");
 
-static char *toggle_names[] = {"Disabled", "Enabled"};
-
-// Global "Fog Distance" multiplier written into HSD_Fog.scale. HSD_FogSet emits
-// GXSetFog(..., end * scale, ...), so <1 pulls the fog wall in and >1 pushes it out.
+// Written into HSD_Fog.scale. HSD_FogSet emits GXSetFog(..., end * scale, ...), so
+// <1 pulls the fog wall in and >1 pushes it out.
 static const float fog_distance_factors[] = {1.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
 static char *fog_distance_names[] = {"Preset", "50%", "75%", "100%", "125%", "150%", "200%"};
 #define FOG_DISTANCE_NUM (sizeof(fog_distance_factors) / sizeof(fog_distance_factors[0]))
@@ -440,13 +444,22 @@ float CustomWeather_GetFogScale(void)
     return fog_distance_factors[fog_distance_index];
 }
 
-// Repoints the game's preset sub-header at the extended array. Idempotent, so it
-// can run on every stage load.
-static void ExtendPresetArray(GrObj *grobj)
+// Idempotent; runs on every stage load.
+static void CustomWeather_ExtendPresetArray(GrObj *grobj)
 {
     SkyBlock *sky_block = grobj->gr_data->sky_block;
     SkyPresetSubHeader *sub_header = sky_block->preset_header;
     SkyPresetEntry *vanilla_array = sub_header->preset_array;
+
+    // WeatherKind pins the custom indices at WEATHER_VANILLA_NUM, so a stage that
+    // shipped a different count would put every enum value on the wrong preset.
+    static int count_warned = 0;
+    if (sub_header->preset_count != WEATHER_VANILLA_NUM && !count_warned)
+    {
+        OSReport("[CustomWeather] Stage ships %d vanilla presets, expected %d\n",
+                 sub_header->preset_count, WEATHER_VANILLA_NUM);
+        count_warned = 1;
+    }
 
     memcpy(extended_presets, vanilla_array,
            WEATHER_VANILLA_NUM * sizeof(SkyPresetEntry));
@@ -456,14 +469,21 @@ static void ExtendPresetArray(GrObj *grobj)
         const CustomPresetDef *def = &custom_defs[i];
         SkyPresetEntry *entry = &extended_presets[WEATHER_VANILLA_NUM + i];
 
+        int base = def->base_preset;
+        if (base < 0 || base >= WEATHER_VANILLA_NUM)
+            base = WEATHER_DAY;
+
         // Inherits the base's un-overridden AreaLight params (flags, attn, header)
-        *entry = extended_presets[def->base_preset];
+        *entry = extended_presets[base];
 
         entry->fog_color = def->fog_color;
         entry->fog_start = def->fog_start;
         entry->fog_end = def->fog_end;
         entry->sky_ambient_color = def->sky_color;
-        entry->fade_color = 0;          // screen tint is driven from screen_tint via Sky_BeginFade
+        // Sky_BeginTransition (0x800dc354) re-drives the lbfade slot to this field on
+        // every transition, so an event's sky swap and the restore afterwards both
+        // reproduce the preset's tint instead of clearing it.
+        entry->fade_color = def->screen_tint;
         entry->area_light.color = def->char_diffuse;
         entry->area_light.hw_color = def->char_specular;
         entry->area_light.direction = def->char_dir;
@@ -475,52 +495,27 @@ static void ExtendPresetArray(GrObj *grobj)
     sub_header->preset_count = WEATHER_TOTAL;
 }
 
-// Replaces vanilla random/fixed sky selection with a uniform pick over the
-// enabled presets.
 static void CustomWeather_OverrideSky(GrObj *grobj)
 {
-    ExtendPresetArray(grobj);
+    CustomWeather_ExtendPresetArray(grobj);
 
-    int enabled_count = 0;
-    for (int i = 0; i < WEATHER_TOTAL; i++)
-    {
-        if (weather_enabled[i])
-            enabled_count++;
-    }
+    int preset = Weather_PickEnabled(weather_enabled, WEATHER_TOTAL);
+    if (preset < 0)
+        preset = WEATHER_DAY;
 
-    int preset = WEATHER_DAY;
-    if (enabled_count > 0)
-    {
-        int pick = HSD_Randi(enabled_count);
-        for (int i = 0; i < WEATHER_TOTAL; i++)
-        {
-            if (weather_enabled[i])
-            {
-                if (pick == 0)
-                {
-                    preset = i;
-                    break;
-                }
-                pick--;
-            }
-        }
-    }
-
-    // WeatherRuntime names the winner a frame later, on the same path a mid-round
-    // sky transition takes, so only the pool size is reported here.
-    OSReport("[CustomWeather] Rolling from %d of %d presets\n", enabled_count, WEATHER_TOTAL);
+    OSReport("[CustomWeather] Rolled %s\n", CustomWeather_GetPresetName(preset));
 
     Sky_SetPresetIndex(grobj, preset);
 }
 
-// Inside Sky_Init: the City Trial (gr_kind 9) random selection block. r30 = grobj;
-// the hook exits past the vanilla Sky_SetPresetIndex call.
+// Inside Sky_Init (0x8010f114): the stage kind 9 (STAGEKIND_CITY1) random selection
+// block. r30 = grobj; the hook exits past the vanilla Sky_SetPresetIndex call.
 CODEPATCH_HOOKCREATE(0x8010f1a4,
     "mr 3, 30\n\t",
     CustomWeather_OverrideSky,
     "", 0x8010f1d0);
 
-// Inside Sky_Init: City Trial Free Run (stage kind 52) sky init, where vanilla
+// Inside Sky_Init (0x8010f114): stage kind 52 (City Trial Free Run), where vanilla
 // hardcodes preset 0. Same r30 = grobj.
 CODEPATCH_HOOKCREATE(0x8010f224,
     "mr 3, 30\n\t",
@@ -537,26 +532,30 @@ void CustomWeather_OnBoot()
 static int EnableAllWeather(OptionDesc *self)
 {
     (void)self;
-    for (int i = 0; i < WEATHER_TOTAL; i++)
-        weather_enabled[i] = 1;
+    Weather_SetAllEnabled(weather_enabled, WEATHER_TOTAL, 1);
     return 1;
 }
 
 static int DisableAllWeather(OptionDesc *self)
 {
     (void)self;
-    for (int i = 0; i < WEATHER_TOTAL; i++)
-        weather_enabled[i] = 0;
+    Weather_SetAllEnabled(weather_enabled, WEATHER_TOTAL, 0);
     return 1;
+}
+
+static void OnFogDistanceChange(int val)
+{
+    OSReport("[CustomWeather] Fog distance %s\n", fog_distance_names[val]);
 }
 
 #define WEATHER_TOGGLE(idx, label) \
     &(OptionDesc){ \
         .name = label, \
+        .description = "Let this preset appear in the City Trial weather roll", \
         .kind = OPTKIND_VALUE, \
         .val = &weather_enabled[idx], \
         .value_num = 2, \
-        .value_names = toggle_names, \
+        .value_names = weather_enable_names, \
     }
 
 MenuDesc weather_menu = {
@@ -569,6 +568,7 @@ MenuDesc weather_menu = {
             .val = &fog_distance_index,
             .value_num = FOG_DISTANCE_NUM,
             .value_names = fog_distance_names,
+            .on_change = OnFogDistanceChange,
         },
         &(OptionDesc){
             .name = "Enable All",

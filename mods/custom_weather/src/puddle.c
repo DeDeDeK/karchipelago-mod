@@ -39,20 +39,16 @@
 #define PUDDLE_INIT_STAGGER   240
 #define PUDDLE_RETRY_GAP      30      // dormant re-wait when a spot pick finds no ground
 
-// Defaults applied when a preset leaves the matching PuddleDef field 0. The tone is
-// light and fairly opaque because a flat ground disc is heavily foreshortened at the
-// City Trial camera angle, where a bright reflective pool reads far better.
+// Defaults applied when a preset leaves the matching PuddleDef field 0.
 #define PUDDLE_DEF_COLOR     RGBA(150, 178, 205, 195) // bright reflective pool
 #define PUDDLE_DEF_COUNT     24
 #define PUDDLE_DEF_RADIUS    32.0f
 #define PUDDLE_DEF_FACTOR    0.90f                  // damp horizontal velocity 10%/frame inside
+#define PUDDLE_MIN_RADIUS    1.0f                   // PointInPuddle divides by the axes
 
-// Render GObj: an entity class / p_link high enough to avoid the engine's own, on
-// the world camera's gx_link 0, XLU sub-pass.
+// Entity class / p_link high enough to avoid the engine's own.
 #define PUDDLE_GOBJ_CLASS  203
 #define PUDDLE_GOBJ_PLINK  27
-#define PUDDLE_GX_LINK     0
-#define PUDDLE_GX_PRI      0
 
 typedef enum PuddlePhase
 {
@@ -89,8 +85,8 @@ static int     stc_base_count = PUDDLE_DEF_COUNT;
 static float   stc_base_radius = PUDDLE_DEF_RADIUS;
 static float   stc_base_factor = PUDDLE_DEF_FACTOR;
 
-// Slowdown scales the per-preset drag amount (1 - factor); Off removes the slow but
-// still draws the discs.
+// Index 0 ("Preset") is the pass-through value on every knob below. Slowdown scales
+// the per-preset drag amount (1 - factor); Off removes the slow but still draws.
 static const float slow_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *slow_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
 #define PUDDLE_SLOW_NUM (sizeof(slow_strength_factors) / sizeof(slow_strength_factors[0]))
@@ -109,39 +105,27 @@ static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
 #define PUDDLE_SIZE_NUM (sizeof(size_factors) / sizeof(size_factors[0]))
 static int size_index = 0;
 
-// Preset = pools roam and draw.
-static char *puddle_toggle_names[] = {"Preset", "Off", "On"};
-static int puddle_roaming = 0;
-static int show_puddles = 0;
+static int puddle_roaming = 1;
+static int show_puddles = 1;
 
-// Inclusive random integer in [lo, hi].
-static int RandRange(int lo, int hi)
-{
-    if (hi <= lo)
-        return lo;
-    return lo + HSD_Randi(hi - lo + 1);
-}
-
-// Roll a fresh location + oval shape on flat ground and lay the disc flush in the
-// surface plane. Each candidate XZ is raycast straight down against the map
-// collision, keeping only near-flat hits, and the disc is built from a tangent basis
-// derived from the ground normal so it conforms to slopes. Returns 0 if no ground
-// was found (stage not ready, or every try landed on a wall or the void).
+// Returns 0 when no ground was found: stage not ready, or every try landed on a wall
+// or the void.
 static int PickSpot(Puddle *p)
 {
-    GrObj *gr = *stc_grobj;
-    if (!gr || !gr->gr_data || !gr->gr_data->stage_node)
+    StageNode *sn = Weather_StageNode();
+    if (!sn)
         return 0;
-    StageNode *sn = gr->gr_data->stage_node;
 
-    float cx = (sn->oob_min.X + sn->oob_max.X) * 0.5f;
-    float cz = (sn->oob_min.Z + sn->oob_max.Z) * 0.5f;
-    float hx = (sn->oob_max.X - sn->oob_min.X) * 0.5f * PUDDLE_PLAY_FRACTION;
-    float hz = (sn->oob_max.Z - sn->oob_min.Z) * 0.5f * PUDDLE_PLAY_FRACTION;
-    float top_y = sn->oob_max.Y + 50.0f;  // raycast from above the box
-    float bot_y = sn->oob_min.Y - 50.0f;  // down to below it
+    float cx, cz, hx, hz;
+    Weather_PlayBox(sn, &cx, &cz, &hx, &hz);
+    hx *= PUDDLE_PLAY_FRACTION;
+    hz *= PUDDLE_PLAY_FRACTION;
+    float top_y = sn->oob_max.Y + 50.0f;
+    float bot_y = sn->oob_min.Y - 50.0f;
 
     float radius = stc_base_radius * size_factors[size_index];
+    if (radius < PUDDLE_MIN_RADIUS)
+        radius = PUDDLE_MIN_RADIUS;
 
     for (int a = 0; a < PUDDLE_PICK_ATTEMPTS; a++)
     {
@@ -219,7 +203,7 @@ static void StepPuddle(Puddle *p, int roaming)
         {
             p->alpha = 1.0f;
             p->phase = PUD_HELD;
-            p->timer = RandRange(PUDDLE_HOLD_MIN, PUDDLE_HOLD_MAX);
+            p->timer = Weather_RandRangeI(PUDDLE_HOLD_MIN, PUDDLE_HOLD_MAX);
         }
         else
         {
@@ -243,7 +227,7 @@ static void StepPuddle(Puddle *p, int roaming)
         {
             p->alpha = 0.0f;
             p->phase = PUD_DORMANT;
-            p->timer = RandRange(PUDDLE_GAP_MIN, PUDDLE_GAP_MAX);
+            p->timer = Weather_RandRangeI(PUDDLE_GAP_MIN, PUDDLE_GAP_MAX);
         }
         else
         {
@@ -255,9 +239,8 @@ static void StepPuddle(Puddle *p, int roaming)
 
 static int PointInPuddle(float x, float z, const Puddle *p)
 {
-    // Project the horizontal offset onto the disc's in-plane axes, then test against
-    // the ellipse. Their Y components are tiny on near-flat ground, so the XZ
-    // projection is an accurate footprint.
+    // The axes' Y components are tiny on near-flat ground, so the XZ projection is an
+    // accurate footprint.
     float ox = x - p->center.X;
     float oz = z - p->center.Z;
     float du = (ox * p->u.X + oz * p->u.Z) / p->rx;
@@ -265,8 +248,6 @@ static int PointInPuddle(float x, float z, const Puddle *p)
     return (du * du + dv * dv) <= 1.0f;
 }
 
-// Arm the pool field for the round: size the slot set from the preset count and the
-// Frequency scalar, and start every slot dormant on a staggered random timer.
 // Positions are rolled lazily per slot in StepPuddle, so this needs no stage loaded.
 static void Puddle_Arm(void)
 {
@@ -291,18 +272,17 @@ static void Puddle_Arm(void)
 
     stc_inited = 1;
     OSReport("[Puddle] Armed %d pools (roaming %s)\n",
-             stc_count, WeatherToggle(puddle_roaming, 1) ? "on" : "off");
+             stc_count, puddle_roaming ? "on" : "off");
 }
 
-// GX callback on the world camera link. Draws each surfaced pool as a flat
-// translucent triangle fan on the XLU pass (pass 1), scaled by the pool's fade
-// opacity, depth-tested but not depth-writing so opaque geometry occludes it.
+// GX callback on the world camera link, XLU pass. Each surfaced pool is a flat
+// translucent fan scaled by its fade opacity.
 static void Puddle_GX(GOBJ *g, int pass)
 {
     (void)g;
     if (pass != 1)
         return;
-    if (!stc_active || !WeatherToggle(show_puddles, 1) || stc_count <= 0)
+    if (!stc_active || !show_puddles || stc_count <= 0)
         return;
 
     COBJ *cam = COBJ_GetCurrent();
@@ -346,13 +326,10 @@ static void Puddle_Ensure(void)
 {
     if (stc_puddle_gobj)
         return;
-    stc_puddle_gobj = WeatherGX_EnsureLayer(PUDDLE_GOBJ_CLASS, PUDDLE_GOBJ_PLINK, Puddle_GX,
-                                            PUDDLE_GX_LINK, PUDDLE_GX_PRI,
-                                            "[Puddle] Ground puddle layer");
+    stc_puddle_gobj = WeatherGX_EnsureLayer(PUDDLE_GOBJ_CLASS, PUDDLE_GOBJ_PLINK,
+                                            Puddle_GX, "Puddle");
 }
 
-// Latch the active preset's puddle config, resolving each 0 field to its module
-// default, and arm a fresh field for the round.
 void Puddle_SetActive(const PuddleDef *def)
 {
     if (!def || !def->enabled)
@@ -382,18 +359,22 @@ void Puddle_Tick(void)
     if (!stc_active)
         return;
 
+    // Base per-frame drag before per-pool opacity.
+    float base_amt = (1.0f - stc_base_factor) * slow_strength_factors[slow_strength_index];
+
+    // Invisible and inert: skip the lifecycle and its ground raycasts entirely.
+    if (!show_puddles && base_amt <= 0.0f)
+        return;
+
     if (!stc_inited)
         Puddle_Arm();
     Puddle_Ensure();
 
-    int roaming = WeatherToggle(puddle_roaming, 1);
     for (int i = 0; i < stc_count; i++)
-        StepPuddle(&stc_puddles[i], roaming);
+        StepPuddle(&stc_puddles[i], puddle_roaming);
 
-    // Base per-frame drag before per-pool opacity; Off skips only the slowdown, so
-    // the lifecycle and render above still run.
-    float base_amt = (1.0f - stc_base_factor) * slow_strength_factors[slow_strength_index];
-    if (base_amt <= 0.0f)
+    // Riders are still boarding through the intro, so nothing drags them there.
+    if (base_amt <= 0.0f || Weather_RoundProgress() < 0.0f)
         return;
 
     for (int ply = 0; ply < WEATHER_PLAYER_SLOTS; ply++)
@@ -433,12 +414,30 @@ void Puddle_Tick(void)
 
 void Puddle_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop the cached handle
-    // so the next active frame recreates it.
     stc_puddle_gobj = NULL;
     stc_inited = 0;
     stc_count = 0;
     stc_active = 0;
+}
+
+static void OnPuddleSlowChange(int val)
+{
+    OSReport("[Puddle] Slowdown %s\n", slow_strength_names[val]);
+}
+
+static void OnPuddleFreqChange(int val)
+{
+    OSReport("[Puddle] Frequency %s\n", freq_names[val]);
+}
+
+static void OnPuddleSizeChange(int val)
+{
+    OSReport("[Puddle] Size %s\n", size_names[val]);
+}
+
+static void OnPuddleRoamingChange(int val)
+{
+    OSReport("[Puddle] Roaming %s\n", weather_onoff_names[val]);
 }
 
 MenuDesc puddle_menu = {
@@ -451,6 +450,7 @@ MenuDesc puddle_menu = {
             .val = &slow_strength_index,
             .value_num = PUDDLE_SLOW_NUM,
             .value_names = slow_strength_names,
+            .on_change = OnPuddleSlowChange,
         },
         &(OptionDesc){
             .name = "Frequency",
@@ -459,6 +459,7 @@ MenuDesc puddle_menu = {
             .val = &freq_index,
             .value_num = PUDDLE_FREQ_NUM,
             .value_names = freq_names,
+            .on_change = OnPuddleFreqChange,
         },
         &(OptionDesc){
             .name = "Size",
@@ -467,22 +468,24 @@ MenuDesc puddle_menu = {
             .val = &size_index,
             .value_num = PUDDLE_SIZE_NUM,
             .value_names = size_names,
+            .on_change = OnPuddleSizeChange,
         },
         &(OptionDesc){
             .name = "Roaming",
-            .description = "Puddles fade in and out at new spots over time (Preset = on, Off = a fixed field)",
+            .description = "Puddles fade in and out at new spots over time (Off = a fixed field)",
             .kind = OPTKIND_VALUE,
             .val = &puddle_roaming,
-            .value_num = 3,
-            .value_names = puddle_toggle_names,
+            .value_num = 2,
+            .value_names = weather_onoff_names,
+            .on_change = OnPuddleRoamingChange,
         },
         &(OptionDesc){
             .name = "Show Puddles",
             .description = "Draw the puddle discs (the slowdown still applies when off)",
             .kind = OPTKIND_VALUE,
             .val = &show_puddles,
-            .value_num = 3,
-            .value_names = puddle_toggle_names,
+            .value_num = 2,
+            .value_names = weather_onoff_names,
         },
     },
 };
