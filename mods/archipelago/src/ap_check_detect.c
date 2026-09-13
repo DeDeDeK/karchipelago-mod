@@ -89,6 +89,70 @@ static int WithinSphere(const Vec3 *p, const Vec3 *centre, float radius)
     return dx * dx + dy * dy + dz * dz <= radius * radius;
 }
 
+// City Trial rings the city with two invisible barriers, both collision ground
+// type 30. The inner one stands about 100 units above the terrain it follows, so a
+// machine with wings clears it; the outer one runs 150 to 250 units further out and
+// reaches the ceiling at Y 1040.9, so nothing gets past it. Both sit well inside
+// StageNode's +/-1300 out-of-bounds box, which is why calcDistanceFromOOB never
+// goes negative in the city and cannot answer this objective.
+//
+// Leaving the inner barrier is what counts as out of bounds. Its footprint is this
+// closed 147-gon of the barrier posts' XZ, in stage-scaled world units; the last
+// edge spans an 80-unit break in the barrier on the volcano's north slope. No
+// vertex is nearer the origin than 497.
+static const s16 city_bound_xz[][2] = {
+    { -258, -725 }, { -269, -756 }, { -229, -777 }, { -178, -768 }, { -146, -814 }, { -147, -853 },
+    { -137, -858 }, { -106, -850 }, {  -58, -863 }, {  -11, -873 }, {   33, -878 }, {   76, -882 },
+    {  117, -883 }, {  158, -883 }, {  203, -881 }, {  236, -864 }, {  265, -850 }, {  303, -845 },
+    {  342, -854 }, {  380, -854 }, {  422, -835 }, {  459, -811 }, {  497, -795 }, {  541, -775 },
+    {  573, -747 }, {  598, -711 }, {  614, -677 }, {  623, -638 }, {  629, -605 }, {  645, -565 },
+    {  647, -523 }, {  634, -480 }, {  611, -445 }, {  594, -403 }, {  595, -355 }, {  576, -315 },
+    {  582, -277 }, {  605, -251 }, {  618, -209 }, {  613, -160 }, {  601, -115 }, {  596,  -67 },
+    {  575,  -30 }, {  554,    6 }, {  547,   48 }, {  560,   88 }, {  579,  125 }, {  591,  167 },
+    {  592,  211 }, {  585,  249 }, {  570,  285 }, {  549,  316 }, {  534,  348 }, {  524,  385 },
+    {  502,  418 }, {  482,  446 }, {  458,  469 }, {  422,  490 }, {  385,  502 }, {  350,  504 },
+    {  350,  630 }, {  343,  630 }, {  343,  665 }, {  326,  665 }, {  326,  700 }, {  186,  700 },
+    {  186,  692 }, {   77,  692 }, {   77,  671 }, {   42,  671 }, {    7,  671 }, {    7,  602 },
+    {   -7,  602 }, {  -21,  601 }, {  -36,  595 }, {  -50,  586 }, {  -67,  572 }, {  -81,  558 },
+    {  -95,  544 }, { -112,  529 }, { -140,  508 }, { -155,  512 }, { -180,  518 }, { -199,  522 },
+    { -210,  535 }, { -213,  614 }, { -204,  726 }, { -217,  827 }, { -256,  870 }, { -320,  889 },
+    { -394,  872 }, { -434,  827 }, { -457,  726 }, { -461,  649 }, { -473,  566 }, { -485,  529 },
+    { -488,  495 }, { -491,  468 }, { -506,  452 }, { -516,  421 }, { -513,  390 }, { -479,  371 },
+    { -518,  337 }, { -512,  292 }, { -514,  242 }, { -494,  197 }, { -492,  162 }, { -483,  133 },
+    { -484,  114 }, { -492,  104 }, { -504,  102 }, { -526,   88 }, { -539,   61 }, { -533,  -10 },
+    { -528,  -69 }, { -526,  -96 }, { -509, -118 }, { -498, -143 }, { -508, -179 }, { -537, -191 },
+    { -579, -193 }, { -598, -210 }, { -626, -220 }, { -648, -243 }, { -681, -275 }, { -681, -317 },
+    { -691, -350 }, { -683, -385 }, { -677, -416 }, { -665, -456 }, { -640, -472 }, { -624, -489 },
+    { -611, -521 }, { -591, -534 }, { -570, -543 }, { -553, -547 }, { -526, -564 }, { -535, -594 },
+    { -532, -634 }, { -522, -675 }, { -496, -703 }, { -475, -720 }, { -454, -744 }, { -425, -751 },
+    { -397, -769 }, { -356, -771 }, { -329, -762 },
+};
+
+#define CITY_BOUND_NUM ((int)(sizeof(city_bound_xz) / sizeof(city_bound_xz[0])))
+#define CITY_BOUND_INNER_R 490.0f
+
+static int OutsideCityBound(const Vec3 *p)
+{
+    float x = p->X;
+    float z = p->Z;
+
+    if (x * x + z * z < CITY_BOUND_INNER_R * CITY_BOUND_INNER_R)
+        return 0;
+
+    int crossings = 0;
+    for (int i = 0, j = CITY_BOUND_NUM - 1; i < CITY_BOUND_NUM; j = i++)
+    {
+        float xi = city_bound_xz[i][0];
+        float zi = city_bound_xz[i][1];
+        float xj = city_bound_xz[j][0];
+        float zj = city_bound_xz[j][1];
+
+        if ((zi > z) != (zj > z) && x < xi + (z - zi) * (xj - xi) / (zj - zi))
+            crossings++;
+    }
+    return (crossings & 1) == 0;
+}
+
 // A climb into the city's ceiling stops at Y 1040.3, well under the stage's
 // out-of-bounds lid at 1500. The threshold sits below the ceiling so the contact
 // frame is not required, and far above the sky garden at 464 - the highest place
@@ -225,9 +289,7 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     if (st->copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC))
         APCheckDetect_Observe(APCK_MIC_COPY_CHANCE);
 
-    // Negative clearance is the engine's own out-of-bounds definition - what makes
-    // Machine_CheckFallDeath respawn the player.
-    if (calcDistanceFromOOB(&rd->pos) < 0.0f)
+    if (!APCheckDetect_IsSet(APCK_OUT_OF_BOUNDS) && OutsideCityBound(&rd->pos))
         APCheckDetect_Observe(APCK_OUT_OF_BOUNDS);
 
     if (rd->pos.Y >= AP_MAX_ALTITUDE_Y)

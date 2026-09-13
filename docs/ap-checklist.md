@@ -314,7 +314,7 @@ same scope the vanilla City Trial cells use.
 | clear_kind | Objective | Detection |
 |---|---|---|
 | 0 | Visit the flower on top of Castle Hall on foot | `foot_visit_checks[]`: `!Rider_IsOnMachine(rd)` and `rd->pos` within 2 units of the flower, at `(408.7, 370.8, -564.6)`. The flower sits on a very small platform, and the stage's out-of-bounds box spans 2600 units in X and Z, so the sphere is tight. The on-foot requirement stops a machine flying through the spot from counting. |
-| 2 | Go out of bounds | `calcDistanceFromOOB(&rd->pos) < 0` - the engine's own definition, the condition that makes `Machine_CheckFallDeath` respawn the player. |
+| 2 | Go out of bounds | `OutsideCityBound(&rd->pos)`: a crossing-count test of `rd->pos` XZ against `city_bound_xz[]`, the 147-vertex footprint of the city's inner invisible barrier. That barrier stands about 100 units above the terrain it follows, so wings clear it; a second barrier 150 to 250 units further out reaches the ceiling at Y 1040.9 and stops everything. Both are collision ground type 30 and both sit inside `StageNode`'s +/-1300 out-of-bounds box, so `calcDistanceFromOOB` never goes negative in the city and cannot answer this objective. The polygon's last edge spans an 80-unit break in the barrier on the volcano's north slope, and no vertex is nearer the origin than 497, which is what the squared-radius early-out uses to skip the loop for a player anywhere in the city proper. |
 | 3 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
 | 4 | Collect 5 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.checks.allup_collect_total` |
 | 5-12 | Eat 3+ of each of 8 foods | per-run delta of `item_collect[ITKIND_FOOD*]` |
