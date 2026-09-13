@@ -8,9 +8,12 @@ Fruit custom item, or the debug self-test toggle.
 
 ## Game System
 
-Everything the vacuum touches lives in City Trial, so the mod is CT-only (`InCityTrialGameplay`
-requires major `MJRKIND_CITY`, minor `MNRKIND_3D`, and `Gm_GetIntroState() == GMINTRO_END`).
-Air Ride enemies and Top Ride's separate C++ item system are out of scope.
+Everything the vacuum touches lives in City Trial's open city, so the mod is CT-only
+(`InCityTrialGameplay` requires major `MJRKIND_CITY`, minor `MNRKIND_3D`,
+`!CityTrial_IsInStadium()` and `Gm_GetIntroState() == GMINTRO_END`). Stadium events run as
+`MJRKIND_CITY` + `MNRKIND_3D` as well, so the stadium test is what keeps the vacuum out of
+Destruction Derby and the rest - without it the mod arms in every stadium event. Air Ride
+enemies and Top Ride's separate C++ item system are out of scope.
 
 Targets are **claimed** the moment the cone sweeps them and then pulled in every frame
 thereafter - even after they leave the cone or the trigger is released - through one shared
@@ -74,15 +77,22 @@ scale (models are recreated at 1.0 anyway), drops all claims (`Hypernova_VacuumR
 forgets the debug-cone GObj.
 
 When one player's Hypernova ends, `Hypernova_VacuumFinishClaimedPlayer` breaks that player's
-in-flight props (restoring collision on any that will not break), releases their item claims
-back to vanilla physics, and drops their machine claims. Other players' claims stay in flight.
+in-flight props (sending home any that will not break), releases their item claims back to
+vanilla physics, and drops their machine claims. Other players' claims stay in flight. Ending
+also closes a running suck: `StopPlayer` calls `Rider_EndInhale` when the player is mid-LOOP,
+because the per-player loop stops visiting an inactive slot and nothing else would ever end it.
 
 ### Menu
 
-Six options under "Hypernova" (`main.c`): **Enabled** (default on), **Duration**
-(Short/Medium/Long, default Medium), **Suck Yakumono** (default on), **Suck Machines** (default
-on), **D Pad self test** (hold D-Pad Up in CT to activate every human; default off), and
-**Debug Cone** (default off).
+Six options under "Hypernova" (`main.c`), each with an `on_change` that logs the new value:
+**Enabled** (default on), **Duration** (Short/Medium/Long, default Medium), **Suck Props**
+(default on), **Suck Machines** (default on), **D Pad self test** (press D-Pad Up on port 1 in
+CT to give every human Hypernova; default off), and **Debug Cone** (default off). The two
+debug options are `no_save`, so they never reach the memory-card block.
+
+Turning **Enabled** off calls `Hypernova_Deactivate`. Without that, `Hypernova_OnFrameEnd`'s
+early-out would strand any live player with a 2x model, a pinned ColAnim priority suppressing
+their hurt flashes, and frozen claims until the next scene change.
 
 ### Copy Abilities and Power-Ups End Hypernova
 
@@ -195,6 +205,12 @@ Collection is left to the engine: the item is pulled all the way into the rider/
 **vanilla pickup trigger** fires naturally, giving proper credit, pickup SFX, and effects. A raw
 `GObj_Destroy` would vacuum the item away **without** crediting it.
 
+The `is_airborne = -1` freeze has to be undone or it is permanent - `Item_GenericEnvColl` skips
+the raycast at `-1` and nothing in the engine writes the field back. Every path that drops a
+still-live item claim (Hypernova ending, the owner's rider GObj going away) therefore calls
+`Item_SetAirborne` (`0x80254cd8`), so the item falls and lands instead of hanging in mid-air
+wherever it was released.
+
 ### Yakumono: claim -> pull/shrink -> break
 
 CT breakables are **multi-instance**: one `YakumonoData` GObj manages N placed props, and the
@@ -254,18 +270,31 @@ world matrix) if it is not already claimed and still fully collidable
 player cannot run into a swept-up prop mid-flight. The claim cap is `HYPERNOVA_MAX_CLAIMS`
 (200), sized above CT's ~130 breakables so a wide cone cannot starve later props of a slot.
 
+The cone test runs **first**, before the claimed-set lookup and the collidable check. This scan
+is per inhaling player per frame over the whole scene-instance record pool, and of the three
+tests the cone is the only cheap one: the other two walk the claim array and the record's entire
+triangle slice.
+
 **Per-frame advance.** `Hypernova_PullInstance`:
 
 - Re-retires the prop's collision every frame of the flight.
 - Sets `JOBJ_USER_DEFINED_MTX` and pulls the world-matrix translation with the shared step.
 - **Shrinks** the world-matrix 3x3 by `HYPERNOVA_YAKU_SHRINK` (0.70) per frame **only once
-  within `HYPERNOVA_YAKU_SHRINK_RADIUS`** (22.0). The record's cached load-time `world` matrix
-  keeps the original scale as a sqrt-free reference (squared row-0 magnitude).
+  within `HYPERNOVA_YAKU_SHRINK_RADIUS`** (22.0). Only the *translation* of `GrCollRecord.world`
+  is ever overwritten, so its 3x3 still holds the rotation and scale from the last bake and
+  serves as a sqrt-free reference (squared row-0 magnitude).
 - **Breaks** when the prop arrives (within `HYPERNOVA_YAKU_BREAK_RADIUS`, 8.0) **or** has shrunk
   past `HYPERNOVA_YAKU_BREAK_SCALE` (0.20) of its original size.
 
-`HYPERNOVA_YAKU_CLAIM_TTL` (300 frames) force-releases any claim that never breaks, re-arming
-its collision rather than gluing the prop to the rider.
+**Releasing without breaking.** A claim can end with the prop still intact - the owner's rider
+GObj goes away, `HYPERNOVA_YAKU_CLAIM_TTL` (300 frames) expires, the record turns out to have no
+JObj, or `Hypernova_BreakInstanceNative` declines (the multi-stage forest pitfall advances one
+crack-stage per call, so the first attempt usually does). The prop's collision triangles are
+baked in the global array and never moved, so a prop left where it was dragged reads as a ghost
+model standing next to an invisible wall at its baked spot. `Hypernova_ReleaseInstance` therefore
+puts it back: each claim records the world translation and the JObj flags it had when claimed,
+and the release restores the 3x3 from `record->world`, re-seats both translations, clears
+`JOBJ_USER_DEFINED_MTX` if the mod was the one that set it, and re-arms the collision.
 
 **The synthesized break.** `Hypernova_BreakInstanceNative` re-arms the collision
 (`grScene_SetInstanceColl(record, 1)`, so the family tail's "still collidable?" guard passes)
@@ -367,13 +396,15 @@ Machines are not shrunk - a full-size machine erupting on a 2x Kirby reads bette
 break radius (`HYPERNOVA_MACHINE_BREAK_RADIUS`, 45.0) is wider than the yakumono one so the
 machine detonates before its model clips into the rider.
 
-**KO.** On arrival, `Hypernova_KOMachine` arms the break gate (`MachineData[0x78] |= 0x40`) and
-calls **`Machine_OnKO`** (`0x801e568c`). That captures the rider ply into `+0x1b48` (sentinel
-**5** when unridden), sets `is_dead`, disables the machine's hit-collision, and enters the
-**BreakDown** state (29); the BreakDown proc (`Machine_KOExplode` `0x801e5838`) runs the
-explosion VFX (`Effect_SpawnSync` 0x2799 + a debris effect), plays the break SFX, and
-`GObj_Destroy`s the machine. That tail is gated on `+0x78` bit 0x40, which is why Hypernova ORs
-it in first. The whole destroy tail is **rider-safe**: every rider dereference guards on the
+**KO.** On arrival, `Hypernova_KOMachine` arms the break gate and calls **`Machine_OnKO`**
+(`0x801e568c`). That captures the rider ply into `+0x1b48` (sentinel **5** when unridden), sets
+`is_dead`, disables the machine's hit-collision, and enters the **BreakDown** state (29). The
+BreakDown state callback (`0x801f0234` for stars, `0x801fb3d0` for wheels) is what runs
+`Machine_KOExplode` (`0x801e5838`) - explosion VFX (`Effect_SpawnSync` 0x2799 + a debris
+effect), break SFX, then `GObj_Destroy` - and it is gated on a **byte** load of `MachineData.x78`,
+bit `0x40`. `Machine_OnKO` itself neither reads nor sets that bit, so a forced break has to OR it
+in first or the machine enters BreakDown and then sits there dead but undestroyed.
+The whole destroy tail is **rider-safe**: every rider dereference guards on the
 `+0x1b48 == 5` sentinel, so an unridden machine spawns the VFX and frees cleanly with no rider
 eject and no out-of-range player index. The claim is dropped the instant `Machine_OnKO` is
 called - the machine tears itself down from there.
@@ -515,53 +546,54 @@ blending.
 
 ### The ColAnim color overlay
 
-Kirby has a **second** color system: the **ColAnim** overlay (the candy/invincibility flash).
-It is a per-rider color the renderer blends over the textured model through a TEV color stage,
-so it tints whatever texture is showing, with arbitrary RGBA. Each rider has three overlay slots
-(`RiderData+0x5c` body, `+0x108` glow, `+0x1b4`); a per-frame selector (`ColAnim_Resolve`,
-`0x8006ae7c`) picks the highest-priority active slot (`ColAnim_GetActiveSlot`, `0x8006ad20`),
-copies its color into the slot's render-context, and a TEV-setup renderer (`ColAnim_SetupTev`,
-`0x8006aaa4`) applies it.
+Kirby has a **second** color system: the **ColAnim** overlay - the tint behind the invincibility
+and intangibility flashes. It is a per-rider color the renderer blends over the textured model
+through a TEV color stage, so it tints whatever texture is showing, with arbitrary RGBA.
 
-The fields the mod drives inside the body slot (all named as `HYPERNOVA_COLANIM_*` in
-`hypernova.h`) are: the anim-data pointer at `+0x08` (NULL it to freeze the per-frame tick), the
-current anim index at `+0x28` (0 = inactive), the packed RGBA the selector copies out at `+0x2c`,
-the live float RGBA at `+0x30`, the priority byte at `+0xa9`, the state-flag byte at `+0xaa`
-(bit `0x80` = color-override active), the render-context RGBA at `+0x224`, the ratio/blend enable
-at `+0x234` and the draw-flag byte at `+0x235`.
+`RiderData.col_anim` is a `ColAnimState`: three `0xac`-byte `ColAnimSlot`s back to back (body at
+`RiderData+0x5c`, glow at `+0x108`, a third at `+0x1b4`) followed by the render state they all
+resolve into. Every frame `ColAnim_Resolve` (`0x8006ae7c`) picks the active slot of highest
+priority, copies its `color`, light and `ratio` down into that render state, and `ColAnim_SetupTev`
+(`0x8006aaa4`) uploads the resolved `color` to a free TEV color register. `Rider_ApplyColAnim`
+(`0x8019bfb4`) always targets `slot[0]`, so the body slot is the one every game request lands in.
 
-Every frame the selector re-clears the render draw-flag and only re-sets it (and re-copies
-`+0x2c` into `+0x224`) when `+0xaa` bit `0x80` is set. The candy tick is what normally sets that
-bit, so with the tick frozen the mod must hold it itself or the overlay stops drawing after one
-frame.
+The slot fields that matter here are `cmd_data` (NULL it to freeze the per-frame tick),
+`anim_index` (0 = slot inactive), `color` and its float mirror `color_f`, `pri`, and `flags`
+(bit `0x80`, `COLANIM_FLAG_TINT` = tint override live). The render state carries its own `color`,
+`ratio` and `flags`.
 
-The built-in candy flash (ColAnim index 3) is a green pulse (RGBA approx `128,255,128` at low
-alpha) and it **loops**: its per-frame tick keeps re-stamping the green into the slot color and
-maintaining the override bit for as long as the slot is active. Left running it would re-stamp
-its green over any color written to the slot and produce a blink.
+Each frame the resolver clears the render state's tint flag and only re-sets it - re-copying the
+winning slot's `color` - when that slot's `flags` still has `COLANIM_FLAG_TINT`. A running anim
+tick is what normally holds the bit, so with the tick frozen the mod must hold it itself or the
+overlay stops drawing after one frame.
+
+The built-in invincibility flash is ColAnim index 3 (`Rider_GiveInvincibility`, `0x80195f28` - what
+the candy item calls); intangibility is index 2 (`Rider_GiveIntangibility`, `0x80195f68`). Index 3
+is a green pulse (RGBA approx `128,255,128` at low alpha) and it **loops**: its tick keeps
+re-stamping the green into the slot color for as long as the slot is active, so left running it
+would overwrite any color the mod writes and produce a blink.
 
 ### Driven HSV rainbow
 
-`DriveRainbow` applies the candy ColAnim **once** - purely to set the overlay slot up, first
-flooring `+0xa9` because `ColAnim_Apply` (`0x8006a3f0`) is priority-gated and would otherwise
-reject the request - then NULLs the anim-data pointer to freeze the candy tick and owns every
-color field itself each frame. Per frame it pins `+0xa9` to `0xff`, holds `+0xaa` bit `0x80`,
-converts the shared hue to full-saturation RGB, and writes the packed value into both `+0x224`
-(what renders this frame) and `+0x2c` (what the selector copies out on following frames), plus
-the float mirror at `+0x30`, then forces the color-override render path (`+0x235` bit `0x80`)
-with the ratio path off (`+0x234` = `0xff`).
+`DriveRainbow` applies ColAnim index 3 **once** - purely to set the body slot up, first flooring
+`pri` because `ColAnim_Apply` (`0x8006a3f0`) is priority-gated and would otherwise reject the
+request - then NULLs `cmd_data` to freeze the tick and owns every color field itself each frame.
+Per frame it pins `pri` to `0xff`, holds `COLANIM_FLAG_TINT` on the slot, converts the shared hue
+to full-saturation RGB, and writes it into both the render state's `color` (what renders this
+frame) and the slot's `color` (what the resolver copies out on following frames), plus the float
+mirror `color_f`; then it sets `COLANIM_FLAG_TINT` on the render state and disables the ratio
+blend (`ratio = 0xff`).
 
-With the tick frozen and `+0xaa` bit `0x80` held, the selector copies the mod's color into the
-render-context every frame - a continuous rainbow, no flash, no gameplay invincibility.
+With the tick frozen and the slot's tint flag held, the resolver copies the mod's color into the
+render state every frame - a continuous rainbow, no flash, no gameplay invincibility.
 `HYPERNOVA_RAINBOW_ALPHA` (100) sets tint strength; `HYPERNOVA_RAINBOW_PERIOD` (120) sets frames
 per full hue wheel. The hue itself is a single module-level phase shared by every rider.
 
 **Surviving item-pickup flashes.** A pickup flash can wipe the rainbow two ways: it either
-out-prioritizes the body state in the selector, or (same body state) the priority-gated
-`ColAnim_Apply` lets a higher-priority flash overwrite it. Pinning the priority byte to `0xff`
-every frame prevents both. The pin is undone when Hypernova ends (`StopRainbowPlayer` calls
-`ColAnim_Reset` `0x8006a250` on the body slot, which zeroes the priority), so normal
-hurt/invincibility flashes resume.
+out-prioritizes the body slot in the resolver, or (same slot) the priority-gated `ColAnim_Apply`
+lets a higher-priority flash overwrite it. Pinning `pri` to `0xff` every frame prevents both. The
+pin is undone when Hypernova ends (`StopRainbowPlayer` calls `ColAnim_Reset` `0x8006a250` on the
+body slot, which zeroes the priority), so the normal flashes resume.
 
 ## The Inhale Whirlwind
 
@@ -589,8 +621,7 @@ each frame:
 same hue. The model root is `GObj+0x28`.
 
 **Lifetime is left to the engine.** `Effect.life` is not a plain despawn countdown - it drives
-the effect's animation looping, so writing it freezes the whirlwind. The mod only recolors. If a
-sustained suck ever outlives the native whirlwind, spawn a fresh one rather than pinning `life`.
+the effect's animation looping, so writing it freezes the whirlwind. The mod only recolors.
 
 **How the recolor works.** The color is not in the material color registers - writing the
 `HSD_Material` ambient/diffuse/specular has no visible effect. The rendered color comes from a
@@ -608,18 +639,18 @@ recurses the whole JObj tree (child + sibling) since the sub-parts are separate 
 its own MObj and `tev`. It never writes into the `HSD_TExp` node tree itself - the node's list
 link and its color *pointer* are live, and clobbering either crashes the walk.
 
-The in-place recolor gives color but no scale/shape control. If Hypernova ever needs a
-differently-sized or differently-shaped swirl, the path is to spawn its own effect at the mouth
-bone each frame - reusing `HueToRgb`/`stc_hue` and a small custom JObj model - which owns its
-handle and gives full color **and** scale control.
+The in-place recolor gives color but no scale or shape control over the swirl.
 
 ## Debug Cone Visualizer
 
 A debug-only overlay (`hypernova_debug.c`, "Debug Cone" menu toggle, off by default) draws a
 lightly opaque red cone in world space showing the suction region's reach and angle against the
-real items and props in front of the rider. It is decoupled from the power-up: whenever the
-toggle is on and a human rider has a usable forward vector (the same `>= 0.01` guard the vacuum
-uses), the cone is drawn - Hypernova does not need to be active.
+real items and props in front of the rider. It is decoupled from the power-up: in City Trial
+gameplay, whenever the toggle is on and a human rider has a usable forward vector (the same
+`>= 0.01` guard the vacuum uses), the cone is drawn - neither an active Hypernova nor even the
+**Enabled** option is required. `Hypernova_DebugConeEnsure` runs ahead of both the
+`hypernova_enabled` and the pause early-outs in `Hypernova_OnFrameEnd` for exactly that reason,
+which is also why the cone keeps rendering while the game is paused.
 
 **Same inputs as the suction**, so what you see is what gets vacuumed: apex = `RiderData.pos`,
 axis = normalized `RiderData.forward`, reach = `HYPERNOVA_RANGE`, half-angle from

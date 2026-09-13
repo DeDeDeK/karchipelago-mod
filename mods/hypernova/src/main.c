@@ -15,6 +15,7 @@
 
 static const CustomItemsAPI *stc_ci_api;
 static u32 stc_item_hash;
+static int stc_bind_warned;
 
 // Grants Hypernova to the player who collected the Miracle Fruit, and to nobody else.
 static void OnCustomItemPickup(u32 id_hash, const char *name, int player)
@@ -33,18 +34,26 @@ static void TryBind(void)
     if (stc_ci_api == NULL)
         stc_ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
-    if (stc_ci_api == NULL)
-        return;
 
-    for (int i = 0; i < stc_ci_api->GetCount(); i++)
+    if (stc_ci_api != NULL)
     {
-        const char *n = stc_ci_api->GetName(i);
-        if (n == NULL || strcmp(n, HYPERNOVA_TRIGGER_ITEM_NAME) != 0)
-            continue;
-        stc_item_hash = stc_ci_api->GetIdHash(i);
-        stc_ci_api->AddPickupHandler(OnCustomItemPickup);
-        OSReport("[Hypernova] Bound %s\n", HYPERNOVA_TRIGGER_ITEM_NAME);
-        return;
+        for (int i = 0; i < stc_ci_api->GetCount(); i++)
+        {
+            const char *n = stc_ci_api->GetName(i);
+            if (n == NULL || strcmp(n, HYPERNOVA_TRIGGER_ITEM_NAME) != 0)
+                continue;
+            stc_item_hash = stc_ci_api->GetIdHash(i);
+            stc_ci_api->AddPickupHandler(OnCustomItemPickup);
+            OSReport("[Hypernova] Bound %s\n", HYPERNOVA_TRIGGER_ITEM_NAME);
+            return;
+        }
+    }
+
+    // Latched: without custom_items or the archive, only the API and self-test grant Hypernova.
+    if (!stc_bind_warned)
+    {
+        stc_bind_warned = 1;
+        OSReport("[Hypernova] %s unavailable\n", HYPERNOVA_TRIGGER_ITEM_NAME);
     }
 }
 
@@ -55,9 +64,9 @@ static char *stc_toggle_names[] = {
 };
 
 static char *stc_duration_names[] = {
-    "Short",   // 300 frames (~5s)
-    "Medium",  // 600 frames (~10s)
-    "Long",    // 1200 frames (~20s)
+    "Short",
+    "Medium",
+    "Long",
 };
 
 static void OnSceneChange(void)
@@ -66,32 +75,28 @@ static void OnSceneChange(void)
     TryBind();
 }
 
-// custom_items assigns kinds at CityItemSpawn_Init, after this, and skips a
-// disabled item - so a fruit held out here is never handed an ItemKind and no
-// path can spawn it. The title screen's attract demo is a City Trial round in
-// every respect, and a fruit in it is a fruit no player can use.
+// custom_items assigns kinds at CityItemSpawn_Init, after this, and skips a disabled item.
 static void On3DLoadStart(void)
 {
-    TryBind();
-    if (stc_item_hash != 0)
+    if (stc_ci_api != NULL && stc_item_hash != 0)
         stc_ci_api->SetEnabled(stc_item_hash,
                                hypernova_enabled && !Gm_IsAutoDemo() && Gm_IsInCity());
 }
 
+// Turning it off mid-round would otherwise strand live players: OnFrameEnd stops running, so
+// their scale, rainbow priority pin and claims would all freeze until the next scene.
 static void OnChangeEnabled(int val)
 {
-    OSReport("[Hypernova] Hypernova %s\n", val ? "enabled" : "disabled");
+    if (!val)
+        Hypernova_Deactivate();
+    OSReport("[Hypernova] %s\n", val ? "Enabled" : "Disabled");
 }
 
-static void OnChangeSelfTest(int val)
-{
-    OSReport("[Hypernova] Self-test trigger %s\n", val ? "enabled" : "disabled");
-}
-
-static void OnChangeDebugCone(int val)
-{
-    OSReport("[Hypernova] Debug cone overlay %s\n", val ? "enabled" : "disabled");
-}
+static void OnChangeDuration(int val) { OSReport("[Hypernova] Duration %s\n", stc_duration_names[val]); }
+static void OnChangeSuckProps(int val) { OSReport("[Hypernova] Suck props %s\n", val ? "enabled" : "disabled"); }
+static void OnChangeSuckMachines(int val) { OSReport("[Hypernova] Suck machines %s\n", val ? "enabled" : "disabled"); }
+static void OnChangeSelfTest(int val) { OSReport("[Hypernova] Self-test trigger %s\n", val ? "enabled" : "disabled"); }
+static void OnChangeDebugCone(int val) { OSReport("[Hypernova] Debug cone overlay %s\n", val ? "enabled" : "disabled"); }
 
 static MenuDesc top_menu = {
     .option_num = 6,
@@ -112,14 +117,16 @@ static MenuDesc top_menu = {
             .val = &hypernova_duration_sel,
             .value_num = HYPERNOVA_DURATION_NUM,
             .value_names = stc_duration_names,
+            .on_change = OnChangeDuration,
         },
         &(OptionDesc){
-            .name = "Suck Yakumono",
-            .description = "Also vacuum yakumonos",
+            .name = "Suck Props",
+            .description = "Also vacuum breakable props (they shatter on arrival)",
             .kind = OPTKIND_VALUE,
             .val = &hypernova_suck_yaku,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .on_change = OnChangeSuckProps,
         },
         &(OptionDesc){
             .name = "Suck Machines",
@@ -128,23 +135,26 @@ static MenuDesc top_menu = {
             .val = &hypernova_suck_machines,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .on_change = OnChangeSuckMachines,
         },
         &(OptionDesc){
             .name = "D Pad self test",
-            .description = "Hold D-Pad Up to trigger Hypernova",
+            .description = "Press D-Pad Up on port 1 to give every human Hypernova",
             .kind = OPTKIND_VALUE,
             .val = &hypernova_selftest,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .no_save = 1,
             .on_change = OnChangeSelfTest,
         },
         &(OptionDesc){
             .name = "Debug Cone",
-            .description = "Draw the suction cone",
+            .description = "Draw the suction cone, with or without Hypernova active",
             .kind = OPTKIND_VALUE,
             .val = &hypernova_debug_cone,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .no_save = 1,
             .on_change = OnChangeDebugCone,
         },
     },
@@ -158,7 +168,7 @@ OptionDesc ModSettings = {
 };
 
 ModDesc mod_desc = {
-    .name = "hypernova",
+    .name = HYPERNOVA_MOD_NAME,
     .author = "DeDeDK",
     .version.major = HYPERNOVA_API_MAJOR,
     .version.minor = HYPERNOVA_API_MINOR,

@@ -36,13 +36,12 @@
 // Frames a claim may live before it is force-released (collision re-armed).
 #define HYPERNOVA_YAKU_CLAIM_TTL    300
 
-// Machines are KO'd on arrival; wider break radius than yakumono - machines are large.
+// Machines are KO'd on arrival; wider than the yakumono radius so the model does not clip in.
 #define HYPERNOVA_MACHINE_BREAK_RADIUS 45.0f
 
-// MachineData offsets. accel/velocity are integrated into pos each frame (zeroed so the pos
-// override sticks); the KO-gate bit enables the BreakDown explosion + GObj_Destroy in Machine_OnKO.
-#define HYPERNOVA_MACHINE_ACCEL_OFF    0x318
-#define HYPERNOVA_MACHINE_KO_GATE_OFF  0x78
+// The BreakDown state callback (Star 0x801f0234, Wheel 0x801fb3d0) runs Machine_KOExplode -
+// explosion, break SFX, GObj_Destroy - only if MachineData.x78 bit 0x40 is set. Machine_OnKO
+// enters BreakDown but never sets the bit, so a forced break has to.
 #define HYPERNOVA_MACHINE_KO_GATE_BIT  0x40
 
 // B, not A: A is the boost/charge button in Air Ride.
@@ -53,24 +52,14 @@
 #define HYPERNOVA_INHALE_LOOP       0x30
 #define HYPERNOVA_INHALE_END        0x31
 
-// Value RiderData.inhale_timer is topped up to each frame to keep the suck alive; must be >= 2.
-// It aliases copy_wheel_result, so the suck is ended explicitly via Rider_EndInhale rather than
-// by letting this lapse.
+// RiderData.inhale_timer is topped up to this each frame to keep the suck alive. Must be >= 2,
+// one decrement landing before the next write. It aliases copy_wheel_result, so other systems
+// can write it - the suck is ended explicitly rather than by letting this lapse.
 #define HYPERNOVA_INHALE_TIMER_HOLD 8
 
-// Rainbow body overlay: candy ColAnim 3 driven through the ColAnim slot at RiderData+0x5c.
-#define HYPERNOVA_OVERLAY_COLANIM    3
-#define HYPERNOVA_COLANIM_BODY_OFF   0x5c
-#define HYPERNOVA_COLANIM_DATA_OFF   0x08   // anim-data pointer; null to freeze the tick
-#define HYPERNOVA_COLANIM_INDEX_W    10     // word index of the current anim index
-#define HYPERNOVA_COLANIM_COL2C_OFF  0x2c   // packed RGBA the selector reads
-#define HYPERNOVA_COLANIM_COLOR_OFF  0x30   // RGBA floats (0..255)
-#define HYPERNOVA_COLANIM_PRI_OFF    0xa9   // priority byte; pin to PRI_MAX to win the selector
-#define HYPERNOVA_COLANIM_PRI_MAX    0xff
-#define HYPERNOVA_COLANIM_STFLAG_OFF 0xaa   // state flags (bit 0x80 = color-override active)
-#define HYPERNOVA_COLANIM_RENDER_OFF 0x224  // packed RGBA bytes the renderer reads
-#define HYPERNOVA_COLANIM_FLAGA_OFF  0x234  // ratio enable (0xff = off)
-#define HYPERNOVA_COLANIM_FLAGB_OFF  0x235  // draw flags (bit 0x80 = color override)
+// The invincibility flash. Hypernova takes this slot over rather than adding one, so the
+// rainbow inherits its priority ceiling over every other rider overlay.
+#define HYPERNOVA_RAINBOW_COLANIM    3
 
 #define HYPERNOVA_RAINBOW_ALPHA      100    // overlay strength (0..255)
 #define HYPERNOVA_RAINBOW_PERIOD     120    // frames per full hue cycle
@@ -88,25 +77,25 @@
 #define HYPERNOVA_BREAK_FORCE_RADIUS 1.0e9f
 #define HYPERNOVA_BREAK_FORCE_DELTA  100.0f
 
-#define HYPERNOVA_DEBUG_CONE_RGBA   RGBA(255, 0, 0, 64) // lightly opaque red
+#define HYPERNOVA_DEBUG_CONE_RGBA   RGBA(255, 0, 0, 64)
 #define HYPERNOVA_DEBUG_CONE_SEGS   24                  // base-circle subdivisions (15deg steps)
 
 // GX link 0 is the world camera's 3D-scene link, so the cone is occluded by world geometry.
-// class/p_link are arbitrary (the GObj is never enumerated).
+// The p_link is past GAMEPLINK_CARDCAM (28) and clear of custom_weather's 25-34, so no other
+// bucket walker sees this GObj.
 #define HYPERNOVA_DEBUG_GOBJ_CLASS  200
-#define HYPERNOVA_DEBUG_GOBJ_PLINK  25
+#define HYPERNOVA_DEBUG_GOBJ_PLINK  35
 #define HYPERNOVA_DEBUG_GX_LINK     0
 #define HYPERNOVA_DEBUG_GX_PRI      0
 
 #define HYPERNOVA_DURATION_NUM 3
 extern const int hypernova_duration_table[HYPERNOVA_DURATION_NUM];
 
-// Menu-backed settings
 extern int hypernova_enabled;
 extern int hypernova_duration_sel;  // index into hypernova_duration_table
 extern int hypernova_suck_yaku;
 extern int hypernova_suck_machines; // also vacuum unridden machines (KO'd on arrival)
-extern int hypernova_selftest;      // hold D-Pad Up in CT
+extern int hypernova_selftest;      // press D-Pad Up on port 1 in CT
 extern int hypernova_debug_cone;
 
 void Hypernova_OnBoot(void);
@@ -119,7 +108,7 @@ void Hypernova_Deactivate(void);
 int  Hypernova_IsActive(void);
 int  Hypernova_FramesRemaining(void);
 
-// Claim every in-cone item and breakable prop for this rider; moves nothing.
+// Claim every in-cone target for this rider; moves nothing.
 void Hypernova_VacuumPlayer(int player, RiderData *rd);
 
 // Pull every claimed item one frame toward its owner (the vanilla pickup trigger collects it).
