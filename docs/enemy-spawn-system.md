@@ -198,7 +198,6 @@ Four globals hold the manager state, all r13-relative:
 | 0x805DD70C | +0x62C | `stc_spawn_slots` | Array of 4 SpawnSlot structs |
 | 0x805DD710 | +0x630 | `stc_enemy_spawn_data` | Per-stage spawn config (`EnemySpawnData`) |
 | 0x805DD714 | +0x634 | `stc_enemy_mgr` | EnemyMgr struct |
-| 0x805DE334 | +0x1254 | `stc_event_actor_list` | Global EventActor linked-list root |
 
 ### EnemyMgr (0x3C bytes)
 
@@ -214,7 +213,7 @@ Four globals hold the manager state, all r13-relative:
 | +0x18 | u16 | (reserved) | Zeroed at init, never read or written again |
 | +0x1A | s16 | slots_initialized | Count of initialized spawn slots |
 | +0x1C | s16 | last_spawn_slot | Last slot index used |
-| +0x20 | u32[3] | ct_time | `City_GetMinSecMs` output |
+| +0x20 | u32[3] | ct_time | `Gm_GetRemainingFrames` output |
 | +0x2C | u32 | ct_duration_base | Base time in 60ths |
 | +0x30 | u32 | ct_duration | Total match duration in 60ths |
 | +0x34 | float | time_progress | current/total (0.0-1.0), drives CT difficulty scaling |
@@ -522,9 +521,8 @@ ed->path_active_flag = -1.0f; // +0xA8C, enables path following
 EnemyPath_Init(ed);
 ```
 
-`mods/custom_events/src/spawn_enemy.c` installs a `splArcLengthPoint` null-safety patch from
-`SpawnEnemy_OnBoot` for actors whose init callbacks reach for splines before path setup;
-nothing calls that boot function today, so the patch is not live.
+`splArcLengthPoint` (0x80415958) dereferences the spline unconditionally, so a standalone actor
+whose init callbacks walk a path before this setup faults.
 
 ## Key Functions
 
@@ -590,4 +588,4 @@ nothing calls that boot function today, so the patch is not live.
 | SpawnSlot array | 0x805DD70C | +0x62C | Four SpawnSlot structs (0x48 each) |
 | Enemy spawn data | 0x805DD710 | +0x630 | Per-stage spawn config pointer |
 | Init flag | 0x805DD708 | +0x628 | 1 during init, 0 when done |
-| EventActor list | 0x805DE334 | +0x1254 | Global EventActor linked-list root |
+| GObj p_link lists | 0x805DE334 | +0x1254 | `stc_gobj_lookup`, the GObj list head per p_link; live enemies are `(*stc_gobj_lookup)[GAMEPLINK_ENEMY]` |

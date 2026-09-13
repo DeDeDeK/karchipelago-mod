@@ -135,30 +135,22 @@ sets all three:
 
 ## Standalone spawn
 
-`mods/custom_events/src/spawn_enemy.c` drops a meteor on every human player:
-`SpawnEnemy_MeteorTrap` loops the player slots and calls `SpawnMeteorOnPlayer`. Nothing
-invokes it - `SpawnEnemy_MeteorTrap`, `SpawnEnemy_Random` and `SpawnEnemy_OnBoot` are
-scaffolding, so the trap and its two global patches are not live.
-
-Constants: `METEOR_FALL_SPEED` 8.0, `METEOR_DROP_HEIGHT` 400.0, `METEOR_SCALE` 2.0,
-`METEOR_LANDING_FRAMES` 210.
-
-The spawn position is 400 units above the rider, with XZ lead-targeted by
-`rider.self_vel * (DROP_HEIGHT / FALL_SPEED)` so the meteor lands on a moving player. The
-descriptor uses `spawn_index = -1`, `spawn_slot = -1`, `bounds_flag = -1.0` - the standalone
-sentinels that keep it out of the spawn-slot pool.
+A meteor can be dropped outside the event - above a player, say - by standing in for the event
+globals just long enough for its init to read them. The descriptor uses `spawn_index = -1`,
+`spawn_slot = -1`, `bounds_flag = -1.0`, the standalone sentinels that keep it out of the
+spawn-slot pool. To land on a moving target, lead the XZ position by the rider's velocity times
+the fall time (drop height / fall speed).
 
 The sequence around `EventActor_Create` is what matters:
 
 1. Save the real `stc_meteor_data` / `stc_meteor_event_data`.
 2. Write `*stc_meteor_data = 1` and point `*stc_meteor_event_data` at a fake event-data
-   struct (zone speed 8.0, all angles 0) laid out to match the two tables `Meteor_BehaviorInit`
-   indexes.
+   struct (the fall speed as zone speed, all angles 0) laid out to match the two tables
+   `Meteor_BehaviorInit` indexes.
 3. `EventActor_Create` -> post-init callback -> state 14.
-4. Call `Meteor_BehaviorInit(ed)` inline -> state 15, `vel.Y = -8.0`.
+4. Call `Meteor_BehaviorInit(ed)` inline -> state 15, `vel.Y = -zone_speed`.
 5. Restore the real globals immediately.
 6. Clear all three visibility flags (see above).
-7. Attach `MeteorDespawnProc` at priority 0x14.
 
 **Why BehaviorInit is called by hand.** State 14's func1 would call it anyway, but not until
 the priority-1 proc runs on the *next* frame - by which time the real globals are back. The
@@ -170,21 +162,9 @@ active event they point at live data, and `*stc_meteor_data = 1` is not a pointe
 meteor code dereferenced it on the same frame it would crash. Restoring them before returning
 keeps the window to a single straight-line stretch of code with no engine calls in between.
 
-**MeteorDespawnProc** ticks `ed->lifetime_counter` every frame, records the frame the meteor
-first reaches state 16 in `ed->spawn_index`, and after `METEOR_LANDING_FRAMES` runs the same
-cleanup the vanilla state-17 func3 does and destroys the actor. It is a backstop rather than a
-requirement: the vanilla chain (state 15 hit -> 16 -> `Meteor_Landing` -> 17 -> VFX complete ->
-`EventActor_Destroy`) already destroys the meteor on this path, and whichever fires first
-takes the GOBJ and its procs with it.
-
-### Global patches
-
-`SpawnEnemy_OnBoot` replaces two engine functions that assume the spawn-slot/event context:
-
-- `EventActor_GetParentAnimRate` (0x802049b8) -> a null-checked version; standalone spawns have
-  no parent GOBJ and the vanilla one dereferences it unconditionally.
-- `splArcLengthPoint` (0x80415958) -> a null-checked version; standalone spawns have no
-  spline assigned.
+**No despawn proc is needed.** The vanilla chain (state 15 hit -> 16 -> `Meteor_Landing` -> 17
+-> VFX complete -> `EventActor_Destroy`) destroys a standalone meteor the same way it destroys an
+event one.
 
 ## Key addresses
 

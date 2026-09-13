@@ -27,7 +27,7 @@ static int Event_Do(EventKind kind)
     if (ev_chk->data->event->param->arr[kind].is_siren)
     {
         Gm_FadeOutMusic(ev_chk->data->event->music_fadeout_frames);
-        SFX_Play(0x130002); // event siren
+        SFX_PlayFullVolume(EVENT_SIREN_SFX);
 
         int sky_preset = ev_chk->data->bgm_sky[kind].sky_preset;
         if (sky_preset != -1)

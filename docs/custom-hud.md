@@ -334,14 +334,14 @@ Other models worth reusing: `ScInfPlynum_scene_models` (player label), `ScInfPli
 
 ### Dedicated Camera
 
-Rather than sharing a game HUD link, a custom element can own an ortho camera on an unused GX link, which makes rendering independent of the game's camera management. The COBJDesc at 0x805096a0 is a vanilla ortho camera descriptor.
+Rather than sharing a game HUD link, a custom element can own an ortho camera on an unused GX link, which makes rendering independent of the game's camera management. `stc_text_cobjdesc` (0x805096a0, `text.h`) is the vanilla ortho camera descriptor `Text_CreateCanvas` loads.
 
 ```c
 #define CUSTOM_GX_LINK 23
 
 GOBJ *cam = GOBJ_EZCreator(0, 0, 0,
                            0, 0,
-                           HSD_OBJKIND_COBJ, (COBJDesc *)0x805096a0,
+                           HSD_OBJKIND_COBJ, stc_text_cobjdesc,
                            0, 0,
                            CObjThink_Common, 0, 5);
 cam->cobj_links = (1ULL << CUSTOM_GX_LINK);

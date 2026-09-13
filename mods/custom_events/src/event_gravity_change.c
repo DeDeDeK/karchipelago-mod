@@ -1,68 +1,38 @@
 #include "game.h"
 #include "os.h"
+#include "hsd.h"
 #include "stage.h"
 
 #include "event_gravity_change.h"
 
-// Applied to the stage's base strength (City Trial = 0.025); one is picked at
-// random each trigger.
-#define GRAVITY_MULT_LOW   0.5f
-#define GRAVITY_MULT_HIGH  2.0f
+// Multipliers on the stage's base strength (City Trial = 0.025), one picked per trigger.
+#define GRAVITY_MULT_LOW  0.5f
+#define GRAVITY_MULT_HIGH 2.0f
 
+// The scaled StageNode field while the event runs, NULL otherwise. Nothing in the
+// game writes it at runtime, so a single write holds for the whole event.
+static float *scaled_strength;
 static float original_strength;
-static float active_mult;
-static int gravity_modified;
 
-static float *GetStageGravityStrength(void)
+void GravityChange_Start(void)
 {
-    GrObj *grobj = *stc_grobj;
-    if (!grobj || !grobj->gr_data || !grobj->gr_data->stage_node)
-        return NULL;
-    return &grobj->gr_data->stage_node->gravity_strength;
-}
-
-void GravityChange_Start(EventCheckData *ev_chk)
-{
-    float *strength = GetStageGravityStrength();
-    if (!strength)
-    {
-        OSReport("[GravityChange] stage_node gravity not available\n");
-        gravity_modified = 0;
-        return;
-    }
-
-    active_mult = HSD_Randi(2) ? GRAVITY_MULT_HIGH : GRAVITY_MULT_LOW;
+    float *strength = &(*stc_grobj)->gr_data->stage_node->gravity_strength;
+    float mult = HSD_Randi(2) ? GRAVITY_MULT_HIGH : GRAVITY_MULT_LOW;
 
     original_strength = *strength;
-    *strength = original_strength * active_mult;
-    gravity_modified = 1;
+    *strength = original_strength * mult;
+    scaled_strength = strength;
 
-    OSReport("[GravityChange] start: strength %.4f -> %.4f (x%.2f)\n",
-             original_strength, *strength, active_mult);
+    OSReport("[GravityChange] Strength scaled %.4f -> %.4f\n", original_strength, *strength);
 }
 
-void GravityChange_Active(EventCheckData *ev_chk)
+void GravityChange_End2(void)
 {
-    if (!gravity_modified)
+    if (!scaled_strength)
         return;
 
-    // Re-apply each frame in case something overwrites it.
-    float *strength = GetStageGravityStrength();
-    if (strength)
-        *strength = original_strength * active_mult;
-}
+    *scaled_strength = original_strength;
+    scaled_strength = NULL;
 
-void GravityChange_End2(EventCheckData *ev_chk)
-{
-    if (!gravity_modified)
-        return;
-
-    float *strength = GetStageGravityStrength();
-    if (strength)
-    {
-        *strength = original_strength;
-        OSReport("[GravityChange] restored gravity strength %.4f\n", original_strength);
-    }
-
-    gravity_modified = 0;
+    OSReport("[GravityChange] Strength restored to %.4f\n", original_strength);
 }

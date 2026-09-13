@@ -817,13 +817,10 @@ Other options: overwrite the state callbacks `ed+0xAB8`-`ed+0xAC4` directly afte
 re-asserting after each state change); add a `GObj_AddProc(gobj, cb, priority)` of your own; or
 for fresh actors, drive `ed+0x2E0`/`ed+0x2EC`/`ed+0x2F8` (accel/vel/pos) directly.
 
-`mods/custom_events/src/spawn_enemy.c` is a worked but currently uncalled example of standalone
-spawning: `SpawnEnemy_Random` (a random actor near a machine, with optional `EnemyPath_Init`
-spline attach) and `SpawnEnemy_MeteorTrap` (a meteor over every human player). Its
-Its
-`SpawnEnemy_OnBoot`, called from the mod's `OnBoot`, installs null-safety patches for
-`EventActor_GetParentAnimRate` and `splArcLengthPoint`, both of which crash on the null
-parent/spline pointers a standalone spawn has.
+A standalone spawn carries a NULL `parent_gobj` and, until `EnemyPath_Init` assigns one, a NULL
+spline. `EventActor_GetParentAnimRate` (0x802049b8) dereferences the first without a check, but
+it is only called from the child-part follow-parent states; `splArcLengthPoint` (0x80415958)
+dereferences the second, so an actor whose callbacks walk a path before one is assigned faults.
 
 ### Constraints
 

@@ -202,11 +202,12 @@ def fix_syntax(sig):
 
 
 def plan_protos(project):
-    """([(addr, signature, note)], [(addr, name)]) - signatures to apply, and
-    documented addresses with no function in Ghidra.
+    """([(addr, signature, note, rename)], [(addr, name)]) - signatures to apply,
+    and documented addresses with no function in Ghidra.
 
     Ghidra sometimes carries the better name, so an existing real name wins over
-    hoshi's and only the types are taken from the header.
+    hoshi's and only the types are taken from the header. set-signature leaves
+    the name alone, so a default name carries a separate (old, new) rename.
     """
     r = ghidra(
         ["function", "list", "--fields", "address,name", "--limit", "60000"], project
@@ -223,12 +224,16 @@ def plan_protos(project):
         if gname is None:
             skipped.append((addr, name))
             continue
-        if gname == name or gname.startswith(("FUN_", "undefined", "zz_")):
-            note = "match" if gname == name else f"named ({gname} -> {name})"
+        rename = None
+        if gname == name:
+            note = "match"
+        elif gname.startswith(("FUN_", "undefined", "zz_")):
+            note = f"named ({gname} -> {name})"
+            rename = (gname, name)
         else:
             sig = re.sub(r"\b" + re.escape(name) + r"\s*\(", gname + "(", sig, count=1)
             note = f"kept ghidra name ({gname})"
-        plan.append((addr, fix_syntax(sig), note))
+        plan.append((addr, fix_syntax(sig), note, rename))
     return plan, skipped
 
 
@@ -241,7 +246,7 @@ def phase_protos(project, dry_run):
     if dry_run:
         for name, rtype in RETURN_TYPE_OVERRIDES.items():
             print(f"  [getter                ] {name} -> {rtype}")
-        for addr, sig, note in plan:
+        for addr, sig, note, _rename in plan:
             print(f"  [{note:22}] {addr}  {sig}")
         for addr, name in skipped:
             print(f"  [no function          ] {addr}  {name}")
@@ -254,7 +259,12 @@ def phase_protos(project, dry_run):
             ok += 1
         else:
             failures.append((name, rtype, (r.stderr or r.stdout).strip()))
-    for addr, sig, _note in plan:
+    for addr, sig, _note, rename in plan:
+        if rename:
+            r = ghidra(["function", "rename", *rename], project)
+            if r.returncode != 0 or '"renamed"' not in r.stdout:
+                failures.append((addr, sig, (r.stderr or r.stdout).strip()))
+                continue
         r = ghidra(["function", "set-signature", addr, "--signature", sig], project)
         if r.returncode == 0 and re.search(
             r'"status"\s*:\s*"(signature_set|updated)"', r.stdout

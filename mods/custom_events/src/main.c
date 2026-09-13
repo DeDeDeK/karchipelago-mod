@@ -1,34 +1,21 @@
 #include "game.h"
-#include "os.h"
-#include "hsd.h"
 #include "hoshi/mod.h"
 
 #include "custom_events.h"
-#include "cannon_event.h"
-#include "spawn_enemy.h"
-
-static void OnBoot(void)
-{
-    CustomEvents_OnBoot();
-    SpawnEnemy_OnBoot();
-}
 
 static void On3DLoadEnd(void)
 {
-    if (stGetCurrentStageKind() == STAGEKIND_CITY1)
+    if (Gm_IsInCity())
         CustomEvents_InitSis();
-
-    // Cannon scaffolding runs diagnostic spawns and memory dumps on every City
-    // Trial load, so it stays off.
-    // CannonEvent_On3DLoadEnd();
 }
 
 ModDesc mod_desc = {
-    .name = "custom_events",
+    .name = CUSTOM_EVENTS_MOD_NAME,
     .author = "DeDeDK",
     .version.major = CUSTOM_EVENTS_API_MAJOR,
     .version.minor = CUSTOM_EVENTS_API_MINOR,
     .affects_gameplay = 1,
-    .OnBoot = OnBoot,
+    .OnBoot = CustomEvents_OnBoot,
     .On3DLoadEnd = On3DLoadEnd,
+    .On3DExit = CustomEvents_On3DExit,
 };

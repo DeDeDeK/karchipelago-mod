@@ -374,15 +374,14 @@ It then tail-calls two general helpers:
 
 ## Custom Spawns
 
-`SpawnProjectileForPlayer` in `mods/custom_events/src/spawn_projectile.c` is the reference
-implementation for spawning a thrown projectile with no copy ability active. It builds the descriptor
-from the player's **machine** (`Ply_GetMachineGObj`, then `md->pos` / `forward` / `up` / `velocity`)
-rather than a `RiderData`, takes `owner` from the rider GObj's `rd->x0` when a rider exists and 0
-otherwise, sets both self-hit bits, seeds `proj->velocity`, and finally transitions to the flying
-state (`Gordo_EnterThrownState` for gordo, `Projectile_SetState(proj, 1, 1.0f, 1.0f, 1)` for bomb and
-sensor bomb). The three `SpawnProjectile_*Trap()` entry points are wired to no trap dispatcher yet.
+A thrown projectile can be spawned in front of a player with no copy ability active. Build the
+descriptor from the player's **machine** (`Ply_GetMachineGObj`, then `md->pos` / `forward` / `up` /
+`velocity`) rather than a `RiderData`, take `owner` from the rider GObj when one exists, set both
+self-hit bits, seed `proj->velocity`, and finally transition to the flying state
+(`Gordo_EnterThrownState` for gordo, `Projectile_SetState(proj, 1, 1.0f, 1.0f, 1)` for bomb and
+sensor bomb).
 
-Three details in it are easy to get wrong:
+Three details are easy to get wrong:
 
 - **Velocity has to be written twice.** `Projectile_Create` copies `desc.velocity` into the spawn
   *snapshot* at `proj+0x88`; per-frame physics reads `proj+0x94`, which stays zero. Seed
@@ -391,8 +390,8 @@ Three details in it are easy to get wrong:
   projectile co-moving with the machine - it looks glued to Kirby and stays inside his geometry for
   the whole fall arc until env-coll fires. A constant-magnitude forward kick keeps the trajectory
   predictable across machine speeds.
-- **Both self-hit bits.** The trapped player is the owner, so vanilla owner exclusion drops the hit
-  otherwise.
+- **Both self-hit bits.** A projectile meant to hit the player it was spawned on has that player as
+  its owner, so vanilla owner exclusion drops the hit otherwise.
 
 `flags=1` on the `Projectile_SetState` call matches vanilla throw: skip the rider-attached cleanup
 path that `post_init` ran for state 0.

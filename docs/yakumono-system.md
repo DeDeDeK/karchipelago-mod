@@ -339,7 +339,7 @@ Past +0x130 the struct is a per-kind overlay - the break families' per-prop arra
 
 ## Cross-Stage Spawning: the Cannon
 
-Spawning a yakumono kind in a stage that never ships it works at the framework level but not at the asset level. `mods/custom_events/src/cannon_event.c` holds the investigation: diagnostic spawn and memory-dump routines, not a registered custom event. Its `CannonEvent_On3DLoadEnd` entry point is commented out in the mod's `main.c` (it would dump memory on every City Trial load) and `CANNON_LOAD_ENABLED` defaults to 0.
+Spawning a yakumono kind in a stage that never ships it works at the framework level but not at the asset level.
 
 `GrYaku_Create(48, data_idx)` plus `GrYakuCannon_TailInit(gobj)` from `On3DLoadEnd` in City Trial - long after `grInitYakumono` finished - runs without asserting and increments `GrObj.yaku_num`, so the GObj is fully wired and registered. But with a zeroed param block the pipeline silently skips graphical setup: no JObj, an all-zero matrix, no audio handles. HurtData is created, `FinalSetup` runs, the scale and axis vectors are seeded, and `proc1` is auto-installed from the per-kind state table. The result is a **ghost yakumono**: collidable and state-machine-driven, but invisible and immobile. The seven procs are added unconditionally and tick regardless - `GrYakumono_Think` and the HitColl pipeline read HurtData, not the JObj.
 
