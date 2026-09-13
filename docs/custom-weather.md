@@ -503,7 +503,7 @@ The pool clears and the timer re-seeds on every preset change and CT teardown.
 
 The global wind can lean the City Trial forest trees. Each forest tree (yakumono `desc_id` 34,
 53 instances in CT) renders from its own `JOBJ_SKELETON` joint whose world matrix is rebuilt
-from the joint SRT every frame by `HSD_JObjSetupMatrixSub`, so a small tilt written into that
+from the joint SRT every frame by `JObj_SetupMtxSub`, so a small tilt written into that
 joint's Euler rotation each frame is honored automatically - no user matrix, no dirty flag, no
 vertex work. Only the visual model is touched; collision is never moved.
 
@@ -718,7 +718,7 @@ eye += right * eye_right * scale_right  +  up * eye_up * scale_up
 
 Both scale fields initialise to 1.0, so writing `eye_right`/`eye_up` in world units and
 raising `gate` is the whole mechanism - no code patch, and therefore no conflict with
-`custom_events`, which already replaces the `HSD_CObjSetEyePosition` call at 0x800b3900. The
+`custom_events`, which already replaces the `CObj_SetEyePosition` call at 0x800b3900. The
 pointer is sanity-checked as an aligned MEM1 address before anything is written through it,
 distance is measured from the view's own aim point, and the gate is sticky so it is
 explicitly lowered when the funnel lifts.

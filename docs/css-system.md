@@ -74,7 +74,7 @@ The bytes right after each 20-entry list are live, and there is no slack behind 
 
 #### Icon anchors
 
-Both screens position their icons against a strip of 20 sibling `JOBJDesc` in a dedicated model - `ScMenSelplyIpos_scene_models` (`MnSelplyAll.dat`, `0x78740`..`0x78c00` at 0x40 stride) and `ScMenSelplyIposCt_scene_models` (`MnSelplyctAll.dat`) - posed by an animation whose **frame is the icon count**. `AirRideSelect_LayoutIcons` (0x80133f68 -> 0x80151258) and `CitySelect_LayoutMachineIcons` (0x801355f4 -> 0x8015bd14) set the frame to the count, then call `JOBJ_GetWorldPosition` on each of the 20 anchors into the ipos GObj's userdata.
+Both screens position their icons against a strip of 20 sibling `JOBJDesc` in a dedicated model - `ScMenSelplyIpos_scene_models` (`MnSelplyAll.dat`, `0x78740`..`0x78c00` at 0x40 stride) and `ScMenSelplyIposCt_scene_models` (`MnSelplyctAll.dat`) - posed by an animation whose **frame is the icon count**. `AirRideSelect_LayoutIcons` (0x80133f68 -> 0x80151258) and `CitySelect_LayoutMachineIcons` (0x801355f4 -> 0x8015bd14) set the frame to the count, then call `JObj_GetWorldPosition` on each of the 20 anchors into the ipos GObj's userdata.
 
 Each anchor's `AOBJ` carries a TRAX and a TRAY track of CON keys, one per frame. At frame N the first `ceil(N/2)` anchors take the top row and the rest the bottom; anchors from N onward park offscreen at X = -55.799. Counts of 9 and below use a single row at Y 0.700; from 10 up the rows sit at Y 5.212 and Y -0.885 (Air Ride) or 4.300 and -0.700 (City Trial), the bottom offset by half a column so the two interleave. Spacing shrinks as the count grows to keep both rows inside a fixed half-width `H` - 30.62 on Air Ride, 25.20 on City Trial:
 
@@ -282,7 +282,7 @@ The bar does **not** auto-scale with the cap - the notch models are fixed art in
 
 Doing only #1 is **worse than nothing** - it is an out-of-bounds write. Steps 1+2 without 3 read past the JOBJ array.
 
-UI and behavior are decoupled: the CPU rider AI reads its own difficulty from `CpuData+0x22` (0..8), set at `Rider_CPUInit` and scaling every personality roll through `Rider_CPUDifficultyScale`, and CT/AR `cpu_level` maps onto it **1:1**. Making CPUs harder therefore does not require extending the UI bar - remap the existing 1-9 / 1-5 selections onto a steeper internal curve, or replace the profile outright the way `mods/custom_ai` does.
+UI and behavior are decoupled: the CPU rider AI reads its own difficulty from `CpuData+0x22` (0..8), set at `Rider_CPUInit` and scaling every personality roll through `Rider_CPUDifficultyScale`, and CT/AR `cpu_level` maps onto it **1:1**. Making CPUs harder therefore does not require extending the UI bar - remap the existing 1-9 / 1-5 selections onto a steeper internal curve, or replace the `ai_state` profile outright.
 
 ### Archive / Icon System
 
@@ -307,7 +307,7 @@ The title screen runs a "demo player" setup at `0x8000d300` that configures slot
 | Address | Vanilla | Sets |
 |---------|---------|------|
 | 0x8000d340 | `li r4, 0` | `Ply_SetRiderKind(0, ...)` (RDKIND) |
-| 0x8000d34c | `li r4, 0` | `Ply_SetIsBike(0, ...)` |
+| 0x8000d34c | `li r4, 0` | `Ply_SetMachineIsBike(0, ...)` |
 | 0x8000d358 | `li r4, 0` | `Ply_SetMachineKind(0, ...)` (VCKIND) |
 
 `Ply_SetMachineKind` stores a class-relative index: star-class (`is_bike = 0`) uses the `VCKIND_*` value directly, wheel-class is relative to `VCKIND_WHEELNORMAL`. The demo init calls `MachineStateChange` with hardcoded star-only state ids (82/89), so a wheel-class machine crashes here - keep `is_bike = 0` and pick a star machine.

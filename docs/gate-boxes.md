@@ -57,7 +57,7 @@ Vanilla has no such exit. With an all-zero chance table its cumulative walk neve
 
 `BoxHasItems` is evaluated at decision time rather than tracked by the filters, so it always reflects the pool as the copy-ability, patch and item gates have left it - no separate update pass and no cross-system ordering rule. Without it a player could open a green box and get nothing because every green-box item was independently locked.
 
-The three pools are **disjoint**, so which gate can empty which color is fixed. `CityItemSpawn_InitItemFallChances` (0x800eb374) walks the stage's 52-entry `item_spawn` table (`ITKIND_ACCEL` through `ITKIND_GORDO`) and appends each kind to exactly one `item_group_spawn[]` slot, chosen by `Gm_GetItemsCommonAttr(kind)->box_kind`:
+The three pools are **disjoint**, so which gate can empty which color is fixed. `CityItemSpawn_InitItemFallChances` (0x800eb374) walks the stage's 52-entry `item_spawn` table (`ITKIND_ACCEL` through `ITKIND_GORDO`) and appends each kind to exactly one `item_group_spawn[]` slot, chosen by `Item_GetCommonAttr(kind)->box_kind`:
 
 | Color | Contents | Emptied by |
 |-------|----------|-----------|

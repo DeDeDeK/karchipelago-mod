@@ -1,19 +1,20 @@
 // Bridge-side half of the hoshi -> Ghidra sync, driven by sync.py.
 //
-// Two tasks, selected by the `task` key:
+// Three tasks, selected by the `task` key:
 //   parse    run Ghidra's C parser over the body-stripped hoshi headers into the
 //            program's DataTypeManager, then drop orphaned CParser conflicts
+//   names    rename each listed function by address
 //   globals  retype + label each fixed-address engine global in the listing
 //
 // Config comes from a properties file rather than script arguments, and results
 // go to a report file rather than stdout, because the ghidra-cli bridge forwards
 // neither. Config path: ~/.config/ghidra-cli/hoshi_sync.cfg
-//   task     = parse | globals
+//   task     = parse | names | globals
 //   report   = /abs/path/report.txt
 //   includes = /path/a,/path/b        (parse)
 //   files    = /path/master.h         (parse)
 //   defines  = -DFOO=1                (parse, optional)
-//   data     = /abs/path/globals.tsv  (globals)
+//   data     = /abs/path/rows.tsv     (names: addr, name; globals: see globals())
 //
 // The bridge wraps each script in its own transaction and never saves; edits
 // commit to the in-memory program when the script ends. sync.py persists them
@@ -43,6 +44,7 @@ import ghidra.program.model.data.UnsignedIntegerDataType;
 import ghidra.program.model.data.UnsignedLongLongDataType;
 import ghidra.program.model.data.UnsignedShortDataType;
 import ghidra.program.model.data.VoidDataType;
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.symbol.SourceType;
@@ -93,6 +95,8 @@ public class HoshiSync extends GhidraScript {
         String summary;
         if (task.equals("parse")) {
             summary = parse(cfg);
+        } else if (task.equals("names")) {
+            summary = names(cfg);
         } else if (task.equals("globals")) {
             summary = globals(cfg);
         } else {
@@ -257,6 +261,59 @@ public class HoshiSync extends GhidraScript {
 
     private boolean sameType(DataType a, DataType b) {
         return a != null && b != null && a.getPathName().equals(b.getPathName());
+    }
+
+    // Addressed rather than looked up by name, because the names being replaced
+    // are not unique in the program.
+    private String names(Properties cfg) throws Exception {
+        String dataPath = cfg.getProperty("data", "").trim();
+        if (dataPath.isEmpty()) {
+            rpt("ERROR: no `data` in config");
+            return "ERROR: no data file";
+        }
+        rpt("data    : " + dataPath);
+
+        FunctionManager fm = currentProgram.getFunctionManager();
+        List<String> detail = new ArrayList<>();
+        int renamed = 0, failed = 0;
+        int tx = currentProgram.startTransaction("Apply map function names");
+        try (BufferedReader br = new BufferedReader(new FileReader(dataPath))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] f = line.trim().split("\t");
+                if (f.length < 2) {
+                    continue;
+                }
+                Address addr = toAddr(f[0]);
+                Function fn = addr == null ? null : fm.getFunctionAt(addr);
+                if (fn == null) {
+                    detail.add("FAIL  " + f[0] + " " + f[1] + ": no function");
+                    failed++;
+                    continue;
+                }
+                String old = fn.getName();
+                try {
+                    fn.setName(f[1], SourceType.USER_DEFINED);
+                    detail.add(f[0] + "  " + old + " -> " + f[1]);
+                    renamed++;
+                } catch (Exception e) {
+                    detail.add("FAIL  " + f[0] + " " + old + " -> " + f[1] + ": "
+                            + e.getClass().getSimpleName() + ": " + e.getMessage());
+                    failed++;
+                }
+            }
+        } finally {
+            currentProgram.endTransaction(tx, true);
+        }
+
+        String summary = "renamed=" + renamed + " failed=" + failed;
+        rpt(summary);
+        rpt("");
+        rpt("--- renames ---");
+        for (String d : detail) {
+            rpt(d);
+        }
+        return summary;
     }
 
     // Auto-analysis has already laid down conflicting `undefined` data at these

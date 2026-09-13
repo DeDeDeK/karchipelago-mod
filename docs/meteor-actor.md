@@ -43,7 +43,7 @@ post-init callback 0x8021e0d4. Two of those slots do meteor-specific work:
 - **Init callback** (0x8021dfc0) ground-snaps, disables rendering, points both hit-reaction
   callbacks at 0x8021e9b4, calls `EventActor_FinalizeInit` (0x802042fc), and nulls the two
   collision-sphere handles (`ed+0xB74`/`0xB78`). `EventActor_FinalizeInit` is what hides the
-  model: it calls `HSD_JObjSetFlagsAll(root, JOBJ_HIDDEN)` on the model tree.
+  model: it calls `JObj_SetFlagsAll(root, JOBJ_HIDDEN)` on the model tree.
 - **Post-init callback** (0x8021e0d4) runs at the tail of `EventActor_Create`, after all
   procs are registered. It zeroes velocity, hides the actor via `EventActor_Hide`
   (0x801fed40), sets `grounded_active`, disables rendering again, enters **state 14** via

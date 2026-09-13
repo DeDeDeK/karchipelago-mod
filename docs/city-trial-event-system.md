@@ -166,7 +166,7 @@ Thin readers over `EventCheckData` and the config, all in the `0x800ee6xx`-`0x80
 | 0x800ee6ec | `CityEvent_GetLocationIndex` | `bgm_sky[cur_kind].location_idx` |
 | 0x800ee708 | `CityEvent_GetLocationCount` | `bgm_sky[cur_kind].location_count` |
 | 0x800ee724 | `CityEvent_GetLocationIndexForKind` | same, for an explicit kind |
-| 0x800ee73c | `CityEvent_GetFakeItemData` | `bgm_sky[EVKIND_FAKEPOWERUPS].event_data` |
+| 0x800ee73c | `Event_GetInstanceData` | `bgm_sky[EVKIND_FAKEPOWERUPS].event_data` |
 | 0x800ee758 | `CityEvent_GetEventDataForKind` | `bgm_sky[kind].event_data` |
 | 0x800ee770 | `CityEvent_GetGObj` | `*stc_eventcheck_gobj` |
 | 0x800ee8c4 | `CityEvent_GetActiveKind` | `cur_kind` while in state 2, else -1 |

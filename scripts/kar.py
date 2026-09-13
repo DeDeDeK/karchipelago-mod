@@ -61,7 +61,7 @@ _MAP_LINE = re.compile(
 )
 
 # The name field runs up to the first space or '(' - many rows carry a trailing
-# argument note, either separated ("gmGetGlobalP (GameData)") or glued on
+# argument note, either separated ("Gm_GetGameData (GameData)") or glued on
 # ("ResultsScreen_Init(r3=ply num)").
 _MAP_NAME = re.compile(r"([\w.$][\w.$@]*)\s*(.*)")
 
@@ -496,14 +496,13 @@ def cmd_check(args):
     for addr, name, where in header_protos():
         mapped = syms.by_name.get(name)
         if mapped is None:
-            # A real map row under a different name is one of link.ld's
-            # deliberate aliases (Item_Create -> CityItem_Create), which links
-            # fine; only a still-`zz_` row is drift.
+            # A link.ld name over a differently named map row is reported below
+            # as a disagreement, so only a prototype neither file backs is listed.
             row = by_addr.get(addr)
-            aliased = (
+            backed = (
                 row is not None and not row.startswith("zz_") and ld.get(name) == addr
             )
-            if not aliased:
+            if not backed:
                 groups.setdefault("header prototype not in the map", []).append(
                     f"0x{addr:08x} {name}  ({where})"
                 )
@@ -520,14 +519,27 @@ def cmd_check(args):
                 f"0x{addr:08x} {name}  link.ld says 0x{ld[name]:08x}  ({where})"
             )
 
-    # Only a still-`zz_` map row counts as drift. An address the map has no row
-    # for is the map's coarse sizing, and a differently-named row is usually one
-    # of link.ld's deliberate aliases (Gm_Pause -> gmSetFreezeGameFlag).
+    # One name per address across link.ld and the map. An address the map has
+    # no row for is the map's coarse sizing, not drift.
+    names_at = {}
     for name, addr in sorted(ld.items(), key=lambda kv: kv[1]):
+        if addr:  # address 0 stubs functions the game does not ship
+            names_at.setdefault(addr, []).append(name)
         mapped = by_addr.get(addr)
-        if mapped and mapped.startswith("zz_"):
+        if not mapped:
+            continue
+        if mapped.startswith("zz_"):
             groups.setdefault("link.ld name still unnamed in the map", []).append(
                 f"0x{addr:08x} {name}  (map: {mapped})"
+            )
+        elif mapped != name:
+            groups.setdefault("link.ld name disagrees with the map", []).append(
+                f"0x{addr:08x} {name}  (map: {mapped})"
+            )
+    for addr, names in names_at.items():
+        if len(names) > 1:
+            groups.setdefault("link.ld names sharing an address", []).append(
+                f"0x{addr:08x} {', '.join(names)}"
             )
 
     total = sum(len(v) for v in groups.values())

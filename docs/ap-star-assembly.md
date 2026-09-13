@@ -135,7 +135,7 @@ calls the same function on the AP carrier, so the set inherits this unchanged.
 
 What is *not* immortal is the piece inside. `Box_OutcomeLogic` hands the contents to
 `Box_SpawnContents` (`0x80253378`), which builds an ordinary descriptor through
-`CityItem_InitDesc` (`0x802509a0`); that function gives every item
+`Item_InitDesc` (`0x802509a0`); that function gives every item
 `lifetime_min + HSD_Randi(lifetime_variance)` and special-cases kinds `0x37`-`0x3c`, the six
 legendary pieces, only to clear their `flags`. The lifetime is untouched, so a broken-open
 piece left on the ground expires like anything else. That is vanilla behavior and the set

@@ -2,18 +2,19 @@
 """Push hoshi's header knowledge into the Ghidra kar.dol program.
 
 Everything hoshi documents about the game - struct and enum layouts, the
-function signatures annotated with `// 0xADDR`, and the globals pinned to a
-literal address - is mirrored into Ghidra so decompiles read as typed C instead
-of `undefined *` pointer math. The sync is one-way: the headers are the source
-of truth, the Ghidra database is the copy.
+function names in GKYE01.map, the function signatures annotated with
+`// 0xADDR`, and the globals pinned to a literal address - is mirrored into
+Ghidra so decompiles read as typed C instead of `undefined *` pointer math. The
+sync is one-way: hoshi is the source of truth, the Ghidra database is the copy.
 
-    uv run python scripts/ghidra/sync.py              # all three phases, then save
+    uv run python scripts/ghidra/sync.py              # all four phases, then save
     uv run python scripts/ghidra/sync.py --dry-run    # report only, touch nothing
     uv run python scripts/ghidra/sync.py protos       # just re-apply signatures
 
 Phases, in dependency order:
 
     types    parse the headers into the DataTypeManager (structs/enums/typedefs)
+    names    rename each function whose Ghidra name differs from the map's
     protos   set each documented function's signature by address
     globals  retype and label each fixed-address engine global in the listing
 
@@ -33,6 +34,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import kar
 from hoshi_headers import (
     extract_globals,
     extract_protos,
@@ -51,15 +54,10 @@ BRIDGE_SCRIPTS = os.path.join(CFG_DIR, "scripts")
 CFG_FILE = os.path.join(CFG_DIR, "hoshi_sync.cfg")
 REPORT_FILE = os.path.join(CFG_DIR, "hoshi_sync_report.txt")
 GLOBALS_TSV = os.path.join(CFG_DIR, "hoshi_globals.tsv")
+NAMES_TSV = os.path.join(CFG_DIR, "hoshi_names.tsv")
 BRIDGE_STATE = os.path.expanduser("~/.local/share/ghidra-cli")
 
-PHASES = ("types", "protos", "globals")
-
-# Return types that Ghidra propagates to every caller once set, which is worth
-# far more than the one function they name.
-RETURN_TYPE_OVERRIDES = {
-    "gmGetGlobalP": "GameData *",
-}
+PHASES = ("types", "names", "protos", "globals")
 
 _BRIDGE_CWD = None
 
@@ -201,38 +199,79 @@ def fix_syntax(sig):
     return sig
 
 
-def plan_protos(project):
-    """([(addr, signature, note, rename)], [(addr, name)]) - signatures to apply,
-    and documented addresses with no function in Ghidra.
-
-    Ghidra sometimes carries the better name, so an existing real name wins over
-    hoshi's and only the types are taken from the header. set-signature leaves
-    the name alone, so a default name carries a separate (old, new) rename.
-    """
+def ghidra_functions(project):
+    """Bare lowercase hex address -> name, for every function in Ghidra."""
     r = ghidra(
         ["function", "list", "--fields", "address,name", "--limit", "60000"], project
     )
     if r.returncode != 0:
         sys.exit(f"ghidra function list failed:\n{r.stderr or r.stdout}")
-    known = {
+    return {
         f["address"].lower().replace("0x", ""): f["name"] for f in json.loads(r.stdout)
     }
 
+
+# Mangled C++ names, which Ghidra's demangler has already turned into readable
+# namespaced names.
+_MANGLED = re.compile(r"[A-Za-z0-9]__(?:[FQ]|\d)")
+
+
+def plan_names(project):
+    """[(addr, ghidra_name, map_name)] for every function Ghidra names differently
+    from GKYE01.map.
+
+    The map name is the one kar.py resolves, without the trailing `?` or
+    argument notes some rows carry. Rows still `zz_` have no name to give.
+    """
+    exported = kar.read_link_ld()
+    names = {}
+    for addr, _size, name, _note in kar.SymbolMap().rows:
+        key = f"{addr:08x}"
+        if key not in names or name in exported:
+            names[key] = name
+
+    known = ghidra_functions(project)
+    plan = []
+    for addr, name in sorted(names.items()):
+        gname = known.get(addr)
+        if gname in (None, name) or name.startswith("zz_") or _MANGLED.search(name):
+            continue
+        plan.append((addr, gname, name))
+    return plan
+
+
+def phase_names(project, dry_run):
+    plan = plan_names(project)
+    print(f"[names] {len(plan)} functions named differently from the map")
+    if dry_run:
+        for addr, gname, name in plan:
+            print(f"  0x{addr}  {gname} -> {name}")
+        return
+    if not plan:
+        return
+    os.makedirs(CFG_DIR, exist_ok=True)
+    with open(NAMES_TSV, "w") as f:
+        f.writelines(f"0x{addr}\t{name}\n" for addr, _gname, name in plan)
+    report = run_bridge_script("names", {"data": NAMES_TSV}, project)
+    print_report(report, re.compile(r"^\s*FAIL"))
+
+
+def plan_protos(project):
+    """([(addr, signature, note, rename)], [(addr, name)]) - signatures to apply,
+    and documented addresses with no function in Ghidra.
+
+    set-signature leaves the name alone, so a function Ghidra names differently
+    carries a separate (old, new) rename. After the names phase there are none.
+    """
+    known = ghidra_functions(project)
     plan, skipped = [], []
     for addr, name, sig, _loc in extract_protos(HOSHI_INCLUDE):
         gname = known.get(addr.replace("0x", ""))
         if gname is None:
             skipped.append((addr, name))
             continue
-        rename = None
-        if gname == name:
-            note = "match"
-        elif gname.startswith(("FUN_", "undefined", "zz_")):
-            note = f"named ({gname} -> {name})"
-            rename = (gname, name)
-        else:
-            sig = re.sub(r"\b" + re.escape(name) + r"\s*\(", gname + "(", sig, count=1)
-            note = f"kept ghidra name ({gname})"
+        rename = None if gname == name else (gname, name)
+        note = "match" if rename is None else f"named ({gname} -> {name})"
         plan.append((addr, fix_syntax(sig), note, rename))
     return plan, skipped
 
@@ -244,8 +283,6 @@ def phase_protos(project, dry_run):
         f"{len(skipped)} addresses with no function in Ghidra"
     )
     if dry_run:
-        for name, rtype in RETURN_TYPE_OVERRIDES.items():
-            print(f"  [getter                ] {name} -> {rtype}")
         for addr, sig, note, _rename in plan:
             print(f"  [{note:22}] {addr}  {sig}")
         for addr, name in skipped:
@@ -253,12 +290,6 @@ def phase_protos(project, dry_run):
         return
 
     ok, failures = 0, []
-    for name, rtype in RETURN_TYPE_OVERRIDES.items():
-        r = ghidra(["function", "set-return-type", name, "--type", rtype], project)
-        if r.returncode == 0 and "return_type_set" in r.stdout:
-            ok += 1
-        else:
-            failures.append((name, rtype, (r.stderr or r.stdout).strip()))
     for addr, sig, _note, rename in plan:
         if rename:
             r = ghidra(["function", "rename", *rename], project)
@@ -335,7 +366,12 @@ def main(argv):
     if not os.path.isdir(HOSHI_INCLUDE):
         sys.exit(f"missing {HOSHI_INCLUDE}")
 
-    runners = {"types": phase_types, "protos": phase_protos, "globals": phase_globals}
+    runners = {
+        "types": phase_types,
+        "names": phase_names,
+        "protos": phase_protos,
+        "globals": phase_globals,
+    }
     for phase in PHASES:
         if phase in requested:
             runners[phase](args.project, args.dry_run)

@@ -171,7 +171,7 @@ exit - that function is the Air Ride major's `cb_ExitMinor`, entry 4 of the majo
 scene-desc table at `0x80495058` - so it is a single snapshot at race end, not a per-frame
 poll.
 
-It switches on `Stage_GetGrKindFromStageKind(Gm_GetCurrentStageKind())`, a **GroundKind**
+It switches on `Gm_GetGrKindFromStageKind(Gm_GetCurrentStageKind())`, a **GroundKind**
 (file order), to pick the per-course threshold and `clear_kind`:
 
 | GroundKind | Course | Feet | clear_kind |
@@ -194,7 +194,7 @@ local at 0, so the objective can never fire there - the course has no cell of th
 exactly 120. That field holds the limit the rules menu set, which `Game_Think` compares an
 elapsed counter against to end the round; the player has to run a 2-minute timed race.
 
-Per slot the loop takes `p = 0..4` where `plGetPlayerKind(p) == 0` (human), reads
+Per slot the loop takes `p = 0..4` where `Ply_GetPKind(p) == 0` (human), reads
 `Gm_GetPlayerRaceDistance(p)` (metres), divides by `0.3048` and awards when the result is
 **`>=`** the threshold. `ClearChecker_GetKindClear(GMMODE_AIRRIDE, clear_kind) & 5`
 (`is_new | is_unlocked`) suppresses a repeat before `ClearChecker_SetNewUnlock`. Because it

@@ -50,7 +50,7 @@ correspondence, with the sound indices each bank draws on:
 
 Slots 4 and 5 hold two and eleven files respectively, one at a time; the rest
 hold exactly one. Slot 5 is the stage slot, chosen per stage by
-`FGM_LoadStageFGM` (`0x8005a474`) through a 21-row `{stage, ssm, variant}` table
+`Gm_LoadGroundFGMBank` (`0x8005a474`) through a 21-row `{stage, ssm, variant}` table
 at `0x80498ea4`.
 
 ## Playing a sound

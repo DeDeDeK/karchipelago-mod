@@ -34,7 +34,7 @@ Segment text is **copied** at enqueue, so callers may pass stack buffers. The co
 
 ## Canvas and Layout
 
-The canvas is the hoshi ortho screen camera (created by `ScreenCam_Create` inside hoshi's `Hook_SceneChange`). `Text_GXLink` (`0x804516e4`) projects every text canvas with x spanning 0..640 rightward and y spanning 0..-480, negating each vertex's y, so `Text.trans` is measured in raw pixels right of the canvas left edge and down from its top - `TEXT_CANVAS_W` / `TEXT_CANVAS_H` in hoshi's `text.h`. Messages are allocated with `Hoshi_CreateScreenText`. `TEXTBOX_MARGIN` (10px) keeps the stack off the edges.
+The canvas is the hoshi ortho screen camera (created by `ScreenCam_Create` inside hoshi's `Hook_SceneChange`). `Text_GX` (`0x804516e4`) projects every text canvas with x spanning 0..640 rightward and y spanning 0..-480, negating each vertex's y, so `Text.trans` is measured in raw pixels right of the canvas left edge and down from its top - `TEXT_CANVAS_W` / `TEXT_CANVAS_H` in hoshi's `text.h`. Messages are allocated with `Hoshi_CreateScreenText`. `TEXTBOX_MARGIN` (10px) keeps the stack off the edges.
 
 `TextBoxQueue_RepositionAll` reflows the whole stack against the chosen corner. It reads the settings live, so a Position/Spacing change reflows what is already on screen instead of waiting for the next message:
 
@@ -84,7 +84,7 @@ Enqueuing when the queue is already at the "Max On Screen" cap drops oldest mess
 
 ## Typewriter Seeding
 
-`TextBox_ApplyTypewriter` arms the engine's built-in per-glyph reveal (the renderer reveals one glyph every `temp.char_delay` frames on its own - no per-frame work mod-side). It writes `temp.char_delay`/`temp.space_delay` **directly** and leaves `char_delay_init`/`space_delay_init` alone: the engine only copies the `*_init` seeds across on a `0x01`/`0x02` SUBTEXT opcode (the sole write is in `Text_GXLink` at `0x80451cec`), and `Text_AddSubtext` buffers are delimited by `0x07` POS headers with no `0x01`/`0x02` in them, so the copy never fires and writing the `*_init` fields would do nothing at all. The renderer reloads the live `temp` fields into working registers at the top of each render (`0x80451c34`) and never clears them, so one write at enqueue persists.
+`TextBox_ApplyTypewriter` arms the engine's built-in per-glyph reveal (the renderer reveals one glyph every `temp.char_delay` frames on its own - no per-frame work mod-side). It writes `temp.char_delay`/`temp.space_delay` **directly** and leaves `char_delay_init`/`space_delay_init` alone: the engine only copies the `*_init` seeds across on a `0x01`/`0x02` SUBTEXT opcode (the sole write is in `Text_GX` at `0x80451cec`), and `Text_AddSubtext` buffers are delimited by `0x07` POS headers with no `0x01`/`0x02` in them, so the copy never fires and writing the `*_init` fields would do nothing at all. The renderer reloads the live `temp` fields into working registers at the top of each render (`0x80451c34`) and never clears them, so one write at enqueue persists.
 
 Reveal resumes from `chars_revealed` (mirrored from the engine's `temp.reveal_count` every frame), with `text_end` left `NULL` so the engine re-derives the reveal frontier from `reveal_count`. This is what lets a message survive the scene-change rebuild below without re-typing.
 
@@ -94,7 +94,7 @@ The dwell is sampled **at enqueue** into `typewriter_dwell`, so retuning the set
 
 `Text` pointers are invalidated when the scene changes, but messages should persist visually across the transition. The queue stores **the message's text blob + `chars_revealed`**, not just the live `Text*`. Both the first render and the rebuild go through `TextBox_MessageSegments`, which points a `TextSegment` array at that stored blob, so a message can never draw differently the second time. `TextBox_OnSceneChange` walks the queue, rebuilds each message's `Text` via `TextBox_CreateSegmented`, re-snapshots `chars_total` (`Sis_CountGlyphs`), re-arms the typewriter (resuming from `chars_revealed`), and repositions - so a finished message stays fully shown and a mid-reveal one picks up where it was. It then creates the per-frame `TextBox_PerFrame` GObj.
 
-The rebuild runs against a heap that `SceneChange_InitHeaps` has just re-created at a fixed 18432 bytes (`Text_CreateHeap`, `0x8044f5b4`), before the incoming scene allocates any text of its own. Each message costs 160 bytes for the `Text` plus 16 for its cell plus an opcode buffer that `Text_AddSubtext` grows in 128-byte steps, so a full stack of 8 runs a few kilobytes - well inside the heap, and no more than the same 8 messages held in the scene being left. Running the heap dry is not a dropped message: `Text_AllocFromHeap` (`0x8044edec`) `OSPanic`s with `sislib.c` "Memory Empty".
+The rebuild runs against a heap that `Scene_InitHeaps` has just re-created at a fixed 18432 bytes (`Text_CreateHeap`, `0x8044f5b4`), before the incoming scene allocates any text of its own. Each message costs 160 bytes for the `Text` plus 16 for its cell plus an opcode buffer that `Text_AddSubtext` grows in 128-byte steps, so a full stack of 8 runs a few kilobytes - well inside the heap, and no more than the same 8 messages held in the scene being left. Running the heap dry is not a dropped message: `TextHeap_Alloc` (`0x8044edec`) `OSPanic`s with `sislib.c` "Memory Empty".
 
 ### Pre-first-scene canvas-NULL guard
 

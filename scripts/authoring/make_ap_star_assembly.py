@@ -45,7 +45,7 @@ MACHINE_DAT = "mods/ap_star/assets/machines/VcStarAp.dat"
 HYDRA_DAT = "iso/files/VsHydra.dat"
 OUT_DIR = "mods/ap_star/assets"
 
-# Joint indices in the star's main model, in HSD_JObjLoadJoint preorder.
+# Joint indices in the star's main model, in JObj_LoadJoint preorder.
 J_BODY = 6
 J_RING = 8
 J_POD0 = 9
@@ -172,7 +172,7 @@ class Track:
 def emit_figatree(out, node_count, tracks, end_frame=END_FRAME):
     """Write a FigaTree container and everything it points at. `tracks` is a
     list of Track in any order; they are grouped by node here, since the
-    per-node count table is walked in HSD_JObjLoadJoint preorder."""
+    per-node count table is walked in JObj_LoadJoint preorder."""
     by_node = [[] for _ in range(node_count)]
     for t in tracks:
         by_node[t.node].append(t)

@@ -173,7 +173,7 @@ CODEPATCH_HOOKCREATE(0x8002d070,
 )
 
 // Race-init counterpart. TopRide_RaceInit (0x8002d6c4) re-zeros all four
-// panel_machine slots. Hook at 0x8002d748 (`bl gmGetGlobalP`), past the panel_pkind
+// panel_machine slots. Hook at 0x8002d748 (`bl Gm_GetGameData`), past the panel_pkind
 // CPU-fill loop whose caller-saved iterator r7 rules out landing earlier; the
 // re-executed bl restores r3 = GameData*, so no epilogue is needed.
 CODEPATCH_HOOKCREATE(0x8002d748,

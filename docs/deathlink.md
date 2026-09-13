@@ -131,7 +131,7 @@ This replaces the AR/CT kill path entirely: Top Ride has no rider/machine/HP/fal
 
 ### Velocity neutralization
 
-Around each `apply(kirby)` call the proc zeros the kirby's charge-component velocity (`kirby+0xA0` = inline charge component at +0x80 plus its velocity field at +0x20) **both before and after**. The pre-zero pre-empts setters that read that vector and rescale it (the knockback-class setters); the post-zero overrides setters that ignore it and instead `PSVECNormalize` the zero Vec3 argument into NaN and write that back. The result is no residual launch impulse.
+Around each `apply(kirby)` call the proc zeros the kirby's charge-component velocity (`kirby+0xA0` = inline charge component at +0x80 plus its velocity field at +0x20) **both before and after**. The pre-zero pre-empts setters that read that vector and rescale it (the knockback-class setters); the post-zero overrides setters that ignore it and instead `VECNormalize` the zero Vec3 argument into NaN and write that back. The result is no residual launch impulse.
 
 ### Round-state gate
 

@@ -118,7 +118,7 @@ at `0x8058cc08` holds the per-frame camera-facing billboard basis, not a list.
 and calls both the color helper and the quad emitters. Per frame it:
 
 1. Builds a camera-facing billboard basis from the current CObj viewing matrix into scratch
-   `0x8058cc08` (`HSD_CObjGetViewingMtx`, `PSMTXInverse`).
+   `0x8058cc08` (`COBJ_GetViewingMtx`, `MTXInverse`).
 2. Loops the 32 groups, mask-gated, fetching each group's head and tail and walking the list via
    `Particle+0x00`.
 3. Per particle, in order: channel-color setup (`GXSetChanMatColor` / `GXSetChanAmbColor`,

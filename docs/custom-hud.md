@@ -14,42 +14,40 @@ A HUD element GObj carries:
 | `p_link` | caller-supplied; per-player elements use `GAMEPLINK_HUD` (26), the pause stat chart uses `GAMEPLINK_PAUSEHUD` (27), which is what keeps it drawn while paused |
 | `gx_link` / `gx_pri` | caller-supplied; commonly `GAMEGX_HUD` (21) with `gx_pri` 1; the indicator path uses `GAMEGX_HUDORTHO` (18) |
 | `hsd_object` | the JObj tree (the visual model) |
-| `userdata` | optional `HUDElementData`, attached separately by `3DHud_AddData`, not by the creator |
+| `userdata` | optional `HUDElementData`, attached separately by `HUD_AddElementData`, not by the creator |
 | proc | per-frame animation/position callback, priority 20 |
 | `gx_cb` | one of the `3DHud_*` render wrappers, or plain `JObj_GX` |
 
 `HUD_CreateMiscGObj` (0x801147dc) is the engine's internal creator, signature `(JOBJDesc *jobjdesc, int p_link, int gx_link, int gx_pri)`. It runs, in order:
 
 1. `GObj_Create(27, p_link, 0)` - `entity_class` is the literal 27
-2. `HSD_JObjLoadJoint(jobjdesc)` (0x8040afe8) builds the JObj tree
+2. `JObj_LoadJoint(jobjdesc)` (0x8040afe8) builds the JObj tree
 3. `GObj_AddObject(gobj, obj_kind, jobj)` - `obj_kind` is read from the SDA byte at `r13+0x1271` (0x805de351), not a literal
 4. `GObj_AddGXLink(gobj, 3DHud_RenderIfVisible, gx_link, gx_pri)` - installs the visibility-gated callback at 0x8011500c
-5. `JOBJ_SetUnkFlags(jobj, 0x28000000)` (0x80052fb8) - material flags
+5. `JObj_SetAllMOBJFlags(jobj, 0x28000000)` (0x80052fb8) - material flags
 
 Two adjacent variants, `HUD_CreateMiscGObj2` (0x8011487c) and `HUD_CreateMiscGObj3` (0x80114904), have the same shape with different fixed parameters.
 
-## Functions and Symbol Aliases
+## Functions
 
-Several HUD symbols carry a `link.ld` alias that differs from the `GKYE01.map` name; where the two columns differ, both names refer to the same address.
+| Function | Address | Notes |
+|----------|---------|-------|
+| `HUD_CreateElement(int ply, JOBJDesc *j)` | 0x80114ba4 | `GObj_Create(27,26,0)` + `GObj_AddGXLink(g, HUD_GXLink, 21, 1)` |
+| `HUD_AddElementData(GOBJ *g, int kind, int a, int ply)` | 0x80114e24 | `hud.h` names arg 2 "size" but it is `HUDKind` |
+| `HUD_UpdateElement(JOBJ *j, int frame)` | 0x8011503c | sets the JObj animation frame |
+| `HUD_GXLink(GOBJ *g, int pass)` | 0x80114f1c | per-player viewport/scissor + visibility GX callback |
+| `JObj_GX(GOBJ *g, int pass)` | 0x8042a258 | unconditional JObj render |
+| `JObj_SetAllMOBJFlags` | 0x80052fb8 | |
+| `CObj_SetOrtho(COBJ *c, float top, float bottom, float left, float right)` | 0x80402f08 | |
+| `Text_CreateCanvas` | 0x8044f674 | |
+| `CityHUD_CreateStatChart(int ply, int ply2)` | 0x80128bb8 | |
+| `CityHUD_CreateStatBar(int ply, int ply2, int stat_kind)` | 0x80129154 | |
 
-| Callable name | `GKYE01.map` name | Address | Notes |
-|---------------|-------------------|---------|-------|
-| `HUD_CreateElement(int ply, JOBJDesc *j)` | `3DHud_CreatePlayerElement` | 0x80114ba4 | `GObj_Create(27,26,0)` + `GObj_AddGXLink(g, 3DHud_Render, 21, 1)` |
-| `HUD_AddElementData(GOBJ *g, int kind, int a, int ply)` | `3DHud_AddData` | 0x80114e24 | `hud.h` names arg 2 "size" but it is `HUDKind` |
-| `HUD_UpdateElement(JOBJ *j, int frame)` | `3DHud_UpdateElement` | 0x8011503c | sets the JObj animation frame |
-| `HUD_GXLink(GOBJ *g, int pass)` | `3DHud_Render` | 0x80114f1c | per-player viewport/scissor + visibility GX callback |
-| `JObj_GX(GOBJ *g, int pass)` | `GObj_RenderJObj` | 0x8042a258 | unconditional JObj render |
-| `JObj_SetAllMOBJFlags` | `JOBJ_SetUnkFlags` | 0x80052fb8 | |
-| `CObj_SetOrtho(COBJ *c, float top, float bottom, float left, float right)` | `HSD_CObjSetOrtho` | 0x80402f08 | |
-| `Text_CreateCanvas` | `Text_CreateTextCanvas` | 0x8044f674 | |
-| `CityHUD_CreateStatChart(int ply, int ply2)` | `City_CreateStatChart` | 0x80128bb8 | |
-| `CityHUD_CreateStatBar(int ply, int ply2, int stat_kind)` | `City_CreateStatChartBar` | 0x80129154 | |
-
-Named identically in both, and in `link.ld`: `CObjThink_Common` (0x8042a29c), `CObj_RenderGXLinks` (0x8042a0b4), `GObj_GetJObjIndex` (0x80055af0), `JObj_SetMtxDirtySub` (0x8040d92c), `JObj_GetWorldPosition` (0x80053f34), `Gm_GetPlyViewNum` (0x800092b4), `Gm_GetIfAllCityArchive` (0x80112050, map `3DHud_GetIfAll1cArchive`), `Gm_GetIfAllScreenArchive` (0x80112058, map `3DHud_GetIfAllScreenArchive`), `Gm_Get3dData` (0x80112044, map `3D_GetData`).
+Also in `link.ld`: `CObjThink_Common` (0x8042a29c), `CObj_RenderGXLinks` (0x8042a0b4), `GObj_GetJObjIndex` (0x80055af0), `JObj_SetMtxDirtySub` (0x8040d92c), `JObj_GetWorldPosition` (0x80053f34), `Gm_GetPlyViewNum` (0x800092b4), `Gm_GetIfAllCityArchive` (0x80112050), `Gm_GetIfAllScreenArchive` (0x80112058), `Gm_Get3dData` (0x80112044).
 
 **Not in `link.ld`** - call these through a raw pointer cast: `HUD_CreateMiscGObj` (0x801147dc, map name has a trailing `?`), `HUD_SetVisible` (0x80114eec), `HUD_SetInvisible` (0x80114f04), `CityHUD_DestroyAllStatCharts` (0x801294a8), `3DHud_RenderIfVisible` (0x8011500c), `3DHud_CreateIndicatorGObjCustomGX` (0x801149a0), `JObj_AddSetAnim0_SetFrameAndRate` (0x80114d9c).
 
-Symbols starting with a digit (`3DHud_*`, `3D_GetData`) are present in `GKYE01.map` but `scripts/kar.py sym` will not resolve them by name or address; grep the map directly for those.
+Symbols starting with a digit (`3DHud_*`) are present in `GKYE01.map` but `scripts/kar.py sym` will not resolve them by name or address; grep the map directly for those.
 
 ## HUD Element Data
 
@@ -62,7 +60,7 @@ Symbols starting with a digit (`3DHud_*`, `3D_GetData`) are present in `GKYE01.m
 
 ### Attaching Data and Visibility
 
-`HUD_AddElementData` / `3DHud_AddData` (0x80114e24):
+`HUD_AddElementData` (0x80114e24):
 
 1. `HSD_ObjAlloc` a `HUDElementData`, then `memset(p, 0, 0xe4)` - the struct is 228 bytes
 2. `GObj_AddUserData(gobj, 27, destructor = 0x801151e8, p)`
@@ -76,7 +74,7 @@ Step 5 is the one that makes anything appear. `HUD_SetVisible` (0x80114eec) and 
 
 The game renders in two levels:
 
-1. **Camera GObjs** - created via `GObj_InitCamera` (or `GOBJ_EZCreator` with `HSD_OBJKIND_COBJ`), each assigned a unique `gx_link` (64+). Their `cobj_links` field (u64 bitmask) selects which GX links they render.
+1. **Camera GObjs** - created via `GOBJ_InitCamera` (or `GOBJ_EZCreator` with `HSD_OBJKIND_COBJ`), each assigned a unique `gx_link` (64+). Their `cobj_links` field (u64 bitmask) selects which GX links they render.
 2. **Renderable GObjs** - placed on a specific GX link (0-63) via `GObj_AddGXLink`, each with a `gx_cb` called during rendering.
 
 Render loop:
@@ -91,9 +89,9 @@ Render loop:
 
 | Callback | Address | Used By | Behavior |
 |----------|---------|---------|----------|
-| `JObj_GX` (map: `GObj_RenderJObj`) | 0x8042a258 | `JObj_LoadSet_SetPri`, general | Unconditional: loads `gobj->hsd_object` as a JObj and renders it |
+| `JObj_GX` | 0x8042a258 | `JObj_LoadSet_SetPri`, general | Unconditional: loads `gobj->hsd_object` as a JObj and renders it |
 | `3DHud_RenderIfVisible` | 0x8011500c | `HUD_CreateMiscGObj` | Checks `is_visible`; if set, calls `JObj_GX` passing the **userdata** as the JObj arg |
-| `3DHud_Render` / `HUD_GXLink` | 0x80114f1c | `HUD_CreateElement` | Checks `is_visible`, sets the per-player `GXSetScissor` viewport, calls `JObj_GX`, restores the full scissor |
+| `HUD_GXLink` | 0x80114f1c | `HUD_CreateElement` | Checks `is_visible`, sets the per-player `GXSetScissor` viewport, calls `JObj_GX`, restores the full scissor |
 
 All three end in `JObj_GX`. The wrappers add visibility gating and viewport management; using `JObj_GX` directly bypasses both, so the object renders unconditionally in whatever viewport the camera set.
 
@@ -112,7 +110,7 @@ Link 18 is the safest existing link for custom elements loaded with `JObj_LoadSe
 
 ### JOBJ_HIDDEN From Model Descriptors
 
-`HSD_JObjLoadJoint` copies flags straight from the `JOBJDesc`, including `JOBJ_HIDDEN` (0x10). Some archive models ship hidden because the game's own code shows them later via `HUD_SetVisible`. `JObj_LoadSet_SetPri` with `is_hidden = 0` only skips *setting* the flag - it never *clears* one already present in the descriptor. Always `JObj_ClearFlagsAll(root, JOBJ_HIDDEN)` after loading a HUD model.
+`JObj_LoadJoint` copies flags straight from the `JOBJDesc`, including `JOBJ_HIDDEN` (0x10). Some archive models ship hidden because the game's own code shows them later via `HUD_SetVisible`. `JObj_LoadSet_SetPri` with `is_hidden = 0` only skips *setting* the flag - it never *clears* one already present in the descriptor. Always `JObj_ClearFlagsAll(root, JOBJ_HIDDEN)` after loading a HUD model.
 
 Beware also that `HUD_UpdateElement`'s animation pass can clear `JOBJ_HIDDEN` on joints the animation touches, so an element that must stay hidden has to be re-hidden on every update, not once at creation.
 
@@ -140,7 +138,7 @@ Flags: `JOBJ_HIDDEN` = `1 << 4` (0x10), `JOBJ_OPA` = `1 << 18`, `JOBJ_XLU` = `1 
    or through the hoshi helper `JObj_LoadSet_SetPri(is_hidden, set, anim_id, start_frame, p_link, gx_link, is_add_anim, proc, proc_pri)`, which uses plain `JObj_GX` and has no visibility gate.
 4. Reach child JObjs by depth-first index: `GObj_GetJObjIndex(gobj, child_index)` (0x80055af0).
 
-`HUD_UpdateElement(jobj, value)` (0x8011503c) runs `HSD_JObjReqAnimAllFlags(jobj, (float)value)`, then `JObj_SetAllAOBJRateByFlags(jobj, 0xffff, 1.0)`, then `HSD_JObjAnimAll(jobj)`. The digit models are texture-swap material animations, so frame N selects image N. The `ScInfPausegaugect` digit `TexAnim` carries 11 `ImageDesc` entries (16x15, format 0), enough for 0-9 plus one spare.
+`HUD_UpdateElement(jobj, value)` (0x8011503c) runs `JObj_ReqAnim(jobj, (float)value)`, then `JObj_SetAllAOBJRateByFlags(jobj, 0xffff, 1.0)`, then `HSD_JObjAnimAll(jobj)`. The digit models are texture-swap material animations, so frame N selects image N. The `ScInfPausegaugect` digit `TexAnim` carries 11 `ImageDesc` entries (16x15, format 0), enough for 0-9 plus one spare.
 
 To discover what a loaded archive holds at runtime, walk `arch->header.nb_public`, reading each name at `arch->symbols + arch->public_info[i].symbol` and its data at `arch->data + arch->public_info[i].offset`.
 
@@ -251,18 +249,18 @@ Stadium elements, 9 symbols each. Suffix `1`/`2`/`4`.
 
 ## City Trial Stat Bar Internals
 
-`CityHUD_CreateStatChart(ply, ply2)` (map `City_CreateStatChart`, 0x80128bb8):
+`CityHUD_CreateStatChart(ply, ply2)` (0x80128bb8):
 
 1. Picks the background model by player count (`Gm_GetPlyViewNum` -> 1/2/4P slot) from `Game3dData` and loads it with `HUD_CreateMiscGObj(jobj, 0x1b, 0x15, 1)` - `p_link` 27 (`PAUSEHUD`), `gx_link` 21, `gx_pri` 1
-2. Attaches `HUDElementData` via `3DHud_AddData(..., kind = HUDKIND_CITYSTATBG)`; the GObj's `entity_class` is still 27
+2. Attaches `HUDElementData` via `HUD_AddElementData(..., kind = HUDKIND_CITYSTATBG)`; the GObj's `entity_class` is still 27
 3. Extracts world positions with `JObj_GetWorldPosition` (0x80053f34) from background child JObjs 1-9, the 9 stat slot positions
 4. Stores those 9 `Vec3`s in the background's `HUDElementData` starting at +0x14
 5. Adds a per-frame proc at priority 20; the bars themselves are created separately, one per stat kind 0-8
 
-`City_CreateStatChartBar(ply, ply2, stat_kind)` (0x80129154):
+`CityHUD_CreateStatBar(ply, ply2, stat_kind)` (0x80129154):
 
 1. Loads the gauge from IfAll1c (`ScInfPausegaugect_scene_models`) with the same `HUD_CreateMiscGObj` parameters
-2. Attaches `HUDElementData` via `3DHud_AddData(..., kind = HUDKIND_CITYSTATBAR)` and stores `stat_kind` at +0x14
+2. Attaches `HUDElementData` via `HUD_AddElementData(..., kind = HUDKIND_CITYSTATBAR)` and stores `stat_kind` at +0x14
 3. Caches child JObjs by depth-first index: 1 -> `bar_j`, 6 -> `sign_j`, 5 -> `num_left_j`, 4 -> `num_right_j`
 4. Reads its slot position out of the background's stored positions (`background_data + 0x14 + stat_kind * 0xc`), writes it into the gauge root JObj `trans`, then marks the matrix dirty
 
@@ -286,7 +284,7 @@ Indices 1, 4, 5 and 6 are all direct children of the root. A lone digit drawn on
 
 ### Value Display Logic
 
-The vanilla proc reads `Patch_GetPlySavedValue(ply, stat_kind, 0)`, adds 2 for stat kinds 0-7 (kind 8 uses the raw value), then drives the bar with `HUD_UpdateElement(bar_j, value)` when the value is positive, hides `sign_j` unless the value is `<= -10`, and updates or hides the two digit JObjs on the `|value| < 10` vs `>= 10` split. The "+2" offset is why a fresh stat slot reads "2"; the bar only fills for positive values.
+The vanilla proc reads `Ply_GetCityStatNum(ply, stat_kind, 0)`, adds 2 for stat kinds 0-7 (kind 8 uses the raw value), then drives the bar with `HUD_UpdateElement(bar_j, value)` when the value is positive, hides `sign_j` unless the value is `<= -10`, and updates or hides the two digit JObjs on the `|value| < 10` vs `>= 10` split. The "+2" offset is why a fresh stat slot reads "2"; the bar only fills for positive values.
 
 ## Legendary Piece HUD
 
@@ -359,4 +357,4 @@ The Gourmet Race score display (`mods/custom_events/src/event_gourmet_race.c`) u
 ## Constraints
 
 - The models are drawn with the colors baked into their MObjs. There is no runtime per-JObj material or color override in use anywhere in the repo, so per-player tinting would need new work at the MObj level.
-- Screen positions of the game's own stat bars are only knowable indirectly, through the 9 slot positions the background model exposes to `City_CreateStatChart`. Custom elements placed by absolute coordinates can overlap them.
+- Screen positions of the game's own stat bars are only knowable indirectly, through the 9 slot positions the background model exposes to `CityHUD_CreateStatChart`. Custom elements placed by absolute coordinates can overlap them.

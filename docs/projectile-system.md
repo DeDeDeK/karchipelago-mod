@@ -252,7 +252,7 @@ are copied from HurtData regions 0/1, and the fade/alpha ramp is read from the r
    (`proj+0x104`, via `Projectile_AllocRenderState` `0x802205b0`), two particle-effect handles
    (`proj+0x114`/`0x118`, via `0x802364e0`), text/vfx slot, `mpColl` CollData (`proj+0x138`, if the
    kind wants one), anim object, and HurtData via `Projectile_InitHurtData`. The model joint comes
-   from `HSD_JObjLoadJoint` (`0x8040afe8`) on `kind_data->model_desc`, or a global default when NULL.
+   from `JObj_LoadJoint` (`0x8040afe8`) on `kind_data->model_desc`, or a global default when NULL.
 5. Call the per-kind `init`.
 6. Register the ten GObj procs.
 7. Run `Projectile_InitRuntimeState` (`0x8021f2a0`) and its chain to zero accel/velocity, seed

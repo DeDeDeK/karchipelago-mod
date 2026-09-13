@@ -189,7 +189,7 @@ Raycast helpers on this path: `Item_Raycast` (`0x802546e4`) walks `Raycast_Groun
 
 ### Spawning items from mod code
 
-`Item_InitDesc` (`0x802509a0`, `CityItem_InitDesc` in the symbol map) takes **13 parameters**: 8 GPR (r3-r10), 1 FPR (f1, the scale), and 4 on the stack. The GC EABI does not shadow floats in GPRs, so the float argument does not consume a GPR slot and the last four arguments genuinely go on the stack. Pass all 13 - a short call leaves the stack four with garbage, and garbage in the `coll_kind` slot is the crash above.
+`Item_InitDesc` (`0x802509a0`) takes **13 parameters**: 8 GPR (r3-r10), 1 FPR (f1, the scale), and 4 on the stack. The GC EABI does not shadow floats in GPRs, so the float argument does not consume a GPR slot and the last four arguments genuinely go on the stack. Pass all 13 - a short call leaves the stack four with garbage, and garbage in the `coll_kind` slot is the crash above.
 
 The prototype is in `externals/hoshi/include/item.h`. The four stack arguments are, in order, `is_airborne`, `coll_kind`, `x38` and `x3c` (the last two map to `ItemData[0x34]` / `[0x38]` and are `-1` in every vanilla caller).
 

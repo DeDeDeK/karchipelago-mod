@@ -39,7 +39,7 @@ CityTrial_Check*Objectives    --accumulates-->  records block (CityTrial GameCle
 
 All six CT evaluators share a skeleton: bail unless `Checklist_IsCacheValid()`
 (`0x8007b650`) returns 0, then loop player slots 0..4, gate on
-`Ply_GetPKind(player)` (`0x8022c858`, `plGetPlayerKind` in the map; `0` = human),
+`Ply_GetPKind(player)` (`0x8022c858`; `0` = human),
 and call `ClearChecker_SetNewUnlock(2, kind)` (`0x8004a054`) for each met
 threshold. Per-game cells test a stat directly; cumulative cells fold the
 per-game value into the records block first. **Scope varies**: some accumulators
@@ -324,7 +324,7 @@ of the 24 `StadiumKind`s are unlocked, regardless of whether each was actually p
 
 The drag-race finish-time field `GameData+0x8B8[p]` and the polymorphic score
 field `GameData+0xA38[p]` are unit-`1/60 s` and plain-int respectively.
-`(IsBike, Mk)` = `Ply_GetIsBike` (PlayerData `+0x8E`, `0x8022c8b0`) and
+`(IsBike, Mk)` = `Ply_GetMachineIsBike` (PlayerData `+0x8E`, `0x8022c8b0`) and
 `Ply_GetMachineKind` (PlayerData `+0x8F`, `0x8022c8e0`); these are *per-category*
 machine indices, distinct from `VCKIND_*`.
 
@@ -553,7 +553,7 @@ accumulators: each sums `PKIND_HMN` (0) players always, plus `PKIND_CPU` (1) pla
 **only when** the mode is `AIRRIDEMODE_TIME` (1) - so a Time-Attack CPU's laps/etc. fold
 into the cross-game totals, while in Race/Free Run only human players are summed.
 
-**gr_kind -> stage** (`Stage_GetGrKindFromStageKind`, `0x80261ce8`): 0 = Fantasy
+**gr_kind -> stage** (`Gm_GetGrKindFromStageKind`, `0x80261ce8`): 0 = Fantasy
 Meadows, 1 = Magma Flows, 2 = Sky Sands, 3 = Checker Knights, 4 = Celestial
 Valley, 5 = Machine Passage, 7 = Beanstalk Park, 8 = Frozen Hillside (gr_kind 6
 is not used by the checklist). This engine gr_kind is **not** the `AirRideCourse`
@@ -657,7 +657,7 @@ The Fantasy Meadows >=20 mph cell (0x60) runs on a pair of bits.
 `AirRide_TrackMinLapSpeed` (`0x80231670`) is the per-frame watcher. It is not called
 directly: `Ply_UnkUpdate` (`0x80231340`, reached each frame per rider from
 `RiderThink_Unk` at `0x8018fc40`) resolves the stage group via
-`Stage_GetGrKindFromStageKind(Gm_GetCurrentStageKind())` and tail-dispatches through a
+`Gm_GetGrKindFromStageKind(Gm_GetCurrentStageKind())` and tail-dispatches through a
 group-indexed function-pointer table at `0x804b4cb8`. Only two slots are populated -
 group 0 -> `AirRide_TrackMinLapSpeed`, group 7 -> `0x80231700` (the Beanstalk Ferris-wheel
 tracker) - with group 9 handled by a separate `bl 0x8023177c`. So the watcher only runs
@@ -670,7 +670,7 @@ What it measures is `MachineData.world_velocity` (`+0x354`) - the machine's *mea
 per-frame displacement, computed by `Machine_ShadowThink` (`0x801c69f0`) as
 `pos (0x3e8) - prev_pos (0x3f4)`, not the commanded velocity at `+0x324`. Collisions,
 wall scrapes and slope drag are therefore already folded in. The watcher takes
-`PSVECMagnitude` of that vector, divides by the mile/km constant `1.609344` (double at
+`VECMag` of that vector, divides by the mile/km constant `1.609344` (double at
 `0x805e2a58`) and compares against `0.8101851f` (`0x805e2a60`); below that - or with the
 player on foot, since a null machine GObj takes the same branch - it clears `+0x84c`
 bit4. That is a raw threshold of **1.303867 world units per frame**, so the "mph" the

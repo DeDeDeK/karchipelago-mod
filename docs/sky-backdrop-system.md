@@ -30,14 +30,11 @@ you can graft into any other stage that respects `ModelSection`.
 
 ### CreateStageModel_3D (0x800dcbf0) - the loader
 
-Spelled `3D_CreateStageModel` in `GKYE01.map`; the leading digit is illegal in a linker
-symbol, so `link.ld` and the hoshi prototype reverse it.
-
 Reads `grdata->model_section` and instantiates each populated slot with
-`HSD_JObjLoadJoint`. The terrain joint goes to `GObj_AddObject` on the ground GObj; the
+`JObj_LoadJoint`. The terrain joint goes to `GObj_AddObject` on the ground GObj; the
 backdrop joint is parked in `GrObj.backdrop_jobj` (`+0xF4`) with no GObj of its own. Both
 get `grGetStageScale()` stamped into the root joint's scale at `JObj+0x2C/30/34`. If
-`ms.backdrop == NULL`, `GrObj+0xF4` is set to NULL and the second `HSD_JObjLoadJoint` is
+`ms.backdrop == NULL`, `GrObj+0xF4` is set to NULL and the second `JObj_LoadJoint` is
 skipped - no crash.
 
 `grGetStageScale` (0x800d3058) returns `grdata->stage_node->StageScale` (`StageNode+0x08`)
@@ -61,7 +58,7 @@ callback picks a random enabled entry, rebuilds that backdrop's subtree out of t
 disc, and rewrites `grdata->model_section->backdrop` to point at it. The stock loader then
 instantiates the foreign backdrop subtree as if it were native to this stage.
 
-This is the simplest possible swap - no manual `HSD_JObjLoadJoint` / `HSD_JObjAddNext`, no
+This is the simplest possible swap - no manual `JObj_LoadJoint` / `JObj_AddNext`, no
 GX callback. The loader handles all of it; the mod just lies about which `JOBJDesc *` it
 should use.
 

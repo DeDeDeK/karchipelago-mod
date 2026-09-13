@@ -2,7 +2,7 @@
 
 Each of the 24 City Trial stadiums can be individually locked behind an Archipelago unlock item. AP items 400-423 (`AP_STADIUM_UNLOCK_BASE` + `StadiumKind`) route through `ap_item_handler.c` to `GateStadiums_UnlockStadium(kind, /*announce=*/1)`, which sets the bit in `APSave.stadium_unlocked_mask`, ORs the kind into the vanilla "NEW" badge bitfield, and posts an `"Unlocked Stadium: <name>"` textbox with `tb_api->StadiumColor`. A locked stadium is excluded from both shuffle-mode and group-mode round selection and hidden from the stadium-list UI. The vanilla unlock-check pipeline and the per-round selector are both replaced outright.
 
-**File:** `mods/archipelago/src/gate_stadiums.c`. Function names follow `externals/hoshi/include/stadium.h` and `link.ld`; the symbol map names two of them differently - 0x8000C148 is `CityTrial_CheckIfStadiumIsDefaultUnlocked` and 0x8000C17C is `CityTrial_CheckStadiumIsUnlocked` there.
+**File:** `mods/archipelago/src/gate_stadiums.c`.
 
 | Group | Stadiums | AP items |
 |-------|----------|----------|

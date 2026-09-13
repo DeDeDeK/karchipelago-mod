@@ -75,7 +75,7 @@ It then overrides `ItemData.lifetime` (+0x44) to `GOURMET_ITEM_LIFETIME` (30000,
 
 A single watcher GObj on `GAMEPLINK_1` runs `GourmetRace_WatcherProc` at priority 0. That link is chosen for two properties:
 - **It freezes with the pause.** Pause kind 1 freezes plinks 1-17, while plink 0 (`GAMEPLINK_SYS`) keeps running, so respawn timers stop while the game is paused.
-- **It runs before the event proc.** `GObj_Proc` runs procs of equal priority in plink order, so the watcher runs ahead of `CityEvent_Think` on `GAMEPLINK_CITYEVENTSPAWN` (2). `End2` therefore never sees a food that was eaten after the last watcher pass.
+- **It runs before the event proc.** `GObj_UpdateAll` runs procs of equal priority in plink order, so the watcher runs ahead of `CityEvent_Think` on `GAMEPLINK_CITYEVENTSPAWN` (2). `End2` therefore never sees a food that was eaten after the last watcher pass.
 
 The watcher owns a `FoodSlot` array. Each slot holds:
 - the item GObj (NULL while eaten);

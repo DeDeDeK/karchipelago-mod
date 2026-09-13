@@ -4,7 +4,7 @@
 
 Walks the JObj tree at <symbol>[<slot>], accumulates each joint's
 T*R*S transform (with the ROOT joint's scale forced to identity, since
-3D_CreateStageModel overwrites the runtime root scale with the stage's
+CreateStageModel_3D overwrites the runtime root scale with the stage's
 grStageScale at load), parses every POBJ's display list to collect the
 position indices actually drawn, decodes the indexed F32/S16 position
 buffer, and reports the bounding box / radius about the root origin.

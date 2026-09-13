@@ -18,7 +18,7 @@ Parameters: 900-frame duration (~15 s), siren intro, sky preset 3 (Dusk 2), BGM 
 Collision is pre-baked, world-scale spatial data that nothing rescales at runtime:
 - `Raycast_Do` (0x800d9958) reads a triangle array at `(*stc_grobj)+0x5c` (stride `0x40`) and a BVH whose nodes carry baked world-space AABBs.
 - Machine **sphere** collision (`mpColl_UpdateCollision`, 0x802485e0) reads the same triangle data directly.
-- The stage `scale` field (`StageNode+0x08`, read by `grGetStageScale` 0x800d3058) only feeds visual JObj setup in `3D_CreateStageModel` (0x800dcbf0) at load. Writing it at runtime moves neither the mesh nor the BVH, and machines fall through the floor.
+- The stage `scale` field (`StageNode+0x08`, read by `grGetStageScale` 0x800d3058) only feeds visual JObj setup in `CreateStageModel_3D` (0x800dcbf0) at load. Writing it at runtime moves neither the mesh nor the BVH, and machines fall through the floor.
 
 Truly scaling collision would mean rewriting every triangle vertex, every BVH AABB and their plane constants, then reversing it exactly when the event ends. Hooking the ground raycast (`Raycast_Ground` 0x800d1ac4) to transform ray coordinates does not help either, because the machine sphere path does not go through it.
 
@@ -73,7 +73,7 @@ The shim replaces the eye-set call inside `PlyCam_Think` (0x800b3540) instead of
 - The camera is recomputed from scratch every frame *after* most game logic, so an external write would be overwritten.
 - `PlyCam_Think`'s own input (`CamData.x14`) is recomputed inside the same function just before it is consumed, so there is nothing to pre-seed.
 
-Intercepting the final `CObj_SetEyePosition` (0x804018ac, map name `HSD_CObjSetEyePosition`) puts the shim downstream of the entire camera pipeline: kind dispatch, C-stick `zoom_amt`, rail/normal transitions. It works regardless of how the eye was produced. The interest was written to the same COBJ by the `bl CObj_SetInterest` one instruction earlier (0x800b38f4), so the shim reads the dolly target straight back off the COBJ, with no capture and no lag.
+Intercepting the final `CObj_SetEyePosition` (0x804018ac) puts the shim downstream of the entire camera pipeline: kind dispatch, C-stick `zoom_amt`, rail/normal transitions. It works regardless of how the eye was produced. The interest was written to the same COBJ by the `bl CObj_SetInterest` one instruction earlier (0x800b38f4), so the shim reads the dolly target straight back off the COBJ, with no capture and no lag.
 
 ## Implementation
 

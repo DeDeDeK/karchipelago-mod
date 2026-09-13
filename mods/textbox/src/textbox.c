@@ -143,7 +143,7 @@ static void TextBox_ApplyTypewriter(TextBoxMessage *msg)
     if (!msg || !msg->text)
         return;
 
-    // Text_GXLink only copies char_delay_init across at a TEXTCMD_SUBTEXT_RESET/BREAK (0x80451cec),
+    // Text_GX only copies char_delay_init across at a TEXTCMD_SUBTEXT_RESET/BREAK (0x80451cec),
     // which these TEXTCMD_POS-delimited buffers never contain, so the live temp fields are seeded
     // directly. The renderer reloads temp each render and never clears it, so one write persists.
     msg->text->temp.char_delay  = msg->typewriter_dwell;
@@ -620,7 +620,7 @@ int TextBox_EnqueueSegments(const TextSegment *segs, int seg_count)
         return 0;
     if (seg_count <= 0 || seg_count > TEXTBOX_MAX_SEGMENTS)
         return 0;
-    // Text_CreateGObj (0x8044f198) reads the canvas list head with no NULL check, so an enqueue
+    // Text_CreateTextManual (0x8044f198) reads the canvas list head with no NULL check, so an enqueue
     // before hoshi creates the canvas on the first scene change faults.
     if (!*stc_textcanvas_first)
     {

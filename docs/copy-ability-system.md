@@ -71,11 +71,11 @@ Teardown is layered; the drop path calls the top and each layer calls the next:
 
 `Rider_AbilityRemoveModel` (0x80191554) is the universal front door: if `copy_kind` or `powerup_kind` is set it invokes the installed teardown slots (+0x7f8 then +0x7fc), so it handles every ability. It does **not** play the spit-out animation.
 
-`AS_LoseCopyAbility` (0x801b0adc, aka `Rider_LoseAbilityState_Enter`) is only the spit-out animation: it `RiderStateChange`s to action-state `0x68`. It performs no teardown, so on its own the ability is not lost - every engine caller runs a revert first.
+`Rider_LoseAbilityState_Enter` (0x801b0adc) is only the spit-out animation: it `RiderStateChange`s to action-state `0x68`. It performs no teardown, so on its own the ability is not lost - every engine caller runs a revert first.
 
 ## The Two Ways An Ability Leaves
 
-- **Expiry / use up** - the per-frame `cb_ability_tick` sees `copy_timer == 0` (or ammo/fuel gone), runs the per-ability revert, then `AS_LoseCopyAbility` for the spit animation.
+- **Expiry / use up** - the per-frame `cb_ability_tick` sees `copy_timer == 0` (or ammo/fuel gone), runs the per-ability revert, then `Rider_LoseAbilityState_Enter` for the spit animation.
 - **Replacement** - a new inhale calls `Rider_GiveAbility`, which calls `Rider_AbilityRemoveModel` to strip the old ability (no spit animation) before granting the new one.
 
 ## Forcing A Drop From Mod Code
@@ -84,7 +84,7 @@ To discard the held ability from a mod (a manual "drop ability" control, a trap)
 
 ```c
 Rider_AbilityRemoveModel(rd);     // teardown: copy_kind = -1, poof VFX/SFX, model/hat removed
-Rider_LoseAbilityState_Enter(rd); // AS_LoseCopyAbility spit-out animation
+Rider_LoseAbilityState_Enter(rd); // spit-out animation
 ```
 
-Call these only when `rd->copy_kind != COPYKIND_NONE`. `Rider_AbilityRemoveModel` clears `copy_kind`, so a per-frame trigger that re-checks it won't re-fire. Calling `AS_LoseCopyAbility` alone would play the animation but leave the ability equipped.
+Call these only when `rd->copy_kind != COPYKIND_NONE`. `Rider_AbilityRemoveModel` clears `copy_kind`, so a per-frame trigger that re-checks it won't re-fire. Calling `Rider_LoseAbilityState_Enter` alone would play the animation but leave the ability equipped.

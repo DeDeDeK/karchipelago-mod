@@ -69,9 +69,9 @@ GrObj  (gr_kind=9, City Trial)
 | 0x800eef04  | `Sky_AllocFade`                            | `grobj+0x714 = ScreenFade_Alloc(3)`. |
 | 0x800eef50  | `Sky_BeginFade(grobj, &color, frames)`     | `ScreenFade_GetState(3)` then `ScreenFade_Begin`. |
 | 0x800eefb0  | `Sky_FreeFade`                             | Frees the lbfade slot at scene teardown. |
-| 0x800b04a8  | `World_CObj`                               | World-camera GObj GX callback. At +0x144 (0x800b05ec) it loads the global fog color from 0x80557484 and pushes it through `HSD_SetEraseColor` (0x8040f884). |
+| 0x800b04a8  | `World_CObj`                               | World-camera GObj GX callback. At +0x144 (0x800b05ec) it loads the global fog color from 0x80557484 and pushes it through `CObj_SetEraseColor` (0x8040f884). |
 | 0x8041b0fc  | `HSD_FogSet`                               | Reads the live `HSD_Fog`, queries current CObj near/far, emits `GXSetFog` and `GXSetFogColor`. |
-| 0x80057468  | `LObj_CreateAll`                           | Walks a NULL-terminated `LObjDesc**` array, `HSD_LObjLoadDesc` per entry, links them via `LOBJ.next`. |
+| 0x80057468  | `LObj_CreateAll`                           | Walks a NULL-terminated `LObjDesc**` array, `LObj_LoadDesc` per entry, links them via `LOBJ.next`. |
 | 0x803ff570 | `HSD_LObjSetCurrentAll` | Each frame: clears the 9-slot table at 0x805899B0 (`stc_lobj_hw_slot_table` in `obj.h`), re-walks the list, assigns each LOBJ a hardware slot. |
 | 0x803fe4b8  | `HSD_LObjSetupInit`                        | Bakes each active LOBJ into a hardware light register via `GXInitLight*` + `GXLoadLightObjImm`, and rebuilds the three global light-mask words. |
 | 0x8042a22c  | `LObj_GX`                                  | GX callback for an LObj-bearing GObj: `HSD_LObjSetCurrentAll` then `HSD_LObjSetupInit`. |
@@ -227,7 +227,7 @@ both:
 Sky_Update -> HSD_Fog.start/end/color -> Fog_GX (gx_link 0, pri 1) -> HSD_FogSet
                 -> GXSetFog + GXSetFogColor -> per-pixel TEV blend
 
-Sky_Update -> 0x80557484 (BSS) -> World_CObj+0x144 -> HSD_SetEraseColor -> 0x805dcb88
+Sky_Update -> 0x80557484 (BSS) -> World_CObj+0x144 -> CObj_SetEraseColor -> 0x805dcb88
                 -> GX_SetCopyClear on the next CopyDisp
 ```
 
@@ -236,7 +236,7 @@ the previous color (visible as contrasting borders where the camera does not fil
 viewport); changing only 0x80557484 does the reverse.
 
 `HSD_FogSet` (0x8041b0fc) reads the *current* COBJ's near/far via
-`HSD_CObjGetCurrent`/`Get{Near,Far}`, then emits
+`COBJ_GetCurrent`/`Get{Near,Far}`, then emits
 `GXSetFog(type, start, end * HSD_Fog.scale, near, far, &color)`. The `scale` multiplier at
 `HSD_Fog+0x20` is the cleanest global lever on the fog far wall. `Fog_GX` runs once per
 camera/render-pass, so mid-frame fog color changes are visible on the next pass.
@@ -357,7 +357,7 @@ GX-rendered; the third exists only as a default-value source for the AreaLight.
 | Creator | Role | GObj class | gx_link | Chain source | AddProc |
 |---------|------|------------|---------|--------------|---------|
 | `Light_CreateForStage` (0x800d5fd0) | primary GX lights | 1 | 0 | `stage_resource[+0x14][+0x00]` | 0x800d5f3c - per-LOBJ `HSD_LObjAnim` (skips AOBJ flag 0x40000000) + stage scale |
-| `Light_CreateForStageSecondary` (0x800d60d8) | secondary GX lights | 20 | 8 | `stage_resource[+0x14][+0x08]` | 0x800d6094 - `HSD_LObjAnimAll`, no filter |
+| `Light_CreateForStageSecondary` (0x800d60d8) | secondary GX lights | 20 | 8 | `stage_resource[+0x14][+0x08]` | 0x800d6094 - `LObj_AnimAll`, no filter |
 | `Light_CreateAreaLightDefaults` (0x800d6188) | AreaLight defaults, not rendered | - | - | `stage_resource[+0x14][+0x04]` | none |
 
 `Light_GX` (0x800d5fb0) and the secondary's callback (0x800d60b8) are byte-identical
@@ -379,7 +379,7 @@ both bound to slot 8 (last writer in insertion order wins), primary infinite in 
 secondary infinite in slot 1. The defaults chain is never registered with the active list
 and consumes no slot. Roughly 5-6 hardware slots stay free for custom lights.
 
-Of the 24 `bl HSD_LObjLoadDesc` call sites, 1 is `LObj_CreateAll` and 23 are menu / CSS /
+Of the 24 `bl LObj_LoadDesc` call sites, 1 is `LObj_CreateAll` and 23 are menu / CSS /
 mode-select / HUD / effects code. **There are zero gameplay-time non-stage HSD light
 spawns.** Every "light" you see during gameplay (lighthouse, light tunnel, fireworks event,
 item glow, projectile flash) is textured or animated geometry and material-color tricks.
@@ -401,7 +401,7 @@ AddProc-filtering only.
 ### Sky_SetupLights and the CT glow billboards
 
 `Sky_SetupLights` (0x800db774, 0x5C bytes) picks `joint_table[jobj_index].jobj` from
-`grobj+0x104`, calls `HSD_JObjSetFlagsAll(jobj, 16)` to force render flag bit 4 on the
+`grobj+0x104`, calls `JObj_SetFlagsAll(jobj, 16)` to force render flag bit 4 on the
 whole subtree, then finds that JOBJ's collision zone via `grScene_FindInstanceByKey`
 (0x800d7954) and calls `grScene_SetInstanceColl(zone, 0)` (0x800d7ad0) to disable collision
 on every one of its faces. No HSD light object is created or touched.
@@ -542,7 +542,7 @@ move, rotate, or darken a CT shadow. There are two unrelated shadow systems in t
 
 The lighting-aware path is not on the CT path: `fn_makeShadow` is reached only from a Top
 Ride mode-init routine (0x802823fc), where it asserts "can't find shadow light", reads a
-light's direction as normalized `HSD_LObjGetPosition - HSD_LObjGetInterest`, and builds a
+light's direction as normalized `LObj_GetPosition - LObj_GetInterest`, and builds a
 projection camera from it. CT never invokes it.
 
 ### SimpleShadow mechanics (the CT path)
@@ -564,7 +564,7 @@ projection camera from it. CT never invokes it.
   `SimpleShadow_UpdatePos_` (0x8027b588) the position; `CityItem_UpdateShadowSizeAndVis`
   (0x80261aa8) is the item variant.
 - **Render** is `SimpleShadow_GX` (0x8027ae50) walking the manager's list and
-  `HSD_JObjDispAll`ing each enabled blob, wrapped in `HSD_FogSet`. The blob
+  `JObj_DispAll`ing each enabled blob, wrapped in `HSD_FogSet`. The blob
   material/texture/blend is a static descriptor set by `Shadow_MObjCallback` (0x8027bd68).
 - **Per-entity enable gating** reads entity state bits:
   `Rider_UpdateSimpleShadowRender` (0x80195800) on `RiderData+0x825`/`+0x821`;

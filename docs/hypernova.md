@@ -224,7 +224,7 @@ collision-force driven, not damage-driven.
 
 **Skeleton-joint families.** The static families (houses 38, walls 36, holes 37, floor 32,
 BigStar 29) have plain JObjs whose world matrix can be written directly. The **weak** families
-(trees 34, rocks 35, coral 33) are `JOBJ_SKELETON` joints: `HSD_JObjSetupMatrixSub`
+(trees 34, rocks 35, coral 33) are `JOBJ_SKELETON` joints: `JObj_SetupMtxSub`
 (`0x8040d6b4`) rebuilds their world matrix from the joint SRT every frame, clobbering a plain
 write. `Hypernova_PullInstance` sets `JOBJ_USER_DEFINED_MTX` on each joint first, which makes
 that setup keep our matrix (idempotent for the static families).
@@ -325,7 +325,7 @@ the flight continues.
 
 - **`hitStrongObject`** (walls 36 / holes 37 / houses 38) does the whole visible break
   **inline** at the passed contact point - retires collision, hides the mesh
-  (`HSD_JObjSetFlagsAll`), spawns debris, and calls the per-desc **item-drop** handler from the
+  (`JObj_SetFlagsAll`), spawns debris, and calls the per-desc **item-drop** handler from the
   `0x804a70b4` table (`GrYakuBreak*_DropItems`). A pulled-in house therefore breaks correctly at
   the rider with nothing left behind.
 - **`hitWeakObject`** (coral 33 / trees 34 / rocks 35) does **not** hide the original mesh
@@ -608,7 +608,7 @@ id = 0x3a982, ...)` (`0x80236c40`) and **discards the handle** - nothing on the 
 back to it. It is a standalone **GObj carrying a JObj model tree**, positioned at the mouth bone
 each frame:
 
-- render callback `GObj+0x1c (gx_cb) = 0x8023dfe0` (a thin wrapper around `GObj_RenderJObj` `0x8042a258`), destructor
+- render callback `GObj+0x1c (gx_cb) = 0x8023dfe0` (a thin wrapper around `JObj_GX` `0x8042a258`), destructor
   `GObj+0x30 = 0x80233ddc` - both in the Effect module.
 - It has no point-particle component, so the engine's per-particle color fields do not reach it.
 - It is a real JObj model: scaling local scale or the world matrix visibly grows it. It has at

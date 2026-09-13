@@ -2,13 +2,11 @@
 
 SIS (String Image Set) files are HSD archives holding pre-composed text strings for in-game UI. The runtime renders those, and ad-hoc C-format strings, through a single GX path that walks a stream of opcodes, looks up 32x32 I4 glyph bitmaps, and emits one textured quad per character.
 
-A few entry points carry one name in the symbol map and another in `link.ld` / `externals/hoshi/include/text.h`; mod code links against the `link.ld` names. `Text_CreateTextCanvas` is exported as `Text_CreateCanvas` (0x8044f674), `Text_GXLink` as `Text_GX` (0x804516e4), and `Text_Create` as `Text_CreateText` (0x8044fa70).
-
 ## Rendering paths
 
 Three unrelated text paths exist in the binary:
 
-1. **SIS text** - the main UI path. Every menu, HUD, dialogue, results, event and checklist string goes through `Text_GXLink` (0x804516e4) as texture-mapped 32x32 I4 glyphs.
+1. **SIS text** - the main UI path. Every menu, HUD, dialogue, results, event and checklist string goes through `Text_GX` (0x804516e4) as texture-mapped 32x32 I4 glyphs.
 2. **DevText** - a debug-only stroke (vector) font drawn with `GX_LINES`, used by `3DDebug_*` and the developer menus. 7-bit ASCII, 10x16 px cells.
 3. **OS font (IPL)** - the GameCube SDK font (`OSInitFont` 0x803d6e20, `OSGetFontTexture` 0x803d6f00, `OSGetFontTexel` 0x803d676c), driven by the `OSText_DrawString` family (0x8038bf64). Used only by the Top Ride 2D debug menu and CSS overlays. Shift-JIS aware; mojibakes on NA without an encoding-cache pin. `OSLoadFont` is absent from this build. Not reachable from a `Text` element.
 
@@ -37,7 +35,7 @@ The DevText stroke font is a separate blob at `0x805053f8`: a variable-length pe
 
 ## The opcode stream
 
-Text data is a byte stream parsed from `text->text_start`. Bytes below `0x20` are opcodes; bytes `0x20` and up begin a 2-byte big-endian glyph code. The authoritative list is the `TextCmdOpcode` enum in `externals/hoshi/include/text.h`, which carries each opcode's byte size and operands. Three consumers interpret it: `Text_GXLink` (0x804516e4) draws, `Text_DetermineHeightAndWidth` (0x80451344) measures, and `Text_StorePremadeText` (0x8044f9d4) counts subtexts. Dispatch is a jump table at `0x8050983c` covering `0x00`-`0x1a`; glyphs and the `0x1b`-`0x1f` no-ops fall to the handler at 0x80452210.
+Text data is a byte stream parsed from `text->text_start`. Bytes below `0x20` are opcodes; bytes `0x20` and up begin a 2-byte big-endian glyph code. The authoritative list is the `TextCmdOpcode` enum in `externals/hoshi/include/text.h`, which carries each opcode's byte size and operands. Three consumers interpret it: `Text_GX` (0x804516e4) draws, `Text_DetermineHeightAndWidth` (0x80451344) measures, and `Text_StorePremadeText` (0x8044f9d4) counts subtexts. Dispatch is a jump table at `0x8050983c` covering `0x00`-`0x1a`; glyphs and the `0x1b`-`0x1f` no-ops fall to the handler at 0x80452210.
 
 A walker advances by the opcode's operand count plus one, or by two for a glyph code. `Text_NextOpcode` in `externals/hoshi/include/text.h` is that step, and `Text_GetSubtext` / `Text_GetCommand` are built on it. Only `0x05` DELAY (2), `0x06` TIMING (4), `0x07` POS (4), `0x08` JUMP (4), `0x09` CALL (4), `0x0a` POSPUSH (4), `0x0c` COLOR (3) and `0x0e` SCALE (4) carry operands; everything else below `0x20` is a bare byte. JUMP and CALL are only nominally that width - the renderer follows their absolute pointer instead, so a linear walk cannot cross one.
 
@@ -82,7 +80,7 @@ In pre-composed SIS data, gaps between words are the `0x1a` SPACE opcode, not th
 
 ## Color pipeline
 
-`Text_GXLink` sets one TEV stage once per draw (from 0x80451a10):
+`Text_GX` sets one TEV stage once per draw (from 0x80451a10):
 
 - `GXSetTevColorIn(0, 0xF, 0xF, 0xF, 2)` at 0x80451a1c, so RGB comes entirely from TEV register 1 with no texture color contribution.
 - `GXSetTevAlphaIn(0, 7, 4, 1, 7)`, so glyph alpha from the I4 texture is modulated by the register's alpha.
@@ -139,7 +137,7 @@ Each `Text_AddSubtext` writes its `0f 0d 00` trailer at the heap cell's write po
 
 The engine has a built-in dwell-paced reveal that costs nothing per frame: set the per-glyph dwell in frames and the renderer uncovers one glyph at a time on its own, with no buffer mutation. `0` reveals everything instantly.
 
-Inside `Text_GXLink`, subtext setup loads `temp.reveal_count` (`+0x98`) at 0x80451c3c and `temp.char_delay` / `temp.space_delay` (`+0x90` / `+0x92`) into working registers at 0x80451c34. The opcode loop decrements the reveal counter for each already-revealed glyph while still drawing it; when the counter hits zero it has reached the frontier, so it draws that glyph, increments `reveal_count`, copies `char_delay` into `wait_countdown` (`+0x94`), and points `text_end` (`+0x60`) just past the glyph (0x80452618-0x80452640). SPACE reveals identically using `char_delay` (0x804521f4); LINEBREAK and DELAY consume steps too, using `space_delay` or their own operand. POS and COLOR are processed for free without consuming a step. On the next render the loop head pauses while `parse_ptr == text_end && wait_countdown != 0`, decrementing once per render (0x80451c44-0x80451c78), and releases after `char_delay` frames.
+Inside `Text_GX`, subtext setup loads `temp.reveal_count` (`+0x98`) at 0x80451c3c and `temp.char_delay` / `temp.space_delay` (`+0x90` / `+0x92`) into working registers at 0x80451c34. The opcode loop decrements the reveal counter for each already-revealed glyph while still drawing it; when the counter hits zero it has reached the frontier, so it draws that glyph, increments `reveal_count`, copies `char_delay` into `wait_countdown` (`+0x94`), and points `text_end` (`+0x60`) just past the glyph (0x80452618-0x80452640). SPACE reveals identically using `char_delay` (0x804521f4); LINEBREAK and DELAY consume steps too, using `space_delay` or their own operand. POS and COLOR are processed for free without consuming a step. On the next render the loop head pauses while `parse_ptr == text_end && wait_countdown != 0`, decrementing once per render (0x80451c44-0x80451c78), and releases after `char_delay` frames.
 
 **The `char_delay_init` trap.** The only write to `temp.char_delay` in the renderer is at 0x80451cec, inside the `0x01`/`0x02` SUBTEXT handler. `Text_AddSubtext` buffers are delimited by `0x07` POS headers and contain no `0x01` or `0x02`, so that copy never fires: `temp.char_delay` stays 0, every reveal sets `wait_countdown = 0`, and the whole buffer appears on frame one. Runtime-composed text must seed `temp.char_delay` (and `temp.space_delay`) directly. The renderer reloads them at every render top and never clears them, so a single write at creation persists.
 
@@ -155,9 +153,9 @@ Text canvases are orthographic 640x480 in raw pixels (`TEXT_CANVAS_W` / `TEXT_CA
 
 ### Pass model
 
-`Text_GXLink(gobj, pass)` handles two passes and early-returns on anything else.
+`Text_GX(gobj, pass)` handles two passes and early-returns on anything else.
 
-Pass 0 is camera-level setup, reached through `CObjThink_Common` (0x8042a29c): `GXSetViewport(0,0,640,480)`, `GXSetScissor(0,0,640,480)`, and `C_MTXOrtho(0,-480,0,640,0,2)`.
+Pass 0 is camera-level setup, reached through `CObjThink_Common` (0x8042a29c): `GXSetViewport(0,0,640,480)`, `GXSetScissor(0,0,640,480)`, and `MTXOrtho(0,-480,0,640,0,2)`.
 
 Pass 2 is the per-Text draw. It pulls `Text *t` from `gobj->userdata`, early-returns if `hidden` or `text_start` is null, picks the Z mode from `is_depth_compare`, loads the view matrix, sets vertex format, TEV and blend state, **invokes `render_callback`**, draws the optional `viewport_color` background, and then runs the opcode interpreter.
 
@@ -167,8 +165,8 @@ Pass 2 is the per-Text draw. It pulls `Text *t` from `gobj->userdata`, early-ret
 
 1. Allocates a `TextCanvas` and chains it onto `stc_textcanvas_first` (0x805de56c).
 2. Creates a GObj on the given entity class / plink / priority.
-3. `HSD_CObjLoadDesc` on the canonical text-camera descriptor at `0x805096a0`, then `HSD_CObjSetOrtho(0, -480, 0, 640)`.
-4. `GObj_AddObject(g, COBJ, cobj)` and `GObj_InitCamera(g, CObjThink_Common, cobj_gxpri)`, which registers the pass-0 viewport/scissor callback for every gxlink beneath it.
+3. `COBJ_LoadDesc` on the canonical text-camera descriptor at `0x805096a0`, then `CObj_SetOrtho(0, -480, 0, 640)`.
+4. `GObj_AddObject(g, COBJ, cobj)` and `GOBJ_InitCamera(g, CObjThink_Common, cobj_gxpri)`, which registers the pass-0 viewport/scissor callback for every gxlink beneath it.
 
 The canvas's gxlink mask decides which Text GObjs render under it.
 
@@ -353,16 +351,16 @@ SIS files are ordinary HSD archives:
 
 | Address | Symbol | Role |
 |---------|--------|------|
-| `0x8044edec` | `Text_AllocFromHeap` | text heap alloc |
-| `0x8044efa8` | `Text_FreeAlloc` | text heap free |
-| `0x8044f128` | `Text_CreateGObj` | create Text GObj with position params |
+| `0x8044edec` | `TextHeap_Alloc` | text heap alloc |
+| `0x8044efa8` | `TextHeap_Free` | text heap free |
+| `0x8044f128` | `Text_CreateTextManual` | create Text GObj with position params |
 | `0x8044f350` | `Text_Destroy` | destroy a Text |
 | `0x8044f5b4` | `Text_CreateHeap` | init the text heap |
-| `0x8044f674` | `Text_CreateTextCanvas` (`Text_CreateCanvas`) | canvas + ortho camera |
+| `0x8044f674` | `Text_CreateCanvas` | canvas + ortho camera |
 | `0x8044f800` | `Text_LoadSisFile` | load a SIS archive into a slot |
 | `0x8044f8c8` | `Text_InitPremadeText` | bind a SIS entry by index |
 | `0x8044f9d4` | `Text_StorePremadeText` | parse and count subtexts |
-| `0x8044fa70` | `Text_Create` (`Text_CreateText`) | create a Text under a canvas |
+| `0x8044fa70` | `Text_CreateText` | create a Text under a canvas |
 | `0x8044fb0c` | `Text_ConvertASCIIToShiftJIS` | ASCII to opcode/glyph stream |
 | `0x8044fec4` | `Text_AddSubtext` | append a positioned subtext |
 | `0x8045031c` | `Text_SetText` | replace a subtext body |
@@ -370,12 +368,12 @@ SIS files are ordinary HSD archives:
 | `0x80450828` | `Text_PushState` | push a state-history frame |
 | `0x8045111c` | `Text_PopState` | pop a state-history frame |
 | `0x80451344` | `Text_DetermineHeightAndWidth` | bounding-box measure pass |
-| `0x804516e4` | `Text_GXLink` (`Text_GX`) | renderer; pass 0 camera, pass 2 draw |
+| `0x804516e4` | `Text_GX` | renderer; pass 0 camera, pass 2 draw |
 | `0x800ab2d4` | `DevelopText_Create` | DevText creator |
 | `0x800ab78c` | `DevelopText_AddString` | DevText print |
 | `0x80438898` | `DevelopText_DrawStrokeGlyph` | DevText `GX_LINES` glyph |
 | `0x8042a29c` | `CObjThink_Common` | pass-0 camera GX callback |
-| `0x80112044` | `Gm_Get3dData` | 3D HUD data struct (unnamed in the map) |
+| `0x80112044` | `Gm_Get3dData` | 3D HUD data struct |
 | `0x801168e8` | `CityTrial_CreateEventTextCamera` | event HUD canvas, slot 0 |
 | `0x80113fb4` | `CityEvent_ShowHudText` | mode gate into `stadiumPrediction` |
 | `0x80127864` | `stadiumPrediction` | event / prediction HUD text |

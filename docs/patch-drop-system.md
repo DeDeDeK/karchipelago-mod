@@ -56,7 +56,7 @@ the per-itemkind collection counter array on `PlayerData`, plus the aggregate co
 itemkind > 2.
 
 `CityItem_Throw` (0x80253ce4) takes `(item_kind, spawn_group, pos, throw_dir, flag,
-elev_angle, speed)`. It builds a spawn descriptor via `CityItem_InitDesc` (0x802509a0), maps
+elev_angle, speed)`. It builds a spawn descriptor via `Item_InitDesc` (0x802509a0), maps
 the `ItemKind` through `CityItem_GetUnkKindFromItemKind` (0x8024ea54), hands the descriptor to
 `CityItem_Create` (0x8024eef4), and asserts the throw direction is non-zero and non-pathological
 (`itlib.c`: `"*** Item throw front dir is Zero!"` / `"*** Item throw front dir is
@@ -136,7 +136,7 @@ to the hand-bone position: that is the spawn origin, not a velocity.
 
 `CityItem_Throw` does the rest. It builds a horizontal axis from `Gm_GetDownVector` +
 `VEC_CrossNormalizeSnap(down, throw_dir)`, pitches the direction around that axis by the pair-**B**
-elevation angle via `RotateVecAroundAxis`, scales each component by the pair-**A** speed, and
+elevation angle via `Vec3_RotateAboutUnitAxis`, scales each component by the pair-**A** speed, and
 writes the result to the item's velocity at `(item+0x2c)+0xc4/0xc8/0xcc`. Neither float argument
 reaches the spawn descriptor.
 
@@ -179,7 +179,7 @@ large `patch_drop_count` would silently zero stats instead of fountaining patche
 
 `CityItem_Throw`'s `spawn_group` argument identifies what spawned the item. The patch-drop
 pipeline passes **3** from both sub-handlers; the yakumono-break helpers (`zz_8021c8ec_`,
-`zz_8021db44_`, `zz_8021efd8_`) pass 4/5/6. `CityItem_InitDesc` stores it at desc+8 and
+`zz_8021db44_`, `zz_8021efd8_`) pass 4/5/6. `Item_InitDesc` stores it at desc+8 and
 `CityItem_InitData` (0x8024eaf4) copies it to `(item+0x2c)+0x20`, where it is written once at
 creation and never overwritten.
 
