@@ -16,6 +16,11 @@ static int Event_Do(EventKind kind)
     if (ev_chk->state != 0)
         return 0;
 
+    // The stage reserves a once-only event's resources for a single run; a second
+    // Restoration Area overflows the collision zone pool (grcoll.c assert).
+    if (ev_chk->data->event->param->arr[kind].once_only && ev_chk->occurrence_count[kind])
+        return 0;
+
     if ((*stc_event_function)[kind].check &&
         !(*stc_event_function)[kind].check(ev_chk))
         return 0;

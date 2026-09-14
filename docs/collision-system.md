@@ -20,7 +20,7 @@ The arrays behind `coll` and `coll_terrain` are shared but their counts are sepa
 
 ### Allocation lifetime
 
-`grColl_Alloc` (`0x800d6dcc`) zeroes `coll_max`, runs `grColl_CountArrays` over the terrain node and both prop lists to accumulate counts, then makes **nine separate `HSD_MemAlloc` calls** (`0x800d6f7c` onward), one per array, each sized exactly `count * stride`. `grColl_Free` (`0x800d7060`) releases them the same way, field by field. Everything is plain writable MEM1 for the life of the stage.
+`grColl_Alloc` (`0x800d6dcc`) zeroes `coll_max`, runs `grColl_CountArrays` over the terrain node, every `YakumonoTable.spawn_data_array` block and every generic `entries[]` record to accumulate counts, then makes **nine separate `HSD_MemAlloc` calls** (`0x800d6f7c` onward), one per array, each sized exactly `count * stride`. `grColl_Free` (`0x800d7060`) releases them the same way, field by field. Everything is plain writable MEM1 for the life of the stage.
 
 Consequences for mod code:
 

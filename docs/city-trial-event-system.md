@@ -88,6 +88,8 @@ The **reserve queue** (`ev_chk->reserve[]`, 16 entries) is the priority list for
 | 14 FOG | 1 | 4200 | - | yes | 0x2D | 9 | - | - |
 | 15 FAKEPOWERUPS | 1 | 3200 | - | yes | 0x35 | 4 | - | yes |
 
+`once_only` is load-bearing for RESTORATIONAREA. `event_restorationAreas_start` (0x80111078) picks `event_data[1]` = 5 of its 20 locations and spawns an area at each through `GrYaku_CreateSpawn(20, event_data[0] = 0)` (0x800f48cc). `fn_grSetupCityEventData` installs the archive's 7-entry spawn table as `YakumonoTable.spawn_data_array`; it lists the restoration-area block five times (16 zone vertices, 2 zones each), and `grColl_Alloc` reserves collision for each listing once. The stage therefore has room for exactly one run: collision attaches are never returned, so a second run asserts `gcp->zvtx_num <= total->zvtx_num` (grcoll.c line 400, `gcp 1784: total 1768`) on its first area. Anything that starts an event outside `CityEvent_Decide` must honor `once_only` against `occurrence_count` itself. SECRETCHAMBER's block (`data_array[32]`) carries no collision.
+
 | Kind | start | active | end | end2 | check |
 |------|-------|--------|-----|------|-------|
 | DYNABLADE | 0x80110184 | 0x8011024c | 0x80110444 | 0x80110448 | - |
