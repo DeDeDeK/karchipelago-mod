@@ -58,7 +58,7 @@ GrObj  (gr_kind=9, City Trial)
 | 0x800dc7a4  | `Sky_GetCurrentSkyColor(grobj, &out)`      | Returns `SkyState.current_sky_color`, the per-frame lerp toward the preset's `sky_ambient_color`. RGBA(0,0,0,0) if there is no sky GObj or no target preset. Called from the backdrop pass (`zz_800d8148_+0x64`) and `Map_GX+0xa0`; each call feeds `Sky_DrawTintQuad`. |
 | 0x800d7e78  | `Sky_DrawTintQuad(cobj, &color)`           | Renders an alpha-blended screen-aligned quad at the camera's far plane. Early-outs if `color.a == 0`. Fog-enabled, so distance fog attenuates the tint. This is how `sky_ambient_color` becomes a visible sky tint. |
 | 0x800dbfa8  | `Sky_InitFog`                              | Builds the fog GObj: `GObj_Create(0x1E,1,0)`, `Fog_LoadDesc`, `GObj_AddObject`, `GObj_AddGXLink(Fog_GX, 0, 1)`. Seeds the global EFB clear color at 0x80557484. |
-| 0x800dbf84  | `Fog_GX`                                   | GX callback; one-liner `HSD_FogSet(gobj->object)`. |
+| 0x800dbf84  | `Fog_GX`                                   | GX callback; one-liner `HSD_FogSetCurrent(gobj->object)`. |
 | 0x800797a8  | `AreaLight_Lerp`                           | Interpolates the AreaLight (lbarealight.c). Asserts validity bits, snap-copies header/colors/direction from target, lerps only if `flags & 0x04`. |
 | 0x80079c04  | `GXColor_Lerp`                             | Linearly interpolates packed RGBA u32 colors by ratio. |
 | 0x80079428 | `AreaLight_Create` | Allocates a live AreaLight, registers it in the global registry at `r13[+0x538]`, copies fields from a source `AreaLightData`. Asserts `flags & 0x03 == 0x03`. |
@@ -70,7 +70,9 @@ GrObj  (gr_kind=9, City Trial)
 | 0x800eef50  | `Sky_BeginFade(grobj, &color, frames)`     | `ScreenFade_GetState(3)` then `ScreenFade_Begin`. |
 | 0x800eefb0  | `Sky_FreeFade`                             | Frees the lbfade slot at scene teardown. |
 | 0x800b04a8  | `World_CObj`                               | World-camera GObj GX callback. At +0x144 (0x800b05ec) it loads the global fog color from 0x80557484 and pushes it through `CObj_SetEraseColor` (0x8040f884). |
-| 0x8041b0fc  | `HSD_FogSet`                               | Reads the live `HSD_Fog`, queries current CObj near/far, emits `GXSetFog` and `GXSetFogColor`. |
+| 0x8041b0fc  | `HSD_FogSet`                               | Reads the live `HSD_Fog`, queries current CObj near/far, emits `GXSetFog` and `GXSetFogColor`. NULL emits `GX_FOG_NONE`. Leaves the current fog unchanged. |
+| 0x8041b0d0  | `HSD_FogSetCurrent`                        | Records the fog as the current fog (`r13[+4616]`), then `HSD_FogSet`. |
+| 0x8041b0f4  | `HSD_FogGetCurrent`                        | Returns the current fog. Render callbacks that switch fog off (`Map_GX`, `SimpleShadow_GX`, `Enemy_GX`, `ScreenFade_GX`) restore it with `HSD_FogSet(HSD_FogGetCurrent())`. |
 | 0x80057468  | `LObj_CreateAll`                           | Walks a NULL-terminated `LObjDesc**` array, `LObj_LoadDesc` per entry, links them via `LOBJ.next`. |
 | 0x803ff570 | `HSD_LObjSetCurrentAll` | Each frame: clears the 9-slot table at 0x805899B0 (`stc_lobj_hw_slot_table` in `obj.h`), re-walks the list, assigns each LOBJ a hardware slot. |
 | 0x803fe4b8  | `HSD_LObjSetupInit`                        | Bakes each active LOBJ into a hardware light register via `GXInitLight*` + `GXLoadLightObjImm`, and rebuilds the three global light-mask words. |
@@ -208,7 +210,7 @@ so a mod that repoints that pair extends the selector's range with it.
 |------|---------|-------|--------|
 | 1 | 800dc6a0 | `SkyState.transition_frame_counter++` (capped) | drives `ratio = counter / target.transition_frames` |
 | 2 | 800dc6f4 | `SkyState+0x08` <- `GXColor_Lerp(start, target.fog_color)` | start-color slot reused as the lerp output mirror |
-| 3 | 800dc708 | `HSD_Fog.color` <- lerped RGBA | feeds `Fog_GX -> HSD_FogSet -> GXSetFogColor` |
+| 3 | 800dc708 | `HSD_Fog.color` <- lerped RGBA | feeds `Fog_GX -> HSD_FogSetCurrent -> HSD_FogSet -> GXSetFogColor` |
 | 4 | 800dc71c | `*(u32*)0x80557484` <- lerped RGBA | global EFB clear color, consumed by `World_CObj` on the next clear |
 | 5 | 800dc734 | `HSD_Fog.start` <- lerped float | fog near plane |
 | 6 | 800dc750 | `HSD_Fog.end` <- lerped float | fog far plane |
@@ -224,7 +226,7 @@ Two independent paths feed pixels with the fog color each frame, and `Sky_Update
 both:
 
 ```
-Sky_Update -> HSD_Fog.start/end/color -> Fog_GX (gx_link 0, pri 1) -> HSD_FogSet
+Sky_Update -> HSD_Fog.start/end/color -> Fog_GX (gx_link 0, pri 1) -> HSD_FogSetCurrent -> HSD_FogSet
                 -> GXSetFog + GXSetFogColor -> per-pixel TEV blend
 
 Sky_Update -> 0x80557484 (BSS) -> World_CObj+0x144 -> CObj_SetEraseColor -> 0x805dcb88
@@ -271,7 +273,7 @@ reached as `grobj->gr_data->stage_node`; both do `lbz r0,28(r3)` then mask). CT'
 
 `Map_GX` (0x800d81e4) reads `grGetStageFogFlag1` at four sites, each guarding a
 `Map_DisableFog` (0x800d1dcc, which does `HSD_FogSet(NULL)`) / re-enable (0x800d1d98,
-restoring the `HSD_Fog*` kept at `r13[+4616]`) pair around the backdrop JOBJ draw. The
+`HSD_FogSet(HSD_FogGetCurrent())`) pair around the backdrop JOBJ draw. The
 terrain model is drawn right after the pair with no fog calls of its own, so it inherits
 whatever state the pair left.
 
@@ -564,7 +566,7 @@ projection camera from it. CT never invokes it.
   `SimpleShadow_UpdatePos_` (0x8027b588) the position; `CityItem_UpdateShadowSizeAndVis`
   (0x80261aa8) is the item variant.
 - **Render** is `SimpleShadow_GX` (0x8027ae50) walking the manager's list and
-  `JObj_DispAll`ing each enabled blob, wrapped in `HSD_FogSet`. The blob
+  `JObj_DispAll`ing each enabled blob, then restoring fog with `HSD_FogSet(HSD_FogGetCurrent())`. The blob
   material/texture/blend is a static descriptor set by `Shadow_MObjCallback` (0x8027bd68).
 - **Per-entity enable gating** reads entity state bits:
   `Rider_UpdateSimpleShadowRender` (0x80195800) on `RiderData+0x825`/`+0x821`;

@@ -193,22 +193,34 @@ array are the TLUTs, selected by `Particle+0x0b` (`0xFF` for none).
 A star machine's archive names its trail in the `vcAnimationStar` struct reached through
 `vcData.anim` (`vcData+0x18`, declared in `externals/hoshi/include/machine.h`): two slots at `+0x38`
 for cruising, three at `+0x40` for boosting, two more at `+0x30`, and up to three joints at `+0x4c` to
-emit from. Each slot is a bank-0 generator ID or `-1`, so `Machine_StoreVcDataPtr` (`0x801c4f98`)
-never has to translate anything: the Slick Star's `20` and `51` are `psGeneratorDesc[0][20]` and
-`[51]` directly. The bike class stores its own pair and bones from `+0x20` of its animation bank
-instead.
+emit from. A bike's `vcAnimationWheel` names one cruise generator at `+0x20` and one boost generator
+at `+0x24`, emitted at up to four joints from `+0x28` - the cruise one on a timer from
+`Machine_Wheel_Think` (`0x801f5390`), the boost one at all four joints from the class's boost proc
+(`0x801f516c`). Each slot is a bank-0 generator ID or `-1`, read off the loaded animation bank on
+every spawn with nothing translating it: the Slick Star's `20` and `51` are `psGeneratorDesc[0][20]`
+and `[51]` directly.
 
 Of the 52 vehicle generators only `3` and `8` go unreferenced by any machine. Several that look spare
 belong to the bikes.
 
-Those two spare slots are the way out of the fact that a generator is bank data. `psGeneratorDesc[bank]`
-is an array of pointers, so a slot can be pointed at a descriptor somewhere else entirely: copy a
-generator into memory of your own, store the copy's address in a slot nothing reads, and a machine
-naming that slot emits particles identical to the original out of a descriptor no one else touches.
-The swap has to land before anything emits, because `Ptcl_Alloc` reads the descriptor's program
-pointer into the generator node once at creation and the node keeps it for life. The tail of
-`Ptcl_LoadEfPtclVehicle` at `0x802354bc`, where both of its install paths meet, is the point where the
-table exists and nothing has emitted yet.
+A generator is bank data, but the table naming it can be grown. `psInitDataBanks` (`0x8042a734`) points
+`psGeneratorDesc[bank]` at the offset array inside the loaded archive and sets `psGeneratorCount[bank]`,
+the particle teardowns at `0x8042ad44` and `0x8042af18` clear both, and nothing else writes either. Both
+readers - `Ptcl_Alloc` and the spawn helper at `0x8042b350` - bound an id by the count alone. So copy a
+bank's pointers into an array of your own, append descriptors held anywhere, point `psGeneratorDesc[bank]`
+at the array and raise the count, and an emitter naming an appended id draws from a descriptor no other
+id reaches. Effect ids arrive whole: the spawn helpers `Effect_SpawnSync` (`0x80236c40`) dispatches to
+take the bank as `id / 10000` and hand the id itself to `Ptcl_Alloc`, so a bank has room far past its
+own ids.
+
+A descriptor holds no pointers - loops store offsets from the program base, textures and child generators
+are indexes - so its bytes work from anywhere, save that `psRelocDataBanks` (`0x8042a874`) rewrites the
+`0x0E000000` flag bits to `0x08000000` in every descriptor it relocates, and one installed past that pass
+needs the same rewrite. The table is rebuilt on every load and has to be grown before anything emits,
+because `Ptcl_Alloc` reads the descriptor's program pointer into the generator node once at creation and
+the node keeps it for life. The tail of `Ptcl_LoadEfPtclVehicle` at `0x802354bc`, where all three of its
+install paths meet, is the point where the table exists and nothing has emitted yet; `custom_machines`
+grows bank 0 there, installing each registered machine's own generators from id 52 up.
 
 A machine's cruise and boost generators are authored as a pair and are not interchangeable. The cruise
 one emits for as long as the machine is moving, so it stays tight and short-lived; the boost one is a

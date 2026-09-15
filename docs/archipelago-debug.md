@@ -11,14 +11,13 @@ canvas, and there is no in-round overlay. That is the whole reason the split exi
 that has to happen while a round is running is a pad binding; anything that arms state the next
 round reads, or that the AP receipt queue drains on its own, is a menu row.
 
-The mod imports three APIs from `OnSaveLoaded`, which hoshi runs after every mod has registered,
+The mod imports two APIs from `OnSaveLoaded`, which hoshi runs after every mod has registered,
 so the exports are guaranteed to exist by then:
 
 | Import | Absent means |
 |--------|--------------|
 | `archipelago` | Every menu row and pad binding no-ops; `OnFrameStart` returns immediately |
 | `custom_events` | D-Pad Up (Scale Change) is disabled; everything else works |
-| `custom_machines` | The Machines page shows vanilla kinds only, and the random unlock pool holds no custom machines |
 
 Text feedback goes through `ArchipelagoAPI.Textbox`, so the mod never imports `textbox` itself.
 
@@ -94,12 +93,10 @@ base abilities, patch types, CT items, machines, boxes, AR stages, colors, TR st
 AP Star spheres) plus the persistent progression items - permanent patches, Perm All Up, Patch
 Cap Increase, Spawn Rate Up.
 
-The machine block covers only the 22 kinds with a player-facing unlock. `VCKIND_WINGKIRBY`,
-`WHEELNORMAL` and `WHEELKIRBY` are copy-ability and enemy forms and `WHEELVSDEDEDE` is the
-Vs. King Dedede stadium's CPU-only machine; the AP world ships no item for any of them.
-Registered custom machines continue the id alignment past the gap at 855, and the count is
-clamped to where the box unlock block begins at 860 - four custom slots - so the pool can never
-emit a box unlock in a machine's place.
+The machine block covers the 22 vanilla kinds with a player-facing unlock plus the Archipelago
+Star's 856. `VCKIND_WINGKIRBY`, `WHEELNORMAL` and `WHEELKIRBY` are copy-ability and enemy forms
+and `WHEELVSDEDEDE` is the Vs. King Dedede stadium's CPU-only machine; the AP world ships no item
+for any of them.
 
 L + D-Pad Up picks from whichever pool suits the running mode: in City Trial, one uniform draw
 across the event range, the full `ITKIND` range and the seven standalone gives in the 1-99 block;
@@ -163,9 +160,9 @@ displaying correctly as soon as anything in its page is touched. `OnSceneChange`
 thirteen categories outright, which covers the common case of receiving items between rounds and
 then opening the menu.
 
-Machine gates stop at bit 31: `machine_unlocked_mask` is 32 bits wide, which leaves six rows for
-custom kinds past the 26 vanilla `MachineKind`s. The registry's own cap is higher, and kinds past
-the mask are permanently available rather than gateable.
+The Machines page drives all 27 bits of `machine_unlocked_mask`: the vanilla `MachineKind`s, and
+bit 26, the Archipelago Star, as its last row. No other registered machine has a bit, so none
+has a row.
 
 ### Give Items
 

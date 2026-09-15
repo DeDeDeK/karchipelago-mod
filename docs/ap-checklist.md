@@ -376,7 +376,7 @@ poll keyed to the mod's own frame callback is unaffected.
 **The rival KO recorder - the Destruction Derby box.** `custom_machines` owns the
 `REPLACECALL` on the single `bl Ply_AddDeath` at `0x801e1f74`, inside `Machine_GiveDamage`
 (`0x801e1ee8`), and hands the KO on through its death-handler seam; `main.c` registers
-`APCheckDetect_AddDeath` there with `cm_api->SetDeathHandler` once the registry resolves. The Dedede and Mic tallies are `[5]` arrays indexed by the crediting player, because both
+`APCheckDetect_AddDeath` there with `cm_api->AddDeathHandler` once the registry resolves. The Dedede and Mic tallies are `[5]` arrays indexed by the crediting player, because both
 cells read "in one game" of a single player's KOs. `Ply_AddDeath` (`0x8022f648`) is the
 engine's unified KO-event recorder, reached only from that one call site - where a machine's
 HP crosses zero - and it is the only place the KO'd rider is named: its first argument is the

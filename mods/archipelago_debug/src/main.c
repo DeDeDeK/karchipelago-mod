@@ -6,7 +6,6 @@
 
 #include "archipelago_api.h"
 #include "custom_events_api.h"
-#include "custom_machines_api.h"
 #include "debug_menu.h"
 
 const ArchipelagoAPI *ap_api = 0;
@@ -25,9 +24,6 @@ static void TryImportApi(void)
         ce_api = (const CustomEventsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_EVENTS_MOD_NAME,
             CUSTOM_EVENTS_API_MAJOR, CUSTOM_EVENTS_API_MINOR);
-    DebugMenu_BindCustomMachines((const CustomMachinesAPI *)Hoshi_ImportMod(
-        (char *)CUSTOM_MACHINES_MOD_NAME,
-        CUSTOM_MACHINES_API_MAJOR, CUSTOM_MACHINES_API_MINOR));
 }
 
 static void OnSaveLoaded(void)

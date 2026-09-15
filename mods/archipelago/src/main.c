@@ -255,12 +255,8 @@ static void APOptions_ApplyRevealChecklists(void)
             RevealChecklist(row);
 }
 
-// Idempotent, so a scene that needs the registry earlier than OnSaveLoaded can ask.
-void AP_ResolveCustomMachines(void)
+static void AP_ResolveCustomMachines(void)
 {
-    if (cm_api)
-        return;
-
     cm_api = (const CustomMachinesAPI *)Hoshi_ImportMod(
         (char *)CUSTOM_MACHINES_MOD_NAME, CUSTOM_MACHINES_API_MAJOR, CUSTOM_MACHINES_API_MINOR);
     if (!cm_api)
@@ -274,21 +270,10 @@ void AP_ResolveCustomMachines(void)
 
     // It owns the engine's only KO recorder call too, which is where the Destruction
     // Derby check that counts KO'd Kirbys reads the victim from.
-    cm_api->SetDeathHandler(APCheckDetect_AddDeath);
+    cm_api->AddDeathHandler(APCheckDetect_AddDeath);
     OSReport("[Main] custom_machines: %d machine(s), %d kinds, %d characters\n",
              cm_api->GetCount(), cm_api->GetKindCeiling(),
              cm_api->GetCharacterKindCeiling());
-
-    // The registry may hand out more kinds than the unlock mask has bits for. Those
-    // stay permanently available rather than being gated, which is worth saying once.
-    if (cm_api->GetKindCeiling() > AP_MACHINE_GATE_NUM)
-        OSReport("[Main] %d machine kind(s) past bit %d cannot be gated and stay unlocked\n",
-                 cm_api->GetKindCeiling() - AP_MACHINE_GATE_NUM, AP_MACHINE_GATE_NUM - 1);
-
-    // Same story for the id block: past its edge there is no unlock item to receive.
-    if (cm_api->GetKindCeiling() > AP_MACHINE_UNLOCK_NUM)
-        OSReport("[Main] %d machine kind(s) past the %d-wide unlock id block get no AP item\n",
-                 cm_api->GetKindCeiling() - AP_MACHINE_UNLOCK_NUM, AP_MACHINE_UNLOCK_NUM);
 }
 
 // Runs on startup after any save data is loaded, whether or not a memory card is
@@ -352,17 +337,6 @@ void OnSaveLoaded()
 
     ap_data->game_ready = 1;
     OSReport("[Main] game_ready set - waiting for AP client connection\n");
-}
-
-// Every gateable MachineKind set. MachineKind_Num() can reach the mask's width, and
-// a shift that wide is undefined, so the full mask is spelled out rather than built.
-static u32 MachineGateMask(void)
-{
-    int num = MachineKind_Num();
-
-    if (num >= AP_MACHINE_GATE_NUM)
-        return 0xFFFFFFFFu;
-    return (1u << num) - 1;
 }
 
 static void AppendCsv(char *buf, int *pos, const char *name)
@@ -435,7 +409,7 @@ static void APOptions_ApplyUngatedCategories(void)
     if (opts->goal_forced_gates & GOALGATE_AP_STAR_PIECES)
         star_piece_mask = 0;
 
-    if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       MachineGateMask());
+    if (!opts->machine_gating_enabled)       Unlock_SetMask(AP_UNLOCK_MACHINE,       (1u << AP_MACHINE_BIT_NUM) - 1);
     if (!opts->ability_gating_enabled)       Unlock_SetMask(AP_UNLOCK_ABILITY,       (1u << COPYKIND_NUM) - 1);
     if (!opts->event_gating_enabled)         Unlock_SetMask(AP_UNLOCK_EVENT,         (1u << EVKIND_NUM) - 1);
     if (!opts->patch_gating_enabled)         Unlock_SetMask(AP_UNLOCK_PATCH,         (1u << PATCHKIND_NUM) - 1);
@@ -652,11 +626,11 @@ static const char *const unlock_cat_names[AP_UNLOCK_NUM] = {
     [AP_UNLOCK_AP_STAR_PIECE] = "AP Star spheres",
 };
 
-// Bits worth printing per category. Machines are the one dynamic width, since the
-// registry decides how many kinds exist.
+// Bits worth printing per category.
 static int UnlockCatBits(APUnlockCategory cat)
 {
     static const u8 bits[AP_UNLOCK_NUM] = {
+        [AP_UNLOCK_MACHINE]       = AP_MACHINE_BIT_NUM,
         [AP_UNLOCK_ABILITY]       = COPYKIND_NUM,
         [AP_UNLOCK_EVENT]         = EVKIND_NUM,
         [AP_UNLOCK_PATCH]         = PATCHKIND_NUM,
@@ -671,11 +645,6 @@ static int UnlockCatBits(APUnlockCategory cat)
         [AP_UNLOCK_AP_STAR_PIECE] = AP_STAR_PIECE_NUM,
     };
 
-    if (cat == AP_UNLOCK_MACHINE)
-    {
-        int num = MachineKind_Num();
-        return num > AP_MACHINE_GATE_NUM ? AP_MACHINE_GATE_NUM : num;
-    }
     return bits[cat];
 }
 

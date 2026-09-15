@@ -1,8 +1,10 @@
-// A drop-in machine's sounds, and the star class's per-kind audio parameter row. The
-// row array is authored in VcCommon.dat, sized to the 19 vanilla star slots and
-// reloaded per scene, so it is re-copied wider and repointed on every vcLoadCommon,
-// each custom row starting as its clone_kind's. A companion .ssm then takes its own
-// samples over that row.
+// A drop-in machine's sounds, and each class's per-kind audio. Both classes keep an array
+// of MachineAudioParams rows in VcCommon.dat - 19 star rows and 7 bike rows - reloaded per
+// scene, so both are re-copied wider and repointed on every vcLoadCommon, each custom row
+// starting as its audio_kind's. A companion .ssm then takes its own samples over that row.
+// Each class's sound table rides in its shared archive instead, and is widened as that loads.
+
+#include <string.h>
 
 #include "os.h"
 #include "audio.h"
@@ -20,23 +22,28 @@
 _Static_assert(__builtin_offsetof(MachineAudioParams, surface_speed_max) == SOUND_ROLE_NUM * 4,
                "MachineAudioParams must open with SOUND_ROLE_NUM FGM ids");
 
-// Retail's longest script is 70 commands.
+// Past the longest retail script.
 #define SCRIPT_CMD_MAX 72
 
-// The vanilla banks tile global sound indices 0..614, so a drop-in bank's
-// samples start here. What is resident says nothing about the ceiling: the star
-// bank is still on disc when the first machine registers at the title screen.
-#define VANILLA_SOUND_NUM 615
-
-// The widened script map and the scripts it points at. Both are static: the map
-// stays installed across scenes, and HSD_MemAlloc only returns memory that
-// outlives a scene inside a mod's boot callback. Retail is 20 banks and 825
-// scripts, and one machine filling all 13 roles copies about 250 commands.
+// The widened script map and the scripts it points at. Static: the map stays installed
+// across scenes, and HSD_MemAlloc only returns memory that outlives a scene inside a
+// boot callback.
 #define SCRIPT_MAP_BANK_MAX 24
 #define SCRIPT_MAP_SCRIPT_MAX 896
 #define SCRIPT_POOL_WORDS 1024
 
-static MachineAudioParams stc_star_audio[CUSTOM_VCSTAR_NUM];
+// [is_bike][class slot]; the bike class fits the star class's width.
+static MachineAudioParams stc_audio[2][CUSTOM_VCSTAR_NUM];
+
+// Each class's sound table: a header, then one entry per class slot. The star's entry is
+// the air-noise FGM id Machine_SoundEffectThink (0x801ee588) starts that loop with; the
+// bike's is the {loop, one-shot} FGM id pair its wheel sounds play. No .ssm role reaches
+// either, so a custom slot takes its audio kind's entry.
+static const u8 stc_sound_head[2] = { VCSTAR_SOUND_TABLE_HEAD, VCWHEEL_SOUND_TABLE_HEAD };
+static const u8 stc_sound_stride[2] = { VCSTAR_SOUND_TABLE_STRIDE, VCWHEEL_SOUND_TABLE_STRIDE };
+#define SOUND_TABLE_SIZE (VCSTAR_SOUND_TABLE_HEAD + CUSTOM_VCSTAR_NUM * VCWHEEL_SOUND_TABLE_STRIDE)
+
+static u8 stc_sound_table[2][SOUND_TABLE_SIZE];
 
 typedef struct DropinBank
 {
@@ -56,10 +63,16 @@ static u32 *stc_map_scripts[SCRIPT_MAP_SCRIPT_MAX];
 static u32 stc_script_pool[SCRIPT_POOL_WORDS];
 static int stc_pool_next;
 
-// FGM_LoadBankCallback takes a bank's global sound index base out of the file
-// header it has just staged. A drop-in bank cannot know what else is resident,
-// so its base is assigned here instead, while its own load is the only one in
-// flight. Hooked past the prologue, where the DVD callback's arguments are dead.
+static int VanillaSlotNum(int is_bike)
+{
+    return is_bike ? VCWHEEL_NUM : VCSTAR_NUM;
+}
+
+// FGM_UnkCallback (0x80447a74), the read callback FGM_LoadBankCallback queues, takes a
+// bank's global sound index base out of the file header staged before it. A drop-in bank
+// cannot know what else is resident, so its base is written over the staged one here,
+// while its own load is the only one in flight. Hooked past FGM_LoadBankCallback's
+// prologue, where the DVD callback's arguments are dead.
 static void StampDropinSoundBase(void)
 {
     if (stc_stamp_base != 0)
@@ -73,20 +86,11 @@ CODEPATCH_HOOKCREATE(0x80447eb8,
     0
 )
 
-// The vanilla star slot a machine's rows and donor scripts come from. A descriptor
-// naming a bike or an out-of-range kind falls back to the Slick Star.
-static int CloneKind(const CustomMachineEntry *e)
-{
-    if (e->clone_kind < 0 || e->clone_kind >= VCSTAR_NUM)
-        return VCKIND_SLICK;
-    return e->clone_kind;
-}
-
 static SSMSound *ChunkSound(SSMChunk *chunk, int index)
 {
     SSMSound *s = (SSMSound *)(chunk + 1);
     for (int i = 0; i < index; i++)
-        s = (SSMSound *)((u8 *)s + sizeof(SSMSound) + s->channel_num * 0x40);
+        s = (SSMSound *)((u8 *)s + sizeof(SSMSound) + s->channel_num * SSM_CHANNEL_SIZE);
     return s;
 }
 
@@ -129,15 +133,17 @@ static void LoadDropinBanks(void)
         return;
     }
 
-    int next_index = VANILLA_SOUND_NUM;
+    // Past every vanilla index: a constant rather than a scan of what is resident,
+    // because banks come and go per scene.
+    int next_index = SSM_VANILLA_SOUND_NUM;
 
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         DropinBank *b = &stc_bank[i];
-        if (!b->found ||
-            !CustomMachines_SideCarPath(path, sizeof(path), CustomMachines_GetEntry(i)->path,
-                                        CUSTOM_MACHINE_AUDIO_EXT))
+        if (!b->found)
             continue;
+        CustomMachines_SideCarPath(path, sizeof(path), CustomMachines_GetEntry(i)->path,
+                                   CUSTOM_MACHINE_AUDIO_EXT);
 
         stc_stamp_base = next_index + 1;
         FGM_QueueLoad(path, slot, NULL, NULL);
@@ -176,9 +182,9 @@ static int ScriptLength(const u32 *script)
     return 0;
 }
 
-static u32 *CloneScript(const u32 *donor, int sound_index)
+static u32 *CloneScript(const u32 *src, int sound_index)
 {
-    int n = ScriptLength(donor);
+    int n = ScriptLength(src);
     if (n == 0 || stc_pool_next + n > SCRIPT_POOL_WORDS)
         return NULL;
 
@@ -187,7 +193,7 @@ static u32 *CloneScript(const u32 *donor, int sound_index)
 
     for (int i = 0; i < n; i++)
     {
-        u32 cmd = donor[i];
+        u32 cmd = src[i];
         if ((cmd >> 24) == FGMSCRIPT_SOUND)
             cmd = (cmd & 0xFFFF0000) | (u32)(sound_index & 0xFFFF);
         copy[i] = cmd;
@@ -195,19 +201,20 @@ static u32 *CloneScript(const u32 *donor, int sound_index)
     return copy;
 }
 
-// The FGM id a drop-in sound's script is copied from: the clone kind's, or the
-// first vanilla star row carrying one where the clone kind leaves the slot at -1.
-// The Slick Star, the Wagon Star and the two wing riders leave all three boost
-// tiers at -1, so a drop-in cloning one of them has no envelope to inherit there.
-static int DonorSfx(int clone, int role)
+// The FGM id a drop-in sound's script is copied from: the audio kind's, or the first
+// vanilla row of the same class carrying one where the audio kind leaves the slot at -1.
+// The Slick Star, the Wagon Star and the two wing riders leave all three boost tiers at
+// -1, so a drop-in voiced after one of them would otherwise have no envelope there.
+static int TemplateSfx(const CustomMachineEntry *e, int role)
 {
-    const int *row = (const int *)&stc_star_audio[clone];
+    const MachineAudioParams *rows = stc_audio[e->is_bike];
+    const int *row = (const int *)&rows[MachineKind_ClassIndex(e->audio_kind)];
     if (row[role] >= 0)
         return row[role];
 
-    for (int k = 0; k < VCSTAR_NUM; k++)
+    for (int k = 0; k < VanillaSlotNum(e->is_bike); k++)
     {
-        row = (const int *)&stc_star_audio[k];
+        row = (const int *)&rows[k];
         if (row[role] >= 0)
             return row[role];
     }
@@ -215,7 +222,7 @@ static int DonorSfx(int clone, int role)
 }
 
 // One script per loaded drop-in sound, copied from whichever vanilla script the
-// clone kind uses for that sound slot. Runs once; the copies outlive any reload
+// audio kind uses for that sound slot. Runs once; the copies outlive any reload
 // of airride.sem.
 static void CloneDropinScripts(void)
 {
@@ -226,7 +233,6 @@ static void CloneDropinScripts(void)
     {
         DropinBank *b = &stc_bank[i];
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
-        int clone = CloneKind(e);
 
         for (int r = 0; r < SOUND_ROLE_NUM; r++)
         {
@@ -234,16 +240,16 @@ static void CloneDropinScripts(void)
             if (b->sound[r] < 0)
                 continue;
 
-            int donor_fid = DonorSfx(clone, r);
-            if (donor_fid < 0)
+            int template_fid = TemplateSfx(e, r);
+            if (template_fid < 0)
             {
-                OSReport("[MachineAudio] '%s' sound %d has no script on any star kind to copy\n",
-                         e->name, r);
+                OSReport("[MachineAudio] '%s' sound %d has no script on any %s kind to copy\n",
+                         e->name, r, e->is_bike ? "bike" : "star");
                 continue;
             }
 
-            int donor = starts[(donor_fid >> 16) & 0xFFFF] + (donor_fid & 0xFFFF);
-            b->script[r] = CloneScript(scripts[donor], b->sound[r]);
+            int script = starts[(template_fid >> 16) & 0xFFFF] + (template_fid & 0xFFFF);
+            b->script[r] = CloneScript(scripts[script], b->sound[r]);
             if (b->script[r] != NULL)
                 stc_script_num++;
             else
@@ -310,7 +316,7 @@ static void InstallScriptMap(void)
     *stc_fgm_bank_num = bank_num + 1;
 }
 
-// Hook at 0x8005c654, in FGM_LoadAirride.sem right after it installs the file it
+// Hook at 0x8005c654, in FGM_LoadAirrideSem right after it installs the file it
 // just read. The engine reloads the script map on a scene reset, which puts the
 // vanilla tables back and loses the appended bank.
 static void ReinstallScriptMap(void)
@@ -326,17 +332,21 @@ CODEPATCH_HOOKCREATE(0x8005c654,
     0
 )
 
-static void SpliceStarAudioParams(void)
+static void SpliceAudioParams(void)
 {
     MachineAudioParamsLookup *lookup = *stc_machineAudioParams;
-    if (lookup == NULL || lookup->params[0] == NULL || lookup->params[0] == stc_star_audio)
+    if (lookup == NULL || lookup->params[0] == NULL || lookup->params[1] == NULL ||
+        lookup->params[0] == stc_audio[0])
         return;
 
-    for (int i = 0; i < VCSTAR_NUM; i++)
-        stc_star_audio[i] = lookup->params[0][i];
+    for (int is_bike = 0; is_bike < 2; is_bike++)
+    {
+        for (int i = 0; i < VanillaSlotNum(is_bike); i++)
+            stc_audio[is_bike][i] = lookup->params[is_bike][i];
+    }
 
-    // The vanilla rows have to be in place first: the donor script for a drop-in
-    // sound is the one the clone kind's row names for that slot.
+    // The vanilla rows have to be in place first: a drop-in sound's script is copied
+    // from the one the audio kind's row names for that slot.
     if (!stc_ready)
     {
         LoadDropinBanks();
@@ -348,9 +358,11 @@ static void SpliceStarAudioParams(void)
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
-        stc_star_audio[e->star_slot] = stc_star_audio[CloneKind(e)];
+        MachineAudioParams *rows = stc_audio[e->is_bike];
 
-        int *row = (int *)&stc_star_audio[e->star_slot];
+        rows[e->class_slot] = rows[MachineKind_ClassIndex(e->audio_kind)];
+
+        int *row = (int *)&rows[e->class_slot];
         for (int r = 0; r < SOUND_ROLE_NUM; r++)
         {
             if (stc_bank[i].sfx[r] >= 0)
@@ -358,22 +370,49 @@ static void SpliceStarAudioParams(void)
         }
     }
 
-    lookup->params[0] = stc_star_audio;
+    lookup->params[0] = stc_audio[0];
+    lookup->params[1] = stc_audio[1];
 }
 
 // Hook at 0x801c6d64, vcLoadCommon's epilogue, one instruction after it caches
 // the audio-params lookup into r13+0x764.
 CODEPATCH_HOOKCREATE(0x801c6d64,
     "",
-    SpliceStarAudioParams,
+    SpliceAudioParams,
     "",
     0
 )
 
+void CustomMachineAudio_OnClassLoad(int is_bike)
+{
+    vcDataKindStar *kind = stc_vcDataKindStar[is_bike];
+    u8 *table = stc_sound_table[is_bike];
+
+    if (kind == NULL || kind->sound == NULL || kind->sound == table ||
+        CustomMachines_GetClassCount(is_bike) == 0)
+        return;
+
+    int head = stc_sound_head[is_bike];
+    int stride = stc_sound_stride[is_bike];
+
+    memcpy(table, kind->sound, head + VanillaSlotNum(is_bike) * stride);
+    for (int i = 0; i < CustomMachines_GetCount(); i++)
+    {
+        CustomMachineEntry *e = CustomMachines_GetEntry(i);
+        if (e->is_bike != is_bike)
+            continue;
+
+        memcpy(table + head + e->class_slot * stride,
+               table + head + MachineKind_ClassIndex(e->audio_kind) * stride, stride);
+    }
+    kind->sound = table;
+}
+
 void CustomMachineAudio_OnBoot(void)
 {
     CODEPATCH_HOOKAPPLY(0x80447eb8); // FGM_LoadBankCallback, past its prologue
-    CODEPATCH_HOOKAPPLY(0x8005c654); // FGM_LoadAirride.sem, after FGM_InitSEM
+    CODEPATCH_HOOKAPPLY(0x8005c654); // FGM_LoadAirrideSem, after FGM_InitSEM
     CODEPATCH_HOOKAPPLY(0x801c6d64); // vcLoadCommon epilogue
+
     OSReport("[MachineAudio] Hooks installed\n");
 }

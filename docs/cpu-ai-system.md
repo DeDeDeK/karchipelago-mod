@@ -49,10 +49,10 @@ Rider_CopyInputToMachine (0x80190c54)  // rider input -> machine
 ### Stage roles
 
 1. **Perceive** - `Rider_ProcessCPUDistance` (0x8026bbe0) refreshes the rider's
-   *self*-state for the decision logic: it caches the machine ids from
+   *self*-state for the decision logic: it caches the `is_bike` and absolute kind of
    `RiderData.machine_gobj` (`CpuData+0x0c/+0x0d`), records position/velocity, casts a
-   short forward predict-ray (`pos + vel*15` against the course), and caches three
-   per-machine turn/speed-envelope scalars into the globals `0x8055e68c/690/694` (read
+   short forward predict-ray (`pos + vel*15` against the course), and caches the machine's
+   two heading-alignment cosines and stuck angle into the globals `0x8055e68c/690/694` (read
    by route-building and steering). It runs two **anti-stuck detectors** - a position
    one (no movement away from `recorded_pos` for 241 frames -> `status_flags` bit `0x04`)
    and a velocity one (too slow or moving against facing for 60 frames -> bit `0x02`) -
@@ -912,15 +912,17 @@ charge byte) or full replace both work, on the kirby's 2-axis steer instead of a
 | Ability press-hold table | 0x804b7f30 | per-difficulty ability-press hold frames `{15,12,10,8,6,4,2,1,0}` (idx by `+0x22`), read by `Rider_CPUGetAbilityPressHold` |
 | Steer envelope table | 0x804b7f54 | per-difficulty stick `(step, cap)` pairs (9 entries), read by `Rider_CPUGetSteerEnvelope` |
 | Machine attack-score table | 0x804b8000 | per-machine, stride 0x14: +4/+6/+8 attack scores (base / damage-off / damage-on), +0xc range weight, +0x10 bit 0x40 = priority-target |
-| Machine capability tables | 0x804b8854 / 0x804b89d0 | per-machine CPU capability flags (non-bike / bike), stride 0x14; +8 flag bits gate charge/attack/dodge; selected by `is_bike` |
-| Machine turn-tolerance table | 0x804b8f30 | per-machine max-turn angle (stride 0x14, +0xc ~ 0.785 rad for entry 0), read by `Rider_CPUGetMachineTurnTolerance` |
+| Machine capability tables | 0x804b8854 / 0x804b89d0 | `CpuMachineCaps`, 19 star / 7 bike rows, stride 0x14: +4 `swap_score` (desirability as a field machine; `Rider_CPUScanCityObjects` skips 0), +8 flags (0x80 may leave it for a better machine, 0x40 brake, 0x20 charge-hold, 0x10 ram-charge, 0x08 no preferred Machine Passage branch), +0xc `charge_release` (a charge-holding CPU holds while the gauge is at or under it). Read by the `Machine_CPU*` accessors at 0x8027699c-0x80276d1c, each splitting `Machine_GetAbsoluteKind` back into a class slot |
+| Machine steer table | 0x804b8f30 | `CpuMachineSteer`, 19 star rows, stride 0x14: +4 / +8 heading-alignment cosines (`Rider_CPUGetMachineAlignCosNear` / `Far`), +0xc turn tolerance in radians (`Rider_CPUGetMachineTurnTolerance`), +0x10 stuck angle (`Rider_CPUGetMachineStuckAngle`). The bike table after it at 0x804b90ac is never read: bikes and riders with no machine get row 0 |
+| Stadium machine pairs | 0x804b8a5c / 0x804b8b24 | `CpuStadiumMachineParam`, 25 each by absolute kind, `{pitch, min_len}` for Air Glider (`Rider_CPUGetAirGliderMachineParam`) and High Jump (`Rider_CPUGetHighJumpMachineParam`) |
+| Machine kind switches | r2 0x805e31a4-0x805e31c0 | `Machine_CPUGetChargeHoldGate` gives Bulk, Hydra, Rocket and Formula a charge-hold gate pair and `Machine_CPUGetChargeReleaseOverride` gives Bulk and Hydra a release level; `Rider_CPUEmitSteerStick` holds the stick up on Hydra and down on Winged and Jet Star once moving, off the cached `CpuData+0x0d` |
 | Desire-flag seed tables | 0x804b7b18 / 0x804b7c00 | `{u32 id; u32 inhibitor_flags}`, stride 8; indexed by `RiderData.state_idx` (+0x1c). Table 1 = 29 entries (ids 0x00..0x1c, all kinds); Table 2 = 102 entries (ids 0x1d..0x82, `kind==0` only, indexed by `state_idx-29`) |
 | Course path-graph object | `stc_grobj_ptr` 0x805dd6cc (r13[0x5ec]) | Per-stage spline node array (`[grobj+0x120]+id*0x1c`); the id space for `target_primary/secondary` |
 | CpuData registry / count | 0x8055de08 / 0x8055de1c | Up to 5 allocated `CpuData*` + a count byte. **Never freed per-rider** (bulk-freed at scene teardown); iterated **only** by a debug-text overlay, never by gameplay |
 | CPU stat-growth budget | `GameData.city.cpu_stat_budget` (`+0x46c`) | `float[5]`, per-slot remaining stat pool. Seeded by `SceneLoad_3D` from `cpu_level`, drained by `CityTrial_GrowCpuStats`. 0 for humans |
 | CPU stat-growth tables | `gmGameParams.ct_cpu_stat_{seed,rate,interval}` (`+0x154 / +0x178 / +0x19c`) | `float[9]` seed pool `{3,5,10,15,20,25,30,35,42}` / `float[9]` drain rate `{1,1,1,1,1.2,1.5,2,2.5,3}` / `int` tick interval `180`. In `gmGameParams` (`gmDataAll->game_params`), indexed by `cpu_level` 0..8 |
 | Per-frame scratch buffers (typed) | 0x8055e964 / 0x8055e698 / 0x8055e8b4 | Three distinct single-rider structures, zeroed each perceive: **route waypoints** (0x2f0, <=4 lane-midpoint waypoints from `Rider_CPUBuildRoute`; header byte 4/5 = valid route); **hazard/threat list** (`stc_cpu_hazards`, 0x210, stride 0x40, <=8, count at 0x8055e898, +0x38 time-to-impact / +0x3c bit 0x80 = imminent); **forward-collision list** (`stc_cpu_forward`, 0xb0, stride 0x14 `{x00; Vec3 pos; side}`, <=8, count at 0x8055e954). **Not** a multi-rider world model |
-| Per-machine envelope cache / self-vel basis | 0x8055e68c*690*694 / 0x8055e89c | three per-machine turn/speed-envelope scalars (feed route-build + steer) and the cached self-velocity Vec3 basis (hazard avoidance), all written each perceive |
+| Per-machine envelope cache / self-vel basis | 0x8055e68c*690*694 / 0x8055e89c | the machine's two alignment cosines and stuck angle (feed route-build + steer) and the cached self-velocity Vec3 basis (hazard avoidance), all written each perceive |
 | TR CPU input-reader vtable | 0x804d8710 | vtable for the CPU `TopRideCpuInputReader`; human readers use 0x804d25e0. `vt[0x0c]` = brain, `vt[0x14]` = poll |
 | TR per-slot CPU level scratch | 0x804d8040 | `float[slot]`; written by the CPU reader ctor = handicap byte, read back into `reader->difficulty` (+0x1c) each frame |
 | TR per-level tuning tables | 0x804d80d0 / 0x804d8058 / 0x804d80bc | Indexed by `reader->difficulty` (0..4): steer gain (80->-70) / commit-hold frames (60->0) / commit threshold (0->100). Per-detector aggression gates: item 0x804d80a8, rival 0x804d8094, ram 0x804d806c |

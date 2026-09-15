@@ -402,11 +402,10 @@ typedef enum APItemId
     AP_STAR_PIECE_UNLOCK_BLUE,
     AP_STAR_PIECE_UNLOCK_YELLOW,
 
-    // Machine unlock items (830-854, aligned to MachineKind).
+    // Machine unlock items (830-856, aligned to the machine unlock mask's bits:
+    // MachineKind for the vanilla machines, then the Archipelago Star).
     // VCKIND_WHEELVSDEDEDE (would be 855) is not exposed: it is the Vs. King
     // Dedede stadium's CPU-only machine and no game code reads its unlock bit.
-    // 856 and up continue the alignment into the MachineKinds custom_machines
-    // registers, in the order it discovers them.
     // The ids stay aligned to MachineKind, so three of them name a machine the
     // AP world ships no item for and whose unlock bit therefore never clears:
     // WINGKIRBY (847) and WHEELKIRBY (850) are copy-ability states, and
@@ -438,6 +437,7 @@ typedef enum APItemId
     AP_MACHINE_UNLOCK_REXWHEELIE,          // VCKIND_REXWHEELIE
     AP_MACHINE_UNLOCK_WHEELIESCOOTER,      // VCKIND_WHEELIESCOOTER
     AP_MACHINE_UNLOCK_WHEELDEDEDE,         // VCKIND_WHEELDEDEDE - player-facing Dedede (Free Run / Stadium CSS)
+    AP_MACHINE_UNLOCK_AP_STAR = 856,       // the Archipelago Star, at whatever MachineKind it registered as
 
     // Box type unlock items (860-862, aligned to BoxKind)
     AP_BOX_UNLOCK_BASE = 860,
@@ -605,8 +605,8 @@ typedef enum BaseAbilityKind
 // SetUnlockMask truncates back to the underlying width.
 typedef enum APUnlockCategory
 {
-    AP_UNLOCK_MACHINE,         // u32 - VCKIND_*
-    AP_UNLOCK_ABILITY,         // u16 - COPYKIND_*
+    AP_UNLOCK_MACHINE,         // u32 - VCKIND_*, then AP_MACHINE_BIT_AP_STAR
+    AP_UNLOCK_ABILITY,       // u16 - COPYKIND_*
     AP_UNLOCK_EVENT,           // u32 - EVKIND_*
     AP_UNLOCK_PATCH,           // u16 - PATCHKIND_*
     AP_UNLOCK_ITEM,            // u32 - ITUNLOCK_*
@@ -620,6 +620,12 @@ typedef enum APUnlockCategory
     AP_UNLOCK_AP_STAR_PIECE,   // u8  - APStarPiece
     AP_UNLOCK_NUM,
 } APUnlockCategory;
+
+// The machine unlock mask's bits: one per vanilla MachineKind, then the Archipelago
+// Star. Any other registered custom machine has no bit and no item, and is always
+// available.
+#define AP_MACHINE_BIT_AP_STAR (AP_MACHINE_UNLOCK_AP_STAR - AP_MACHINE_UNLOCK_BASE)
+#define AP_MACHINE_BIT_NUM     (AP_MACHINE_BIT_AP_STAR + 1)
 
 // Which sphere of the Archipelago Star's set a sphere unlock item addresses, in
 // the order the AP_STAR_PIECE_UNLOCK_* item IDs above are assigned. The ap_star

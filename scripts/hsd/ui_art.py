@@ -1,22 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""The four art roles a character-indexed UI bank asks for, derived from renders.
+"""The five art roles a UI bank drawn by kind asks for, derived from renders.
 
-Twenty-one TexAnims across eight archives take a machine picture, but they hold
-only four distinct (width, height, format) combinations between them, and the
+Twenty-three TexAnims across ten archives take a machine picture, but they hold
+only five distinct (width, height, format) combinations between them, and the
 geometry is what says which role a bank plays. Every bank of a role wants the same
 image, so two renders of a machine - a three-quarter hero view and a straight
-top-down - produce all four.
+top-down - produce all five.
 
 | Role | Geometry | Where it is drawn |
 |---|---|---|
 | portrait | 64x64 CMPR | the character-select grid tile |
 | picture | 80x48 C8 | the large art beside the CSS cursor and on the results screens |
 | silhouette | 80x48 I4 | a soft white bloom drawn under the picture, same size and place |
-| icon | 40x40 C4 | the time-attack board, and beside a player on the results and stadium-select screens |
+| icon | 40x40 C4 | the time-attack board, beside a player on the results and stadium-select screens, and the stadium HUD |
+| blip | 32x32 C4 | floating over the machine on the City Trial field |
 
-The formats above are the donor frames'. An appended frame carries its own format,
-so the encoders here emit RGB5A3 for the three color roles and I4 for the
-silhouette, and neither a CMPR encoder nor a quantizer is needed.
+The formats above are the vanilla frames'. An appended frame carries its own format,
+so the encoders here emit RGB5A3 for the color roles and I4 for the silhouette, and
+neither a CMPR encoder nor a quantizer is needed.
 """
 
 from PIL import Image, ImageFilter
@@ -31,6 +32,7 @@ BANK_ROLE = {
     (80, 48, GX_TF_C8): "picture",
     (80, 48, GX_TF_I4): "silhouette",
     (40, 40, GX_TF_C4): "icon",
+    (32, 32, GX_TF_C4): "blip",
 }
 
 ROLE_SIZE = {
@@ -38,7 +40,16 @@ ROLE_SIZE = {
     "picture": (80, 48),
     "silhouette": (80, 48),
     "icon": (40, 40),
+    "blip": (32, 32),
 }
+
+ROLES = ("portrait", "picture", "silhouette", "icon", "blip")
+
+# A vanilla blip is one flat pastel with no outline, its shape filling the frame to
+# within a pixel: the machine's color with its brightest channel at 255 and the rest
+# pulled halfway to white.
+BLIP_MARGIN = 0.06
+BLIP_PASTEL = 0.5
 
 # Measured off frame 4 of the portrait banks: a flat warm gray darkening along the
 # bottom edge, where a soft contact shadow pools under the machine.
@@ -156,8 +167,27 @@ def icon(topdown, w, h):
     return out
 
 
-def role_images(hero, topdown):
-    """Every role's image at its target size, from a hero and a top-down render."""
+def mean_color(im):
+    """The average RGB of the pixels `im` draws."""
+    px = [p for p in im.getdata() if p[3] >= 128]
+    if not px:
+        return (255, 255, 255)
+    return tuple(round(sum(p[c] for p in px) / len(px)) for c in range(3))
+
+
+def blip(topdown, w, h, color):
+    """The City Trial blip: the top-down silhouette as one flat pastel of `color`."""
+    art = contain(topdown, w, h, margin=BLIP_MARGIN)
+    top = max(color) or 1
+    fill = tuple(round(255 - (255 - c * 255 / top) * BLIP_PASTEL) for c in color)
+    out = Image.new("RGBA", (w, h), fill + (0,))
+    out.putalpha(art.getchannel("A"))
+    return out
+
+
+def role_images(hero, topdown, blip_color=None):
+    """Every role's image at its target size, from a hero and a top-down render. The
+    blip is tinted `blip_color`, or the top-down render's average color."""
     hero, topdown = trim(hero), trim(topdown)
     pw, ph = ROLE_SIZE["picture"]
     picture_im = contain(hero, pw, ph)
@@ -166,18 +196,19 @@ def role_images(hero, topdown):
         "picture": picture_im,
         "silhouette": silhouette(picture_im, pw, ph),
         "icon": icon(topdown, *ROLE_SIZE["icon"]),
+        "blip": blip(topdown, *ROLE_SIZE["blip"], blip_color or mean_color(topdown)),
     }
 
 
 def contact_sheet(images, zoom=6, back=(128, 128, 132)):
-    """The four role images magnified side by side over a mid gray, for eyeballing
-    what a build is about to ship at 40x40 and 64x64."""
+    """The role images magnified side by side over a mid gray, for eyeballing what a
+    build is about to ship at 32x32 to 80x48."""
     pad = zoom * 2
     tiles = [
         images[r].resize(
             (images[r].width * zoom, images[r].height * zoom), Image.NEAREST
         )
-        for r in ("portrait", "picture", "silhouette", "icon")
+        for r in ROLES
     ]
     out = Image.new(
         "RGBA",

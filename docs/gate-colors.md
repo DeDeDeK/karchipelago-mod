@@ -34,7 +34,7 @@ The Air Ride select struct (`airride_select_ply` at `GameData + 0x108`, `game.h`
 
 Only `color[]` holds a `KirbyColor`. Despite the name, `icon[]` is **not** a color: `CSS_airRide_RaceUpdate` derives it by scanning the available-machine list for the slot's `machine_kind` (+0x61) and storing the matching **list position**, falling back to the entry whose value is 1 (Warp Star) and then to 0. Color gating must never touch `icon[]` - a color-mask test applied to a list index is a type confusion that corrupts the CSS icon. Machine availability is a separate concern, handled in `gate_machines.c`.
 
-For the same reason, the `HSD_Randi` calls at 0x800236b4 / 0x80026534 / 0x8002988c in the AR CSS are left alone here: they pick a machine-list index (`machine[slot] = available_char_list[HSD_Randi(unlocked_count)]` over the `AirRide_CheckCharacterAvailable`-gated list), not a color.
+For the same reason, the `HSD_Randi` calls at 0x800236b4 / 0x80026534 / 0x8002988c in the AR CSS are left alone here: they pick a machine-list index (`machine[slot] = available_char_list[HSD_Randi(unlocked_count)]` over the availability-gated list), not a color.
 
 ## Init Paths and Convergence Points
 

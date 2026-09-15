@@ -3,9 +3,22 @@
 
 #include "datatypes.h"
 #include "hsd.h"
+#include "game.h"
+#include "menu.h"
 #include "machine.h"
 
 #include "custom_machines_api.h"
+#include "custom_machine_desc.h"
+
+// Icons a select screen can carry. City Trial's headroom past its packed list decides
+// the ceiling for both screens.
+#define SELECT_ICON_MAX 33
+
+// Registry cap across both classes, sized so every machine that wants a character gets
+// a select-screen icon.
+#define CUSTOM_MACHINE_MAX 13
+_Static_assert(CKIND_NUM + CUSTOM_MACHINE_MAX <= SELECT_ICON_MAX,
+               "every registered machine must fit the select screens");
 
 #define CUSTOM_MACHINE_NAME_MAX 32
 #define CUSTOM_MACHINE_PATH_MAX 64
@@ -13,74 +26,93 @@
 // Two lines of about 24 characters, which is what the description box holds.
 #define CUSTOM_MACHINE_DESCRIPTION_MAX 64
 
-// Palette entries copied out of a descriptor. The archive is freed once discovery
-// is done, so the colors cannot be left pointing into it.
-#define CUSTOM_MACHINE_PALETTE_MAX 16
+// Widened class slot counts. Either class can take every registered machine, and both
+// rows of the relocated vcData lookup are as wide as the star row.
+#define CUSTOM_VCSTAR_NUM  (VCSTAR_NUM + CUSTOM_MACHINE_MAX)
+#define CUSTOM_VCWHEEL_NUM (VCWHEEL_NUM + CUSTOM_MACHINE_MAX)
+#define CUSTOM_VCKIND_NUM  (VCKIND_NUM + CUSTOM_MACHINE_MAX)
+#define CUSTOM_CKIND_NUM   (CKIND_NUM + CUSTOM_MACHINE_MAX)
 
-// Widened class slot counts. Only the star class grows; the bike row keeps the
-// same width so both rows of the relocated lookup are indexed alike.
-#define CUSTOM_VCSTAR_NUM (VCSTAR_NUM + CUSTOM_MACHINE_MAX)
-#define CUSTOM_VCKIND_NUM (VCKIND_NUM + CUSTOM_MACHINE_MAX)
-#define CUSTOM_CKIND_NUM  (CKIND_NUM + CUSTOM_MACHINE_MAX)
+// Stat rows a descriptor lists for its class, at most.
+#define CUSTOM_MACHINE_STAT_ROW_MAX CUSTOM_MACHINE_BIKE_STAT_ROW_NUM
 
-// Controller slots the engine carries player state for.
-#define CUSTOM_MACHINE_PLY_NUM 5
+// Each class's animation bank particle slots run back to back, each a vehicle bank
+// generator id or -1: the star's two unk, two moving and three boosting, the bike's
+// cruise and boost.
+#define STAR_PARTICLE_SLOT_NUM  7
+#define WHEEL_PARTICLE_SLOT_NUM 2
+#define CUSTOM_MACHINE_PARTICLE_SLOT_MAX STAR_PARTICLE_SLOT_NUM
 
-// Columns per row of the vanilla select-screen character grid.
-#define VANILLA_GRID_COLS 10
+_Static_assert(__builtin_offsetof(vcAnimationStar, particle_bone) -
+                   __builtin_offsetof(vcAnimationStar, unk_particle) ==
+                   STAR_PARTICLE_SLOT_NUM * sizeof(int),
+               "vcAnimationStar particle slots must be contiguous");
+_Static_assert(__builtin_offsetof(vcAnimationWheel, particle_bone) -
+                   __builtin_offsetof(vcAnimationWheel, cruise_particle) ==
+                   WHEEL_PARTICLE_SLOT_NUM * sizeof(int),
+               "vcAnimationWheel particle slots must be contiguous");
 
-// Icons a select screen can carry, and where each screen's block keeps its packed
-// list: a count byte, then one CharacterKind per icon. City Trial's headroom past
-// the list decides the ceiling for both screens.
-#define SELECT_ICON_MAX 33
-#define SELECT_COUNT    0x65
-#define SELECT_LIST     0x66
-
-// The particle bank EfPtclVehicle.dat installs, which is what a machine's
-// animation bank names its exhaust out of.
-#define PTCL_BANK_VEHICLE 0
+static inline int *CustomMachines_ParticleSlots(int is_bike, void *anim, int *out_num)
+{
+    if (is_bike)
+    {
+        *out_num = WHEEL_PARTICLE_SLOT_NUM;
+        return &((vcAnimationWheel *)anim)->cruise_particle;
+    }
+    *out_num = STAR_PARTICLE_SLOT_NUM;
+    return ((vcAnimationStar *)anim)->unk_particle;
+}
 
 typedef struct CustomMachineEntry
 {
-    char name[CUSTOM_MACHINE_NAME_MAX];    // descriptor name, or the filename if it has none
-    char path[CUSTOM_MACHINE_PATH_MAX];    // full FST path, handed to the engine loader
-    char symbol[CUSTOM_MACHINE_NAME_MAX];  // the archive's vcData public
+    char name[CUSTOM_MACHINE_NAME_MAX];               // descriptor name, or the filename if it has none
+    char path[CUSTOM_MACHINE_PATH_MAX];               // full FST path, handed to the engine loader
+    char symbol[CUSTOM_MACHINE_NAME_MAX];             // the archive's vcData public
     char description[CUSTOM_MACHINE_DESCRIPTION_MAX]; // select-screen blurb, empty if none
-    int machine_kind;                      // appended MachineKind, -1 until registered
-    int character_kind;                    // appended CharacterKind, -1 if none
-    int star_slot;                         // class slot in the widened star class
-    int rider_kind;                        // RiderKind for the CharacterDesc row
-    int clone_kind;                        // star kind whose per-kind engine rows it inherits
-    float spawn_weight;                    // City Trial spawn weight
-    int palette_joint;                     // joint whose materials cycle, -1 if none
-    float palette_period;                  // seconds for one pass through the palette
-    int palette_count;
-    u32 palette[CUSTOM_MACHINE_PALETTE_MAX];
-    int trail_count;                       // tinted RGB triples in the vehicle particle bank
-    u8 trail_gen[8];                       // generator each offset belongs to
-    u16 trail_rgb[8];                      // byte offset of an RGB triple in that generator
-    int trail_clone_count;                 // spare bank slots this machine claims
-    u8 trail_clone_src[4];                 // generator copied
-    u8 trail_clone_dst[4];                 // slot it is copied into
-    int cine_machine_index;                // vanilla legendary the cutscene runs under, -1 if none
-    char cine_glow_file[CUSTOM_MACHINE_NAME_MAX];
-    char cine_glow_symbol[CUSTOM_MACHINE_NAME_MAX];
-    char cine_cam_symbol[CUSTOM_MACHINE_NAME_MAX];
-    char cine_parts_file[CUSTOM_MACHINE_NAME_MAX];
-    char cine_parts_symbol[CUSTOM_MACHINE_NAME_MAX];
+    int machine_kind;                                 // appended MachineKind
+    int character_kind;                               // appended CharacterKind, -1 if none
+    int is_bike;                                      // machine class
+    int class_slot;                                   // slot in its widened class
+    int rider_kind;                                   // RiderKind for the CharacterDesc row
+    int audio_kind;                                   // same-class kind voicing what its bank lacks
+    float spawn_weight;                               // City Trial spawn weight
+    float blip_height;                                // field blip height, in the engine table's units
+    float radar_drop;                                 // stat radar screen model drop, in the same units
+    int generator_count;                              // vehicle particle bank generators it brings
+    int generator_base;                               // bank id its first generator is installed at
+    u16 generator_size[CUSTOM_MACHINE_GENERATOR_MAX]; // 0 for one discovery dropped
+    u8 generator[CUSTOM_MACHINE_GENERATOR_MAX][CUSTOM_MACHINE_GENERATOR_SIZE];
+    int particle[CUSTOM_MACHINE_PARTICLE_SLOT_MAX];   // its class's animation bank particle slots, as installed
+    CustomMachineCpu cpu;
+    int cine_machine_index;                           // vanilla legendary the cutscene runs under, -1 if none
+    char cine_file[CUSTOM_MACHINE_NAME_MAX];
+    char cine_symbol[CUSTOM_MACHINE_NAME_MAX];
+    float stat_rows[CUSTOM_MACHINE_STAT_ROW_MAX][2];  // its class's rows, in that class's order
 } CustomMachineEntry;
 
 void CustomMachines_OnBoot(void);
 void CustomMachines_On3DLoadStart(void);
+void CustomMachines_OnFrameStart(void);
 
 int                 CustomMachines_GetCount(void);
+int                 CustomMachines_GetClassCount(int is_bike);
 int                 CustomMachines_GetKindCeiling(void);
 int                 CustomMachines_GetCharacterKindCeiling(void);
 CustomMachineEntry *CustomMachines_GetEntry(int index);
 CustomMachineEntry *CustomMachines_FindByKind(int machine_kind);
-CustomMachineEntry *CustomMachines_FindByCharacterKind(int character_kind);
-CustomMachineEntry *CustomMachines_FindByStarSlot(int star_slot);
+// NULL for every vanilla slot, which is the common case on the per-frame paths.
+CustomMachineEntry *CustomMachines_FindByClassSlot(int is_bike, int class_slot);
 void                CustomMachines_CopyStr(char *dst, const char *src, int max);
+
+// Registry order, which is also the order the appended kinds were handed out in.
+static inline int CustomMachines_Index(const CustomMachineEntry *e)
+{
+    return e->machine_kind - VCKIND_NUM;
+}
+
+// (is_bike, class slot) <-> MachineKind, custom slots included.
+int CustomMachines_KindFromClassIndex(int is_bike, int class_index);
+int CustomMachines_ClassIndexFromKind(int kind, int *out_is_bike);
 
 // Point an accessor's `lis` / `addi` pair at a relocated copy of its table.
 void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table);
@@ -88,65 +120,62 @@ void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
 // Rewrite the low half of one instruction, keeping its opcode and registers.
 void CustomMachines_SetImmediate(u32 addr, u32 imm);
 
-// The live joint for a depth-first index into the machine archive's own joint
-// tree, found through the back-pointer JObjLoad (0x8040add4) leaves at JOBJ+0x84.
+// The live joint for a depth-first index into the machine archive's own joint tree,
+// matched through the JOBJ.desc back-pointer JObjLoad (0x8040add4) leaves.
 JOBJ *CustomMachines_GetMachineJoint(MachineData *md, int joint_index);
 
 // A machine's side-car path: its own with the extension swapped. Returns 0 if it
 // does not fit or the source has no extension to swap.
 int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *ext);
 
-// machine_registry.c - the widened star class.
+typedef enum CustomMachineHandlerSlot
+{
+    CUSTOM_MACHINE_HANDLER_INIT,
+    CUSTOM_MACHINE_HANDLER_THINK,
+    CUSTOM_MACHINE_HANDLER_ANIM,
+} CustomMachineHandlerSlot;
+
 void CustomMachineRegistry_OnBoot(void);
-// Layer a handler onto a custom kind's slot in one of the two per-kind tables the
-// star class dispatches through: 0 = Machine_Star_Init, 1 = Machine_Star_Think.
-int  CustomMachineRegistry_SetStarHandler(int table, int machine_kind,
-                                          void (*fn)(MachineData *));
+int  CustomMachineRegistry_SetHandler(CustomMachineHandlerSlot slot, int machine_kind,
+                                      CustomMachineHandler fn);
 
-// character_registry.c - appended CharacterDesc rows and select-grid cells.
-void CustomMachineCharacter_OnBoot(void);
-int  CustomMachineCharacter_GetGridCols(void);
+void CustomMachineStatScaling_OnBoot(void);
 
-// select_text.c - the select screens' machine name and description text.
-void CustomMachineText_OnBoot(void);
+void CustomMachineCharacterRegistry_OnBoot(void);
+int  CustomMachineCharacterRegistry_GetGridCols(void);
 
-// machine_audio.c - the star class's audio parameter array and drop-in banks.
+void CustomMachineSelectText_OnBoot(void);
+
 void CustomMachineAudio_OnBoot(void);
+// Widen a class's sound table, just loaded with its shared archive.
+void CustomMachineAudio_OnClassLoad(int is_bike);
 
-// trail_bank.c - private copies of shared vehicle particle bank generators.
-void CustomMachineTrail_OnBoot(void);
+void CustomMachineTrailBank_OnBoot(void);
 
-// machine_palette.c - the wall-clock material cycle a descriptor may ask for.
-void CustomMachinePalette_OnBoot(void);
+void CustomMachineCpu_OnBoot(void);
 
-// machine_stats.c - the widened per-machine counter arrays.
 void CustomMachineStats_OnBoot(void);
 void CustomMachineStats_On3DLoadStart(void);
-void CustomMachineStats_SetDeathHandler(CustomMachineDeathHandler handler);
+void CustomMachineStats_AddDeathHandler(CustomMachineDeathHandler handler);
 
-// machine_blip.c - the City Trial blip a custom machine borrows.
-void CustomMachineBlip_OnBoot(void);
+void CustomMachineHud_OnBoot(void);
 
-// machine_spawn.c - the City Trial field spawn roll.
 void CustomMachineSpawn_OnBoot(void);
 void CustomMachineSpawn_SetWeightFilter(CustomMachineSpawnWeightFilter filter);
 
-// machine_preload.c - files this mod adds to City Trial's preload set.
-void CustomMachinePreload_OnBoot(void);
-int  CustomMachinePreload_Add(const char *path);
-
-// machine_cinematic.c - the vanilla legendary cutscene, driven by a descriptor.
 void CustomMachineCinematic_OnBoot(void);
 void CustomMachineCinematic_On3DLoadStart(void);
 int  CustomMachineCinematic_Start(int machine_kind, int ply);
 
-// ui_frames.c - the 21st frame spliced into each character-indexed art bank.
-void CustomMachineUiFrames_OnBoot(void);
+int  CustomMachineMount_Queue(int machine_kind, int ply);
+void CustomMachineMount_On3DLoadStart(void);
+void CustomMachineMount_OnFrameStart(void);
 
-// select_screen.c - the widened UI art banks, icon grids and icon-list packing.
-void CustomMachineSelect_OnBoot(void);
-int  CustomMachineSelect_GetIconMax(void);
-void CustomMachineSelect_SetAirRideRowSplit(void *select_base, int two_rows);
-void CustomMachineSelect_SetAvailabilityFilter(CustomMachineAvailabilityFilter filter);
+void CustomMachineUiFrames_OnBoot(void);
+// Whether every bank in the archive with this basename grew on its latest load.
+int  CustomMachineUiFrames_IsGrown(const char *name);
+
+void CustomMachineSelectScreen_OnBoot(void);
+void CustomMachineSelectScreen_SetAvailabilityFilter(CustomMachineAvailabilityFilter filter);
 
 #endif

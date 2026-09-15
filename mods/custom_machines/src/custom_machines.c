@@ -1,9 +1,4 @@
 // Registry for drop-in machine archives found in the FST machines/ folder.
-//
-// Discovery loads each candidate through Archive_LoadFile, which allocates out of
-// hoshi's boot arena, and rewinds that arena once the descriptor is copied out. A
-// machine archive runs to six figures of bytes and the engine loads its own copy
-// later, by filename, through the widened name table.
 
 #include <string.h>
 
@@ -11,6 +6,8 @@
 #include "hsd.h"
 #include "obj.h"
 #include "menu.h"
+#include "rider.h"
+#include "particle.h"
 #include "hoshi/mod.h"
 #include "code_patch/code_patch.h"
 
@@ -18,13 +15,28 @@
 
 #include "custom_machines.h"
 
+// A weight past this is taken for garbage rather than a machine meant to crowd out the field.
+#define SPAWN_WEIGHT_MAX 1000.0f
+
 static CustomMachineEntry stc_entries[CUSTOM_MACHINE_MAX];
 static int stc_count;
+static int stc_class_count[2];  // appended slots handed out per class
 static int stc_character_count;
+static int stc_generator_count; // generator ids handed out past CUSTOM_MACHINE_GENERATOR_BASE
+
+static const char *ClassName(int is_bike)
+{
+    return is_bike ? "bike" : "star";
+}
 
 int CustomMachines_GetCount(void)
 {
     return stc_count;
+}
+
+int CustomMachines_GetClassCount(int is_bike)
+{
+    return stc_class_count[is_bike != 0];
 }
 
 int CustomMachines_GetKindCeiling(void)
@@ -46,29 +58,18 @@ CustomMachineEntry *CustomMachines_GetEntry(int index)
 
 CustomMachineEntry *CustomMachines_FindByKind(int machine_kind)
 {
-    for (int i = 0; i < stc_count; i++)
-    {
-        if (stc_entries[i].machine_kind == machine_kind)
-            return &stc_entries[i];
-    }
-    return NULL;
+    return CustomMachines_GetEntry(machine_kind - VCKIND_NUM);
 }
 
-CustomMachineEntry *CustomMachines_FindByCharacterKind(int character_kind)
+CustomMachineEntry *CustomMachines_FindByClassSlot(int is_bike, int class_slot)
 {
-    for (int i = 0; i < stc_count; i++)
-    {
-        if (stc_entries[i].character_kind == character_kind)
-            return &stc_entries[i];
-    }
-    return NULL;
-}
+    is_bike = is_bike != 0;
+    if (class_slot < (is_bike ? VCWHEEL_NUM : VCSTAR_NUM))
+        return NULL;
 
-CustomMachineEntry *CustomMachines_FindByStarSlot(int star_slot)
-{
     for (int i = 0; i < stc_count; i++)
     {
-        if (stc_entries[i].star_slot == star_slot)
+        if (stc_entries[i].is_bike == is_bike && stc_entries[i].class_slot == class_slot)
             return &stc_entries[i];
     }
     return NULL;
@@ -164,15 +165,33 @@ int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *
     return 1;
 }
 
+static int FindKindByName(const char *name)
+{
+    if (name == NULL)
+        return -1;
+    for (int i = 0; i < stc_count; i++)
+    {
+        if (strcmp(stc_entries[i].name, name) == 0)
+            return stc_entries[i].machine_kind;
+    }
+    return -1;
+}
+
+// Whether a string exists and fits a registry buffer whole; one cut short would name a
+// different file or symbol, or a name no consumer could look up.
+static int Fits(const char *s, int max)
+{
+    return s != NULL && strlen(s) < (size_t)max;
+}
+
 static void CountCb(int entrynum, void *args)
 {
     (void)entrynum;
     (*(int *)args)++;
 }
 
-// Take one candidate's descriptor into the registry. Returns 1 if it registered,
-// and only reads through `desc` - the caller frees the archive on the way out.
-static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
+// Take one candidate's descriptor into the registry. Returns 1 if it registered.
+static int TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMachineDesc *desc)
 {
     if (desc == NULL)
     {
@@ -190,104 +209,152 @@ static int TakeDescriptor(char *path, int entrynum, CustomMachineDesc *desc)
                  path, desc->version, CUSTOM_MACHINE_DESC_VERSION);
         return 0;
     }
-    if (desc->is_bike)
+    if (desc->is_bike != 0 && desc->is_bike != 1)
     {
-        OSReport("[CustomMachines] %s is a bike; only the star class can be widened\n", path);
+        OSReport("[CustomMachines] %s is_bike %d names no machine class\n", path, desc->is_bike);
         return 0;
     }
-    if (desc->symbol == NULL)
+
+    const char *name = desc->name != NULL ? desc->name : FST_GetFilenameFromEntrynum(entrynum);
+    if (!Fits(path, CUSTOM_MACHINE_PATH_MAX) || !Fits(name, CUSTOM_MACHINE_NAME_MAX) ||
+        !Fits(desc->symbol, CUSTOM_MACHINE_NAME_MAX))
     {
-        OSReport("[CustomMachines] %s descriptor has no vcData symbol\n", path);
+        OSReport("[CustomMachines] %s path, name or vcData symbol is missing or too long\n", path);
+        return 0;
+    }
+    // The name is what a consumer binds a machine by, so a second one under it could
+    // never be found.
+    if (FindKindByName(name) >= 0)
+    {
+        OSReport("[CustomMachines] %s is named '%s', which is already registered\n", path, name);
+        return 0;
+    }
+
+    vcData *vc = (vcData *)Archive_GetPublicAddress(arc, (char *)desc->symbol);
+    if (vc == NULL || vc->attr == NULL || vc->model == NULL || vc->model->model_root == NULL ||
+        vc->unk_collision_group == NULL || vc->coll_attr == NULL || vc->coll_sphere == NULL ||
+        vc->handling_attr == NULL || vc->anim == NULL)
+    {
+        OSReport("[CustomMachines] %s vcData public '%s' is missing or incomplete\n",
+                 path, desc->symbol);
+        return 0;
+    }
+    if (desc->audio_kind < 0 || desc->audio_kind >= VCKIND_NUM ||
+        MachineKind_IsBike(desc->audio_kind) != desc->is_bike)
+    {
+        OSReport("[CustomMachines] %s audio_kind %d is not a %s kind\n",
+                 path, desc->audio_kind, ClassName(desc->is_bike));
+        return 0;
+    }
+    if (desc->stat_rows == NULL || desc->cpu == NULL)
+    {
+        OSReport("[CustomMachines] %s descriptor is missing its stat or CPU rows\n", path);
+        return 0;
+    }
+    if (desc->wants_character && (desc->rider_kind < 0 || desc->rider_kind >= RDKIND_NUM))
+    {
+        OSReport("[CustomMachines] %s rider_kind %d is not a RiderKind\n", path, desc->rider_kind);
         return 0;
     }
 
     CustomMachineEntry *e = &stc_entries[stc_count];
     CustomMachines_CopyStr(e->path, path, CUSTOM_MACHINE_PATH_MAX);
     CustomMachines_CopyStr(e->symbol, desc->symbol, CUSTOM_MACHINE_NAME_MAX);
-    CustomMachines_CopyStr(e->name, desc->name != NULL ? desc->name
-                                                       : FST_GetFilenameFromEntrynum(entrynum),
-                           CUSTOM_MACHINE_NAME_MAX);
+    CustomMachines_CopyStr(e->name, name, CUSTOM_MACHINE_NAME_MAX);
     CustomMachines_CopyStr(e->description, desc->description, CUSTOM_MACHINE_DESCRIPTION_MAX);
-    e->star_slot = VCSTAR_NUM + stc_count;
     e->machine_kind = VCKIND_NUM + stc_count;
-    e->character_kind = -1;
+    e->is_bike = desc->is_bike;
+    e->class_slot = (e->is_bike ? VCWHEEL_NUM : VCSTAR_NUM) + stc_class_count[e->is_bike];
+    e->character_kind = desc->wants_character ? CKIND_NUM + stc_character_count++ : -1;
     e->rider_kind = desc->rider_kind;
-    e->clone_kind = desc->clone_kind;
+    e->audio_kind = desc->audio_kind;
+    e->blip_height = desc->blip_height;
+    e->radar_drop = desc->radar_drop;
+
+    // A negative weight would eat into every other kind's share of the roll.
     e->spawn_weight = desc->spawn_weight;
-
-    // The colors are copied rather than pointed at, because the archive they sit
-    // in goes away with this call.
-    e->palette_joint = -1;
-    if (desc->palette_joint >= 0 && desc->palette_count > 0 &&
-        desc->palette != NULL && desc->palette_period > 0.0f)
+    if (!(e->spawn_weight >= 0.0f && e->spawn_weight <= SPAWN_WEIGHT_MAX))
     {
-        int count = desc->palette_count;
-        if (count > CUSTOM_MACHINE_PALETTE_MAX)
-        {
-            OSReport("[CustomMachines] '%s' palette of %d clamped to %d\n",
-                     e->name, count, CUSTOM_MACHINE_PALETTE_MAX);
-            count = CUSTOM_MACHINE_PALETTE_MAX;
-        }
-        e->palette_joint = desc->palette_joint;
-        e->palette_period = desc->palette_period;
-        e->palette_count = count;
-        for (int i = 0; i < count; i++)
-            e->palette[i] = desc->palette[i];
+        OSReport("[CustomMachines] '%s' spawn_weight is not a weight, it never spawns loose\n",
+                 e->name);
+        e->spawn_weight = 0.0f;
     }
 
-    // The trail tint rides the same cycle, so it only means anything on a machine
-    // that asked for a palette.
-    e->trail_count = 0;
-    if (e->palette_joint >= 0 && desc->trail_count > 0 && desc->trail_count <= 8)
+    int rows = e->is_bike ? CUSTOM_MACHINE_BIKE_STAT_ROW_NUM : CUSTOM_MACHINE_STAT_ROW_NUM;
+    for (int i = 0; i < rows; i++)
     {
-        e->trail_count = desc->trail_count;
-        for (int i = 0; i < desc->trail_count; i++)
+        e->stat_rows[i][0] = desc->stat_rows[i * 2];
+        e->stat_rows[i][1] = desc->stat_rows[i * 2 + 1];
+    }
+    e->cpu = *desc->cpu;
+
+    // Generator ids are positional, so a program that fails the check keeps its id with
+    // nothing installed behind it. Every program ends on a 0xfe or PTCL_OP_END terminator.
+    e->generator_count = desc->generators != NULL ? desc->generator_count : 0;
+    if (e->generator_count < 0)
+        e->generator_count = 0;
+    if (e->generator_count > CUSTOM_MACHINE_GENERATOR_MAX)
+    {
+        OSReport("[CustomMachines] '%s' generators clamped to %d\n",
+                 e->name, CUSTOM_MACHINE_GENERATOR_MAX);
+        e->generator_count = CUSTOM_MACHINE_GENERATOR_MAX;
+    }
+    e->generator_base = CUSTOM_MACHINE_GENERATOR_BASE + stc_generator_count;
+    for (int i = 0; i < e->generator_count; i++)
+    {
+        const CustomMachineGenerator *g = &desc->generators[i];
+
+        e->generator_size[i] = 0;
+        if (g->desc == NULL || g->size <= sizeof(struct PtclDesc) ||
+            g->size > CUSTOM_MACHINE_GENERATOR_SIZE || g->desc[g->size - 1] < 0xfe)
         {
-            e->trail_gen[i] = desc->trail_gen[i];
-            e->trail_rgb[i] = desc->trail_rgb[i];
+            OSReport("[CustomMachines] '%s' generator %d dropped\n", e->name, i);
+            continue;
         }
+        e->generator_size[i] = g->size;
+        memcpy(e->generator[i], g->desc, g->size);
     }
 
-    // Clones are only worth installing for a machine that goes on to tint them.
-    e->trail_clone_count = 0;
-    if (e->trail_count > 0 && desc->trail_clone_count > 0 && desc->trail_clone_count <= 4)
+    // The ids every loaded copy of the animation bank is given. Below the base is the
+    // bank's own generator, shared with every machine naming it.
+    int particle_num;
+    int *slots = CustomMachines_ParticleSlots(e->is_bike, vc->anim, &particle_num);
+    for (int i = 0; i < particle_num; i++)
     {
-        e->trail_clone_count = desc->trail_clone_count;
-        for (int i = 0; i < desc->trail_clone_count; i++)
+        int id = slots[i];
+        int own = id - CUSTOM_MACHINE_GENERATOR_BASE;
+
+        if (id < -1 || own >= e->generator_count)
         {
-            e->trail_clone_src[i] = desc->trail_clone_src[i];
-            e->trail_clone_dst[i] = desc->trail_clone_dst[i];
+            OSReport("[CustomMachines] '%s' animation bank names generator %d, which it does not bring\n",
+                     e->name, id);
+            id = -1;
         }
+        else if (own >= 0)
+            id = e->generator_base + own;
+        e->particle[i] = id;
     }
 
-    // Both archives are needed - one carries the parts that fly in, the other the
-    // streaks they ride and the camera - so a descriptor naming only one asks for none.
+    // A descriptor naming neither string asks for no cutscene; one naming only one of
+    // them, or one too long, gets none.
     e->cine_machine_index = -1;
-    if (desc->cine_glow_file != NULL && desc->cine_parts_file != NULL &&
-        desc->cine_glow_symbol != NULL && desc->cine_cam_symbol != NULL &&
-        desc->cine_parts_symbol != NULL)
+    if (Fits(desc->cine_file, CUSTOM_MACHINE_NAME_MAX) &&
+        Fits(desc->cine_symbol, CUSTOM_MACHINE_NAME_MAX))
     {
         e->cine_machine_index = desc->cine_machine_index != 0 ? 1 : 0;
-        CustomMachines_CopyStr(e->cine_glow_file, desc->cine_glow_file, CUSTOM_MACHINE_NAME_MAX);
-        CustomMachines_CopyStr(e->cine_glow_symbol, desc->cine_glow_symbol, CUSTOM_MACHINE_NAME_MAX);
-        CustomMachines_CopyStr(e->cine_cam_symbol, desc->cine_cam_symbol, CUSTOM_MACHINE_NAME_MAX);
-        CustomMachines_CopyStr(e->cine_parts_file, desc->cine_parts_file, CUSTOM_MACHINE_NAME_MAX);
-        CustomMachines_CopyStr(e->cine_parts_symbol, desc->cine_parts_symbol,
-                               CUSTOM_MACHINE_NAME_MAX);
+        CustomMachines_CopyStr(e->cine_file, desc->cine_file, CUSTOM_MACHINE_NAME_MAX);
+        CustomMachines_CopyStr(e->cine_symbol, desc->cine_symbol, CUSTOM_MACHINE_NAME_MAX);
     }
+    else if (desc->cine_file != NULL || desc->cine_symbol != NULL)
+        OSReport("[CustomMachines] '%s' cutscene strings are incomplete or too long, no cutscene\n",
+                 e->name);
 
-    if (desc->wants_character)
-    {
-        if (CKIND_NUM + stc_character_count < CustomMachineSelect_GetIconMax())
-            e->character_kind = CKIND_NUM + stc_character_count++;
-        else
-            OSReport("[CustomMachines] %s gets no character: the select screens hold %d icons\n",
-                     path, CustomMachineSelect_GetIconMax());
-    }
-
+    stc_generator_count += e->generator_count;
+    stc_class_count[e->is_bike]++;
     stc_count++;
-    OSReport("[CustomMachines] %s -> '%s' (kind %d, star slot %d, character %d)\n",
-             path, e->name, e->machine_kind, e->star_slot, e->character_kind);
+    OSReport("[CustomMachines] %s -> '%s' (kind %d, %s slot %d, character %d)\n",
+             path, e->name, e->machine_kind, ClassName(e->is_bike), e->class_slot,
+             e->character_kind);
     return 1;
 }
 
@@ -301,8 +368,8 @@ static void IndexCb(int entrynum, void *args)
     if (path == NULL)
         return;
 
-    // The descriptor is copied out whole, so the archive is dropped before the next
-    // one loads rather than holding every machine's file for the run.
+    // Archive_LoadFile allocates out of hoshi's boot arena, which is rewound once the
+    // descriptor is copied out: the engine loads its own copy later, by filename.
     void *mark = HSD_ArenaMark();
     HSD_Archive *arc = Archive_LoadFile(path);
     if (arc == NULL)
@@ -312,7 +379,7 @@ static void IndexCb(int entrynum, void *args)
         return;
     }
 
-    TakeDescriptor(path, entrynum,
+    TakeDescriptor(path, entrynum, arc,
                    (CustomMachineDesc *)Archive_GetPublicAddress(arc, CUSTOM_MACHINE_SYMBOL));
     HSD_ArenaRelease(mark);
 }
@@ -326,7 +393,7 @@ static int Discover(void)
         return 0;
 
     if (found > CUSTOM_MACHINE_MAX)
-        OSReport("[CustomMachines] %d files in /%s exceeds cap %d - extra files ignored\n",
+        OSReport("[CustomMachines] %d files in /%s, past the cap of %d - the rest were skipped\n",
                  found, CUSTOM_MACHINE_DROPIN_DIR, CUSTOM_MACHINE_MAX);
 
     FST_ForEachInFolder((char *)CUSTOM_MACHINE_DROPIN_DIR, (char *)CUSTOM_MACHINE_DROPIN_EXT,
@@ -334,106 +401,85 @@ static int Discover(void)
     return stc_count;
 }
 
-static int Api_KindFromClassIndex(int is_bike, int class_index)
+int CustomMachines_KindFromClassIndex(int is_bike, int class_index)
 {
-    if (!is_bike)
-    {
-        CustomMachineEntry *e = CustomMachines_FindByStarSlot(class_index);
-        if (e != NULL)
-            return e->machine_kind;
-    }
-    return MachineKind_FromClassIndex(is_bike, class_index);
+    CustomMachineEntry *e = CustomMachines_FindByClassSlot(is_bike, class_index);
+    return e != NULL ? e->machine_kind : MachineKind_FromClassIndex(is_bike, class_index);
 }
 
-static int Api_ClassIndexFromKind(int kind, int *out_is_bike)
+int CustomMachines_ClassIndexFromKind(int kind, int *out_is_bike)
 {
     CustomMachineEntry *e = CustomMachines_FindByKind(kind);
     if (e != NULL)
     {
-        *out_is_bike = 0;
-        return e->star_slot;
+        *out_is_bike = e->is_bike;
+        return e->class_slot;
     }
     *out_is_bike = MachineKind_IsBike(kind);
     return MachineKind_ClassIndex(kind);
 }
 
-static const char *Api_GetName(int kind)
+static int Api_SetInitHandler(int kind, CustomMachineHandler fn)
+{
+    return CustomMachineRegistry_SetHandler(CUSTOM_MACHINE_HANDLER_INIT, kind, fn);
+}
+
+static int Api_SetThinkHandler(int kind, CustomMachineHandler fn)
+{
+    return CustomMachineRegistry_SetHandler(CUSTOM_MACHINE_HANDLER_THINK, kind, fn);
+}
+
+static int Api_SetAnimHandler(int kind, CustomMachineHandler fn)
+{
+    return CustomMachineRegistry_SetHandler(CUSTOM_MACHINE_HANDLER_ANIM, kind, fn);
+}
+
+static u8 *Api_GetGenerator(int kind, int index, int *out_size)
 {
     CustomMachineEntry *e = CustomMachines_FindByKind(kind);
-    return e != NULL ? e->name : NULL;
-}
-
-static int Api_FindKindByName(const char *name)
-{
-    if (name == NULL)
-        return -1;
-    for (int i = 0; i < stc_count; i++)
-    {
-        if (strcmp(stc_entries[i].name, name) == 0)
-            return stc_entries[i].machine_kind;
-    }
-    return -1;
-}
-
-static int Api_SetStarInitHandler(int kind, CustomMachineStarHandler fn)
-{
-    return CustomMachineRegistry_SetStarHandler(0, kind, fn);
-}
-
-static int Api_SetStarThinkHandler(int kind, CustomMachineStarHandler fn)
-{
-    return CustomMachineRegistry_SetStarHandler(1, kind, fn);
-}
-
-static const u32 *Api_GetPalette(int kind, int *out_count)
-{
-    CustomMachineEntry *e = CustomMachines_FindByKind(kind);
-    if (e == NULL || e->palette_joint < 0)
+    if (e == NULL || index < 0 || index >= e->generator_count || e->generator_size[index] == 0)
         return NULL;
-    if (out_count != NULL)
-        *out_count = e->palette_count;
-    return e->palette;
+    if (out_size != NULL)
+        *out_size = e->generator_size[index];
+    return e->generator[index];
 }
 
 static const CustomMachinesAPI stc_api = {
-    .GetGridCols = CustomMachineCharacter_GetGridCols,
-    .GetSelectIconMax = CustomMachineSelect_GetIconMax,
-    .SetAvailabilityFilter = CustomMachineSelect_SetAvailabilityFilter,
-    .SetDeathHandler = CustomMachineStats_SetDeathHandler,
-    .SetAirRideRowSplit = CustomMachineSelect_SetAirRideRowSplit,
-    .SetSpawnWeightFilter = CustomMachineSpawn_SetWeightFilter,
     .GetCount = CustomMachines_GetCount,
     .GetKindCeiling = CustomMachines_GetKindCeiling,
     .GetCharacterKindCeiling = CustomMachines_GetCharacterKindCeiling,
-    .KindFromClassIndex = Api_KindFromClassIndex,
-    .ClassIndexFromKind = Api_ClassIndexFromKind,
-    .GetName = Api_GetName,
-    .FindKindByName = Api_FindKindByName,
-    .SetStarInitHandler = Api_SetStarInitHandler,
-    .SetStarThinkHandler = Api_SetStarThinkHandler,
+    .KindFromClassIndex = CustomMachines_KindFromClassIndex,
+    .ClassIndexFromKind = CustomMachines_ClassIndexFromKind,
+    .FindKindByName = FindKindByName,
+    .SetAvailabilityFilter = CustomMachineSelectScreen_SetAvailabilityFilter,
+    .SetSpawnWeightFilter = CustomMachineSpawn_SetWeightFilter,
+    .AddDeathHandler = CustomMachineStats_AddDeathHandler,
+    .SetInitHandler = Api_SetInitHandler,
+    .SetThinkHandler = Api_SetThinkHandler,
+    .SetAnimHandler = Api_SetAnimHandler,
     .GetMachineJoint = CustomMachines_GetMachineJoint,
-    .GetPalette = Api_GetPalette,
+    .GetGenerator = Api_GetGenerator,
     .StartAssembly = CustomMachineCinematic_Start,
-    .AddCityPreload = CustomMachinePreload_Add,
+    .MountMachine = CustomMachineMount_Queue,
 };
 
 void CustomMachines_On3DLoadStart(void)
 {
     CustomMachineCinematic_On3DLoadStart();
+    CustomMachineMount_On3DLoadStart();
     CustomMachineStats_On3DLoadStart();
+}
+
+void CustomMachines_OnFrameStart(void)
+{
+    CustomMachineMount_OnFrameStart();
 }
 
 void CustomMachines_OnBoot(void)
 {
-    // Ahead of discovery: the widened select screens ship with this mod whether or
-    // not a drop-in machine is present, and the engine has to agree with them either
-    // way. This also takes over both screens' packing, which stays the engine's own
-    // roster until a consumer sets an availability filter.
-    CustomMachineSelect_OnBoot();
-
-    // Owned on the same terms: the engine's own selection loop is VCKIND_NUM wide
-    // and cannot reach a registered kind, and a consumer that gates machines needs
-    // the weight filter whether or not one is present.
+    // Unconditional: the widened select screens and their packing ship whether or not a
+    // machine is found, and the engine's own spawn roll is VCKIND_NUM wide either way.
+    CustomMachineSelectScreen_OnBoot();
     CustomMachineSpawn_OnBoot();
 
     if (Discover() == 0)
@@ -441,22 +487,20 @@ void CustomMachines_OnBoot(void)
     else
     {
         CustomMachineRegistry_OnBoot();
-        CustomMachineCharacter_OnBoot();
-        CustomMachineText_OnBoot();
+        CustomMachineStatScaling_OnBoot();
+        CustomMachineCharacterRegistry_OnBoot();
+        CustomMachineSelectText_OnBoot();
         CustomMachineAudio_OnBoot();
-        CustomMachineTrail_OnBoot();
-        CustomMachinePalette_OnBoot();
+        CustomMachineTrailBank_OnBoot();
         CustomMachineCinematic_OnBoot();
-        CustomMachineBlip_OnBoot();
+        CustomMachineHud_OnBoot();
+        CustomMachineCpu_OnBoot();
         CustomMachineStats_OnBoot();
     }
 
-    // After discovery, so each machine's own art side-car is in hand, and after
-    // the cinematic, which registers the archives it wants preloaded.
+    // After discovery, so each machine's own art side-car is in hand.
     CustomMachineUiFrames_OnBoot();
-    CustomMachinePreload_OnBoot();
 
-    // Exported even with nothing registered: this mod owns the select-screen packing
-    // either way, so a consumer that gates characters still needs the filter.
+    // Exported with nothing registered: consumers still need the filters.
     Hoshi_ExportMod((void *)&stc_api);
 }

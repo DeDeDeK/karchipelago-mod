@@ -25,15 +25,21 @@ static void OnCustomItemPickup(u32 id_hash, const char *name, int player)
         Hypernova_ActivatePlayer(player, 0);
 }
 
-// Retried every scene change: mods boot in FST order, so custom_items' export
-// may not exist yet when this one boots.
+// Run from scene changes: mods boot in FST order, so custom_items' export may not
+// exist yet when this one boots. The import is tried once, since a build without
+// custom_items would warn on every attempt.
 static void TryBind(void)
 {
+    static int import_tried;
+
     if (stc_item_hash != 0)
         return;
-    if (stc_ci_api == NULL)
+    if (!import_tried)
+    {
+        import_tried = 1;
         stc_ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
+    }
 
     if (stc_ci_api != NULL)
     {

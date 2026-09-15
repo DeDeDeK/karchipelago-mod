@@ -7,6 +7,7 @@
 // in the air flies straight.
 
 void ApStarShot_OnBoot(void);
+void ApStarShot_OnFrameStart(void);
 
 // Load this scene's shot model and claim the machine's per-kind handler slots.
 void ApStarShot_On3DLoadEnd(void);

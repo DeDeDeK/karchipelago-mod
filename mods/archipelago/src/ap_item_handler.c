@@ -267,16 +267,14 @@ int APItems_HandleItem(uint ap_item_id)
         return GateApStar_UnlockPiece(piece);
     }
 
-    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854
-    // for the vanilla machines and 856 up for registered custom ones, capped at
-    // the end of the block so registered kinds can never reach another category's
-    // ids). ID 855 is WHEELVSDEDEDE (25), the stadium CPU-only Dedede machine,
-    // which is not exposed and falls through to the unknown-item path.
-    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + MachineUnlock_KindNum() &&
+    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + mask bit: 830-854 for the vanilla
+    // machines, 856 for the Archipelago Star). ID 855 is WHEELVSDEDEDE (25), the
+    // stadium CPU-only Dedede machine, which is not exposed and falls through to the
+    // unknown-item path.
+    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + AP_MACHINE_BIT_NUM &&
         ap_item_id != AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
     {
-        MachineKind kind = ap_item_id - AP_MACHINE_UNLOCK_BASE;
-        return GateMachines_UnlockMachine(kind, /*announce=*/1);
+        return GateMachines_UnlockMachine(ap_item_id - AP_MACHINE_UNLOCK_BASE, /*announce=*/1);
     }
 
     // Box type unlock items (AP_BOX_UNLOCK_BASE + BoxKind)

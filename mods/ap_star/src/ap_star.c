@@ -9,12 +9,22 @@ const CustomMachinesAPI *cm_api;
 
 u32 ap_star_piece_gate = AP_STAR_PIECE_ALL;
 
+const u32 ap_star_piece_colors[APSTARPIECE_NUM] = {
+    [APSTARPIECE_ROSE]   = 0xC97682,
+    [APSTARPIECE_GREEN]  = 0x75C275,
+    [APSTARPIECE_VIOLET] = 0xCA94C2,
+    [APSTARPIECE_TAN]    = 0xD9A07D,
+    [APSTARPIECE_BLUE]   = 0x767EBD,
+    [APSTARPIECE_YELLOW] = 0xEEE391,
+};
+
 #define AP_STAR_HANDLER_MAX 4
 
 static ApStarAssembleFn assemble_handlers[AP_STAR_HANDLER_MAX];
 
-// Idempotent, and deferred out of OnBoot: mods load in FST order, so custom_machines
-// may not have exported yet when ours runs.
+// Retried until it resolves: mods boot in FST order and an import only finds a mod that
+// has already booted, so a lookup from any mod's OnBoot - ours or a consumer's - runs
+// before custom_machines exports.
 static void ResolveCustomMachines(void)
 {
     if (cm_api)
@@ -44,6 +54,14 @@ int ApStar_StartAssembly(int ply)
     if (kind < 0)
         return 0;
     return cm_api->StartAssembly(kind, ply);
+}
+
+int ApStar_Mount(int ply)
+{
+    int kind = ApStar_MachineKind();
+    if (kind < 0)
+        return 0;
+    return cm_api->MountMachine(kind, ply);
 }
 
 void ApStar_FireAssemble(int ply)

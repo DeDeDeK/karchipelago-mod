@@ -11,4 +11,5 @@ ModDesc mod_desc = {
     .affects_gameplay = 1,
     .OnBoot = CustomMachines_OnBoot,
     .On3DLoadStart = CustomMachines_On3DLoadStart,
+    .OnFrameStart = CustomMachines_OnFrameStart,
 };

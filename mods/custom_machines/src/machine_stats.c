@@ -1,7 +1,7 @@
 // Per-machine counters wide enough for the appended MachineKinds. PlayerStats'
-// machine_change_count and kills_by_machine are int[0x1a] indexed by absolute
-// MachineKind with no bounds check, so a custom machine's slot lands on the bike
-// half of the range and past the eighth writes into the KO-by-cause counters, the
+// machine_change_count and kills_by_machine are int[0x1a] indexed by the engine's
+// absolute-kind fold with no bounds check, so a custom machine's appended slot counts
+// under another kind or, far enough out, writes into the KO-by-cause counters, the
 // vehicle-bust mask and the item tally. Both are relocated here and widened; the
 // vanilla arrays are left to whatever the engine puts in them.
 
@@ -18,7 +18,7 @@
 #define STAT_KILL   1
 #define STAT_NUM    2
 
-static int stc_stats[CUSTOM_MACHINE_PLY_NUM][STAT_NUM][CUSTOM_VCKIND_NUM];
+static int stc_stats[PLY_NUM][STAT_NUM][CUSTOM_VCKIND_NUM];
 
 // A vanilla kind that no vehicle-bust table entry names as the busted machine, and
 // that City Trial never puts on the field. Ply_AddDeath indexes with whatever kind
@@ -26,21 +26,13 @@ static int stc_stats[CUSTOM_MACHINE_PLY_NUM][STAT_NUM][CUSTOM_VCKIND_NUM];
 // sent here instead of past the end of its arrays.
 #define STAT_SCAPEGOAT_KIND VCKIND_WHEELVSDEDEDE
 
-// The absolute kind a machine counts under, appended kinds included. Vanilla stars
-// keep their class slot, bikes sit at 19 and up, and a custom machine - a star at
-// class slot 19 and up - takes its own MachineKind past those.
-static int AbsoluteKind(int is_bike, int class_slot)
-{
-    if (is_bike)
-        return class_slot + VCSTAR_NUM;
-    if (class_slot >= VCSTAR_NUM)
-        return VCKIND_NUM + (class_slot - VCSTAR_NUM);
-    return class_slot;
-}
+#define DEATH_HANDLER_MAX 4
+
+static CustomMachineDeathHandler stc_death_handlers[DEATH_HANDLER_MAX];
 
 static void Bump(int ply, int stat, int kind)
 {
-    if (ply >= 0 && ply < CUSTOM_MACHINE_PLY_NUM && kind >= 0 && kind < CUSTOM_VCKIND_NUM)
+    if (ply >= 0 && ply < PLY_NUM && kind >= 0 && kind < CUSTOM_VCKIND_NUM)
         stc_stats[ply][stat][kind]++;
 }
 
@@ -48,7 +40,7 @@ static int Total(int ply, int stat)
 {
     int sum = 0;
 
-    if (ply < 0 || ply >= CUSTOM_MACHINE_PLY_NUM)
+    if (ply < 0 || ply >= PLY_NUM)
         return 0;
     for (int i = 0; i < CUSTOM_VCKIND_NUM; i++)
         sum += stc_stats[ply][stat][i];
@@ -62,24 +54,37 @@ static void CountMachineChange(int ply, GOBJ *machine_gobj)
 {
     MachineData *md = machine_gobj->userdata;
 
-    Bump(ply, STAT_CHANGE, AbsoluteKind(md->is_bike, md->kind));
+    Bump(ply, STAT_CHANGE, CustomMachines_KindFromClassIndex(md->is_bike, md->kind));
 }
 
-static CustomMachineDeathHandler stc_death_handler;
-
-void CustomMachineStats_SetDeathHandler(CustomMachineDeathHandler handler)
+void CustomMachineStats_AddDeathHandler(CustomMachineDeathHandler handler)
 {
-    stc_death_handler = handler;
+    if (handler == NULL)
+        return;
+    for (int i = 0; i < DEATH_HANDLER_MAX; i++)
+    {
+        if (stc_death_handlers[i] == handler)
+            return;
+    }
+    for (int i = 0; i < DEATH_HANDLER_MAX; i++)
+    {
+        if (stc_death_handlers[i] == NULL)
+        {
+            stc_death_handlers[i] = handler;
+            return;
+        }
+    }
+    OSReport("[MachineStats] Death handler list full\n");
 }
 
 // Replaces the bl at 0x801e1f74 in Machine_GiveDamage. The counting is done here,
 // with the widened kind; the engine still runs for everything else it does on a KO
 // - the KO-by-cause counters, the vehicle-bust mask, the King Dedede frame - but a
 // kind it has no bucket for is swapped out first. This is the game's only call to
-// the KO recorder, so a consumer that has to see KOs is told from here.
-static void AddDeath(int ply, DmgLog *dmg_log, int is_bike, MachineKind machine_kind)
+// the KO recorder, so every consumer that has to see KOs is told from here.
+static void AddDeath(int ply, DmgLog *dmg_log, int is_bike, int class_slot)
 {
-    int kind = AbsoluteKind(is_bike, machine_kind);
+    int kind = CustomMachines_KindFromClassIndex(is_bike, class_slot);
     int attacker = dmg_log->attacker_ply;
 
     if (ply != attacker)
@@ -87,13 +92,16 @@ static void AddDeath(int ply, DmgLog *dmg_log, int is_bike, MachineKind machine_
 
     if (kind >= VCKIND_NUM)
     {
-        is_bike = 0;
-        machine_kind = STAT_SCAPEGOAT_KIND;
+        is_bike = MachineKind_IsBike(STAT_SCAPEGOAT_KIND);
+        class_slot = MachineKind_ClassIndex(STAT_SCAPEGOAT_KIND);
     }
-    Ply_AddDeath(ply, dmg_log, is_bike, machine_kind);
+    Ply_AddDeath(ply, dmg_log, is_bike, class_slot);
 
-    if (stc_death_handler != NULL)
-        stc_death_handler(ply, dmg_log, kind);
+    for (int i = 0; i < DEATH_HANDLER_MAX; i++)
+    {
+        if (stc_death_handlers[i] != NULL)
+            stc_death_handlers[i](ply, dmg_log, kind);
+    }
 }
 
 // Replaces the bl at 0x8004e6a8 in CityTrial_CheckFreeRunObjectives, which unlocks
@@ -113,7 +121,7 @@ static int GetKONum(int ply)
 // The engine clears its own arrays in Player_InitAll, which runs just after this.
 void CustomMachineStats_On3DLoadStart(void)
 {
-    for (int p = 0; p < CUSTOM_MACHINE_PLY_NUM; p++)
+    for (int p = 0; p < PLY_NUM; p++)
     {
         for (int s = 0; s < STAT_NUM; s++)
         {

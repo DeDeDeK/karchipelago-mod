@@ -217,6 +217,21 @@ spin and overheat want one shots.
 `quick_spin_sfx` is one shot from `Machine_PlayQuickSpinSFX` (`0x801e383c`) and
 one other site.
 
+### The class sound table
+
+Each class's shared archive carries one more table, `vcDataKindStar[is_bike]->sound`
+(`+0x0c`), which the class's attribute copy hands every machine as `MachineData.x654`
+(`0x801e81b0` for the star, `0x801f3d24` for the bike) and nothing else reads. Past a header
+it holds one entry per class slot, indexed with no bound, and neither class's entries are
+row slots.
+
+The star's, from `+0x30`, are the FGM id of the air-noise loop - `SFX_airnoize_s/m/l_lp` -
+which `Machine_SoundEffectThink` (`0x801ee588`) starts at the volume `Machine_Star_ApplyGrip`
+(`0x801ebe58`) leaves in `MachineData+0xc44`. The bike's, from `+0x1c`, are a
+`{loop, one-shot}` pair: the loop is started by a callback at `0x801f87a8` that
+`Machine_Wheel_Think` (`0x801f5390`) drives while the machine is moving, and the one shot
+plays from `0x801f8874`, reached from the Wheel jump states.
+
 ## Giving a machine its own samples
 
 The ids above name scripts, and a script names a sample by a global sound index
@@ -224,17 +239,17 @@ that runs across every `.ssm` on the disc. A drop-in machine ships a companion
 `.ssm` next to its `.dat` with the same basename - `machines/VcMine.dat` and
 `machines/VcMine.ssm` - holding exactly one record per row slot in the order
 above. A slot the author does not supply is a record with a sample rate of 0,
-and that slot keeps the clone kind's id. Records may point into the same data,
+and that slot keeps the descriptor's `audio_kind`'s id. Records may point into the same data,
 so a machine whose engine start is its engine loop pays for one copy.
 
 `machine_audio.c` in `mods/custom_machines/` loads those banks into one SSM slot
 carved out of the ARAM sample arena, assigns each bank global sound indices past
 the 615 vanilla claims, and appends one SEM bank of scripts that play them. Each
-script is a copy of whichever vanilla script the clone kind's row names for that
-slot with its sound index rewritten, so a drop-in engine loop keeps the donor's
-volume and pitch envelope. Where the clone kind leaves a slot at -1 - the boost
-tiers, usually - the copy is taken from the first star row that has one, so a
-drop-in can fill a slot its clone kind never had.
+script is a copy of whichever vanilla script the audio kind's row names for that
+slot with its sound index rewritten, so a drop-in engine loop plays through that
+script's volume and pitch envelope. Where the audio kind leaves a slot at -1 - the
+boost tiers, usually - the copy is taken from the first row of the same class that has one,
+so a drop-in can fill a slot its audio kind never had.
 
 Retail leaves about 1.48 MiB of the ARAM sample arena free, which is the real
 budget on how much of a voice a drop-in machine can carry.
@@ -242,31 +257,24 @@ budget on how much of a voice a drop-in machine can carry.
 ## Authoring
 
 `scripts/audio/machine_audio.py` reads and writes these banks, over the
-subcommands `roles`, `clone`, `donors`, `build`, `info` and `dump`. Source audio
-is 16-bit PCM WAV at any rate; the tool encodes to the DSP-ADPCM the hardware
-wants, generates each sound's coefficient book, and writes the loop point and its
-decoder context.
-
-`clone <star>` copies a vanilla machine's thirteen roles into a new bank and is
-the fastest way to a working voice. `donors <star> <dir>` writes the sample behind
-each role out as a `.wav` named for the slot it fills, which is the starting point
-for hand-editing: edit the files and feed them back through `build`. `--fallback`
-supplies the roles a star leaves at -1, so `slick --fallback warp` is a complete
-thirteen. `--pitch` resamples, which lowers the pitch and lengthens the sound
-together, the way a bigger engine sounds; a loop point is scaled with it.
+subcommands `roles`, `build`, `info` and `dump`. Source audio is 16-bit PCM WAV
+at any rate; the tool encodes to the DSP-ADPCM the hardware wants, generates each
+sound's coefficient book, and writes the loop point and its decoder context.
+`dump` writes a built bank's sounds back out as `.wav`s named for the slot each
+fills, to edit and feed back through `build`.
 
 `build` defaults each role to the loop flag its slot wants and loops from sample
 0. `--loop ROLE=SAMPLE` sets a real loop point, which matters for the charge
 sweeps and the rumble, whose vanilla loops start well into the sample, and
-`--loop ROLE=-1` forces a one shot. The vanilla loop points a `clone` of the
-Slick Star carries are `--loop charge1=19740 --loop charge2=28867 --loop
-charge3=25296 --loop rumble=16734`, scaled by whatever `--pitch` asks for.
+`--loop ROLE=-1` forces a one shot. The Slick Star's own loops start at
+`--loop charge1=19740 --loop charge2=28867 --loop charge3=25296 --loop
+rumble=16734`.
 
 Pass all thirteen roles every time. `build` writes an absent record for any role
-it is not given, and an absent role falls back to the clone kind's sound rather
+it is not given, and an absent role falls back to the audio kind's sound rather
 than keeping what the previous bank had.
 
 No machine ships a companion bank. The Archipelago Star, the only drop-in
-registered, takes the Slick Star's row whole and sounds like one, so the loading
-and index-assignment path above runs with nothing to load and every drop-in sound
-resolves to its clone kind's.
+registered, names the Slick Star as its audio kind and takes that row whole, so the
+loading and index-assignment path above runs with nothing to load and every drop-in
+sound resolves to the Slick Star's.

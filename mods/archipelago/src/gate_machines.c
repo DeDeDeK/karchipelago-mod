@@ -13,6 +13,8 @@
 #include "textbox_api.h"
 #include "inline.h"
 #include "ap_announce.h"
+#include "gate_ap_star.h"
+#include "ap_star_api.h"
 
 // Machines that don't naturally spawn in CT: Top Ride stars, transformation forms,
 // and the Meta Knight / Dedede character forms. All have a 0 base spawn chance, so
@@ -42,6 +44,26 @@ static float ZeroChanceSpawnWeight(int vckind)
     }
 }
 
+// The unlock mask bit a MachineKind is gated on, or -1 for a registered machine other
+// than the Archipelago Star, which has no unlock item and is never gated.
+static int GateBit(int kind)
+{
+    if (kind >= 0 && kind < VCKIND_NUM)
+        return kind;
+    if (kind >= VCKIND_NUM && kind == GateApStar_MachineKind())
+        return AP_MACHINE_BIT_AP_STAR;
+    return -1;
+}
+
+static int IsKindUnlocked(int kind)
+{
+    if (kind < 0)
+        return 0;
+
+    int bit = GateBit(kind);
+    return bit < 0 || ((ap_save->machine_unlocked_mask >> bit) & 1);
+}
+
 static int IsCKindUnlocked(CharacterKind ckind)
 {
     if (ckind < 0 || ckind >= CharacterKind_Num())
@@ -50,7 +72,7 @@ static int IsCKindUnlocked(CharacterKind ckind)
     if (!desc)
         return 0;
     MachineKind vckind = MachineKind_Resolve(desc->is_bike, desc->machine_kind);
-    return MachineKind_IsUnlocked(vckind);
+    return IsKindUnlocked(vckind);
 }
 
 // First unlocked City-Trial-spawnable MachineKind, or VCKIND_COMPACT as fallback.
@@ -60,7 +82,7 @@ static MachineKind GetFirstUnlockedCTMachine()
     {
         if (i < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << i)))
             continue;
-        if (MachineKind_IsUnlocked(i))
+        if (IsKindUnlocked(i))
             return i;
     }
     return VCKIND_COMPACT;
@@ -100,7 +122,7 @@ static CharacterKind RandomUnlockedKirbyCKind(void)
 static int IsTRMachineUnlocked(TopRideMachineKind tr)
 {
     MachineKind vckind = TOPRIDE_MACHINE_TO_VCKIND(tr);
-    return MachineKind_IsUnlocked(vckind);
+    return IsKindUnlocked(vckind);
 }
 
 static TopRideMachineKind GetFirstUnlockedTRMachine()
@@ -304,7 +326,7 @@ int GateMachines_CheckFreeRunKindUnlocked(MachineKind kind)
 {
     if (kind < 0 || kind >= MachineKind_Num())
         return 0;
-    return MachineKind_IsUnlocked(kind);
+    return IsKindUnlocked(kind);
 }
 
 // Weight filter handed to custom_machines, which owns the City Trial field spawn
@@ -316,7 +338,7 @@ float GateMachines_SpawnWeight(int kind, float default_weight)
         return 0.0f;
     if (kind < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << kind)))
         return 0.0f;
-    if (!MachineKind_IsUnlocked(kind))
+    if (!IsKindUnlocked(kind))
         return 0.0f;
 
     // A registered machine brings its own weight and takes no fallback: a descriptor
@@ -345,7 +367,7 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     int is_bike;
     int class_index;
 
-    if (!MachineKind_IsUnlocked(vckind))
+    if (!IsKindUnlocked(vckind))
         vckind = GetFirstUnlockedCTMachine();
 
     class_index = MachineKind_ClassIndexOf(vckind, &is_bike);
@@ -399,16 +421,6 @@ CODEPATCH_HOOKCREATE(0x801952c8,
     0x801952e0
 )
 
-// Replaces AirRide_CheckCharacterAvailable (0x8002090c), which decides who appears on
-// the Air Ride character select screen from checklist reward indices. Vanilla also
-// hardcodes Compact Star, Dragoon, Hydra and Flight Warp Star out of Air Ride whatever
-// the save holds; the mask is the only rule here, so an owned machine is selectable in
-// every mode whose select screen offers it. The icon archive backs all 20 characters.
-int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
-{
-    return IsCKindUnlocked(ckind);
-}
-
 // Replaces TitleScreen_CheckMachineUnlocked (0x8000c364), the unlock query for the
 // title-screen attract demo's random machine picker (TitleScreen_SelectRandomMachine,
 // 0x8000daa0). It does NOT run for CPUs in real Air Ride races, which draw from the
@@ -422,7 +434,7 @@ int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
     if (vckind < 0 || vckind >= MachineKind_Num())
         return 0;
 
-    return MachineKind_IsUnlocked(vckind);
+    return IsKindUnlocked(vckind);
 }
 
 void GateMachines_OnBoot()
@@ -433,7 +445,6 @@ void GateMachines_OnBoot()
     CODEPATCH_REPLACECALL(0x801de528, GateMachines_CheckFreeRunKindUnlocked);
     CODEPATCH_REPLACEINSTRUCTION(0x801de518, 0x4800000c); // b 0x801de524
 
-    CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
     CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
 
     CODEPATCH_HOOKAPPLY(0x8002dea0);  // CT starting-machine finalize
@@ -452,45 +463,29 @@ void GateMachines_OnBoot()
     OSReport("[GateMachines] Hooks installed\n");
 }
 
-// Display name for any MachineKind, vanilla or registered custom.
-static const char *GateMachines_GetName(MachineKind kind)
+// The star's bit is kept whether or not this build registered the star.
+int GateMachines_UnlockMachine(int bit, int announce)
 {
-    if (kind >= 0 && kind < VCKIND_NUM)
-        return MachineKind_Names[kind];
-    const char *custom = cm_api ? cm_api->GetName(kind) : NULL;
-    return custom ? custom : "Unknown Machine";
-}
-
-int GateMachines_UnlockMachine(MachineKind kind, int announce)
-{
-    if (kind < 0 || kind >= MachineKind_Num())
+    if (bit < 0 || bit >= AP_MACHINE_BIT_NUM)
         return 0;
 
-    if (kind < AP_MACHINE_GATE_NUM)
-        ap_save->machine_unlocked_mask |= (1u << kind);
+    ap_save->machine_unlocked_mask |= (1u << bit);
 
+    const char *name = bit == AP_MACHINE_BIT_AP_STAR ? AP_STAR_MACHINE_NAME : MachineKind_Names[bit];
     if (!ap_regrant_quiet)
-    {
-        if (kind < AP_MACHINE_GATE_NUM)
-            OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n",
-                     kind, GateMachines_GetName(kind),
-                     MaskBits(ap_save->machine_unlocked_mask, 32));
-        else
-            OSReport("[GateMachines] Machine %d (%s) is past bit %d - always unlocked, not persisted\n",
-                     kind, GateMachines_GetName(kind), AP_MACHINE_GATE_NUM - 1);
-    }
+        OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n", bit, name,
+                 MaskBits(ap_save->machine_unlocked_mask, AP_MACHINE_BIT_NUM));
     if (announce)
     {
         // VCKIND_WHEELDEDEDE / VCKIND_WINGMETAKNIGHT are the player-facing King Dedede
         // / Meta Knight unlocks, announced to match the checklist reward path.
         const char *prefix = "Unlocked Machine: ";
-        const char *name   = GateMachines_GetName(kind);
-        if (kind == VCKIND_WHEELDEDEDE)
+        if (bit == VCKIND_WHEELDEDEDE)
         {
             prefix = "Unlocked Character: ";
             name   = "King Dedede";
         }
-        else if (kind == VCKIND_WINGMETAKNIGHT)
+        else if (bit == VCKIND_WINGMETAKNIGHT)
         {
             prefix = "Unlocked Character: ";
             name   = "Meta Knight";

@@ -105,7 +105,7 @@ the setup the six assembly spheres use), so the mod writes the loaded copy's `am
 per shot with the color of the pod that launched it. `HSD_MObjSetup` (`0x803fac18`) reads all four
 material colors out of the live struct on every draw, and `MObjLoad` (`0x803f9f04`) gives every
 instance its own copy, so shots in flight are colored independently and nothing has to be re-loaded.
-The color comes from the machine descriptor's own palette - the same six values the pods and the six
+The color comes from `ap_star_piece_colors` - the same six values the pods and the six
 assembly spheres are painted from, in pod order.
 
 ## Trajectory
@@ -141,10 +141,15 @@ that call zeroes `proj+0x160`..`0x178`, so anything written earlier would be los
 
 ## The ring
 
-Per-machine state is a small table keyed by `MachineData *`, eight rings deep, claimed on each
-machine's first per-frame tick. Slots are recycled by age rather than released, so a machine
-destroyed without warning leaves nothing to clean up; the whole table is cleared on every 3D load,
-where the joints it points at have just been freed with the scene heap.
+Per-machine state is a table keyed by `MachineData *`, 32 rings deep, claimed on each machine's
+first per-frame tick. Slots are never released: a machine destroyed without warning leaves nothing
+to clean up, because a slot whose machine has gone a whole frame unseen is free to reclaim. A slot
+whose machine was seen last frame is never taken, even with the table full - its owner would take
+another on its own tick, that owner another, and the cascade would strip the machines first in the
+proc list of their rings every frame, so they could never fire. A machine that finds no slot simply
+has no ring and no shot until one frees. "Frame" here counts only frames in which some star ran its
+Think (advanced from `OnFrameStart`), so a pause does not age every ring at once. The whole table is
+cleared on every 3D load, where the joints it points at have just been freed with the scene heap.
 
 Pod joints are indices 9 through 14 of the machine archive's own joint tree, resolved through the
 registry and cached until the machine's model root changes. Scale, translation and Y rotation are
@@ -176,31 +181,19 @@ tick (`regrow_timer` 0 through 60). Firing is locked out for the whole
 window. The spread resets to the authored ring on that same frame, while every pod is at zero scale
 and the change cannot be seen.
 
-The count of surviving pods also selects the machine's handling profile, on a fixed ladder from
-the machine as shipped at six down to Jet Star's at one. `UpdateProfile` reads it off
-`alive_mask` each per-machine tick and only acts on a change; an empty ring answers
-no profile at all, so the regrow window holds the last one until the refill takes the count back
-to six. That is the ring's whole involvement - the profiles themselves live in
-`ap_star_handling.c`, behind `ap_star_settings.handling_enabled`, which no settings option is
-bound to, so the count is read and discarded.
-
 ## Where the per-machine work runs
 
-Neither the fire path nor the scale writes can take `Machine_AnimThink`'s tail (`0x801c6274`) - the
-`custom_machines` palette cycle already replaces that call. Instead the mod claims the engine's own
-per-kind extension slots on the star class, through two `CustomMachinesAPI` entries:
+The mod claims the machine's per-kind Init and Think handler slots through two `CustomMachinesAPI` entries, which on the star
+class are the engine's own extension tables:
 
 | Slot | Dispatch tail | Table | Used for |
 |------|---------------|-------|----------|
-| `SetStarInitHandler` | `Machine_Star_Init` (`0x801e7f3c`), tail at `0x801e80d8` | `0x804b15c0` | drop this machine's ring, so the next tick rebuilds it full against the new model |
-| `SetStarThinkHandler` | `Machine_Star_Think` (`0x801eacbc`), tail at `0x801eb520` | `0x804b160c` | claim the ring, advance the regrow, write the six pod scales |
+| `SetInitHandler` | `Machine_Star_Init` (`0x801e7f3c`), tail at `0x801e80d8` | `0x804b15c0` | drop this machine's ring, so the next tick rebuilds it full against the new model |
+| `SetThinkHandler` | `Machine_Star_Think` (`0x801eacbc`), tail at `0x801eb520` | `0x804b160c` | claim the ring, advance the regrow, write the six pod scales |
 
 Both tails index their table by `md->kind` and call the entry only if it is non-NULL. The registry
-already relocates both tables into arrays it owns, so installing a handler is a store. A consumer's
-handler layers over whatever the machine's `clone_kind` inherited rather than replacing it: one
-shared dispatcher stands in the slot and recovers the row from `md->kind`, which is the star slot, so
-no per-slot trampoline is needed. The Archipelago Star clones `VCKIND_SLICK`, whose entry in both
-tables is NULL, so nothing is inherited in practice.
+already relocates both tables into arrays it owns and starts a custom slot's entries at NULL, so
+installing a handler is a store. The third slot, Anim, belongs to the platform color cycle.
 
 ## Tuning
 

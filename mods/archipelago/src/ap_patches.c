@@ -57,7 +57,7 @@ static const float box_slot_yaw[4] = { 0.0f, 180.0f, 90.0f, -90.0f };
 #define BOX_SINGLE_PITCH 1.5708f // the fixed launch pitch a one-item box uses
 
 static const CustomItemsAPI *ci_api;
-static int pickup_registered;
+static int ci_import_tried;
 
 static u32 patch_hash, box_hash; // 0 until the registry has been scanned
 static int items_matched = -1;   // -1 before the first scan, then the match count
@@ -425,18 +425,19 @@ void ApPatches_On3DLoadStart(void)
     box_gate_frames = 0x7fffffff; // open, so the round's first roll is not held back
     ptcl_state = 0; // the bank tables are rebuilt with the scene
 
-    if (ci_api == NULL)
+    // Tried once: a build without custom_items would warn on every 3D scene.
+    if (!ci_import_tried)
+    {
+        ci_import_tried = 1;
         ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
+        if (ci_api != NULL)
+            ci_api->AddPickupHandler(OnPickup);
+    }
     if (ci_api == NULL)
         return;
 
     ResolveItems();
-    if (!pickup_registered)
-    {
-        ci_api->AddPickupHandler(OnPickup);
-        pickup_registered = 1;
-    }
 
     // custom_items registers at CityItemSpawn_Init's epilogue and skips a disabled
     // item, so a held-out kind is never handed an ItemKind and nothing can spawn it.

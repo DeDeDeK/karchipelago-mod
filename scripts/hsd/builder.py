@@ -70,6 +70,17 @@ class Builder:
                 self.relocs.add(off + r - src)
         return off
 
+    def graft(self, src, align=32):
+        """Append another data section with its relocations - a `Builder`, a
+        parsed `Archive` or a `CarveResult` - and return where it starts. Its
+        pointers move with it. The default alignment keeps a carve's ranges on
+        the GX cache-line alignment they were carved at."""
+        base = self.alloc(0, align)
+        self.data.extend(src.data)
+        for r in src.relocs:
+            self.set_ptr(base + r, u32(src.data, r) + base)
+        return base
+
 
 def walk_joints(b, root):
     """(offset, parent index) per joint, in the preorder the LOD tables and

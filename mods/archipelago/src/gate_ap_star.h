@@ -6,8 +6,9 @@
 // ap_star_piece_unlocked_mask, decides from it which those are, and announces one
 // arriving. `piece` is an APStarPiece throughout.
 
-// Import ap_star if it has not resolved yet and push the saved mask into it.
-// Idempotent; safe from any scene.
+// Import ap_star, bind the star's MachineKind and push the saved mask into it. Run at
+// OnSaveLoaded, the first point past every mod's OnBoot; whatever is missing then
+// stays missing.
 void GateApStar_Resolve(void);
 
 // Push ap_star_piece_unlocked_mask into the mod's gate. Called on every write to
@@ -19,7 +20,8 @@ void GateApStar_PushMask(void);
 // Mark one sphere unlocked. Returns 1 if applied.
 int GateApStar_UnlockPiece(int piece);
 
-// MachineKind of the Archipelago Star, or -1 while nothing has registered it.
+// MachineKind of the Archipelago Star, or -1 while nothing has registered it. This is
+// what binds AP_MACHINE_BIT_AP_STAR to a kind.
 int GateApStar_MachineKind(void);
 
 // Drop one sphere in front of a player's machine, bypassing the delivery

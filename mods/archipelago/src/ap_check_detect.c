@@ -33,6 +33,13 @@ void APCheckDetect_Observe(int ck)
     OSReport("[APCheckDetect] Objective %d achieved\n", ck);
 }
 
+// A player's widened MachineKind. hoshi's Ply_GetMachineKindAbs folds a custom star slot
+// onto the bike range, where it would match a vanilla bike.
+static MachineKind PlyMachineKind(int ply)
+{
+    return MachineKind_Resolve(Ply_GetMachineIsBike(ply), Ply_GetMachineKind(ply));
+}
+
 int APCheckDetect_IsSet(int ck)
 {
     switch (ck)
@@ -575,7 +582,7 @@ static void SampleAirRide(const StadiumResults *r)
         if (won)
         {
             APCheckDetect_Observe(APCK_NEBULA_1ST);
-            if (Ply_GetMachineKindAbs(p) == VCKIND_WHEELIESCOOTER)
+            if (PlyMachineKind(p) == VCKIND_WHEELIESCOOTER)
                 APCheckDetect_Observe(APCK_NEBULA_1ST_SCOOTER);
         }
 
@@ -596,7 +603,7 @@ static void SampleAirRide(const StadiumResults *r)
         // airborne_time is the longest single airborne stretch, and PlayerStats is
         // only zeroed on the next 3D scene load, so it still reads this race's run.
         // The three flight machines are the only ones that hold a glide that long.
-        MachineKind mk = Ply_GetMachineKindAbs(p);
+        MachineKind mk = PlyMachineKind(p);
         if ((mk == VCKIND_DRAGOON || mk == VCKIND_FLIGHT || mk == VCKIND_WINGED) &&
             Ply_GetItemCollectArray(p)->airborne_time > AP_NEBULA_AIR_FRAMES)
             APCheckDetect_Observe(APCK_NEBULA_AIRBORNE);
@@ -628,7 +635,7 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
             APCheckDetect_Observe(APCK_SR1_FIRST + (st - STKIND_SINGLERACE1));
             if (st != STKIND_SINGLERACE1)
                 continue;
-            if (Ply_GetMachineKindAbs(p) == VCKIND_BULK)
+            if (PlyMachineKind(p) == VCKIND_BULK)
                 APCheckDetect_Observe(APCK_SR1_BULK);
             // Ply_GetColor reads PlayerDesc.color, a KirbyColor only for a Kirby
             // rider - the stadiums are reachable from a Dedede match too.

@@ -10,24 +10,11 @@
 #include "inline.h"
 
 #include "archipelago_api.h"
-#include "custom_machines_api.h"
 #include "debug_menu.h"
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
 
-static const CustomMachinesAPI *cm_api = 0;
-
-// machine_unlocked_mask is 32 bits, so only MachineKinds under 32 carry a gate.
-// The registry may register past that; those kinds are permanently available.
-#define MACHINE_GATE_NUM 32
-
-static int MachineNum(void)
-{
-    int n = CustomMachines_KindNum(cm_api);
-    return n > MACHINE_GATE_NUM ? MACHINE_GATE_NUM : n;
-}
-
-static int machine_state[MACHINE_GATE_NUM];
+static int machine_state[AP_MACHINE_BIT_NUM];
 static int ability_state[COPYKIND_NUM];
 static int event_state[EVKIND_NUM];
 static int patch_state[PATCHKIND_NUM];
@@ -87,7 +74,7 @@ static u32 synced_mask[AP_UNLOCK_NUM];
         OSReport("[ApDebug] " #cat " = %s\n", MaskBits(m, n)); \
     }
 
-DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  MachineNum())
+DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  AP_MACHINE_BIT_NUM)
 DEF_SYNC(SyncAbilities, AP_UNLOCK_ABILITY,         ability_state,  COPYKIND_NUM)
 DEF_SYNC(SyncEvents,    AP_UNLOCK_EVENT,           event_state,    EVKIND_NUM)
 DEF_SYNC(SyncPatches,   AP_UNLOCK_PATCH,           patch_state,    PATCHKIND_NUM)
@@ -110,7 +97,7 @@ DEF_SYNC(SyncStarPiece, AP_UNLOCK_AP_STAR_PIECE,   star_piece_state,   AP_STAR_P
         synced_mask[cat] = m; \
     }
 
-DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  MachineNum())
+DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  AP_MACHINE_BIT_NUM)
 DEF_REFRESH(RefreshAbilities, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM)
 DEF_REFRESH(RefreshEvents,    AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM)
 DEF_REFRESH(RefreshPatches,   AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM)
@@ -167,7 +154,7 @@ static void RefreshStateFromMasks(void)
         return 1; \
     }
 
-DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  MachineNum(),     "machines")
+DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  AP_MACHINE_BIT_NUM, "machines")
 DEF_ALL(Abl, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM,     "abilities")
 DEF_ALL(Evt, AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM,       "events")
 DEF_ALL(Pch, AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM,    "patch types")
@@ -330,7 +317,7 @@ GIVE_FN(GiveTRChickie,         AP_TOPRIDE_ITEM_GIVE_CHICKIE)
 GIVE_FN(GiveTRPartyBall,       AP_TOPRIDE_ITEM_GIVE_PARTY_BALL)
 
 // Every AP unlock item id, as contiguous { base, count } runs tagged with the
-// category they gate. Machines take three runs: the AP world ships no item for
+// category they gate. Machines take four runs: the AP world ships no item for
 // VCKIND_WINGKIRBY, WHEELNORMAL and WHEELKIRBY (copy-ability and enemy forms) or for
 // WHEELVSDEDEDE (the Vs. King Dedede stadium's CPU-only machine), and their unlock
 // bits never clear. Every other category is one run.
@@ -349,7 +336,8 @@ static const struct
     { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_WARP,           VCKIND_STEER - VCKIND_WARP + 1              },
     { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_WINGMETAKNIGHT, 1                                           },
     { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_WHEELIEBIKE,    VCKIND_WHEELDEDEDE - VCKIND_WHEELIEBIKE + 1 },
-    { AP_UNLOCK_BOX,           AP_BOX_UNLOCK_BASE,               BOXKIND_NUM                                 },
+    { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_AP_STAR,        1                                           },
+    { AP_UNLOCK_BOX,          AP_BOX_UNLOCK_BASE,               BOXKIND_NUM                                 },
     { AP_UNLOCK_AIRRIDE_STAGE, AP_STAGE_UNLOCK_AIRRIDE_BASE,     AIRRIDE_NUM                                 },
     { AP_UNLOCK_COLOR,         AP_COLOR_UNLOCK_BASE,             KIRBYCOLOR_NUM                              },
     { AP_UNLOCK_TOPRIDE_STAGE, AP_STAGE_UNLOCK_TOPRIDE_BASE,     TOPRIDE_NUM                                 },
@@ -371,24 +359,14 @@ static const struct
     { AP_ITEM_SPAWN_RATE_UP,      1             },
 };
 
-// Custom machine unlock ids sit between the vanilla machines and the box block, so
-// the registry's own count has to stop at that edge.
-static int CustomMachineGiveNum(void)
-{
-    int max = AP_BOX_UNLOCK_BASE - (AP_MACHINE_UNLOCK_BASE + VCKIND_NUM);
-    int n = cm_api ? cm_api->GetCount() : 0;
-    return n > max ? max : n;
-}
-
 // Uniform pick over one category's ids, or over every category plus the progression
 // items when cat is -1. Returns -1 when the filter matched nothing.
 static int PickUnlockId(int cat)
 {
     int run_num = GetElementsIn(unlock_runs);
     int prog_num = GetElementsIn(progression_pools);
-    int custom_num = (cat < 0 || cat == AP_UNLOCK_MACHINE) ? CustomMachineGiveNum() : 0;
 
-    int total = custom_num;
+    int total = 0;
     for (int i = 0; i < run_num; i++)
         if (cat < 0 || unlock_runs[i].cat == cat)
             total += unlock_runs[i].count;
@@ -399,13 +377,6 @@ static int PickUnlockId(int cat)
         return -1;
 
     int pick = HSD_Randi(total);
-    if (pick < custom_num)
-    {
-        // Custom machine kinds resume the alignment past the gap at 855.
-        return AP_MACHINE_UNLOCK_BASE + VCKIND_NUM + pick;
-    }
-    pick -= custom_num;
-
     for (int i = 0; i < run_num; i++)
     {
         if (cat >= 0 && unlock_runs[i].cat != cat)
@@ -1058,13 +1029,11 @@ void DebugMenu_RefreshState(void)
         .menu_ptr = &menu_ref, \
     }
 
-// 22 player-rideable machines plus the three action rows. The 4 omitted VCKINDs
+// 23 player-rideable machines plus the three action rows. The 4 omitted VCKINDs
 // (WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE) are transformation forms or
 // stadium CPU-only machines with no player-facing unlock surface.
-#define MACHINES_MENU_VANILLA_OPTIONS 25
-
 static MenuDesc machines_menu = {
-    .option_num = MACHINES_MENU_VANILLA_OPTIONS,
+    .option_num = 26,
     .options = {
         A("Unlock All", "Unlock all machines", MchUnlockAll),
         A("Lock All",   "Lock all machines",   MchLockAll),
@@ -1091,36 +1060,9 @@ static MenuDesc machines_menu = {
         G("Rex Wheelie",       machine_state, VCKIND_REXWHEELIE,     SyncMachines),
         G("Wheelie Scooter",   machine_state, VCKIND_WHEELIESCOOTER, SyncMachines),
         G("Dedede Wheelie",    machine_state, VCKIND_WHEELDEDEDE,    SyncMachines),
-        // Trailing rows for whatever custom_machines registered. option_num hides
-        // them until DebugMenu_BindCustomMachines names the ones that exist.
-        G("Custom Machine 1",  machine_state, VCKIND_NUM + 0,        SyncMachines),
-        G("Custom Machine 2",  machine_state, VCKIND_NUM + 1,        SyncMachines),
-        G("Custom Machine 3",  machine_state, VCKIND_NUM + 2,        SyncMachines),
-        G("Custom Machine 4",  machine_state, VCKIND_NUM + 3,        SyncMachines),
-        G("Custom Machine 5",  machine_state, VCKIND_NUM + 4,        SyncMachines),
-        G("Custom Machine 6",  machine_state, VCKIND_NUM + 5,        SyncMachines),
+        G("Archipelago Star",  machine_state, AP_MACHINE_BIT_AP_STAR, SyncMachines),
     },
 };
-
-// Rows here are limited by the 32-bit mask, not by what the registry can take.
-#define MACHINES_MENU_CUSTOM_ROWS (MACHINE_GATE_NUM - VCKIND_NUM)
-
-_Static_assert(MACHINES_MENU_CUSTOM_ROWS == 6, "machines_menu needs one trailing row per gateable custom slot");
-
-void DebugMenu_BindCustomMachines(const CustomMachinesAPI *api)
-{
-    if (!api || cm_api)
-        return;
-    cm_api = api;
-
-    int count = api->GetCount();
-    if (count > MACHINES_MENU_CUSTOM_ROWS)
-        count = MACHINES_MENU_CUSTOM_ROWS;
-    for (int i = 0; i < count; i++)
-        machines_menu.options[MACHINES_MENU_VANILLA_OPTIONS + i]->name =
-            (char *)api->GetName(VCKIND_NUM + i);
-    machines_menu.option_num = MACHINES_MENU_VANILLA_OPTIONS + count;
-}
 
 static MenuDesc abilities_menu = {
     .option_num = 14,

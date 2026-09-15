@@ -11,18 +11,17 @@
 #include "code_patch/code_patch.h"
 
 #include "ap_star.h"
-#include "ap_star_handling.h"
 #include "ap_star_shot.h"
 
 // PROJKIND_PLASMA_SPREAD_MID with its model swapped for a sphere across the
 // synchronous Projectile_Create call: its init and three of its four state
 // callbacks are blr, and it carries no per-kind scratch a custom spawn must seed.
 
-#define AP_STAR_POD_NUM   6
+#define AP_STAR_POD_NUM   APSTARPIECE_NUM // one per sphere color, in the same order
 #define AP_STAR_POD_JOINT 9 // first pod; the six are consecutive in the archive's joint tree
 
-// Machines tracked at once; past this the oldest unseen ring is recycled.
-#define AP_STAR_RING_MAX 8
+// Machines tracked at once; past this a machine has no ring, and no shot, until one frees.
+#define AP_STAR_RING_MAX 32
 
 // The shot model's joint count, which has to match what the archive holds.
 #define AP_STAR_SHOT_JOINTS 2
@@ -65,18 +64,16 @@ typedef struct RingState
     u8 shrink[AP_STAR_POD_NUM]; // frames left of a fired pod's collapse
     u8 regrowing;
     u8 regrow_timer;
-    s8 profile;        // handling profile the pods left have the machine on
-    u32 stamp;         // last frame this machine was seen
+    u32 frame;         // last stc_frame this machine was seen
 } RingState;
 
 static RingState stc_rings[AP_STAR_RING_MAX];
-static u32 stc_stamp;
+static u32 stc_frame;   // counts only frames in which some star ran its Think
+static int stc_thought;
 
 static JOBJDesc *stc_shot_model;  // this scene's ApStarShot.dat root
 static ProjModelBlock stc_model_block;  // stands in for the kind's own model block
 
-static const u32 *stc_palette;
-static int stc_palette_count;
 static int stc_star_slot = -1;    // class slot, which is what MachineData.kind holds
 static int stc_handlers_installed;
 
@@ -90,32 +87,42 @@ static RingState *FindRing(MachineData *md)
     return NULL;
 }
 
-// Slots are reclaimed by age rather than released, so a machine destroyed
-// without warning leaves nothing to clean up.
+// A slot is reclaimed once its machine has gone a whole frame unseen, so a machine
+// destroyed without warning leaves nothing to clean up. A live slot is never taken:
+// its owner would take another in turn, and the cascade leaves the machines first in
+// the proc list without a ring every frame.
 static RingState *ClaimRing(MachineData *md)
 {
     RingState *free_slot = NULL;
-    RingState *oldest = &stc_rings[0];
+    RingState *stale = NULL;
 
+    stc_thought = 1;
     for (int i = 0; i < AP_STAR_RING_MAX; i++)
     {
         RingState *r = &stc_rings[i];
         if (r->md == md)
         {
-            r->stamp = ++stc_stamp;
+            r->frame = stc_frame;
             return r;
         }
-        if (r->md == NULL && free_slot == NULL)
-            free_slot = r;
-        if (r->stamp < oldest->stamp)
-            oldest = r;
+        if (r->md == NULL)
+        {
+            if (free_slot == NULL)
+                free_slot = r;
+        }
+        else if (stale == NULL && stc_frame - r->frame > 1)
+        {
+            stale = r;
+        }
     }
 
-    RingState *r = free_slot != NULL ? free_slot : oldest;
+    RingState *r = free_slot != NULL ? free_slot : stale;
+    if (r == NULL)
+        return NULL;
     memset(r, 0, sizeof(*r));
     r->md = md;
     r->alive_mask = (1 << AP_STAR_POD_NUM) - 1;
-    r->stamp = ++stc_stamp;
+    r->frame = stc_frame;
     return r;
 }
 
@@ -225,24 +232,6 @@ static void SetPodPose(RingState *r, int i, float f)
     JObj_SetMtxDirtySub(j);
 }
 
-// An empty ring holds the last profile rather than passing through a seventh.
-static void UpdateProfile(RingState *r, MachineData *md)
-{
-    int pods = 0;
-    for (int i = 0; i < AP_STAR_POD_NUM; i++)
-    {
-        if (r->alive_mask & (1 << i))
-            pods++;
-    }
-
-    int profile = ap_star_settings.handling_enabled ? ApStarHandling_ProfileForPods(pods) : 0;
-    if (profile < 0 || profile == r->profile)
-        return;
-
-    r->profile = (s8)profile;
-    ApStarHandling_Apply(md, profile);
-}
-
 // Tail of the star class's per-kind Think slot, once per frame per machine.
 static void OnStarThink(MachineData *md)
 {
@@ -250,7 +239,7 @@ static void OnStarThink(MachineData *md)
         return;
 
     RingState *r = ClaimRing(md);
-    if (!ResolvePods(r, md))
+    if (r == NULL || !ResolvePods(r, md))
         return;
 
     float grow = 0.0f;
@@ -267,8 +256,6 @@ static void OnStarThink(MachineData *md)
     {
         SolveSpread(r);
     }
-
-    UpdateProfile(r, md);
 
     for (int i = 0; i < AP_STAR_POD_NUM; i++)
     {
@@ -548,8 +535,7 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
         proj->user_hook_1 = ShotFollowGround;
     }
 
-    if (stc_palette != NULL && pod < stc_palette_count)
-        PaintShot(handle, stc_palette[pod]);
+    PaintShot(handle, ap_star_piece_colors[pod]);
 
     r->alive_mask &= (u8)~(1 << pod);
     if (r->alive_mask == 0)
@@ -611,6 +597,16 @@ void ApStarShot_OnBoot(void)
     OSReport("[ApStarShot] Charge release hooks installed\n");
 }
 
+// A pause runs no Think, so it does not age every ring at once.
+void ApStarShot_OnFrameStart(void)
+{
+    if (stc_thought)
+    {
+        stc_thought = 0;
+        stc_frame++;
+    }
+}
+
 void ApStarShot_On3DLoadEnd(void)
 {
     // Every ring's joints belong to the scene heap that was just torn down.
@@ -636,7 +632,6 @@ void ApStarShot_On3DLoadEnd(void)
 
     int is_bike = 0;
     stc_star_slot = ApStar_ClassIndex(&is_bike);
-    stc_palette = cm_api->GetPalette(kind, &stc_palette_count);
 
     HSD_Archive *arc = NULL;
     Gm_LoadGameFile(&arc, "ApStarShot");
@@ -645,14 +640,14 @@ void ApStarShot_On3DLoadEnd(void)
 
     if (!stc_handlers_installed)
     {
-        stc_handlers_installed = cm_api->SetStarInitHandler(kind, OnStarInit) &&
-                                 cm_api->SetStarThinkHandler(kind, OnStarThink);
+        stc_handlers_installed = cm_api->SetInitHandler(kind, OnStarInit) &&
+                                 cm_api->SetThinkHandler(kind, OnStarThink);
         // Reported on the install that succeeds, whichever round that is; the
         // failure line latches so a permanent failure says so once.
         if (stc_handlers_installed)
         {
-            OSReport("[ApStarShot] %s star slot %d, %d palette colors, model %s, handlers installed\n",
-                     AP_STAR_MACHINE_NAME, stc_star_slot, stc_palette_count,
+            OSReport("[ApStarShot] %s star slot %d, model %s, handlers installed\n",
+                     AP_STAR_MACHINE_NAME, stc_star_slot,
                      stc_shot_model != NULL ? "ready" : "unavailable");
         }
         else if (!failure_reported)

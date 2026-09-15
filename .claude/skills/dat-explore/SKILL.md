@@ -14,8 +14,9 @@ description: >
     - Plan the manifest custom_weather rebuilds a stage backdrop from
     - Author a texture or model .dat from PNGs
     Wraps the general `.dat` toolchain in `scripts/hsd/` (`explore.py`,
-    `carve_custom_item.py`, `clone_machine.py`, `machine_preview.py`,
-    `make_machine_art.py`, `verify_carved.py`, `geom_bounds.py`) and the
+    `carve_custom_item.py`, `machine_descriptor.py`,
+    `machine_preview.py`, `make_machine_art.py`, `verify_carved.py`,
+    `geom_bounds.py`) and the
     per-mod asset authors in `scripts/authoring/`. Reads files directly from
     disc - does not require Dolphin to be running.
 ---

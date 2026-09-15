@@ -522,9 +522,17 @@ def cmd_check(args):
     # One name per address across link.ld and the map. An address the map has
     # no row for is the map's coarse sizing, not drift.
     names_at = {}
+    addrs_named = {}
+    for r in syms.rows:
+        addrs_named.setdefault(r[2], []).append(r[0])
     for name, addr in sorted(ld.items(), key=lambda kv: kv[1]):
         if addr:  # address 0 stubs functions the game does not ship
             names_at.setdefault(addr, []).append(name)
+        named = addrs_named.get(name)
+        if named and addr not in named:
+            groups.setdefault("link.ld address disagrees with the map", []).append(
+                f"0x{addr:08x} {name}  map says 0x{named[0]:08x}"
+            )
         mapped = by_addr.get(addr)
         if not mapped:
             continue

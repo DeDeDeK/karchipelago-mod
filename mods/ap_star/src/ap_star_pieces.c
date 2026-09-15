@@ -70,10 +70,6 @@ static struct
     u8 shown_mask;
 } piece_hud[5];
 
-// Mounts owed. Collection lands inside Machine_OnTouchItem, which the mount would
-// tear down, so it waits for the frame boundary.
-static u8 pending_mount_mask;
-
 const char *ApStarPieces_GetName(int piece)
 {
     if (piece < 0 || piece >= APSTARPIECE_NUM)
@@ -259,46 +255,20 @@ static void UpdatePieceHud(int ply)
     piece_hud[ply].shown_mask = mask;
 }
 
-// The recreate the cinematic's own substate would have fired 150 frames in.
-// Re-mounting a player already riding the star costs them their patches, as vanilla
-// does on a duplicate Hydra set.
-static void MountStar(int ply)
-{
-    int kind = ApStar_MachineKind();
-    if (kind < 0)
-    {
-        OSReport("[ApStarPieces] Player %d not mounted: no %s registered\n",
-                 ply + 1, AP_STAR_MACHINE_NAME);
-        return;
-    }
-
-    int is_bike = 0;
-    int class_index = CustomMachines_ClassIndexOf(cm_api, (MachineKind)kind, &is_bike);
-    GOBJ *rg = Ply_GetRiderGObj(ply);
-    if (class_index < 0 || rg == NULL)
-    {
-        OSReport("[ApStarPieces] Player %d not mounted: no rider or class slot\n", ply + 1);
-        return;
-    }
-
-    RiderData *rd = rg->userdata;
-    rd->starting_machine_idx = (MachineKind)kind;
-    Rider_RespawnFullRecreate(rd, is_bike, (u8)class_index, 0, 0, 1, 0, 0);
-    OSReport("[ApStarPieces] Player %d mounted the %s (kind %d, star slot %d)\n",
-             ply + 1, AP_STAR_MACHINE_NAME, kind, class_index);
-}
-
 static void Assemble(int ply)
 {
     assembled_mask |= (u8)(1 << ply);
     piece_mask[ply] = 0;
 
     // The cinematic owns the mount and the completion sounds; with none, both are owed
-    // here and the mount waits for the frame boundary. Rung 4 is the pair of sounds a
-    // machine completes on, not a fourth piece.
+    // here. Rung 4 is the pair of sounds a machine completes on, not a fourth piece.
+    // Re-mounting a player already riding the star costs them their patches, as vanilla
+    // does on a duplicate Hydra set.
     if (!ApStar_StartAssembly(ply))
     {
-        pending_mount_mask |= (u8)(1 << ply);
+        if (!ApStar_Mount(ply))
+            OSReport("[ApStarPieces] Player %d not mounted: no %s registered\n",
+                     ply + 1, AP_STAR_MACHINE_NAME);
         Ply_OnLegendaryPieceCollect(ply, 4);
     }
 
@@ -518,16 +488,21 @@ void ApStarPieces_OnBoot(void)
     OSReport("[ApStarPieces] Spawn and drop hooks installed\n");
 }
 
+// Tried once: a build without custom_items would warn on every 3D scene.
 static void ImportRegistry(void)
 {
-    if (ci_api == NULL)
+    static int tried;
+
+    if (!tried)
+    {
+        tried = 1;
         ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
-    if (ci_api == NULL)
-        return;
-
-    ResolvePieces();
-    ci_api->AddPickupHandler(OnPickup);
+        if (ci_api != NULL)
+            ci_api->AddPickupHandler(OnPickup);
+    }
+    if (ci_api != NULL)
+        ResolvePieces();
 }
 
 void ApStarPieces_On3DLoadStart(void)
@@ -561,7 +536,6 @@ void ApStarPieces_On3DLoadEnd(void)
     }
     icon_sets = NULL;
     anchors_valid = 0;
-    pending_mount_mask = 0;
     assembled_mask = 0;
     memset(&sched, 0, sizeof(sched));
     for (int i = 0; i < APSTARPIECE_NUM; i++)
@@ -628,14 +602,7 @@ void ApStarPieces_On3DLoadEnd(void)
 void ApStarPieces_OnFrameStart(void)
 {
     for (int ply = 0; ply < 5; ply++)
-    {
-        if (pending_mount_mask & (1 << ply))
-        {
-            pending_mount_mask &= (u8)~(1 << ply);
-            MountStar(ply);
-        }
         UpdatePieceHud(ply);
-    }
 }
 
 // Matches the granted-box offset, so a sphere lands in front of the rider to drive

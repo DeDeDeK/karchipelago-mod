@@ -216,7 +216,9 @@ that gate off `archipelago` pre-fills all six at connect, unless `GOALGATE_AP_ST
 says the seed's goal is the assembly, in which case the six stay locked and the apworld
 ships them as items.
 
-The Archipelago Star's **machine** item (856) is a separate thing. It decides whether the
+The Archipelago Star's **machine** item (856) is a separate thing, bound to the star by its
+descriptor name as bit 26 of the machine unlock mask rather than to the `MachineKind` the
+registry happened to hand it. It decides whether the
 assembled star spawns loose on the City Trial field and whether it is selectable, the same
 split Hydra and Dragoon have between their piece items and their machine items. Assembling
 the star mounts the player on it whatever that bit says, exactly as assembling Hydra from
@@ -335,11 +337,11 @@ registered with `ApStarAPI.AddAssembleHandler`, and starts the cinematic, which 
 mount and plays the completion sounds 150 frames later. `archipelago` is on that handler
 list, and what it does there is latch the checklist objective.
 
-The cinematic is not this mod's. `custom_machines` owns the vanilla legendary cutscene and
-drives it for any registered machine off the archive names in the machine descriptor - the
-star's descriptor names `ApStarGlow.dat` (models plus the camera animation) and
-`ApStarParts.dat` (the parts), and both are queued alongside `VsDragoon.dat` and
-`VsHydra.dat` when City Trial loads, so the run's synchronous load never hits the disc. The
+The cinematic's engine side is not this mod's. `custom_machines` owns the vanilla legendary
+cutscene and drives it for any registered machine off the archive its descriptor names; this
+mod authors that archive. The star's descriptor names `ApStarAssembly.dat`, which is queued
+alongside `VsDragoon.dat` and `VsHydra.dat` when City Trial loads, so the run's synchronous
+load never hits the disc. The
 star gets the same 28-frame lead-in, world freeze, HUD drop, rider pose, scripted camera,
 150-frame run, audio bracket and legendary theme Hydra and Dragoon get, with six pods flying
 in on six streaks where Hydra has three parts on three.
@@ -349,7 +351,7 @@ This mod's whole share is one call, on the frame a player completes the set:
 registry. It returns 0 when the cinematic could not run - no machine registered, one already
 up, or a rider the vanilla assembly state does not cover, since
 `Rider_EnterLegendaryAssembly` (`0x8019248c`) ignores Meta Knight and King Dedede and the
-cinematic would play and hand back no machine - and the caller then owes the plain mount and
+cinematic would play and hand back no machine - and this mod then gives the plain mount and
 the completion sounds instead.
 
 It runs under `machine_index` 1, so the rider gets Hydra's pose and the motion script that
@@ -359,16 +361,16 @@ reads the index again, so the machine that arrives is entirely the star's own
 
 The mount itself is the tail of the vanilla assembly, and what that tail does is general:
 the rider's assembly state stages that pair, and the state's own motion script fires
-`Rider_RespawnFullRecreate` (`0x80193900`) on it. The star's class slot comes from
-`CustomMachinesAPI.ClassIndexFromKind` rather than a literal, since it is whatever the
-registry handed the machine this boot, and the player's `starting_machine_idx` is set to the
-star as well so a later respawn keeps it.
+`Rider_RespawnFullRecreate` (`0x80193900`) on it. The registry stages the star's own pair,
+since its class slot is whatever the registry handed the machine this boot, and sets the
+player's `starting_machine_idx` to the star as well so a later respawn keeps it.
 
-`MountStar` is the fallback for the cases the cinematic cannot cover, firing that recreate
-directly with no presentation around it. It waits for the frame boundary, since collection
-lands inside `Machine_OnTouchItem` and the recreate would tear down the machine that call is
-running on; with a cinematic the mount comes out of its own proc instead, which is already
-past that call.
+`ApStar_Mount` is the fallback for the cases the cinematic cannot cover, and the mount is the
+registry's there too: it hands the star to `CustomMachinesAPI.MountMachine`, which fires that
+same recreate with no presentation around it. The registry runs it at the next frame
+boundary, since collection lands inside `Machine_OnTouchItem` and the recreate would tear
+down the machine that call is running on; with a cinematic the mount comes out of its own
+proc instead, which is already past that call.
 
 A player already riding the star is re-mounted like anyone else, which costs them the
 patches on the machine the recreate tears down. That is what vanilla does: the pickup arm of
@@ -376,19 +378,23 @@ patches on the machine the recreate tears down. That is what vanilla does: the p
 and that no cinematic is already running, so a player riding Hydra who collects three more
 Hydra pieces gets a fresh Hydra with base stats.
 
-## The Cinematic's Archives
+## The Cinematic's Archive
 
-The cinematic reads a `vsData`: a glow-model triple `{JOBJDesc*, FigaTree*, MatAnimJoint*}`,
-a parts-model triple of the same shape, and a pointer to a word holding a camera-animation
-descriptor. The two halves come from different donors, so they are two archives and the
-three-pointer block is assembled in mod RAM.
+`ApStarAssembly.dat` has one public, `apStarAssembly`, shaped like `VsHydra.dat`'s
+`vsDataHydra`. It is three pointers:
 
-| File | Publics | What it is |
-|---|---|---|
-| `ApStarParts.dat` | `apStarParts` | the star's own model plus a 150-frame FigaTree that flies the pods in |
-| `ApStarGlow.dat` | `apStarGlow`, `apStarCam` | Hydra's streaks and flashes rebuilt for six pods, plus the camera descriptor |
+| Slot | Points at |
+|---|---|
+| glow | a `{JOBJDesc*, FigaTree*, MatAnimJoint*}` triple: Hydra's streaks and flashes rebuilt for six pods |
+| parts | a triple of the same shape: the star's own model plus a 150-frame FigaTree that flies the pods in |
+| camera | a word holding the camera descriptor |
 
-Both are written by `uv run python scripts/authoring/make_ap_star_assembly.py`.
+The two models come from different donors, the parts from `VcStarAp.dat` and the glow and
+camera from `VsHydra.dat`, so each is carved on its own and the parts carve is grafted onto the
+end of the glow one with every pointer in it rebased. The graft starts on a 32-byte boundary,
+so every carved range keeps the alignment it was carved at.
+
+It is written by `uv run python scripts/authoring/make_ap_star_assembly.py`.
 
 **The parts model** is a carve of `VcStarAp.dat`'s main model, all 17 joints. Each drawn
 joint's DObj chain is trimmed to its high LOD, plus the pods' XLU glow quad, because the

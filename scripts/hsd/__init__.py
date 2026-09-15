@@ -27,7 +27,7 @@ mod's shipped assets live in `scripts/authoring/`.
 - `explore.py` - CLI front-end (ls / tree / grdata / find).
 - `geom_bounds.py` - measure a model subtree's bounding radius / rescale it.
 - `carve_custom_item.py` - carve an Item.dat model into a customItem .dat.
-- `clone_machine.py` - copy a Vc*.dat machine under a new name and public.
+- `machine_descriptor.py` - read, write and edit a custom machine's descriptor.
 - `machine_preview.py` - re-export a machine archive under the public names
   HSDraw types, so the model can be opened in a viewer.
 - `make_machine_art.py` - build a machine's .art UI side-car from two renders.

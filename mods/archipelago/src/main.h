@@ -19,9 +19,6 @@ extern const TextBoxAPI *tb_api;
 #include "custom_machines_api.h"
 extern const CustomMachinesAPI *cm_api;
 
-// Import the registry if it has not resolved yet. Idempotent; safe from any scene.
-void AP_ResolveCustomMachines(void);
-
 // The registry's own kind-space helpers, bound to our import.
 static inline int MachineKind_Num(void)
 {
@@ -316,33 +313,6 @@ static inline int ChecklistRowMode(int row)
 
 // Is checkbox `k` of row `r` recorded complete?
 #define SENT_CHECK_BIT(r, k)  ((ap_save->sent_checks[(r)][(k) >> 6] >> ((k) & 63)) & 1ULL)
-
-// machine_unlocked_mask is 32 bits, so only the first 32 MachineKinds can carry a
-// gate. custom_machines is free to register past that - its own cap is its own -
-// and the kinds beyond are treated as permanently available rather than shifted out
-// of range. OnSaveLoaded reports how many were left ungated.
-#define AP_MACHINE_GATE_NUM 32
-
-// The machine unlock item ids run from AP_MACHINE_UNLOCK_BASE up to where the box
-// unlock ids begin, so a build registering more MachineKinds than that block holds
-// has to stop at its edge instead of reading on into another category's ids. The
-// kinds past it get no unlock item and stay ungated like the ones past the mask.
-#define AP_MACHINE_UNLOCK_NUM (AP_BOX_UNLOCK_BASE - AP_MACHINE_UNLOCK_BASE)
-
-static inline int MachineUnlock_KindNum(void)
-{
-    int num = MachineKind_Num();
-    return num < AP_MACHINE_UNLOCK_NUM ? num : AP_MACHINE_UNLOCK_NUM;
-}
-
-static inline int MachineKind_IsUnlocked(int kind)
-{
-    if (kind < 0)
-        return 0;
-    if (kind >= AP_MACHINE_GATE_NUM)
-        return 1;
-    return (ap_save->machine_unlocked_mask >> kind) & 1;
-}
 
 void OnBoot();
 void OnSaveInit();

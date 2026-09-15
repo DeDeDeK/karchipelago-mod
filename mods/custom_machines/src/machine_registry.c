@@ -1,5 +1,5 @@
-// Widens the engine's star machine class from 19 slots to 19 + CUSTOM_MACHINE_MAX
-// so registered machines can load archives of their own.
+// Widens both machine classes - the star class past its 19 slots and the bike class
+// past its 7 - so registered machines load archives of their own.
 
 #include "os.h"
 #include "hsd.h"
@@ -8,61 +8,90 @@
 
 #include "custom_machines.h"
 
-static char *stc_star_names[CUSTOM_VCSTAR_NUM * 2];
+// Each class's {filename, symbol} pairs, vanilla then appended.
+static char *stc_names[2][CUSTOM_VCSTAR_NUM * 2];
 
 // Replaces stc_vcDataLookup. The bike row is as wide as the star row so both are
-// indexed the same way; only slots 0-6 of it are ever filled.
+// indexed the same way.
 static vcData *stc_vc_lookup[2][CUSTOM_VCSTAR_NUM];
 
-// Each holds the machine-specific handler that Machine_Star_Init (0x801e7f3c) and
-// Machine_Star_Think (0x801eacbc) end by calling: the vanilla table, then the lis /
-// addi pair that forms it inside the one function that reads it. Only Hydra,
-// Formula, Wagon and Turbo have one; every other slot is NULL.
-static const u32 stc_handler_tables[2][3] = {
-    { 0x804b15c0, 0x801e80dc, 0x801e80e0 }, // Machine_Star_Init
-    { 0x804b160c, 0x801eb524, 0x801eb528 }, // Machine_Star_Think
+// The lis / addi pair forming each star handler table inside the one function that
+// reads it: Machine_Star_Init (0x801e7f3c), then Machine_Star_Think (0x801eacbc).
+static const u32 stc_star_handler_sites[2][2] = {
+    { 0x801e80dc, 0x801e80e0 },
+    { 0x801eb524, 0x801eb528 },
 };
 
-static void (*stc_handlers[2][CUSTOM_VCSTAR_NUM])(MachineData *);
+// [Init, Think][class slot]. A custom star slot stays NULL until a consumer installs its
+// own. The bike class dispatches through no per-kind table, so its handlers run from
+// hooks on the epilogues of Machine_Wheel_Init and Machine_Wheel_Think.
+static CustomMachineHandler stc_star_handlers[2][CUSTOM_VCSTAR_NUM];
+static CustomMachineHandler stc_bike_handlers[2][CUSTOM_VCWHEEL_NUM];
 
-// A consumer's handler layers over the inherited one rather than replacing it.
-// One dispatcher stands in the slot and recovers the row from md->kind, which is
-// the star slot, so no per-slot trampoline is needed.
-static void (*stc_inherited[2][CUSTOM_VCSTAR_NUM])(MachineData *);
-static void (*stc_mod_handlers[2][CUSTOM_VCSTAR_NUM])(MachineData *);
+// In registry order. Machine_AnimThink (0x801c618c) is shared by both classes and
+// dispatches through nothing indexed by kind, so these run from a replacement of its
+// last call.
+static CustomMachineHandler stc_anim_handlers[CUSTOM_MACHINE_MAX];
 
-static void RunHandlers(int table, MachineData *md)
-{
-    int slot = md->kind;
-    if (slot < 0 || slot >= CUSTOM_VCSTAR_NUM)
-        return;
-    if (stc_inherited[table][slot] != NULL)
-        stc_inherited[table][slot](md);
-    if (stc_mod_handlers[table][slot] != NULL)
-        stc_mod_handlers[table][slot](md);
-}
-
-static void StarInitDispatch(MachineData *md)  { RunHandlers(0, md); }
-static void StarThinkDispatch(MachineData *md) { RunHandlers(1, md); }
-
-static void (*const stc_dispatch[2])(MachineData *) = { StarInitDispatch, StarThinkDispatch };
-
-int CustomMachineRegistry_SetStarHandler(int table, int machine_kind,
-                                         void (*fn)(MachineData *))
+int CustomMachineRegistry_SetHandler(CustomMachineHandlerSlot slot, int machine_kind,
+                                     CustomMachineHandler fn)
 {
     CustomMachineEntry *e = CustomMachines_FindByKind(machine_kind);
-    if (e == NULL || table < 0 || table > 1)
+    if (e == NULL)
         return 0;
 
-    int slot = e->star_slot;
-    if (stc_handlers[table][slot] != stc_dispatch[table])
-    {
-        stc_inherited[table][slot] = stc_handlers[table][slot];
-        stc_handlers[table][slot] = stc_dispatch[table];
-    }
-    stc_mod_handlers[table][slot] = fn;
+    if (slot == CUSTOM_MACHINE_HANDLER_ANIM)
+        stc_anim_handlers[CustomMachines_Index(e)] = fn;
+    else if (e->is_bike)
+        stc_bike_handlers[slot][e->class_slot] = fn;
+    else
+        stc_star_handlers[slot][e->class_slot] = fn;
     return 1;
 }
+
+// Replaces the bl Machine_ColAnimThink at 0x801c6274, Machine_AnimThink's last call, which
+// runs once per machine per frame after the ColAnim overlays and before the draw.
+static void AnimThinkTail(MachineData *md)
+{
+    Machine_ColAnimThink(md);
+
+    CustomMachineEntry *e = CustomMachines_FindByClassSlot(md->is_bike, md->kind);
+    if (e != NULL && stc_anim_handlers[CustomMachines_Index(e)] != NULL)
+        stc_anim_handlers[CustomMachines_Index(e)](md);
+}
+
+static void RunBikeHandler(CustomMachineHandlerSlot slot, MachineData *md)
+{
+    if (md->kind < CUSTOM_VCWHEEL_NUM && stc_bike_handlers[slot][md->kind] != NULL)
+        stc_bike_handlers[slot][md->kind](md);
+}
+
+static void WheelInitTail(MachineData *md)
+{
+    RunBikeHandler(CUSTOM_MACHINE_HANDLER_INIT, md);
+}
+
+static void WheelThinkTail(MachineData *md)
+{
+    RunBikeHandler(CUSTOM_MACHINE_HANDLER_THINK, md);
+}
+
+// r31 holds the machine through Machine_Wheel_Init's epilogue, r29 through
+// Machine_Wheel_Think's.
+CODEPATCH_HOOKCREATE(0x801f3c70, "mr 3, 31\n\t", WheelInitTail, "", 0)
+CODEPATCH_HOOKCREATE(0x801f597c, "mr 3, 29\n\t", WheelThinkTail, "", 0)
+
+// Machine_CheckStuck (0x801d2b04) leaves Dragoon, Hydra and Wing Meta Knight out of City
+// Trial's stuck check by class slot alone - 8, 4 and 17, whatever the class - and an
+// appended bike can sit at 8 or 17. An appended slot is compared as one matching none.
+static int StuckCheckSlot(MachineData *md)
+{
+    return md->kind >= (md->is_bike ? VCWHEEL_NUM : VCSTAR_NUM) ? 0xFF : md->kind;
+}
+
+// The first compare, with r29 the machine and r0 the slot just loaded. All three
+// compares run on what this leaves in r0.
+CODEPATCH_HOOKCREATE(0x801d2ba8, "mr 3, 29\n\t", StuckCheckSlot, "mr 0, 3\n\t", 0)
 
 // Replaces vcData_InitLookup (0x801c6c68), the scene-entry reset.
 static void InitLookup(void)
@@ -73,6 +102,24 @@ static void InitLookup(void)
             stc_vc_lookup[is_bike][i] = NULL;
         stc_vcDataKindStar[is_bike] = NULL;
     }
+}
+
+// A machine's animation bank names its own generators from CUSTOM_MACHINE_GENERATOR_BASE
+// up, and they are installed past every other machine's, so each loaded copy takes the
+// ids discovery resolved. Written whole rather than offset, so a copy that already took
+// them is left as it is.
+static void InstallParticleIds(int is_bike, int class_index)
+{
+    vcData *vc = stc_vc_lookup[is_bike][class_index];
+    CustomMachineEntry *e = CustomMachines_FindByClassSlot(is_bike, class_index);
+
+    if (e == NULL || vc == NULL || vc->anim == NULL)
+        return;
+
+    int num;
+    int *slots = CustomMachines_ParticleSlots(is_bike, vc->anim, &num);
+    for (int i = 0; i < num; i++)
+        slots[i] = e->particle[i];
 }
 
 // Replaces Vehile_LoadFile (0x801c6d74). lbLoadArchive resolves each archive's
@@ -87,30 +134,32 @@ static void LoadFile(int is_bike, int class_index)
     {
         char **pair = &stc_vcClassNameTable[is_bike * 2];
         lbLoadArchive(0, pair[0], &stc_vcDataKindStar[is_bike], pair[1], 0);
+        CustomMachineAudio_OnClassLoad(is_bike);
     }
 
     if (stc_vc_lookup[is_bike][class_index] == NULL)
     {
         char **pair = &stc_vcNameTable[is_bike][class_index * 2];
         lbLoadArchive(0, pair[0], &stc_vc_lookup[is_bike][class_index], pair[1], 0);
+        InstallParticleIds(is_bike, class_index);
     }
 }
 
 // Replaces MachineDesc_SetKindAndIsBikeFromMachineKind (0x801c857c), the
 // MachineKind -> (is_bike, class slot) split shared by CityMachineSpawn_Create
-// and 13 other sites. Vanilla splits at 19; registered machines are star slots
-// 19 and up, whose MachineKinds sit past VCKIND_NUM.
+// and 13 other sites.
 static void SplitKind(MachineKind kind, int *out_is_bike, u8 *out_class_index)
 {
-    CustomMachineEntry *e = CustomMachines_FindByKind(kind);
-    if (e != NULL)
-    {
-        *out_is_bike = 0;
-        *out_class_index = (u8)e->star_slot;
-        return;
-    }
-    *out_is_bike = MachineKind_IsBike(kind);
-    *out_class_index = (u8)MachineKind_ClassIndex(kind);
+    *out_class_index = (u8)CustomMachines_ClassIndexFromKind(kind, out_is_bike);
+}
+
+// Replaces Machine_EncodeVehicleKind (0x801c85a8), the reverse: (is_bike, class slot) ->
+// absolute kind, behind Ply_GetVehicleKind, Free Run's machine counts and the checklist
+// and finish-line compares against a vanilla kind. Vanilla adds 19 to a bike's slot only,
+// which reads an appended star slot as a bike and an appended bike slot as another kind.
+static int EncodeKind(int is_bike, int class_index)
+{
+    return CustomMachines_KindFromClassIndex(is_bike, (u8)class_index);
 }
 
 // Queues every registered machine's archive alongside the ones Machine_PreloadAll
@@ -140,45 +189,51 @@ static void PatchLookupBase(void)
 
 void CustomMachineRegistry_OnBoot(void)
 {
-    // The vanilla pairs are copied rather than restated so the widened table
-    // cannot drift from the DOL's.
-    char **vanilla = stc_vcNameTable[0];
-    for (int i = 0; i < VCSTAR_NUM * 2; i++)
-        stc_star_names[i] = vanilla[i];
+    for (int is_bike = 0; is_bike < 2; is_bike++)
+    {
+        char **vanilla = stc_vcNameTable[is_bike];
+        int n = is_bike ? VCWHEEL_NUM : VCSTAR_NUM;
 
+        for (int i = 0; i < n * 2; i++)
+            stc_names[is_bike][i] = vanilla[i];
+    }
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
-        stc_star_names[e->star_slot * 2 + 0] = e->path;
-        stc_star_names[e->star_slot * 2 + 1] = e->symbol;
+        stc_names[e->is_bike][e->class_slot * 2 + 0] = e->path;
+        stc_names[e->is_bike][e->class_slot * 2 + 1] = e->symbol;
     }
-    stc_vcNameTable[0] = stc_star_names;
+    stc_vcNameTable[0] = stc_names[0];
+    stc_vcNameTable[1] = stc_names[1];
 
+    const MachineStarProc *vanilla_handlers[2] = {
+        stc_machine_star_init_handler,
+        stc_machine_star_think_handler,
+    };
     for (int t = 0; t < 2; t++)
     {
-        void (**handlers)(MachineData *) = (void (**)(MachineData *))stc_handler_tables[t][0];
-
         for (int i = 0; i < VCSTAR_NUM; i++)
-            stc_handlers[t][i] = handlers[i];
+            stc_star_handlers[t][i] = vanilla_handlers[t][i];
 
-        for (int i = 0; i < CustomMachines_GetCount(); i++)
-        {
-            CustomMachineEntry *e = CustomMachines_GetEntry(i);
-            // A star's MachineKind is its class slot, so this also rejects bikes.
-            if (e->clone_kind >= 0 && e->clone_kind < VCSTAR_NUM)
-                stc_handlers[t][e->star_slot] = handlers[e->clone_kind];
-        }
-
-        CustomMachines_RepointTable(stc_handler_tables[t][1], stc_handler_tables[t][2],
-                                    stc_handlers[t]);
+        CustomMachines_RepointTable(stc_star_handler_sites[t][0], stc_star_handler_sites[t][1],
+                                    stc_star_handlers[t]);
     }
 
     PatchLookupBase();
     CODEPATCH_REPLACEFUNC(vcData_InitLookup, InitLookup);
     CODEPATCH_REPLACEFUNC(Vehile_LoadFile, LoadFile);
     CODEPATCH_REPLACEFUNC(MachineDesc_SetKindAndIsBikeFromMachineKind, SplitKind);
+    CODEPATCH_REPLACEFUNC(Machine_EncodeVehicleKind, EncodeKind);
     CODEPATCH_HOOKAPPLY(0x801c8d8c); // Machine_PreloadAll tail
+    CODEPATCH_REPLACECALL(0x801c6274, AnimThinkTail); // bl Machine_ColAnimThink
 
-    OSReport("[MachineRegistry] Star class widened to %d slots for %d machine(s)\n",
-             CUSTOM_VCSTAR_NUM, CustomMachines_GetCount());
+    if (CustomMachines_GetClassCount(1) > 0)
+    {
+        CODEPATCH_HOOKAPPLY(0x801f3c70); // Machine_Wheel_Init epilogue
+        CODEPATCH_HOOKAPPLY(0x801f597c); // Machine_Wheel_Think epilogue
+        CODEPATCH_HOOKAPPLY(0x801d2ba8); // Machine_CheckStuck slot compare
+    }
+
+    OSReport("[MachineRegistry] Classes widened for %d star(s) and %d bike(s)\n",
+             CustomMachines_GetClassCount(0), CustomMachines_GetClassCount(1));
 }

@@ -1,8 +1,9 @@
-// Grows every character-indexed UI art bank so the appended characters have frames.
-// Twenty banks across eight archives are TexAnims whose animation frame is the
-// CharacterKind; each gains CUSTOM_MACHINE_MAX frames out of the CmUiFrames.dat
-// side-car, plus the quad-scale tracks that size them, every time its archive loads
-// through Gm_LoadGameFile (0x80059818).
+// Grows every UI art bank that picks its frame by kind, so the appended machines have
+// frames. Twenty banks across eight menu archives are TexAnims whose animation frame is
+// the CharacterKind, and the two HUD machine icon banks are keyed by registry order; each gains
+// CUSTOM_MACHINE_MAX frames out of the CmUiFrames.dat side-car, plus the quad-scale tracks
+// that size the menu ones, every time its archive loads through Gm_LoadGameFile
+// (0x80059818).
 
 #include "os.h"
 #include "hsd.h"
@@ -16,13 +17,16 @@
 #define UI_FRAMES_PUBLIC "cmUiFrames"
 
 // The widest bank grows 34 -> 47; the pool holds a table per bank for the run of
-// the game, because a donor is rebuilt on every scene entry.
+// the game, because the archive holding a bank is rebuilt on every scene entry.
 #define UI_FRAME_ENTRY_MAX 48
-#define UI_FRAME_BANK_MAX  20
-#define UI_FRAME_FILE_MAX  10
+#define UI_FRAME_BANK_MAX  24
+#define UI_FRAME_FILE_MAX  12
 
-// Longest donor basename is "MnSelplyctAll", and the engine passes it with a
-// trailing '.' and no extension.
+// A bank whose appended frames count registered machines in registry order rather than
+// appended CharacterKinds: one that draws a machine by kind.
+#define UI_FRAME_KEY_MACHINE 1
+
+// Fits the longest bank archive basename, "MnSelstadiumAll", plus the engine's trailing '.'.
 #define UI_FRAME_NAME_MAX 24
 
 // Where the engine diverts the two characters it keeps out of the roster's own
@@ -44,8 +48,8 @@ static const u32 stc_divert_sites[] = {
 typedef struct UiFrameBank
 {
     u32 texanim_off;       // 0x00 data-section offset of the TexAnim
-    u16 n_images;          // 0x04 donor image count, before the append
-    u16 n_tluts;           // 0x06 donor TLUT count
+    u16 n_images;          // 0x04 the archive's own image count, before the append
+    u16 n_tluts;           // 0x06 its own TLUT count
     u16 src;               // 0x08 frame the appended ones are cloned from
     u16 n_appended;        // 0x0a frames the ramps were authored to add
     _HSD_ImageDesc *image; // 0x0c the placeholder frame
@@ -60,7 +64,8 @@ typedef struct UiFrameBank
     u32 src_format;        // 0x2c
     u8 timg_flag;          // 0x30 value flag the widened ramp needs
     u8 tclt_flag;          // 0x31
-    u16 pad;               // 0x32
+    u8 key;                // 0x32 UI_FRAME_KEY_MACHINE, else keyed by CharacterKind
+    u8 pad;                // 0x33
 } UiFrameBank;
 
 // A ramp outside any bank that is keyed by CharacterKind all the same: the Sicon
@@ -77,7 +82,7 @@ typedef struct UiFrameRamp
 
 typedef struct UiFrameFile
 {
-    char *name;         // 0x00 donor basename, no extension
+    char *name;         // 0x00 archive basename, no extension
     u32 n_banks;        // 0x04
     UiFrameBank *banks; // 0x08
     u32 n_ramps;        // 0x0c
@@ -89,12 +94,13 @@ static int stc_slot_base[UI_FRAME_FILE_MAX]; // first pool slot of each file's b
 static int stc_file_num;
 static int stc_appended;
 
-// A machine's art, by its appended CharacterKind's slot. The archives are held for
-// the run of the game: the menu banks are pointed straight at the images.
+// A machine's art, by its appended CharacterKind's slot and by its registry index.
 static CustomMachineArt *stc_art[CUSTOM_MACHINE_MAX];
+static CustomMachineArt *stc_machine_art[CUSTOM_MACHINE_MAX];
 
 static _HSD_ImageDesc *stc_image_pool[UI_FRAME_BANK_MAX][UI_FRAME_ENTRY_MAX];
 static HSD_TlutDesc *stc_tlut_pool[UI_FRAME_BANK_MAX][UI_FRAME_ENTRY_MAX];
+static u8 stc_grown[UI_FRAME_BANK_MAX];
 
 static char stc_loading[UI_FRAME_NAME_MAX];
 
@@ -137,11 +143,12 @@ static void SetRamp(HSD_Archive *archive, u32 off, void *buffer, u32 length, u8 
     fobj->value_flag = flag;
 }
 
-// The image an appended frame shows: the machine holding that frame's
-// CharacterKind, if it shipped art for this bank's geometry, else the placeholder.
+// The image an appended frame shows: the machine holding that frame's CharacterKind or
+// registry index, if it shipped art for this bank's geometry, else the placeholder.
 static _HSD_ImageDesc *AppendedImage(UiFrameBank *bank, int frame)
 {
-    CustomMachineArt *art = frame < CUSTOM_MACHINE_MAX ? stc_art[frame] : NULL;
+    CustomMachineArt **arts = bank->key == UI_FRAME_KEY_MACHINE ? stc_machine_art : stc_art;
+    CustomMachineArt *art = frame < CUSTOM_MACHINE_MAX ? arts[frame] : NULL;
 
     if (art != NULL)
     {
@@ -156,7 +163,9 @@ static _HSD_ImageDesc *AppendedImage(UiFrameBank *bank, int frame)
     return bank->image;
 }
 
-static void PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
+// Returns whether the bank holds the appended frames, including a preloaded archive the
+// pool was already spliced into.
+static int PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
 {
     HSD_TexAnim *tex;
     _HSD_ImageDesc **images;
@@ -166,12 +175,14 @@ static void PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
 
     if (!InBounds(archive, bank->texanim_off, sizeof(HSD_TexAnim))
         || !InBounds(archive, bank->timg_off, sizeof(HSD_FObjDesc)))
-        return;
+        return 0;
 
     tex = (HSD_TexAnim *)(archive->data + bank->texanim_off);
+    if (tex->imagetbl == stc_image_pool[slot])
+        return 1;
     n = tex->n_imagetbl;
     if (n != bank->n_images || n + a > UI_FRAME_ENTRY_MAX)
-        return;
+        return 0;
 
     // The TLUT table and its ramp go together: a ramp keying an entry the table
     // does not have would index off the end of it.
@@ -182,7 +193,7 @@ static void PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
         if (!InBounds(archive, bank->tclt_off, sizeof(HSD_FObjDesc))
             || nt != bank->n_tluts || nt + a > UI_FRAME_ENTRY_MAX
             || bank->src >= nt)
-            return;
+            return 0;
 
         HSD_TlutDesc **tluts = stc_tlut_pool[slot];
 
@@ -203,6 +214,7 @@ static void PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
     tex->imagetbl = images;
     tex->n_imagetbl = n + a;
     SetRamp(archive, bank->timg_off, bank->timg_buf, bank->timg_len, bank->timg_flag);
+    return 1;
 }
 
 // Gm_LoadGameFile's `mr r3, r25`, where r25 is the basename and both the
@@ -231,7 +243,10 @@ static void OnLoadEnd(HSD_Archive *archive)
         if (!NameMatches(stc_loading, file->name))
             continue;
         for (b = 0; b < file->n_banks; b++)
-            PatchBank(archive, &file->banks[b], stc_slot_base[f] + b);
+        {
+            int slot = stc_slot_base[f] + b;
+            stc_grown[slot] = PatchBank(archive, &file->banks[b], slot);
+        }
         for (b = 0; b < file->n_ramps; b++)
         {
             UiFrameRamp *r = &file->ramps[b];
@@ -244,8 +259,25 @@ static void OnLoadEnd(HSD_Archive *archive)
 }
 CODEPATCH_HOOKCREATE(0x800599f8, "mr 3,30\n\t", OnLoadEnd, "", 0)
 
-// Load each registered machine's art side-car into the slot its CharacterKind
-// takes. The archives are never freed - the banks point straight into them.
+int CustomMachineUiFrames_IsGrown(const char *name)
+{
+    for (int f = 0; f < stc_file_num; f++)
+    {
+        if (!NameMatches(name, stc_files[f].name))
+            continue;
+        for (u32 b = 0; b < stc_files[f].n_banks; b++)
+        {
+            if (!stc_grown[stc_slot_base[f] + b])
+                return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+// Load each registered machine's art side-car into its registry index's entry, and into
+// the slot its CharacterKind takes if it has one. The archives are never freed - the
+// banks point straight into them.
 static int LoadMachineArt(void)
 {
     char path[CUSTOM_MACHINE_PATH_MAX];
@@ -254,10 +286,8 @@ static int LoadMachineArt(void)
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
-        int slot = e->character_kind - CKIND_NUM;
+        int character = e->character_kind - CKIND_NUM;
 
-        if (slot < 0 || slot >= CUSTOM_MACHINE_MAX)
-            continue;
         if (!CustomMachines_SideCarPath(path, sizeof(path), e->path, CUSTOM_MACHINE_ART_EXT))
             continue;
         if (DVDConvertPathToEntrynum(path) == -1)
@@ -281,7 +311,9 @@ static int LoadMachineArt(void)
             continue;
         }
 
-        stc_art[slot] = art;
+        stc_machine_art[i] = art;
+        if (character >= 0)
+            stc_art[character] = art;
         found++;
     }
     return found;

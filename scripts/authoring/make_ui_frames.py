@@ -32,13 +32,17 @@ engine already diverts King Dedede and Meta Knight's colours. Those two runs sli
 --appended frames later; the mod rewrites the sixteen addi immediates that form
 them to match.
 
+Two HUD banks draw a machine by its kind instead - the City Trial field blip in
+IfAll2c.dat and the stadium HUD's machine icon in IfAll3c.dat - and grow the same way,
+their appended frames keyed by registry order rather than by CharacterKind.
+
 The output exports one public:
 
   cmUiFrames  - UiFrameFile[], terminated by a zero name
 
-whose layout must match mods/custom_machines/src/ui_frames.c. A bank names the
-donor by data-section offset: those are fixed for GKYE01, and the mod adds the
-loaded archive's data base to reach the live TexAnim.
+whose layout must match mods/custom_machines/src/ui_frames.c. A bank names its
+TexAnim by data-section offset: those are fixed for GKYE01, and the mod adds the
+loaded archive's data base to reach the live one.
 
 Run from the repo root:
     uv run --with pillow python scripts/authoring/make_ui_frames.py
@@ -56,6 +60,7 @@ from hsd.gx import FORMAT_NAME, align32
 from hsd.ui_art import BANK_ROLE
 from hsd.ui_banks import (
     FOBJ_TRACK,
+    has_prefix_shape,
     TEXANIM_AOBJ,
     TEXANIM_IMAGES,
     TEXANIM_N_IMAGES,
@@ -73,6 +78,10 @@ from hsd.ui_banks import (
 
 PUBLIC = "cmUiFrames"
 
+# UiFrameBank.key: what an appended frame's index counts.
+KEY_CHARACTER = 0
+KEY_MACHINE = 1
+
 BANK_SIZE = 0x34
 RAMP_SIZE = 0x10
 FILE_SIZE = 0x14
@@ -80,7 +89,7 @@ FILE_SIZE = 0x14
 # MnSelruleAll is left out on purpose. Its 96x24 I4 bank holds the rule screen's
 # option labels and is only found by the character-bank test because it happens to
 # hold 20 images; its animation frame is a rule value, never a CharacterKind.
-DONORS = [
+MENU_ARCHIVES = [
     "MnBestrapAll",
     "MnResult2All",
     "MnResult4All",
@@ -90,6 +99,14 @@ DONORS = [
     "MnSelplyctAll",
     "MnSelstadiumAll",
 ]
+
+# The two HUD banks that draw a machine by its kind rather than its CharacterKind, by
+# TexAnim offset: the City Trial field blip and the stadium HUD's machine icon. Both
+# are one image per machine with no colour diverts, so neither shape test finds them.
+MACHINE_BANKS = {
+    "IfAll2c": 0xED8,
+    "IfAll3c": 0x92B8,
+}
 
 
 def bank_tracks(data, tex):
@@ -161,18 +178,9 @@ def main(argv):
 
     blob = Blob()
     files = []
-    for name in DONORS:
-        arc = Archive(os.path.join(args.iso_dir, name + ".dat"))
-        banks = [
-            tex
-            for tex in texanim_offsets(arc, args.frames)
-            if bank_geometry(arc.data, tex, args.source) in BANK_ROLE
-        ]
-        if not banks:
-            raise SystemExit(f"{name}: no character-indexed bank")
 
+    def write_banks(arc, banks, key):
         table = blob.append(b"\0" * (BANK_SIZE * len(banks)))
-        print(f"{name}: {len(banks)} bank(s)")
         for i, tex in enumerate(banks):
             at = table + i * BANK_SIZE
             data = arc.data
@@ -183,6 +191,8 @@ def main(argv):
                 raise SystemExit(f"  bank @ {tex:#x}: no image-index track")
 
             geom = bank_geometry(data, tex, args.source)
+            if geom not in BANK_ROLE:
+                raise SystemExit(f"  bank @ {tex:#x}: {geom} is no art role's geometry")
             desc, note = bank_image(blob, geom, im)
             timg_buf, timg_flag = encoded_ramp(
                 data, timg, index_values(n, args.appended)
@@ -197,7 +207,7 @@ def main(argv):
             blob.ptr(at + 0x14, timg_off)
             struct.pack_into(">I", blob.data, at + 0x18, len(timg_buf))
             struct.pack_into(">HHI", blob.data, at + 0x28, geom[0], geom[1], geom[2])
-            struct.pack_into(">B", blob.data, at + 0x30, timg_flag)
+            struct.pack_into(">BBB", blob.data, at + 0x30, timg_flag, 0, key)
 
             if tclt:
                 tclt_buf, tclt_flag = encoded_ramp(
@@ -213,6 +223,20 @@ def main(argv):
                 f"{note}"
                 + (f", tlut {n_tlut} -> {n_tlut + args.appended}" if tclt else "")
             )
+        return table
+
+    for name in MENU_ARCHIVES:
+        arc = Archive(os.path.join(args.iso_dir, name + ".dat"))
+        banks = [
+            tex
+            for tex in texanim_offsets(arc, args.frames)
+            if bank_geometry(arc.data, tex, args.source) in BANK_ROLE
+        ]
+        if not banks:
+            raise SystemExit(f"{name}: no character-indexed bank")
+
+        print(f"{name}: {len(banks)} bank(s)")
+        table = write_banks(arc, banks, KEY_CHARACTER)
 
         joints = joint_ramp_offsets(arc)
         ramps = blob.append(b"\0" * (RAMP_SIZE * len(joints))) if joints else 0
@@ -226,6 +250,17 @@ def main(argv):
             struct.pack_into(">B", blob.data, at + 0x0C, flag)
             print(f"  joint ramp @ {fobj:#x}: holds frame {args.source}'s {value:g}")
         files.append((name, len(banks), table, len(joints), ramps))
+
+    for name, tex in MACHINE_BANKS.items():
+        arc = Archive(os.path.join(args.iso_dir, name + ".dat"))
+        n = u16(arc.data, tex + TEXANIM_N_IMAGES)
+        timg, _ = bank_tracks(arc.data, tex)
+        if not timg or not has_prefix_shape(arc.data, timg, n):
+            raise SystemExit(f"{name}: no one-image-per-machine bank at {tex:#x}")
+
+        print(f"{name}: machine bank, keyed by registry order")
+        table = write_banks(arc, [tex], KEY_MACHINE)
+        files.append((name, 1, table, 0, 0))
 
     name_offs = [blob.append(f[0].encode("ascii") + b"\0", 1) for f in files]
     table = blob.append(b"\0" * (FILE_SIZE * (len(files) + 1)))

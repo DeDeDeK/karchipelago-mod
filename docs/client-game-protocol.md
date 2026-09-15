@@ -370,7 +370,7 @@ Each category sets a bit in a save-data mask; see the `gate_*.c` files.
 | 780-788 | 780 | `AP_PATCH_UNLOCK_` | Patch types (aligned to PatchKind) | 9 | `patch_unlocked_mask` |
 | 790-819 | 790 | `AP_ITEM_UNLOCK_` | Item groups (aligned to ItemUnlockKind, `ITUNLOCK_NUM` = 30) | 30 | `item_unlocked_mask` |
 | 820-825 | 820 | `AP_STAR_PIECE_UNLOCK_` | Archipelago Star assembly spheres (in `APStarPiece` order) | 6 | `ap_star_piece_unlocked_mask` |
-| 830-854, 856 | 830 | `AP_MACHINE_UNLOCK_` | Machines (aligned to MachineKind) | 23 | `machine_unlocked_mask` |
+| 830-854, 856 | 830 | `AP_MACHINE_UNLOCK_` | Machines (aligned to the mask's bits: MachineKind, then the Archipelago Star) | 23 | `machine_unlocked_mask` |
 | 860-862 | 860 | `AP_BOX_UNLOCK_` | Box types (Blue, Green, Red) | 3 | `box_unlocked_mask` |
 | 870-878 | 870 | `AP_STAGE_UNLOCK_AIRRIDE_` | Air Ride stages | 9 | `airride_stage_unlocked_mask` |
 | 880-887 | 880 | `AP_COLOR_UNLOCK_` | Kirby colors (aligned to KirbyColor; Pink/880 is the always-unlocked default, so its item is generated but is a no-op in-game) | 8 | `color_unlocked_mask` |
@@ -417,13 +417,13 @@ AP item ID = `980 + APStarPiece`. Adds that sphere to every human rider's collec
 |----------|---------|
 | 980-985 | Rose, Green, Violet, Tan, Blue, Yellow |
 
-**Machine unlock note:** IDs 830-854 cover VCKINDs 0-24. VCKIND 25 (WHEELVSDEDEDE) is the Vs. King Dedede stadium's CPU-only machine - ID 855 is explicitly rejected by the handler and is not a valid machine unlock. IDs 856 and up continue the alignment into the MachineKinds `custom_machines` registers, in the order it discovers `machines/*.dat`.
+**Machine unlock note:** IDs 830-854 cover VCKINDs 0-24. VCKIND 25 (WHEELVSDEDEDE) is the Vs. King Dedede stadium's CPU-only machine - ID 855 is explicitly rejected by the handler and is not a valid machine unlock. ID 856 is the Archipelago Star, bit 26 of the mask; no other machine `custom_machines` registers has an unlock ID.
 
 The AP world (`worlds/kirby_air_ride/KARItems.py`) generates 23 unlock items as `progression`: 830-846, 848, 851-854 and 856. Three caveats for modders:
 
 - **Top Ride machines are live gates, not placeholders.** 845 (FREE) and 846 (STEER) are read by the mod's Top Ride lobby gating (`GateMachines_TRLobbyCanStart` / `IsTRMachineUnlocked`, in `gate_machines.c`), which hard-blocks starting a Top Ride race unless at least one is unlocked. In the apworld they are tagged `source_modes=_TR` (they don't spawn in City Trial via `CT_SPAWN_EXCLUDED_MASK` and aren't Air Ride machines), and a guaranteed Top Ride machine starter - one of Free/Steer, precollected when `machines_gated` and Top Ride is in play - keeps the gate satisfiable in every seed config. AP logic doesn't model the lobby gate, so without that precollect the `_TR`-confined unlocks could land behind it (circular placement, Top-Ride-only softlock). Free/Steer are also excluded from the AR/CT machine starter pool since they can't be ridden there. When `machine_gating_enabled == 0`, the mod sets every gateable bit (`MachineGateMask()`, bits 0 through `MachineKind_Num() - 1`) at connect, so the lobby is freely startable.
 - **Three in-range IDs ship no item.** 847 (WINGKIRBY), 849 (WHEELNORMAL) and 850 (WHEELKIRBY) are not selectable player machines - no character rides them in player-controlled contexts, and they are force-excluded from City Trial spawns. The mod still accepts the IDs and sets their bits, but no game code reads them. The canonical Dedede unlock is 854 (WHEELDEDEDE), which is what `CharacterDesc[CKIND_DEDEDE]` resolves to.
-- **856 is positional, not fixed.** The Archipelago Star's MachineKind is assigned at boot from FST discovery order, so 856 names it only while `ap_star` ships the sole `machines/*.dat` (`mods/ap_star/assets/machines/VcStarAp.dat`). A second drop-in machine sorting ahead of it shifts the numbering, and the AP world's hardcoded 856 would then unlock the other machine.
+- **856 names the Archipelago Star by name, not by position.** `custom_machines` assigns appended MachineKinds at boot in FST discovery order, so the mod binds 856 and bit 26 through the star's descriptor name (`GateApStar_MachineKind()`), and another drop-in machine in the build moves nothing. That other machine has no ID and is always available.
 
 ## Location Data
 

@@ -1,77 +1,44 @@
-// The legendary assembly cutscene, driven by a machine's own archives, by standing
-// in at the three bl sites where the engine's cinematic decides which archive loads,
+// The legendary assembly cutscene, driven by a machine's own archive, by standing in at
+// the bl sites where the engine's cinematic decides which archive preloads, which loads,
 // which frees, and which machine the rider mounts. One run at a time, which is the
-// engine's own limit - GameData+0xa8c holds a single controller GObj.
+// engine's own limit: GameData.legendary_assembly_gobj holds a single controller.
 
 #include "os.h"
 #include "hsd.h"
 #include "obj.h"
 #include "game.h"
 #include "rider.h"
+#include "stage.h"
+#include "preload.h"
 #include "machine.h"
 #include "code_patch/code_patch.h"
 
 #include "custom_machines.h"
 
-static HSD_Archive *stc_glow_arc;
-static HSD_Archive *stc_parts_arc;
-static LegendaryAssemblyData stc_vsdata;
+// Where the registry's bits start in stc_assembled, past Dragoon's 0 and Hydra's 1.
+#define ASSEMBLED_CUSTOM_BIT 2
+
+static HSD_Archive *stc_arc;
 static CustomMachineEntry *stc_running;
 
-// Vanilla legendaries assembled through this file in the loaded scene: bit 0 =
-// Dragoon, bit 1 = Hydra.
-static u8 stc_vanilla_assembled;
+// Cutscenes that ran in the loaded scene. The engine frees an archive when its run ends
+// while the preload table still hands the freed block back, so a second run loads a
+// joint out of it.
+static u16 stc_assembled;
+_Static_assert(ASSEMBLED_CUSTOM_BIT + CUSTOM_MACHINE_MAX <= 16, "stc_assembled holds a bit per cutscene");
 
-static void FreeMachineArchives(void)
+// Replaces the bl at 0x80283914 in LegendaryMachine_CreateAssembly, which returns the
+// vsData public of VsDragoon.dat or VsHydra.dat. A machine's archive carries one of
+// the same shape.
+static LegendaryAssemblyData *LoadArchive(int machine_index)
 {
-    if (stc_glow_arc != NULL)
-    {
-        Archive_Free(0, stc_glow_arc);
-        stc_glow_arc = NULL;
-    }
-    if (stc_parts_arc != NULL)
-    {
-        Archive_Free(0, stc_parts_arc);
-        stc_parts_arc = NULL;
-    }
-}
+    LegendaryAssemblyData *vsdata;
 
-// Replaces the bl at 0x80283914 in LegendaryMachine_CreateAssembly. Vanilla returns
-// the archive's vsData: a glow-model triple, a parts-model triple and a pointer to
-// the camera animation descriptor. A machine's two archives carry one half each, so
-// the three-pointer block is assembled here.
-static void *LoadArchive(int machine_index)
-{
-    CustomMachineEntry *e = stc_running;
-    if (e == NULL)
+    if (stc_running == NULL)
         return LegendaryMachine_LoadAssemblyArchive(machine_index);
 
-    void *glow = NULL;
-    void *cam = NULL;
-    void *parts = NULL;
-    lbLoadArchive(&stc_glow_arc, e->cine_glow_file, &glow, e->cine_glow_symbol,
-                  &cam, e->cine_cam_symbol, 0);
-    lbLoadArchive(&stc_parts_arc, e->cine_parts_file, &parts, e->cine_parts_symbol, 0);
-    if (glow == NULL || cam == NULL || parts == NULL)
-    {
-        // Latched: the same descriptor fails the same way on every run.
-        static int reported;
-
-        if (!reported)
-        {
-            reported = 1;
-            OSReport("[MachineCinematic] '%s' archive load failed (glow %d cam %d parts %d)\n",
-                     e->name, glow != NULL, cam != NULL, parts != NULL);
-        }
-        FreeMachineArchives();
-        stc_running = NULL;
-        return LegendaryMachine_LoadAssemblyArchive(machine_index);
-    }
-
-    stc_vsdata.glow = (void **)glow;
-    stc_vsdata.parts = (void **)parts;
-    stc_vsdata.cam_anim = (void **)cam;
-    return &stc_vsdata;
+    lbLoadArchive(&stc_arc, stc_running->cine_file, &vsdata, stc_running->cine_symbol, 0);
+    return vsdata;
 }
 
 // Replaces the bl at 0x80283c98, in phase 3 of LegendaryMachine_AssemblyThink
@@ -86,7 +53,8 @@ static void FreeArchive(int machine_index)
     }
 
     stc_running = NULL;
-    FreeMachineArchives();
+    Archive_Free(0, stc_arc);
+    stc_arc = NULL;
 }
 
 // Replaces the bl at 0x80283b70 in LegendaryMachine_AssemblyThink (0x802839b8).
@@ -103,19 +71,49 @@ static void EnterAssembly(int ply, int machine_index)
         return;
 
     RiderData *rd = rg->userdata;
-    rd->respawn_is_bike = 0;
-    rd->respawn_class_slot = e->star_slot;
+    rd->respawn_is_bike = e->is_bike;
+    rd->respawn_class_slot = e->class_slot;
     rd->starting_machine_idx = (MachineKind)e->machine_kind;
+}
+
+// Replaces the bl LegendaryMachine_PreloadAssemblyArchives at 0x80262be8, the tail of
+// Preload_AllCityFiles (0x80262ba4). A run loads its archive synchronously mid-round, so
+// each machine's is queued with the vanilla pair, under the same arguments.
+static void PreloadArchives(GroundKind gr_kind)
+{
+    LegendaryMachine_PreloadAssemblyArchives(gr_kind);
+    if (gr_kind != GR_CITY1)
+        return;
+
+    for (int i = 0; i < CustomMachines_GetCount(); i++)
+    {
+        CustomMachineEntry *e = CustomMachines_GetEntry(i);
+        if (e->cine_machine_index >= 0)
+            Preload_CreateEntry(5, e->cine_file, 6, 6, 0, 1, 5, 0x20, 0);
+    }
+}
+
+// lbLoadArchive panics on a public it cannot find, so each cutscene archive is loaded
+// whole once here, where the boot arena takes it back.
+static int CutsceneLoads(CustomMachineEntry *e)
+{
+    if (DVDConvertPathToEntrynum(e->cine_file) == -1)
+        return 0;
+
+    void *mark = HSD_ArenaMark();
+    HSD_Archive *arc = Archive_LoadFile(e->cine_file);
+    int ok = arc != NULL && Archive_GetPublicAddress(arc, e->cine_symbol) != NULL;
+    HSD_ArenaRelease(mark);
+    return ok;
 }
 
 void CustomMachineCinematic_On3DLoadStart(void)
 {
-    // The archives came off a per-scene heap the teardown has already reclaimed,
-    // so there is nothing to free - only the handles to forget.
+    // The archive came off a per-scene heap the teardown has already reclaimed, so
+    // there is nothing to free - only the handle to forget.
     stc_running = NULL;
-    stc_glow_arc = NULL;
-    stc_parts_arc = NULL;
-    stc_vanilla_assembled = 0;
+    stc_arc = NULL;
+    stc_assembled = 0;
 }
 
 int CustomMachineCinematic_Start(int machine_kind, int ply)
@@ -126,17 +124,22 @@ int CustomMachineCinematic_Start(int machine_kind, int ply)
     MachineData *md;
     LegendaryAssemblyParams params;
     int machine_index;
+    int bit;
 
     if (e != NULL)
+    {
         machine_index = e->cine_machine_index;
-    else if (machine_kind == VCKIND_DRAGOON)
-        machine_index = 0;
-    else if (machine_kind == VCKIND_HYDRA)
-        machine_index = 1;
+        bit = ASSEMBLED_CUSTOM_BIT + CustomMachines_Index(e);
+    }
+    else if (machine_kind == VCKIND_DRAGOON || machine_kind == VCKIND_HYDRA)
+    {
+        machine_index = machine_kind == VCKIND_HYDRA;
+        bit = machine_index;
+    }
     else
         return 0;
 
-    if (machine_index < 0 || ply < 0 || ply >= CUSTOM_MACHINE_PLY_NUM)
+    if (machine_index < 0 || ply < 0 || ply >= PLY_NUM || (stc_assembled & (1 << bit)))
         return 0;
 
     // The cutscene stages its models on the open City Trial map and drives that
@@ -146,19 +149,13 @@ int CustomMachineCinematic_Start(int machine_kind, int ply)
     if (!Gm_IsInCity() || Gm_IsAutoDemo())
         return 0;
 
-    // A machine's own archives are reloaded per run; the vanilla pair's are freed
-    // when one ends and a second would load a joint out of the freed archive.
-    if (e == NULL && (stc_vanilla_assembled & (1 << machine_index)))
-        return 0;
-
     mg = Ply_GetMachineGObj(ply);
     rg = Ply_GetRiderGObj(ply);
     if (mg == NULL || rg == NULL || Gm_IsLegendaryAssembling() || stc_running != NULL)
         return 0;
 
     // Rider_EnterLegendaryAssembly (0x8019248c) is Kirby-only, and the mount rides
-    // on the state it enters, so anyone else would get the whole shot and no
-    // machine. They take the plain mount instead.
+    // on the state it enters, so anyone else would get the whole shot and no machine.
     if (((RiderData *)rg->userdata)->kind != RDKIND_KIRBY)
         return 0;
 
@@ -170,10 +167,9 @@ int CustomMachineCinematic_Start(int machine_kind, int ply)
     params.up = md->up;
 
     stc_running = e;
+    stc_assembled |= (u16)(1 << bit);
     if (e != NULL)
         Machine_ResetColAnims(md);
-    else
-        stc_vanilla_assembled |= (u8)(1 << machine_index);
 
     LegendaryMachine_StartAssembly(&params);
     OSReport("[MachineCinematic] Player %d assembling the %s\n", ply + 1,
@@ -191,15 +187,21 @@ void CustomMachineCinematic_OnBoot(void)
         if (e->cine_machine_index < 0)
             continue;
 
-        CustomMachinePreload_Add(e->cine_glow_file);
-        CustomMachinePreload_Add(e->cine_parts_file);
+        if (!CutsceneLoads(e))
+        {
+            OSReport("[MachineCinematic] '%s' has no '%s' in %s, no cutscene\n", e->name,
+                     e->cine_symbol, e->cine_file);
+            e->cine_machine_index = -1;
+            continue;
+        }
         n++;
     }
     if (n == 0)
         return;
 
-    CODEPATCH_REPLACECALL(0x80283914, LoadArchive);    // bl LegendaryMachine_LoadAssemblyArchive
-    CODEPATCH_REPLACECALL(0x80283c98, FreeArchive);    // bl LegendaryMachine_FreeAssemblyArchive
-    CODEPATCH_REPLACECALL(0x80283b70, EnterAssembly);  // bl Ply_EnterLegendaryAssembly
+    CODEPATCH_REPLACECALL(0x80283914, LoadArchive);     // bl LegendaryMachine_LoadAssemblyArchive
+    CODEPATCH_REPLACECALL(0x80283c98, FreeArchive);     // bl LegendaryMachine_FreeAssemblyArchive
+    CODEPATCH_REPLACECALL(0x80283b70, EnterAssembly);   // bl Ply_EnterLegendaryAssembly
+    CODEPATCH_REPLACECALL(0x80262be8, PreloadArchives); // bl LegendaryMachine_PreloadAssemblyArchives
     OSReport("[MachineCinematic] %d machine(s) with a cutscene, hooks installed\n", n);
 }
