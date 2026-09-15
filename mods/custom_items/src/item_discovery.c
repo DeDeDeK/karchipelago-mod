@@ -1,10 +1,3 @@
-// Two passes (count, then index) so the cap warning precedes the entries it
-// applies to. Descriptors are loaded and validated here, once, because the name
-// is the handle consumer mods bind by and an item held disabled never reaches a
-// round. During OnBoot hoshi redirects HSD_MemAlloc and Archive_LoadFile to
-// bump-arena versions, so only the name is copied out and the archive is
-// dropped by rewinding the arena.
-
 #include "os.h"
 #include "hsd.h"
 

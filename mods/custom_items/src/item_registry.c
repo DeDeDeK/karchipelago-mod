@@ -1,6 +1,3 @@
-// The splice re-runs every City Trial round because the engine's item tables and
-// the loaded descriptor archives all live in per-scene memory.
-
 #include "os.h"
 #include "game.h"
 #include "hsd.h"

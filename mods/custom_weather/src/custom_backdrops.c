@@ -1,6 +1,3 @@
-// Random City Trial skybox selection: swaps the stage's backdrop JObj for one
-// rebuilt out of another stage's archive on the retail disc.
-
 #include <string.h>
 
 #include "os.h"

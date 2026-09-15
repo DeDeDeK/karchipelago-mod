@@ -1,7 +1,3 @@
-// Applies the active preset's optional CustomPresetDef layers and ticks the effect
-// modules. Hooked immediately after Sky_Update so its writes layer on top of the
-// per-frame sky state rather than being clobbered.
-
 #include "os.h"
 #include "game.h"
 #include "hsd.h"
