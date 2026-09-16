@@ -32,6 +32,21 @@ Copy abilities can be obtained four ways, all of which need gating.
 
 `zz_80246f40_` scans `CollData.zone_hit` and `CollData.moving_zone_hit` against `(*stc_grobj)->coll.zone` (0x805dd6cc, 0x140 stride, face kinds at +0x24 + face*0x24), which `grZone_BuildRecord` (0x800dcf08) fills from `GrCollFace.kind_word`, so the path exists in City Trial and Air Ride only. Panels come from two places. City Trial has one baked into `GrCity1.dat`'s own zone array. Every Air Ride panel is instead a yakumono appended at load: `grdata->yakumono->entries[]` (YakumonoNode+0x10, count at +0x14; 0x0c stride `{kind, data_idx, common_group}`) dispatched through `grYakuFuncTable[12]` (`GrYaku_DispatchEntry12`, 0x800f9be0), each contributing a kind-15 zone plus a light zone past the terrain model's own. Only two courses ship any: **Nebula Belt** four - its sole ability source, since it spawns no enemies at all - and **Celestial Valley** the single one on top of the tree.
 
+**Which stages spawn copy panels at all.** The item spawner reads `GrData.item` (+0x2c), an array of 0x14-byte `GrItemNode` entries indexed by the stage's ItemposId (`stGetCurrentStageKind_ItemposId`, 0x802623e8, from the `Stage.dat` row at +0x24). `fn_grGetItemData` (0x800da518) returns `GrData.item[ItemposId]`, or NULL when the ground has no item node or `Gm_IsItemsDisabled()` (0x8000a2a0, `GameData.is_items_disabled`) holds; a NULL there means `CityItemSpawn_InitGrBoxGeneInfo` never allocates `grBoxGeneInfo` and nothing spawns. Only four grounds ship an item node - `GrCity1`, `GrColosseum1`, `GrColosseum3`, `GrDedede1` - so the spawner runs in exactly seven places: the open city, the five Destruction Derbies and Vs. King Dedede. Every other stadium and every Air Ride course leaves it NULL, which is why the two Kirby Melee grounds (`GrPasture1`, `GrColosseum5`) have no copy panels and Air Ride's panels are yakumono zones instead.
+
+Stadiums sharing a ground get separate nodes: `GrCity1` carries the open city at ItemposId 0, Derby 4 at 1 and Derby 5 at 2, and `GrColosseum1` carries Derby 1 at 0 and Vs. King Dedede at 1. `CityItemSpawn_Init` takes the first non-NULL of the node's `item_desc` (+0x08, the full City Trial table, only on `GrCity1` entry 0), `pool_a` (+0x0c) or `pool_b` (+0x10). A pool is `{box_spawn_chances, entries, entry_num}` with 0x10-byte `{it_kind, chance[3]}` rows; `CityItemSpawn_InitStadiumPoolsA` (0x800ed8b0) / `...PoolsB` (0x800eda0c) file each row into `item_group_spawn[ItemCommonAttr.box_kind]` using one chance column picked per round by `HSD_Randi(3)`, so a stage can offer three alternative weightings - identical columns mean the pool never varies.
+
+The seven pools differ in which copy panels they offer, and one is much narrower than the rest:
+
+| Stadium | Ground (ItemposId) | Copy panels with a nonzero chance |
+|---|---|---|
+| Destruction Derby 1 | `GrColosseum1` (0) | all 11 |
+| Destruction Derby 2 | `GrColosseum3` (0) | all 11 |
+| Destruction Derby 3 | `GrDedede1` (0) | all but Wheel; columns 1-2 only for Sleep, Wing, Tornado, Mic |
+| Destruction Derby 4 | `GrCity1` (1) | all 11; Wing in columns 1-2 only |
+| Destruction Derby 5 | `GrCity1` (2) | **Ice, Plasma, Sword, Needle only**, and all three columns are identical |
+| Vs. King Dedede | `GrColosseum1` (1) | all 11, alongside food and nothing else |
+
 **Copy panels from boxes and event drops.** Copy panels are regular items in the `grBoxGeneObj` spawn table system (at `*(0x805dd0e0 + 0x608)`), whose pools are `item_group_spawn[BOXKIND_NUM]` (per box type, each with parallel `it_kind`/`chance` arrays and a `num`), `sameitem_*` ("All Same Item" event) and `subsequent_*` (blue box multi-item). The event drop table is `grBoxGeneInfo->item_desc->event_source_drop` (+0x18, count at +0x1c), per-item entries with one chance field per drop source: dyna, tac, meteor, destructible, chamber, ufo.
 
 ## Acquisition Hooks

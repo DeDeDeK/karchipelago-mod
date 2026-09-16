@@ -110,7 +110,7 @@ static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
     *num += 1;
 }
 
-// Under the Max Stats Insanity goal, make All-Up reachable from every patch source the
+// Under the Max Stats CT goal, make All-Up reachable from every patch source the
 // vanilla tables miss: the three box pools, the Same Item and subsequent pools, and the
 // destructible + Dyna Blade columns (vanilla already covers UFO/Tac/Meteor/Chamber).
 void GateItems_EnsureAllUpInSpawnPools()

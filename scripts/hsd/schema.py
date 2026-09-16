@@ -504,9 +504,9 @@ SCHEMA = {
         0x14,
         [
             f(0x04, "grItemTimingTable", "timing"),
-            f(0x08, "grItemCityTrial", "citytrial"),
-            f(0x0C, "grItemSpawnTable", "airride"),
-            f(0x10, "grItemSpawnTable", "coliseum"),
+            f(0x08, "grItemCityTrial", "item_desc"),
+            f(0x0C, "grItemSpawnTable", "pool_a"),
+            f(0x10, "grItemSpawnTable", "pool_b"),
         ],
     ),
     "grItemTimingTable": TypeSpec(

@@ -796,9 +796,9 @@ def _d_itemnode(arc, off):
         n
         for n, s in (
             ("timing", 0x04),
-            ("citytrial", 0x08),
-            ("airride", 0x0C),
-            ("coliseum", 0x10),
+            ("item_desc", 0x08),
+            ("pool_a", 0x0C),
+            ("pool_b", 0x10),
         )
         if _has_ptr(arc, off + s)
     ]

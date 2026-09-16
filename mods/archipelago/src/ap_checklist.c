@@ -25,7 +25,6 @@ static const CustomChecklistAPI *cc_api = NULL;
 static const CustomCheck ap_checks[] = {
     { APCK_CASTLE_FLOWER,   "City Trial: Visit the flower\non top of Castle Hall on foot!", APCheckDetect_IsSet },
     { APCK_BREAK_ALL_CORAL, "City Trial: Break all\nthe coral in one game!", APCheckDetect_IsSet },
-    { APCK_OUT_OF_BOUNDS,   "City Trial: Go out of bounds!",                APCheckDetect_IsSet },
 
     { APCK_HP_PATCHES_10,   "City Trial: In one game,\nget 10 or more HP Patches!",  APCheckDetect_IsSet },
     { APCK_ALLUPS_5,        "City Trial: Collect\n5 All Ups in total!",     APCheckDetect_IsSet },
@@ -100,6 +99,9 @@ static const CustomCheck ap_checks[] = {
 
     { APCK_ASSEMBLE_AP_STAR,   "City Trial: Collect all 6 spheres\nand assemble the Archipelago Star!", APCheckDetect_IsSet },
     { APCK_ASSEMBLE_ALL_LEGENDARY, "City Trial: In one game, assemble\nDragoon, Hydra and Archipelago Star!", APCheckDetect_IsSet },
+
+    // Restates vanilla's per-stat patch cell for the one stat it never counts.
+    { APCK_OFFENSE_PATCHES_10, "City Trial: In one game,\nget 10 or more Offense Patches!", APCheckDetect_IsSet },
 };
 
 #define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))
