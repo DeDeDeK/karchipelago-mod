@@ -107,10 +107,12 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
 
 // Saves r3-r8 (the original SpawnAtPosition args) across the bl into the filter, since
 // the return value clobbers r3 and the function immediately derefs it (lwz r3, 4(r3) at
-// 0x8034bf68). Proceed path: restore args + LR + frame, then `b 0x1c` past the
-// block-path tail and the macro's cmpwi/bne, landing on the clobbered instruction with
-// r3 = mgr. Block path: restore LR + frame, set r3 = 1 so the macro branches to the alt
-// addr 0x8034c12c via the saved LR.
+// 0x8034bf68). Proceed path: restore args + LR + frame, then `b 0x18` over the four
+// block-path instructions and the macro's `bne`, landing on the clobbered
+// `stwu r1, -288(r1)` with r3 = mgr - skipping it would run the whole function on the
+// caller's frame and blr through a smashed LR. Block path: restore LR + frame, set
+// r3 = 1 so the macro branches to the alt addr 0x8034c12c, the bare blr that needs no
+// frame teardown.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     "stwu 1, -48(1)\n\t"
     "mflr 0\n\t"
@@ -133,7 +135,7 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     "lwz 0, 0x8(1)\n\t"
     "mtlr 0\n\t"
     "addi 1, 1, 48\n\t"
-    "b 0x1c\n\t"
+    "b 0x18\n\t"
     "1:\n\t"
     "lwz 0, 0x8(1)\n\t"
     "mtlr 0\n\t"
