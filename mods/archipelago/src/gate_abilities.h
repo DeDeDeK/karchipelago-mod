@@ -5,8 +5,8 @@
 
 void GateAbilities_OnBoot();
 void GateAbilities_On3DLoadEnd();
-void GateAbilities_FilterSpawnTables();
-void GateAbilities_FilterEventDropTables();
+// 1 if it_kind is a copy item whose ability is still locked.
+int GateAbilities_IsItemLocked(u8 it_kind);
 int GateAbilities_UnlockAbility(CopyKind kind);
 
 #endif

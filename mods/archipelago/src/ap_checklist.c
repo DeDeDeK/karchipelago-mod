@@ -25,7 +25,6 @@ static const CustomChecklistAPI *cc_api = NULL;
 static const CustomCheck ap_checks[] = {
     { APCK_CASTLE_FLOWER,   "City Trial: Visit the flower\non top of Castle Hall on foot!", APCheckDetect_IsSet },
     { APCK_BREAK_ALL_CORAL, "City Trial: Break all\nthe coral in one game!", APCheckDetect_IsSet },
-    { APCK_OUT_OF_BOUNDS,   "City Trial: Go out of bounds!",                APCheckDetect_IsSet },
 
     { APCK_HP_PATCHES_10,   "City Trial: In one game,\nget 10 or more HP Patches!",  APCheckDetect_IsSet },
     { APCK_ALLUPS_5,        "City Trial: Collect\n5 All Ups in total!",     APCheckDetect_IsSet },
@@ -100,6 +99,9 @@ static const CustomCheck ap_checks[] = {
 
     { APCK_ASSEMBLE_AP_STAR,   "City Trial: Collect all 6 spheres\nand assemble the Archipelago Star!", APCheckDetect_IsSet },
     { APCK_ASSEMBLE_ALL_LEGENDARY, "City Trial: In one game, assemble\nDragoon, Hydra and Archipelago Star!", APCheckDetect_IsSet },
+
+    // Restates vanilla's per-stat patch cell for the one stat it never counts.
+    { APCK_OFFENSE_PATCHES_10, "City Trial: In one game,\nget 10 or more Offense Patches!", APCheckDetect_IsSet },
 };
 
 #define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))
@@ -108,16 +110,14 @@ static const CustomCheck ap_checks[] = {
 // any progression item fill places on it.
 _Static_assert(AP_CHECK_NUM == APCK_NUM, "ap_checks[] must cover every APCheckKind");
 
-// Already recorded as sent this save? Out-of-range cells report "done".
+// Already recorded as sent this save? The framework range-checks clear_kind first.
 static int APChecklist_IsRecorded(int clear_kind)
 {
-    if (clear_kind < 0 || clear_kind >= CLEAR_KIND_NUM)
-        return 1;
     return (ap_save->sent_checks[AP_CHECKLIST_ROW][clear_kind >> 6] >> (clear_kind & 63)) & 1ULL;
 }
 
 // Record a completed AP check. The ClearChecker_SetNewUnlock REPLACEFUNC in
-// check_detection intercepts ap_checklist_mode and sets the AP row's sent_checks
+// ap_checks intercepts ap_checklist_mode and sets the AP row's sent_checks
 // bit, fires the "Check sent" textbox and re-evaluates goals. The framework seeds
 // the cell's is_new/is_visible afterward, so the animation runs on the next entry.
 static void APChecklist_RecordComplete(int clear_kind)
@@ -158,16 +158,6 @@ int APChecklist_GetBuildMode(void)
     return cc_api && cc_api->GetBuildMode ? cc_api->GetBuildMode() : -1;
 }
 
-void APChecklist_RevealAll(void)
-{
-    if (!cc_api)
-        return;
-
-    // Through the framework rather than by writing is_visible here: it latches the tab
-    // open for the session, so a reveal that lands before the grid shuffle survives it.
-    cc_api->RevealAll(ap_checklist_mode);
-}
-
 // Set only once custom_checklist has accepted the tab, so callers can tell a live tab
 // from ap_checklist_mode's GMMODE_NUM default - the framework hands out that same mode
 // when the AP tab registers first.
@@ -178,12 +168,20 @@ int APChecklist_IsRegistered(void)
     return ap_tab_registered;
 }
 
+void APChecklist_RevealAll(void)
+{
+    if (!ap_tab_registered)
+        return;
+
+    // Through the framework rather than by writing is_visible here: it latches the tab
+    // open for the session, so a reveal that lands before the grid shuffle survives it.
+    cc_api->RevealAll(ap_checklist_mode);
+}
+
 void APChecklist_Register(void)
 {
-    static int registered = 0;
-    if (registered)
+    if (cc_api)
         return;
-    registered = 1;
 
     cc_api = (const CustomChecklistAPI *)Hoshi_ImportMod(
         (char *)CUSTOM_CHECKLIST_MOD_NAME, CUSTOM_CHECKLIST_API_MAJOR, CUSTOM_CHECKLIST_API_MINOR);

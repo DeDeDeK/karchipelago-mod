@@ -8,7 +8,7 @@ Each of the 16 City Trial `EventKind`s can be individually locked behind an Arch
 
 ## Two independent AP ranges touch events
 
-Unlock IDs 700-715 control the **natural** event pool, handled here. Trigger IDs 200-215 (`AP_EVENT_BASE` + index) force-start an event immediately via `Event_GiveItem` -> `Event_Do(kind)` in `city_trial_event.c`, which sets the event state directly and never goes through the chance selection. The two are fully independent by design: the apworld can ship triggers as filler that fires a *locked* event while unlocks control the ambient pool, and `traplink.c` likewise treats a locked event as eligible trap content.
+Unlock IDs 700-715 control the **natural** event pool, handled here. Trigger IDs 200-215 (`AP_EVENT_BASE` + index) force-start an event immediately via `Event_GiveItem` -> `Event_Do(kind)` in `city_trial_event.c`, which sets the event state directly and never goes through the chance selection. It still refuses a `once_only` kind whose `occurrence_count` is nonzero, returning 0 so the item handler keeps it queued for a later round: the stage reserves a once-only event's collision for a single run, and a second Restoration Area asserts in grcoll.c. The two are fully independent by design: the apworld can ship triggers as filler that fires a *locked* event while unlocks control the ambient pool, and `traplink.c` likewise treats a locked event as eligible trap content.
 
 ## Game System
 

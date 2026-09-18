@@ -37,7 +37,6 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
     Vec3 u, v;
     ConeBasis(aim, &u, &v);
 
-    // Base-circle center = apex + aim * reach.
     Vec3 axis, center;
     VECScale(aim, &axis, HYPERNOVA_RANGE);
     VECAdd(apex, &axis, &center);
@@ -51,16 +50,14 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
         rim[i].Z = center.Z + radius * (cx * u.Z + cy * v.Z);
     }
 
-    // Flat per-vertex color, alpha blend, depth-tested but not depth-writing, both faces drawn,
-    // so the cone reads as a see-through volume.
+    // Z-write off and cull-none so the cone reads as a see-through volume.
     HSD_StateInitDirect(GX_VTXFMT0, 4);
     GXSetNumTevStages(1);
     GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
     GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
     GXSetNumTexGens(0);
     GXSetNumChans(1);
-    // Channel 0 color+alpha from the vertex (no lighting), so per-vertex alpha reaches the
-    // blender - the cone's translucency depends on it.
+    // Channel 0 takes alpha from the vertex, or the translucency never reaches the blender.
     GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
     GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
     GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
@@ -100,7 +97,7 @@ static void Hypernova_DebugConeGX(GOBJ *g, int pass)
 {
     if (pass != 1)
         return;
-    if (!hypernova_enabled || !hypernova_debug_cone)
+    if (!hypernova_debug_cone)
         return;
 
     GXColor col = GXColor_Unpack(HYPERNOVA_DEBUG_CONE_RGBA);
@@ -117,7 +114,7 @@ static void Hypernova_DebugConeGX(GOBJ *g, int pass)
         Vec3 fwd = rd->forward;
         Vec3 aim;
         if (VEC_NormalizeAndSnap(&fwd, &aim) < 0.01f)
-            continue; // no usable facing this frame, matching the vacuum's guard
+            continue; // a forward shorter than 0.01 is not a usable facing
         DrawConeGX(&rd->pos, &aim, &col);
     }
 }
@@ -132,17 +129,15 @@ void Hypernova_DebugConeEnsure(void)
     GOBJ *g = GObj_Create(HYPERNOVA_DEBUG_GOBJ_CLASS, HYPERNOVA_DEBUG_GOBJ_PLINK, 0);
     if (g == NULL)
         return;
-    GObj_AddGXLink(g, Hypernova_DebugConeGX, HYPERNOVA_DEBUG_GX_LINK, HYPERNOVA_DEBUG_GX_PRI);
-    stc_cone_gobj = g;
-
     for (int i = 0; i < HYPERNOVA_DEBUG_CONE_SEGS; i++)
     {
-        float a = (6.28318531f * i) / HYPERNOVA_DEBUG_CONE_SEGS; // i * (2*pi / segs)
+        float a = (6.28318531f * i) / HYPERNOVA_DEBUG_CONE_SEGS;
         stc_cone_unit[i].X = cosf(a);
         stc_cone_unit[i].Y = sinf(a);
     }
 
-    OSReport("[HypernovaDebug] Inhale-cone overlay installed\n");
+    GObj_AddGXLink(g, Hypernova_DebugConeGX, HYPERNOVA_DEBUG_GX_LINK, HYPERNOVA_DEBUG_GX_PRI);
+    stc_cone_gobj = g;
 }
 
 void Hypernova_DebugConeReset(void)

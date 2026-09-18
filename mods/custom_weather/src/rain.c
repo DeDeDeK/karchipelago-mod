@@ -23,52 +23,42 @@
 #define RAIN_DEF_LINE_WIDTH  10                        // 1/6-pixel units (~1.7px)
 #define RAIN_DEF_STREAK      1.5f
 
-// Overlay GObj: an entity class / p_link high enough to avoid the engine's own, on
-// the world camera's gx_link 0, XLU sub-pass.
+// Entity class / p_link high enough to avoid the engine's own.
 #define RAIN_GOBJ_CLASS  201
 #define RAIN_GOBJ_PLINK  25
-#define RAIN_GX_LINK     0
-#define RAIN_GX_PRI      0
 
 // Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_rain_gobj = NULL;
 
 static int     stc_active = 0;
 
-// Resolved appearance/motion for the active preset (RainDef + defaults applied).
-// vel_y is negative (falling), vel_x/z are wind, streak scales the velocity into
-// the drawn segment length.
+// vel_y is negative (falling); vel_x/z are wind.
 static GXColor stc_color = {165, 180, 215, 120};
 static int     stc_density = RAIN_DEF_DENSITY;
 static float   stc_vel_x = 0.0f, stc_vel_y = -RAIN_DEF_FALL_SPEED, stc_vel_z = 0.0f;
 static int     stc_line_width = RAIN_DEF_LINE_WIDTH;
 static float   stc_streak = RAIN_DEF_STREAK;
 
-// Menu knobs layered over the active preset. Intensity scales the preset's drop
-// count; Off disables rain for every preset.
+// Index 0 ("Preset") is the pass-through value on every knob below.
 static const float rain_intensity_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *rain_intensity_names[] = {"Preset", "Off", "Light", "Normal", "Heavy", "Downpour"};
 #define RAIN_INTENSITY_NUM (sizeof(rain_intensity_factors) / sizeof(rain_intensity_factors[0]))
 static int rain_intensity_index = 0;
 
-// Scales the per-preset fall velocity only (the wind slant is unaffected); streak
-// length tracks velocity, so faster rain also streaks longer.
+// Scales the fall velocity only; streak length tracks velocity, so faster rain
+// also streaks longer.
 static const float rain_fall_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
 static char *rain_fall_names[] = {"Preset", "Slow", "Normal", "Fast"};
 #define RAIN_FALL_NUM (sizeof(rain_fall_factors) / sizeof(rain_fall_factors[0]))
 static int rain_fall_index = 0;
 
-// Preset follows the global wind vector.
-static char *rain_toggle_names[] = {"Preset", "Off", "On"};
-static int rain_wind_slant = 0;
+static int rain_wind_slant = 1;
 
 static float RainIntensity(void)
 {
     return rain_intensity_factors[rain_intensity_index];
 }
 
-// Whether rain is falling for the active preset (preset rain enabled and the
-// master Rain Intensity not Off). Hail only falls while this is true.
 int Rain_IsActive(void)
 {
     return stc_active;
@@ -95,20 +85,8 @@ static void SeedOffsets(void)
     stc_seeded = 1;
 }
 
-// Advance one drift axis by v, wrapping into [0, RAIN_BOX). |v| < RAIN_BOX, so a
-// single add/subtract suffices.
-static float WrapStep(float d, float v)
-{
-    d += v;
-    if (d >= RAIN_BOX)
-        d -= RAIN_BOX;
-    else if (d < 0.0f)
-        d += RAIN_BOX;
-    return d;
-}
-
 // Clamp a per-frame velocity so |v| < RAIN_BOX, the bound the single-subtract wrap
-// in WrapStep / Rain_GX relies on.
+// in Weather_WrapStep / Rain_GX relies on.
 static float ClampSpeed(float v)
 {
     float lim = RAIN_BOX - 1.0f;
@@ -119,25 +97,13 @@ static float ClampSpeed(float v)
     return v;
 }
 
-// Camera world position from its view matrix. The view matrix is the rigid
-// world->view transform [R | t], so the eye is -R^T * t.
-static void CameraEye(COBJ *c, Vec3 *out)
-{
-    float (*m)[4] = c->view_mtx;
-    float tx = m[0][3], ty = m[1][3], tz = m[2][3];
-    out->X = -(m[0][0] * tx + m[1][0] * ty + m[2][0] * tz);
-    out->Y = -(m[0][1] * tx + m[1][1] * ty + m[2][1] * tz);
-    out->Z = -(m[0][2] * tx + m[1][2] * ty + m[2][2] * tz);
-}
-
-// GX callback on the world camera link. Draws the rain field on the XLU pass
-// (pass 1) so it blends over opaque world geometry; a no-op otherwise.
+// GX callback on the world camera link, XLU pass.
 static void Rain_GX(GOBJ *g, int pass)
 {
     (void)g;
     if (pass != 1)
         return;
-    if (!stc_active)
+    if (!stc_active || stc_density <= 0)
         return;
 
     COBJ *cam = COBJ_GetCurrent();
@@ -145,7 +111,7 @@ static void Rain_GX(GOBJ *g, int pass)
         return;
 
     Vec3 eye;
-    CameraEye(cam, &eye);
+    WeatherGX_CameraEye(cam, &eye);
 
     float sx = stc_vel_x * stc_streak;
     float sy = stc_vel_y * stc_streak;
@@ -156,9 +122,8 @@ static void Rain_GX(GOBJ *g, int pass)
     GXBegin(GX_LINES, GX_VTXFMT0, stc_density * 2);
     for (int i = 0; i < stc_density; i++)
     {
-        // World pos = eye + center(offset + drift): offset and drift are each in
-        // [0, RAIN_BOX), so one subtract folds their sum back into that range,
-        // then -HALF centers the box on the eye.
+        // Offset and drift are each in [0, RAIN_BOX), so one subtract folds their
+        // sum back into that range; -HALF then centers the box on the eye.
         float tx = stc_offset[i].X + stc_drift.X;
         if (tx >= RAIN_BOX)
             tx -= RAIN_BOX;
@@ -185,12 +150,9 @@ static void Rain_Ensure(void)
 {
     if (stc_rain_gobj)
         return;
-    stc_rain_gobj = WeatherGX_EnsureLayer(RAIN_GOBJ_CLASS, RAIN_GOBJ_PLINK, Rain_GX,
-                                          RAIN_GX_LINK, RAIN_GX_PRI,
-                                          "[Rain] World-space rain layer");
+    stc_rain_gobj = WeatherGX_EnsureLayer(RAIN_GOBJ_CLASS, RAIN_GOBJ_PLINK, Rain_GX, "Rain");
 }
 
-// Latch the active preset's rain config, resolving each 0 field to its module default.
 void Rain_SetActive(const RainDef *rain)
 {
     float intensity = RainIntensity();
@@ -212,7 +174,7 @@ void Rain_SetActive(const RainDef *rain)
 
     float fall = (rain->fall_speed > 0.0f ? rain->fall_speed : RAIN_DEF_FALL_SPEED)
                  * rain_fall_factors[rain_fall_index];
-    stc_vel_y = -ClampSpeed(fall);            // negative = downward
+    stc_vel_y = -ClampSpeed(fall);
     // The horizontal slant is refreshed every frame in Rain_Tick, not latched here.
 
     stc_line_width = rain->line_width ? rain->line_width : RAIN_DEF_LINE_WIDTH;
@@ -226,9 +188,9 @@ void Rain_Tick(void)
     SeedOffsets();
     Rain_Ensure();
 
-    // The slant reads the global wind fresh each frame so gusts visibly bend the
-    // rain; ClampSpeed keeps the drift within the single-subtract wrap bound.
-    if (WeatherToggle(rain_wind_slant, 1))
+    // Read the wind fresh each frame so gusts visibly bend the rain; ClampSpeed
+    // keeps the drift within the single-subtract wrap bound.
+    if (rain_wind_slant)
     {
         Vec3 wind;
         Wind_GetVector(&wind);
@@ -243,17 +205,21 @@ void Rain_Tick(void)
 
     // All drops share the drift, so they fall coherently; the per-drop wrap in
     // Rain_GX recycles any drop that leaves the box.
-    stc_drift.X = WrapStep(stc_drift.X, stc_vel_x);
-    stc_drift.Y = WrapStep(stc_drift.Y, stc_vel_y);
-    stc_drift.Z = WrapStep(stc_drift.Z, stc_vel_z);
+    stc_drift.X = Weather_WrapStep(stc_drift.X, stc_vel_x, RAIN_BOX);
+    stc_drift.Y = Weather_WrapStep(stc_drift.Y, stc_vel_y, RAIN_BOX);
+    stc_drift.Z = Weather_WrapStep(stc_drift.Z, stc_vel_z, RAIN_BOX);
 }
 
 void Rain_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop the cached handle
-    // so the next active frame recreates it.
     stc_rain_gobj = NULL;
     stc_active = 0;
+    stc_drift.X = stc_drift.Y = stc_drift.Z = 0.0f;
+}
+
+static void OnRainIntensityChange(int val)
+{
+    OSReport("[Rain] Intensity %s\n", rain_intensity_names[val]);
 }
 
 // Surfaced in this submenu because hail only falls on an active rain layer.
@@ -264,11 +230,12 @@ MenuDesc rain_menu = {
     .options = {
         &(OptionDesc){
             .name = "Rain Intensity",
-            .description = "Master rain amount over every CT preset, scaling its drop count (Off disables rain entirely)",
+            .description = "Master rain amount over every CT preset, scaling its drop count (Off disables rain, and hail with it)",
             .kind = OPTKIND_VALUE,
             .val = &rain_intensity_index,
             .value_num = RAIN_INTENSITY_NUM,
             .value_names = rain_intensity_names,
+            .on_change = OnRainIntensityChange,
         },
         &(OptionDesc){
             .name = "Fall Speed",
@@ -280,11 +247,11 @@ MenuDesc rain_menu = {
         },
         &(OptionDesc){
             .name = "Wind Slant",
-            .description = "Let the global wind bend the rain (Preset = follow wind, Off = rain falls straight down)",
+            .description = "Let the global wind bend the rain (Off = rain falls straight down)",
             .kind = OPTKIND_VALUE,
             .val = &rain_wind_slant,
-            .value_num = 3,
-            .value_names = rain_toggle_names,
+            .value_num = 2,
+            .value_names = weather_onoff_names,
         },
         &hail_option,
     },

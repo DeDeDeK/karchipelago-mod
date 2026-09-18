@@ -7,15 +7,14 @@
 #include "textbox_colors.h"
 
 // 0x80009084 is the instruction right after the `bl TopRide_CustomRenderer` inside
-// TopRide_PostRenderCallback, whose second render pass overdraws the EFB and wipes the textbox.
-static void Hook_TopRidePostRender(void)
+// TopRide_PostRenderCallback (0x80009074), whose second render pass wipes the textbox.
+static void TextBox_OnTopRidePostRender(void)
 {
     TextBox_TopRideReRender();
 }
-CODEPATCH_HOOKCREATE(0x80009084, "", Hook_TopRidePostRender, "", 0)
+CODEPATCH_HOOKCREATE(0x80009084, "", TextBox_OnTopRidePostRender, "", 0)
 
-// The palette fields are filled in at OnBoot: extern const GXColors aren't constant
-// expressions in C, so they can't initialize the struct statically.
+// Filled at OnBoot: an extern const GXColor is not a constant expression.
 static TextBoxAPI api = {
     .Enqueue               = TextBox_Enqueue,
     .EnqueueSegments       = TextBox_EnqueueSegments,
@@ -33,14 +32,6 @@ static void OnBoot(void)
     api.StageColor       = TextBox_StageColor;
     api.TopRideItemColor = TextBox_TopRideItemColor;
     api.ItemColor        = TextBox_ItemColor;
-    api.TrapColor        = TextBox_TrapColor;
-    api.DeathColor       = TextBox_DeathColor;
-    api.EnergyColor      = TextBox_EnergyColor;
-    api.CheckColor       = TextBox_CheckColor;
-    api.GoalColor        = TextBox_GoalColor;
-    api.RewardColor      = TextBox_RewardColor;
-    api.ShopColor        = TextBox_ShopColor;
-    api.FillerColor      = TextBox_FillerColor;
     api.AbilityColors    = TextBox_AbilityColors;
     api.KirbyColors      = TextBox_KirbyColors;
     api.ModeColors       = TextBox_ModeColors;
@@ -55,54 +46,45 @@ static void OnBoot(void)
              TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR);
 }
 
-static const char *stc_off_on[] = {"Off", "On"};
-
-static void OnToggleEnabled(int val)
+static void OnChangeEnabled(int val)
 {
-    OSReport("[TextBox] Enabled toggled %s\n", stc_off_on[val]);
+    // Turning it off retires what is already on screen, or the stack keeps fading for another
+    // minute after the player asked for it to stop.
+    if (!val)
+        TextBoxQueue_Flush();
+    OSReport("[TextBox] Text box %s\n", val ? "enabled" : "disabled");
 }
 
-static void OnToggleTypewriter(int val)
+static void OnChangeTypewriter(int val)
 {
-    OSReport("[TextBox] Typewriter toggled %s\n", stc_off_on[val]);
+    static const char *names[] = {"off", "slow", "medium", "fast"};
+    OSReport("[TextBox] Typewriter %s\n", names[val]);
 }
 
 // RepositionAll reads the settings live, so this reflows what is already on screen instead of
 // waiting for the next message.
 static void OnChangeSpacing(int val)
 {
-    (void)val;
+    static const char *names[] = {"tight", "normal", "wide"};
     TextBoxQueue_RepositionAll();
+    OSReport("[TextBox] Spacing %s\n", names[val]);
 }
 
 static void OnChangeCorner(int val)
 {
-    (void)val;
+    static const char *names[] = {"top-left", "top-right", "bottom-left", "bottom-right"};
     TextBoxQueue_RepositionAll();
+    OSReport("[TextBox] Position %s\n", names[val]);
 }
 
-static MenuDesc typewriter_menu = {
-    .option_num = 2,
-    .options = {
-        &(OptionDesc){
-            .name = "Enabled",
-            .description = "Reveal textbox messages gradually instead of all at once",
-            .kind = OPTKIND_VALUE,
-            .val = &textbox_settings.typewriter_enabled,
-            .value_num = 2,
-            .value_names = (char *[]){"Off", "On"},
-            .on_change = OnToggleTypewriter,
-        },
-        &(OptionDesc){
-            .name = "Speed",
-            .description = "How fast the typewriter reveals each glyph",
-            .kind = OPTKIND_VALUE,
-            .val = &textbox_settings.typewriter_speed,
-            .value_num = 3,
-            .value_names = (char *[]){"Slow", "Med", "Fast"},
-        },
-    },
-};
+// The cap is otherwise only read at enqueue, so lowering it would strand a stack that is already
+// over the new limit until the next message arrived and dropped several at once.
+static void OnChangeMaxVisible(int val)
+{
+    static const char *names[] = {"3", "4", "6", "8"};
+    TextBoxQueue_TrimToCap();
+    OSReport("[TextBox] Max on screen %s\n", names[val]);
+}
 
 static MenuDesc top_menu = {
     .option_num = 9,
@@ -114,7 +96,7 @@ static MenuDesc top_menu = {
             .val = &textbox_settings.enabled,
             .value_num = 2,
             .value_names = (char *[]){"Off", "On"},
-            .on_change = OnToggleEnabled,
+            .on_change = OnChangeEnabled,
         },
         &(OptionDesc){
             .name = "Position",
@@ -127,7 +109,7 @@ static MenuDesc top_menu = {
         },
         &(OptionDesc){
             .name = "Font Size",
-            .description = "Size of the textbox font",
+            .description = "Font size for new messages; those already on screen keep theirs",
             .kind = OPTKIND_VALUE,
             .val = &textbox_settings.font_size,
             .value_num = 3,
@@ -165,10 +147,11 @@ static MenuDesc top_menu = {
             .val = &textbox_settings.max_visible,
             .value_num = 4,
             .value_names = (char *[]){"3", "4", "6", "8"},
+            .on_change = OnChangeMaxVisible,
         },
         &(OptionDesc){
             .name = "Display Time",
-            .description = "How long a message stays at full opacity before fading out",
+            .description = "How long the oldest message holds before it fades and the stack advances",
             .kind = OPTKIND_VALUE,
             .val = &textbox_settings.display_time,
             .value_num = 3,
@@ -176,9 +159,12 @@ static MenuDesc top_menu = {
         },
         &(OptionDesc){
             .name = "Typewriter",
-            .description = "Per-glyph reveal animation",
-            .kind = OPTKIND_MENU,
-            .menu_ptr = &typewriter_menu,
+            .description = "Speed of the per-glyph reveal, or Off to show a message at once",
+            .kind = OPTKIND_VALUE,
+            .val = &textbox_settings.typewriter,
+            .value_num = 4,
+            .value_names = (char *[]){"Off", "Slow", "Med", "Fast"},
+            .on_change = OnChangeTypewriter,
         },
     },
 };
@@ -193,9 +179,9 @@ static OptionDesc ModSettings = {
 ModDesc mod_desc = {
     .name = "textbox",
     .author = "DeDeDK",
-    .version.major = 1,
-    .version.minor = 0,
+    .version.major = TEXTBOX_API_MAJOR,
+    .version.minor = TEXTBOX_API_MINOR,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
-    .OnSceneChange = CreateTextBox_OnSceneChange,
+    .OnSceneChange = TextBox_OnSceneChange,
 };

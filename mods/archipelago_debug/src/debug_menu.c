@@ -10,21 +10,11 @@
 #include "inline.h"
 
 #include "archipelago_api.h"
-#include "custom_machines_api.h"
 #include "debug_menu.h"
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
 
-static const CustomMachinesAPI *cm_api = 0;
-
-// Unlock-mask width for machines. Custom kinds occupy VCKIND_NUM and up, so the
-// vanilla ceiling only holds until the registry reports in.
-static int MachineNum(void)
-{
-    return cm_api ? cm_api->GetKindCeiling() : VCKIND_NUM;
-}
-
-static int machine_state[VCKIND_NUM + CUSTOM_MACHINE_MAX];
+static int machine_state[AP_MACHINE_BIT_NUM];
 static int ability_state[COPYKIND_NUM];
 static int event_state[EVKIND_NUM];
 static int patch_state[PATCHKIND_NUM];
@@ -38,12 +28,14 @@ static int stadium_state[STKIND_NUM];
 static int base_ability_state[BASEABILITY_NUM];
 static int star_piece_state[AP_STAR_PIECE_NUM];
 
-// Seed sizes the AP Patch count row offers. A build with no AP Patch seed reports
-// 0, and picking any nonzero row is what lets the drop-ins register at the next
-// round load.
+// Seed sizes the AP Patch count row offers.
 static char *ap_patch_count_values[] = {"Off", "8", "64", "512"};
 static const int ap_patch_count_map[] = {0, 8, 64, AP_PATCH_MAX};
 static int ap_patch_count_state;
+// The row this option last mirrored. DebugSetApPatchCount rewrites the seed's own
+// count and trims every collected bit past it, so the boot-time on_change sweep
+// must not replay a bucketed value back over a seed that sits between rows.
+static int ap_patch_count_synced = -1;
 
 // Nearest row at or below the live count, so a seed's own value shows as the
 // closest offered size rather than snapping the option back to Off.
@@ -54,27 +46,35 @@ static void RefreshApPatchCount(void)
     for (int i = 1; i < (int)(sizeof(ap_patch_count_map) / sizeof(ap_patch_count_map[0])); i++)
         if (n >= ap_patch_count_map[i])
             ap_patch_count_state = i;
+    ap_patch_count_synced = ap_patch_count_state;
 }
 
-// MaskBits' buffer holds 32 bits, and the machine ceiling can exceed that.
-static inline int MaskWidth(int count)
-{
-    return count > 32 ? 32 : count;
-}
+// A toggle rebuilds its whole category mask from the local array, so a bit the mask
+// gained elsewhere - an AP delivery, a Give action, a granted reward - would be wiped
+// by the next unrelated toggle. Only bits that differ from the last synced value are
+// the menu's; the rest keep whatever the mask holds now.
+static u32 synced_mask[AP_UNLOCK_NUM];
 
 #define DEF_SYNC(name, cat, arr, count) \
     static void name(int v) { \
         (void)v; \
         if (!ap_api) return; \
-        u32 m = 0; \
-        for (int i = 0; i < (count); i++) \
-            if (arr[i]) m |= ((u32)1 << i); \
-        if (ap_api->GetUnlockMask(cat) != m) \
-            OSReport("[ApDebug] " #cat " = %s\n", MaskBits(m, MaskWidth(count))); \
+        int n = (count); \
+        u32 built = 0; \
+        for (int i = 0; i < n; i++) \
+            if (arr[i]) built |= ((u32)1 << i); \
+        u32 owned = built ^ synced_mask[cat]; \
+        u32 live = ap_api->GetUnlockMask(cat); \
+        u32 m = (live & ~owned) | (built & owned); \
+        for (int i = 0; i < n; i++) \
+            arr[i] = (m & ((u32)1 << i)) ? 1 : 0; \
+        synced_mask[cat] = m; \
+        if (m == live) return; \
         ap_api->SetUnlockMask(cat, m); \
+        OSReport("[ApDebug] " #cat " = %s\n", MaskBits(m, n)); \
     }
 
-DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  MachineNum())
+DEF_SYNC(SyncMachines,  AP_UNLOCK_MACHINE,         machine_state,  AP_MACHINE_BIT_NUM)
 DEF_SYNC(SyncAbilities, AP_UNLOCK_ABILITY,         ability_state,  COPYKIND_NUM)
 DEF_SYNC(SyncEvents,    AP_UNLOCK_EVENT,           event_state,    EVKIND_NUM)
 DEF_SYNC(SyncPatches,   AP_UNLOCK_PATCH,           patch_state,    PATCHKIND_NUM)
@@ -91,11 +91,13 @@ DEF_SYNC(SyncStarPiece, AP_UNLOCK_AP_STAR_PIECE,   star_piece_state,   AP_STAR_P
 #define DEF_REFRESH(name, cat, arr, count) \
     static void name(void) { \
         u32 m = ap_api ? ap_api->GetUnlockMask(cat) : 0; \
-        for (int i = 0; i < (count); i++) \
+        int n = (count); \
+        for (int i = 0; i < n; i++) \
             arr[i] = (m & ((u32)1 << i)) ? 1 : 0; \
+        synced_mask[cat] = m; \
     }
 
-DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  MachineNum())
+DEF_REFRESH(RefreshMachines,  AP_UNLOCK_MACHINE,        machine_state,  AP_MACHINE_BIT_NUM)
 DEF_REFRESH(RefreshAbilities, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM)
 DEF_REFRESH(RefreshEvents,    AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM)
 DEF_REFRESH(RefreshPatches,   AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM)
@@ -109,7 +111,7 @@ DEF_REFRESH(RefreshStadiums,  AP_UNLOCK_STADIUM,        stadium_state,  STKIND_N
 DEF_REFRESH(RefreshBaseAbil,  AP_UNLOCK_BASE_ABILITY,   base_ability_state, BASEABILITY_NUM)
 DEF_REFRESH(RefreshStarPiece, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   AP_STAR_PIECE_NUM)
 
-void DebugMenu_RefreshStateFromMasks(void)
+static void RefreshStateFromMasks(void)
 {
     RefreshMachines();
     RefreshAbilities();
@@ -131,26 +133,28 @@ void DebugMenu_RefreshStateFromMasks(void)
     static int prefix##UnlockAll(OptionDesc *self) { \
         (void)self; \
         if (!ap_api) return 1; \
-        u32 m = (count >= 32) ? 0xFFFFFFFFu : ((1u << (count)) - 1u); \
+        int n = (count); \
+        u32 m = (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); \
         ap_api->SetUnlockMask(cat, m); \
-        for (int i = 0; i < (count); i++) arr[i] = 1; \
-        OSReport("[ApDebug] Unlock all " label ": " #cat " = %s\n", \
-                 MaskBits(m, MaskWidth(count))); \
+        for (int i = 0; i < n; i++) arr[i] = 1; \
+        synced_mask[cat] = m; \
+        OSReport("[ApDebug] Unlocked all " label ": " #cat " = %s\n", MaskBits(m, n)); \
         ap_api->Textbox("All " label " unlocked"); \
         return 1; \
     } \
     static int prefix##LockAll(OptionDesc *self) { \
         (void)self; \
         if (!ap_api) return 1; \
+        int n = (count); \
         ap_api->SetUnlockMask(cat, 0); \
-        for (int i = 0; i < (count); i++) arr[i] = 0; \
-        OSReport("[ApDebug] Lock all " label ": " #cat " = %s\n", \
-                 MaskBits(0, MaskWidth(count))); \
+        for (int i = 0; i < n; i++) arr[i] = 0; \
+        synced_mask[cat] = 0; \
+        OSReport("[ApDebug] Locked all " label ": " #cat " = %s\n", MaskBits(0, n)); \
         ap_api->Textbox("All " label " locked"); \
         return 1; \
     }
 
-DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  MachineNum(),     "machines")
+DEF_ALL(Mch, AP_UNLOCK_MACHINE,        machine_state,  AP_MACHINE_BIT_NUM, "machines")
 DEF_ALL(Abl, AP_UNLOCK_ABILITY,        ability_state,  COPYKIND_NUM,     "abilities")
 DEF_ALL(Evt, AP_UNLOCK_EVENT,          event_state,    EVKIND_NUM,       "events")
 DEF_ALL(Pch, AP_UNLOCK_PATCH,          patch_state,    PATCHKIND_NUM,    "patch types")
@@ -169,9 +173,9 @@ DEF_ALL(Sph, AP_UNLOCK_AP_STAR_PIECE,  star_piece_state,   AP_STAR_PIECE_NUM, "A
         (void)self; \
         if (!ap_api) return 1; \
         if (!ap_api->QueueItem(id)) \
-            OSReport("[ApDebug] Give item " #id " (%d) failed: queue full\n", id); \
+            OSReport("[ApDebug] Queue full, dropped " #id " (%d)\n", id); \
         else \
-            OSReport("[ApDebug] Give item " #id " (%d)\n", id); \
+            OSReport("[ApDebug] Queued " #id " (%d)\n", id); \
         return 1; \
     }
 
@@ -278,6 +282,7 @@ GIVE_FN(GiveHydra,          AP_ITEM_GIVE_HYDRA)
 GIVE_FN(GiveApStar,         AP_ITEM_GIVE_AP_STAR)
 GIVE_FN(GiveDropPatchesTrap,AP_ITEM_DROP_PATCHES_TRAP)
 
+GIVE_FN(GiveApAllUp,     AP_ITEM_ALL_UP)
 GIVE_FN(GivePatchCap,    AP_ITEM_PATCH_CAP_INCREASE)
 GIVE_FN(GiveSpawnRateUp, AP_ITEM_SPAWN_RATE_UP)
 GIVE_FN(GiveFillerAR,    AP_ITEM_CHECKBOX_FILLER_AIRRIDE)
@@ -285,11 +290,9 @@ GIVE_FN(GiveFillerTR,    AP_ITEM_CHECKBOX_FILLER_TOPRIDE)
 GIVE_FN(GiveFillerCT,    AP_ITEM_CHECKBOX_FILLER_CITYTRIAL)
 GIVE_FN(GiveFillerAP,    AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO)
 
-// Scales every human Kirby model, in all modes.
 GIVE_FN(GiveBigKirby,    AP_ITEM_BIG_KIRBY)
 GIVE_FN(GiveSmallKirby,  AP_ITEM_SMALL_KIRBY)
 
-// Applied directly to each human Kirby.
 GIVE_FN(GiveTRHammer,          AP_TOPRIDE_ITEM_GIVE_HAMMER)
 GIVE_FN(GiveTRBigCake,         AP_TOPRIDE_ITEM_GIVE_BIG_CAKE)
 GIVE_FN(GiveTRSpeedUp,         AP_TOPRIDE_ITEM_GIVE_SPEED_UP)
@@ -313,6 +316,186 @@ GIVE_FN(GiveTRSmokescreen,     AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN)
 GIVE_FN(GiveTRChickie,         AP_TOPRIDE_ITEM_GIVE_CHICKIE)
 GIVE_FN(GiveTRPartyBall,       AP_TOPRIDE_ITEM_GIVE_PARTY_BALL)
 
+// Every AP unlock item id, as contiguous { base, count } runs tagged with the
+// category they gate. Machines take four runs: the AP world ships no item for
+// VCKIND_WINGKIRBY, WHEELNORMAL and WHEELKIRBY (copy-ability and enemy forms) or for
+// WHEELVSDEDEDE (the Vs. King Dedede stadium's CPU-only machine), and their unlock
+// bits never clear. Every other category is one run.
+static const struct
+{
+    u8 cat;
+    u16 base;
+    u8 count;
+} unlock_runs[] = {
+    { AP_UNLOCK_STADIUM,       AP_STADIUM_UNLOCK_BASE,           STKIND_NUM                                  },
+    { AP_UNLOCK_EVENT,         AP_EVENT_UNLOCK_BASE,             EVKIND_NUM                                  },
+    { AP_UNLOCK_ABILITY,       AP_ABILITY_UNLOCK_BASE,           COPYKIND_NUM                                },
+    { AP_UNLOCK_BASE_ABILITY,  AP_BASE_ABILITY_UNLOCK_BASE,      BASEABILITY_NUM                             },
+    { AP_UNLOCK_PATCH,         AP_PATCH_UNLOCK_BASE,             PATCHKIND_NUM                               },
+    { AP_UNLOCK_ITEM,          AP_ITEM_UNLOCK_BASE,              ITUNLOCK_NUM                                },
+    { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_WARP,           VCKIND_STEER - VCKIND_WARP + 1              },
+    { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_WINGMETAKNIGHT, 1                                           },
+    { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_WHEELIEBIKE,    VCKIND_WHEELDEDEDE - VCKIND_WHEELIEBIKE + 1 },
+    { AP_UNLOCK_MACHINE,       AP_MACHINE_UNLOCK_AP_STAR,        1                                           },
+    { AP_UNLOCK_BOX,          AP_BOX_UNLOCK_BASE,               BOXKIND_NUM                                 },
+    { AP_UNLOCK_AIRRIDE_STAGE, AP_STAGE_UNLOCK_AIRRIDE_BASE,     AIRRIDE_NUM                                 },
+    { AP_UNLOCK_COLOR,         AP_COLOR_UNLOCK_BASE,             KIRBYCOLOR_NUM                              },
+    { AP_UNLOCK_TOPRIDE_STAGE, AP_STAGE_UNLOCK_TOPRIDE_BASE,     TOPRIDE_NUM                                 },
+    { AP_UNLOCK_TOPRIDE_ITEM,  AP_TOPRIDE_ITEM_UNLOCK_BASE,      TRITEM_NUM                                  },
+    { AP_UNLOCK_AP_STAR_PIECE, AP_STAR_PIECE_UNLOCK_BASE,        AP_STAR_PIECE_NUM                           },
+};
+
+// Progression, not unlocks: applied globally or at the next round start rather than
+// spawning a pickup, so they belong to no category and only the all-pools draw
+// reaches them.
+static const struct
+{
+    u16 base;
+    u8 count;
+} progression_pools[] = {
+    { AP_PERM_PATCH_BASE,         PATCHKIND_NUM },
+    { AP_ITEM_PERM_PATCH_ALL_UP,  1             },
+    { AP_ITEM_PATCH_CAP_INCREASE, 1             },
+    { AP_ITEM_SPAWN_RATE_UP,      1             },
+};
+
+// Uniform pick over one category's ids, or over every category plus the progression
+// items when cat is -1. Returns -1 when the filter matched nothing.
+static int PickUnlockId(int cat)
+{
+    int run_num = GetElementsIn(unlock_runs);
+    int prog_num = GetElementsIn(progression_pools);
+
+    int total = 0;
+    for (int i = 0; i < run_num; i++)
+        if (cat < 0 || unlock_runs[i].cat == cat)
+            total += unlock_runs[i].count;
+    if (cat < 0)
+        for (int i = 0; i < prog_num; i++)
+            total += progression_pools[i].count;
+    if (total <= 0)
+        return -1;
+
+    int pick = HSD_Randi(total);
+    for (int i = 0; i < run_num; i++)
+    {
+        if (cat >= 0 && unlock_runs[i].cat != cat)
+            continue;
+        if (pick < unlock_runs[i].count)
+            return unlock_runs[i].base + pick;
+        pick -= unlock_runs[i].count;
+    }
+    if (cat < 0)
+        for (int i = 0; i < prog_num; i++)
+        {
+            if (pick < progression_pools[i].count)
+                return progression_pools[i].base + pick;
+            pick -= progression_pools[i].count;
+        }
+    return -1;
+}
+
+static void QueueDrawn(int id, const char *what)
+{
+    if (id < 0)
+    {
+        OSReport("[ApDebug] No %s id to give\n", what);
+        return;
+    }
+    if (ap_api->QueueItem(id))
+        OSReport("[ApDebug] Queued %s id=%d\n", what, id);
+    else
+        OSReport("[ApDebug] Queue full, dropped %s id=%d\n", what, id);
+}
+
+void DebugMenu_GiveRandomUnlock(void)
+{
+    if (!ap_api)
+        return;
+    QueueDrawn(PickUnlockId(-1), "unlock/progression");
+}
+
+#define DEF_GIVE_RANDOM(prefix, cat, label) \
+    static int prefix##GiveRandom(OptionDesc *self) { \
+        (void)self; \
+        if (!ap_api) return 1; \
+        QueueDrawn(PickUnlockId(cat), label); \
+        return 1; \
+    }
+
+DEF_GIVE_RANDOM(Mch, AP_UNLOCK_MACHINE,       "machine")
+DEF_GIVE_RANDOM(Abl, AP_UNLOCK_ABILITY,       "ability")
+DEF_GIVE_RANDOM(Evt, AP_UNLOCK_EVENT,         "event")
+DEF_GIVE_RANDOM(Pch, AP_UNLOCK_PATCH,         "patch type")
+DEF_GIVE_RANDOM(Itm, AP_UNLOCK_ITEM,          "CT item")
+DEF_GIVE_RANDOM(Box, AP_UNLOCK_BOX,           "box")
+DEF_GIVE_RANDOM(Ars, AP_UNLOCK_AIRRIDE_STAGE, "AR stage")
+DEF_GIVE_RANDOM(Trs, AP_UNLOCK_TOPRIDE_STAGE, "TR stage")
+DEF_GIVE_RANDOM(Tri, AP_UNLOCK_TOPRIDE_ITEM,  "TR item")
+DEF_GIVE_RANDOM(Clr, AP_UNLOCK_COLOR,         "color")
+DEF_GIVE_RANDOM(Std, AP_UNLOCK_STADIUM,       "stadium")
+DEF_GIVE_RANDOM(Bab, AP_UNLOCK_BASE_ABILITY,  "base ability")
+DEF_GIVE_RANDOM(Sph, AP_UNLOCK_AP_STAR_PIECE, "AP Star sphere")
+
+// The standalone City Trial gives in the 1-99 block; the rest of that block is
+// global or save-only progression.
+static const u16 ct_singletons[] = {
+    AP_ITEM_ALL_UP,
+    AP_ITEM_ALL_DOWN,
+    AP_ITEM_GIVE_DRAGOON,
+    AP_ITEM_GIVE_HYDRA,
+    AP_ITEM_GIVE_AP_STAR,
+    AP_ITEM_1_HP_TRAP,
+    AP_ITEM_DROP_PATCHES_TRAP,
+};
+
+void DebugMenu_GiveRandomModeItem(MajorKind major)
+{
+    if (!ap_api)
+        return;
+
+    int picked;
+    const char *mode_name;
+    if (major == MJRKIND_CITY)
+    {
+        // One uniform pool over the three CT give segments: the event range, the
+        // full ITKIND range, and the standalone gives.
+        int n_evt = EVKIND_NUM;
+        int n_it = AP_ITKIND_WEIGHTFAKE - AP_ITKIND_BASE + 1;
+        int n_one = GetElementsIn(ct_singletons);
+        int r = HSD_Randi(n_evt + n_it + n_one);
+        if (r < n_evt)
+            picked = AP_EVENT_BASE + r;
+        else if (r < n_evt + n_it)
+            picked = AP_ITKIND_BASE + (r - n_evt);
+        else
+            picked = ct_singletons[r - n_evt - n_it];
+        mode_name = "CT";
+    }
+    else if (major == MJRKIND_AIR)
+    {
+        // Only copy abilities are honored outside CT; every other ITKIND no-ops
+        // behind the Gm_IsInCity gate.
+        picked = AP_ITKIND_COPYBOMB + HSD_Randi(AP_ITKIND_COPYMIC - AP_ITKIND_COPYBOMB + 1);
+        mode_name = "AR";
+    }
+    else if (major == MJRKIND_TOP)
+    {
+        picked = AP_TOPRIDE_ITEM_GIVE_BASE +
+                 HSD_Randi(AP_TOPRIDE_ITEM_GIVE_PARTY_BALL - AP_TOPRIDE_ITEM_GIVE_BASE + 1);
+        mode_name = "TR";
+    }
+    else
+    {
+        return;
+    }
+
+    if (ap_api->QueueItem(picked))
+        OSReport("[ApDebug] Queued %s item id=%d\n", mode_name, picked);
+    else
+        OSReport("[ApDebug] Queue full, dropped %s item id=%d\n", mode_name, picked);
+}
+
 static int GiveEnergy1000(OptionDesc *self)
 {
     (void)self;
@@ -323,10 +506,8 @@ static int GiveEnergy1000(OptionDesc *self)
     return 1;
 }
 
-// Gate enable/disable toggle. Never saved: every gate mirrors an AP unlock mask
-// that DebugMenu_RefreshStateFromMasks re-derives on save load, so a card copy
-// would only be overwritten - and the machine rows are renamed at runtime, which
-// would move their save hashes anyway.
+// Gate enable/disable toggle. Never saved - the mask is re-derived at save load,
+// and the machine rows are renamed at runtime, which would move their save hashes.
 #define G(label, arr, idx, cb) \
     &(OptionDesc){ \
         .name = label, \
@@ -338,13 +519,39 @@ static int GiveEnergy1000(OptionDesc *self)
         .on_change = cb, \
     }
 
-// Action option
 #define A(label, desc, fn) \
     &(OptionDesc){ \
         .name = label, \
         .description = desc, \
         .kind = OPTKIND_ACTION, \
         .on_action = fn, \
+    }
+
+// Value row that writes AP state, and its two-state form. Never saved: the row is
+// re-derived from live state before boot replays every on_change, and a value
+// restored off the card would push the menu's idea of the world over the seed's.
+#define V(label, desc, var, values, cb) \
+    &(OptionDesc){ \
+        .name = label, \
+        .description = desc, \
+        .kind = OPTKIND_VALUE, \
+        .no_save = 1, \
+        .val = &var, \
+        .value_num = GetElementsIn(values), \
+        .value_names = values, \
+        .on_change = cb, \
+    }
+
+#define T(label, desc, var, cb) \
+    &(OptionDesc){ \
+        .name = label, \
+        .description = desc, \
+        .kind = OPTKIND_VALUE, \
+        .no_save = 1, \
+        .val = &var, \
+        .value_num = 2, \
+        .value_names = toggle_values, \
+        .on_change = cb, \
     }
 
 static int CheckDbgClearAll(OptionDesc *self)
@@ -367,7 +574,9 @@ static int CheckDbgForceMarkAll(OptionDesc *self)
 
 static void OnApPatchCountChange(int v)
 {
-    if (!ap_api) return;
+    if (!ap_api || v == ap_patch_count_synced)
+        return;
+    ap_patch_count_synced = v;
     int n = ap_patch_count_map[v];
     ap_api->DebugSetApPatchCount(n);
     OSReport("[ApDebug] ap_patches = %d, registers on the next round load\n", n);
@@ -452,9 +661,6 @@ static int CheckDbgClearAllChecklistData(OptionDesc *self)
     return 1;
 }
 
-// Makes the Z-button checklist unlock also grant the cell's reward, simulating AP
-// delivery when no client is connected. Off by default: a connected client delivers
-// the reward itself, so it would be granted and announced twice.
 static int auto_grant_on_debug_unlock = 0;
 
 int DebugMenu_ShouldAutoGrantOnUnlock(void)
@@ -464,12 +670,357 @@ int DebugMenu_ShouldAutoGrantOnUnlock(void)
 
 static void OnAutoGrantChange(int v)
 {
-    (void)v;
-    OSReport("[ApDebug] Auto-grant on Z unlock: %s\n",
-             auto_grant_on_debug_unlock ? "Enabled" : "Disabled");
+    OSReport("[ApDebug] Auto-grant on Z unlock: %s\n", v ? "Enabled" : "Disabled");
 }
 
-// Submenu option
+// Every OPTKIND_VALUE on_change is replayed once at boot, right after the refresh
+// pass below installs the live value, so a row that writes AP state latches: only a
+// real move past the value it was last synced to does anything. Without that, boot
+// would push the menu's idea of the world back over the seed's.
+
+static const char *const checklist_row_names[CHECKLIST_MODE_NUM] = {
+    "Air Ride", "Top Ride", "City Trial", "Archipelago",
+};
+
+static char *goal_values[] = {
+    "100 Squares", "N Squares", "Listed Squares", "Hydra + Dragoon", "Beat King Dedede",
+    "Max Stats", "Assemble AP Star", "All Legendaries", "None",
+};
+static int goal_state[CHECKLIST_MODE_NUM];
+
+// The square count GOAL_N_CHECKLIST needs. One row for all four, since only the goal
+// rows set to N read it.
+static char *goal_amount_values[] = {"1", "5", "10", "25", "50", "100", "120"};
+static const int goal_amount_map[] = {1, 5, 10, 25, 50, 100, 120};
+static int goal_amount_state;
+
+// Nearest offered row at or below a live value, so a seed between rows shows as the
+// closest size rather than snapping the option to its first entry.
+static int NearestRow(const int *map, int num, int live)
+{
+    int row = 0;
+    for (int i = 1; i < num; i++)
+        if (live >= map[i])
+            row = i;
+    return row;
+}
+
+// The amount is one row for four goals, so it follows the first row actually on the
+// count goal; with none there it keeps whatever it was left at.
+static void RefreshGoals(void)
+{
+    int amount = -1;
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+    {
+        int row_amount = 0;
+        goal_state[r] = ap_api ? ap_api->GetGoal(r, &row_amount) : GOAL_NONE;
+        if (goal_state[r] < 0 || goal_state[r] > GOAL_NONE)
+            goal_state[r] = GOAL_NONE;
+        if (goal_state[r] == GOAL_N_CHECKLIST && amount < 0)
+            amount = row_amount;
+    }
+    if (amount > 0)
+        goal_amount_state = NearestRow(goal_amount_map, GetElementsIn(goal_amount_map), amount);
+}
+
+// The rows only select. hoshi fires on_change on every D-pad tick, including
+// auto-repeat, and goal evaluation is over the whole set - so committing each
+// intermediate value would let a row scrolled past a satisfied kind latch
+// goal_complete, which is sticky and is reported to the server.
+static int GoalDbgApply(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+
+    ap_api->DebugSetGoals(goal_state, goal_amount_map[goal_amount_state]);
+    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
+        OSReport("[ApDebug] %s goal = %s\n", checklist_row_names[r], goal_values[goal_state[r]]);
+    ap_api->Textbox("Goals applied");
+    return 1;
+}
+
+// Whether the seed ships unlock items for a category. The flags are read at connect,
+// so a change only shows after Re-apply Slot Options.
+static int gating_state[AP_UNLOCK_NUM];
+static int gating_synced[AP_UNLOCK_NUM];
+
+#define DEF_GATING(name, cat) \
+    static void name(int v) { \
+        if (!ap_api || v == gating_synced[cat]) return; \
+        gating_synced[cat] = v; \
+        ap_api->DebugSetGating(cat, v); \
+        OSReport("[ApDebug] " #cat " gating: %s\n", v ? "Enabled" : "Disabled"); \
+    }
+
+DEF_GATING(OnGateMachines,  AP_UNLOCK_MACHINE)
+DEF_GATING(OnGateAbilities, AP_UNLOCK_ABILITY)
+DEF_GATING(OnGateEvents,    AP_UNLOCK_EVENT)
+DEF_GATING(OnGatePatches,   AP_UNLOCK_PATCH)
+DEF_GATING(OnGateItems,     AP_UNLOCK_ITEM)
+DEF_GATING(OnGateBoxes,     AP_UNLOCK_BOX)
+DEF_GATING(OnGateARStages,  AP_UNLOCK_AIRRIDE_STAGE)
+DEF_GATING(OnGateTRStages,  AP_UNLOCK_TOPRIDE_STAGE)
+DEF_GATING(OnGateTRItems,   AP_UNLOCK_TOPRIDE_ITEM)
+DEF_GATING(OnGateColors,    AP_UNLOCK_COLOR)
+DEF_GATING(OnGateStadiums,  AP_UNLOCK_STADIUM)
+DEF_GATING(OnGateBaseAbil,  AP_UNLOCK_BASE_ABILITY)
+
+// The per-stat cap a City Trial run starts at and its ceiling, plus the item spawn
+// rate floor. All three are read out of the slot options as a round loads.
+static char *patch_cap_values[] = {"1", "10", "25", "50", "100", "127"};
+static const int patch_cap_map[] = {1, 10, 25, 50, 100, PATCH_STAT_MAX};
+static int patch_cap_min_state;
+static int patch_cap_max_state;
+static int patch_cap_synced_min = -1;
+static int patch_cap_synced_max = -1;
+
+static void OnPatchCapMinChange(int v)
+{
+    if (!ap_api || v == patch_cap_synced_min) return;
+    patch_cap_synced_min = v;
+    ap_api->DebugSetPatchCapMin(patch_cap_map[v]);
+    OSReport("[ApDebug] CT patch cap min = %d\n", patch_cap_map[v]);
+}
+
+static void OnPatchCapMaxChange(int v)
+{
+    if (!ap_api || v == patch_cap_synced_max) return;
+    patch_cap_synced_max = v;
+    ap_api->DebugSetPatchCapMax(patch_cap_map[v]);
+    OSReport("[ApDebug] CT patch cap max = %d\n", patch_cap_map[v]);
+}
+
+static char *spawn_rate_values[] = {"25%", "50%", "75%", "100%"};
+static const int spawn_rate_map[] = {25, 50, 75, 100};
+static int spawn_rate_state;
+static int spawn_rate_synced = -1;
+
+static void OnSpawnRateChange(int v)
+{
+    if (!ap_api || v == spawn_rate_synced) return;
+    spawn_rate_synced = v;
+    ap_api->DebugSetSpawnRateMin(spawn_rate_map[v]);
+    OSReport("[ApDebug] Spawn rate floor = %d%%\n", spawn_rate_map[v]);
+}
+
+static void RefreshSlotOptions(void)
+{
+    for (int cat = 0; cat < AP_UNLOCK_NUM; cat++)
+    {
+        gating_state[cat] = ap_api ? ap_api->GetGating((APUnlockCategory)cat) : 1;
+        gating_synced[cat] = gating_state[cat];
+    }
+
+    int cap_num = GetElementsIn(patch_cap_map);
+    int min = 0, max = 0, rate = 0;
+    if (ap_api)
+    {
+        ap_api->GetPatchCapRange(&min, &max);
+        rate = ap_api->GetSpawnRateMin();
+    }
+    // A stored 0 is "options not received yet", which the mod reads as the ceiling.
+    patch_cap_min_state = NearestRow(patch_cap_map, cap_num, min ? min : PATCH_STAT_MAX);
+    patch_cap_max_state = NearestRow(patch_cap_map, cap_num, max ? max : PATCH_STAT_MAX);
+    spawn_rate_state = NearestRow(spawn_rate_map, GetElementsIn(spawn_rate_map),
+                                  rate ? rate : 100);
+
+    patch_cap_synced_min = patch_cap_min_state;
+    patch_cap_synced_max = patch_cap_max_state;
+    spawn_rate_synced = spawn_rate_state;
+}
+
+static int SlotOptDbgReapply(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    ap_api->DebugReapplySlotOptions();
+    RefreshStateFromMasks();
+    OSReport("[ApDebug] Re-applied slot options over a cleared mask set\n");
+    ap_api->Textbox("Slot options re-applied");
+    return 1;
+}
+
+// Cross-session checklist progress, mirroring the live counters. Setting a row one
+// short of its target lets the next real event in a round complete the check.
+static char *allup_values[] = {"0", "1", "2", "3", "4", "5"};
+static char *purple_values[] = {"0", "1", "2", "3"};
+static char *race_color_values[] = {"None", "Partial", "All"};
+static const int race_color_map[] = {0x00, 0x7F, ((1 << KIRBYCOLOR_NUM) - 1)};
+static int allup_state;
+static int purple_state;
+static int race_color_state;
+static int allup_synced = -1;
+static int purple_synced = -1;
+static int race_color_synced = -1;
+
+static void OnAllUpProgressChange(int v)
+{
+    if (!ap_api || v == allup_synced) return;
+    allup_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_ALLUP_TOTAL, v);
+}
+
+static void OnPurpleProgressChange(int v)
+{
+    if (!ap_api || v == purple_synced) return;
+    purple_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_PURPLE_SR1, v);
+}
+
+static void OnRaceColorProgressChange(int v)
+{
+    if (!ap_api || v == race_color_synced) return;
+    race_color_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_RACE_COLORS, race_color_map[v]);
+}
+
+static void RefreshCheckProgress(void)
+{
+    allup_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_ALLUP_TOTAL) : 0;
+    if (allup_state > 5) allup_state = 5;
+    purple_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_PURPLE_SR1) : 0;
+    if (purple_state > 3) purple_state = 3;
+    // A mask, so the middle row stands for every partial state rather than one value.
+    int colors = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_RACE_COLORS) : 0;
+    race_color_state = (colors == 0) ? 0 : ((colors == race_color_map[2]) ? 2 : 1);
+    allup_synced = allup_state;
+    purple_synced = purple_state;
+    race_color_synced = race_color_state;
+}
+
+// EnergyLink balance. The cheapest purchase is 200 MJ and the dearest 50000, so the
+// rows bracket both ends of the affordability check.
+static char *energy_values[] = {"0", "199", "200", "2500", "49999", "50000", "100000"};
+static const int energy_map[] = {0, 199, 200, 2500, 49999, 50000, 100000};
+static int energy_state;
+static int energy_synced = -1;
+
+static void OnEnergyBalanceChange(int v)
+{
+    if (!ap_api || v == energy_synced) return;
+    energy_synced = v;
+    ap_api->DebugSetEnergyBalance((s64)energy_map[v]);
+    OSReport("[ApDebug] Energy balance = %d MJ\n", energy_map[v]);
+}
+
+static void RefreshEnergy(void)
+{
+    s64 live = ap_api ? ap_api->GetEnergyBalance() : 0;
+    int clamped = live < 0 ? 0 : (live > 100000 ? 100000 : (int)live);
+    energy_state = NearestRow(energy_map, GetElementsIn(energy_map), clamped);
+    energy_synced = energy_state;
+}
+
+// Which player slot the pad bindings that drop an item act on.
+static char *target_player_values[] = {"1", "2", "3", "4"};
+static int target_player_state;
+
+int DebugMenu_TargetPlayer(void)
+{
+    return target_player_state;
+}
+
+static void OnTargetPlayerChange(int v)
+{
+    OSReport("[ApDebug] Debug drops target player %d\n", v + 1);
+}
+
+static int MsgDbgSend(int kind, const char *name)
+{
+    if (!ap_api) return 1;
+    if (ap_api->DebugSendText(kind))
+        OSReport("[ApDebug] Posted a canned %s message\n", name);
+    else
+        OSReport("[ApDebug] Text mailbox still full, dropped the %s message\n", name);
+    return 1;
+}
+
+static int MsgDbgCheck(OptionDesc *self)  { (void)self; return MsgDbgSend(APTEXT_KIND_CHECK,  "check"); }
+static int MsgDbgItem(OptionDesc *self)   { (void)self; return MsgDbgSend(APTEXT_KIND_ITEM,   "item"); }
+static int MsgDbgHint(OptionDesc *self)   { (void)self; return MsgDbgSend(APTEXT_KIND_HINT,   "hint"); }
+static int MsgDbgStatus(OptionDesc *self) { (void)self; return MsgDbgSend(APTEXT_KIND_STATUS, "status"); }
+static int MsgDbgChat(OptionDesc *self)   { (void)self; return MsgDbgSend(APTEXT_KIND_CHAT,   "chat"); }
+static int MsgDbgLink(OptionDesc *self)   { (void)self; return MsgDbgSend(APTEXT_KIND_LINK,   "link"); }
+
+static int MsgDbgOverlong(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    if (ap_api->DebugSendOverlongText())
+        OSReport("[ApDebug] Posted an 8-run message past the third line\n");
+    else
+        OSReport("[ApDebug] Text mailbox still full, dropped the overlong message\n");
+    return 1;
+}
+
+static int LinkDbgDeathlink(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    ap_api->DebugTriggerDeathlinkReceive();
+    OSReport("[ApDebug] Armed deathlink_receive\n");
+    ap_api->Textbox("DeathLink armed");
+    return 1;
+}
+
+static int LinkDbgTraplink(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    ap_api->DebugTriggerTraplinkReceive();
+    OSReport("[ApDebug] Armed traplink_receive\n");
+    ap_api->Textbox("TrapLink armed");
+    return 1;
+}
+
+static int EnergyDbgDrain(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    ap_api->DebugSetEnergyBalance(0);
+    RefreshEnergy();
+    OSReport("[ApDebug] Energy balance drained to 0\n");
+    ap_api->Textbox("Energy drained");
+    return 1;
+}
+
+static int ApPatchDbgClearCollected(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    ap_api->DebugClearApPatchCollected();
+    ap_api->Textbox("Cleared collected AP Patches");
+    return 1;
+}
+
+static int StateDbgReport(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    ap_api->DebugReportState();
+    ap_api->Textbox("AP state written to the console");
+    return 1;
+}
+
+static int StateDbgResetProgression(OptionDesc *self)
+{
+    (void)self;
+    if (!ap_api) return 1;
+    ap_api->DebugResetProgression();
+    RefreshCheckProgress();
+    ap_api->Textbox("Progression reset");
+    return 1;
+}
+
+void DebugMenu_RefreshState(void)
+{
+    RefreshStateFromMasks();
+    RefreshGoals();
+    RefreshSlotOptions();
+    RefreshCheckProgress();
+    RefreshEnergy();
+}
+
 #define S(label, desc, menu_ref) \
     &(OptionDesc){ \
         .name = label, \
@@ -478,15 +1029,15 @@ static void OnAutoGrantChange(int v)
         .menu_ptr = &menu_ref, \
     }
 
-// 22 player-rideable machines. Free / Steer Star are the two Top Ride lobby
-// "Control Type" choices. The 4 omitted VCKINDs (WINGKIRBY, WHEELNORMAL,
-// WHEELKIRBY, WHEELVSDEDEDE) are transformation forms or stadium CPU-only
-// machines with no player-facing unlock surface.
+// 23 player-rideable machines plus the three action rows. The 4 omitted VCKINDs
+// (WINGKIRBY, WHEELNORMAL, WHEELKIRBY, WHEELVSDEDEDE) are transformation forms or
+// stadium CPU-only machines with no player-facing unlock surface.
 static MenuDesc machines_menu = {
-    .option_num = 24,
+    .option_num = 26,
     .options = {
         A("Unlock All", "Unlock all machines", MchUnlockAll),
         A("Lock All",   "Lock all machines",   MchLockAll),
+        A("Give Random", "Queue one random machine unlock item", MchGiveRandom),
         G("Warp Star",         machine_state, VCKIND_WARP,           SyncMachines),
         G("Compact Star",      machine_state, VCKIND_COMPACT,        SyncMachines),
         G("Winged Star",       machine_state, VCKIND_WINGED,         SyncMachines),
@@ -509,45 +1060,16 @@ static MenuDesc machines_menu = {
         G("Rex Wheelie",       machine_state, VCKIND_REXWHEELIE,     SyncMachines),
         G("Wheelie Scooter",   machine_state, VCKIND_WHEELIESCOOTER, SyncMachines),
         G("Dedede Wheelie",    machine_state, VCKIND_WHEELDEDEDE,    SyncMachines),
-        // Trailing rows for whatever custom_machines registered. option_num hides
-        // them until DebugMenu_BindCustomMachines names the ones that exist.
-        G("Custom Machine 1",  machine_state, VCKIND_NUM + 0,        SyncMachines),
-        G("Custom Machine 2",  machine_state, VCKIND_NUM + 1,        SyncMachines),
-        G("Custom Machine 3",  machine_state, VCKIND_NUM + 2,        SyncMachines),
-        G("Custom Machine 4",  machine_state, VCKIND_NUM + 3,        SyncMachines),
-        G("Custom Machine 5",  machine_state, VCKIND_NUM + 4,        SyncMachines),
-        G("Custom Machine 6",  machine_state, VCKIND_NUM + 5,        SyncMachines),
+        G("Archipelago Star",  machine_state, AP_MACHINE_BIT_AP_STAR, SyncMachines),
     },
 };
 
-#define MACHINES_MENU_VANILLA_OPTIONS 24
-
-// machine_unlocked_mask is 32 bits, so only MachineKinds under 32 carry a gate to
-// toggle. That is what limits the rows here, not how many the registry can take.
-#define MACHINES_MENU_CUSTOM_ROWS (32 - VCKIND_NUM)
-
-_Static_assert(MACHINES_MENU_CUSTOM_ROWS == 6, "machines_menu needs one trailing row per gateable custom slot");
-
-void DebugMenu_BindCustomMachines(const CustomMachinesAPI *api)
-{
-    if (!api || cm_api)
-        return;
-    cm_api = api;
-
-    int count = api->GetCount();
-    if (count > MACHINES_MENU_CUSTOM_ROWS)
-        count = MACHINES_MENU_CUSTOM_ROWS;
-    for (int i = 0; i < count; i++)
-        machines_menu.options[MACHINES_MENU_VANILLA_OPTIONS + i]->name =
-            (char *)api->GetName(VCKIND_NUM + i);
-    machines_menu.option_num = MACHINES_MENU_VANILLA_OPTIONS + count;
-}
-
 static MenuDesc abilities_menu = {
-    .option_num = 13,
+    .option_num = 14,
     .options = {
         A("Unlock All", "Unlock all copy abilities", AblUnlockAll),
         A("Lock All",   "Lock all copy abilities",   AblLockAll),
+        A("Give Random", "Queue one random copy ability unlock item", AblGiveRandom),
         G("Fire",    ability_state, COPYKIND_FIRE,    SyncAbilities),
         G("Wheel",   ability_state, COPYKIND_WHEEL,   SyncAbilities),
         G("Sleep",   ability_state, COPYKIND_SLEEP,   SyncAbilities),
@@ -563,10 +1085,11 @@ static MenuDesc abilities_menu = {
 };
 
 static MenuDesc base_abilities_menu = {
-    .option_num = 5,
+    .option_num = 6,
     .options = {
         A("Unlock All", "Unlock all base abilities", BabUnlockAll),
         A("Lock All",   "Lock all base abilities",   BabLockAll),
+        A("Give Random", "Queue one random base ability unlock item", BabGiveRandom),
         G("Inhale",     base_ability_state, BASEABILITY_INHALE,    SyncBaseAbil),
         G("Quick Spin", base_ability_state, BASEABILITY_QUICKSPIN, SyncBaseAbil),
         G("Charge",     base_ability_state, BASEABILITY_CHARGE,    SyncBaseAbil),
@@ -574,10 +1097,11 @@ static MenuDesc base_abilities_menu = {
 };
 
 static MenuDesc events_menu = {
-    .option_num = 18,
+    .option_num = 19,
     .options = {
         A("Unlock All", "Unlock all events", EvtUnlockAll),
         A("Lock All",   "Lock all events",   EvtLockAll),
+        A("Give Random", "Queue one random event unlock item", EvtGiveRandom),
         G("Dyna Blade",         event_state, EVKIND_DYNABLADE,        SyncEvents),
         G("Tac",                event_state, EVKIND_TAC,              SyncEvents),
         G("Meteor",             event_state, EVKIND_METEOR,           SyncEvents),
@@ -598,10 +1122,11 @@ static MenuDesc events_menu = {
 };
 
 static MenuDesc patches_menu = {
-    .option_num = 11,
+    .option_num = 12,
     .options = {
         A("Unlock All", "Unlock all patch types", PchUnlockAll),
         A("Lock All",   "Lock all patch types",   PchLockAll),
+        A("Give Random", "Queue one random patch type unlock item", PchGiveRandom),
         G("Weight",    patch_state, PATCHKIND_WEIGHT,   SyncPatches),
         G("Boost",     patch_state, PATCHKIND_ACCEL,    SyncPatches),
         G("Top Speed", patch_state, PATCHKIND_TOPSPEED, SyncPatches),
@@ -615,10 +1140,11 @@ static MenuDesc patches_menu = {
 };
 
 static MenuDesc items_menu = {
-    .option_num = 32,
+    .option_num = 33,
     .options = {
         A("Unlock All", "Unlock all CT items", ItmUnlockAll),
         A("Lock All",   "Lock all CT items",   ItmLockAll),
+        A("Give Random", "Queue one random CT item unlock item", ItmGiveRandom),
         G("All Up",         item_state, ITUNLOCK_ALLUP,           SyncItems),
         G("Speed Max",      item_state, ITUNLOCK_SPEEDMAX,        SyncItems),
         G("Speed Min",      item_state, ITUNLOCK_SPEEDMIN,        SyncItems),
@@ -646,17 +1172,18 @@ static MenuDesc items_menu = {
         G("Hydra Part X",   item_state, ITUNLOCK_HYDRA1,          SyncItems),
         G("Hydra Part Y",   item_state, ITUNLOCK_HYDRA2,          SyncItems),
         G("Hydra Part Z",   item_state, ITUNLOCK_HYDRA3,          SyncItems),
-        G("Dragoon Part A", item_state, ITUNLOCK_DRAGOON1,       SyncItems),
-        G("Dragoon Part B", item_state, ITUNLOCK_DRAGOON2,       SyncItems),
-        G("Dragoon Part C", item_state, ITUNLOCK_DRAGOON3,       SyncItems),
+        G("Dragoon Part A", item_state, ITUNLOCK_DRAGOON1,      SyncItems),
+        G("Dragoon Part B", item_state, ITUNLOCK_DRAGOON2,      SyncItems),
+        G("Dragoon Part C", item_state, ITUNLOCK_DRAGOON3,      SyncItems),
     },
 };
 
 static MenuDesc boxes_menu = {
-    .option_num = 5,
+    .option_num = 6,
     .options = {
         A("Unlock All", "Unlock all box types", BoxUnlockAll),
         A("Lock All",   "Lock all box types",   BoxLockAll),
+        A("Give Random", "Queue one random box type unlock item", BoxGiveRandom),
         G("Blue Box",  box_state, BOXKIND_BLUE,  SyncBoxes),
         G("Green Box", box_state, BOXKIND_GREEN, SyncBoxes),
         G("Red Box",   box_state, BOXKIND_RED,   SyncBoxes),
@@ -666,10 +1193,11 @@ static MenuDesc boxes_menu = {
 // A sphere held locked here is kept out of the custom_items registry entirely, so
 // it takes no delivery step and no carrier box can hold it.
 static MenuDesc star_pieces_menu = {
-    .option_num = 8,
+    .option_num = 9,
     .options = {
         A("Unlock All", "Unlock all AP Star spheres", SphUnlockAll),
         A("Lock All",   "Lock all AP Star spheres",   SphLockAll),
+        A("Give Random", "Queue one random AP Star sphere unlock item", SphGiveRandom),
         G("Rose Sphere",   star_piece_state, AP_STAR_PIECE_ROSE,   SyncStarPiece),
         G("Green Sphere",  star_piece_state, AP_STAR_PIECE_GREEN,  SyncStarPiece),
         G("Violet Sphere", star_piece_state, AP_STAR_PIECE_VIOLET, SyncStarPiece),
@@ -680,10 +1208,11 @@ static MenuDesc star_pieces_menu = {
 };
 
 static MenuDesc ar_stages_menu = {
-    .option_num = 11,
+    .option_num = 12,
     .options = {
         A("Unlock All", "Unlock all AR stages", ArsUnlockAll),
         A("Lock All",   "Lock all AR stages",   ArsLockAll),
+        A("Give Random", "Queue one random AR stage unlock item", ArsGiveRandom),
         G("Fantasy Meadows",  ar_stage_state, AIRRIDE_FANTASY_MEADOWS,  SyncARStages),
         G("Magma Flows",      ar_stage_state, AIRRIDE_MAGMA_FLOWS,      SyncARStages),
         G("Sky Sands",        ar_stage_state, AIRRIDE_SKY_SANDS,        SyncARStages),
@@ -697,10 +1226,11 @@ static MenuDesc ar_stages_menu = {
 };
 
 static MenuDesc tr_stages_menu = {
-    .option_num = 9,
+    .option_num = 10,
     .options = {
         A("Unlock All", "Unlock all TR stages", TrsUnlockAll),
         A("Lock All",   "Lock all TR stages",   TrsLockAll),
+        A("Give Random", "Queue one random TR stage unlock item", TrsGiveRandom),
         G("Grass", tr_stage_state, TOPRIDE_GRASS, SyncTRStages),
         G("Sand",  tr_stage_state, TOPRIDE_SAND,  SyncTRStages),
         G("Sky",   tr_stage_state, TOPRIDE_SKY,   SyncTRStages),
@@ -714,10 +1244,11 @@ static MenuDesc tr_stages_menu = {
 // One row per TRITEM kind, in enum order - Tri(Unlock|Lock)All drive the whole
 // TRITEM_NUM mask, so a missing row would leave a gate the menu cannot show.
 static MenuDesc tr_items_menu = {
-    .option_num = 2 + TRITEM_NUM,
+    .option_num = 3 + TRITEM_NUM,
     .options = {
         A("Unlock All", "Unlock all TR items", TriUnlockAll),
         A("Lock All",   "Lock all TR items",   TriLockAll),
+        A("Give Random", "Queue one random TR item unlock item", TriGiveRandom),
         G("Hammer",            tr_item_state, TRITEM_HAMMER,           SyncTRItems),
         G("Big Cake",          tr_item_state, TRITEM_BIG_CAKE,         SyncTRItems),
         G("Speed Up",          tr_item_state, TRITEM_SPEED_UP,         SyncTRItems),
@@ -744,10 +1275,11 @@ static MenuDesc tr_items_menu = {
 };
 
 static MenuDesc colors_menu = {
-    .option_num = 10,
+    .option_num = 11,
     .options = {
         A("Unlock All", "Unlock all colors", ClrUnlockAll),
         A("Lock All",   "Lock all colors",   ClrLockAll),
+        A("Give Random", "Queue one random color unlock item", ClrGiveRandom),
         G("Pink",   color_state, KIRBYCOLOR_PINK,   SyncColors),
         G("Yellow", color_state, KIRBYCOLOR_YELLOW, SyncColors),
         G("Blue",   color_state, KIRBYCOLOR_BLUE,   SyncColors),
@@ -760,10 +1292,11 @@ static MenuDesc colors_menu = {
 };
 
 static MenuDesc stadiums_menu = {
-    .option_num = 26,
+    .option_num = 27,
     .options = {
         A("Unlock All", "Unlock all stadiums", StdUnlockAll),
         A("Lock All",   "Lock all stadiums",   StdLockAll),
+        A("Give Random", "Queue one random stadium unlock item", StdGiveRandom),
         G("Drag Race 1",         stadium_state, STKIND_DRAG1,          SyncStadiums),
         G("Drag Race 2",         stadium_state, STKIND_DRAG2,          SyncStadiums),
         G("Drag Race 3",         stadium_state, STKIND_DRAG3,          SyncStadiums),
@@ -801,9 +1334,9 @@ static MenuDesc give_stat_patches_menu = {
         A("Charge Patch",    "Give Charge patch",    GiveCharge),
         A("Glide Patch",     "Give Glide patch",     GiveGlide),
         A("Offense Patch",   "Give Offense patch",   GiveOffense),
-        A("Defense Patch",   "Give Defense patch",    GiveDefense),
-        A("Weight Patch",    "Give Weight patch",     GiveWeight),
-        A("All Up",          "Give All Up",           GiveAllUp),
+        A("Defense Patch",   "Give Defense patch",   GiveDefense),
+        A("Weight Patch",    "Give Weight patch",    GiveWeight),
+        A("All Up",          "Spawn an All Up pickup", GiveAllUp),
     },
 };
 
@@ -928,7 +1461,7 @@ static MenuDesc give_events_menu = {
         A("Machine Formation", "Trigger Machine Formation event", GiveEvtMachineFormation),
         A("UFO",               "Trigger UFO event",               GiveEvtUFO),
         A("Bounce",            "Trigger Bounce event",            GiveEvtBounce),
-        A("Fog",                "Trigger Fog event",              GiveEvtFog),
+        A("Fog",               "Trigger Fog event",               GiveEvtFog),
         A("Fake Powerups",     "Trigger Fake Powerups event",     GiveEvtFakePowerups),
     },
 };
@@ -936,18 +1469,18 @@ static MenuDesc give_events_menu = {
 static MenuDesc give_traps_menu = {
     .option_num = 3,
     .options = {
-        A("1 HP Trap",        "Set HP to 1",                 Give1HPTrap),
-        A("All Down",         "All stats down",              GiveAllDown),
-        A("Drop Patches Trap","Eject rider patches (CT)",    GiveDropPatchesTrap),
+        A("1 HP Trap",         "Set HP to 1",                 Give1HPTrap),
+        A("All Down",          "All stats down",              GiveAllDown),
+        A("Drop Patches Trap", "Eject rider patches (CT)",    GiveDropPatchesTrap),
     },
 };
 
 static MenuDesc give_upgrades_menu = {
     .option_num = 9,
     .options = {
+        A("All Up",              "Grant the AP All Up item to each rider", GiveApAllUp),
         A("Patch Cap Increase",  "Increase patch cap",       GivePatchCap),
         A("Spawn Rate Up",       "Increase item spawn rate", GiveSpawnRateUp),
-        A("Give 1000 Energy",    "Add 1000 to EnergyLink balance", GiveEnergy1000),
         A("AR Checkbox Filler",  "Fill AR checklist square", GiveFillerAR),
         A("TR Checkbox Filler",  "Fill TR checklist square", GiveFillerTR),
         A("CT Checkbox Filler",  "Fill CT checklist square", GiveFillerCT),
@@ -996,9 +1529,9 @@ static MenuDesc give_items_menu = {
         S("Food",              "Healing items",                   give_food_menu),
         S("Special Items",     "Powerful one-use items",          give_special_menu),
         S("Legendary Pieces",  "Dragoon, Hydra and AP Star parts", give_legendary_menu),
-        S("Top Ride Items",    "Spawn a Top Ride item for pickup", give_topride_items_menu),
+        S("Top Ride Items",    "Apply a Top Ride item to each human Kirby", give_topride_items_menu),
         S("CT Events",         "Trigger a City Trial event",      give_events_menu),
-        S("Traps & Events",    "Traps and event triggers",       give_traps_menu),
+        S("Traps",             "Traps and stat drops",            give_traps_menu),
         S("Upgrades",          "Progression upgrades and fillers", give_upgrades_menu),
     },
 };
@@ -1015,7 +1548,7 @@ static MenuDesc reveal_menu = {
 };
 
 static MenuDesc checks_menu = {
-    .option_num = 9,
+    .option_num = 10,
     .options = {
         &(OptionDesc){
             .name = "Auto-Grant on Z Unlock",
@@ -1027,7 +1560,7 @@ static MenuDesc checks_menu = {
             .on_change = OnAutoGrantChange,
         },
         A("Clear All sent_checks",   "Wipe sent_checks bitmask and goal_complete", CheckDbgClearAll),
-        A("Force-Mark All",          "Set every sent_checks bit and goal_complete", CheckDbgForceMarkAll),
+        A("Force-Mark All",          "Set every backed sent_checks bit, goal_complete and goal_announced", CheckDbgForceMarkAll),
         A("Trigger goal_complete",   "Set only goal_complete (sent_checks unchanged)", CheckDbgTriggerGoal),
         S("Reveal Checklists",       "Make checkboxes visible (visual only)",       reveal_menu),
         A("Simulate Location Data",  "Fill location arrays with a random shuffle",  CheckDbgSimulateLocationData),
@@ -1043,11 +1576,12 @@ static MenuDesc checks_menu = {
             .on_change = OnApPatchCountChange,
         },
         A("Collect AP Patch",        "Claim the lowest unclaimed AP Patch",         ApPatchDbgCollect),
+        A("Clear Collected AP Patches", "Clear every collected bit, so they can be claimed again", ApPatchDbgClearCollected),
     },
 };
 
-static MenuDesc debug_menu = {
-    .option_num = 15,
+static MenuDesc gates_menu = {
+    .option_num = 13,
     .options = {
         S("Machines",        "Toggle machine unlock gates",     machines_menu),
         S("Copy Abilities",  "Toggle ability unlock gates",     abilities_menu),
@@ -1062,8 +1596,104 @@ static MenuDesc debug_menu = {
         S("TR Items",        "Toggle Top Ride item gates",      tr_items_menu),
         S("Colors",          "Toggle Kirby color gates",        colors_menu),
         S("Stadiums",        "Toggle stadium unlock gates",     stadiums_menu),
-        S("Give Items",      "Give items directly (free)",      give_items_menu),
-        S("Checks",          "Check detection and goal debug",  checks_menu),
+    },
+};
+
+static MenuDesc goals_menu = {
+    .option_num = 6,
+    .options = {
+        V("Air Ride",     "Goal for the Air Ride checklist row",    goal_state[GMMODE_AIRRIDE],   goal_values, 0),
+        V("Top Ride",     "Goal for the Top Ride checklist row",    goal_state[GMMODE_TOPRIDE],   goal_values, 0),
+        V("City Trial",   "Goal for the City Trial checklist row",  goal_state[GMMODE_CITYTRIAL], goal_values, 0),
+        V("Archipelago",  "Goal for the Archipelago checklist row", goal_state[AP_CHECKLIST_ROW], goal_values, 0),
+        V("Squares for N", "Square count the N Squares rows compare against", goal_amount_state, goal_amount_values, 0),
+        A("Apply", "Commit the five rows above and re-evaluate", GoalDbgApply),
+    },
+};
+
+static MenuDesc gating_menu = {
+    .option_num = 12,
+    .options = {
+        T("Machines",       "On: AP ships machine unlock items",       gating_state[AP_UNLOCK_MACHINE],       OnGateMachines),
+        T("Copy Abilities", "On: AP ships ability unlock items",       gating_state[AP_UNLOCK_ABILITY],       OnGateAbilities),
+        T("Events",         "On: AP ships event unlock items",         gating_state[AP_UNLOCK_EVENT],         OnGateEvents),
+        T("Patch Types",    "On: AP ships patch type unlock items",    gating_state[AP_UNLOCK_PATCH],         OnGatePatches),
+        T("CT Items",       "On: AP ships CT item unlock items",       gating_state[AP_UNLOCK_ITEM],          OnGateItems),
+        T("Box Types",      "On: AP ships box type unlock items",      gating_state[AP_UNLOCK_BOX],           OnGateBoxes),
+        T("AR Stages",      "On: AP ships Air Ride stage unlocks",     gating_state[AP_UNLOCK_AIRRIDE_STAGE], OnGateARStages),
+        T("TR Stages",      "On: AP ships Top Ride stage unlocks",     gating_state[AP_UNLOCK_TOPRIDE_STAGE], OnGateTRStages),
+        T("TR Items",       "On: AP ships Top Ride item unlocks",      gating_state[AP_UNLOCK_TOPRIDE_ITEM],  OnGateTRItems),
+        T("Colors",         "On: AP ships Kirby color unlock items",   gating_state[AP_UNLOCK_COLOR],         OnGateColors),
+        T("Stadiums",       "On: AP ships stadium unlock items",       gating_state[AP_UNLOCK_STADIUM],       OnGateStadiums),
+        T("Base Abilities", "On: AP ships base ability unlock items",  gating_state[AP_UNLOCK_BASE_ABILITY],  OnGateBaseAbil),
+    },
+};
+
+static MenuDesc slot_options_menu = {
+    .option_num = 5,
+    .options = {
+        S("Category Gating", "Which categories AP ships unlock items for", gating_menu),
+        V("Patch Cap Min",   "Per-stat cap a City Trial run starts at",    patch_cap_min_state, patch_cap_values,  OnPatchCapMinChange),
+        V("Patch Cap Max",   "Ceiling Patch Cap Increase items raise it to", patch_cap_max_state, patch_cap_values, OnPatchCapMaxChange),
+        V("Spawn Rate Floor", "Item spawn rate before any Spawn Rate Up",  spawn_rate_state,    spawn_rate_values, OnSpawnRateChange),
+        A("Re-apply", "Clear every unlock mask and re-run the connect-time pre-fill", SlotOptDbgReapply),
+    },
+};
+
+static MenuDesc progress_menu = {
+    .option_num = 3,
+    .options = {
+        V("All Ups Collected", "Lifetime CT All Ups, toward the 5 that check needs",  allup_state,      allup_values,       OnAllUpProgressChange),
+        V("Purple SR1 Wins",   "SINGLE RACE 1 wins as Purple Kirby, toward 3",        purple_state,     purple_values,      OnPurpleProgressChange),
+        V("Race Colors",       "Which Kirby colors have finished an Air Ride race",   race_color_state, race_color_values,  OnRaceColorProgressChange),
+    },
+};
+
+static MenuDesc messages_menu = {
+    .option_num = 7,
+    .options = {
+        A("Check",    "Post a canned check line",                  MsgDbgCheck),
+        A("Item",     "Post a canned item line",                   MsgDbgItem),
+        A("Hint",     "Post a canned hint line",                   MsgDbgHint),
+        A("Status",   "Post a canned status line",                 MsgDbgStatus),
+        A("Chat",     "Post a canned chat line",                   MsgDbgChat),
+        A("Link",     "Post a canned DeathLink/TrapLink line",     MsgDbgLink),
+        A("Overlong", "Post a line of 8 runs past the third line", MsgDbgOverlong),
+    },
+};
+
+static MenuDesc links_menu = {
+    .option_num = 2,
+    .options = {
+        A("Arm DeathLink", "Set deathlink_receive; it lands at the next round", LinkDbgDeathlink),
+        A("Arm TrapLink",  "Set traplink_receive; the mode picks the trap",     LinkDbgTraplink),
+    },
+};
+
+static MenuDesc energy_menu = {
+    .option_num = 3,
+    .options = {
+        V("Balance",       "Set the EnergyLink balance in MJ", energy_state, energy_values, OnEnergyBalanceChange),
+        A("Add 1000",      "Add 1000 MJ to the balance",       GiveEnergy1000),
+        A("Drain to Zero", "Set the balance to 0 MJ",          EnergyDbgDrain),
+    },
+};
+
+static MenuDesc debug_menu = {
+    .option_num = 12,
+    .options = {
+        S("Unlock Gates",   "Toggle the unlock gate masks by category",     gates_menu),
+        S("Give Items",     "Give items directly (free)",                   give_items_menu),
+        S("Checks",         "Check detection and goal debug",               checks_menu),
+        S("Goals",          "Override the goal of each checklist row",      goals_menu),
+        S("Slot Options",   "Override the options the seed shipped",        slot_options_menu),
+        S("Check Progress", "Cross-session AP checklist counters",          progress_menu),
+        S("Messages",       "Render canned client text messages",           messages_menu),
+        S("Links",          "Arm a DeathLink or TrapLink receive",          links_menu),
+        S("EnergyLink",     "Set the energy balance the spend menu reads",  energy_menu),
+        V("Target Player",  "Player slot the pad drops act on", target_player_state, target_player_values, OnTargetPlayerChange),
+        A("Report State",   "Log every mask, counter and goal to the console",    StateDbgReport),
+        A("Reset Progression", "Roll received-item progression back to pre-connect", StateDbgResetProgression),
     },
 };
 

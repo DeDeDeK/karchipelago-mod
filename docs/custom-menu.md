@@ -9,9 +9,10 @@ screen (background, Kirby, menu options) is untouched.
 
 ## Demo Machine
 
-`MainMenu_SelectDemoMachine` rewrites the three `li r4` operands of the idle demo-player setup
-inside `SceneLoad_TitleScreen` - RiderKind at `0x8000d340`, IsBike at `0x8000d34c`, class slot at
-`0x8000d358`. It asks `GateApStar_MachineKind()` for the Archipelago Star; if that resolves to a
+`MainMenu_SelectDemoMachine` rewrites two of the three `li r4` operands of the idle demo-player
+setup inside `SceneLoad_TitleScreen` (`0x8000d26c`) - RiderKind at `0x8000d340` and class slot at
+`0x8000d358`. The third, IsBike at `0x8000d34c`, is left alone: it already encodes `li r4, 0` and
+the selection only ever picks a star-class slot, so patching it wrote back the same word. It asks `GateApStar_MachineKind()` for the Archipelago Star; if that resolves to a
 star-class kind the demo becomes Kirby riding it, otherwise it falls back to Dedede on the Wagon
 Star. Showing the Archipelago Star on the title screen is the point: it is the machine the goal
 awards, on display before it is earned.
@@ -20,6 +21,43 @@ The demo ride must stay star-class (`is_bike = 0`) - the demo init uses hardcode
 ids and a wheel-class machine crashes there. The selection is re-run from the title load hook on
 every title entry, not just at boot, because the machine registry only resolves the AP Star kind
 after every mod has booted.
+
+## Version Stamp
+
+The release version is drawn in the bottom-right corner of the title screen as `v<version>` on a
+translucent black panel.
+
+The string is `KARCHIPELAGO_VERSION` from `mods/archipelago/src/version.h`, a hand-maintained
+literal matching the repo's release tag. It is deliberately separate from `mod_desc.version`,
+which hoshi reads as the save-compatibility number and which tracks
+`APSAVE_VERSION_MAJOR`/`MINOR` - the shape of `APSave` - not the exported
+`ARCHIPELAGO_API_MAJOR`/`MINOR` other mods import against. The same string is printed once at boot as
+`[Main] KARchipelago <version>`.
+
+The stamp is a `Text` on hoshi's screen-space canvas (640x480 raw pixels,
+`Hoshi_CreateScreenText`). Its lifetime is bound to the title scene through the two descriptor
+wrappers rather than to a scene-change callback: `MainMenu_TitleThink` creates it and
+`MainMenu_TitleExit` calls `Text_Destroy` and clears the pointer. A `Text` is not reliably
+reclaimed by scene teardown - one created on the title and left alone goes on drawing over
+whatever follows - so the explicit destroy is what keeps it to the title screen. The think also
+guards on `*stc_textcanvas_first`, since hoshi rebuilds the canvas on every scene change and
+`Text_CreateText` faults on an empty canvas list.
+
+Scene major/minor is not enough of a gate on its own. The boot cinematic runs inside the same
+`MJRKIND_TITLE` / `MNRKIND_TITLESCREEN` scene as the title proper - a stamp created on scene
+entry sits over the cinematic for its full ~37 seconds. What separates the two phases is
+`Gm_GetMenuData()->ScMenTitleFg_gobj`, the title foreground scene carrying the logo and PRESS
+START: it is null throughout the cinematic and non-null once the title settles. The think creates
+the stamp only while that gobj exists and destroys it if the gobj goes away, so the version
+tracks the title branding rather than the scene.
+
+Layout: `t->color` and `t->viewport_color` are set before `Text_AddSubtext`, which bakes the text
+color into the subtext's `COLOR` opcode and would otherwise render in the default. The subtext is
+added at x = `VERSION_PAD` and measured with `Text_GetWidthAndHeight`, which excludes the
+subtext's own `POS` offset, so `aspect` becomes the measured box plus one pad on each side. That
+`aspect`, scaled by `viewport_scale`, is what sizes the background quad; `trans` is the box's
+top-left, placed by subtracting the scaled `aspect` and the margin from the canvas's right and
+bottom edges.
 
 ## Hooks
 
@@ -177,4 +215,4 @@ The pieces are static. Adding motion takes one of two forms. A rigged animation 
 HSDRaw/Blender needs the C side to add proc `TitleScreenForeground_Proc` (`0x8017b424`) and a
 `JObj_AddSetAnim` call after `MenuElement_Create`. Simple effects - cycling the Archipelago
 icon through the logo colors, say - are a per-frame material-color or texture swap driven from a
-think proc, the same shape as the moon/stars weather effects.
+think proc.

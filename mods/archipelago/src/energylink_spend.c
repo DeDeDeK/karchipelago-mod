@@ -6,6 +6,7 @@
 #include "main.h"
 #include "settings_menu.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 #include "ap_item_handler.h"
 #include "energylink.h"
 #include "energylink_spend.h"
@@ -24,7 +25,7 @@ static int Buy(OptionDesc *self)
     {
         OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: Energy Link is off\n",
                  self->name, entry->item_id);
-        tb_api->EnqueueColoredNoun("Turn on ", "Energy Link", tb_api->EnergyColor,
+        tb_api->EnqueueColoredNoun("Turn on ", "Energy Link", APColor_Energy,
                                    " to spend energy");
         return 0;
     }
@@ -47,7 +48,7 @@ static int Buy(OptionDesc *self)
     {
         OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: need %lld, have %lld\n",
                  self->name, entry->item_id, entry->cost, ap_data->energy_balance);
-        tb_api->EnqueueColoredNounFmt("Not enough ", "energy", tb_api->EnergyColor,
+        tb_api->EnqueueColoredNounFmt("Not enough ", "energy", APColor_Energy,
                                       "! Need %lld, have %lld", entry->cost, ap_data->energy_balance);
         return 0;
     }
@@ -62,15 +63,15 @@ static int Buy(OptionDesc *self)
         return 0;
     }
 
-    // The integer cost lands on the send counter immediately so the client diffs
-    // it on the next poll in any scene - no gameplay frame runs in the menu to
-    // drive a per-frame flush. The balance decrement feeds the UI and the gate above.
-    ap_data->energy_sent_total -= entry->cost;
-    ap_data->energy_balance    -= entry->cost;
+    // The integer cost lands on the withdrawal counter immediately so the client diffs
+    // it on the next poll in any scene - no gameplay frame runs in the menu to drive a
+    // per-frame flush. The balance decrement feeds the UI and the gate above.
+    ap_data->energy_withdraw_total += (u32)entry->cost;
+    ap_data->energy_balance        -= entry->cost;
 
     OSReport("[EnergyLinkSpend] Bought '%s' (id=%d) for %lld, balance %lld\n",
              self->name, entry->item_id, entry->cost, ap_data->energy_balance);
-    tb_api->EnqueueColoredNounFmt("Bought ", self->name, tb_api->ShopColor,
+    tb_api->EnqueueColoredNounFmt("Bought ", self->name, APColor_Shop,
                                   " for %lld energy", entry->cost);
     return 1;
 }

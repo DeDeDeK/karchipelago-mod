@@ -1,6 +1,6 @@
 # Client-Game Protocol
 
-The shared-memory wire contract between the Python Archipelago client and the game mod. The client drives it with `dolphin-memory-engine` while the mod runs in Dolphin. The mod side lives in `mods/archipelago/src/main.c` (struct, handshake, per-frame poll), `ap_item_handler.c` (item application), `check_detection.c` (location sends, goal evaluation), and `deathlink.c` / `energylink.c` / `traplink.c`.
+The shared-memory wire contract between the Python Archipelago client and the game mod. The client drives it with `dolphin-memory-engine` while the mod runs in Dolphin. The mod side lives in `mods/archipelago/src/main.c` (struct, handshake, per-frame poll), `ap_item_handler.c` (item application), `ap_checks.c` (location sends), `ap_goal.c` (goal evaluation), and `deathlink.c` / `energylink.c` / `traplink.c`.
 
 ## Shared Memory Access
 
@@ -10,14 +10,21 @@ The shared-memory wire contract between the Python Archipelago client and the ga
 
 Offsets are relative to the struct base and are pinned by `_Static_assert(offsetof(APData, ...))` lines in `main.c`. Adding a field shifts everything after it, so those asserts and the client's offset table move together; the field order in `APData` / `APSlotOptions` (`mods/archipelago/src/main.h`) is the canonical reference.
 
-All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64-bit fields (`energy_balance`, `energy_sent_total`, `sent_checks`, `client_backfill`, `goal_checks`) are NOT atomic on PPC32 - a reader may observe a torn value mid-write. For `energy_sent_total` this is self-correcting: the client reads-and-diffs a cumulative counter, so a torn read only skews one poll's delta and sets `last_seen` to whatever it read; the next poll's diff compensates exactly. Per-frame deltas are far below 2^31, bounding the magnitude of any single torn read.
+All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64-bit fields (`energy_balance`, `sent_checks`, `client_backfill`, `ap_patch_checks`, `ap_patch_backfill`, `goal_checks`) are NOT atomic on PPC32 - a reader may observe a torn value mid-write, so every 64-bit field needs a design that tolerates one:
+
+- `energy_balance` is overwritten wholesale every poll, so a torn read is gone by the next one.
+- The energy send channel avoids the problem outright by being two rising u32 counters rather than one signed net s64; see Units below.
+- `sent_checks` and `ap_patch_checks` are read-and-diffed: a torn read drops a bit for one poll and the next diff picks it up.
+- `client_backfill` and `ap_patch_backfill` are consume-once, where a lost bit would be lost for good, so both are published behind `backfill_valid` (0x428) instead. The client writes every word, then sets the flag; the game consumes both arrays, zeroes them and clears the flag last. A u32 flag is itself never torn, and because the game clears it last, a client that waits for zero also cannot write into an array the game is mid-consume on.
+- `goal_checks` is written once during the options handshake and gated by `options_valid`.
 
 ### Communication Fields
 
 | Offset | Type   | Field                | Writer       | Reader/Clearer |
 |--------|--------|----------------------|--------------|----------------|
 | 0x000  | s64    | `energy_balance`     | Client       | Game (reads; may locally adjust for purchase UI - client write is authoritative) |
-| 0x008  | s64    | `energy_sent_total`  | Game         | Client (read-and-diff; NEVER writes) |
+| 0x008  | u32    | `energy_deposit_total`  | Game      | Client (read-and-diff; NEVER writes) |
+| 0x00C  | u32    | `energy_withdraw_total` | Game      | Client (read-and-diff; NEVER writes) |
 | 0x010  | u32    | `deathlink_receive`  | Client       | Game (clear to 0) |
 | 0x014  | u32    | `deathlink_send`     | Game         | Client (clear to 0) |
 | 0x018  | u32    | `traplink_receive`   | Client       | Game (clear to 0) |
@@ -25,7 +32,7 @@ All 32-bit fields are 4-byte aligned and atomic on PPC at that alignment. The 64
 | 0x020  | u32    | `incoming_item_id`   | Client       | Game (clear to 0) |
 | 0x024  | u32    | `item_received_index`| Game         | Client (read-only) |
 
-`energy_balance` and `energy_sent_total` are denominated in raw MJ units (1 raw unit = 1 MJ in the AP pool, by the client-side `ENERGY_LINK_EXCHANGE_RATE = 1_000_000` convention). The fields are signed 64-bit so the mod can faithfully mirror multiworld pools that exceed u64 *joules* (i.e. > ~1.8x10^19 J), which translates to ~1.8x10^13 raw MJ on the mod side. `energy_sent_total` is *net* (deposits minus withdrawals) and resets to 0 each mod boot, so it stays far below even that figure.
+`energy_balance` and the two energy counters are denominated in raw MJ units (1 raw unit = 1 MJ in the AP pool, by the client-side `ENERGY_LINK_EXCHANGE_RATE = 1_000_000` convention). `energy_balance` is signed 64-bit so the mod can faithfully mirror multiworld pools that exceed u64 *joules* (i.e. > ~1.8x10^19 J), which translates to ~1.8x10^13 raw MJ on the mod side. The send channel is two u32 counters that only ever rise and reset to 0 each mod boot; the client nets them. A u32 caps a single session at ~4.29x10^9 MJ in each direction, which no session reaches.
 
 ### Handshake and Options Fields
 
@@ -70,8 +77,9 @@ Both bitmasks are `CHECKLIST_MODE_NUM` (4) rows: rows 0-2 are Air Ride / Top Rid
 |--------|------|-------|--------|--------|-------------|
 | 0x3A8 | u64[8] | `ap_patch_checks`   | Game   | Client        | Bit `i` of word `w` = AP Patch `w * 64 + i` collected, location code `413 + w * 64 + i`. Mirror of `APSave.ap_patch_collected`. |
 | 0x3E8 | u64[8] | `ap_patch_backfill` | Client | Game (clears) | Additive backfill, the same protocol as `client_backfill`. |
+| 0x428 | u32 | `backfill_valid` | Client | Game (clears) | Set to 1 after both backfill arrays are written; the game consumes them, zeroes them, and clears this last. Never write a backfill word while this reads non-zero. |
 
-`APData` ends at 0x428. AP Patches are one flat block rather than per-mode rows: they are City Trial content only, and they carry no checklist cell, so they never decode through the mode / clear_kind codec. The client reads-and-diffs `ap_patch_checks` every poll and reports new bits as ordinary location checks, which gives them the ordinary check line with no text work on either side.
+`APData` ends at 0x42C (0x430 with the 8-byte tail alignment its `u64`s force). AP Patches are one flat block rather than per-mode rows: they are City Trial content only, and they carry no checklist cell, so they never decode through the mode / clear_kind codec. The client reads-and-diffs `ap_patch_checks` every poll and reports new bits as ordinary location checks, which gives them the ordinary check line with no text work on either side.
 
 Like the other u64 fields these are not written atomically, so a torn read is possible; the client only ever ORs newly-seen bits, so a torn read costs one poll.
 
@@ -128,7 +136,7 @@ Almost every shared field follows one rule: **exactly one side writes, the other
 
 `deathlink_receive` is the exception to the wait: the client writes `1` on every incoming DeathLink bounce without waiting for the game to clear the previous one. Concurrent deaths collapse to a single kill - Kirby can't die-while-dying, so dropping the second event matches the observable game behavior.
 
-`energy_sent_total` is not a mailbox at all but a **single-writer cumulative counter**. The game owns it and only ever adds or subtracts; the client only ever reads and diffs it, never writing and never clearing.
+`energy_deposit_total` and `energy_withdraw_total` are not mailboxes at all but **single-writer rising counters**. The game owns both and only ever adds; the client only reads and diffs them, never writing and never clearing.
 
 ## Connection Handshake
 
@@ -362,7 +370,7 @@ Each category sets a bit in a save-data mask; see the `gate_*.c` files.
 | 780-788 | 780 | `AP_PATCH_UNLOCK_` | Patch types (aligned to PatchKind) | 9 | `patch_unlocked_mask` |
 | 790-819 | 790 | `AP_ITEM_UNLOCK_` | Item groups (aligned to ItemUnlockKind, `ITUNLOCK_NUM` = 30) | 30 | `item_unlocked_mask` |
 | 820-825 | 820 | `AP_STAR_PIECE_UNLOCK_` | Archipelago Star assembly spheres (in `APStarPiece` order) | 6 | `ap_star_piece_unlocked_mask` |
-| 830-854, 856 | 830 | `AP_MACHINE_UNLOCK_` | Machines (aligned to MachineKind) | 23 | `machine_unlocked_mask` |
+| 830-854, 856 | 830 | `AP_MACHINE_UNLOCK_` | Machines (aligned to the mask's bits: MachineKind, then the Archipelago Star) | 23 | `machine_unlocked_mask` |
 | 860-862 | 860 | `AP_BOX_UNLOCK_` | Box types (Blue, Green, Red) | 3 | `box_unlocked_mask` |
 | 870-878 | 870 | `AP_STAGE_UNLOCK_AIRRIDE_` | Air Ride stages | 9 | `airride_stage_unlocked_mask` |
 | 880-887 | 880 | `AP_COLOR_UNLOCK_` | Kirby colors (aligned to KirbyColor; Pink/880 is the always-unlocked default, so its item is generated but is a no-op in-game) | 8 | `color_unlocked_mask` |
@@ -409,13 +417,13 @@ AP item ID = `980 + APStarPiece`. Adds that sphere to every human rider's collec
 |----------|---------|
 | 980-985 | Rose, Green, Violet, Tan, Blue, Yellow |
 
-**Machine unlock note:** IDs 830-854 cover VCKINDs 0-24. VCKIND 25 (WHEELVSDEDEDE) is the Vs. King Dedede stadium's CPU-only machine - ID 855 is explicitly rejected by the handler and is not a valid machine unlock. IDs 856 and up continue the alignment into the MachineKinds `custom_machines` registers, in the order it discovers `machines/*.dat`.
+**Machine unlock note:** IDs 830-854 cover VCKINDs 0-24. VCKIND 25 (WHEELVSDEDEDE) is the Vs. King Dedede stadium's CPU-only machine - ID 855 is explicitly rejected by the handler and is not a valid machine unlock. ID 856 is the Archipelago Star, bit 26 of the mask; no other machine `custom_machines` registers has an unlock ID.
 
 The AP world (`worlds/kirby_air_ride/KARItems.py`) generates 23 unlock items as `progression`: 830-846, 848, 851-854 and 856. Three caveats for modders:
 
 - **Top Ride machines are live gates, not placeholders.** 845 (FREE) and 846 (STEER) are read by the mod's Top Ride lobby gating (`GateMachines_TRLobbyCanStart` / `IsTRMachineUnlocked`, in `gate_machines.c`), which hard-blocks starting a Top Ride race unless at least one is unlocked. In the apworld they are tagged `source_modes=_TR` (they don't spawn in City Trial via `CT_SPAWN_EXCLUDED_MASK` and aren't Air Ride machines), and a guaranteed Top Ride machine starter - one of Free/Steer, precollected when `machines_gated` and Top Ride is in play - keeps the gate satisfiable in every seed config. AP logic doesn't model the lobby gate, so without that precollect the `_TR`-confined unlocks could land behind it (circular placement, Top-Ride-only softlock). Free/Steer are also excluded from the AR/CT machine starter pool since they can't be ridden there. When `machine_gating_enabled == 0`, the mod sets every gateable bit (`MachineGateMask()`, bits 0 through `MachineKind_Num() - 1`) at connect, so the lobby is freely startable.
 - **Three in-range IDs ship no item.** 847 (WINGKIRBY), 849 (WHEELNORMAL) and 850 (WHEELKIRBY) are not selectable player machines - no character rides them in player-controlled contexts, and they are force-excluded from City Trial spawns. The mod still accepts the IDs and sets their bits, but no game code reads them. The canonical Dedede unlock is 854 (WHEELDEDEDE), which is what `CharacterDesc[CKIND_DEDEDE]` resolves to.
-- **856 is positional, not fixed.** The Archipelago Star's MachineKind is assigned at boot from FST discovery order, so 856 names it only while `ap_star` ships the sole `machines/*.dat` (`mods/ap_star/assets/machines/VcStarAp.dat`). A second drop-in machine sorting ahead of it shifts the numbering, and the AP world's hardcoded 856 would then unlock the other machine.
+- **856 names the Archipelago Star by name, not by position.** `custom_machines` assigns appended MachineKinds at boot in FST discovery order, so the mod binds 856 and bit 26 through the star's descriptor name (`GateApStar_MachineKind()`), and another drop-in machine in the build moves nothing. That other machine has no ID and is always available.
 
 ## Location Data
 
@@ -472,12 +480,12 @@ The mod is the source of truth: it owns `sent_checks[4][2]` in both shared memor
 
 1. **On gameplay completion**: the mod replaces `ClearChecker_SetNewUnlock` (`0x8004a054`) with a wrapper that detects the moment of transition and writes the bit into both `ap_save->sent_checks` and `ap_data->sent_checks`. As a whole-function replacement it intercepts every caller automatically (AR/CT/TR objectives, stadium results, free run). **Manual filler placement does not route through this function** - it is caught by a separate hook at `0x80180dc4` (the vanilla filler store site inside `Checklist_Think`).
 2. **Meta auto-unlock hooks**: five "meta" checkboxes bypass `SetNewUnlock` because vanilla sets them via direct stores inside `Checklist_ProcessUnlock`. The mod hooks each of the 5 store sites directly - it does not poll per frame - and forwards `is_unlocked` transitions: AR `0x18`, TR `0x77`, CT `0x37` (the native "Fill in over 100 Checklist blocks!" cells) and CT `0x6D` / `0x6E` (the Dragoon-parts and Hydra-parts cells, which auto-complete when the corresponding part rewards are received). These two are distinct from the Hydra-and-Dragoon goal cell at CT `0x77`.
-3. **Backfill processing**: each frame `CheckDetection_OnFrameStart` runs `ProcessBackfill`, which ORs `client_backfill` bits into `sent_checks`, sets `clear[].is_unlocked` and `clear[].is_visible` for visual consistency, sets `has_reward` where a local AP placement exists for that checkbox *and* the source item has been received, re-evaluates the goal, then clears `client_backfill`.
+3. **Backfill processing**: on any frame where `backfill_valid` is set, `OnFrameStart` runs `APChecks_ApplyBackfill` and `ApPatches_ApplyBackfill` and then clears the flag. The first ORs `client_backfill` bits into `sent_checks`, sets `clear[].is_unlocked` and `clear[].is_visible` for visual consistency, sets `has_reward` where a local AP placement exists for that checkbox *and* the source item has been received, re-evaluates the goal, then clears `client_backfill`.
 4. **Goal evaluation**: after every check transition and on save load, the mod evaluates the active goal and sets `goal_complete = 1` if satisfied. Sticky and persisted across reboots.
 
 ### Goal Evaluation (Mod-Side)
 
-Evaluated in `check_detection.c` against `ap_save->options` (the slot options copied at handshake). Almost every goal type reduces to bit reads on `sent_checks`:
+Evaluated in `ap_goal.c` against `ap_save->options` (the slot options copied at handshake). Almost every goal type reduces to bit reads on `sent_checks`:
 
 | Goal | Detection |
 |------|-----------|
@@ -517,19 +525,18 @@ Per-mode satisfaction is published as `goal_satisfied_mask` alongside the aggreg
 
 ### Units
 
-The AP server stores the EnergyLink pool in integer Joules; the mod stores `energy_balance` and `energy_sent_total` in raw MJ. The client scales in both directions (multiply by 1,000,000 going to the server, integer-divide coming back). All values sent to the server MUST be integers - the AP data-storage protocol does not accept floats.
+The AP server stores the EnergyLink pool in integer Joules; the mod stores `energy_balance` and both energy counters in raw MJ. The client scales in both directions (multiply by 1,000,000 going to the server, integer-divide coming back). All values sent to the server MUST be integers - the AP data-storage protocol does not accept floats.
 
 ### Client Responsibilities
 
 **Processing sends** must happen *before* updating the balance; the ordering is what closes the overdraw window.
 
 - **Seeding / restart detection**: maintain a `last_seen` watermark, re-seeded (record the current value, apply nothing) whenever a fresh game session starts - on connect, on a struct-pointer change at `0x805d52d4`, and on a `game_ready` 1-to-0 transition. The mod sets `game_ready` once in `OnSaveLoaded` and never clears it during play, so the reboot `memset` zeroing it is the restart signal. Do **not** persist `last_seen` across sessions: the counter resets to 0 each boot, so a persisted watermark would turn the boot's drop to 0 into a phantom withdrawal. There is no magnitude backstop - a small reset-to-0 is indistinguishable from ordinary spending, so the client relies on the `game_ready` signal alone.
-- **Each poll (~1s)**: `cur = read(energy_sent_total)`, `delta = cur - last_seen`.
+- **Each poll (~1s)**: `cur = read(energy_deposit_total) - read(energy_withdraw_total)`, `delta = cur - last_seen`. The two reads are separate, so a frame that both deposits and withdraws can be seen half-applied; the watermark is cumulative, so the next poll picks up the remainder.
   - `delta == 0`: nothing to send.
   - `delta > 0` (deposit): send `Set` with `add: delta * 1_000_000` and no tag.
   - `delta < 0` (withdrawal): send `Set` with operations `[add: delta * 1_000_000, max: 0]`, plus a unique `tag` (uuid) and `want_reply: true`. On the matching `SetReply`, compare `original_value - value` against the requested subtraction; if the server subtracted less (pool ran out), log the discrepancy - the mod's local balance already overshot and will be corrected on the next `set_notify` push.
   - Advance `last_seen = cur`, then optimistically fold the delta into the cached pool: `current_energy_link_value = max(0, current_energy_link_value + delta_joules)`.
-- **Optional torn-read guard**: read the field twice and skip the poll if the reads disagree. Belt-and-suspenders only - because the counter is cumulative rather than consume-once, an unguarded torn read self-heals on the next poll's diff.
 
 **Updating balance**: after processing sends, write the current AP pool total (in raw MJ, `pool_joules // 1_000_000`) to `energy_balance` as an s64, **unconditionally** every poll - so seed polls, `delta == 0` polls, and other players' deposits all keep the mod's view fresh. Sub-MJ remainders are not representable on the mod side and are dropped.
 
@@ -539,8 +546,8 @@ The AP server stores the EnergyLink pool in integer Joules; the mod stores `ener
 
 ### Game Responsibilities
 
-- **Generating energy** (`energylink.c`): accumulates locally from destroyed objects, collected patches, and machine charging. Sub-MJ precision is kept in a float carry that persists across scene loads (charge gain produces fractional MJ per frame); whenever the carry crosses a whole MJ, that whole part is added to `energy_sent_total` and the remainder rolls forward. There is no flush and no slot check - the counter is written directly and the client diffs it.
-- **Spending energy** (`energylink_spend.c`): a purchase in the in-game EnergyLink menu queues the bought item ID into `unprocessed_items` (the same path AP-delivered items take), then subtracts the integer cost from both `energy_sent_total` (which the client diffs and forwards as a withdrawal) and `energy_balance` (immediate UI feedback and the affordability gate). This happens on the purchase event itself in **any** scene - no gameplay frame is required, so menu purchases reliably reach the pool. Purchases are rejected when the queue is full. Auto-Charge's per-frame fractional withdrawals fold into the same carry.
+- **Generating energy** (`energylink.c`): accumulates locally from destroyed objects, collected patches, and machine charging. Sub-MJ precision is kept in a float carry that persists across scene loads (charge gain produces fractional MJ per frame); whenever the carry crosses a whole MJ, that whole part is added to `energy_deposit_total` (or, if negative, to `energy_withdraw_total`) and the remainder rolls forward. There is no flush and no slot check - the counter is written directly and the client diffs it.
+- **Spending energy** (`energylink_spend.c`): a purchase in the in-game EnergyLink menu queues the bought item ID into `unprocessed_items` (the same path AP-delivered items take), then adds the integer cost to `energy_withdraw_total` (which the client diffs and forwards as a withdrawal) and subtracts it from `energy_balance` (immediate UI feedback and the affordability gate). This happens on the purchase event itself in **any** scene - no gameplay frame is required, so menu purchases reliably reach the pool. Purchases are rejected when the queue is full. Auto-Charge's per-frame fractional withdrawals fold into the same carry.
 
 ## TrapLink
 

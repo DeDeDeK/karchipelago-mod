@@ -6,9 +6,9 @@ Each of the 9 City Trial stat patches can be individually locked behind an Archi
 
 ## What Is Gated
 
-The 9 `PatchKind` values (`item.h`). Each covers three ITKINDs at once - `ITKIND_<STAT>`, `ITKIND_<STAT>DOWN`, `ITKIND_<STAT>FAKE` - collapsed onto one `PatchKind` by `ItemKindToPatchKind()`. `PATCHKIND_HP` is the exception: `ITKIND_HP` has no Down or Fake variant. Grouping the variants keeps the AP pool at 9 items instead of 27, and "unlock offense stat items" is how a player thinks about it anyway.
+The 9 `PatchKind` values (`item.h`). Each covers three ITKINDs at once - `ITKIND_<STAT>`, `ITKIND_<STAT>DOWN`, `ITKIND_<STAT>FAKE` - collapsed onto one `PatchKind` by `Item_KindToPatchKind()` (`item.h`, since it describes the game rather than the mod). `PATCHKIND_HP` is the exception: `ITKIND_HP` has no Down or Fake variant. Grouping the variants keeps the AP pool at 9 items instead of 27, and "unlock offense stat items" is how a player thinks about it anyway.
 
-`ITKIND_ALLUP` and the four `*MAX` items (`SPEEDMAX`, `CHARGEMAX`, `OFFENSEMAX`, `DEFENSEMAX`) are **not** mapped by `ItemKindToPatchKind` - it returns `-1` for them - so a locked stat still lets All-Up and Max-stat pickups through. Those carry their own bits in the individual-item gate.
+`ITKIND_ALLUP` and the four `*MAX` items (`SPEEDMAX`, `CHARGEMAX`, `OFFENSEMAX`, `DEFENSEMAX`) are **not** mapped by `Item_KindToPatchKind` - it returns `-1` for them - so a locked stat still lets All-Up and Max-stat pickups through. Those carry their own bits in the individual-item gate.
 
 ## Game System
 
@@ -31,13 +31,15 @@ This module installs **no hooks of its own**. hoshi allows one hook per address 
 | Hook address | Hooked function (entry) | Clobbered instruction |
 |-------------|-----------------|----------------------|
 | `0x800eb558` | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` |
-| `0x800ed7f0` | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `lwz r0, 0x14(r1)` |
+| `0x800ed7f4` | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `mtlr r0` |
 
 Both are function epilogues, so the hook can call C with no arguments. Stadium and Air Ride never run the `CityItemSpawn` init path at all, so `ItemSpawnFilter_On3DLoadEnd()` runs the same chain at scene load instead, guarded by `!Gm_IsInCity() && *stc_grBoxGeneObj`.
 
 The two pool families are filtered differently, and the difference is load-bearing:
 
-- **Box pools** (`FilterPatchItemsFromPool`): a locked entry is deleted by stable two-pointer forward compaction and `*pool_num` shrinks. The game samples these pools by random index, so the array length must actually shrink or the roll can land on a hole. Order is preserved - this is *not* a swap-with-last delete.
-- **Event drop table** (`GatePatches_FilterEventDropTables`): entries cannot move, because callers index the table directly. All six `chance_*` columns of a locked entry are zeroed in place instead.
+- **Box pools**: a locked entry is deleted by stable two-pointer forward compaction and `*pool_num` shrinks. The game samples these pools by random index, so the array length must actually shrink or the roll can land on a hole. Order is preserved - this is *not* a swap-with-last delete.
+- **Event drop table**: entries cannot move, because callers index the table directly. All six `chance_*` columns of a locked entry are zeroed in place instead.
+
+Both passes live in `item_spawn_filter.c`. This module contributes only `GatePatches_IsItemLocked(it_kind)`, which is `Item_KindToPatchKind` plus a bit test against `patch_unlocked_mask`.
 
 A newly received unlock takes effect at the next spawn-table population - the next round, or the next event reinit - because that is when the filters re-run over freshly loaded `.dat` data.

@@ -88,6 +88,21 @@ the sizing walk and both copy directions, so it neither costs card space nor let
 runtime-assigned name shift a hash. It suits options whose value is re-derived at load
 from some other source, which is why every gate toggle in `archipelago_debug` carries it.
 
+## Mod save versioning
+
+`ModDesc.version.major` is the number hoshi compares when it restores a backed-up mod save
+(`_Hoshi_RestoreModSave`, which copies `user_data` back only while the backup's major is no
+higher than the installed mod's). That backup set is built from the mods whose
+`ModDesc.affects_gameplay` is 1, so a mod that leaves the flag at 0 is never backed up and its
+`version.major` is never read at all. `archipelago`, `custom_machines` and `ap_star` all set it.
+
+In `archipelago` the pair tracks `APSave`'s layout through `APSAVE_VERSION_MAJOR` /
+`APSAVE_VERSION_MINOR` in `main.h`, deliberately **not** `ARCHIPELAGO_API_MAJOR`/`MINOR`: the
+exported API and the save struct change for unrelated reasons, and tying them meant an API-only
+change discarded a good save while an `APSave` field added without an API change kept a stale
+one. Bump the major whenever `APSave` changes shape. Note that a same-size reorder of `APSave`
+is caught by neither the major nor `KARPlusSave_VerifySize`, which only compares sizes.
+
 ### When the hoshi file is written
 
 `KARPlusSave_OnReqSave` is hooked at each **call site** of `Memcard_ReqSave`
@@ -110,6 +125,15 @@ card-prompt, LAN and debug sites are left alone.) Two properties follow:
 `stc_hoshi_save_ready` gates the hook: a save can be requested before our own
 create/load has run, and writing the default-filled struct then would overwrite a good
 on-card file.
+
+`KARPlusSave_Write` starts by calling `Mod_CopyAllToSave`, which walks every mod's
+`OptionDesc` tree and copies each option's live value into its `MenuSave` row. Menu option
+values otherwise live only in the mod's own RAM, so a mod that changes one in code - the
+archipelago mod applies the slot's DeathLink / EnergyLink / TrapLink toggles at connect -
+would see it persist only if the player happened to open and close the settings menu, which
+used to be the sole caller. Doing the copy inside the write means every `Hoshi_WriteSave`
+caller persists the option changes it made. It is cheap and idempotent: the write is already
+hash-gated, so a copy that changes nothing still costs no card I/O.
 
 The hooks go on the call sites, not on `Memcard_ReqSave`'s entry. `_CodePatch_HookApply`
 injects a bare `bl` to the hook function with no register or LR save (that is what the

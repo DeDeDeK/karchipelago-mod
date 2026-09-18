@@ -159,7 +159,7 @@ A model effect is a `GOBJ` carrying an HSD `JOBJ` model, built by `EffectModel_C
    zeroes the state.
 5. `model = Effect_GetModelData(kind)`; if the kind is the default `0x5a5b9` the model comes from a
    fixed record instead. Asserts with `OSReport "not found effect model data(kind %d)"` when missing.
-6. `jobj = HSD_JObjLoadJoint(model->jointdesc)` instantiates the JObj tree from the descriptor's
+6. `jobj = JObj_LoadJoint(model->jointdesc)` instantiates the JObj tree from the descriptor's
    joint template.
 7. `GObj_AddObject(gobj, obj_kind = 3 /*JOBJ*/, jobj)`, which lands the root at `GObj+0x28`.
 8. Register the Effect in its per-group active list, storing the list node at `Effect+0x08`.
@@ -168,9 +168,9 @@ A model effect is a `GOBJ` carrying an HSD `JOBJ` model, built by `EffectModel_C
 So for a live model effect, `GObj+0x28` is the model tree and `GObj+0x2C` is the `Effect` state,
 which points back at its list node.
 
-**Rendering.** The gx_cb at `0x8023dfe0` is a thin wrapper around `GObj_RenderJObj` (`0x8042a258`),
+**Rendering.** The gx_cb at `0x8023dfe0` is a thin wrapper around `JObj_GX` (`0x8042a258`),
 which reads `gobj->hsd_object`, maps the GX pass to an HSD render mode with `HSD_GetRenderPass`, and
-recurses the whole tree through `HSD_JObjDispAll` (`0x8040a7b8`). OPA versus XLU pass is chosen by
+recurses the whole tree through `JObj_DispAll` (`0x8040a7b8`). OPA versus XLU pass is chosen by
 the JObj root flags (`JOBJ_ROOT_OPA` / `JOBJ_ROOT_XLU`); the whirlwind's translucent spiral renders
 in the XLU pass. `EffectModel_CreateGObj` installs no GX link or think proc of its own - both come
 from the entity-class-25 defaults plus the manually installed gx_cb.
@@ -410,7 +410,7 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x8023ccb4` | `EffectModel_CreateGObj` | build a model-effect GObj + JObj |
 | `0x80233e24` | (instance init) | writes the `Effect` state struct |
 | `0x80233ddc` | (destructor) | `GObj+0x30` dtor; frees `Effect+0x90` and the pool slot |
-| `0x8023dfe0` | (model gx_cb) | wraps `GObj_RenderJObj` |
+| `0x8023dfe0` | (model gx_cb) | wraps `JObj_GX` |
 | `0x8023d9b0` | `EffectModel_AttachToJObj` | sets `Effect+0x1e`/`+0x20` and installs the follow proc |
 | `0x8023ce1c` | (follow-joint proc) | priority 11: re-anchors the model root's SRT to the target joint |
 | `0x8023e6bc` | (anim loop watcher) | priority 11: arms AOBJ looping once the intro anim ends |
@@ -426,8 +426,8 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x8042abe8` | (sibling bank installer) | shares `psInitDataBanks`' panic strings |
 | `0x80233b74` / `0x80233ba0` | `Ptcl_Think` / `Ptcl_Think2` | point-particle updater thunks (pool masks 0 / `0xFFFD0000`) |
 | `0x804324ec` | (generator update pass) | walks `*0x805de370` driving `Ptcl_SyncGenToJObj`; not a model-effect updater |
-| `0x8042a258` | `GObj_RenderJObj` | reads `GObj+0x28`, feeds `HSD_JObjDispAll` |
-| `0x8040a7b8` | `HSD_JObjDispAll` | recursive JObj tree render |
+| `0x8042a258` | `JObj_GX` | reads `GObj+0x28`, feeds `JObj_DispAll` |
+| `0x8040a7b8` | `JObj_DispAll` | recursive JObj tree render |
 | `0x803faba0` | `MObjSetupTev` | per-frame TEV setup; asserts `MObj->tevdesc` |
 | `0x80424624` | `HSD_TExpSetupTev` | walk the compiled TEV list |
 | `0x80424128` | `HSD_TExpSetReg` | materialize TExp constants into GX registers |

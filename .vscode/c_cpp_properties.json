@@ -4,7 +4,6 @@
             "name": "Gamecube",
             "includePath": [
                 "${default}",
-                "${workspaceFolder}/externals/devkitpro/libogc/include/**", 
                 "${workspaceFolder}/externals/devkitpro/devkitPPC/include/**", 
                 "${workspaceFolder}/externals/hoshi/include/**", 
                 "${workspaceFolder}/externals/hoshi/Lib/**",

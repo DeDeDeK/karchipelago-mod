@@ -18,7 +18,7 @@ typedef enum APLocalKind
 // 1 when the Messages -> Local menu has that category turned on.
 int APAnnounce_LocalEnabled(APLocalKind kind);
 
-int APAnnounce_Grant(const char *prefix, const char *noun, GXColor color, const char *suffix);
-int APAnnounce_GrantSegments(const TextSegment *segs, int seg_count);
+void APAnnounce_Grant(const char *prefix, const char *noun, GXColor color, const char *suffix);
+void APAnnounce_GrantSegments(const TextSegment *segs, int seg_count);
 
 #endif // ARCHIPELAGO_AP_ANNOUNCE_H

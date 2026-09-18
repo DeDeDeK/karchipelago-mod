@@ -11,22 +11,17 @@
 #include "code_patch/code_patch.h"
 
 #include "ap_star.h"
-#include "ap_star_handling.h"
 #include "ap_star_shot.h"
 
-// The shot is a plasma spread projectile with its model swapped for a sphere at
-// spawn. That kind is the ownerless-safe one: its init is a bare blr, three of its
-// four state callbacks are blr, and it carries no per-kind scratch a custom spawn
-// would have to seed. The swap points the kind's ProjKindData+0x08 model block at one
-// of ours across the create call and puts it back after; the call is synchronous, so
-// no other projectile can see it.
+// PROJKIND_PLASMA_SPREAD_MID with its model swapped for a sphere across the
+// synchronous Projectile_Create call: its init and three of its four state
+// callbacks are blr, and it carries no per-kind scratch a custom spawn must seed.
 
-#define AP_STAR_POD_NUM   6
+#define AP_STAR_POD_NUM   APSTARPIECE_NUM // one per sphere color, in the same order
 #define AP_STAR_POD_JOINT 9 // first pod; the six are consecutive in the archive's joint tree
 
-// Machines tracked at once. Past this the oldest unseen ring is recycled, which
-// costs that machine a full ring rather than anything visible.
-#define AP_STAR_RING_MAX 8
+// Machines tracked at once; past this a machine has no ring, and no shot, until one frees.
+#define AP_STAR_RING_MAX 32
 
 // The shot model's joint count, which has to match what the archive holds.
 #define AP_STAR_SHOT_JOINTS 2
@@ -34,14 +29,14 @@
 #define SHOT_SPEED      6.3f  // relative to the machine, so this is also its on-screen speed
 #define SHOT_LIFETIME   233   // frames; the kind's own default is 120
 #define SHOT_GROW_FRAMES 30   // the shot swells to full size over the first of those
-#define SHOT_FADE_FRAMES 30   // ...and shrinks out over the last
+#define SHOT_FADE_FRAMES 30   // and shrinks out over the last
 
 // The size the grow starts from and the fade ends at. Not zero: the same field
 // drives the hitbox and the render cull, and a shot with no extent at all is a
 // degenerate one for a frame.
 #define SHOT_SEED_SCALE 0.05f
 #define SHOT_PROBE_UP   12.0f // ground probe starts this far above the shot
-#define SHOT_PROBE_DOWN 40.0f // ...and reaches this far below it
+#define SHOT_PROBE_DOWN 40.0f // and this far below it
 #define SHOT_HOVER      3.5f  // ride height over the surface in ground-follow mode
 
 #define POD_SHRINK_FRAMES  10
@@ -69,18 +64,16 @@ typedef struct RingState
     u8 shrink[AP_STAR_POD_NUM]; // frames left of a fired pod's collapse
     u8 regrowing;
     u8 regrow_timer;
-    s8 profile;        // handling profile the pods left have the machine on
-    u32 stamp;         // last frame this machine was seen
+    u32 frame;         // last stc_frame this machine was seen
 } RingState;
 
 static RingState stc_rings[AP_STAR_RING_MAX];
-static u32 stc_stamp;
+static u32 stc_frame;   // counts only frames in which some star ran its Think
+static int stc_thought;
 
 static JOBJDesc *stc_shot_model;  // this scene's ApStarShot.dat root
-static u32 stc_model_block[2];    // stands in for the kind's own model block
+static ProjModelBlock stc_model_block;  // stands in for the kind's own model block
 
-static const u32 *stc_palette;
-static int stc_palette_count;
 static int stc_star_slot = -1;    // class slot, which is what MachineData.kind holds
 static int stc_handlers_installed;
 
@@ -94,38 +87,47 @@ static RingState *FindRing(MachineData *md)
     return NULL;
 }
 
-// Slots are reclaimed by age rather than released, so a machine destroyed
-// without warning leaves nothing to clean up.
+// A slot is reclaimed once its machine has gone a whole frame unseen, so a machine
+// destroyed without warning leaves nothing to clean up. A live slot is never taken:
+// its owner would take another in turn, and the cascade leaves the machines first in
+// the proc list without a ring every frame.
 static RingState *ClaimRing(MachineData *md)
 {
     RingState *free_slot = NULL;
-    RingState *oldest = &stc_rings[0];
+    RingState *stale = NULL;
 
+    stc_thought = 1;
     for (int i = 0; i < AP_STAR_RING_MAX; i++)
     {
         RingState *r = &stc_rings[i];
         if (r->md == md)
         {
-            r->stamp = ++stc_stamp;
+            r->frame = stc_frame;
             return r;
         }
-        if (r->md == NULL && free_slot == NULL)
-            free_slot = r;
-        if (r->stamp < oldest->stamp)
-            oldest = r;
+        if (r->md == NULL)
+        {
+            if (free_slot == NULL)
+                free_slot = r;
+        }
+        else if (stale == NULL && stc_frame - r->frame > 1)
+        {
+            stale = r;
+        }
     }
 
-    RingState *r = free_slot != NULL ? free_slot : oldest;
+    RingState *r = free_slot != NULL ? free_slot : stale;
+    if (r == NULL)
+        return NULL;
     memset(r, 0, sizeof(*r));
     r->md = md;
     r->alive_mask = (1 << AP_STAR_POD_NUM) - 1;
-    r->stamp = ++stc_stamp;
+    r->frame = stc_frame;
     return r;
 }
 
-// The pods carry no animation tracks of their own, so their joint scale is
-// uncontested and the authored value is still there the first time a fresh model
-// is walked.
+// The pods carry no animation tracks, so the authored pose is still readable the
+// first time a fresh model is walked.
 static int ResolvePods(RingState *r, MachineData *md)
 {
     JOBJ *root = (JOBJ *)md->gobj->hsd_object;
@@ -162,8 +164,7 @@ static float WrapTurns(float t)
 }
 
 // Even angles for however many pods are left. The ring never stops spinning, so
-// only the transient matters: the phase is the one that moves the pods least,
-// which lets the survivors close the gap symmetrically.
+// only the transient matters: the phase chosen is the one that moves the pods least.
 static void SolveSpread(RingState *r)
 {
     int alive[AP_STAR_POD_NUM];
@@ -231,26 +232,6 @@ static void SetPodPose(RingState *r, int i, float f)
     JObj_SetMtxDirtySub(j);
 }
 
-// The pods left pick the profile. An empty ring holds the last one rather than
-// passing through a seventh, and the refill puts it back on the first. With the
-// profiles off the machine goes back to its shipped attributes.
-static void UpdateProfile(RingState *r, MachineData *md)
-{
-    int pods = 0;
-    for (int i = 0; i < AP_STAR_POD_NUM; i++)
-    {
-        if (r->alive_mask & (1 << i))
-            pods++;
-    }
-
-    int profile = ap_star_settings.handling_enabled ? ApStarHandling_ProfileForPods(pods) : 0;
-    if (profile < 0 || profile == r->profile)
-        return;
-
-    r->profile = (s8)profile;
-    ApStarHandling_Apply(md, profile);
-}
-
 // Tail of the star class's per-kind Think slot, once per frame per machine.
 static void OnStarThink(MachineData *md)
 {
@@ -258,7 +239,7 @@ static void OnStarThink(MachineData *md)
         return;
 
     RingState *r = ClaimRing(md);
-    if (!ResolvePods(r, md))
+    if (r == NULL || !ResolvePods(r, md))
         return;
 
     float grow = 0.0f;
@@ -275,8 +256,6 @@ static void OnStarThink(MachineData *md)
     {
         SolveSpread(r);
     }
-
-    UpdateProfile(r, md);
 
     for (int i = 0; i < AP_STAR_POD_NUM; i++)
     {
@@ -307,9 +286,8 @@ static void OnStarThink(MachineData *md)
     }
 }
 
-// Head of the star class's per-kind Init slot, once as a machine is created. The
-// ring is rebuilt from scratch by the next Think, against whatever model the new
-// machine loaded.
+// Head of the star class's per-kind Init slot. The next Think rebuilds the ring
+// against whatever model the new machine loaded.
 static void OnStarInit(MachineData *md)
 {
     RingState *r = FindRing(md);
@@ -332,14 +310,21 @@ static int NearestPod(RingState *r, MachineData *md)
         have_heading = 1;
     }
 
+    // No horizontal heading to pick by, so the lowest-index remaining pod stands in.
+    if (!have_heading)
+    {
+        for (int i = 0; i < AP_STAR_POD_NUM; i++)
+        {
+            if (r->alive_mask & (1 << i))
+                return i;
+        }
+        return -1;
+    }
+
     for (int i = 0; i < AP_STAR_POD_NUM; i++)
     {
         if (!(r->alive_mask & (1 << i)))
             continue;
-        // Pointing straight up or down leaves no heading to pick by, so the
-        // lowest remaining pod stands in.
-        if (!have_heading)
-            return i;
 
         Vec3 p;
         JObj_GetWorldPosition(r->pod[i], NULL, &p);
@@ -359,10 +344,9 @@ static int NearestPod(RingState *r, MachineData *md)
     return best;
 }
 
-// The model's sphere joint and cur_scale are both 1 on a fresh shot, so a size
-// goes straight into each. cur_scale is re-read every frame for the hitbox at
-// prio 7 and for the env sweep and the render cull, so the damage tracks the
-// sphere.
+// Both fields are 1 on a fresh shot, so a size goes straight into each. cur_scale
+// is re-read every frame for the prio-7 hitbox, the env sweep and the render cull,
+// so the damage tracks the sphere.
 static void SetShotScale(ProjectileData *proj, float f)
 {
     proj->cur_scale = f;
@@ -379,10 +363,9 @@ static void SetShotScale(ProjectileData *proj, float f)
     JObj_SetMtxDirtySub(root->child);
 }
 
-// The shot swells out of nothing and goes back to nothing at the end of its
-// life - the kind's despawn handler destroys the GObj outright, so it would
-// otherwise vanish between frames. Prio 0 runs ahead of the lifetime decrement,
-// so a shot with one frame left is already at zero.
+// The kind's despawn handler destroys the GObj outright, so the shot has to shrink
+// out. Prio 0 runs ahead of the lifetime decrement, so a shot with one frame left
+// is already down.
 static void ShotScaleThink(void *p)
 {
     ProjectileData *proj = (ProjectileData *)p;
@@ -401,9 +384,8 @@ static void ShotScaleThink(void *p)
     }
 }
 
-// Ground-follow mode, at prio 7 - after the frame's integration, before the
-// HurtData position refresh. Over a gap the probe misses and the shot holds the
-// altitude it left the ledge at until its lifetime runs out.
+// Prio 7, after the frame's integration and before the HurtData position refresh.
+// Over a gap the probe misses and the shot holds its altitude.
 static void ShotFollowGround(void *p)
 {
     ProjectileData *proj = (ProjectileData *)p;
@@ -419,14 +401,16 @@ static void ShotFollowGround(void *p)
     proj->velocity.Y = 0.0f;
 }
 
-// Stands in for the kind's own state fn2 in ground-follow mode. That one bursts
-// the shot on a steep environment contact, which a projectile deliberately
-// riding the floor would trip on every rise; this only ends it on a wall.
+// Stands in for the kind's own state fn2 in ground-follow mode. That one bursts the
+// shot on a steep environment contact, which a projectile riding the floor trips on
+// every rise; only the burst decision is replaced, so the env collision that drives
+// coll_data - and with it the yakumono break dispatch - still runs.
 static void ShotWallCheck(void *p)
 {
     ProjectileData *proj = (ProjectileData *)p;
     Vec3 hit;
 
+    Projectile_UpdateEnvColl(proj);
     if (Raycast_Wall(&proj->position_prev, &proj->position, &hit) >= 0)
         GObj_Destroy(proj->gobj);
 }
@@ -461,15 +445,15 @@ static void PaintShot(GOBJ *handle, u32 color)
 
 static GOBJ *CreateShot(ProjectileDesc *desc)
 {
-    ProjKindData *kd = ((ProjKindData **)0x8055a9a8)[PROJKIND_PLASMA_SPREAD_MID];
+    ProjKindData *kd = proj_kind_data[PROJKIND_PLASMA_SPREAD_MID];
     if (kd == NULL || kd->model_desc == NULL)
         return NULL;
 
-    u32 *orig = (u32 *)kd->model_desc;
-    stc_model_block[0] = (u32)stc_shot_model;
-    stc_model_block[1] = (orig[1] & 0x00FFFFFF) | (AP_STAR_SHOT_JOINTS << 24);
+    ProjModelBlock *orig = kd->model_desc;
+    stc_model_block.tree = stc_shot_model;
+    stc_model_block.flags = (orig->flags & 0x00FFFFFF) | (AP_STAR_SHOT_JOINTS << 24);
 
-    kd->model_desc = stc_model_block;
+    kd->model_desc = &stc_model_block;
     GOBJ *handle = Projectile_Create(desc);
     kd->model_desc = orig;
     return handle;
@@ -513,8 +497,8 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
     ProjectileDesc desc;
     memset(&desc, 0, sizeof(desc));
     desc.kind = PROJKIND_PLASMA_SPREAD_MID;
-    desc.owner_gobj = (void *)rd->x0;
-    desc.owner_unk2 = rd->x0;
+    desc.owner_gobj = rd->gobj;
+    desc.owner_unk2 = (int)rd->gobj;
     desc.position = muzzle;
     desc.forward = dir;
     desc.up = up;
@@ -551,8 +535,7 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
         proj->user_hook_1 = ShotFollowGround;
     }
 
-    if (stc_palette != NULL && pod < stc_palette_count)
-        PaintShot(handle, stc_palette[pod]);
+    PaintShot(handle, ap_star_piece_colors[pod]);
 
     r->alive_mask &= (u8)~(1 << pod);
     if (r->alive_mask == 0)
@@ -599,10 +582,8 @@ static void TryFire(RiderData *rd)
         Fire(rd, md, r, pod);
 }
 
-// Both callers of AS_StarChargeRelease: the A-release interrupt check, and the
-// full-charge hold state's own think. Taken as call replacements rather than a
-// hook on the function, whose entry has no instruction to displace without
-// losing the link register.
+// Both callers of AS_StarChargeRelease (0x801abc64). Call replacements rather than
+// a hook on the entry, which has no instruction to displace without losing LR.
 static void ApStarShot_ChargeRelease(RiderData *rd)
 {
     TryFire(rd);
@@ -616,6 +597,16 @@ void ApStarShot_OnBoot(void)
     OSReport("[ApStarShot] Charge release hooks installed\n");
 }
 
+// A pause runs no Think, so it does not age every ring at once.
+void ApStarShot_OnFrameStart(void)
+{
+    if (stc_thought)
+    {
+        stc_thought = 0;
+        stc_frame++;
+    }
+}
+
 void ApStarShot_On3DLoadEnd(void)
 {
     // Every ring's joints belong to the scene heap that was just torn down.
@@ -625,7 +616,7 @@ void ApStarShot_On3DLoadEnd(void)
 
     // Both paths repeat every round while they keep failing, so each says it once.
     static int missing_reported;
-    static int install_reported;
+    static int failure_reported;
 
     int kind = ApStar_MachineKind();
     if (kind < 0)
@@ -641,7 +632,6 @@ void ApStarShot_On3DLoadEnd(void)
 
     int is_bike = 0;
     stc_star_slot = ApStar_ClassIndex(&is_bike);
-    stc_palette = cm_api->GetPalette(kind, &stc_palette_count);
 
     HSD_Archive *arc = NULL;
     Gm_LoadGameFile(&arc, "ApStarShot");
@@ -650,15 +640,21 @@ void ApStarShot_On3DLoadEnd(void)
 
     if (!stc_handlers_installed)
     {
-        stc_handlers_installed = cm_api->SetStarInitHandler(kind, OnStarInit) &&
-                                 cm_api->SetStarThinkHandler(kind, OnStarThink);
-        if (!install_reported)
+        stc_handlers_installed = cm_api->SetInitHandler(kind, OnStarInit) &&
+                                 cm_api->SetThinkHandler(kind, OnStarThink);
+        // Reported on the install that succeeds, whichever round that is; the
+        // failure line latches so a permanent failure says so once.
+        if (stc_handlers_installed)
         {
-            install_reported = 1;
-            OSReport("[ApStarShot] %s star slot %d, %d palette colors, model %s, handlers %s\n",
-                     AP_STAR_MACHINE_NAME, stc_star_slot, stc_palette_count,
-                     stc_shot_model != NULL ? "ready" : "unavailable",
-                     stc_handlers_installed ? "installed" : "unavailable");
+            OSReport("[ApStarShot] %s star slot %d, model %s, handlers installed\n",
+                     AP_STAR_MACHINE_NAME, stc_star_slot,
+                     stc_shot_model != NULL ? "ready" : "unavailable");
+        }
+        else if (!failure_reported)
+        {
+            failure_reported = 1;
+            OSReport("[ApStarShot] %s handler slots unavailable, star shot is off\n",
+                     AP_STAR_MACHINE_NAME);
         }
     }
 }

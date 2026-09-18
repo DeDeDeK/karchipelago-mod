@@ -1,9 +1,8 @@
 // Machine name and description text on both select screens. Each screen turns a
-// CharacterKind into a pair of SIS text indices through two 20-entry tables with
-// no spare entry, so all four are relocated widened and each appended character
-// gets a name and a description entry composed here and appended to the loaded SIS
-// pointer array. A machine with no description still gets one, empty: the screen
-// draws neither text unless both indices are valid.
+// CharacterKind into a pair of SIS text indices through two 20-entry tables with no
+// spare entry, so all four are relocated widened and each appended character gets a
+// name and a description entry composed here. A machine with no description still
+// gets one, empty: the screen draws neither text unless both indices are valid.
 
 #include "os.h"
 #include "hsd.h"
@@ -14,20 +13,15 @@
 
 #include "custom_machines.h"
 
-// Entries in SisSelply.dat and SisSelplyCt.dat, both of which load into SIS slot
-// 0. Indices 0-1 are the image and kerning banks, 2-7 screen furniture, 8-27 the
-// machine names and 28-47 their descriptions.
-#define SIS_SELPLY_ENTRY_NUM 48
-
 // Both hold their string's glyphs at two bytes each plus the styling around them.
 #define SIS_NAME_TEXT_MAX 96
 #define SIS_DESCRIPTION_TEXT_MAX 160
 
-// Air Ride then City Trial: each screen's name and description index table, with
-// the lis / addi pair that forms it inside the one function that reads it.
-static const u32 stc_index_tables[2][2][3] = {
-    { { 0x804aa3d8, 0x80153d58, 0x80153d68 }, { 0x804aa428, 0x80153d5c, 0x80153d6c } },
-    { { 0x804aa598, 0x8015e76c, 0x8015e77c }, { 0x804aa5e8, 0x8015e770, 0x8015e780 } },
+// Air Ride then City Trial, name then description: the lis / addi pair that forms each
+// index table inside the one function that reads it.
+static const u32 stc_index_table_sites[2][2][2] = {
+    { { 0x80153d58, 0x80153d68 }, { 0x80153d5c, 0x80153d6c } }, // AirRideSelect_SetMachineText
+    { { 0x8015e76c, 0x8015e77c }, { 0x8015e770, 0x8015e780 } }, // CitySelect_SetMachineText
 };
 
 // Entries are read as a word and sign-extended from their low byte, so a text
@@ -48,12 +42,12 @@ static u8 *WriteGlyphs(u8 *p, u8 *end, const char *str, int upper)
 
         if (c == ' ')
         {
-            *p++ = 0x1a;  // SPACE
+            *p++ = TEXTCMD_SPACE;
             continue;
         }
         if (c == '\n')
         {
-            *p++ = 0x03;  // LINEBREAK
+            *p++ = TEXTCMD_LINEBREAK;
             continue;
         }
         if (upper && c >= 'a' && c <= 'z')
@@ -74,18 +68,21 @@ static void ComposeName(u8 *buf, const char *name)
 {
     u8 *p = buf;
 
-    *p++ = 0x10;                                                      // ALIGN_CENTER
-    *p++ = 0x18;                                                      // FIT_ON
-    *p++ = 0x16;                                                      // KERNING_ON
-    *p++ = 0x0c; *p++ = 0x00; *p++ = 0x00; *p++ = 0x00;               // COLOR black
-    *p++ = 0x0e; *p++ = 0x00; *p++ = 0x80; *p++ = 0x00; *p++ = 0x80;  // SCALE 0.5
+    *p++ = TEXTCMD_ALIGNCENTER;
+    *p++ = TEXTCMD_FIT;
+    *p++ = TEXTCMD_KERNING;
+    *p++ = TEXTCMD_COLOR; *p++ = 0x00; *p++ = 0x00; *p++ = 0x00;              // black
+    *p++ = TEXTCMD_SCALE; *p++ = 0x00; *p++ = 0x80; *p++ = 0x00; *p++ = 0x80; // 0.5
 
     p = WriteGlyphs(p, buf + SIS_NAME_TEXT_MAX - 9, name, 1);
 
-    *p++ = 0x03;                                         // LINEBREAK
-    *p++ = 0x0d; *p++ = 0x0f; *p++ = 0x17; *p++ = 0x19;  // COLOR_POP SCALE_POP KERNING_OFF FIT_OFF
-    *p++ = 0x11;                                         // ALIGN_POP
-    *p++ = 0x00;                                         // TERMINATE
+    *p++ = TEXTCMD_LINEBREAK;
+    *p++ = TEXTCMD_COLOREND;
+    *p++ = TEXTCMD_SCALEEND;
+    *p++ = TEXTCMD_KERNINGEND;
+    *p++ = TEXTCMD_FITEND;
+    *p++ = TEXTCMD_ALIGNCENTEREND;
+    *p++ = TEXTCMD_TERMINATE;
 }
 
 // The blurb under the name, in the vanilla descriptions' box and styling. An empty
@@ -94,25 +91,28 @@ static void ComposeDescription(u8 *buf, const char *description)
 {
     u8 *p = buf;
 
-    *p++ = 0x0a; *p++ = 0x00; *p++ = 0x00; *p++ = 0x14; *p++ = 0x00;  // POS_PUSH (0, 20)
-    *p++ = 0x12;                                                      // ALIGN_LEFT
-    *p++ = 0x18;                                                      // FIT_ON
-    *p++ = 0x16;                                                      // KERNING_ON
-    *p++ = 0x0c; *p++ = 0x30; *p++ = 0x30; *p++ = 0x30;               // COLOR gray
-    *p++ = 0x0e; *p++ = 0x00; *p++ = 0x8c; *p++ = 0x00; *p++ = 0x8c;  // SCALE 0.55
+    *p++ = TEXTCMD_POSPUSH; *p++ = 0x00; *p++ = 0x00; *p++ = 0x00; *p++ = 0x14; // (0, 20)
+    *p++ = TEXTCMD_ALIGNLEFT;
+    *p++ = TEXTCMD_FIT;
+    *p++ = TEXTCMD_KERNING;
+    *p++ = TEXTCMD_COLOR; *p++ = 0x30; *p++ = 0x30; *p++ = 0x30;              // gray
+    *p++ = TEXTCMD_SCALE; *p++ = 0x00; *p++ = 0x8c; *p++ = 0x00; *p++ = 0x8c; // 0.55
 
     p = WriteGlyphs(p, buf + SIS_DESCRIPTION_TEXT_MAX - 9, description, 0);
 
-    *p++ = 0x03;                                         // LINEBREAK
-    *p++ = 0x0d; *p++ = 0x0f; *p++ = 0x17; *p++ = 0x19;  // COLOR_POP SCALE_POP KERNING_OFF FIT_OFF
-    *p++ = 0x13;                                         // ALIGN_POP
-    *p++ = 0x00;                                         // TERMINATE
+    *p++ = TEXTCMD_LINEBREAK;
+    *p++ = TEXTCMD_COLOREND;
+    *p++ = TEXTCMD_SCALEEND;
+    *p++ = TEXTCMD_KERNINGEND;
+    *p++ = TEXTCMD_FITEND;
+    *p++ = TEXTCMD_ALIGNLEFTEND;
+    *p++ = TEXTCMD_TERMINATE;
 }
 
 // Re-point SIS slot 0 at a copy of the archive's pointer array with the appended
 // entries after it. The array lives in the scene's heap, so this runs on every
 // load of either screen's SIS file.
-static void CustomMachineText_ExtendSis(void)
+static void ExtendSis(void)
 {
     void **loaded = (void **)stc_sis_data[0];
 
@@ -129,51 +129,57 @@ static void CustomMachineText_ExtendSis(void)
 // Text_LoadSisFile that fills the slot.
 CODEPATCH_HOOKCREATE(0x8013baf0,
     "",
-    CustomMachineText_ExtendSis,
+    ExtendSis,
     "",
     0
 )
 
 CODEPATCH_HOOKCREATE(0x8013c4cc,
     "",
-    CustomMachineText_ExtendSis,
+    ExtendSis,
     "",
     0
 )
 
-void CustomMachineText_OnBoot(void)
+void CustomMachineSelectText_OnBoot(void)
 {
     int appended = CustomMachines_GetCharacterKindCeiling() - CKIND_NUM;
     if (appended <= 0)
         return;
 
     // A name then its description, one pair per appended character.
-    for (int i = 0; i < appended; i++)
+    for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
-        CustomMachineEntry *e = CustomMachines_FindByCharacterKind(CKIND_NUM + i);
+        CustomMachineEntry *e = CustomMachines_GetEntry(i);
+        int n = e->character_kind - CKIND_NUM;
 
-        ComposeName(stc_sis_name_text[i], e != NULL ? e->name : "");
-        ComposeDescription(stc_sis_description_text[i], e != NULL ? e->description : "");
-        stc_sis_ptrs[SIS_SELPLY_ENTRY_NUM + i * 2 + 0] = stc_sis_name_text[i];
-        stc_sis_ptrs[SIS_SELPLY_ENTRY_NUM + i * 2 + 1] = stc_sis_description_text[i];
+        if (n < 0)
+            continue;
+        ComposeName(stc_sis_name_text[n], e->name);
+        ComposeDescription(stc_sis_description_text[n], e->description);
+        stc_sis_ptrs[SIS_SELPLY_ENTRY_NUM + n * 2 + 0] = stc_sis_name_text[n];
+        stc_sis_ptrs[SIS_SELPLY_ENTRY_NUM + n * 2 + 1] = stc_sis_description_text[n];
     }
 
+    const int *vanilla[2][2] = {
+        { stc_airride_select_name_text, stc_airride_select_desc_text },
+        { stc_city_select_name_text, stc_city_select_desc_text },
+    };
     for (int screen = 0; screen < 2; screen++)
     {
         for (int which = 0; which < 2; which++)
         {
-            const u32 *table = stc_index_tables[screen][which];
-            const u32 *vanilla = (const u32 *)table[0];
             u32 *dst = stc_text_index[screen][which];
 
             for (int i = 0; i < CKIND_NUM; i++)
-                dst[i] = vanilla[i];
+                dst[i] = vanilla[screen][which][i];
             for (int i = 0; i < appended; i++)
                 dst[CKIND_NUM + i] = (u32)(SIS_SELPLY_ENTRY_NUM + i * 2 + which);
             for (int i = CKIND_NUM + appended; i <= CUSTOM_CKIND_NUM; i++)
                 dst[i] = (u32)-1;
 
-            CustomMachines_RepointTable(table[1], table[2], dst);
+            CustomMachines_RepointTable(stc_index_table_sites[screen][which][0],
+                                        stc_index_table_sites[screen][which][1], dst);
         }
     }
 

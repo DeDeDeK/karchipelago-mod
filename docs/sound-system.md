@@ -50,7 +50,7 @@ correspondence, with the sound indices each bank draws on:
 
 Slots 4 and 5 hold two and eleven files respectively, one at a time; the rest
 hold exactly one. Slot 5 is the stage slot, chosen per stage by
-`FGM_LoadStageFGM` (`0x8005a474`) through a 21-row `{stage, ssm, variant}` table
+`Gm_LoadGroundFGMBank` (`0x8005a474`) through a 21-row `{stage, ssm, variant}` table
 at `0x80498ea4`.
 
 ## Playing a sound
@@ -161,7 +161,7 @@ the script bodies
 
 Entries in tables 1, 3 and 4 are file offsets, relocated in place by adding the
 image's base address, so `FGM_InitSEM` may only be called once per image.
-`FGM_LoadAirride.sem` (`0x8005c584`) reads the whole file into one audio-heap
+`FGM_LoadAirrideSem` (`0x8005c584`) reads the whole file into one audio-heap
 block and installs it, and is reached again from `FGM_Init` (`0x8005a064`) on a
 scene reset - anything a mod does to those four globals has to be redone after
 each install.

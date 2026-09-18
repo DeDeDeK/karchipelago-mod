@@ -11,13 +11,13 @@ stage archive does not fit (GrSimpleModel alone is 14.5 MB).
 So nothing is shipped but the recipe. This walks each donor's backdrop subtree, works
 out which byte ranges of the file the subtree actually occupies, and writes those
 ranges - not their contents - into one small archive. At runtime the mod reads just
-those ranges off the retail disc into one allocation and relocates them, which costs
-the same memory the carved asset used to and reads the same number of bytes.
+those ranges off the retail disc into one allocation and relocates them.
 
 Per backdrop the manifest holds:
 
-  * the donor filename, and the offsets/lengths of 5-17 file ranges. Ranges are
-    expanded to 32-byte boundaries at both ends, because `File_Read` needs a
+  * the donor filename, and the offset/length of each file range the subtree occupies
+    (one contiguous range per donor in practice). Ranges are expanded to 32-byte
+    boundaries at both ends, because `File_Read` needs a
     32-byte-aligned offset, length and destination - so the runtime copies them
     verbatim with no alignment arithmetic of its own. GX needs the same alignment
     for textures, display lists and vertex arrays, which the expansion also gives.
@@ -27,9 +27,8 @@ Per backdrop the manifest holds:
     precomputed here and the runtime just adds the buffer base.
   * a `scale` factor. The loader stamps City Trial's StageScale over the root joint,
     so donors modelled at 1300-10000 units would otherwise render at wildly different
-    distances. The carve used to bake the normalization into every vertex; the factor
-    is shipped instead and the mod applies it to the root joint, which renders the
-    same and keeps the geometry byte-identical to the disc.
+    distances. Shipping the factor and letting the mod apply it to the root joint
+    keeps the geometry byte-identical to the disc.
 
 The payload the runtime builds leads with a 0x20-byte pp slot mirroring a vanilla
 stage's `grModel<X>[1]`: word 0 is the backdrop JOBJDesc root, the rest is zero (no

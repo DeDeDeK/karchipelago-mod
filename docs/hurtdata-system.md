@@ -212,8 +212,8 @@ collision is still detected), 2 intangible (no collision at all - the hurtbox is
 
 Two timers drive it, both counting down each frame:
 
-- **Intangibility** (`vuln.intang_timer`, +0x94), set by `HurtData_GiveIntangibility` (`0x8018cb5c`,
-  named `HurtData_UpdateIntangibility` in the symbol map). Takes priority over invincibility, sets
+- **Intangibility** (`vuln.intang_timer`, +0x94), set by `HurtData_GiveIntangibility` (`0x8018cb5c`).
+  Takes priority over invincibility, sets
   `vuln.kind = 2`, and only ever *raises* the timer - a shorter request is ignored.
 - **Invulnerability** (`vuln.invuln_timer`, +0x98), set by `HurtData_GiveInvincibility`
   (`0x8018cc38`). Sets `vuln.kind = 1`, and only takes effect while the intangibility timer is 0.
@@ -339,7 +339,7 @@ victim's normal `HitColl_ActOnCollision` / `Machine_ActOnHitCollision` resolutio
 | HurtData_InitRegion | 0x8018c598 | Builds a defensive sub-region from joint data |
 | HurtData_UpdatePerFrame | 0x8018c4e8 | Per-frame position/radius update and pos_tracker roll |
 | HurtData_CheckVulnerability | 0x8018cd9c | Non-zero if the target is protected |
-| HurtData_GiveIntangibility | 0x8018cb5c | Sets the intangibility timer (map name: HurtData_UpdateIntangibility) |
+| HurtData_GiveIntangibility | 0x8018cb5c | Sets the intangibility timer |
 | HurtData_GiveInvincibility | 0x8018cc38 | Sets the invulnerability timer |
 | HurtData_UpdateVulnState | 0x8018cb28 | Refreshes `vuln.kind` from the timers |
 | Machine_ApplyHurt | 0x8018d1a8 | Applies hurt from a HurtParams through the log |

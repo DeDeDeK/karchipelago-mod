@@ -22,7 +22,7 @@ a    = Vec_GetAngleBetween(r, md->forward /*0x418*/)      // radians
 rate = base_charge_rate + (a / pi) * (turning_charge_rate - base_charge_rate)
 ```
 
-`PSVECMagnitude` (0x803d2158) guards both vectors at 1e-5; below that the angle is taken as 0 and the rate is the base one, so a stationary machine charges at `base_charge_rate`.
+`VECMag` (0x803d2158) guards both vectors at 1e-5; below that the angle is taken as 0 and the rate is the base one, so a stationary machine charges at `base_charge_rate`.
 
 Three conditions skip the increment: +0xc35 bit 0x01, the sign bit of the byte at +0xc36, and a nonzero `charge_cooldown_timer` (+0x794). While any holds, the meter, the display mirror and two of the effect flags are all left alone.
 

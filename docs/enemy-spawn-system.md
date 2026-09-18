@@ -198,7 +198,6 @@ Four globals hold the manager state, all r13-relative:
 | 0x805DD70C | +0x62C | `stc_spawn_slots` | Array of 4 SpawnSlot structs |
 | 0x805DD710 | +0x630 | `stc_enemy_spawn_data` | Per-stage spawn config (`EnemySpawnData`) |
 | 0x805DD714 | +0x634 | `stc_enemy_mgr` | EnemyMgr struct |
-| 0x805DE334 | +0x1254 | `stc_event_actor_list` | Global EventActor linked-list root |
 
 ### EnemyMgr (0x3C bytes)
 
@@ -214,7 +213,7 @@ Four globals hold the manager state, all r13-relative:
 | +0x18 | u16 | (reserved) | Zeroed at init, never read or written again |
 | +0x1A | s16 | slots_initialized | Count of initialized spawn slots |
 | +0x1C | s16 | last_spawn_slot | Last slot index used |
-| +0x20 | u32[3] | ct_time | `City_GetMinSecMs` output |
+| +0x20 | u32[3] | ct_time | `Gm_GetRemainingFrames` output |
 | +0x2C | u32 | ct_duration_base | Base time in 60ths |
 | +0x30 | u32 | ct_duration | Total match duration in 60ths |
 | +0x34 | float | time_progress | current/total (0.0-1.0), drives CT difficulty scaling |
@@ -409,8 +408,7 @@ each of the two that mod code touches.
 - **StadiumKind** (`stadium.h`, `STKIND_*`) is the 0-based City Trial event index:
   `STKIND_MELEE1 = 7`, `STKIND_MELEE2 = 8`.
 
-`Stage_GetGrKindFromStageKind` (0x80261ce8, exported to mod code as
-`Gm_GetGrKindFromStageKind`; table `*(*(r13+0x7FC))`, stride 0x58, GroundKind at +0x00) maps
+`Gm_GetGrKindFromStageKind` (0x80261ce8; table `*(*(r13+0x7FC))`, stride 0x58, GroundKind at +0x00) maps
 StageKind to GroundKind: 17 -> 14 (GrPasture1), 18 -> 17 (GrColosseum5), matching the `.dat`
 evidence above. StageKind uses menu order and GroundKind uses file order, so the two spaces
 coincide only at 0/1/2 and at City Trial (9) and diverge everywhere else - Machine Passage is
@@ -470,23 +468,22 @@ Enemies have no traditional HP - death comes from per-hit knockback, not accumul
 Incoming damage is first scaled by **0.4** (`Enemy_ScaleDamage` 0x8020b71c, reading param table
 +0x04), then classified into a response tier 0-3 by `Enemy_ClassifyDamageTier` (0x8020b740)
 against three float thresholds at the table's +0x08, +0x0C and +0x10 (10.0, 21.0, 32.0).
-`Enemy_ApplyKnockback` (0x8020b784) indexes four per-tier arrays by that tier (`ed+0xA1C`) and
-writes the results into `EnemyData`:
+`Enemy_ApplyKnockback` (0x8020b784) indexes three per-tier arrays by that tier (`ed+0xA1C`):
 
-| Tier | Damage | Stun frames (ed+0xA18, +0x60) | Launch speed (ed+0x9D8, +0x50) | KB scale (ed+0x878, +0x40) | KB base magnitude (+0x30) |
-|------|--------|-------------------------------|--------------------------------|----------------------------|---------------------------|
-| 0 | < 10.0 | 2 | 2.0 | 1.0 | 20 |
-| 1 | 10.0 - 20.9 | 4 | 3.0 | 0.8 | 30 |
-| 2 | 21.0 - 31.9 | 6 | 4.0 | 0.6 | 40 |
-| 3 | >= 32.0 | 8 | 5.0 | 0.5 | 50 |
+| Tier | Damage | Stun frames (ed+0xA18, +0x60) | Launch speed (ed+0x9D8, +0x50) | Intangibility base (+0x30, int) |
+|------|--------|-------------------------------|--------------------------------|---------------------------------|
+| 0 | < 10.0 | 2 | 2.0 | 20 |
+| 1 | 10.0 - 20.9 | 4 | 3.0 | 30 |
+| 2 | 21.0 - 31.9 | 6 | 4.0 | 40 |
+| 3 | >= 32.0 | 8 | 5.0 | 50 |
 
-These values are **global** - shared by every enemy type and tier - and static: they live in
-`Enemy.dat` (public `emDataAll`), loaded by `Enemy_LoadCommonParams` (0x801fd580), which stores
-the table pointer to `*0x805dd878`. The magnitude actually passed to the launch is
-`int(KB_base_mag[tier] * actor_data->+0x00->+0xA0 * KB_scale[tier])`, clamped to at least 1, so
-the per-tier archive launch multiplier (+0xA0) further scales how far a given enemy flies.
-Higher-tier enemies can carry a lower multiplier, flying less far from the same hit and so
-being harder to knock out of the arena.
+These values are **global** - shared by every enemy type and tier: they live in `Enemy.dat`
+(public `emDataAll`, `EnemyParamTable`), loaded by `Enemy_LoadCommonParams` (0x801fd580), which
+stores the table pointer to `*0x805dd878`. The launch speed is what sends the enemy flying:
+`EnemyState_AnimTick` sets its velocity to the knockback direction times it. The intangibility
+handed to `HurtData_GiveIntangibility` is `int(base[tier] * actor_data->+0x00->+0xA0 *
+scale)`, clamped to at least 1, plus the tier's stun frames, where `scale` is the table's +0x40
+`{1.0, 0.8, 0.6, 0.5}` indexed by `GameData+0xa95` rather than by tier.
 
 The death sequence: a hit sets `stun_frames` (ed+0xA18) from the response tier;
 `EnemyState_AnimExit` (0x8020c558, func3 for states 0x00-0x08) decrements it each frame during
@@ -522,9 +519,8 @@ ed->path_active_flag = -1.0f; // +0xA8C, enables path following
 EnemyPath_Init(ed);
 ```
 
-`mods/custom_events/src/spawn_enemy.c` installs a `splArcLengthPoint` null-safety patch from
-`SpawnEnemy_OnBoot` for actors whose init callbacks reach for splines before path setup;
-nothing calls that boot function today, so the patch is not live.
+`splArcLengthPoint` (0x80415958) dereferences the spline unconditionally, so a standalone actor
+whose init callbacks walk a path before this setup faults.
 
 ## Key Functions
 
@@ -572,7 +568,7 @@ nothing calls that boot function today, so the patch is not live.
 | `splArcLengthPoint` | 0x80415958 | Evaluate a spline position (wrapper) |
 | `splGetSplinePoint` | 0x80414fc0 | Evaluate a spline at a parameter |
 | `splArcLengthGetParameter` | 0x80415758 | Arc-length parameter for a spline |
-| `Stage_GetGrKindFromStageKind` | 0x80261ce8 | StageKind -> physical GroundKind (hoshi exports it as `Gm_GetGrKindFromStageKind`) |
+| `Gm_GetGrKindFromStageKind` | 0x80261ce8 | StageKind -> physical GroundKind |
 
 ## Data Addresses
 
@@ -584,10 +580,10 @@ nothing calls that boot function today, so the patch is not live.
 | Archive filename pointers | 0x804b2204 | - | Two pointers per data_index (dat, group) |
 | Per-type descriptor table | 0x804b1d98 | - | One pointer per actor ID |
 | Default collision bounds | 0x804b1d40 | - | All-zero bounds used when `bounds_flag == -1.0` |
-| Enemy parameter table pointer | 0x805dd878 | - | Pointer to the `emDataAll` block, NULL until enemies load. Damage scale +0x04, tier thresholds +0x08/+0x0C/+0x10, per-tier KB magnitude/scale/launch/stun +0x30/+0x40/+0x50/+0x60, mode scale +0x70, detection range +0x80, retarget cooldown +0x94/+0x98 |
+| Enemy parameter table pointer | 0x805dd878 | - | Pointer to `EnemyParamTable` (`emDataAll`), set on every 3D scene load. Damage scale +0x04, tier thresholds +0x08, intangibility base/scale +0x30/+0x40, per-tier launch speed/stun +0x50/+0x60, detection range +0x80, leash range +0x90, retarget cooldown +0x94/+0x98 |
 | Stage-file table | 0x804A2FFC | - | Stage-def pointers indexed by physical GroundKind |
 | EnemyMgr pointer | 0x805DD714 | +0x634 | EnemyMgr struct (0x3C bytes) |
 | SpawnSlot array | 0x805DD70C | +0x62C | Four SpawnSlot structs (0x48 each) |
 | Enemy spawn data | 0x805DD710 | +0x630 | Per-stage spawn config pointer |
 | Init flag | 0x805DD708 | +0x628 | 1 during init, 0 when done |
-| EventActor list | 0x805DE334 | +0x1254 | Global EventActor linked-list root |
+| GObj p_link lists | 0x805DE334 | +0x1254 | `stc_gobj_lookup`, the GObj list head per p_link; live enemies are `(*stc_gobj_lookup)[GAMEPLINK_ENEMY]` |

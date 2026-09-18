@@ -3,10 +3,9 @@
 #include "main.h"
 #include "city_trial_event.h"
 
-// Similar to the game's CityEvent_ForceStart (0x800ee778), but adds the event to
-// prev_kind[] history so it can't stack with a natural re-occurrence, and skips
-// the reserve queue - the AP item handler retries by returning 0 instead.
-int Event_Do(EventKind kind)
+// Like CityEvent_ForceStart (0x800ee778) but without the reserve queue - the AP item
+// handler retries by returning 0 instead.
+static int Event_Do(EventKind kind)
 {
     if (!stc_eventcheck_gobj || !*stc_eventcheck_gobj)
         return 0;
@@ -17,6 +16,11 @@ int Event_Do(EventKind kind)
     if (ev_chk->state != 0)
         return 0;
 
+    // The stage reserves a once-only event's resources for a single run; a second
+    // Restoration Area overflows the collision zone pool (grcoll.c assert).
+    if (ev_chk->data->event->param->arr[kind].once_only && ev_chk->occurrence_count[kind])
+        return 0;
+
     if ((*stc_event_function)[kind].check &&
         !(*stc_event_function)[kind].check(ev_chk))
         return 0;
@@ -24,13 +28,11 @@ int Event_Do(EventKind kind)
     ev_chk->state = 1;
     ev_chk->cur_kind = kind;
     ev_chk->timer = 0;
-    ev_chk->prev_kind[ev_chk->prev_kind_num] = ev_chk->cur_kind;
-    ev_chk->prev_kind_num++;
 
     if (ev_chk->data->event->param->arr[kind].is_siren)
     {
         Gm_FadeOutMusic(ev_chk->data->event->music_fadeout_frames);
-        SFX_Play(0x130002); // event siren
+        SFX_PlayFullVolume(EVENT_SIREN_SFX);
 
         int sky_preset = ev_chk->data->bgm_sky[kind].sky_preset;
         if (sky_preset != -1)

@@ -24,7 +24,7 @@ Two GObj procs on each rider drive the CPU. They run every frame:
 
 ```
 Rider_CPUThink (0x8018fc58)            // proc: decide + fill the virtual pad
-  +- if plGetPlayerKind(RiderData.ply) == PKIND_CPU (1):
+  +- if Ply_GetPKind(RiderData.ply) == PKIND_CPU (1):
        _Rider_UpdateCPU (0x80275c70)   // thin wrapper
          +- Rider_UpdateCPU (0x8026beec)            // orchestrator, 4 stages:
               +- Rider_ProcessCPUDistance (0x8026bbe0)   // 1. perceive (self-state, anti-stuck)
@@ -33,7 +33,7 @@ Rider_CPUThink (0x8018fc58)            // proc: decide + fill the virtual pad
               +- Rider_CPUProcessCmd      (0x80275cbc)   // 4. emit    (command stream -> virtual pad)
 
 Rider_InputThink (0x8018ee28)          // proc: read effective input for this frame
-  +- if plGetPlayerKind == PKIND_CPU:
+  +- if Ply_GetPKind == PKIND_CPU:
        RiderData.held   (0x3d8) = Rider_GetCPUButtons(RiderData)  // 0x80275cb0
        RiderData.stickX (0x3ec) = Rider_GetCPUStickX(RiderData)   // 0x80275c90
        RiderData.stickY (0x3ed) = Rider_GetCPUStickY(RiderData)   // 0x80275ca0
@@ -42,17 +42,17 @@ Rider_InputThink (0x8018ee28)          // proc: read effective input for this fr
 Rider_CopyInputToMachine (0x80190c54)  // rider input -> machine
 ```
 
-`plGetPlayerKind` (0x8022c858) returns the `PKIND` of a controller slot
+`Ply_GetPKind` (0x8022c858) returns the `PKIND` of a controller slot
 (`PKIND_HMN`=0, `PKIND_CPU`=1, `PKIND_NONE`). It is distinct from
 `Ply_CheckIfCPU` (0x8000948c), a separate query.
 
 ### Stage roles
 
 1. **Perceive** - `Rider_ProcessCPUDistance` (0x8026bbe0) refreshes the rider's
-   *self*-state for the decision logic: it caches the machine ids from
+   *self*-state for the decision logic: it caches the `is_bike` and absolute kind of
    `RiderData.machine_gobj` (`CpuData+0x0c/+0x0d`), records position/velocity, casts a
-   short forward predict-ray (`pos + vel*15` against the course), and caches three
-   per-machine turn/speed-envelope scalars into the globals `0x8055e68c/690/694` (read
+   short forward predict-ray (`pos + vel*15` against the course), and caches the machine's
+   two heading-alignment cosines and stuck angle into the globals `0x8055e68c/690/694` (read
    by route-building and steering). It runs two **anti-stuck detectors** - a position
    one (no movement away from `recorded_pos` for 241 frames -> `status_flags` bit `0x04`)
    and a velocity one (too slow or moving against facing for 60 frames -> bit `0x02`) -
@@ -66,7 +66,7 @@ Rider_CopyInputToMachine (0x80190c54)  // rider input -> machine
    persistent multi-rider world model.
 2. **Decide** - `Rider_CPUDecideState` (0x802716e8) dispatches on the **strategic
    state** `CpuData+0x08` (1..10; **state 0 asserts** - `cpu.c:0x21f1`) to one of 9
-   handlers (`0x80271xxx`-`0x80273xxx`; states 2/4/`>10` share `0x80271b24`). The
+   `Rider_CPUDecide*` handlers (states 2/4/`>10` share `Rider_CPUDecideCruisePlus`). The
    `0x804b7a28` table is the compiler's switch jump table, not an array of handler
    pointers. Each handler rewrites the **behavior flags** (`CpuData+0x2c`),
    computes the navigation target (see below), selects the target entities
@@ -169,16 +169,30 @@ object lists - none are ids an external caller can synthesize.
   when damage is enabled. Winner -> `+0x70`, cooldown `HSD_Randi(60)+60` (60-119f); none ->
   `+0x70 = 5`. Consumed by writing the rival's *live* `Ply_GetPosition` into
   `nav_target_pos` (+0xb8).
-- **Item** - `Rider_CPUScanItems` (0x80263c4c), states 3 & 8. Keeps a **top-5 ranked**
-  array (score = base + behind-bonus + distance bands); the caller takes the rotating
-  pick -> `item_target` (+0x74), pos -> `item_target_pos` (+0x78). State 8 re-validates each
-  frame, acquires a new one only on `frame%300==0` past the Attack roll.
+- **Item** - `Rider_CPUScanItems` (0x80263c4c), states 3 & 8. Ranks the **top 5** items
+  within a radius of a center point: score = `Rider_CPUGetItemScore` (0x802768a8), +5 when
+  the item is not ahead of the optional facing vector, + distance bands (+10 under 50 units,
+  +5 under 200, +1 under 500), ties going to the nearer. Items scoring below 1, or sitting
+  too steeply above or below the rider, are skipped. It returns the `path_retry_counter`'th
+  pick, so stuck recovery rotates through the list; the caller stores it to `item_target`
+  (+0x74) and its pos to `item_target_pos` (+0x78). The per-kind base comes from the table
+  at 0x804b862c: every stat patch-up, All Up, HP and the blue box 50; food 5, times 20 under
+  a quarter of machine HP and 10 under half; abilities, weapons and the green and red boxes
+  1; the timed Max boosts, candy and legendary parts 0; the downs, fakes, Sleep, Speed Min and
+  Charge None -1. Navigate keeps its target until a radius-2 rescan around it comes back
+  empty, then scans 700 units around the rider and falls back to the whole map (100000).
+  State 8 re-validates each frame and acquires a new one only on `frame%300==0` past the
+  Attack roll.
 - **City object** - `Rider_CPUScanCityObjects` (0x802638a4), state 3. Scans actor slots
   0..0x16 with height/distance/kind filters, top-5 ranked -> `city_object` (+0x84) /
   `city_object_pos` (+0x88).
 - **Route goal** - `Rider_CPUScanRouteGoal` (0x80263fd0), states 5 & 6. **Single best**
-  (not ranked) -> `route_goal` (+0x94) / `route_goal_pos` (+0x98). States 5/6 fill
-  `nav_target_pos` by priority `route_goal > city_object > item_target`.
+  (not ranked) -> `route_goal` (+0x94) / `route_goal_pos` (+0x98). It walks the enemy GObj
+  list and scores live enemies by `EnemyData.pos`, skipping child parts (actors 72-74) and
+  enemies in common states 1-10, with a bonus while the rider holds no copy ability - the
+  "goal" is an inhalable enemy, not an item. States 5/6 fill `nav_target_pos` by priority
+  `route_goal > city_object > item_target`; state 5 runs no item or city-object scan, so
+  with no live enemy it keeps steering at the last `nav_target_pos` (the origin after init).
 - **Charge anchor** - `Rider_CPUSelectChargeAnchor` (0x80263610), state 7. Resolves a
   difficulty-scaled anchor node id -> `charge_anchor_id` (+0xb4), pos -> `charge_anchor`
   (+0xb0).
@@ -262,24 +276,24 @@ ENABLE bits), computes the nav target, selects target entities, then tail-calls 
 arbitration cascade (`Rider_CPUArbitrateManeuver`) to commit the tactical maneuver.
 The cascade and the handlers gate decisions on the two flag bytes below and
 difficulty-scale their probability rolls via `Rider_CPUDifficultyScale` (0x80276f00),
-which maps the skill level `CpuData+0x22` (0..8) to a `[0,1]` factor (`level/8`). Only
+which maps the skill level `CpuData+0x22` (s16, 0..8) to a `[0,1]` factor (`level/8`). Only
 states **7 (Charge)** and **8 (Attack)** roll `HSD_Randf` in the handler body; the
 cruise/navigate states are deterministic (their maneuver comes from geometry). The
 dodge / ram / brake / wiggle probabilities live one layer down, in the cascade itself.
 `base_maneuver` (+0x14) is the maneuver a state parks on (states write 1 or 2);
 handlers fall back to it.
 
-| State | Addr | Name | Behavior |
-|-------|------|------|----------|
-| 1 | 0x80271790 | **Cruise** | Follow the racing line; leanest flag set. Steers at whichever is closer: the track look-ahead or `target_primary`. |
-| 2,4,>10 | 0x80271b24 | **Cruise+ (default)** | Catch-all cruise; same targeting as 1 but enables the item/attack desire bits. |
-| 3 | 0x80271eb4 | **Navigate** | Heavyweight city path-finding; all behaviors enabled. Holds the **position-stuck recovery sweep** (the get-unstuck workhorse): on stuck + unreachable target it sweeps the reversed forward vector for an escape node and clears targets. |
-| 5 | 0x802726fc | **RouteFollow** | Follow a precomputed route (3-slot cache) toward a goal; no spline look-ahead. |
-| 6 | 0x80272888 | **RouteFollow+City** | Like 5, plus nearest-city-object override and the same anti-stuck escape as state 3. |
-| 7 | 0x80272dd0 | **Charge** *(med)* | Drive to a fixed world anchor; on a difficulty-scaled `HSD_Randf` roll when close, commit maneuver 0x15. |
-| 8 | 0x802735dc | **Attack** *(high)* | Acquire the nearest in-cone rival (loops players 0..4, distance minus collision radii), then on rolls fire a scripted spin-attack input burst (L/R variant by coin-flip). |
-| 9 | 0x80273228 | **Reposition** *(med)* | Branches on `stage_kind` (+0xf) to nudge its own position by stage-specific offsets (sidestep / back off / climb), then resume. Deterministic. |
-| 10 | 0x80273b48 | **Patrol** *(low-med)* | Timed ~900-frame toggle of a 2-bit sub-state (`+0x2d` bits 0x18); follows nav target or a rival from the shared `Rider_CPURivalSelect`. Deterministic itself. |
+| State | Handler | Name | Behavior |
+|-------|---------|------|----------|
+| 1 | `Rider_CPUDecideCruise` 0x80271790 | **Cruise** | Follow the racing line; leanest flag set. Steers at whichever is closer: the track look-ahead or `target_primary`. |
+| 2,4,>10 | `Rider_CPUDecideCruisePlus` 0x80271b24 | **Cruise+ (default)** | Catch-all cruise; same targeting as 1 but enables the item/attack desire bits. |
+| 3 | `Rider_CPUDecideNavigate` 0x80271eb4 | **Navigate** | Heavyweight city path-finding; all behaviors enabled. Holds the **position-stuck recovery sweep** (the get-unstuck workhorse): on stuck + unreachable target it sweeps the reversed forward vector for an escape node and clears targets. |
+| 5 | `Rider_CPUDecideRouteFollow` 0x802726fc | **RouteFollow** | Follow a precomputed route (3-slot cache) toward a goal; no spline look-ahead. |
+| 6 | `Rider_CPUDecideRouteFollowCity` 0x80272888 | **RouteFollow+City** | Like 5, plus nearest-city-object override and the same anti-stuck escape as state 3. |
+| 7 | `Rider_CPUDecideCharge` 0x80272dd0 | **Charge** *(med)* | Drive to a fixed world anchor; on a difficulty-scaled `HSD_Randf` roll when close, commit maneuver 0x15. |
+| 8 | `Rider_CPUDecideAttack` 0x802735dc | **Attack** *(high)* | Acquire the nearest in-cone rival (loops players 0..4, distance minus collision radii), then on rolls fire a scripted spin-attack input burst (L/R variant by coin-flip). |
+| 9 | `Rider_CPUDecideReposition` 0x80273228 | **Reposition** *(med)* | Branches on `stage_kind` (+0xf) to nudge its own position by stage-specific offsets (sidestep / back off / climb), then resume. Deterministic. |
+| 10 | `Rider_CPUDecidePatrol` 0x80273b48 | **Patrol** *(low-med)* | Timed ~900-frame toggle of a 2-bit sub-state (`+0x2d` bits 0x18); follows nav target or a rival from the shared `Rider_CPURivalSelect`. Deterministic itself. |
 
 **The probability rolls.** With `scale = level/8` (from `Rider_CPUDifficultyScale`),
 the only difficulty-scaled `HSD_Randf` gates in the handlers are:
@@ -304,8 +318,8 @@ caller passes 0, the result of **`Rider_CPUSelectProfile` (0x802766fc)**. That
 selector is a pure function of context:
 
 ```
-stage_kind 9    -> 3  (Navigate)        stage_kind 0xf  -> 7  (Charge)
-stage_kind 0x11 -> 5  (RouteFollow)     stage_kind 0x12 -> 6  (RouteFollow+City)
+CITY1 (9)          -> 3  (Navigate)      TARGETFLIGHT (0xf) -> 7  (Charge)
+KIRBYMELEE1 (0x11) -> 5  (RouteFollow)   KIRBYMELEE2 (0x12) -> 6  (RouteFollow+City)
 else if rider.ply == 4 -> 10 (Patrol)
 else look up Gm_GetCityKind() in the table at 0x804b7f78, default 2 (Cruise+):
 ```
@@ -318,10 +332,12 @@ else look up Gm_GetCityKind() in the table at 0x804b7f78, default 2 (Cruise+):
 | 0xf, 0x10 | 2 Cruise+ | 0xd, 0x13 | 5 RouteFollow |
 
 So the strategic state is a **per-stage / per-stadium AI personality**: combat
-stadiums (city 0xe / 0x12) get Attack, collection ones get RouteFollow, etc. The
+stadiums (city 0xe / 0x12) get Attack, Kirby Melee gets RouteFollow, etc. The
 two init entry points are `Rider_CPUInitPlayer` (0x80275c04, passes 0 -> computed
 profile, from match setup) and `Rider_CPUInitPlayerFixed` (0x80275c40, forces
-state 1 / difficulty 8, from `Game_Think`).
+state 1 / difficulty 8, from `Game_Think`). `Game_Think` (0x80012a08) calls the fixed one
+only for a human slot while `GameData.city_kind` is 4, and marks the slot `PKIND_CPU` after
+it returns - it builds an autopilot for a human, not a CPU opponent.
 
 ## Behavior & Desire Flags
 
@@ -447,14 +463,14 @@ Priority order (first match wins):
 | 4 | **0x12** TapOnce | attack/target-scan picks a scored target (RNG, ai_state-bucketed) |
 | 5 | **0x13** Wiggle | threat sub-scan hit + roll (gated by desire `0x400`, bypassed by copy_kind==9) |
 | 6 | **9** DodgeProjectile | MachineData+0xc33 bit 0x02 (being-hit) |
-| 7 | **0xd** ChargeCentered | ENABLE `0x40` + desire `0x1000000` clear + rival found + roll < 0.05*scale (or a 1/100 short-circuit) |
+| 7 | **0xd** ChargeCentered | `status_flags` 0x40 (Navigate sets it) + desire `0x1000000` clear + a `Rider_CPUScanCityObjects` pick outscoring the current machine + roll < 0.05*scale (or a 1/100 short-circuit) |
 | 8 | **0x14** Brake | ai_state in {2,4,7,9} + difficulty > 3 + machine brakeable + roll < scale |
-| 9 | **7** ChargeHold | ENABLE `0x01` + machine chargeable + per-machine dist/cone gate (`Vec2_Dist(pos, item_target_pos) < dist` AND charge < cone) |
-| - | *(city gate)* | if NOT `CityTrial_IsInCity()` -> skip 10-12 |
+| 9 | **7** ChargeHold | ENABLE `0x01` + machine chargeable + per-machine dist/cone gate (`VECSquareDistance(pos, item_target_pos) < dist` AND charge < cone) |
+| - | *(city gate)* | if NOT `Gm_IsInCity()` -> skip 10-12 |
 | 10 | **6** RouteFollow+City | in-city + `path_point` (+0xac) set + HUD-progress ratio < 0.9 |
 | 11 | **0xb** SteerTarget/Wiggle | ENABLE `0x08` + target (`interaction_target`/`item_target`) within 1600 units |
 | 12 | **0xc** SteerTarget/Advance | ENABLE `0x08` + `item_target` set + (within 1600 OR nearest spline node == `target_primary`) |
-| 13 | **3** RamCharge | ENABLE `0x01` + intercept candidates > 0 + roll < 0.2*scale+0.01 -> nearest "side 1" rival, pos copied to +0xd0 |
+| 13 | **3** RamCharge | ENABLE `0x01` + intercept candidates > 0 + roll < 0.2*scale+0.01 -> nearest `stc_cpu_forward` entry with `side == 1`, its x00 copied to +0xd0 and pos to +0xd4 |
 | 14 | **4** PursueLOS | as 13 but "side 0" rival |
 | 15 | **7** ChargeHold | ENABLE `0x01` + machine chargeable + charge-level gate (geometry, no RNG) |
 | 16 | **= base_maneuver** (+0x14) | unconditional fallback |
@@ -554,7 +570,7 @@ to break free. Whether the rider can make a given turn at all is tracked by
 
 The pipeline above is self-contained: its decide handlers call only math / utility
 helpers, never any C++ class. The complete set of non-`Rider_*` calls is
-`PSVECMagnitude` (0x803d2158) and `Vec2_Dist` (0x803d22cc) for perception distances,
+`VECMag` (0x803d2158) and `VECSquareDistance` (0x803d22cc) for perception distances,
 `splArcLengthPoint` (0x80415958) for spline arc-length (track position), `HSD_Randf`
 (0x8041e610) for the personality rolls, and the `_savegpr_*` compiler prologue helpers
 (e.g. 0x803adb48).
@@ -705,14 +721,14 @@ plateaus once the pool empties. Humans get zero - this is purely a CPU handicap.
 
 ### Scaling it (`mods/custom_ai`)
 
-`CpuStatGrowth_ScaleSeed` hooks the seed loop's slot-increment `addi r25,r25,1`
-(0x80014ad4), reached once per player slot immediately after the pool store with `r25`
-still holding the pre-increment slot index. It multiplies the freshly stored
-`GameData.city.cpu_stat_budget[slot]` in place by a factor from two menu settings:
-`CPU Stat Growth` (Disabled -> x0, so the per-frame drainer finds nothing to hand out;
-Enabled -> use the budget factor) and `CPU Stat Budget` (Default x1.0, Low x0.5,
-Medium x1.5, High x2.0). Humans already hold `0.0`, so scaling them is a no-op. Both
-settings take effect at the next City Trial start, when the pool is re-seeded.
+`CpuStatGrowth_ScaleSeed` hooks the seed loop's slot increment `addi r25,r25,1`
+(0x80014ad4), reached once per player slot right after the pool store with `r25` still
+holding the slot index. It multiplies the freshly stored
+`GameData.city.cpu_stat_budget[slot]` in place by the `CPU Stat Pool` setting: Off x0 (the
+per-frame drainer finds nothing to hand out), Low x0.5, Default x1, High x1.5, Max x2.
+Humans are seeded `0.0`, so scaling them is a no-op. The loop only runs for a normal City
+Trial load (`Scene_GetCurrentMajor() == 6` and `Gm_GetCityData()[5] == 0`), never the title
+demo, and a change takes effect at the next City Trial start.
 
 ### Difficulty tables (`gmGameParams`)
 
@@ -757,28 +773,55 @@ replace the virtual pad it produces. `mods/custom_ai` uses only the first.
 
 ### Implementation (`mods/custom_ai`)
 
-Because `ai_state` (+0x08) is a *fixed profile* rather than a transitioning state,
-writing a new value once swaps the CPU's whole personality for the rest of the match.
-`CpuAI_ReprofileRider` does exactly that from an epilogue hook on `Rider_CPUInit`
-(0x80262fbc - `lwz r0,36(r1)`, by which point every `CpuData` field is initialized and
-`r31` still holds the `RiderData*`). It skips riders with no `CpuData` (humans), reads
-`Scene_GetCurrentMajor()` to pick the City Trial vs Air Ride menu selection, writes
-`ai_state` unless the preset keeps the vanilla per-stage profile, and optionally
-overrides `difficulty_level` (+0x22, 0..8) from the preset's 0..4 `cpu_level` (`x2`).
+A preset never writes `ai_state` or `difficulty_level`. Every CPU keeps the profile
+`Rider_CPUSelectProfile` gives its stage - Navigate in the City Trial city, Cruise+ on an
+Air Ride course - and its CSS level, and the preset layers extra decisions over what that
+profile already computes. That keeps the vanilla path-finding and stuck recovery under
+every preset, and keeps the level-driven systems (the steering envelope, the stat-growth
+pool, the finish-rank rubber-band) on the CSS value. Every roll or range a preset adds
+scales with `Rider_CPUDifficultyScale`, the `level/8` factor the vanilla rolls use, so a
+higher-level CPU plays its preset better.
 
-| Preset | `ai_state` written | `difficulty_level` | Intent |
-|--------|--------------------|--------------------|--------|
-| Default | - (keeps the vanilla per-stage profile) | unchanged | vanilla |
-| Aggressive | 8 Attack | 8 | rams and contests riders, fights over items |
-| Hoarder | 5 RouteFollow | 6 | beelines for patches and item boxes |
-| Cautious | 1 Cruise | 4 | avoids combat, conserves boost |
-| Reckless | 7 Charge | 8 | boosts and charges constantly |
-| Random | one of the four above, rolled per rider | per rolled preset | mixed field |
+`CpuAI_AssignPreset` hooks the `Rider_CPUInit` epilogue (0x80262fbc, `lwz r0,36(r1)`, with
+`r31` still the `RiderData*`) and records the rider's preset in a table indexed by
+`RiderData.ply`, rolling Random there so each rider draws its own. Every init writes its
+slot, so no scene inherits the previous one's presets. It records Default unless
+`Ply_GetPKind(rider->ply) == PKIND_CPU` - the `Game_Think` autopilot allocates a `CpuData`
+for a human slot and marks it CPU only after init returns - and unless the scene is Air Ride
+or the City Trial city (`CityTrial_IsInStadium` false); stadium events keep vanilla behavior.
 
-Because the hook runs at init only, a menu change takes effect on the next CPU spawn,
-and "Random" is rolled per rider, so one match can hold a mix of personalities. The
-`aggression` / `item_focus` / `boost_usage` weights on `CpuAIPresetDef` are scaffold -
-nothing reads them yet; only `ai_profile` and `cpu_level` are applied.
+The presets act through three seams:
+
+- **The committed maneuver.** `CpuAI_AdjustManeuver` hooks the exit of
+  `Rider_CPUArbitrateManeuver` (0x80275bc4, `psq_l f31,120(r1)`, `r31` the `RiderData*`).
+  It can veto a maneuver back to `base_maneuver`, which holds for as long as the cascade
+  keeps choosing it, or take a second roll at one. The Wiggle dodge reads the hazard list
+  (`stc_cpu_hazards`) the way the cascade does: an entry with a nonzero +0x04..+0x0c and
+  +0x3c bit 0x80 set, with `desire_flags` 0x400 clear. The RamCharge roll takes the nearest
+  `side == 1` entry of the forward list (`stc_cpu_forward`) and copies it to
+  `CpuData+0xd0`/`+0xd4` as the cascade does. A dodge never replaces Coast, AvoidObstacle,
+  the nav-steer maneuvers 0xe-0x10 or the cascade's own hazard reactions (0x12, 0x13), which
+  all outrank it; a ram only replaces cruising (`base_maneuver`), PursueLOS or ChargeHold.
+- **Navigate's nav target.** A hook in `Rider_CPUDecideNavigate` at 0x80272258
+  (`lwz r3,184(r29)`, `r28` the `RiderData*`) runs once the handler has picked
+  `nav_target_pos` and before it becomes `steer_target_pos`, which `zz_80265d28_` plans the
+  route cache (+0xe4) toward and `Rider_CPUBuildRoute` lays waypoints along.
+- **Item choice.** `Rider_CPUScanItems` scores each item with `Rider_CPUGetItemScore` (call
+  site 0x80263d00), and Navigate revalidates its current `item_target` with a radius-2 scan
+  around it (call site 0x80272144). Both calls are replaced.
+
+| Preset | Menus | Behavior | Level 0 -> 8 |
+|--------|-------|----------|--------------|
+| Default | both | vanilla | - |
+| Cautious | both | vetoes RamCharge and PursueLOS; a second roll at the hazard Wiggle | dodge chance 0.05 -> 0.35 a frame |
+| Reckless | both | vetoes DodgeProjectile and the hazard Wiggle; a second roll at RamCharge | ram chance 0.02 -> 0.22 a frame |
+| Aggressive | City Trial | steers at the `Rider_CPURivalSelect` rival while it is in range, ahead of items and machines; a second roll at RamCharge | chase range 150 -> 600 units; ram chance as Reckless |
+| Hoarder | City Trial | scores patches, boxes, the timed Max boosts and legendary parts 100 and abilities, weapons and candy 0, keeping food's HP-scaled score; rescans the whole city for a better item target on an interval; vetoes RamCharge and PursueLOS | rescan every 300 -> 30 frames |
+| Random | both | one of that menu's presets above Default, rolled per rider | per rolled preset |
+
+Aggressive and Hoarder work through Navigate, so the Air Ride menu does not offer them: on
+a course, a steer target off the racing line would stop the CPU lapping. A menu change
+applies from the next CPU spawn.
 
 Top Ride is not hooked. `Rider_CPUInit` is never reached in that mode, so the Custom AI
 menu offers presets for City Trial and Air Ride only; giving Top Ride one means adding a
@@ -791,7 +834,7 @@ Top Ride hook (below).
   and **0..4 (5 steps) in Top Ride** (`TopRide_SetCpuLevel`, 0x8000be74). Raising it
   shifts the desire rolls toward more skilled, aggressive play without changing
   *what* the AI prioritizes. The brain reads its own difficulty from `CpuData+0x22`
-  (0..8) through `Rider_CPUDifficultyScale` (0x80276f00) - every personality roll is
+  (s16, 0..8) through `Rider_CPUDifficultyScale` (0x80276f00) - every personality roll is
   `HSD_Randf() < const * scale + const` - and CT/AR `cpu_level` maps to it **1:1**,
   so writing `+0x22` directly is the finest-grained difficulty lever. The CSS
   difficulty selector on the character-select screen is a fixed-segment bar (9 / 5
@@ -835,7 +878,7 @@ which bypasses the AI entirely.
 
 The cleanest hook is `_Rider_UpdateCPU` (0x80275c70): a trivial wrapper whose only body
 is `bl Rider_UpdateCPU`, whose sole caller `Rider_CPUThink` already gates it behind
-`plGetPlayerKind == PKIND_CPU` and passes `RiderData*` in `r3`. Trampolining it (or the
+`Ply_GetPKind == PKIND_CPU` and passes `RiderData*` in `r3`. Trampolining it (or the
 `bl` at 0x8018fc80) yields a CPU-gated entry with the pad in hand and no command-language
 knowledge required - write `cpu->stick_x`/`stick_y`/`buttons` directly. Calling
 `Rider_ProcessCPUDistance` (0x8026bbe0) first reuses the engine's self-state and
@@ -865,18 +908,21 @@ charge byte) or full replace both work, on the kirby's 2-axis steer instead of a
 | Strategic state jump table | 0x804b7a28 | Switch table for `ai_state` (+0x08) in `Rider_CPUDecideState` |
 | Tactical maneuver jump table | 0x804b79b8 | 22-entry switch table for `maneuver` (+0x10, 0..0x15) in `Rider_ProcessCPUManeuver`; index 0x11 + out-of-range -> Coast |
 | City-kind -> profile table | 0x804b7f78 | 16 `(city_kind, ai_state)` int pairs, -1 terminated, scanned by `Rider_CPUSelectProfile` (default 2) |
+| CPU item score table | 0x804b862c | 69 `{u32 ItemKind; s16 score; u8 flags; u8}` entries read by `Rider_CPUGetItemScore`; flag 0x10 scales food by machine HP |
 | Ability press-hold table | 0x804b7f30 | per-difficulty ability-press hold frames `{15,12,10,8,6,4,2,1,0}` (idx by `+0x22`), read by `Rider_CPUGetAbilityPressHold` |
 | Steer envelope table | 0x804b7f54 | per-difficulty stick `(step, cap)` pairs (9 entries), read by `Rider_CPUGetSteerEnvelope` |
 | Machine attack-score table | 0x804b8000 | per-machine, stride 0x14: +4/+6/+8 attack scores (base / damage-off / damage-on), +0xc range weight, +0x10 bit 0x40 = priority-target |
-| Machine capability tables | 0x804b8854 / 0x804b89d0 | per-machine CPU capability flags (non-bike / bike), stride 0x14; +8 flag bits gate charge/attack/dodge; selected by `is_bike` |
-| Machine turn-tolerance table | 0x804b8f30 | per-machine max-turn angle (stride 0x14, +0xc ~ 0.785 rad for entry 0), read by `Rider_CPUGetMachineTurnTolerance` |
+| Machine capability tables | 0x804b8854 / 0x804b89d0 | `CpuMachineCaps`, 19 star / 7 bike rows, stride 0x14: +4 `swap_score` (desirability as a field machine; `Rider_CPUScanCityObjects` skips 0), +8 flags (0x80 may leave it for a better machine, 0x40 brake, 0x20 charge-hold, 0x10 ram-charge, 0x08 no preferred Machine Passage branch), +0xc `charge_release` (a charge-holding CPU holds while the gauge is at or under it). Read by the `Machine_CPU*` accessors at 0x8027699c-0x80276d1c, each splitting `Machine_GetAbsoluteKind` back into a class slot |
+| Machine steer table | 0x804b8f30 | `CpuMachineSteer`, 19 star rows, stride 0x14: +4 / +8 heading-alignment cosines (`Rider_CPUGetMachineAlignCosNear` / `Far`), +0xc turn tolerance in radians (`Rider_CPUGetMachineTurnTolerance`), +0x10 stuck angle (`Rider_CPUGetMachineStuckAngle`). The bike table after it at 0x804b90ac is never read: bikes and riders with no machine get row 0 |
+| Stadium machine pairs | 0x804b8a5c / 0x804b8b24 | `CpuStadiumMachineParam`, 25 each by absolute kind, `{pitch, min_len}` for Air Glider (`Rider_CPUGetAirGliderMachineParam`) and High Jump (`Rider_CPUGetHighJumpMachineParam`) |
+| Machine kind switches | r2 0x805e31a4-0x805e31c0 | `Machine_CPUGetChargeHoldGate` gives Bulk, Hydra, Rocket and Formula a charge-hold gate pair and `Machine_CPUGetChargeReleaseOverride` gives Bulk and Hydra a release level; `Rider_CPUEmitSteerStick` holds the stick up on Hydra and down on Winged and Jet Star once moving, off the cached `CpuData+0x0d` |
 | Desire-flag seed tables | 0x804b7b18 / 0x804b7c00 | `{u32 id; u32 inhibitor_flags}`, stride 8; indexed by `RiderData.state_idx` (+0x1c). Table 1 = 29 entries (ids 0x00..0x1c, all kinds); Table 2 = 102 entries (ids 0x1d..0x82, `kind==0` only, indexed by `state_idx-29`) |
 | Course path-graph object | `stc_grobj_ptr` 0x805dd6cc (r13[0x5ec]) | Per-stage spline node array (`[grobj+0x120]+id*0x1c`); the id space for `target_primary/secondary` |
 | CpuData registry / count | 0x8055de08 / 0x8055de1c | Up to 5 allocated `CpuData*` + a count byte. **Never freed per-rider** (bulk-freed at scene teardown); iterated **only** by a debug-text overlay, never by gameplay |
 | CPU stat-growth budget | `GameData.city.cpu_stat_budget` (`+0x46c`) | `float[5]`, per-slot remaining stat pool. Seeded by `SceneLoad_3D` from `cpu_level`, drained by `CityTrial_GrowCpuStats`. 0 for humans |
 | CPU stat-growth tables | `gmGameParams.ct_cpu_stat_{seed,rate,interval}` (`+0x154 / +0x178 / +0x19c`) | `float[9]` seed pool `{3,5,10,15,20,25,30,35,42}` / `float[9]` drain rate `{1,1,1,1,1.2,1.5,2,2.5,3}` / `int` tick interval `180`. In `gmGameParams` (`gmDataAll->game_params`), indexed by `cpu_level` 0..8 |
-| Per-frame scratch buffers (typed) | 0x8055e964 / 0x8055e698 / 0x8055e8b4 | Three distinct single-rider structures, zeroed each perceive: **route waypoints** (0x2f0, <=4 lane-midpoint waypoints from `Rider_CPUBuildRoute`; header byte 4/5 = valid route); **hazard/threat list** (0x210, stride 0x40, <=8, count at 0x8055e898, +0x38 time-to-impact / +0x3c bit 0x80 = imminent); **forward-collision list** (0xb0, stride 0x14, <=8, count at 0x8055e954). **Not** a multi-rider world model |
-| Per-machine envelope cache / self-vel basis | 0x8055e68c*690*694 / 0x8055e89c | three per-machine turn/speed-envelope scalars (feed route-build + steer) and the cached self-velocity Vec3 basis (hazard avoidance), all written each perceive |
+| Per-frame scratch buffers (typed) | 0x8055e964 / 0x8055e698 / 0x8055e8b4 | Three distinct single-rider structures, zeroed each perceive: **route waypoints** (0x2f0, <=4 lane-midpoint waypoints from `Rider_CPUBuildRoute`; header byte 4/5 = valid route); **hazard/threat list** (`stc_cpu_hazards`, 0x210, stride 0x40, <=8, count at 0x8055e898, +0x38 time-to-impact / +0x3c bit 0x80 = imminent); **forward-collision list** (`stc_cpu_forward`, 0xb0, stride 0x14 `{x00; Vec3 pos; side}`, <=8, count at 0x8055e954). **Not** a multi-rider world model |
+| Per-machine envelope cache / self-vel basis | 0x8055e68c*690*694 / 0x8055e89c | the machine's two alignment cosines and stuck angle (feed route-build + steer) and the cached self-velocity Vec3 basis (hazard avoidance), all written each perceive |
 | TR CPU input-reader vtable | 0x804d8710 | vtable for the CPU `TopRideCpuInputReader`; human readers use 0x804d25e0. `vt[0x0c]` = brain, `vt[0x14]` = poll |
 | TR per-slot CPU level scratch | 0x804d8040 | `float[slot]`; written by the CPU reader ctor = handicap byte, read back into `reader->difficulty` (+0x1c) each frame |
 | TR per-level tuning tables | 0x804d80d0 / 0x804d8058 / 0x804d80bc | Indexed by `reader->difficulty` (0..4): steer gain (80->-70) / commit-hold frames (60->0) / commit threshold (0->100). Per-detector aggression gates: item 0x804d80a8, rival 0x804d8094, ram 0x804d806c |

@@ -92,7 +92,7 @@ The decision is the toggle and nothing else. The mod does not try to work out wh
 
 Every grant announce goes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`) rather than calling the text box itself. That is deliberate: the toggle is a property of the whole category, and a new unlock handler that copies its neighbour gets it without anyone remembering a guard. Announces that carry something the AP item name does not - `Patch cap increased (50%)`, `Spawn rate increased (60%)` - are the exception and call the text box directly, which is what marks them as exceptional. So does every non-AP path: EnergyLink purchases, in-game pickups, gate prompts. The boot regrant suppresses the same category through the same funnel, via `ap_regrant_quiet`.
 
-The check and goal lines have one call site each, in `check_detection.c`, so they test `APAnnounce_LocalEnabled` directly instead of routing through a funnel of their own. So do the link lines, which sit at the send and receive points in `deathlink.c` and `traplink.c`.
+The check and goal lines have one call site each, in `ap_checks.c`, so they test `APAnnounce_LocalEnabled` directly instead of routing through a funnel of their own. So do the link lines, which sit at the send and receive points in `deathlink.c` and `traplink.c`.
 
 ## Client Status
 
@@ -105,3 +105,19 @@ That leaves the connect and disconnect lines to the client, which knows both mom
 One 256-byte record in `APData` plus a pending flag, the same mailbox handshake the item channel uses: the client writes the body, then sets the flag; the mod renders and clears it. The mod holds a pending message while the text box has no screen canvas, so a scene load backpressures the client instead of losing the message.
 
 That caps delivery at one message per client poll, roughly 10 a second. The text box shows at most 8 at a time and holds each for several seconds, so it retires messages far slower than that, and a shared ring would only move the backlog from the client into game memory. The client queues composed messages in an unbounded deque instead and writes one per poll, keeping all Dolphin access in its poll loop. Nothing is collapsed or dropped on the way in: a burst of checks queues one line each and drains at the poll's own pace. Goaling a world releases every check this slot placed at once, which is the case the queue is sized for - the records are 256 bytes each and the client has the memory.
+
+## Testing without a client
+
+`APText_DebugSend(kind)` composes one canned line per `APTextKind` into the mailbox the way the
+client does - the whole 256-byte record first, `text_pending` last - so the render path, the
+per-kind Messages filter, the colour table and the `IsReady` hold across a scene load all behave
+exactly as they do in a live session. `archipelago_debug` exposes them as its Messages page.
+
+Each canned line carries the wording and colours the client actually composes for that kind, so a
+difference on screen is a real difference rather than an artifact of the test. A seventh entry,
+`APText_DebugSendOverlong`, fills all eight runs and overruns the three rendered lines: that is
+the only local way to see the wrap and the trailing `..` truncation, which otherwise need a real
+seed with a long player or item name in it.
+
+Both return 0 when a message is still pending, which is the same precondition the client honours
+- the mailbox is one slot and must not be written while the flag is set.

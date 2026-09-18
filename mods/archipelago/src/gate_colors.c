@@ -93,38 +93,31 @@ int GateColors_RandomUnlockedColorExcept(const u8 *taken, int num_taken)
     return pool[HSD_Randi(count)];
 }
 
-int GateColors_RandomUnlockedColor(void)
-{
-    return GateColors_RandomUnlockedColorExcept(NULL, 0);
-}
-
 // Replaces the shared per-slot default on the CPU-slot branch only, so humans keep
-// their CSS pick. slot_base = airride_select_ply base + slot; color[] is at +0x51.
-// loadCPU walks the slots in order, so the slots already picked are visible here.
-void GateColors_SetCpuAirRideColor(u8 *slot_base)
+// their CSS pick. loadCPU walks the slots in order, so the slots already picked are
+// visible here.
+static void GateColors_SetCpuAirRideColor(int slot)
 {
     GameData *gd = Gm_GetGameData();
+    if (!gd || (u32)slot >= 4)
+        return;
+
     u8 taken[4];
     int num_taken = 0;
-
-    if (gd)
+    for (int i = 0; i < 4; i++)
     {
-        int slot = (int)(&slot_base[0x51] - gd->airride_select_ply.color);
-        for (int i = 0; i < 4; i++)
-        {
-            u8 kind = gd->airride_select_ply.slot_kind[i];
-            if (i != slot && (kind == 0 || kind == 2))
-                taken[num_taken++] = gd->airride_select_ply.color[i];
-        }
+        u8 kind = gd->airride_select_ply.slot_kind[i];
+        if (i != slot && (kind == 0 || kind == 2))
+            taken[num_taken++] = gd->airride_select_ply.color[i];
     }
-    slot_base[0x51] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
+    gd->airride_select_ply.color[slot] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
 }
 
 // Hook at 0x800236a8 in loadCPU (`stb r0, 69(r29)`, the CPU-slot ply_kind write).
-// r29 = airride_select_ply base + slot. The clobbered store needs r0 = 2, which the
-// C call wipes.
+// r28 = the slot the enclosing loop is on. The clobbered store needs r0 = 2, which
+// the C call wipes.
 CODEPATCH_HOOKCREATE(0x800236a8,
-    "mr 3, 29\n\t",
+    "clrlwi 3, 28, 24\n\t",
     GateColors_SetCpuAirRideColor,
     "li 0, 2\n\t",
     0
@@ -164,7 +157,7 @@ CODEPATCH_HOOKCREATE(0x8002f350,
     0
 )
 
-// Hook at 0x800295e8 (li r8, 0) in zz_80028888_ (Race mode): convergence after the
+// Hook at 0x800295e8 (li r8, 0) in CSS_airRide_RaceUpdate: convergence after the
 // color[0..3] init block. r3/r4 are reloaded just below, so clobbers are safe.
 CODEPATCH_HOOKCREATE(0x800295e8,
     "",
@@ -173,7 +166,7 @@ CODEPATCH_HOOKCREATE(0x800295e8,
     0
 )
 
-// Hook at 0x8002d06c (li r3, 0) in zz_8002cfd8_ (Top Ride data reset): convergence
+// Hook at 0x8002d06c (li r3, 0) in TopRide_InitSelectData: convergence
 // after the color[0..3] loop.
 CODEPATCH_HOOKCREATE(0x8002d06c,
     "",
@@ -182,7 +175,7 @@ CODEPATCH_HOOKCREATE(0x8002d06c,
     0
 )
 
-// Hook at 0x8002d704 (li r7, 0) in TopRide_RaceInit (zz_8002d0ec_, multiplayer):
+// Hook at 0x8002d704 (li r7, 0) in TopRide_RaceInit (0x8002d0ec, multiplayer):
 // convergence after the color reset, before the visual loop reads the colors.
 CODEPATCH_HOOKCREATE(0x8002d704,
     "",
@@ -191,7 +184,7 @@ CODEPATCH_HOOKCREATE(0x8002d704,
     0
 )
 
-// Hook at 0x8002db8c (li r28, 0) in TopRide_SoloInit (zz_8002d9e8_), covering Free Run
+// Hook at 0x8002db8c (li r28, 0) in TopRide_SoloInit (0x8002d9e8), covering Free Run
 // and Time Attack: after the color assignment, before the visual loop.
 CODEPATCH_HOOKCREATE(0x8002db8c,
     "",
@@ -200,7 +193,8 @@ CODEPATCH_HOOKCREATE(0x8002db8c,
     0
 )
 
-// Hook at 0x80029e34 (li r5, 0) in zz_80029bd8_ (Air Ride Free Run / Time Attack), the
+// Hook at 0x80029e34 (li r5, 0) in CSS_airRide_FreeTimeUpdate (Air Ride Free Run /
+// Time Attack), the
 // non-Race CSS with its own color[0..3] init block. r4 is reloaded just below, so
 // clobbers are safe.
 CODEPATCH_HOOKCREATE(0x80029e34,
@@ -318,7 +312,8 @@ void GateColors_OnTopRideLobbyThink(void)
     }
 }
 
-// Both clobber stw r31, 12(r1), past the LR save and using only preserved registers.
+// In TopRide_LobbyInit (0x8002dc9c) and TopRide_LobbyThink (0x8002dd34). Both clobber
+// stw r31, 12(r1), past the LR save and using only preserved registers.
 CODEPATCH_HOOKCREATE(0x8002dca8, "", GateColors_OnTopRideLobbyInit, "", 0)
 CODEPATCH_HOOKCREATE(0x8002dd40, "", GateColors_OnTopRideLobbyThink, "", 0)
 
@@ -359,7 +354,7 @@ void GateColors_OnBoot()
     CODEPATCH_HOOKAPPLY(0x8002dca8);  // TR lobby init
     CODEPATCH_HOOKAPPLY(0x8002dd40);  // TR lobby think
 
-    OSReport("[GateColors] Color gating hooks installed\n");
+    OSReport("[GateColors] Hooks installed\n");
 }
 
 int GateColors_UnlockColor(int color_idx, int announce)

@@ -7,9 +7,9 @@
 #include "os.h"
 #include "textbox_api.h"
 
-// Effective spawn rate scale = min_pct/100 + level * 0.1. spawn_rate_min is the
-// AP starting rate in percent; each Spawn Rate Up adds +10%. The cap backstops
-// item density against a malformed save.
+// Effective spawn rate scale = min_pct/100 + level * 0.1. spawn_rate_min is the AP
+// starting rate in percent; each Spawn Rate Up adds +10%. The cap is where a full
+// collection lands, and keeps the Top Ride spawn probability short of saturation.
 #define SPAWN_RATE_SCALE_MAX 3.0f
 
 float SpawnRate_GetScale()

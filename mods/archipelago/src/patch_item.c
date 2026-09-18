@@ -33,14 +33,13 @@ PatchKind Patch_ItKindToPatchKind(ItemKind it_kind)
     return PATCHKIND_NUM;
 }
 
-// Give PatchKind to every human rider on a machine. In City Trial, positive
-// deltas go through the item pickup pipeline so the player sees the normal
-// "+1 stat" visual. Air Ride has no item data tables loaded (SpawnItem would
-// crash), so AR - and any negative delta - falls back to Machine_GivePatch.
-int Patch_GiveItem(PatchKind kind, int num)
+// Give one PatchKind to every human rider on a machine. In City Trial this goes
+// through the item pickup pipeline so the player sees the normal "+1 stat" visual.
+// Air Ride has no item data tables loaded (SpawnItem would crash), so it falls
+// back to Machine_GivePatch.
+int Patch_GiveItem(PatchKind kind)
 {
-    int use_item_spawn = (num > 0) && Gm_IsInCity() && (kind < PATCHKIND_NUM);
-    const char *kind_name = (kind < PATCHKIND_NUM) ? PatchKind_Names[kind] : "?";
+    int use_item_spawn = Gm_IsInCity();
     int applied = 0;
 
     for (int i = 0; i < 5; i++)
@@ -53,13 +52,12 @@ int Patch_GiveItem(PatchKind kind, int num)
 
         if (use_item_spawn)
         {
-            for (int n = 0; n < num; n++)
-                SpawnItemPlayer(i, stc_patch_itkinds[kind]);
+            SpawnItemPlayer(i, stc_patch_itkinds[kind]);
         }
         else
         {
             MachineData *md = mg->userdata;
-            Machine_GivePatch(md, kind, num);
+            Machine_GivePatch(md, kind, 1);
             // Rebase so the stat change doesn't refund energy into the pool.
             EnergyLink_RebaseStats(i);
         }
@@ -67,8 +65,8 @@ int Patch_GiveItem(PatchKind kind, int num)
     }
 
     if (applied)
-        OSReport("[PatchItem] Gave %d %s patch(es) to %d player(s) (%s)\n",
-                 num, kind_name, applied, use_item_spawn ? "item" : "direct");
+        OSReport("[PatchItem] Gave a %s patch to %d player(s) (%s)\n",
+                 PatchKind_Names[kind], applied, use_item_spawn ? "item" : "direct");
     return applied;
 }
 
@@ -123,9 +121,11 @@ int Patch_DropTrap()
         RiderData *rd = rg->userdata;
         int drop_mode = HSD_Randi(3);
         Rider_DropPatches(rd, rd->stats.values, drop_mode);
-        OSReport("[PatchItem] Drop-patches trap applied to player %d (mode %d)\n", i, drop_mode);
-        dropped = 1;
+        dropped++;
     }
+
+    if (dropped)
+        OSReport("[PatchItem] Drop-patches trap applied to %d player(s)\n", dropped);
     return dropped;
 }
 
@@ -139,8 +139,7 @@ int PermanentPatch_GiveItem(PatchKind kind)
 
     OSReport("[PatchItem] Permanent %s patch received (total %d)\n",
              PatchKind_Names[kind], ap_save->permanent_patches[kind]);
-    if (kind < PATCHKIND_NUM)
-        APAnnounce_Grant("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
+    APAnnounce_Grant("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
     return 1;
 }
 
@@ -165,7 +164,6 @@ static int permanent_patches_applied;
 // all-ups where possible to reduce the number of calls.
 static void PermanentPatch_DoApply()
 {
-    // The minimum across all stats is how many all-ups we can apply.
     u8 min_patches = ap_save->permanent_patches[0];
     for (int i = 1; i < PATCHKIND_NUM; i++)
     {
@@ -232,7 +230,7 @@ static int PermanentPatch_ShouldApply(void)
     {
         CityMode cm = Gm_GetCityMode();
         if (cm == CITYMODE_FREERUN)
-            return 0; // item data is not loaded; inflated stats crash patch ejection
+            return 0;
         if (cm == CITYMODE_STADIUM)
             return ap_menu_settings.ct_stadium_permanent_patches_enabled;
         return ap_menu_settings.ct_permanent_patches_enabled;
@@ -240,8 +238,6 @@ static int PermanentPatch_ShouldApply(void)
     return ap_menu_settings.ar_permanent_patches_enabled;
 }
 
-// Set up the per-frame GObj that applies ap_save->permanent_patches[] to all
-// human MachineData at round start, gated by mode + menu toggle.
 void PermanentPatch_On3DLoadEnd()
 {
     if (!PermanentPatch_ShouldApply())
@@ -252,13 +248,6 @@ void PermanentPatch_On3DLoadEnd()
         total += ap_save->permanent_patches[i];
     if (total == 0)
         return;
-
-    if (Scene_GetCurrentMajor() == MJRKIND_CITY && Gm_GetCityMode() == CITYMODE_FREERUN)
-    {
-        OSReport("[PatchItem] Free Run - holding %d permanent patch(es) (item data not loaded)\n",
-                 total);
-        return;
-    }
 
     permanent_patches_applied = 0;
     GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, PermanentPatch_PerFrame, 0, 0, 0, 0);

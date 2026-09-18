@@ -17,7 +17,7 @@ Two stage-state predicates sit alongside the mode accessors and answer a differe
 | Predicate | Address | True when |
 |-----------|---------|-----------|
 | `CityTrial_IsInStadium()` | 0x8000ad48 | The loaded stage is a stadium (`city_kind` 7-18). The stadium test mod code uses. |
-| `CityTrial_IsInCity()` | 0x8000acb0 | The loaded stage is the open City Trial map. |
+| `Gm_IsInCity()` | 0x8000acb0 | The loaded stage is the open City Trial map. |
 | `Gm_IsLegendaryAssembling()` | 0x8000c934 | A Dragoon/Hydra assembly cinematic is running (reads the cinematic GObj pointer at `GameData+0xa8c`). Not a mode or stadium check. |
 
 ## The Title Screen's Attract Demo
@@ -109,9 +109,9 @@ Top Ride gameplay runs as **minor 19** (`MNRKIND_19`), *not* the shared minor 18
 | `Scene_ExitMajor()` | 0x80008220 | Trigger major exit (sets `request_major_exit`) |
 | `Scene_SetNextMinor(id)` | 0x800088c8 | Queue next minor (call from scene decide) |
 | `Scene_ExitMinor()` | 0x800064f0 | Trigger minor exit (call from think) |
-| `Scene_SetDirection(dir)` | 0x8000a498 | Store button input for transitions (map name `Scene_StoreDirection`) |
+| `Scene_SetDirection(dir)` | 0x8000a498 | Store button input for transitions |
 | `Scene_GetDirection()` | 0x8000a474 | Retrieve stored direction |
-| `Scene_InitHeaps()` | 0x8000891c | Initialize scene heaps (map name `SceneChange_InitHeaps`) |
+| `Scene_InitHeaps()` | 0x8000891c | Initialize scene heaps |
 | `Scene_GetMinorData()` | 0x80008874 | Get current minor's data pointer |
 | `Scene_InitMinorData()` | 0x80008898 | Initialize minor data |
 
@@ -119,7 +119,7 @@ The transition contract: a **MinorThink** calls `Scene_ExitMinor()` to trigger t
 
 ### Teardown Reclaims Memory Without Running Destructors
 
-`Gm_Minor()` calls `SceneChange_InitHeaps()` -> `Preload_ResetHeaps()` before the incoming minor's
+`Gm_Minor()` calls `Scene_InitHeaps()` -> `Preload_ResetHeaps()` before the incoming minor's
 `cb_Load`. This resets the scene heaps wholesale: every GObj and every heap-allocated struct from
 the outgoing scene is reclaimed **without its destructor running**. A minor's `cb_Exit` only tears
 down what it explicitly destroys - anything it leaves behind is reclaimed as memory, but its

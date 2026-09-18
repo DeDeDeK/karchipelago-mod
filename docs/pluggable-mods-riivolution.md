@@ -129,16 +129,15 @@ Disabling it = vanilla game, no `/mods` scan.
 never faults on its own. Whether that is survivable depends on the consumer:
 
 - `archipelago` dereferences the textbox API at ~90 call sites with no NULL check at any of
-  them - only at the import in `OnSaveLoaded`, which logs a warning and continues. "Archipelago
-  on, Textbox off" crashes on the first notification.
+  them, and most of those pass a palette color as an argument that is evaluated before the
+  caller's own message-enabled gate runs, so guarding each site is not practical. Instead
+  `tb_api` starts at a stub in `mods/archipelago/src/main.c` whose `Enqueue*` return 0, whose
+  `IsReady` returns 0 and whose palettes are zeroed; a failed import leaves it there, so
+  "Archipelago on, Textbox off" drops notifications rather than faulting.
 - Its other imports degrade cleanly: `custom_machines` (`AP_ResolveCustomMachines` in
   `mods/archipelago/src/main.c`) leaves machines ungated, and `ap_star`
   (`GateApStar_Resolve` in `mods/archipelago/src/gate_ap_star.c`) simply installs no assemble
-  handler. `archipelago_debug` guards all three of its imports the same way.
-
-Two ways to handle textbox: bundle it into the Archipelago choice (as in the XML above; ships
-today with no code change), or NULL-guard `tb_api` at its uses so the dependency becomes
-genuinely optional.
+  handler. `archipelago_debug` guards its two imports - `archipelago` and `custom_events` - with a plain NULL check at each use, and routes its own text through `ArchipelagoAPI.Textbox` rather than importing textbox.
 
 **Assets travel with their mod, not core.** `ApIcon.dat` belongs to the `archipelago` patch,
 `ApStarShot.dat` to `ap_star`. Since each mod's `assets/` folder already stages its own files,

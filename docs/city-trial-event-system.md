@@ -10,6 +10,8 @@ There are 16 kinds, the `EventKind` enum in `externals/hoshi/include/event.h`, w
 
 `EventCheckData` (200 bytes, `HSD_MemAlloc`'d, stored as the event GOBJ's userdata) is the live state: current state and kind, a frame timer, the next-event delay target, a `prev_kind[]` history ring, a 16-entry occurrence counter at `+0x44`, and a 16-entry reserve queue at `+0x84`. The struct is in `event.h`.
 
+`CityEvent_Init` creates the GOBJ on p_link 2 (`GAMEPLINK_CITYEVENTSPAWN`) without a proc. `SceneLoad_3D` adds `CityEvent_Think` at priority 0 later, through `CityEvent_AddThinkProc` (0x800edcc0), right after `Enemy_InitSpawner` and `CityItemSpawn_Create`. The userdata destructor `CityEvent_Destructor` (0x800edb68) is a bare `HSD_Free`, so an event still running when the scene ends never gets its `end` or `end2`.
+
 `EventConfigData` (also in `event.h`) has two arms: `event` (global timing/chance parameters plus pointers to the weight and param tables) and `bgm_sky` (0x14 bytes per kind: BGM file, sky preset, event location index/count, and a pointer to event-specific data).
 
 ### Global timing values (City Trial archive)
@@ -18,7 +20,7 @@ There are 16 kinds, the `EventKind` enum in `externals/hoshi/include/event.h`, w
 |-------|-------|---------|
 | `delay_min` / `delay_max` | 3300 / 7500 | Random inter-event delay range (~55s to ~125s) |
 | `occur_chance` / `skip_chance` | 70 / 30 | Weights for the occur-or-skip roll in state 0 |
-| `min_time` | 2200 | Match frames (~37s) that must elapse before events start. `CityEvent_StateIdle` gates on `City_GetMinSecMs?()` (0x8000a0f8) `>= event->min_time` at `+0x14`, not the unknown word at `+0x10` |
+| `min_time` | 2200 | Events only start while at least this many round frames (~37s) remain. `CityEvent_StateIdle` gates on `Gm_GetRemainingFrames()` (0x8000a0f8) `>= min_time` at `+0x14`; the word at `+0x10` is unread |
 | `prev_kind_max` | 4 | Max history entries |
 | `music_fadeout_frames` | 180 | BGM fadeout on a siren event |
 | `starting_delay` | 180 | Frames in state 1 (the siren/announcement period) |
@@ -27,17 +29,15 @@ There are 16 kinds, the `EventKind` enum in `externals/hoshi/include/event.h`, w
 
 ## State Machine
 
-`CityEvent_Think` (0x800ee60c) runs each frame, increments `timer`, and dispatches through the 4-entry function table at `stc_event_state_table` (0x804a5604):
+`CityEvent_Think` (0x800ee60c) runs each frame, increments `timer`, and dispatches through the 4-entry function table at `stc_event_state_table` (0x804a5604). The match pause freezes p_link 2, so the event timer stops while paused.
 
 ```
 0 Idle --[decide]--> 1 Starting --[delay]--> 2 Active --[end]--> 3 Cleanup --[delay]--> 0
 ```
 
-The map symbol names for slots 1 and 2 are shifted one off the state they handle: slot 1 (Starting) is `CityEvent_StateActive`, slot 2 (Active) is `CityEvent_StateEnding`. **Index by slot number, not by name.**
-
-- **State 0, `CityEvent_StateIdle` (0x800ee270)** - waits for match time `>= min_time`, then for `timer >= event_time`. Rolls `HSD_Randi(occur_chance + skip_chance)`; a roll below `occur_chance` calls `CityEvent_Decide`, otherwise it picks a new random delay in `[delay_min, delay_max]` and resets the timer.
-- **State 1, `CityEvent_StateActive` (0x800ee328)** - waits `starting_delay` frames, then pushes `cur_kind` onto `prev_kind[]`, increments `occurrence_count[cur_kind]` (the write at `ev_chk+0x44+kind*4`, 0x800ee420-0x800ee434), starts the secondary BGM for a siren event, shows the HUD announcement, and calls the event's `start` function.
-- **State 2, `CityEvent_StateEnding` (0x800ee4c0)** - calls the event's `active` function each frame. **The active function is what ends the event**, by calling `CityEvent_EndWithSkyRestore` once the duration expires. If there is no active function, state 2 ends immediately.
+- **State 0, `CityEvent_StateIdle` (0x800ee270)** - while at least `min_time` round frames remain (`Gm_GetRemainingFrames`, 0x8000a0f8), waits for `timer >= event_time`. Rolls `HSD_Randi(occur_chance + skip_chance)`; a roll below `occur_chance` calls `CityEvent_Decide`, otherwise it picks a new random delay in `[delay_min, delay_max]` and resets the timer.
+- **State 1, `CityEvent_StateStarting` (0x800ee328)** - waits `starting_delay` frames, then sets state 2, pushes `cur_kind` onto `prev_kind[]`, increments `occurrence_count[cur_kind]` (the write at `ev_chk+0x44+kind*4`, 0x800ee420-0x800ee434), starts the secondary BGM for a siren event, plays the kind's start sound (`CityEvent_PlayStartSound`, 0x8027a5d8; PREDICTION has none), shows the HUD announcement, and calls the event's `start` function.
+- **State 2, `CityEvent_StateActive` (0x800ee4c0)** - calls the event's `active` function each frame. **The active function is what ends the event**, by calling `CityEvent_EndWithSkyRestore` once the duration expires. If there is no active function, state 2 ends immediately.
 - **State 3, `CityEvent_StateCleanup` (0x800ee50c)** - calls the event's `end` function each frame for gradual cleanup, then after `cleanup_delay` calls `end2` once, stops the secondary music, picks a new delay, and returns to state 0 with `cur_kind = -1`.
 
 ## Event Selection
@@ -51,7 +51,7 @@ The map symbol names for slots 1 and 2 are shifted one off the state they handle
 5. Tries the reserve queue first; otherwise `Gm_Roll(chance_arr, 16)` at 0x800ee098 picks a winner.
 6. If every weight is zero, it sets a new delay and stays idle.
 7. If the winner has a `check` function that fails, the kind is appended to the reserve queue and the roll retries.
-8. On success: `state = 1`, `cur_kind` set, timer reset. For a siren event it also fades the music, plays SFX `0x130002`, and calls `Sky_TransitionGlobal(bgm_sky[kind].sky_preset)`.
+8. On success: `state = 1`, `cur_kind` set, timer reset. For a siren event it also fades the music, plays the siren `EVENT_SIREN_SFX` (0x130002) through `SFX_PlayFullVolume`, and calls `Sky_TransitionGlobal(bgm_sky[kind].sky_preset)`.
 
 The **reserve queue** (`ev_chk->reserve[]`, 16 entries) is the priority list for events whose check failed. Reserved kinds are retried ahead of the weighted roll on later cycles and removed on success. `CityEvent_ForceStart` (0x800ee778) feeds it too - a forced event whose check fails is queued instead of dropped. Its overflow guard (`reserve_kind_num < 16`) is at 0x800ee80c.
 
@@ -88,6 +88,8 @@ The **reserve queue** (`ev_chk->reserve[]`, 16 entries) is the priority list for
 | 14 FOG | 1 | 4200 | - | yes | 0x2D | 9 | - | - |
 | 15 FAKEPOWERUPS | 1 | 3200 | - | yes | 0x35 | 4 | - | yes |
 
+`once_only` is load-bearing for RESTORATIONAREA. `event_restorationAreas_start` (0x80111078) picks `event_data[1]` = 5 of its 20 locations and spawns an area at each through `GrYaku_CreateSpawn(20, event_data[0] = 0)` (0x800f48cc). `fn_grSetupCityEventData` installs the archive's 7-entry spawn table as `YakumonoTable.spawn_data_array`; it lists the restoration-area block five times (16 zone vertices, 2 zones each), and `grColl_Alloc` reserves collision for each listing once. The stage therefore has room for exactly one run: collision attaches are never returned, so a second run asserts `gcp->zvtx_num <= total->zvtx_num` (grcoll.c line 400, `gcp 1784: total 1768`) on its first area. Anything that starts an event outside `CityEvent_Decide` must honor `once_only` against `occurrence_count` itself. SECRETCHAMBER's block (`data_array[32]`) carries no collision.
+
 | Kind | start | active | end | end2 | check |
 |------|-------|--------|-----|------|-------|
 | DYNABLADE | 0x80110184 | 0x8011024c | 0x80110444 | 0x80110448 | - |
@@ -111,9 +113,22 @@ FOG's `start`, `end` and `end2` are empty stubs - the fog is entirely the sky pr
 
 The map names the functions after internal event names that differ from the enum: `event_stationFire` = RAILFIRE, `event_rubberyItems` = BOUNCE, `event_denseFog` = FOG, `event_sameItems` = SAMEITEM, `event_restorationAreas` = RESTORATIONAREA, `event_fakeItems` = FAKEPOWERUPS, `event_formation_init` = the MACHINEFORMATION check.
 
+## Music
+
+A siren event hands the music between the two BGM slots:
+
+| When | Call | Effect |
+|------|------|--------|
+| Pick (`CityEvent_Decide`) | `Gm_FadeOutMusic(music_fadeout_frames)` (0x80061df0) | Fades the main slot (1) out |
+| State 1 -> 2 | `BGM_PlaySecondaryFile(bgm_sky[kind].bgm_file)` (0x80061e7c) | Streams the event track in slot 2 and pauses slot 1 |
+| State 2 -> 3 (`CityEvent_EndWithSkyRestore`) | `Gm_FadeInMusic(cleanup_delay)` (0x80062004) | Resumes slot 1 and fades it back in, fading slot 2 out |
+| End of state 3 | `BGM_StopSecondary` (0x800620e8) | Ends slot 2 |
+
+All four are gated on `is_siren`. Code that ends state 2 without `CityEvent_EndWithSkyRestore` must call `Gm_FadeInMusic` itself, or the main music stays paused for the rest of the round.
+
 ## Sky and Lighting
 
-A siren event begins its sky change in `CityEvent_Decide`, not in the event's own `start`: `Sky_TransitionGlobal` (0x800d5444) smoothly moves to the event's preset (colors, fog, lighting). `CityEvent_EndWithSkyRestore` (0x800ee660) sets state 3 and calls `Sky_RestoreGlobal` (0x800d546c) to transition back.
+A siren event begins its sky change in `CityEvent_Decide`, not in the event's own `start`: `Sky_TransitionGlobal` (0x800d5444) smoothly moves to the event's preset (colors, fog, lighting). `CityEvent_EndWithSkyRestore` (0x800ee660) sets state 3, resets the timer and, for a siren event, fades the music back in and calls `Sky_RestoreGlobal` (0x800d546c) to transition back.
 
 ## Item Drop Biasing
 
@@ -153,9 +168,12 @@ Thin readers over `EventCheckData` and the config, all in the `0x800ee6xx`-`0x80
 | 0x800ee6ec | `CityEvent_GetLocationIndex` | `bgm_sky[cur_kind].location_idx` |
 | 0x800ee708 | `CityEvent_GetLocationCount` | `bgm_sky[cur_kind].location_count` |
 | 0x800ee724 | `CityEvent_GetLocationIndexForKind` | same, for an explicit kind |
-| 0x800ee73c | `CityEvent_GetFakeItemData` | `bgm_sky[EVKIND_FAKEPOWERUPS].event_data` |
+| 0x800ee73c | `Event_GetInstanceData` | `bgm_sky[EVKIND_FAKEPOWERUPS].event_data` |
 | 0x800ee758 | `CityEvent_GetEventDataForKind` | `bgm_sky[kind].event_data` |
 | 0x800ee770 | `CityEvent_GetGObj` | `*stc_eventcheck_gobj` |
+| 0x800ee8c4 | `CityEvent_GetActiveKind` | `cur_kind` while in state 2, else -1 |
+| 0x800ee8f0 | `CityEvent_GetCurrentKind` | `cur_kind` in any state, -1 with events off |
+| 0x800ee910 | `CityEvent_GetActiveTimer` | `timer` while in state 2, else 0 |
 | 0x800ee93c | `CityEvent_GetOccurrenceCount` | `occurrence_count[kind]` |
 
 ## Key Addresses
@@ -166,7 +184,9 @@ Thin readers over `EventCheckData` and the config, all in the `0x800ee6xx`-`0x80
 | 0x804a5410 | `stc_event_function` | Event function table (16 x 0x14) |
 | 0x804a5604 | `stc_event_state_table` | State handler dispatch table (4 entries) |
 | 0x804a7b98 | `stc_event_sis_id_table` | Event/stadium name -> SIS index (40 vanilla entries) |
+| 0x800edb68 | `CityEvent_Destructor` | `EventCheckData` destructor, a bare `HSD_Free` |
 | 0x800edb88 | `CityEvent_Init` | Creates the event GOBJ; zeros the 16 occurrence counters at 0x800edc30-0x800edc6c |
+| 0x800edcc0 | `CityEvent_AddThinkProc` | Adds `CityEvent_Think` to the event GOBJ during `SceneLoad_3D` |
 | 0x800edcf8 | `CityEvent_Decide` | Event selection |
 | 0x800ee60c | `CityEvent_Think` | Per-frame state machine driver |
 | 0x800ee660 | `CityEvent_EndWithSkyRestore` | Sets state 3, resets the timer, restores the sky |

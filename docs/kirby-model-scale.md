@@ -40,7 +40,7 @@ Initialized to 1.0 (`TopRide_KirbyChargeInit`). The model's root JObj is
 float s = model_scale(kirby+0x524) * dataTable[0x20f8];
 JOBJ *m = child_of(model_jobj(kirby+0x4E0));
 m->scale = { s, s, s };          // JOBJ +0x2c/+0x30/+0x34
-HSD_JObjSetMtxDirtySub(m);
+JObj_SetMtxDirtySub(m);
 ```
 
 Accessed from mod code as `kirby->charge.model_scale`.

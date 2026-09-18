@@ -8,7 +8,7 @@ multiworld items can be placed *on* its cells for display.
 The framework owns the presentation (synthetic-mode plumbing, minor scene, grid build,
 theme recolor, banner/emblem swap) and polls every check predicate once per frame. This
 doc covers only the AP-specific wiring - `mods/archipelago/src/ap_checklist.c`, with the
-AP-side reward/check integration in `checklist_rewards.c` / `check_detection.c`.
+AP-side reward/check integration in `checklist_rewards.c` / `ap_checks.c`.
 
 ## Two Mode Identities
 
@@ -24,7 +24,7 @@ each registered tab to the next free mode index, so the AP tab's mode is whateve
 lands on, `>= GMMODE_NUM`. `APChecklist_Register` stores it in the global
 `ap_checklist_mode` (defaulting to `GMMODE_NUM`).
 
-`ChecklistModeRow(mode)` in `check_detection.h` maps a runtime mode to its row, returning
+`ChecklistModeRow(mode)` in `main.h` maps a runtime mode to its row, returning
 `-1` for a checklist mode this mod does not record (`ChecklistRowMode(row)` goes back, for
 the game APIs like `gmGetClearcheckerTypeP` that index by runtime mode). It is the single
 answer to "which row is this mode" - consumers call it rather than re-deriving the mapping.
@@ -82,8 +82,8 @@ The descriptor's callbacks bind the framework's presentation to AP's authoritati
   permanently complete, shown with no replay on a later boot). An out-of-range `clear_kind`
   reports "done", so the framework never tries to complete it.
 - `record_complete(clear_kind)` calls `ClearChecker_SetNewUnlock(ap_checklist_mode,
-  clear_kind)`, which `check_detection`'s `CODEPATCH_REPLACEFUNC`
-  (`CheckDetection_SetNewUnlockReplacement`) intercepts for `ap_checklist_mode`: on a fresh
+  clear_kind)`, which `ap_checks`'s `CODEPATCH_REPLACEFUNC`
+  (`APChecks_SetNewUnlockReplacement`) intercepts for `ap_checklist_mode`: on a fresh
   cell it runs `RecordCheck`, which resolves the row via `ChecklistModeRow`, sets the
   `sent_checks` bit, fires the "Check sent" textbox and re-evaluates goals - and, mid-run
   (unlock cache invalid), sets `clear[].is_new` and plays the unlock SFX. The framework
@@ -92,10 +92,10 @@ The descriptor's callbacks bind the framework's presentation to AP's authoritati
   cache-valid short-circuit.
 
 So the AP tab's completion path is unchanged from a plain checklist objective:
-predicate -> `ClearChecker_SetNewUnlock` -> `check_detection` -> `sent_checks` row -> AP.
+predicate -> `ClearChecker_SetNewUnlock` -> `ap_checks` -> `sent_checks` row -> AP.
 The framework only adds the cell flags and animation around it.
 
-`check_detection` reads and writes the AP cells through
+`ap_checks` reads and writes the AP cells through
 `gmGetClearcheckerTypeP(ap_checklist_mode)`, which the framework serves from the AP tab's
 `GameClearData` block - so the AP record path and the framework presentation operate on the
 same block.
@@ -111,7 +111,7 @@ undefined stay dark until their own check fires.
 `APChecklist_RevealAll` is the exception. Reveal is per checklist-mode row: the
 `reveal_checklists[row]` slot option asks for one row at a time, and `RevealChecklist(row)`
 opens either a vanilla mode's 120 cells or, for `AP_CHECKLIST_ROW`, the AP tab.
-`RevealAllChecklists` (the debug menu's "All Checklists") is that call over every row. The AP
+`RevealAllChecklists` is that call over every row. The debug menu drives both: its Reveal Checklists page has an "All Checklists" row plus one per mode row. The AP
 tab reveals only the cells in `ap_checks[]` - the other 68 have no objective behind them, so
 revealing them would show boxes that can never be checked. It sets `is_visible` only, leaving
 `is_unlocked` to the normal completion path, and no-ops when the framework never registered
@@ -143,8 +143,8 @@ that block when adding fields, and move both sides together.
 `APSave` is not part of that contract - the client never reads it - so it grows freely.
 Objectives whose predicate counts across boots keep their progress in `APSave.checks`, an
 `APCheckProgress` struct sitting at the end of `APSave`, away from the unlock masks: today
-`allup_collect_total` (clear_kind 4), `purple_sr1_wins` (clear_kind 27) and
-`race_color_mask` (clear_kind 30, one bit per `KirbyColor`), with their targets as
+`allup_collect_total` (clear_kind 3), `purple_sr1_wins` (clear_kind 26) and
+`race_color_mask` (clear_kind 29, one bit per `KirbyColor`), with their targets as
 `AP_ALLUP_TOTAL_NEED` (5) / `AP_PURPLE_SR1_NEED` (3) / `AP_RACE_COLOR_MASK_ALL` (`0xFF`) in
 `main.h` so the counter that stops incrementing and the predicate that reads it share one
 value. Grouping them means a new counting objective adds a field to that struct rather than
@@ -220,22 +220,22 @@ must be `0` - the same gate the rankers use - or that slot's placement and time 
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 13-21 | SINGLE RACE 1-9 finish 1st | `ply_finished[p] && ply_placement[p] == 0` with at least one opponent |
-| 22 | HIGH JUMP over 1,500 ft | `ply_dist[p] / 0.3048 > 1500` (`ply_dist` is metres) |
-| 23 | AIR GLIDER over 2,000 ft | `ply_dist[p] / 0.3048 > 2000` |
-| 24 / 25 | KIRBY MELEE 1 / 2 KOs | `ply_points[p] > 100` / `> 60` (the field is a polymorphic score; for Melee it is the KO count) |
-| 42 | DESTRUCTION DERBY 3 KO a rival 10x | `ply_points[p] >= 10` on `STKIND_DESTRUCTION3`. For a derby the polymorphic score is `GameData.destruction_derby_ko_num[p]`, which is exactly what the vanilla DD cells count, so this reads the same number vanilla's own DD 3 cell does |
-| 26 | SINGLE RACE 1 1st on Bulk Star | placement + an opponent + `Ply_GetMachineKindAbs(p) == VCKIND_BULK` |
-| 27 | SINGLE RACE 1 1st 3x as Purple | placement + an opponent + `rider_kind == RDKIND_KIRBY` + `Ply_GetColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.checks.purple_sr1_wins`. The rider-kind test is required because `Ply_GetColor` reads `PlayerDesc.color`, which is only a `KirbyColor` for a Kirby rider, and the stadiums are reachable from a Dedede match |
-| 28 | Photo finish in any DRAG RACE | a human and any other finisher with `ply_race_time` within 6 frames (0.10 s at 60 fps), on any of `STKIND_DRAG1`-`STKIND_DRAG4` |
-| 29 | Photo finish on any Air Ride course | same pairing, gated on `MJRKIND_AIR` + `AIRRIDEMODE_RACE` and not looking at the course |
-| 30 | Finish an Air Ride race as every Kirby color | per human `RDKIND_KIRBY` slot with `ply_finished[p]`, `1 << Ply_GetColor(p)` OR-ed into `APSave.checks.race_color_mask`; the predicate wants all 8 bits. Same `MJRKIND_AIR` + `AIRRIDEMODE_RACE` gate, and the same rider-kind test box 27 needs. A player with no color unlocked rides Pink, so Pink can latch unowned - harmless, since the apworld requires all 8 color items to reach the box |
-| 35 / 36 | Air Ride 1st place as Meta Knight / King Dedede | `won` + `ply_desc[p].rider_kind == RDKIND_METAKNIGHT` / `RDKIND_DEDEDE`, on any course |
-| 37 | NEBULA BELT finish 1st | `won` |
-| 38 | NEBULA BELT over 5,500 ft in 2 minutes | `Gm_GetCityKind() == AIRRIDE_RULE_TIME` + `Gm_GetRaceTimeLimitSeconds() == 120` + `Gm_GetPlayerRaceDistance(p) / 0.3048 >= 5500` |
-| 39 | NEBULA BELT 2 laps under 02:30:00 | `Gm_GetCityKind() == AIRRIDE_RULE_LAPS` + `Gm_GetRaceLapTotal() == 2` + `ply_race_time[p]` nonzero and `<= 9000` frames |
-| 40 | NEBULA BELT 1st on Wheelie Scooter | `won` + `Ply_GetMachineKindAbs(p) == VCKIND_WHEELIESCOOTER` |
-| 41 | NEBULA BELT airborne over 10 s on a flight machine | `Ply_GetMachineKindAbs(p)` in `VCKIND_DRAGOON` / `VCKIND_FLIGHT` / `VCKIND_WINGED` + `Ply_GetItemCollectArray(p)->airborne_time > 600` frames |
+| 12-20 | SINGLE RACE 1-9 finish 1st | `ply_finished[p] && ply_placement[p] == 0` with at least one opponent |
+| 21 | HIGH JUMP over 1,500 ft | `ply_dist[p] / 0.3048 > 1500` (`ply_dist` is metres) |
+| 22 | AIR GLIDER over 2,000 ft | `ply_dist[p] / 0.3048 > 2000` |
+| 23 / 24 | KIRBY MELEE 1 / 2 KOs | `ply_points[p] > 100` / `> 60` (the field is a polymorphic score; for Melee it is the KO count) |
+| 41 | DESTRUCTION DERBY 3 KO a rival 10x | `ply_points[p] >= 10` on `STKIND_DESTRUCTION3`. For a derby the polymorphic score is `GameData.destruction_derby_ko_num[p]`, which is exactly what the vanilla DD cells count, so this reads the same number vanilla's own DD 3 cell does |
+| 25 | SINGLE RACE 1 1st on Bulk Star | placement + an opponent + `Ply_GetMachineKindAbs(p) == VCKIND_BULK` |
+| 26 | SINGLE RACE 1 1st 3x as Purple | placement + an opponent + `rider_kind == RDKIND_KIRBY` + `Ply_GetColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.checks.purple_sr1_wins`. The rider-kind test is required because `Ply_GetColor` reads `PlayerDesc.color`, which is only a `KirbyColor` for a Kirby rider, and the stadiums are reachable from a Dedede match |
+| 27 | Photo finish in any DRAG RACE | a human and any other finisher with `ply_race_time` within 6 frames (0.10 s at 60 fps), on any of `STKIND_DRAG1`-`STKIND_DRAG4` |
+| 28 | Photo finish on any Air Ride course | same pairing, gated on `MJRKIND_AIR` + `AIRRIDEMODE_RACE` and not looking at the course |
+| 29 | Finish an Air Ride race as every Kirby color | per human `RDKIND_KIRBY` slot with `ply_finished[p]`, `1 << Ply_GetColor(p)` OR-ed into `APSave.checks.race_color_mask`; the predicate wants all 8 bits. Same `MJRKIND_AIR` + `AIRRIDEMODE_RACE` gate, and the same rider-kind test box 27 needs. A player with no color unlocked rides Pink, so Pink can latch unowned - harmless, since the apworld requires all 8 color items to reach the box |
+| 34 / 35 | Air Ride 1st place as Meta Knight / King Dedede | `won` + `ply_desc[p].rider_kind == RDKIND_METAKNIGHT` / `RDKIND_DEDEDE`, on any course |
+| 36 | NEBULA BELT finish 1st | `won` |
+| 37 | NEBULA BELT over 5,500 ft in 2 minutes | `Gm_GetCityKind() == AIRRIDE_RULE_TIME` + `Gm_GetRaceTimeLimitSeconds() == 120` + `Gm_GetPlayerRaceDistance(p) / 0.3048 >= 5500` |
+| 38 | NEBULA BELT 2 laps under 02:30:00 | `Gm_GetCityKind() == AIRRIDE_RULE_LAPS` + `Gm_GetRaceLapTotal() == 2` + `ply_race_time[p]` nonzero and `<= 9000` frames |
+| 39 | NEBULA BELT 1st on Wheelie Scooter | `won` + `Ply_GetMachineKindAbs(p) == VCKIND_WHEELIESCOOTER` |
+| 40 | NEBULA BELT airborne over 10 s on a flight machine | `Ply_GetMachineKindAbs(p)` in `VCKIND_DRAGOON` / `VCKIND_FLIGHT` / `VCKIND_WINGED` + `Ply_GetItemCollectArray(p)->airborne_time > 600` frames |
 
 Boxes 37-41 are gated on `in_nebula`, latched at `On3DLoadEnd` from `Gr_GetCurrentGrKind() ==
 GR_SPACE2`. That is the loaded terrain rather than `GameData.stage_kind`, for the same reason
@@ -295,7 +295,8 @@ Both per-frame procs below are attached by `AttachSamplers`, which walks the fiv
 slots and hangs the proc on every `PKIND_HMN` rider's GObj at `RDPRI_HITCOLL + 1`.
 
 `APCheckDetect_On3DLoadEnd` returns without arming anything when `Gm_IsAutoDemo()` - the
-title screen's attract demo, a real City Trial round run inside `MJRKIND_TITLE` with a CPU in
+title screen's attract demo, a real 3D round run inside `MJRKIND_TITLE` - City Trial on one of
+its rotating slots, Air Ride or Top Ride on the others - with a CPU in
 every slot. The samplers would find no human to attach to anyway, but the coral objective
 counts a break whoever made it, so the whole round is skipped rather than each hook.
 
@@ -313,16 +314,16 @@ same scope the vanilla City Trial cells use.
 | clear_kind | Objective | Detection |
 |---|---|---|
 | 0 | Visit the flower on top of Castle Hall on foot | `foot_visit_checks[]`: `!Rider_IsOnMachine(rd)` and `rd->pos` within 2 units of the flower, at `(408.7, 370.8, -564.6)`. The flower sits on a very small platform, and the stage's out-of-bounds box spans 2600 units in X and Z, so the sphere is tight. The on-foot requirement stops a machine flying through the spot from counting. |
-| 2 | Go out of bounds | `calcDistanceFromOOB(&rd->pos) < 0` - the engine's own definition, the condition that makes `Machine_CheckFallDeath` respawn the player. |
-| 3 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
-| 4 | Collect 5 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.checks.allup_collect_total` |
-| 5-12 | Eat 3+ of each of 8 foods | per-run delta of `item_collect[ITKIND_FOOD*]` |
-| 31 | Visit the model city on foot | the second `foot_visit_checks[]` entry: within 10 units of `(-422.7, 12.7, -168.9)`, on foot. The model sits on open ground rather than a ledge, so the sphere is wide enough to cover standing anywhere on it. |
-| 32 | Visit the flower on top of the volcanic cliffs on foot | the third `foot_visit_checks[]` entry: within 5 units of `(-107.0, 205.1, -847.3)`, on foot. The flower sits on the cliff top, reachable on foot from the surrounding terrain, so the sphere is the same size as the sky garden's rather than the tight one Castle Hall's platform needs. |
-| 33 | Visit the top of the garden in the sky on foot | the fourth `foot_visit_checks[]` entry: within 5 units of `(-67.9, 463.8, -0.3)`, on foot. Vanilla's own "Make your way to the garden in the sky!" cell only asks the player to reach the garden, so the sphere sits on the top surface rather than anywhere on the structure. |
-| 34 | Fly to the highest point possible | `rd->pos.Y >= AP_MAX_ALTITUDE_Y` (1000). A climb into the city's ceiling stops at 1040.3 - a collision, not an apex: vertical velocity is zeroed in one frame and the fall that follows is exactly the stage's `gravity_strength` of 0.025/frame. That ceiling is 460 below `StageNode.oob_max.Y` (1500), so the out-of-bounds lid is never what stops the climb and `calcDistanceFromOOB` cannot measure this. The threshold's 40-unit margin means the contact frame need not be sampled, and it sits far above the sky garden at 464, the highest place reachable without flying. |
-| 44 | Get the Mic ability from the Copy Chance Wheel | `PlayerStats.copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC)`. Only `Rider_MarkCopyAbilityObtained` (`0x8022f150`) sets that mask, and only the two copy-wheel paths call it (`randomAbility_aPress` `0x801ae7f4`, `randomAbility_autoSelect` `0x801ae890`) - so a Mic panel picked up off the ground does not satisfy it, the same wheel-only demand vanilla's Bomb and Sleep cells make. The mask is MSB-first, bit `15 - CopyKind`. |
-| 46-48 | Break 20 blue / 10 green / 10 red boxes in one game | per-run delta of `item_collect[ITKIND_BOXBLUE/GREEN/RED]` - `ItemKind` 0/1/2 *are* the three box colors, and a break bumps the array the same way a pickup does. Vanilla counts boxes only as an all-colors lifetime total (`CityTrialClearRecords.box_total`, its 500/1000 cells), so per-color counts are unclaimed. The thresholds are unequal because the colors are: `GrCity1`'s 9-entry `box_spawn_chances` table rolls blue 45/71, red 14/71 and green 12/71 |
+| 2 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
+| 51 | 10+ Offense Patches in one game | per-run delta of `item_collect[ITKIND_OFFENSE]` |
+| 3 | Collect 5 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.checks.allup_collect_total` |
+| 4-11 | Eat 3+ of each of 8 foods | per-run delta of `item_collect[ITKIND_FOOD*]` |
+| 30 | Visit the model city on foot | the second `foot_visit_checks[]` entry: within 10 units of `(-422.7, 12.7, -168.9)`, on foot. The model sits on open ground rather than a ledge, so the sphere is wide enough to cover standing anywhere on it. |
+| 31 | Visit the flower on top of the volcanic cliffs on foot | the third `foot_visit_checks[]` entry: within 5 units of `(-107.0, 205.1, -847.3)`, on foot. The flower sits on the cliff top, reachable on foot from the surrounding terrain, so the sphere is the same size as the sky garden's rather than the tight one Castle Hall's platform needs. |
+| 32 | Visit the top of the garden in the sky on foot | the fourth `foot_visit_checks[]` entry: within 5 units of `(-67.9, 463.8, -0.3)`, on foot. Vanilla's own "Make your way to the garden in the sky!" cell only asks the player to reach the garden, so the sphere sits on the top surface rather than anywhere on the structure. |
+| 33 | Fly to the highest point possible | `rd->pos.Y >= AP_MAX_ALTITUDE_Y` (1000). A climb into the city's ceiling stops at 1040.3 - a collision, not an apex: vertical velocity is zeroed in one frame and the fall that follows is exactly the stage's `gravity_strength` of 0.025/frame. That ceiling is 460 below `StageNode.oob_max.Y` (1500), so the out-of-bounds lid is never what stops the climb and `calcDistanceFromOOB` cannot measure this. The threshold's 40-unit margin means the contact frame need not be sampled, and it sits far above the sky garden at 464, the highest place reachable without flying. |
+| 43 | Get the Mic ability from the Copy Chance Wheel | `PlayerStats.copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC)`. Only `Rider_MarkCopyAbilityObtained` (`0x8022f150`) sets that mask, and only the two copy-wheel paths call it (`randomAbility_aPress` `0x801ae7f4`, `randomAbility_autoSelect` `0x801ae890`) - so a Mic panel picked up off the ground does not satisfy it, the same wheel-only demand vanilla's Bomb and Sleep cells make. The mask is MSB-first, bit `15 - CopyKind`. |
+| 45-47 | Break 20 blue / 10 green / 10 red boxes in one game | per-run delta of `item_collect[ITKIND_BOXBLUE/GREEN/RED]` - `ItemKind` 0/1/2 *are* the three box colors, and a break bumps the array the same way a pickup does. Vanilla counts boxes only as an all-colors lifetime total (`CityTrialClearRecords.box_total`, its 500/1000 cells), so per-color counts are unclaimed. The thresholds are unequal because the colors are: `GrCity1`'s 9-entry `box_spawn_chances` table rolls blue 45/71, red 14/71 and green 12/71 |
 
 `item_collect` is bumped by `Ply_IncrementItemCollectNum`, which `Machine_OnTouchItem` calls
 for every item application. That includes patches an Archipelago item spawns -
@@ -341,7 +342,7 @@ vanilla's `TA:` and `FR:` cells, so Race, Time Attack and Free Run all count.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 49 | FANTASY MEADOWS take the shortcut | `rd->pos` within 25 units of `(249.7, 120.0, 19.2)`. Riders are always on a machine in Air Ride, so unlike the city visits there is no on-foot test |
+| 48 | FANTASY MEADOWS take the shortcut | `rd->pos` within 25 units of `(249.7, 120.0, 19.2)`. Riders are always on a machine in Air Ride, so unlike the city visits there is no on-foot test |
 
 The shortcut is an elevated arc over the normal racing line, peaking near `(255, 135, 6)`;
 it is the lap's only route divergence. The sphere sits on the arc's descent rather than at
@@ -356,8 +357,8 @@ skip between frames.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 50 | City Trial: Collect all 6 spheres and assemble the Archipelago Star! | `GateApStar_WasAssembled()` - a read of the sticky flag the `ap_star` mod sets when a human player collects the sixth sphere, forwarded through `gate_ap_star.c` |
-| 51 | City Trial: In one game, assemble Dragoon, Hydra and Archipelago Star! | A per-frame poll over the human players: `PlayerStats.flags_84d` bits `0x04` and `0x08`, the per-round flags `Ply_MarkLegendaryMachineAssembled` (`0x80231198`) sets, plus `GateApStar_AssembledThisRound(ply)` |
+| 49 | City Trial: Collect all 6 spheres and assemble the Archipelago Star! | Latched by the `ap_star` assemble handler in `gate_ap_star.c`, which fires for every rider and keeps only `PKIND_HMN` |
+| 50 | City Trial: In one game, assemble Dragoon, Hydra and Archipelago Star! | A per-frame poll over the human players: `PlayerStats.flags_84d` bits `0x04` and `0x08`, the per-round flags `Ply_MarkLegendaryMachineAssembled` (`0x80231198`) sets, plus `GateApStar_AssembledThisRound(ply)` |
 
 The six spheres are custom items scheduled into City Trial's forced-content red boxes
 against match progress, the way the Hydra and Dragoon parts are, and each enters the pool
@@ -368,12 +369,15 @@ Cell 51 is scoped to one round because all three of its inputs are: `flags_84d` 
 `PlayerStats`, which is zeroed on every 3D scene load, and the star's assembly mask is
 cleared at the same point. It is polled from `APCheckDetect_OnFrameStart` rather than the
 per-rider sampler the other City Trial objectives use, because assembling the star ends in
-`Rider_RespawnFullRecreate` (`0x80193900`) - the rider the sampler proc hangs off is torn
-down and rebuilt under it, and a poll keyed to the mod's own frame callback is unaffected.
+`Rider_RespawnFullRecreate` (`0x80193900`) - it destroys the rider's `machine_gobj` and
+calls `Machine_Create` for the legendary, tearing the machine down under the sampler, and a
+poll keyed to the mod's own frame callback is unaffected.
 
-**The rival KO recorder - the Destruction Derby box.** `APCheckDetect_OnBoot` repoints the
-single `bl Ply_AddDeath` at `0x801e1f74`, inside `Machine_GiveDamage` (`0x801e1ee8`), at a
-wrapper that runs the vanilla recorder and then counts. `Ply_AddDeath` (`0x8022f648`) is the
+**The rival KO recorder - the Destruction Derby box.** `custom_machines` owns the
+`REPLACECALL` on the single `bl Ply_AddDeath` at `0x801e1f74`, inside `Machine_GiveDamage`
+(`0x801e1ee8`), and hands the KO on through its death-handler seam; `main.c` registers
+`APCheckDetect_AddDeath` there with `cm_api->AddDeathHandler` once the registry resolves. The Dedede and Mic tallies are `[5]` arrays indexed by the crediting player, because both
+cells read "in one game" of a single player's KOs. `Ply_AddDeath` (`0x8022f648`) is the
 engine's unified KO-event recorder, reached only from that one call site - where a machine's
 HP crosses zero - and it is the only place the KO'd rider is named: its first argument is the
 ply riding the destroyed machine and `dmg_log->attacker_ply` (`MachineData.dmg_log` + 0x1c)
@@ -382,7 +386,7 @@ is the killer. The per-player tally the DD cells read,
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 43 | As King Dedede, KO 10 Kirbys in one derby | gated on `Gm_IsDestructionDerby()` (`Gm_GetCityKind() == 14`, so any of DD 1-5); counts a KO whose killer is a `PKIND_HMN` slot with `Ply_GetRiderKind == RDKIND_DEDEDE` and whose victim is a different slot with `RDKIND_KIRBY`. The counter is per game, reset in `On3DLoadEnd` alongside the City Trial baselines |
+| 42 | As King Dedede, KO 10 Kirbys in one derby | gated on `Gm_IsDestructionDerby()` (`Gm_GetCityKind() == 14`, so any of DD 1-5); counts a KO whose killer is a `PKIND_HMN` slot with `Ply_GetRiderKind == RDKIND_DEDEDE` and whose victim is a different slot with `RDKIND_KIRBY`. The counter is per game, reset in `On3DLoadEnd` alongside the City Trial baselines |
 
 Testing the victim's rider kind is not a formality. A stadium CPU draws its character from the
 gated select grid, so once King Dedede or Meta Knight is unlocked - and this box needs Dedede
@@ -414,7 +418,7 @@ enemy-side counterpart of `Ply_AddDeath`: it credits a player with an enemy kill
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 45 | KIRBY MELEE (All): KO 10 enemies as Mic Kirby in one game | gated on a loaded KIRBY MELEE round (`Scene_GetCurrentMajor() == MJRKIND_CITY`, `Gm_GetCityMode() == CITYMODE_STADIUM`, `Gm_GetCurrentStadiumKind()` of `STKIND_MELEE1`/`STKIND_MELEE2`), latched in `On3DLoadEnd`; counts a defeat credited to a `PKIND_HMN` slot whose rider holds `COPYKIND_MIC` and is in action state `RIDERSTATE_MIC_SING` (`0x61`) or `RIDERSTATE_MIC_END` (`0x62`). The counter is per game, reset in `On3DLoadEnd` alongside the Destruction Derby one |
+| 44 | KIRBY MELEE (All): KO 10 enemies as Mic Kirby in one game | gated on a loaded KIRBY MELEE round (`Scene_GetCurrentMajor() == MJRKIND_CITY`, `Gm_GetCityMode() == CITYMODE_STADIUM`, `Gm_GetCurrentStadiumKind()` of `STKIND_MELEE1`/`STKIND_MELEE2`), latched in `On3DLoadEnd`; counts a defeat credited to a `PKIND_HMN` slot whose rider holds `COPYKIND_MIC` and is in action state `RIDERSTATE_MIC_SING` (`0x61`) or `RIDERSTATE_MIC_END` (`0x62`). The counter is per game, reset in `On3DLoadEnd` alongside the Destruction Derby one |
 
 The rider's live state is what identifies the blast, not the attack-method index the
 recorder itself keys off. That index - byte 3 of the attacker log - is what vanilla's own
@@ -469,8 +473,10 @@ boxes that need something to ride, the eight colors for the all-colors race.
 - `scripts/authoring/make_checklist_textures.py` - authors `ApChecklistTex.dat`.
 - `mods/archipelago/src/main.h` / `main.c` - the wire structs, `CHECKLIST_MODE_NUM` /
   `AP_CHECKLIST_ROW`, the runtime `ap_checklist_mode`, and the offset assertions.
-- `mods/archipelago/src/check_detection.c` / `.h` - `ChecklistModeRow` / `ChecklistRowMode`,
-  and the `ClearChecker_SetNewUnlock` REPLACEFUNC that records AP completions.
+- `mods/archipelago/src/ap_checks.c` / `.h` - the `ClearChecker_SetNewUnlock` REPLACEFUNC
+  that records AP completions, and the client backfill.
+- `mods/archipelago/src/ap_goal.c` / `.h` - goal evaluation and the filler gate that keeps
+  a filler token off a goal cell.
 - `mods/archipelago/src/checklist_rewards.c` - cross-mode reward placement onto AP cells.
-- `mods/archipelago/src/gate_ap_star.c` - the `ap_star` mod import behind clear_kinds 50/51.
+- `mods/archipelago/src/gate_ap_star.c` - the `ap_star` mod import behind clear_kinds 49/50.
 - `mods/custom_checklist/` - the framework that renders the tab.

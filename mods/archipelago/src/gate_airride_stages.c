@@ -33,7 +33,7 @@ void GateAirRideStages_OnBoot()
     CODEPATCH_REPLACEINSTRUCTION(0x8003c214, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x8003c218, 0x60000000); // nop
 
-    // Course init with random select (0x8003b4e8)
+    // AirRideSelect_StartRandomCourse (0x8003b4e8)
     CODEPATCH_REPLACEINSTRUCTION(0x8003b520, 0x7c030378); // mr r3, r0
     CODEPATCH_REPLACEINSTRUCTION(0x8003b524, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x8003b528, 0x60000000); // nop
@@ -51,7 +51,7 @@ void GateAirRideStages_OnBoot()
     CODEPATCH_REPLACEINSTRUCTION(0x8005207c, 0x60000000); // nop
     CODEPATCH_REPLACEINSTRUCTION(0x80052080, 0x60000000); // nop
 
-    OSReport("[GateAirRideStages] Air Ride stage gating installed\n");
+    OSReport("[GateAirRideStages] Hooks installed\n");
 }
 
 int GateAirRideStages_UnlockStage(int stage_kind, int announce)
@@ -62,7 +62,7 @@ int GateAirRideStages_UnlockStage(int stage_kind, int announce)
     ap_save->airride_stage_unlocked_mask |= (1 << stage_kind);
     if (!ap_regrant_quiet)
         OSReport("[GateAirRideStages] Air Ride stage %d (%s) unlocked (mask = %s)\n",
-                 stage_kind, AirRideCourse_Names[stage_kind], MaskBits(ap_save->airride_stage_unlocked_mask, 16));
+                 stage_kind, AirRideCourse_Names[stage_kind], MaskBits(ap_save->airride_stage_unlocked_mask, AIRRIDE_NUM));
     if (announce)
         APAnnounce_Grant("Unlocked Course: ", AirRideCourse_Names[stage_kind], tb_api->StageColor, NULL);
     return 1;

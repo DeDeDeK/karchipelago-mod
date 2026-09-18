@@ -5,12 +5,9 @@
 #include "settings_menu.h"
 #include "air_quick_spin.h"
 
-// Vanilla runs the L/R-flick quick spin check only in the grounded machine-riding
-// states; the airborne state stops short of it. With the menu toggle on, this
-// reinstates the check airborne for all three rider characters, each of which has
-// its own airborne state callback and its own quick-spin check. The reinstated
-// calls funnel through the base-ability quick-spin gates (0x801b7ec0, 0x801c05d4,
-// 0x801c3f6c), so an AP-locked spin stays locked in the air too.
+// Reinstates the grounded L/R-flick quick spin check in the airborne state, per rider
+// character. The reinstated calls funnel through the base-ability quick-spin gates
+// (0x801b7ec0, 0x801c05d4, 0x801c3f6c), so an AP-locked spin stays locked in the air.
 
 // Hook body at 0x801ac170, the dead `cmpwi r3,0` airControl left where
 // groundLogic calls the quick spin check. r31 = RiderData, r3 = Tornado-spin

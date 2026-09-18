@@ -10,6 +10,7 @@
 #include "inline.h"
 #include "code_patch/code_patch.h"
 #include "hoshi/mod.h"
+#include "hoshi/func.h"
 
 #include "custom_items_api.h"
 
@@ -17,24 +18,30 @@
 #include "ap_item_handler.h"
 #include "spawn_rate.h"
 #include "ap_patches.h"
+#include "settings_menu.h"
 
-// Percent of the city's box-category spawn ticks that come up as an AP Box. Well under
-// the 14-in-71 share red holds in the city's own chance table, because the tick a box
-// rolls on is not the throttled quantity: the spawner's item cap is checked ahead of
-// the roll, so a full field kills a tick before it ever reaches here, and a field that
-// gating has emptied lets every one of them through.
-#define AP_BOX_PERCENT 6
+// The two levers of the AP Box rate, one row per APBOXRATE_ setting. percent is the
+// share of box-category spawn ticks that come up an AP Box; interval is the frame floor
+// between winning rolls, divided by the spawn-rate scale at use so Spawn Rate Up still
+// moves the cadence. Both are needed because the tick count itself is not throttled -
+// the field's item cap is checked before the roll, so a round that gating has emptied
+// offers every tick through.
+static const struct
+{
+    int percent;
+    int interval;
+} ap_box_rate[APBOXRATE_NUM] = {
+    [APBOXRATE_RARE]   = {  3, 80 * 60 },
+    [APBOXRATE_LOW]    = {  6, 40 * 60 },
+    [APBOXRATE_MEDIUM] = { 12, 20 * 60 },
+    [APBOXRATE_HIGH]   = { 20, 12 * 60 },
+};
 
-// Frames an AP Box roll waits after a winning one, divided by the spawn-rate scale so
-// the Spawn Rate Up item still moves the cadence. This is the ceiling the percentage on
-// its own cannot give: City Trial ticks at 20-50 frames, one in five of them a box, so
-// an unthrottled round offers roughly 125 box ticks and the percentage alone would pay
-// out against however many of those the field's cap happened to leave live.
-//
-// The clock is grBoxGeneInfo.match_frames_left, which the spawner rebuilds from the
-// round timer every frame - so nothing has to be counted down, and a paused or ended
-// round stops the interval on its own.
-#define AP_BOX_MIN_INTERVAL (40 * 60)
+static int BoxRate(void)
+{
+    int rate = ap_menu_settings.ap_box_rate;
+    return (rate < 0 || rate >= APBOXRATE_NUM) ? APBOXRATE_LOW : rate;
+}
 
 // Patches one AP Box scatters, capping the 1 / 2 / 4 the vanilla size roll gives, so a
 // single large box cannot hand over a run of checks.
@@ -50,7 +57,7 @@ static const float box_slot_yaw[4] = { 0.0f, 180.0f, 90.0f, -90.0f };
 #define BOX_SINGLE_PITCH 1.5708f // the fixed launch pitch a one-item box uses
 
 static const CustomItemsAPI *ci_api;
-static int pickup_registered;
+static int ci_import_tried;
 
 static u32 patch_hash, box_hash; // 0 until the registry has been scanned
 static int items_matched = -1;   // -1 before the first scan, then the match count
@@ -151,12 +158,9 @@ static int RollBoxSize(void)
 }
 
 // REPLACECALL on the bl GrBoxGeneratorDetermine at 0x800eb20c, the one call site
-// CityItemSpawn_Think reaches when its tick came up an item box. The picker's
-// return is the box's ItemKind, so an AP box is one more outcome of the vanilla
-// roll - it keeps the color and size the roll landed on and inherits the fall timer.
-// What it does not inherit is the throttle: the field's item cap is checked before
-// this runs, so gating that empties the field hands the roll every tick the timer
-// makes. The interval floor is what holds the cadence steady across that.
+// CityItemSpawn_Think reaches when its tick came up an item box. The picker's return
+// is the box's ItemKind, so an AP box is one more outcome of the vanilla roll, keeping
+// the color, size and fall timer the roll landed on.
 static int DetermineBox(int *box_color, int *box_size)
 {
     int kind = GrBoxGeneratorDetermine(box_color, box_size);
@@ -168,10 +172,11 @@ static int DetermineBox(int *box_color, int *box_size)
     int now = info != NULL ? info->match_frames_left : 0;
     if (now > box_gate_frames)
         return kind;
-    if (HSD_Randi(100) >= AP_BOX_PERCENT)
+    int rate = BoxRate();
+    if (HSD_Randi(100) >= ap_box_rate[rate].percent)
         return kind;
 
-    box_gate_frames = now - (int)((float)AP_BOX_MIN_INTERVAL / SpawnRate_GetScale());
+    box_gate_frames = now - (int)((float)ap_box_rate[rate].interval / SpawnRate_GetScale());
 
     // No gate ever sees the AP box, so it still lands on the tick where box
     // gating has left no vanilla color eligible - carrying its own color and size.
@@ -356,7 +361,8 @@ static int SuppressItemCollect(ItemData *id)
     return IsApKind(id, patch_kind) || IsApKind(id, box_kind);
 }
 
-// 0x801db91c: lwz r4, 28(r21) - the call's own kind argument, reloaded from r21
+// 0x801db91c in Machine_OnTouchItem: lwz r4, 28(r21) - the call's own kind argument,
+// reloaded from r21
 // (ItemData) on the accept path. Accept falls through to 0x801db920, which
 // re-materializes r3 and r5; reject jumps past the call.
 CODEPATCH_HOOKCONDITIONALCREATE(0x801db91c, "mr 3, 21\n\t", SuppressItemCollect, "", 0, 0x801db92c)
@@ -371,9 +377,8 @@ static void OnPickup(u32 id_hash, const char *name, int player)
     Claim();
 }
 
-// Match both drop-ins to their hashes by display name, the same lazy resolve the
-// AP Star spheres use: mod load order follows FST order, so an export is not
-// available until its owner's OnBoot has run.
+// Match both drop-ins to their hashes by display name. Lazy because mod load order
+// follows FST order, so an export is not available until its owner's OnBoot has run.
 static void ResolveItems(void)
 {
     if (ci_api == NULL || items_matched == 2)
@@ -420,24 +425,24 @@ void ApPatches_On3DLoadStart(void)
     box_gate_frames = 0x7fffffff; // open, so the round's first roll is not held back
     ptcl_state = 0; // the bank tables are rebuilt with the scene
 
-    if (ci_api == NULL)
+    // Tried once: a build without custom_items would warn on every 3D scene.
+    if (!ci_import_tried)
+    {
+        ci_import_tried = 1;
         ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
+        if (ci_api != NULL)
+            ci_api->AddPickupHandler(OnPickup);
+    }
     if (ci_api == NULL)
         return;
 
     ResolveItems();
-    if (!pickup_registered)
-    {
-        ci_api->AddPickupHandler(OnPickup);
-        pickup_registered = 1;
-    }
 
     // custom_items registers at CityItemSpawn_Init's epilogue and skips a disabled
     // item, so a held-out kind is never handed an ItemKind and nothing can spawn it.
-    // The title screen's attract demo is a City Trial round in every respect the
-    // gate below reads, so it is held out here rather than at the roll: a CPU
-    // collecting a patch claims a location the same way a player does.
+    // The attract demo satisfies every other term here, and a CPU collecting a patch
+    // would claim a location, so it is held out at the registry rather than the roll.
     int on = ApPatches_GetCount() > 0 && !Gm_IsAutoDemo() &&
              Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL;
     if (patch_hash != 0)
@@ -466,9 +471,10 @@ void ApPatches_On3DLoadEnd(void)
     }
 
     round_armed = 1;
+    int rate = BoxRate();
     OSReport("[APPatches] Armed with %d patch(es) left, %d%% of box spawns, %d frame floor\n",
-             ApPatches_Remaining(), AP_BOX_PERCENT,
-             (int)((float)AP_BOX_MIN_INTERVAL / SpawnRate_GetScale()));
+             ApPatches_Remaining(), ap_box_rate[rate].percent,
+             (int)((float)ap_box_rate[rate].interval / SpawnRate_GetScale()));
 }
 
 void ApPatches_On3DExit(void)
@@ -480,14 +486,9 @@ void ApPatches_On3DExit(void)
     round_armed = 0;
 }
 
-void ApPatches_OnFrameStart(void)
+// Called only under ap_data->backfill_valid, so the array is whole.
+void ApPatches_ApplyBackfill(void)
 {
-    int any = 0;
-    for (int w = 0; w < AP_PATCH_WORDS && !any; w++)
-        any = ap_data->ap_patch_backfill[w] != 0;
-    if (!any)
-        return;
-
     int applied = 0;
     for (int w = 0; w < AP_PATCH_WORDS; w++)
     {
@@ -559,6 +560,17 @@ void ApPatches_DebugSetCount(int count)
 int ApPatches_DebugClaim(void)
 {
     return Claim();
+}
+
+// The client's backfill is ORed straight back into both arrays on its next push, so
+// a clear that left it alone would be undone and the patch stay unclaimable.
+void ApPatches_DebugClearCollected(void)
+{
+    ApPatches_ResetAll();
+    for (int w = 0; w < AP_PATCH_WORDS; w++)
+        ap_data->ap_patch_backfill[w] = 0;
+    Hoshi_WriteSave();
+    OSReport("[APPatches] Debug: cleared every collected bit\n");
 }
 
 int ApPatches_DebugSpawnBox(int ply)

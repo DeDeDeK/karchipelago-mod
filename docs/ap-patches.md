@@ -218,15 +218,14 @@ and `box_size` the roll wrote in place.
 
 That makes the AP box a fourth outcome of the vanilla box roll rather than a spawn of its own. It
 inherits the fall timer, the position and slot picking and the 8-entry recent-slot ring buffer, and
-the spawn-rate hooks scale it with everything else - the frequency knob is the Spawn Rate Up item,
-not a setting. The cost is that an AP box displaces the blue, green or red one that tick would
+the spawn-rate hooks scale it with everything else. The cost is that an AP box displaces the blue, green or red one that tick would
 otherwise have placed. What it does **not** inherit is the field's simultaneous-item cap, which is
 checked upstream of the seam; the section below is what stands in for it.
 
 ### Why a percentage is not enough
 
-`AP_BOX_PERCENT` is 6, and there is a second limit on top of it, because the quantity a
-percentage is taken against is not throttled.
+The roll's share is a percentage, and there is a second limit on top of it, because the quantity
+a percentage is taken against is not throttled.
 
 `CityItemSpawn_UpdateAndCheckToSpawn` (`0x800ea6e0`) runs three steps in this order, and the
 order is the whole problem:
@@ -250,19 +249,19 @@ boxes land - and an early seed with box and patch gating on is exactly the case 
 else is spawning to fill the field at all. Gating makes the category *more* generous, which is
 backwards.
 
-At the old 16% an unthrottled round pays out ~20 AP boxes and ~38 patches. That is the go-mode
-reading, and it is worst at the start of a seed.
+At 16% with no second limit an unthrottled round pays out ~20 AP boxes and ~38 patches. That is
+the go-mode reading, and it is worst at the start of a seed.
 
 ### The two limits
 
-**`AP_BOX_PERCENT` is 6**, well under the 14-in-71 share red holds in the city's own chance table
-(`[20, 15, 10, 5, 4, 3, 7, 7, 0]`). Matching a real color's share only makes sense for something
-the cap throttles like a real color.
+**A share of the box ticks.** At the default Low setting it is 6%, well under the 14-in-71 share
+red holds in the city's own chance table (`[20, 15, 10, 5, 4, 3, 7, 7, 0]`). Matching a real
+color's share only makes sense for something the cap throttles like a real color.
 
-**`AP_BOX_MIN_INTERVAL` is 2400 frames (40 s)**, a floor on the gap between two winning rolls. It
-is divided by `SpawnRate_GetScale()` so the Spawn Rate Up item still moves the cadence and a
-sub-vanilla `spawn_rate_min` still slows it - the floor bounds the category against *gating*, not
-against the knob that is supposed to control it.
+**A floor on the gap between two winning rolls**, 2400 frames (40 s) at Low. It is divided by
+`SpawnRate_GetScale()` so the Spawn Rate Up item still moves the cadence and a sub-vanilla
+`spawn_rate_min` still slows it - the floor bounds the category against *gating*, not against the
+knob that is supposed to control it.
 
 Nothing counts the interval down. The spawner already keeps a frame clock for the round in
 `grBoxGeneInfo.match_frames_left` (`+0x29c`), rebuilt at the top of
@@ -281,7 +280,32 @@ The floor is what makes the rate stop depending on how much of the game is locke
 unthrottled round offers ~125 box ticks, which at 6% wants ~7.5 AP boxes; the floor allows at most
 7 in five minutes. The two land in the same place by construction, so a gated round and an ungated
 one pay out at the same rate - about **7 AP boxes and 11 patches** in a five-minute round, against
-~20 boxes and ~38 patches before.
+~20 boxes and ~38 patches with the percentage alone.
+
+### The rate setting
+
+Both levers move together off one menu option, `ap_menu_settings.ap_box_rate`, in the
+`ap_box_rate[]` table at the top of `ap_patches.c`. **AP Box Rate** sits on the Archipelago
+Settings page with values Rare / Low / Med / High, defaulting to **Low** - the rate the category
+shipped with:
+
+| Setting | Share of box ticks | Interval floor | Boxes / 5 min | Patches |
+|---|---|---|---|---|
+| Rare | 3% | 4800 frames (80 s) | 3.75 | ~6 |
+| Low | 6% | 2400 frames (40 s) | 7.5 | ~12 |
+| Med | 12% | 1200 frames (20 s) | 15 | ~23 |
+| High | 20% | 720 frames (12 s) | 25 | ~39 |
+
+Each row's floor is `300 s / (1.25 * percent)`, which is what keeps the two limits binding at the
+same number of boxes - the property the pair is built on. Changing one column without the other
+breaks it: a share above what the floor admits makes gating generous again, and a floor above what
+the share wants makes the setting do nothing on an open field. The ladder doubles the share and
+halves the floor at each step, so a seed's payout is the same shape at every setting.
+
+The value is read at roll time, so a change takes effect on the next box tick rather than the next
+round. It is player-owned and saved to the memory card with the rest of the menu; no slot option
+seeds it, because the seed's location count is already `ap_patches` and this only decides how fast
+that block is worked through.
 
 The roll is skipped entirely while the round is not armed or
 `ap_patches - popcount(ap_patch_collected)` has reached zero, which leaves the category dormant for
@@ -431,8 +455,8 @@ independently, and its own option tops out at 200.
 
 ## Debug
 
-`archipelago_debug` drops one AP Box in front of player 1 on each **D-Pad Down**, so a break and
-its patches can be watched without waiting on the spawner. It goes through
+`archipelago_debug` drops one AP Box in front of its Target Player slot on each **D-Pad Down**
+during a round, so a break and its patches can be watched without waiting on the spawner. It goes through
 `ArchipelagoAPI.DebugSpawnApBox`, which reads the box's `ItemKind` out of the `custom_items`
 registry - an item held out when the scene loaded was never registered and cannot be spawned
 until the round reloads. The AP Star sphere cycle is on **R + D-Pad Down**.
@@ -441,12 +465,24 @@ The Checks menu carries the two that are not spawns: **AP Patches**, which overr
 `ap_patches` (Off / 8 / 64 / 512) so a build with no AP Patch seed can still register the
 drop-ins at the next round load, and **Collect AP Patch**, which claims the lowest unclaimed
 patch outright. Lowering the count drops the collected bits above the new ceiling, so the
-collected total never reads past the window the count describes.
+collected total never reads past the window the count describes - which is why the row only
+writes when the player moves it, and never when hoshi replays its `on_change` at boot with the
+bucketed value a seed between sizes was displayed as.
+
+**Clear Collected AP Patches** is the inverse of Collect: it clears the save bits, the
+`ap_patch_checks` mirror and the client's pending `ap_patch_backfill` together, then writes the
+card. All three matter. Clearing only the save leaves the mirror to be republished over it at the
+next `ApPatches_OnSaveLoaded`; clearing only the mirror leaves the claim loop still skipping the
+index, since that tests the save word; and leaving the backfill alone lets the client's next push
+OR every bit straight back in. Nothing else needs resetting for a drop to re-arm - the remaining
+count is recomputed per call, so a mid-round clear makes the box drop patches again without a
+scene reload.
 
 ## Logging
 
 The `[APPatches]` component prints one "Hooks installed" line at boot, one line per claim, one
-per round at arm time with the remaining count, the roll's share and the scaled interval floor,
+per round at arm time with the remaining count, the rate setting's share and its scaled interval
+floor,
 and one at round end with the AP boxes the roll produced - enough to see whether the share is
 landing where it should, and whether the floor or the percentage was the binding limit. Nothing
 per spawn.

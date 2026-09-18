@@ -18,8 +18,7 @@
 #define VOLC_PI      3.14159265358979f
 #define VOLC_DEG2RAD (VOLC_PI / 180.0f)
 
-// Crater mouth in City Trial world space, surveyed at the rim. The play box is
-// X/Z +/-1300, Y -300..1500, so the crater sits left-and-back of the map center.
+// Crater mouth in City Trial world space.
 #define VOLC_MOUTH_X   -366.19f
 #define VOLC_MOUTH_Y    114.97f
 #define VOLC_MOUTH_Z   -575.42f
@@ -37,9 +36,7 @@
 #define VOLC_MAX_BURST      8      // per-volley cap
 
 // Ballistic launch. Range is roughly speed^2 / gravity, so the defaults carry a
-// projectile most of the way across the play box. Speed and gravity are tied: to
-// change how fast the arc plays out without moving where shots land, scale gravity
-// by the square of the speed change.
+// projectile most of the way across the play box.
 #define VOLC_BASE_SPEED    5.5f
 #define VOLC_SPEED_VAR     0.30f   // +/- fraction rolled per shot
 #define VOLC_MAX_TILT     70.0f    // degrees off vertical at spread == 1
@@ -47,20 +44,13 @@
 #define VOLC_GRAVITY       0.021875f // per-frame downward accel written by VolcanoGravity
 #define VOLC_LIFETIME     1680     // frames; long enough to complete the arc
 
-// Per-shot size roll, uniform over the range. Drives both the model and the hitbox,
-// so a big one is genuinely more dangerous. 0.0 would mean no hitbox at all.
+// Per-shot size roll. Drives both the model and the hitbox, so a big one is
+// genuinely more dangerous.
 #define VOLC_SCALE_MIN     0.5f
 #define VOLC_SCALE_MAX     3.5f
 
-// Per-kind data lives at 0x8055a9a8[kind], registered in one pass when the first
-// rider is created from the ability archive. Between scene load (the table is
-// zeroed) and that point every slot is NULL, and Projectile_Create dereferences the
-// slot without checking.
-static void **stc_proj_kind_data = (void **)0x8055a9a8;
-
-// Projectile kinds per theme. A volley picks uniformly within the theme's list.
-// Every kind here spawns and flies with no owner rider; see VolcanoTheme for the
-// ones that cannot.
+// A volley picks uniformly within the theme's list. Every kind here survives an
+// ownerless spawn, which is what limits the roster.
 static const u8 theme_fire[]   = { PROJKIND_FIRE_BULLET };
 static const u8 theme_plasma[] = { PROJKIND_PLASMA_A, PROJKIND_PLASMA_B,
                                    PROJKIND_PLASMA_SPREAD_MID, PROJKIND_PLASMA_SPREAD_SIDE };
@@ -116,27 +106,26 @@ static int   stc_next = 0;        // next unfired entry in stc_schedule
 static int   stc_frames_left = 0; // remaining frames of the eruption in progress
 static int   stc_volley_cd = 0;
 
-// Menu overrides. Index 0 is "Preset" on every knob.
-static char *toggle_names[] = {"Preset", "Off", "On"};
+// Menu overrides. Index 0 is "Preset", the pass-through value, on every knob.
 static int show_index = 0;
 
-static const int count_values[] = {0, 0, 1, 2, 3, 5, 8};
-static char *count_names[] = {"Preset", "Off", "1", "2", "3", "5", "8"};
+static const int count_values[] = {0, 1, 2, 3, 5, 8};
+static char *count_names[] = {"Preset", "1", "2", "3", "5", "8"};
 #define VOLC_COUNT_NUM (int)(sizeof(count_values) / sizeof(count_values[0]))
 static int count_index = 0;
 
-static const float duration_factors[] = {0.0f, 0.5f, 1.0f, 1.8f, 3.0f};
+static const float duration_factors[] = {1.0f, 0.5f, 1.0f, 1.8f, 3.0f};
 static char *duration_names[] = {"Preset", "Brief", "Normal", "Long", "Sustained"};
 #define VOLC_DURATION_NUM (int)(sizeof(duration_factors) / sizeof(duration_factors[0]))
 static int duration_index = 0;
 
 // Scales the per-volley projectile count and tightens the gap between volleys.
-static const float density_factors[] = {0.0f, 0.5f, 1.0f, 2.0f, 3.5f};
+static const float density_factors[] = {1.0f, 0.5f, 1.0f, 2.0f, 3.5f};
 static char *density_names[] = {"Preset", "Sparse", "Normal", "Heavy", "Cataclysm"};
 #define VOLC_DENSITY_NUM (int)(sizeof(density_factors) / sizeof(density_factors[0]))
 static int density_index = 0;
 
-static const float power_factors[] = {0.0f, 0.65f, 1.0f, 1.4f};
+static const float power_factors[] = {1.0f, 0.65f, 1.0f, 1.4f};
 static char *power_names[] = {"Preset", "Weak", "Normal", "Strong"};
 #define VOLC_POWER_NUM (int)(sizeof(power_factors) / sizeof(power_factors[0]))
 static int power_index = 0;
@@ -146,48 +135,11 @@ static char *theme_names[] = {"Preset", "Fire", "Plasma", "Bombs", "Stars", "Cha
 #define VOLC_THEME_NUM (int)(sizeof(theme_names) / sizeof(theme_names[0]))
 static int theme_index = 0;
 
-// FIRE_BULLET's init and post_init read rider fields through the owner GObj from
-// inside Projectile_Create, so it is the one kind that cannot be handed a null
-// owner. Any live rider satisfies them - the two floats cached from it are per-kind
-// scratch - and the owner is dropped the moment create returns.
-static int NeedsOwner(int kind)
-{
-    return kind == PROJKIND_FIRE_BULLET;
-}
-
-static void *FindDonorRider(void)
-{
-    for (int i = 0; i < 4; i++)
-    {
-        GOBJ *rg = stc_playerdata[i].rider_gobj;
-        if (stc_playerdata[i].player_kind == PKIND_NONE || !rg || !rg->userdata)
-            continue;
-        return rg;
-    }
-    return NULL;
-}
-
 // Runs from the projectile's own prio-0 proc, right after that proc zeroes the
-// acceleration vector and before prio 4 integrates it into velocity. Every theme
-// gets it: the plasma and star kinds have an all-`blr` pre-physics slot and would
-// otherwise fly dead straight, and the bomb kinds only ever add the stage air
-// current to accel, so this value survives on them too.
+// acceleration vector and before prio 4 integrates it into velocity.
 static void VolcanoGravity(void *p)
 {
     ((ProjectileData *)p)->accel.Y = -VOLC_GRAVITY;
-}
-
-// Spread the round's eruptions over the match, one per equal slice with jitter
-// inside the slice so they never land on the same beat twice. Entries already
-// behind `p` are skipped so re-planning mid-round does not replay them.
-static void SeedSchedule(int n, float p)
-{
-    for (int i = 0; i < n; i++)
-        stc_schedule[i] = ((float)i + 0.15f + 0.70f * HSD_Randf()) / (float)n;
-    stc_next = 0;
-    while (stc_next < n && stc_schedule[stc_next] <= p)
-        stc_next++;
-    stc_scheduled = n;
 }
 
 // Resolve the theme to a concrete kind, rerolling per projectile under Chaos.
@@ -202,7 +154,7 @@ static int PickKind(void)
 
     const ThemeKinds *t = &theme_table[theme];
     int kind = t->kinds[HSD_Randi(t->count)];
-    if (stc_proj_kind_data[kind] == NULL)
+    if (proj_kind_data[kind] == NULL)
         return -1;
     return kind;
 }
@@ -214,10 +166,12 @@ static void LaunchOne(void)
     if (kind < 0)
         return;
 
+    // FIRE_BULLET's init and post_init read rider fields through the owner GObj from
+    // inside Projectile_Create; every other kind here tolerates a null owner.
     void *donor = NULL;
-    if (NeedsOwner(kind))
+    if (kind == PROJKIND_FIRE_BULLET)
     {
-        donor = FindDonorRider();
+        donor = Weather_FindDonorRider();
         if (!donor)
             return;
     }
@@ -243,7 +197,7 @@ static void LaunchOne(void)
     up.Z = -ct * ca;
 
     float speed = VOLC_BASE_SPEED * stc_power * (1.0f + VOLC_SPEED_VAR * Weather_Randf2());
-    float scale = VOLC_SCALE_MIN + (VOLC_SCALE_MAX - VOLC_SCALE_MIN) * HSD_Randf();
+    float scale = Weather_RandRange(VOLC_SCALE_MIN, VOLC_SCALE_MAX);
 
     Vec3 pos;
     pos.X = VOLC_MOUTH_X + Weather_Randf2() * VOLC_MOUTH_JIT;
@@ -293,12 +247,8 @@ static void LaunchOne(void)
         Projectile_SetState(proj, SENSOR_BOMB_STATE_ARMED_FLYING, 1.0f, 1.0f, 1);
     // Single-state kinds are already in their one flying state after create.
 
-    // FIRE_BULLET's init caches the owner's Fire-ability charge in kind scratch: word 0
-    // normalized, word 1 raw. On impact it multiplies its hitbox radius by the first and
-    // assigns the second to cur_scale. A borrowed rider is never charged, so both arrive
-    // 0 and the burst lands inert, invisible, and noisy (the effect system warns on the
-    // zero scale). Word 0 gets a full charge, whose vanilla ceiling is 1.0; word 1 gets
-    // the rolled size, so the burst stays as big as the shot that made it.
+    // kind_scratch word 0 is the normalized charge, word 1 the burst size. A borrowed
+    // rider is never charged, so both would arrive 0 and the burst would land inert.
     if (kind == PROJKIND_FIRE_BULLET)
     {
         float *charge = (float *)proj->kind_scratch;
@@ -308,14 +258,14 @@ static void LaunchOne(void)
 
     // The hook write must follow the transition, since Projectile_SetState clears
     // the user-hook slots. The per-kind default lifetimes are unusable here: plasma
-    // expires in 6 to 9 frames, and bomb and sensor bomb never expire at all (0).
+    // expires in 6 to 9 frames, and bomb and sensor bomb never expire at all.
     proj->lifetime = VOLC_LIFETIME;
     proj->user_hook_0 = VolcanoGravity;
 }
 
-// Fold the menu overrides over the latched preset config into the effective values
-// for this frame. Returns 0 when the volcano is dormant.
-static int ResolveConfig(void)
+// Fold the menu overrides over the latched preset config. Returns 0 when the
+// volcano is dormant this round.
+static int Volcano_ResolveConfig(void)
 {
     if (!WeatherToggle(show_index, stc_active))
         return 0;
@@ -326,13 +276,11 @@ static int ResolveConfig(void)
     if (stc_eruptions > VOLC_MAX_ERUPTIONS)
         stc_eruptions = VOLC_MAX_ERUPTIONS;
 
-    stc_duration = (duration_index > 0)
-                       ? (int)(stc_def_duration * duration_factors[duration_index])
-                       : stc_def_duration;
+    stc_duration = (int)(stc_def_duration * duration_factors[duration_index]);
     if (stc_duration < 1)
         stc_duration = 1;
 
-    float density = (density_index > 0) ? density_factors[density_index] : 1.0f;
+    float density = density_factors[density_index];
     stc_burst = (int)(stc_def_burst * density + 0.5f);
     stc_interval = (int)(stc_def_interval / density);
     if (stc_burst < 1)
@@ -342,16 +290,15 @@ static int ResolveConfig(void)
     if (stc_interval < 2)
         stc_interval = 2;
 
-    stc_power = (power_index > 0) ? power_factors[power_index] : stc_def_power;
+    stc_power = power_factors[power_index] * stc_def_power;
     stc_spread = stc_def_spread;
     stc_theme = (theme_index > 0) ? theme_index : stc_def_theme;
 
     return 1;
 }
 
-// Latch the active preset's volcano config, applying the module defaults for any
-// field the preset left at 0. The menu can still force it on over a preset that
-// leaves it off, so the resolved values are kept either way.
+// The menu can force the volcano on over a preset that leaves it off, so the
+// resolved values are latched either way.
 void Volcano_SetActive(const VolcanoDef *def)
 {
     stc_active = (def && def->enabled) ? 1 : 0;
@@ -373,7 +320,7 @@ void Volcano_Tick(void)
 {
     // Config is resolved before the active test so a forced-On menu value can wake
     // a preset that ships the volcano dormant.
-    if (!ResolveConfig())
+    if (!Volcano_ResolveConfig())
     {
         stc_frames_left = 0;
         return;
@@ -385,7 +332,10 @@ void Volcano_Tick(void)
 
     // A changed eruption count re-plans the round from the current progress.
     if (stc_scheduled != stc_eruptions)
-        SeedSchedule(stc_eruptions, p);
+    {
+        stc_next = Weather_SeedSchedule(stc_schedule, stc_eruptions, p);
+        stc_scheduled = stc_eruptions;
+    }
 
     if (stc_frames_left > 0)
     {
@@ -420,6 +370,36 @@ void Volcano_Reset(void)
     stc_volley_cd = 0;
 }
 
+static void OnVolcanoShowChange(int val)
+{
+    OSReport("[Volcano] Volcano %s\n", weather_toggle_names[val]);
+}
+
+static void OnVolcanoCountChange(int val)
+{
+    OSReport("[Volcano] Eruptions %s\n", count_names[val]);
+}
+
+static void OnVolcanoDurationChange(int val)
+{
+    OSReport("[Volcano] Duration %s\n", duration_names[val]);
+}
+
+static void OnVolcanoDensityChange(int val)
+{
+    OSReport("[Volcano] Intensity %s\n", density_names[val]);
+}
+
+static void OnVolcanoPowerChange(int val)
+{
+    OSReport("[Volcano] Power %s\n", power_names[val]);
+}
+
+static void OnVolcanoThemeChange(int val)
+{
+    OSReport("[Volcano] Projectiles %s\n", theme_names[val]);
+}
+
 MenuDesc volcano_menu = {
     .option_num = 6,
     .options = {
@@ -429,7 +409,8 @@ MenuDesc volcano_menu = {
             .kind = OPTKIND_VALUE,
             .val = &show_index,
             .value_num = 3,
-            .value_names = toggle_names,
+            .value_names = weather_toggle_names,
+            .on_change = OnVolcanoShowChange,
         },
         &(OptionDesc){
             .name = "Eruptions",
@@ -438,6 +419,7 @@ MenuDesc volcano_menu = {
             .val = &count_index,
             .value_num = VOLC_COUNT_NUM,
             .value_names = count_names,
+            .on_change = OnVolcanoCountChange,
         },
         &(OptionDesc){
             .name = "Duration",
@@ -446,6 +428,7 @@ MenuDesc volcano_menu = {
             .val = &duration_index,
             .value_num = VOLC_DURATION_NUM,
             .value_names = duration_names,
+            .on_change = OnVolcanoDurationChange,
         },
         &(OptionDesc){
             .name = "Intensity",
@@ -454,6 +437,7 @@ MenuDesc volcano_menu = {
             .val = &density_index,
             .value_num = VOLC_DENSITY_NUM,
             .value_names = density_names,
+            .on_change = OnVolcanoDensityChange,
         },
         &(OptionDesc){
             .name = "Power",
@@ -462,6 +446,7 @@ MenuDesc volcano_menu = {
             .val = &power_index,
             .value_num = VOLC_POWER_NUM,
             .value_names = power_names,
+            .on_change = OnVolcanoPowerChange,
         },
         &(OptionDesc){
             .name = "Projectiles",
@@ -470,6 +455,7 @@ MenuDesc volcano_menu = {
             .val = &theme_index,
             .value_num = VOLC_THEME_NUM,
             .value_names = theme_names,
+            .on_change = OnVolcanoThemeChange,
         },
     },
 };

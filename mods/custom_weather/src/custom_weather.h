@@ -41,8 +41,8 @@ typedef enum WeatherKind
     WEATHER_TORNADO,
 } WeatherKind;
 
-// Per-preset rain (CustomPresetDef.rain). Numeric fields take 0 = module default;
-// the horizontal slant comes from the global wind vector, not from here.
+// Falling line streaks. The horizontal slant comes from the global wind vector, not
+// from here. 0 = module default on every numeric field.
 typedef struct RainDef
 {
     int   enabled;     // 0 = no rain for this preset
@@ -53,16 +53,14 @@ typedef struct RainDef
     float streak;      // streak length = per-frame velocity * this
 } RainDef;
 
-// Per-preset hail (CustomPresetDef.hail): icy stones riding over each machine that
-// chip 1 HP on contact with an exposed machine. Requires rain.enabled.
+// Icy stones riding over each machine that chip 1 HP on contact. Requires rain.
 typedef struct HailDef
 {
     int   enabled;   // 0 = no hail for this preset
     float amount;    // density multiplier over the base stone count (1.0 = Normal)
 } HailDef;
 
-// Per-preset snow (CustomPresetDef.snow): soft flakes that fall slowly, flutter
-// sideways, and drift with the wind. Numeric fields take 0 = module default.
+// Soft flakes that fall slowly, flutter sideways, and drift with the wind.
 typedef struct SnowDef
 {
     int   enabled;     // 0 = no snow for this preset
@@ -73,8 +71,7 @@ typedef struct SnowDef
     float size;        // flake radius in world units
 } SnowDef;
 
-// Visible-bolt mode for a lightning preset (LightningDef.bolt). The flash lights
-// terrain; the bolt is GX geometry plus a midpoint point light for nearby riders.
+// The flash lights terrain; the bolt is GX geometry plus a midpoint point light.
 typedef enum LightningBoltMode
 {
     LTNG_BOLT_OFF = 0,   // no bolt geometry; the screen flash only (default)
@@ -82,8 +79,7 @@ typedef enum LightningBoltMode
     LTNG_BOLT_REPLACE,   // draw a bolt INSTEAD of the screen flash (terrain stays dim)
 } LightningBoltMode;
 
-// Per-preset lightning (CustomPresetDef.lightning): random lulls punctuated by a
-// flash toward flash_color. Numeric fields take 0 = module default.
+// Random lulls punctuated by a flash toward flash_color.
 typedef struct LightningDef
 {
     int enabled;       // 0 = no lightning for this preset
@@ -94,9 +90,8 @@ typedef struct LightningDef
     int bolt;          // LightningBoltMode: 0 = off (default), 1 = augment, 2 = replace
 } LightningDef;
 
-// Per-preset wind (CustomPresetDef.wind): one global horizontal vector that slants
-// precipitation, blows airborne items, and pushes gliding machines. Speed and
-// heading evolve as smoothed random walks. Numeric fields take 0 = module default.
+// One global horizontal vector that slants precipitation, blows airborne items, and
+// pushes gliding machines. Speed and heading evolve as smoothed random walks.
 typedef struct WindDef
 {
     int   enabled;     // 0 = no wind for this preset
@@ -106,8 +101,7 @@ typedef struct WindDef
     float chaos;       // 0..1, how much the heading wanders over time (0 = fixed)
 } WindDef;
 
-// Per-preset puddles (CustomPresetDef.puddles): roaming oval pools on flat ground
-// that damp grounded machines driving through them. 0 = module default.
+// Roaming oval pools on flat ground that damp machines driving through them.
 typedef struct PuddleDef
 {
     int   enabled;      // 0 = no puddles for this preset
@@ -117,9 +111,8 @@ typedef struct PuddleDef
     float slow_factor;  // horizontal velocity multiplier/frame while inside (0,1)
 } PuddleDef;
 
-// Per-preset cloud deck (CustomPresetDef.clouds): a low deck of soft translucent
-// spheroid clusters drifting with the wind, which riders fly through. Numeric
-// fields take 0 = module default.
+// A low deck of soft translucent spheroid clusters drifting with the wind, which
+// riders fly through.
 typedef struct CloudDef
 {
     int   enabled;     // 0 = no clouds for this preset
@@ -132,7 +125,6 @@ typedef struct CloudDef
     float puff_var;    // 0..1 size variance among the puffs within a cluster
 } CloudDef;
 
-// Shooting-star cadence for a preset (StarDef.shoot).
 typedef enum ShootFreq
 {
     SHOOT_FREQ_DEFAULT = 0,  // Occasional (the built-in cadence)
@@ -142,8 +134,7 @@ typedef enum ShootFreq
     SHOOT_FREQ_FREQUENT,
 } ShootFreq;
 
-// Per-preset starfield (CustomPresetDef.stars): faint camera-anchored dots on the
-// sky dome, drawn additively as soft twinkling glows. 0 = module default.
+// Faint camera-anchored dots on the sky dome, drawn additively as twinkling glows.
 typedef struct StarDef
 {
     int   enabled;      // 0 = no stars for this preset
@@ -156,8 +147,8 @@ typedef struct StarDef
     int   shoot;        // ShootFreq cadence. 0 = Default (Occasional)
 } StarDef;
 
-// Moon phase (MoonDef.phase): how much of the disc is lit and on which side.
-// Full = 0, so a preset that leaves the field unset gets a full moon.
+// How much of the disc is lit and on which side. Full = 0, so a preset that leaves
+// the field unset gets a full moon.
 typedef enum MoonPhase
 {
     MOON_FULL = 0,
@@ -170,9 +161,8 @@ typedef enum MoonPhase
     MOON_NEW,               // fully dark (not drawn)
 } MoonPhase;
 
-// Per-preset moon (CustomPresetDef.moon): a distant fog-free disc on the sky dome
-// that crosses the sky over the round, synced to the City Trial match timer.
-// Numeric fields take 0 = module default.
+// A distant fog-free disc that crosses the sky over the round, synced to the match
+// timer.
 typedef struct MoonDef
 {
     int   enabled;      // 0 = no moon for this preset
@@ -181,18 +171,13 @@ typedef struct MoonDef
     int   phase;        // MoonPhase. 0 = Full (the default)
     float arc_height;   // peak elevation in degrees as it crosses the sky
     float rise_bearing; // compass bearing (deg) of the rise point
-    int   light;        // 1 = cast moonlight LOBJ + suppress the distant sun. 0 = off
+    int   light;        // 1 = cast a moonlight LOBJ and zero the secondary stage light
     u32   light_color;  // RGBA8888 moonlight color
 } MoonDef;
 
-// Which copy-ability projectiles an eruption flings (VolcanoDef.theme). Chaos rolls
-// a fresh theme for every projectile.
-//
-// The roster is limited to the kinds that survive an ownerless spawn. A volcano
-// projectile has no owner rider, and the kinds left out here dereference that owner:
-// fire bullet, both sword stars and plasma C/D crash inside Projectile_Create, and
-// all three auras (fire/spike/ice) re-snap their position to the owner's hand bone
-// every frame, so they cannot fly at all.
+// Which copy-ability projectiles an eruption flings. Chaos rolls a fresh theme for
+// every projectile. The roster is limited to the kinds that survive an ownerless
+// spawn, since a volcano projectile has no owner rider.
 typedef enum VolcanoTheme
 {
     VOLC_THEME_DEFAULT = 0,  // resolves to Fire
@@ -203,9 +188,8 @@ typedef enum VolcanoTheme
     VOLC_THEME_CHAOS,
 } VolcanoTheme;
 
-// Per-preset volcano (CustomPresetDef.volcano): the City Trial volcano periodically
-// erupts, launching themed projectiles on ballistic arcs from its mouth. Eruptions
-// are spread across the round by the match timer. Numeric fields take 0 = default.
+// The City Trial volcano periodically erupts, launching themed projectiles on
+// ballistic arcs from its mouth, spread across the round by the match timer.
 typedef struct VolcanoDef
 {
     int   enabled;    // 0 = the volcano stays dormant for this preset
@@ -218,10 +202,8 @@ typedef struct VolcanoDef
     float spread;     // 0..1 cone width off vertical (0 = module default)
 } VolcanoDef;
 
-// Per-preset tornado (CustomPresetDef.tornado): a funnel that wanders the city on a
-// random path, drawing loose items, breakable props and parked machines into an
-// orbit around its core, and dragging at riders who stray too close. Appearances are
-// spread across the round by the match timer. Numeric fields take 0 = default.
+// A funnel that wanders the city, drawing loose items, breakable props and parked
+// machines into an orbit around its core and dragging at riders who stray too close.
 typedef struct TornadoDef
 {
     int   enabled;   // 0 = no tornado for this preset
@@ -257,8 +239,8 @@ typedef struct CustomPresetDef
     u32   char_ambient;          // 0=inherit. Slot-8 fill light color
     u32   char_ambient_specular; // 0=inherit. Slot-8 fill specular
 
-    // Screen overlay on lbfade slot 3 (gxlink 3): tints terrain/sky/fog after the
-    // world pass but before chars/machines (gxlink 5/6) and the HUD (gxlink 21).
+    // Screen overlay on lbfade slot 3: tints terrain/sky/fog after the world pass
+    // but before chars/machines and the HUD.
     u32   screen_tint;           // RGB=tint, A=strength. 0=no overlay
 
     u32   fog_curve;             // WeatherFogCurve. 0 = inherit engine default
@@ -295,9 +277,9 @@ const char *CustomWeather_GetPresetName(int weather_kind);
 // >1 pushes the far fog wall out, <1 pulls it in. 1.0 = unchanged.
 float CustomWeather_GetFogScale(void);
 
-// BackdropManifest.dat, authored by scripts/authoring/make_backdrop_manifest.py. It holds
-// no game data: each entry is a recipe for rebuilding one stage's backdrop subtree
-// out of the retail disc, so no vanilla geometry or texture ships with the mod.
+// BackdropManifest.dat holds no game data: each entry is a recipe for rebuilding one
+// stage's backdrop subtree out of the retail disc, so no vanilla geometry or texture
+// ships with the mod.
 #define BACKDROP_MANIFEST_FILE    "BackdropManifest.dat"
 #define BACKDROP_MANIFEST_SYMBOL  "backdropManifest"
 #define BACKDROP_MANIFEST_MAGIC   0x42444D46u  // 'BDMF'
@@ -307,8 +289,8 @@ float CustomWeather_GetFogScale(void);
 // vanilla stage's grModel<X>[1]: word 0 is the backdrop root, the rest reads as zero.
 #define BACKDROP_PP_SLOT 0x20
 
-// One byte range of the donor file. All three fields are multiples of 32, which is
-// what File_Read requires of an offset, a length and a destination alike.
+// All three fields are multiples of 32, which is what File_Read requires of an
+// offset, a length and a destination alike.
 typedef struct BackdropRange
 {
     u32 donor_off;   // 0x00 absolute offset in the donor file
@@ -316,9 +298,9 @@ typedef struct BackdropRange
     u32 length;      // 0x08
 } BackdropRange;
 
-// One pointer to fix up. The bytes arrive raw off the disc, so every pointer still
-// holds a donor offset; dest_val is that offset already translated into payload
-// coordinates, leaving the runtime to add the payload base.
+// The bytes arrive raw off the disc, so every pointer still holds a donor offset;
+// dest_val is that offset already in payload coordinates, leaving the runtime to add
+// the payload base.
 typedef struct BackdropReloc
 {
     u32 dest_off;    // 0x00 where the pointer sits in the payload
@@ -351,9 +333,11 @@ void CustomWeatherRuntime_OnBoot(void);
 void CustomBackdrop_OnBoot(void);
 void EventSky_OnBoot(void);
 
-// Effect layers driven from the per-frame weather tick: SetActive latches the
-// preset's config (NULL or enabled == 0 = off), Tick advances the layer and
-// lazily creates its render GObj, Reset drops per-stage state on CT teardown.
+// Effect layers driven from the per-frame weather tick. SetActive latches the
+// preset's config on a preset change; Tick advances the layer and lazily creates its
+// render GObj; Reset drops per-stage state on the first tick of a new CT entry.
+// Layers the menu can force on over a dormant preset (hail, moon, stars, volcano,
+// tornado) latch their config whether or not the preset enabled them.
 void Rain_SetActive(const RainDef *rain);
 void Rain_Tick(void);
 void Rain_Reset(void);
@@ -381,7 +365,7 @@ void Wind_GetVector(struct Vec3 *out);
 void Wind_Reset(void);
 
 // Trees have no per-preset config: the wind leans the intact CT forest trees
-// (yakumono desc_id 34) downwind.
+// downwind.
 void Tree_Tick(void);
 void Tree_Reset(void);
 
@@ -401,14 +385,10 @@ void Star_SetActive(const StarDef *def);
 void Star_Tick(void);
 void Star_Reset(void);
 
-// The volcano erupts on a schedule spread across the round, flinging themed
-// copy-ability projectiles from its mouth on ballistic arcs.
 void Volcano_SetActive(const VolcanoDef *def);
 void Volcano_Tick(void);
 void Volcano_Reset(void);
 
-// A tornado wanders the city on a random path, orbiting everything loose it passes
-// and shaking the camera of any player it gets close to.
 void Tornado_SetActive(const TornadoDef *def);
 void Tornado_Tick(void);
 void Tornado_Reset(void);
