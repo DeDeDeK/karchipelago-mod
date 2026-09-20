@@ -254,11 +254,11 @@ the go-mode reading, and it is worst at the start of a seed.
 
 ### The two limits
 
-**A share of the box ticks.** At the default Low setting it is 6%, well under the 14-in-71 share
+**A share of the box ticks.** At the default Med setting it is 12%, well under the 14-in-71 share
 red holds in the city's own chance table (`[20, 15, 10, 5, 4, 3, 7, 7, 0]`). Matching a real
 color's share only makes sense for something the cap throttles like a real color.
 
-**A floor on the gap between two winning rolls**, 2400 frames (40 s) at Low. It is divided by
+**A floor on the gap between two winning rolls**, 1200 frames (20 s) at Med. It is divided by
 `SpawnRate_GetScale()` so the Spawn Rate Up item still moves the cadence and a sub-vanilla
 `spawn_rate_min` still slows it - the floor bounds the category against *gating*, not against the
 knob that is supposed to control it.
@@ -277,17 +277,16 @@ one `On3DLoadStart` already writes, and a paused round, a round that has ended a
 length all behave correctly for free, because they are already correct in the clock.
 
 The floor is what makes the rate stop depending on how much of the game is locked. A fully
-unthrottled round offers ~125 box ticks, which at 6% wants ~7.5 AP boxes; the floor allows at most
-7 in five minutes. The two land in the same place by construction, so a gated round and an ungated
-one pay out at the same rate - about **7 AP boxes and 11 patches** in a five-minute round, against
+unthrottled round offers ~125 box ticks, which at 12% wants ~15 AP boxes; the floor allows at most
+15 in five minutes. The two land in the same place by construction, so a gated round and an ungated
+one pay out at the same rate - about **15 AP boxes and 23 patches** in a five-minute round, against
 ~20 boxes and ~38 patches with the percentage alone.
 
 ### The rate setting
 
 Both levers move together off one menu option, `ap_menu_settings.ap_box_rate`, in the
 `ap_box_rate[]` table at the top of `ap_patches.c`. **AP Box Rate** sits on the Archipelago
-Settings page with values Rare / Low / Med / High, defaulting to **Low** - the rate the category
-shipped with:
+Settings page with values Rare / Low / Med / High, defaulting to **Med**:
 
 | Setting | Share of box ticks | Interval floor | Boxes / 5 min | Patches |
 |---|---|---|---|---|

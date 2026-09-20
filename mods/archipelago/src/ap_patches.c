@@ -40,7 +40,7 @@ static const struct
 static int BoxRate(void)
 {
     int rate = ap_menu_settings.ap_box_rate;
-    return (rate < 0 || rate >= APBOXRATE_NUM) ? APBOXRATE_LOW : rate;
+    return (rate < 0 || rate >= APBOXRATE_NUM) ? APBOXRATE_MEDIUM : rate;
 }
 
 // Patches one AP Box scatters, capping the 1 / 2 / 4 the vanilla size roll gives, so a
