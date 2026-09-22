@@ -197,7 +197,12 @@ static ClearCheckerUI *CC_GetUI(void)
 // tab is on screen at a time, so these buffers are shared.
 
 #define CC_SIS_HEADER_NUM 4  // entries 0..3 are CT's title/legend
-#define CC_SIS_PTR_NUM (CLEAR_KIND_NUM + CC_SIS_HEADER_NUM)
+#define CC_SIS_LABEL_END (CLEAR_KIND_NUM + CC_SIS_HEADER_NUM)
+// The reward panel reads 0x7C for "no reward" and 0x7D + reward_index for a reward
+// string, so the array has to span City Trial's whole entry range, not just the labels.
+#define CC_SIS_REWARD_BASE 0x7D
+#define CC_SIS_REWARD_NUM 44
+#define CC_SIS_PTR_NUM (CC_SIS_REWARD_BASE + CC_SIS_REWARD_NUM)
 // Every vanilla objective entry fits in 128; the extra room is for longer custom labels.
 #define CC_SIS_LABEL_MAX 160
 
@@ -278,8 +283,13 @@ static void CC_InitSisForList(int idx)
     for (int i = 0; i < CC_SIS_HEADER_NUM; i++)
         g_sis_ptrs[i] = loaded[i];
 
-    for (int i = CC_SIS_HEADER_NUM; i < CC_SIS_PTR_NUM; i++)
+    for (int i = CC_SIS_HEADER_NUM; i < CC_SIS_LABEL_END; i++)
         g_sis_ptrs[i] = g_sis_blank;
+
+    // A cross-mode City Trial reward hosted on this tab still reaches these through
+    // slot 0, so they keep pointing at the loaded archive.
+    for (int i = CC_SIS_LABEL_END; i < CC_SIS_PTR_NUM; i++)
+        g_sis_ptrs[i] = loaded[i];
 
     const CustomChecklistDesc *d = &g_lists[idx].desc;
     int n = d->check_num;
@@ -288,7 +298,7 @@ static void CC_InitSisForList(int idx)
     for (int c = 0; c < n; c++)
     {
         int sis_idx = d->checks[c].clear_kind + CC_SIS_HEADER_NUM;
-        if (!d->checks[c].label || sis_idx < CC_SIS_HEADER_NUM || sis_idx >= CC_SIS_PTR_NUM)
+        if (!d->checks[c].label || sis_idx < CC_SIS_HEADER_NUM || sis_idx >= CC_SIS_LABEL_END)
             continue;
         CC_ComposeSis(g_sis_label[c], d->checks[c].label);
         g_sis_ptrs[sis_idx] = g_sis_label[c];

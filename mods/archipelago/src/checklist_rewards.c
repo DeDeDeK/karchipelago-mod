@@ -731,8 +731,7 @@ static void ChecklistRewards_DisplayRewardText(Text *text, int reward_index)
 {
     // Read the command data from the source mode's slot, then restore slot 0 so
     // Text_GX renders with its glyph data (all checklist SIS files share a font).
-    u8 source_slot = mode_to_sis_slot[hover_source_mode];
-    text->sis_id = source_slot;
+    text->sis_id = hover_source_mode < GMMODE_NUM ? mode_to_sis_slot[hover_source_mode] : 0;
     Text_InitPremadeText(text, reward_index + 0x7D);
     text->sis_id = 0;
 }

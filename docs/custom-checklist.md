@@ -138,11 +138,18 @@ available.
 
 The checklist shows the selected cell's objective text via `stc_sis_data[0][clear_kind + 4]`.
 `Checklist_Init` loads City Trial's `SisClrChkCT` into slot 0; after the build the framework
-repoints slot 0 at its own pointer array (CT's header entries 0..3 kept, every other slot
-pointed at one shared bare-terminator entry, each check's label composed in and slotted at
-`clear_kind + 4`). Only one custom tab is on screen
+repoints slot 0 at its own pointer array (CT's header entries 0..3 kept, every objective
+slot pointed at one shared bare-terminator entry, each check's label composed in and slotted
+at `clear_kind + 4`). Only one custom tab is on screen
 at a time, so a single shared buffer set is recomposed per build. The CT tab reloads slot 0
 from the archive on its own `cb_Load`, so its labels stay intact.
+
+The array spans City Trial's whole entry range, not just the 124 header + objective entries:
+the reward panel also reads slot 0 at `0x7C` (the "no reward" string) and at
+`0x7D + reward_index`, and a cross-mode City Trial reward hosted on a custom tab reaches
+both. Those tail entries pass through to the loaded archive, so the panel reads the real
+string; a short array would be indexed past its end and hand `Text_GX` a garbage stream
+pointer.
 
 A composed entry holds only glyphs, `TEXTCMD_SPACE` word separators, an optional
 `TEXTCMD_LINEBREAK` at the wrap point, and `TEXTCMD_TERMINATE` - the exact shape of the
