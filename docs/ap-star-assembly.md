@@ -327,10 +327,10 @@ loads and the anchors are read before the delivery schedule is rolled, because a
 given through `CollectPiece` lands whether or not any sphere is in play that round.
 
 The art is `mods/ap_star/assets/ApPieceIcons.dat`, one alpha-cut textured quad per
-color under a single `apPieceIcons_scene_models` public, each a 40x40 RGB5A3 shaded ball
-of 1.0-unit radius inside a 0.28-unit black rim, on a 2.56-unit quad against the 2.5-unit
-anchor spacing it is hung on. The rim is what the vanilla piece icons outline with - 2-3
-texels of a 40x56 texture on a 4.49-unit quad - so the two rows read as one set.
+color under a single `apPieceIcons_scene_models` public, each a 36x36 RGB5A3 shaded ball
+of 1.0-unit radius inside a 0.14-unit black rim, on a 2.28-unit quad against the 2.5-unit
+anchor spacing it is hung on. The rim reads as a thin outline next to the vanilla piece
+icons rather than matching their heavier black.
 
 ## Assembly and the Mount
 

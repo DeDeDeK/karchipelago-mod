@@ -140,12 +140,11 @@ GX_TRIANGLEFAN = 0xA0
 AMBIENT_SCALE = 0.55
 
 ICON_PUBLIC = "apPieceIcons_scene_models"
-ICON_TEX = 40  # texture is square; the ball and its rim fill it
+ICON_TEX = 36  # texture is square; the ball and its rim fill it
 ICON_BALL = 1.0  # HUD-space ball radius
-# The vanilla piece icons outline at 2-3 texels of a 40x56 texture on a 4.49-unit
-# quad, so their black is 0.28 HUD units thick. The rim goes outside the ball
-# rather than eating into it, which keeps the ball the size the row was built at.
-ICON_RIM = 0.28
+# The rim goes outside the ball rather than eating into it, which keeps the ball
+# the size the row was built at.
+ICON_RIM = 0.14
 ICON_HALF = ICON_BALL + ICON_RIM  # quad half extent, against the anchors' 2.5 spacing
 ICON_SUPERSAMPLE = 4
 
