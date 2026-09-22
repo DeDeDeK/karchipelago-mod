@@ -277,8 +277,7 @@ CODEPATCH_HOOKCREATE(0x8002dc48,
 // Returns 0 = allow start, 1 = block start.
 static int GateMachines_TRLobbyCanStart(void)
 {
-    u32 tr_mask = (1u << VCKIND_FREE) | (1u << VCKIND_STEER);
-    if (ap_save->machine_unlocked_mask & tr_mask)
+    if (ap_save->machine_unlocked_mask & TR_MACHINE_BITS)
         return 0;
 
     playSoundFX_errorNoise();

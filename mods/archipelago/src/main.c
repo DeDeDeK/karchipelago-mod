@@ -423,6 +423,14 @@ static void APOptions_ApplyUngatedCategories(void)
     if (!opts->stadium_gating_enabled)       Unlock_SetMask(AP_UNLOCK_STADIUM,       stadium_mask);
     if (!opts->base_ability_gating_enabled)  Unlock_SetMask(AP_UNLOCK_BASE_ABILITY,  (1u << BASEABILITY_NUM) - 1);
 
+    // The AP world ships the Free Star / Steer Star unlocks only when Top Ride is in the
+    // seed, but the one machine mask stays gated for City Trial or Air Ride.
+    if (opts->machine_gating_enabled && opts->goal[GMMODE_TOPRIDE] == GOAL_NONE)
+    {
+        Unlock_SetMask(AP_UNLOCK_MACHINE, Unlock_GetMask(AP_UNLOCK_MACHINE) | TR_MACHINE_BITS);
+        OSReport("[Main] Top Ride not in the seed - its machines unlocked\n");
+    }
+
     // The three TR "New Item" types (Chickie/Who? Paint/Lantern) aren't reachable
     // via the mask - the engine enables them only when their checklist reward is
     // received. Mark TR reward indices 8-10 received so an ungated world gets them.
