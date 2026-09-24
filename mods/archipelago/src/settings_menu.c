@@ -230,7 +230,7 @@ static MenuDesc permanent_patches_menu = {
         },
         &(OptionDesc){
             .name = "CT Stadium",
-            .description = "Apply permanent patches when entering a City Trial stadium",
+            .description = "Apply permanent patches in stadiums picked from the Stadium menu",
             .kind = OPTKIND_VALUE,
             .val = &ap_menu_settings.ct_stadium_permanent_patches_enabled,
             .value_num = 2,

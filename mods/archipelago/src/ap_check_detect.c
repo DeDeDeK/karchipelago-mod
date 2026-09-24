@@ -115,8 +115,8 @@ static int WithinSphere(const Vec3 *p, const Vec3 *centre, float radius)
 // 10 seconds at 60fps.
 #define AP_NEBULA_AIR_FRAMES  600
 
-// Per-City-Trial-run item objectives, counted as a delta against a baseline taken
-// at the start of the run.
+// Per-City-Trial-run item objectives. Every 3D scene load zeroes item_collect, so
+// the raw count is the run's, including permanent patches credited at round start.
 typedef struct RunItemCheck
 {
     u8 ck;
@@ -125,7 +125,7 @@ typedef struct RunItemCheck
 } RunItemCheck;
 
 // ItemKind 0/1/2 are the three box colors, and a break bumps item_collect the same
-// way a pickup does, so the box counts ride the same per-run delta as the rest.
+// way a pickup does, so the box counts ride the same per-run count as the rest.
 static const RunItemCheck run_item_checks[] = {
     { APCK_HP_PATCHES_10,      ITKIND_HP,            10 },
     { APCK_OFFENSE_PATCHES_10, ITKIND_OFFENSE,       10 },
@@ -144,9 +144,7 @@ static const RunItemCheck run_item_checks[] = {
 
 #define RUN_ITEM_NUM ((int)(sizeof(run_item_checks) / sizeof(run_item_checks[0])))
 
-static int run_base[5][RUN_ITEM_NUM];
 static int prev_allup[5];
-static int needs_baseline[5];
 
 // Coral placed by the loaded stage, sampled once at load (0 outside City Trial),
 // and how much of it anyone has broken this round.
@@ -196,23 +194,9 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     int ply = rd->ply;
     PlayerStats *st = Ply_GetItemCollectArray(ply);
 
-    // Baseline after the intro, so the round's starting patches are not read as
-    // a collection.
-    if (needs_baseline[ply])
-    {
-        if (Gm_GetIntroState() != GMINTRO_END)
-            return;
-        needs_baseline[ply] = 0;
-        for (int i = 0; i < RUN_ITEM_NUM; i++)
-            run_base[ply][i] = st->item_collect[run_item_checks[i].it_kind];
-        prev_allup[ply] = st->item_collect[ITKIND_ALLUP];
-        return;
-    }
-
     for (int i = 0; i < RUN_ITEM_NUM; i++)
     {
-        int got = st->item_collect[run_item_checks[i].it_kind] - run_base[ply][i];
-        if (got >= (int)run_item_checks[i].need)
+        if (st->item_collect[run_item_checks[i].it_kind] >= (int)run_item_checks[i].need)
             APCheckDetect_Observe(run_item_checks[i].ck);
     }
 
@@ -274,12 +258,11 @@ static int AttachSamplers(void *proc)
 
 void APCheckDetect_On3DLoadEnd(void)
 {
-    for (int i = 0; i < 5; i++)
-        needs_baseline[i] = 1;
     coral_total = 0;
     coral_broken = 0;
     for (int i = 0; i < 5; i++)
     {
+        prev_allup[i] = 0;
         dedede_kirby_kos[i] = 0;
         mic_enemy_kos[i] = 0;
     }

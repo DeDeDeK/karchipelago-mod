@@ -188,6 +188,9 @@ static void PermanentPatch_DoApply()
              ap_save->permanent_patches[PATCHKIND_DEFENSE],
              ap_save->permanent_patches[PATCHKIND_HP]);
 
+    // Only the City Trial map counts as one game for the "10+ X Patches" cells.
+    int credit = Gm_IsInCity();
+
     for (int p = 0; p < 5; p++)
     {
         if (Ply_GetPKind(p) != PKIND_HMN)
@@ -197,6 +200,10 @@ static void PermanentPatch_DoApply()
             continue;
         MachineData *md = mg->userdata;
 
+        float before[PATCHKIND_NUM];
+        for (int i = 0; i < PATCHKIND_NUM; i++)
+            before[i] = md->stats.values[i];
+
         if (min_patches > 0)
             Machine_GiveAllUp(md, min_patches);
 
@@ -205,6 +212,21 @@ static void PermanentPatch_DoApply()
             int remainder = ap_save->permanent_patches[i] - min_patches;
             if (remainder > 0)
                 Machine_GivePatch(md, i, remainder);
+        }
+
+        // Machine_GivePatch skips the pickup counter, so credit what landed past
+        // the patch cap as collected. Written directly rather than through
+        // Ply_IncrementItemCollectNum, which would also feed the first-20-seconds
+        // aggregate.
+        if (credit)
+        {
+            PlayerStats *st = Ply_GetItemCollectArray(p);
+            for (int i = 0; i < PATCHKIND_NUM; i++)
+            {
+                int got = (int)(md->stats.values[i] - before[i] + 0.5f);
+                if (got > 0)
+                    st->item_collect[stc_patch_itkinds[i]] += got;
+            }
         }
     }
 }
@@ -223,7 +245,9 @@ static void PermanentPatch_PerFrame(GOBJ *g)
 // Gm_IsInCity() is stage-based (only true on the CT main map, stage_kind 9/52)
 // and excludes stadiums, so dispatch off the CT major + city_mode instead. Free
 // Run never loads item data tables, so inflated stats from perm patches would
-// crash Item_GetItDataPtr on damage-driven patch ejection.
+// crash Item_GetItDataPtr on damage-driven patch ejection. A Trial's closing
+// stadium carries the city machine's stats over, patches included, so applying
+// there would double them.
 static int PermanentPatch_ShouldApply(void)
 {
     if (Scene_GetCurrentMajor() == MJRKIND_CITY)
@@ -233,6 +257,8 @@ static int PermanentPatch_ShouldApply(void)
             return 0;
         if (cm == CITYMODE_STADIUM)
             return ap_menu_settings.ct_stadium_permanent_patches_enabled;
+        if (CityTrial_IsInStadium())
+            return 0;
         return ap_menu_settings.ct_permanent_patches_enabled;
     }
     return ap_menu_settings.ar_permanent_patches_enabled;

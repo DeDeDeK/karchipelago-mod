@@ -25,13 +25,9 @@ TextBoxSettings textbox_settings = {
 #define TEXTBOX_MAX_LINES  3
 #define TEXTBOX_TRUNC_MARK ".."
 
-// Text_ConvertASCIIToShiftJIS (0x8044fb0c) reads at most 128 input bytes, and writes its output
-// into the 128 bytes below the input it is still reading while emitting up to 3 bytes per
-// character. Once a run's output runs more than that ahead of its input, the converter overtakes
-// its own read pointer and re-reads emitted bytes as text, so both limits bound one subtext.
-#define TEXTBOX_RUN_BYTES     127
-#define TEXTBOX_CONVERT_SLACK 128
-#define TEXTBOX_RUN_CHARS     128
+// Text_ConvertASCIIToShiftJIS (0x8044fb0c) reads at most 128 input bytes, which bounds one subtext.
+#define TEXTBOX_RUN_BYTES 127
+#define TEXTBOX_RUN_CHARS 128
 
 static const float font_size_scales[]    = { 0.30f, 0.40f, 0.55f };
 static const u8    typewriter_dwells[]   = { 0, 8, 4, 2 };
@@ -104,39 +100,6 @@ static int Sis_CountGlyphs(u8 *start)
     return count;
 }
 
-// Output bytes Text_ConvertASCIIToShiftJIS emits for an already-sanitized run. A letter costs a
-// TEXTCMD_POSPUSHEND plus its 2-byte code; a digit entering tight-spacing mode pays a 5-byte
-// TEXTCMD_POSPUSH first, and stays at 2 bytes while it holds.
-static int TextBox_ConvertCost(const char *s)
-{
-    const u8 *p = (const u8 *)s;
-    int cost  = 0;
-    int tight = 0;
-
-    while (*p != '\0')
-    {
-        if (*p >= 0x80 && p[1] != '\0') // a 2-byte code Text_Sanitize already emitted
-        {
-            cost += 3;
-            tight = 0;
-            p += 2;
-        }
-        else if ((*p >= '0' && *p <= '9') || *p == '.')
-        {
-            cost += tight ? 2 : 7;
-            tight = 1;
-            p++;
-        }
-        else
-        {
-            cost += 3;
-            tight = 0;
-            p++;
-        }
-    }
-    return cost;
-}
-
 // Arms the engine's built-in typewriter; a dwell of 0 reveals instantly.
 static void TextBox_ApplyTypewriter(TextBoxMessage *msg)
 {
@@ -192,26 +155,13 @@ static int TextBox_SetRun(Text *t, int sub, const char *s, int len, const char *
         // that shrinks the next attempt hard.
         int ok    = Text_Sanitize(raw, buf, sizeof(buf));
         int bytes = ok ? (int)strlen(buf) : (int)sizeof(buf);
-        int slack = ok ? TextBox_ConvertCost(buf) - bytes : (int)sizeof(buf);
 
-        if ((bytes <= TEXTBOX_RUN_BYTES && slack <= TEXTBOX_CONVERT_SLACK) || len == 0)
+        if (bytes <= TEXTBOX_RUN_BYTES || len == 0)
             break;
 
-        // Both costs are near enough to linear in character count that scaling by the overshoot
-        // lands within a character or two; the -1 floor keeps the search strictly decreasing.
-        int next = len;
-        if (bytes > TEXTBOX_RUN_BYTES)
-        {
-            int by_bytes = len * TEXTBOX_RUN_BYTES / bytes;
-            if (by_bytes < next)
-                next = by_bytes;
-        }
-        if (slack > TEXTBOX_CONVERT_SLACK)
-        {
-            int by_slack = len * TEXTBOX_CONVERT_SLACK / slack;
-            if (by_slack < next)
-                next = by_slack;
-        }
+        // Bytes are near enough to linear in character count that scaling by the overshoot lands
+        // within a character or two; the -1 floor keeps the search strictly decreasing.
+        int next = len * TEXTBOX_RUN_BYTES / bytes;
         len = (next < len) ? next : len - 1;
     }
 

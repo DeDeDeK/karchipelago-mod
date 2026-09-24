@@ -302,9 +302,9 @@ counts a break whoever made it, so the whole round is skipped rather than each h
 
 **A per-frame proc on each human rider - the City Trial objectives.** Attached from
 `On3DLoadEnd`, and only for `Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL`, since "in
-one game" means one CT Trial run. Counters baseline on the first frame where
-`Gm_GetIntroState() == GMINTRO_END`, so patches applied at round start - including permanent
-ones an Archipelago item grants - are not read as a collection.
+one game" means one CT Trial run. The per-run item objectives read `item_collect` raw, with
+no baseline, the same way vanilla's own patch cells do; permanent patches applied at round
+start count toward them.
 
 "One game" here is one city segment: `SceneLoad_3D` calls `Player_InitAll` on every 3D scene
 load, which memsets all five `PlayerData` slots and so zeroes `item_collect` and
@@ -314,22 +314,33 @@ same scope the vanilla City Trial cells use.
 | clear_kind | Objective | Detection |
 |---|---|---|
 | 0 | Visit the flower on top of Castle Hall on foot | `foot_visit_checks[]`: `!Rider_IsOnMachine(rd)` and `rd->pos` within 2 units of the flower, at `(408.7, 370.8, -564.6)`. The flower sits on a very small platform, and the stage's out-of-bounds box spans 2600 units in X and Z, so the sphere is tight. The on-foot requirement stops a machine flying through the spot from counting. |
-| 2 | 10+ HP Patches in one game | per-run delta of `item_collect[ITKIND_HP]` |
-| 51 | 10+ Offense Patches in one game | per-run delta of `item_collect[ITKIND_OFFENSE]` |
+| 2 | 10+ HP Patches in one game | `item_collect[ITKIND_HP] >= 10` |
+| 51 | 10+ Offense Patches in one game | `item_collect[ITKIND_OFFENSE] >= 10` |
 | 3 | Collect 5 All Ups in total | frame deltas of `item_collect[ITKIND_ALLUP]` fold into `APSave.checks.allup_collect_total` |
-| 4-11 | Eat 3+ of each of 8 foods | per-run delta of `item_collect[ITKIND_FOOD*]` |
+| 4-11 | Eat 3+ of each of 8 foods | `item_collect[ITKIND_FOOD*] >= 3` |
 | 30 | Visit the model city on foot | the second `foot_visit_checks[]` entry: within 10 units of `(-422.7, 12.7, -168.9)`, on foot. The model sits on open ground rather than a ledge, so the sphere is wide enough to cover standing anywhere on it. |
 | 31 | Visit the flower on top of the volcanic cliffs on foot | the third `foot_visit_checks[]` entry: within 5 units of `(-107.0, 205.1, -847.3)`, on foot. The flower sits on the cliff top, reachable on foot from the surrounding terrain, so the sphere is the same size as the sky garden's rather than the tight one Castle Hall's platform needs. |
 | 32 | Visit the top of the garden in the sky on foot | the fourth `foot_visit_checks[]` entry: within 5 units of `(-67.9, 463.8, -0.3)`, on foot. Vanilla's own "Make your way to the garden in the sky!" cell only asks the player to reach the garden, so the sphere sits on the top surface rather than anywhere on the structure. |
 | 33 | Fly to the highest point possible | `rd->pos.Y >= AP_MAX_ALTITUDE_Y` (1000). A climb into the city's ceiling stops at 1040.3 - a collision, not an apex: vertical velocity is zeroed in one frame and the fall that follows is exactly the stage's `gravity_strength` of 0.025/frame. That ceiling is 460 below `StageNode.oob_max.Y` (1500), so the out-of-bounds lid is never what stops the climb and `calcDistanceFromOOB` cannot measure this. The threshold's 40-unit margin means the contact frame need not be sampled, and it sits far above the sky garden at 464, the highest place reachable without flying. |
 | 43 | Get the Mic ability from the Copy Chance Wheel | `PlayerStats.copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC)`. Only `Rider_MarkCopyAbilityObtained` (`0x8022f150`) sets that mask, and only the two copy-wheel paths call it (`randomAbility_aPress` `0x801ae7f4`, `randomAbility_autoSelect` `0x801ae890`) - so a Mic panel picked up off the ground does not satisfy it, the same wheel-only demand vanilla's Bomb and Sleep cells make. The mask is MSB-first, bit `15 - CopyKind`. |
-| 45-47 | Break 20 blue / 10 green / 10 red boxes in one game | per-run delta of `item_collect[ITKIND_BOXBLUE/GREEN/RED]` - `ItemKind` 0/1/2 *are* the three box colors, and a break bumps the array the same way a pickup does. Vanilla counts boxes only as an all-colors lifetime total (`CityTrialClearRecords.box_total`, its 500/1000 cells), so per-color counts are unclaimed. The thresholds are unequal because the colors are: `GrCity1`'s 9-entry `box_spawn_chances` table rolls blue 45/71, red 14/71 and green 12/71 |
+| 45-47 | Break 20 blue / 10 green / 10 red boxes in one game | `item_collect[ITKIND_BOXBLUE/GREEN/RED]` - `ItemKind` 0/1/2 *are* the three box colors, and a break bumps the array the same way a pickup does. Vanilla counts boxes only as an all-colors lifetime total (`CityTrialClearRecords.box_total`, its 500/1000 cells), so per-color counts are unclaimed. The thresholds are unequal because the colors are: `GrCity1`'s 9-entry `box_spawn_chances` table rolls blue 45/71, red 14/71 and green 12/71 |
 
 `item_collect` is bumped by `Ply_IncrementItemCollectNum`, which `Machine_OnTouchItem` calls
 for every item application. That includes patches an Archipelago item spawns -
 `SpawnItemPlayer` calls `Machine_OnTouchItem` directly to force a same-frame pickup - so an
 All Up or HP Patch **received from another world counts**. That is deliberate: the player sees
 the pickup happen, and a box that fires too readily is the safe failure direction.
+
+Permanent patches are the one other writer. They land through `Machine_GiveAllUp` /
+`Machine_GivePatch`, which never touch `item_collect`, so `PermanentPatch_DoApply` credits each
+stat's applied amount (measured as the stat's change, so a patch the cap swallowed does not
+count) straight into `item_collect` - on the City Trial map only, since the stadium reload
+zeroes the array again and Air Ride has no patch cells. The write is direct rather than through
+`Ply_IncrementItemCollectNum` so it stays out of the first-20-seconds aggregate. This feeds
+vanilla's seven "10+ X Patches" cells and the HP/Offense boxes alike, and also the item totals
+`Ply_GetItemCollectTotal` sums. Crediting also keeps drops honest: a rider who sheds a patch
+runs `Ply_DecrementItemCollectNum` whether or not that patch was ever collected, so without the
+credit a hit would pull the count below the real pickups.
 
 **A per-frame proc on each human rider - the Fantasy Meadows shortcut.** The second
 `On3DLoadEnd` attach path, taken when `Scene_GetCurrentMajor() == MJRKIND_AIR` and
@@ -386,7 +397,7 @@ is the killer. The per-player tally the DD cells read,
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 42 | As King Dedede, KO 10 Kirbys in one derby | gated on `Gm_IsDestructionDerby()` (`Gm_GetCityKind() == 14`, so any of DD 1-5); counts a KO whose killer is a `PKIND_HMN` slot with `Ply_GetRiderKind == RDKIND_DEDEDE` and whose victim is a different slot with `RDKIND_KIRBY`. The counter is per game, reset in `On3DLoadEnd` alongside the City Trial baselines |
+| 42 | As King Dedede, KO 10 Kirbys in one derby | gated on `Gm_IsDestructionDerby()` (`Gm_GetCityKind() == 14`, so any of DD 1-5); counts a KO whose killer is a `PKIND_HMN` slot with `Ply_GetRiderKind == RDKIND_DEDEDE` and whose victim is a different slot with `RDKIND_KIRBY`. The counter is per game, reset in `On3DLoadEnd` alongside the other per-round counters |
 
 Testing the victim's rider kind is not a formality. A stadium CPU draws its character from the
 gated select grid, so once King Dedede or Meta Knight is unlocked - and this box needs Dedede

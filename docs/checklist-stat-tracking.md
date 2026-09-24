@@ -154,6 +154,10 @@ Without it an AP Patch would count as an Offense patch and an AP Box break as a
 blue box, letting one location category farm another's cells. Every other item,
 custom kinds included, takes the vanilla path unchanged.
 
+The only other writer is the mod's permanent-patch apply (`PermanentPatch_DoApply`),
+which adds each stat's round-start rise straight into the per-kind slot on the City
+Trial map, since `Machine_GivePatch` / `Machine_GiveAllUp` never reach this function.
+
 `Ply_DecrementItemCollectNum` has **two callers**, both on the drop pipeline:
 `Rider_SpawnDropPatchSeq` (`0x8019ce50`, two sites) when a rider sheds patches,
 and the all-up legendary drop when a collected Hydra/Dragoon piece is thrown.
