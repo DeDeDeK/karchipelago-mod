@@ -17,7 +17,6 @@ static const char *const BaseAbility_Names[BASEABILITY_NUM] = {
     "Charge",
 };
 
-// Caller-side bounds checks ensure kind is in [0, BASEABILITY_NUM).
 static int IsBaseAbilityLocked(BaseAbilityKind kind)
 {
     return (ap_save->base_ability_unlocked_mask & (1 << kind)) == 0;
@@ -47,8 +46,9 @@ void GateBaseAbilities_StartInhale(RiderData *rd)
     Rider_StartInhale(rd);
 }
 
-// Replaces both bl Rider_QuickSpin_Enter sites (0x801b7ec0, 0x801b7e58). Kirby only -
-// Dedede and Meta Knight have their own enters below.
+// Replaces both bl Rider_QuickSpin_Enter sites: 0x801b7ec0 in Rider_IASACheck_QuickSpin
+// and 0x801b7e58 in Rider_TryQuickSpinNeutral. Kirby only - Dedede and Meta Knight have
+// their own enters below.
 void GateBaseAbilities_QuickSpinEnter(float f, RiderData *rd, int dir, int flag)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
@@ -56,7 +56,9 @@ void GateBaseAbilities_QuickSpinEnter(float f, RiderData *rd, int dir, int flag)
     Rider_QuickSpin_Enter(f, rd, dir, flag);
 }
 
-// Dedede and Meta Knight have their own quick-spin enters, one call site each.
+// Dedede and Meta Knight have their own quick-spin enters, one call site each:
+// Rider_Dedede_IASACheck_QuickSpin (0x801c05a8) and
+// Rider_MetaKnight_IASACheck_QuickSpin (0x801c3f40).
 void GateBaseAbilities_DededeSpinEnter(RiderData *rd, int dir)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
@@ -71,8 +73,9 @@ void GateBaseAbilities_MetaKnightSpinEnter(RiderData *rd, int dir)
     Rider_MetaKnight_QuickSpin_Enter(rd, dir);
 }
 
-// Replaces every bl Machine_IncrementCharge - generic grounded (0x801ef424,
-// 0x801ef350) and the Wheel/wheelie callbacks (0x801fa1d4, 0x801fa29c).
+// Replaces every bl Machine_IncrementCharge: 0x801ef424 in MachinePhys_Charge, 0x801ef350
+// in Machine_Star_PushChargeUpdate, 0x801fa1d4 in Machine_Wheel_PushChargeUpdate and
+// 0x801fa29c in fn_VehicleStatTableFuncCallbacks_Wheel_RunPush_3.
 void GateBaseAbilities_IncrementCharge(MachineData *md)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && MachineRiderIsHuman(md))
@@ -80,8 +83,9 @@ void GateBaseAbilities_IncrementCharge(MachineData *md)
     Machine_IncrementCharge(md);
 }
 
-// Explicit-rate charge accumulators. rate stays a named param so the compiler
-// preserves f1 across the human check before forwarding it.
+// Explicit-rate charge accumulators. rate stays a named param so the compiler preserves
+// f1 across the human check before forwarding it. AddCharge's one site is 0x801efa6c in
+// fn_VehicleStatTableFuncCallbacks_Star_Fly_3_HandleFlightPhysics.
 void GateBaseAbilities_AddCharge(double rate, MachineData *md)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && MachineRiderIsHuman(md))
@@ -119,7 +123,7 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x802e01b4,
 // spin block. The query receives &kirby->history (kirby+0x64) in r3.
 int GateBaseAbilities_TopRideQuickSpinQuery(int *history)
 {
-    TopRideKirby *k = (TopRideKirby *)((char *)history - 0x64);
+    TopRideKirby *k = (TopRideKirby *)((char *)history - offsetof(TopRideKirby, history));
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && TRKirbyIsHuman(k))
         return 0;
     return TopRide_KirbyHistoryQuery(history);
@@ -140,12 +144,12 @@ void GateBaseAbilities_OnBoot(void)
     CODEPATCH_REPLACECALL(0x801fa1d4, GateBaseAbilities_IncrementCharge);
     CODEPATCH_REPLACECALL(0x801fa29c, GateBaseAbilities_IncrementCharge);
     CODEPATCH_REPLACECALL(0x801efa6c, GateBaseAbilities_AddCharge);
-    CODEPATCH_REPLACECALL(0x801eb968, GateBaseAbilities_AddChargeEx);
-    CODEPATCH_REPLACECALL(0x801f5f30, GateBaseAbilities_AddChargeEx);
+    CODEPATCH_REPLACECALL(0x801eb968, GateBaseAbilities_AddChargeEx); // Machine_Star_RailPushAddCharge
+    CODEPATCH_REPLACECALL(0x801f5f30, GateBaseAbilities_AddChargeEx); // Machine_Wheel_PushAddCharge
 
     CODEPATCH_HOOKAPPLY(0x802e01b4);
 
-    OSReport("[GateBaseAbilities] Base ability gating hooks installed\n");
+    OSReport("[GateBaseAbilities] Hooks installed\n");
 }
 
 int GateBaseAbilities_UnlockAbility(BaseAbilityKind kind)

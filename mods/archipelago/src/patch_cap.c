@@ -22,7 +22,7 @@ static int PatchCap_GetMax()
 // Current effective cap: starts at city_trial_patch_cap_min and each Patch Cap
 // Increase item adds one, clamped to the max. min == max is a flat cap. A stored
 // min of 0 means options have not been received yet.
-static int PatchCap_GetCap()
+int PatchCap_GetCap()
 {
     int min = (int)ap_save->options.city_trial_patch_cap_min;
     int max = PatchCap_GetMax();

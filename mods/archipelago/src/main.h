@@ -6,8 +6,10 @@
 
 #include "archipelago_api.h"
 
-// Resolved in OnSaveLoaded, not OnBoot: mods boot alphabetically and textbox
-// boots after us, so Hoshi_ImportMod returns NULL during our own OnBoot.
+// Mods boot in FST order, so every Hoshi_ImportMod in this mod is deferred to
+// OnSaveLoaded - the first point past every mod's OnBoot, and so the only place an
+// absent export really means absent. tb_api is never null: it starts at a stub that
+// drops every message.
 #include "textbox_api.h"
 extern const TextBoxAPI *tb_api;
 
@@ -16,9 +18,6 @@ extern const TextBoxAPI *tb_api;
 // that left it out, where machine gating is off entirely.
 #include "custom_machines_api.h"
 extern const CustomMachinesAPI *cm_api;
-
-// Import the registry if it has not resolved yet. Idempotent; safe from any scene.
-void AP_ResolveCustomMachines(void);
 
 // The registry's own kind-space helpers, bound to our import.
 static inline int MachineKind_Num(void)
@@ -45,13 +44,6 @@ static inline int MachineKind_ClassIndexOf(MachineKind kind, int *is_bike)
 #define REWARD_COUNT_CITYTRIAL 44
 #define REWARD_COUNT_MAX       REWARD_COUNT_AIRRIDE
 
-// Checkboxes per mode (clear_kind 0..119).
-#define CLEAR_KIND_NUM 120
-
-// GMMODE_NUM (3) stays "the three real game modes" and sizes the reward tables.
-// Per-checklist-mode recorded state is one row wider (CHECKLIST_MODE_NUM), with the
-// AP tab at the fixed row AP_CHECKLIST_ROW.
-
 // Runtime checklist mode the custom_checklist framework assigned to the AP tab.
 // Always >= GMMODE_NUM but not necessarily AP_CHECKLIST_ROW - another custom tab
 // registering first pushes it higher. GMMODE_NUM until APChecklist_Register.
@@ -62,28 +54,11 @@ extern int ap_checklist_mode;
 // APAnnounce_Grant alongside the Messages -> Local -> Items toggle.
 extern int ap_regrant_quiet;
 
-// Absolute clamp ceiling for per-stat patch totals. Patch_GetMaxValue returns
-// through extsb, so anything above 127 sign-extends negative.
-#define PATCH_STAT_MAX 127
-
 // Targets of the AP checklist objectives backed by APSave.checks counters.
 #define AP_ALLUP_TOTAL_NEED 5
 #define AP_PURPLE_SR1_NEED  3
 // One bit per KirbyColor, all 8 set.
 #define AP_RACE_COLOR_MASK_ALL 0xFF
-
-typedef enum APGoalKind
-{
-    GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
-    GOAL_N_CHECKLIST,           // Complete N checklist squares
-    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
-    GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
-    GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
-    GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
-    GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
-    GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
-    GOAL_NONE,                  // No goal for this mode - always last, the AP world orders it last too
-} APGoalKind;
 
 // AP Patch locations get their own bitmask, sized so AP_PATCH_MAX packs into
 // whole u64 words.
@@ -165,6 +140,12 @@ typedef struct APCheckProgress
     u8 race_color_mask;      // APCK_AIRRIDE_ALL_COLORS: bit N = an Air Ride race finished as KirbyColor N
 } APCheckProgress;
 
+// Bumped whenever APSave's layout changes, so hoshi discards a stale block instead of
+// reinterpreting it. Independent of ARCHIPELAGO_API_MAJOR/MINOR, which version the
+// struct other mods import.
+#define APSAVE_VERSION_MAJOR 4
+#define APSAVE_VERSION_MINOR 0
+
 typedef struct APSave
 {
     uint boot_num;
@@ -232,19 +213,6 @@ typedef enum APTextColor
     APTEXTCOLOR_NUM,
 } APTextColor;
 
-// What a message is about. Each kind has its own Settings menu toggle; the mod filters
-// on render and the client reads text_menu_mask so it can skip composing at all.
-typedef enum APTextKind
-{
-    APTEXT_KIND_CHECK = 0, // a location this slot completed was sent
-    APTEXT_KIND_ITEM,      // an item arrived for this slot
-    APTEXT_KIND_HINT,      // a server hint concerning this slot
-    APTEXT_KIND_STATUS,    // goal / release / collect, and client connect state
-    APTEXT_KIND_CHAT,      // player and server chat
-    APTEXT_KIND_LINK,      // DeathLink / TrapLink traffic, in both directions
-    APTEXT_KIND_NUM,
-} APTextKind;
-
 typedef struct APTextMessage
 {
     u8 kind;                    // APTextKind
@@ -256,12 +224,24 @@ typedef struct APTextMessage
 
 _Static_assert(sizeof(APTextMessage) == 256, "APTextMessage stride is part of the wire contract");
 
-// Shared struct the Python AP client reads and writes with dolphin-memory-engine
-// (OnBoot stores the pointer at 0x805d52d4). Field order is the wire contract.
+// Where OnBoot parks the APData pointer, so the client can find the struct by
+// address. Changing it needs a paired client change.
+#define AP_DATA_ANCHOR 0x805d52d4
+
+// Shared struct the Python AP client reads and writes with dolphin-memory-engine.
+// Field order is the wire contract.
 typedef struct APData
 {
-    s64 energy_balance;    // EnergyLink pool, raw MJ. Client -> game; the game may decrement locally for purchase UI, the next client write wins.
-    s64 energy_sent_total; // Cumulative net MJ emitted this session. Game -> client, single-writer; the client reads-and-diffs and never writes. Resets each mod boot.
+    s64 energy_balance; // EnergyLink pool, raw MJ. Client -> game; the game may decrement locally for purchase UI, the next client write wins.
+
+    // Raw MJ in and out this session, game -> client single-writer; the client diffs each
+    // and nets them, and never writes either. Both reset each mod boot. Two rising u32s
+    // rather than one signed net total because a 64-bit store is not atomic on PPC32: a
+    // read straddling a net value crossing zero decodes a small negative as ~4.29e9, and
+    // the client's max:0 clamp cannot undo the deposit that follows. A u32 is one store,
+    // and a counter that only rises reads either the old or the new value, never a mix.
+    u32 energy_deposit_total;
+    u32 energy_withdraw_total;
     uint deathlink_receive;
     uint deathlink_send;
     uint traplink_receive;
@@ -298,37 +278,41 @@ typedef struct APData
     // second, and the game ORs the second in and clears it each frame.
     u64 ap_patch_checks[AP_PATCH_WORDS];
     u64 ap_patch_backfill[AP_PATCH_WORDS];
+
+    // Publishes both backfill arrays at once: the client fills client_backfill and
+    // ap_patch_backfill, then sets this; the game consumes both, zeroes them, and clears
+    // this last. Without it the game can read a half-written u64, consume the bits that
+    // arrived and zero away the ones that had not - a permanent loss, since the client
+    // has already moved on. Being a u32 it is never itself torn.
+    u32 backfill_valid;
 } APData;
 
 extern APData *ap_data;
 extern APSave *ap_save;
 
-// machine_unlocked_mask is 32 bits, so only the first 32 MachineKinds can carry a
-// gate. custom_machines is free to register past that - its own cap is its own -
-// and the kinds beyond are treated as permanently available rather than shifted out
-// of range. OnSaveLoaded reports how many were left ungated.
-#define AP_MACHINE_GATE_NUM 32
-
-// The machine unlock item ids run from AP_MACHINE_UNLOCK_BASE up to where the box
-// unlock ids begin, so a build registering more MachineKinds than that block holds
-// has to stop at its edge instead of reading on into another category's ids. The
-// kinds past it get no unlock item and stay ungated like the ones past the mask.
-#define AP_MACHINE_UNLOCK_NUM (AP_BOX_UNLOCK_BASE - AP_MACHINE_UNLOCK_BASE)
-
-static inline int MachineUnlock_KindNum(void)
+// Map a runtime checklist mode to its row in the per-checklist-mode arrays
+// (sent_checks, goal_checks, cross_mode_slots, ...), or -1 for a mode this mod does
+// not record. The 3 real game modes map to themselves; the AP checklist tab maps to
+// AP_CHECKLIST_ROW wherever the custom_checklist framework placed it. The single
+// answer to "which row is this mode" - do not re-derive it per consumer.
+static inline int ChecklistModeRow(int mode)
 {
-    int num = MachineKind_Num();
-    return num < AP_MACHINE_UNLOCK_NUM ? num : AP_MACHINE_UNLOCK_NUM;
+    if (mode >= 0 && mode < GMMODE_NUM)
+        return mode;
+    if (mode == ap_checklist_mode)
+        return AP_CHECKLIST_ROW;
+    return -1;
 }
 
-static inline int MachineKind_IsUnlocked(int kind)
+// Inverse, for handing a row back to game code (gmGetClearcheckerTypeP and friends
+// index by runtime mode).
+static inline int ChecklistRowMode(int row)
 {
-    if (kind < 0)
-        return 0;
-    if (kind >= AP_MACHINE_GATE_NUM)
-        return 1;
-    return (ap_save->machine_unlocked_mask >> kind) & 1;
+    return row == AP_CHECKLIST_ROW ? ap_checklist_mode : row;
 }
+
+// Is checkbox `k` of row `r` recorded complete?
+#define SENT_CHECK_BIT(r, k)  ((ap_save->sent_checks[(r)][(k) >> 6] >> ((k) & 63)) & 1ULL)
 
 void OnBoot();
 void OnSaveInit();
@@ -343,11 +327,27 @@ void On3DExit();
 void OnSceneChange();
 void OnTopRideLoadEnd();
 void OnFrameStart();
-void OnFrameEnd();
 
 // Register the public API instance with hoshi so other mods can import it via
 // Hoshi_ImportMod(). Call once from OnBoot.
 void ArchipelagoAPI_Export(void);
+
+// Debug overrides of the slot options the client normally owns. The gating flags,
+// the patch cap range and the spawn rate floor are read at connect, so a change to
+// any of them needs APOptions_DebugReapply to become observable.
+int APOptions_DebugGetGating(APUnlockCategory cat);
+void APOptions_GetPatchCapRange(int *out_min, int *out_max);
+int APOptions_GetSpawnRateMin(void);
+void APOptions_DebugSetGating(APUnlockCategory cat, int enabled);
+void APOptions_DebugSetPatchCapMin(int min);
+void APOptions_DebugSetPatchCapMax(int max);
+void APOptions_DebugSetSpawnRateMin(int percent);
+void APOptions_DebugReapply(void);
+
+// Log the whole save and wire state, and roll received-item progression back to
+// what a save holds before its first connect.
+void APDebug_ReportState(void);
+void APDebug_ResetProgression(void);
 
 // Per-category unlock-mask access. Set truncates to the underlying width.
 u32  Unlock_GetMask(APUnlockCategory cat);

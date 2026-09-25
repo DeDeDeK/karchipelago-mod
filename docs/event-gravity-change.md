@@ -4,13 +4,32 @@ A custom City Trial event (`CUSTOM_EVKIND_GRAVITY_CHANGE`, kind 17) that scales 
 
 The load-bearing fact: **gravity is a strength scalar plus a direction vector, in two adjacent `StageNode` fields.** To change how strong gravity feels, scale the *strength* (`gravity_strength`, +0x0C) and leave the *direction* (`gravity_dir`, +0x10) a unit vector. Scaling the direction instead denormalizes the machine's derived up vector and breaks air control.
 
-Like every custom event it is a row in `custom_params[]` and `custom_functions[]` in `custom_events.c`; the mod's wrappers on the event state table call the kind's callbacks in place of the vanilla per-kind dispatch. Its parameters: 900-frame duration (~15 s), siren intro, sky preset 8 (Pink Sky), BGM file 0x31 (`event_meteo`), roll weight 20. No `check` callback is registered, so the event is always eligible, and there is no per-frame `end`.
+Like every custom event, it is a row in `events[]` in `custom_events.c`; the mod's wrappers on the event state table call its callbacks in place of the vanilla per-kind dispatch.
+
+Its parameters:
+- 900-frame duration (~15 s) with the siren intro
+- sky preset 8 (Pink Sky)
+- BGM file 0x31 (`event_meteo`)
+- roll weight 20
+
+It registers `start` and `end2`, and uses `end2` again as its `abort`.
 
 ## Implementation
 
-`GravityChange_Start` picks `GRAVITY_MULT_LOW` (0.5, floaty) or `GRAVITY_MULT_HIGH` (2.0, heavy) with `HSD_Randi(2)`, holds the choice in a static, captures the original `gravity_strength` and writes the scaled value. `GravityChange_Active` re-applies it every frame in case something overwrites the field; `GravityChange_End2` writes the original back. `gravity_dir` is never touched.
+`GravityChange_Start`:
+1. Picks `GRAVITY_MULT_LOW` (0.5, floaty) or `GRAVITY_MULT_HIGH` (2.0, heavy) with `HSD_Randi(2)`.
+2. Saves the original `gravity_strength` and a pointer to the field, reached through `*stc_grobj -> gr_data (+0x8) -> stage_node (+0x4) -> +0x0C`.
+3. Writes the scaled value.
 
-The field is reached through `GetStageGravityStrength`, which walks `*stc_grobj -> gr_data (+0x8) -> stage_node (+0x4)` and returns `&stage_node->gravity_strength`, NULL-guarded at every step - if the chain is not up (no stage loaded) the event no-ops rather than writing through a null pointer, and `gravity_modified` stays 0 so `Active`/`End2` skip too.
+Nothing in the game writes `StageNode+0x0C` at runtime; every access through that chain in `.text` is a read. So the one write holds for the whole event, with no per-frame re-apply. `gravity_dir` is never touched.
+
+`GravityChange_End2` writes the original back through the saved pointer and clears the pointer, so a second call does nothing.
+
+It is also the event's `abort`, because the scaled value can outlive the round:
+- `Preload_LoadStageFiles` (0x800ce964) preloads GrCity1.dat into main-RAM heap kind 4.
+- `lbLoadArchive` reuses a loaded preload entry as-is instead of re-reading it from disc.
+- So a strength left scaled by a round that ended mid-event could carry into the next round.
+- `On3DExit` runs before the scene's heaps are reset, so the saved pointer is still valid there.
 
 Low gravity gives floaty machines, longer and higher jumps, drift and extended air time; high gravity makes machines hug the ground with short jumps and snappy landings.
 

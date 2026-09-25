@@ -12,13 +12,14 @@ A `Vc*.dat`'s one public is a `vcData`, and two of its seven pointers are attrib
 | `vcData` field | Struct | Size | Copied to |
 |---|---|---|---|
 | `+0x00` `attr` | `vcAttributes` | `0x1f0` | `MachineData + 0x460` |
-| `+0x14` `handling_attr` | `vcHandlingAttr` | `0xf8` | `md->attr->handling`, i.e. `*(md+0x650) + 0xa8` |
+| `+0x14` `handling_attr` | `vcHandlingAttr` | `0xf8` | `md->attr->handling`, i.e. `*(md+0x650) + 0xac` |
 
 `MachineData + 0x650` is a separate `0x1a4`-byte allocation made per machine by
 `Machine_AllocAttrStruct` (`0x801c71a8`), not a pointer into `MachineData`. Its first
-`0xa8` bytes are a **per-class** block shared by every star, whose `+0x1c` is the class-wide
-speed cap `accelerateStar` (`0x801ec074`) clamps velocity to. The handling block follows at
-`+0xa8`; that half is the machine's own.
+`0xac` bytes are a **per-class** block shared by every star, copied from the `attr` slot of
+the class archive's `vcDataKindStar` (`VcStar.dat`); its `+0x1c` is the class-wide speed cap
+`accelerateStar` (`0x801ec074`) clamps velocity to. The handling block follows at `+0xac`
+and runs to the end of the allocation; that half is the machine's own.
 
 Both classes author a `0xf8` handling block, but the star and bike controllers read
 different subsets of it, so a field named for one class means nothing under the other.
@@ -33,8 +34,8 @@ completely:
    `top_speed_ground` is `+0x4f0`, `top_speed_air` is `+0x5ac`;
 2. dispatch through a per-`is_bike` table at `r13+0x770`: `+0x1c` is
    `Machine_CopyCommonAttributes` (`0x801e812c`), which refills `md->attr` - the class block
-   from a table indexed by `MachineData.kind`, the handling half from
-   `md->vcData->handling_attr` - and `+0x20` is `Machine_AdjustAttributesStar`
+   from `vcDataKindStar.attr`, the handling half from `md->vcData->handling_attr`, so handling
+   field `k` lands at `md->attr + 0xac + k` - and `+0x20` is `Machine_AdjustAttributesStar`
    (`0x801e906c`) or `Machine_AdjustAttributesBike` (`0x801f4dac`), which apply the stat
    scaling;
 3. set `top_speed_current` (`+0x398`) from `top_speed_ground` while `action_state_class`
@@ -58,28 +59,63 @@ the attributes and nothing rewrites them afterwards, so an attribute swap that g
 ## The stat map
 
 `Machine_ApplyStarStatScaling` (`0x801e81e4`) is the game's own statement of which attribute
-belongs to which of the nine patch stats. Each site is
+belongs to which of the nine patch stats. Most sites are
 `field *= Machine_ScaleFromRatio(pair, Machine_GetStatRatio(md, stat))`, where the pair
 comes from a per-class table at `md+0x658` and `Machine_ScaleFromRatio` (`0x801cab4c`)
 returns exactly `1.0` at ratio 0 - so **the shipped value is the machine at zero patches**,
 which is what it is in Air Ride and Top Ride, where the stat arrays stay zero.
+`Machine_GetStatRatio` (`0x801caa8c`) clamps to `[-1, 1]`, and a negative ratio lerps toward
+the pair's low end: City Trial stats spawn at -2, so a fresh City Trial machine sits on the
+low half of every pair.
 
 | Stat | `vcAttributes` | `vcHandlingAttr` |
 |---|---|---|
-| Boost | `top_speed_ground`, `slope_speed_up`, `boost_gain_any`, `boost_gain_sliding`, `takeoff_speed`, `+0x1a4` | `accel_floor`, `accel_turn_keep`, `x044[0..4]`, `x06c[1]`, `pitch_max_up`, `air_accel` |
-| Top Speed | `top_speed_ground`, `top_speed_air`, `+0x1a0` | `accel_floor`, `x044[0..4]`, `x06c[1]`, `air_accel`, `air_impulse` |
-| Turn | `glide_up_speed`, `glide_down_speed`, `+0x18c`, `+0x190`, `+0x19c` | `turn_rate_rest`, `turn_rate_top`, `x06c[0..2]`, `x094`, `lean_approach`, `lean_step_max` |
-| Charge | `charge_rate`, `charge_rate_turning`, `charge_full_duration`, `charge_cooldown_duration` | `x044[0..4]` |
-| Glide | the four `descent_*`, `glide_up_speed`, `glide_down_speed`, `x164`/`x168`/`x16c`/`x170`, `turn_speed_on_slope`, `base_offense`, `base_defense` | `lift_ceiling`, `x028[5..6]`, `x044[0..4]`, `lean_step_max`, `lean_step_max_0`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `x0d0[0]` |
-| Weight | `top_speed_ground`, `slope_speed_up`, `slope_speed_down`, `ground_grip`, `base_hp`-adjacent damage terms, `air_grip`, the fall tiers | most of the above, plus `air_impulse` and `air_recover_len` |
+| Boost | `top_speed_ground`, `slope_speed_up`, `boost_gain_any`, `boost_gain_sliding`, `takeoff_speed`, `+0x1a4` | `accel_floor`, `accel_turn_keep`, `x040[0..4]`, `x054[4]`, `pitch_max_up`, `air_accel` |
+| Top Speed | `top_speed_ground`, `top_speed_air`, `+0x1a0` | `accel_floor`, `x040[0..4]`, `x054[4]`, `air_accel`, `air_impulse` |
+| Turn | `glide_up_speed`, `glide_down_speed`, `+0x18c`, `+0x190`, `+0x19c` | `turn_rate_rest`, `turn_rate_top`, `x054[3..4]`, `x068[0]`, `x068[2..4]` |
+| Charge | `charge_rate`, `charge_rate_turning`, `charge_full_duration`, `charge_cooldown_duration` | `x040[0..4]` |
+| Glide | the four `descent_*`, `glide_up_speed`, `glide_down_speed`, `x164`/`x168`/`x16c`/`x170`, `turn_speed_on_slope`, `base_offense`, `base_defense` | `lift_ceiling`, `x024[0..1]`, `x040[0..4]`, `x068[3..4]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `air_impulse`, `air_recover_len`, `x0cc[0]` |
+| Weight | `top_speed_ground`, `slope_speed_up`, `slope_speed_down`, `ground_grip`, `base_hp`-adjacent damage terms, `air_grip`, the fall tiers | `accel_floor`, `turn_rate_rest`, `turn_rate_top`, `x014`, `x024[0..1]`, `x040[0..4]`, `x054[4]`, `x068[2]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `air_impulse`, `air_recover_len`, `x0cc[0]`, `x0cc[3]` |
 | Offense | `hitbox_size`, `+0x088` | - |
 | Defense | `base_hp`, `base_defense`, `base_offense` | - |
 | HP | - | - |
 
-Two rows are worth reading twice. `x044[0..4]` (handling `+0x044`..`+0x054`) is scaled by
-five of the nine stats and has no direct reader anywhere in the machine or rider code, so
-whatever consumes it lives elsewhere. And the Weight stat touches nearly everything, which
-is why a heavy machine feels different in every axis rather than just slower.
+Two rows are worth reading twice. `x040[0..4]` (handling `+0x040`..`+0x050`) is scaled by
+five of the nine stats and has no reader in the star controller, so whatever consumes it
+lives elsewhere. And the Weight stat touches nearly everything, which is why a heavy machine
+feels different in every axis rather than just slower.
+
+**Some pair blocks are per machine kind.** Most of the table at `md+0x658` is one pair per
+site, but six of the star class's blocks hold 19 rows - one per star class slot - and are
+indexed by `MachineData.kind` (`+0x24`) with no bound:
+
+| Block (from `md+0x658`) | Stat | Applied to |
+|---|---|---|
+| `+0x68 + 8 * kind` | Top Speed | `top_speed_ground`, multiplied |
+| `+0x100 + 8 * kind` | Top Speed | `top_speed_air`, multiplied |
+| `+0x328 + 8 * kind` | Weight | `handling.air_impulse`, added |
+| `+0x3c0 + 8 * kind` | Weight | `handling.air_recover_len`, added |
+| `+0x538 + 8 * kind` | Glide | `handling.air_impulse`, added, then clamped at 0 |
+| `+0x5d0 + 8 * kind` | Glide | `handling.air_recover_len`, added, then clamped at 0 |
+
+The four additive sites go through `Machine_ScaleFromRatio2` (`0x801cab94`), which returns
+0 at ratio 0, `ratio * high` above it and `-ratio * low` below. Each block runs straight
+into the next, so a kind past 18 reads the following block's first rows: slot 19's Weight
+and Glide additions to `air_impulse` are the `air_recover_len` rows, `+/-266.67` and `+/-800`
+against a field that ships at 0.01.
+
+The bike class's table has ten such blocks of 7 rows, all read in
+`Machine_ApplyBikeStatScaling` (`0x801f3d44`) through `Machine_ScaleFromRatio`, so each
+multiplies:
+
+| Block (from `md+0x658`) | Stat | Applied to |
+|---|---|---|
+| `+0x60 + 8 * kind` | Top Speed | `top_speed_ground` |
+| `+0x98 + 8 * kind` | Top Speed | `top_speed_air` |
+| `+0x128`, `+0x160`, `+0x198`, `+0x1d0`, `+0x208`, `+0x240`, `+0x278`, `+0x2b0`, each `+ 8 * kind` | Turn | the class block's `+0x74`, `+0x78`, `+0x84`, `+0x88`, `+0x94`, `+0x98`, `+0x9c` and `+0xa0`, in that order |
+
+A bike kind past 6 reads the next block's first row, or a fixed pair for the last block of
+each stat.
 
 ## The main levers
 
@@ -100,10 +136,10 @@ turn = -stick * lerp(handling.turn_rate_rest, handling.turn_rate_top,
 ```
 
 and then, if the machine is already slipping past `handling.slip_penalty_deg`, multiplies by
-`handling.slip_penalty` (0.2 on every machine). So `turn_rate_rest` is the yaw standing
-still and `turn_rate_top` the yaw at the cap. Swerve Star's `0 -> 0.1` is why it cannot
-pivot in place and carves hard at speed; Formula Star's `0.002 -> 0.5` is the opposite
-extreme.
+`handling.slip_penalty` (0.55 on most stars). So `turn_rate_rest` is the yaw standing still
+and `turn_rate_top` the yaw at the cap. Formula Star's `0.025 -> 0.002` and Swerve Star's
+`0.037 -> 0` all but stop turning at speed; Turbo Star's `0.1 -> 0.018` is the hardest pivot
+in place.
 
 **Acceleration.** `Machine_Star_UpdateThrust` (`0x801eb57c`) rebuilds `MachineData.thrust`
 (`+0x6e8`) on every state entry from the active top speed and `handling.accel_floor`
@@ -114,25 +150,25 @@ down toward `handling.accel_turn_keep` as slip grows and biased by `slope_speed_
 `handling.air_accel_fwd` applied while the stick agrees with the heading and
 `air_accel_back` while it opposes.
 
-| Machine | grip | air grip | yaw rest | yaw top | accel floor | turn keep | ground cap | air cap | full boost | boost decay | air impulse |
+| Machine | grip | air grip | yaw rest | yaw top | accel floor | turn keep | ground cap | air cap | full boost | boost decay | air recover |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Warp Star | 0.233 | 0.4 | 0.029 | 0.0225 | 1.2 | 0.037 | 1.644 | 1.863 | 0.2 | 1 | 500 |
-| Compact Star | 0.8 | 0.3 | 0.041 | 0.1 | 1.2 | 0.044 | 1.174 | 1.847 | 0.2 | 0.33 | 450 |
-| Winged Star | 0.233 | 0.6 | 0.027 | 0.018 | 1.1 | 0.03 | 1.519 | 2.045 | 0.2 | 1 | 1000 |
-| Shadow Star | 0.18 | 0.7 | 0.043 | 0.01 | 1.3 | 0.06 | 1.296 | 1.822 | 0.2441 | 1 | 400 |
-| Hydra | 0.1 | 0.8 | 0.04 | 0.04 | 4 | 0.07 | 1.215 | 2.227 | 0.03 | 0.00012 | 400 |
-| Bulk Star | 0.233 | 0.005 | 0.03 | 0.02 | 1.8 | 0.05 | 1.62 | 1.701 | 0.0092 | 0.0036 | 1 |
-| Slick Star | 0.01 | 0.3 | 0.043 | 0.01 | 0 | 0.05 | 1.762 | 1.944 | 0.14 | 1 | 600 |
-| Formula Star | 0.233 | 0.1 | 0.002 | 0.5 | 1.6 | 0.025 | 2.795 | 2.227 | 0.2218 | 1 | 20 |
-| Dragoon | 0.2 | 1.5 | 0.017 | 0.015 | 1.2 | 0.037 | 2.43 | 3.645 | 0.37 | 1 | 1500 |
-| Wagon Star | 0.5 | 0.6 | 0.038 | 0.02 | 2.3 | 0.042 | 1.701 | 2.025 | 0 | 0.06 | 22 |
-| Rocket Star | 0.25 | 3 | 0.025 | 0.02 | 1.1 | 0.033 | 1.013 | 1.215 | 3.3 | 1 | 600 |
-| Swerve Star | 0.233 | 0.2 | 0 | 0.1 | 1.2 | 0.037 | 2.033 | 1.932 | 0.28 | 0.08 | 230 |
-| Turbo Star | 0.15 | 0.01 | 0.018 | 0.015 | 1.2 | 0.1 | 1.863 | 1.62 | 0.22 | 1 | 60 |
-| Jet Star | 0.233 | 0.25 | 0.035 | 0.04 | 1.8 | 0.05 | 1.337 | 1.579 | 0.2694 | 1 | 400 |
-| Flight Warp Star | 0.233 | 0.6 | 0.029 | 0.0225 | 1.2 | 0.037 | 1.661 | 2.025 | 0.25 | 1 | 1800 |
-| Free Star | 0.233 | 0.4 | 0.029 | 0.0225 | 1.2 | 0.037 | 1.661 | 1.903 | 0.2 | 0.33 | 500 |
-| Steer Star | 0.233 | 0.4 | 0.029 | 0.0225 | 1.2 | 0.037 | 1.661 | 1.903 | 0.2 | 0.33 | 500 |
+| Warp Star | 0.233 | 0.4 | 0.037 | 0.029 | 0.015 | 1.2 | 1.644 | 1.863 | 0.2 | 1 | 500 |
+| Compact Star | 0.8 | 0.3 | 0.044 | 0.041 | 0.04 | 1.2 | 1.174 | 1.847 | 0.2 | 0.33 | 450 |
+| Winged Star | 0.233 | 0.6 | 0.03 | 0.027 | 0.013 | 1.1 | 1.519 | 2.045 | 0.2 | 1 | 1000 |
+| Shadow Star | 0.18 | 0.7 | 0.06 | 0.043 | 0.04 | 1.3 | 1.296 | 1.822 | 0.2441 | 1 | 400 |
+| Hydra | 0.1 | 0.8 | 0.07 | 0.04 | 0 | 4 | 1.215 | 2.227 | 0.03 | 0.00012 | 400 |
+| Bulk Star | 0.233 | 0.005 | 0.05 | 0.03 | 0 | 1.8 | 1.62 | 1.701 | 0.0092 | 0.0036 | 1 |
+| Slick Star | 0.01 | 0.3 | 0.05 | 0.043 | 0.025 | 0 | 1.762 | 1.944 | 0.14 | 1 | 600 |
+| Formula Star | 0.233 | 0.1 | 0.025 | 0.002 | 0.0052 | 1.6 | 2.795 | 2.227 | 0.2218 | 1 | 20 |
+| Dragoon | 0.2 | 1.5 | 0.037 | 0.017 | 0.025 | 1.2 | 2.43 | 3.645 | 0.37 | 1 | 1500 |
+| Wagon Star | 0.5 | 0.6 | 0.042 | 0.038 | 0.02 | 2.3 | 1.701 | 2.025 | 0 | 0.06 | 22 |
+| Rocket Star | 0.25 | 3 | 0.033 | 0.025 | 0.024 | 1.1 | 1.013 | 1.215 | 3.3 | 1 | 600 |
+| Swerve Star | 0.233 | 0.2 | 0.037 | 0 | 0.29 | 1.2 | 2.033 | 1.932 | 0.28 | 0.08 | 230 |
+| Turbo Star | 0.15 | 0.01 | 0.1 | 0.018 | 0.011 | 1.2 | 1.863 | 1.62 | 0.22 | 1 | 60 |
+| Jet Star | 0.233 | 0.25 | 0.05 | 0.035 | 0.019 | 1.8 | 1.337 | 1.579 | 0.2694 | 1 | 400 |
+| Flight Warp Star | 0.233 | 0.6 | 0.037 | 0.029 | 0.015 | 1.2 | 1.661 | 2.025 | 0.25 | 1 | 1800 |
+| Free Star | 0.233 | 0.4 | 0.037 | 0.029 | 0.015 | 1.2 | 1.661 | 1.903 | 0.2 | 0.33 | 500 |
+| Steer Star | 0.233 | 0.4 | 0.037 | 0.029 | 0.015 | 1.2 | 1.661 | 1.903 | 0.2 | 0.33 | 500 |
 
 Free Star, Steer Star and Flight Warp Star are Warp Star variants and share most of its
 handling block; Flight Warp Star's whole difference is thirty-four fields.
@@ -172,11 +208,17 @@ full meter holds before auto-discharging and the frames of the overcharge lockou
 
 ## Air and glide
 
-`handling.air_impulse` (`+0x0c8`) scales the impulse `zz_801ebe88_` returns from a steep
-surface contact, and it is where the gliders live: 1800 on Flight Warp Star and 1500 on
-Dragoon against 500 on Warp Star and 20 on Formula Star. `handling.air_recover_len`
-(`+0x0cc`) is how many frames the post-airborne velocity blend runs over, and
-`handling.air_accel` (`+0x0bc`) is the airborne acceleration budget.
+`handling.air_recover_len` (`+0x0c8`) is where the gliders live: `Machine_Star_ApplyAirThrust`
+blends airborne thrust from the heading toward its reflection off the surface normal at
+`MachineData+0x774` as the counter at `MachineData+0xb8c` climbs to this many frames. It runs
+1800 on Flight Warp Star and 1500 on Dragoon against 500 on Warp Star, 20 on Formula Star and
+1 on Bulk Star. `handling.air_accel` (`+0x0b8`) is the airborne acceleration budget.
+
+`handling.air_impulse` (`+0x0c4`) scales the kick `Machine_Star_ApplyAirImpulse`
+(`0x801ebe88`) adds to `MachineData.accel` from the flight state: when the negated dot of the
+machine's `+0x43c` direction with the vector `zz_801ca968_` returns clears the class block's
+`+0x38`, it adds the `+0x448` direction times that dot, the caller's scale and `air_impulse`.
+It ships at 0.01 on most stars, 0.19 on Bulk Star and 0 on Formula and Rocket Star.
 
 On the attribute side, `glide_up_speed` / `glide_up_amount` / `glide_down_speed` /
 `glide_down_amount` (`+0x174`..`+0x180`) are the glide itself, and the four `descent_*`
@@ -187,8 +229,8 @@ field: it is why that machine leaves the ground off anything.
 
 ## Presentation
 
-`handling +0x094`..`+0x0b0` is the model's lean, in degrees: `pitch_max_down` /
-`pitch_max_up` clamp the pitch (36 / 36 on most stars, 5 / 1 on Formula Star, 35 / -20 on
+`handling +0x090`..`+0x0ac` is the model's lean, in degrees: `pitch_max_down` /
+`pitch_max_up` clamp the pitch (36 / 36 on most stars, 5 / 5 on Formula Star, 35 / 35 on
 Dragoon), `roll_max` sets the bank per unit of stick, and `lean_approach` /
 `lean_step_max` / `lean_step_max_0` control how fast the model gets there. It is drawn only -
 `zz_801ec118_` and its three siblings write a `JOBJ`'s rotation - but it is a large part of

@@ -52,12 +52,12 @@ and index, and the countdown/phase pair at `+0x4c`/`+0x50`.
 
 **Phase 1**, after 28 frames, builds everything. Each model gets a
 `GObj_Create(0x21, 0x20, 0)` with `GObj_AddGXLink(gobj, LegendaryMachine_RenderAssemblyModel,
-0x1a, 1)`; the render callback (`0x80283ed8`) draws through `GObj_RenderJObj` for every pass
-but 3. The joint tree comes from `HSD_JObjLoadJoint`, and
+0x1a, 1)`; the render callback (`0x80283ed8`) draws through `JObj_GX` for every pass
+but 3. The joint tree comes from `JObj_LoadJoint`, and
 `LegendaryMachine_BindAssemblyAnims` (`0x80283f74`) binds the animations: a DObj relink pass
 (`0x8005523c`), then `JObj_AddFigaTreeAnim` (`0x8006e2c0`) for the joint animation and
-`HSD_JObjAddAnimAll(jobj, NULL, matanim, NULL)` for the material animation, then
-`HSD_JObjReqAnimAllByFlags(jobj, 0.0f, 21)` and `JObj_SetAllAOBJRateByFlags(1.0f, jobj, 0xffff)`.
+`JObj_AddAnimAll(jobj, NULL, matanim, NULL)` for the material animation, then
+`JObj_ReqAnimAllByFlags(jobj, 0.0f, 21)` and `JObj_SetAllAOBJRateByFlags(1.0f, jobj, 0xffff)`.
 
 Both models are then placed with `gmLanMenu_Scale3DObject(1.0f, jobj, forward, up, pos)`
 (`0x80054414`), which stamps an orientation matrix built from the machine's own basis: its
@@ -91,7 +91,7 @@ controller GObj destroys itself and `LegendaryMachine_FreeAssemblyArchive` (`0x8
 frees the archive.
 
 Because the archive is freed here, a second cinematic in the same scene reloads it. Code that
-runs two assemblies back to back must let the first finish, or `HSD_JObjLoadJoint` walks a
+runs two assemblies back to back must let the first finish, or `JObj_LoadJoint` walks a
 dangling joint.
 
 ## The Archive

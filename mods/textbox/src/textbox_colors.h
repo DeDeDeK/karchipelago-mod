@@ -7,8 +7,7 @@
 #include "item.h"
 #include "game.h"
 
-// Per-noun text colors. RGB only - alpha is set per-frame by the fade machinery. The cross-mod
-// API re-exports these by value.
+// Per-noun text colors. RGB only; alpha is owned by the fade machinery.
 
 extern const GXColor TextBox_DefaultColor;
 extern const GXColor TextBox_AbilityColors[COPYKIND_NUM];
@@ -23,13 +22,5 @@ extern const GXColor TextBox_StadiumColor;
 extern const GXColor TextBox_StageColor;
 extern const GXColor TextBox_TopRideItemColor;
 extern const GXColor TextBox_ItemColor;
-extern const GXColor TextBox_TrapColor;
-extern const GXColor TextBox_DeathColor;
-extern const GXColor TextBox_EnergyColor;
-extern const GXColor TextBox_CheckColor;
-extern const GXColor TextBox_GoalColor;
-extern const GXColor TextBox_RewardColor;
-extern const GXColor TextBox_ShopColor;
-extern const GXColor TextBox_FillerColor;
 
 #endif // TEXTBOX_COLORS_H

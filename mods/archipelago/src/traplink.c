@@ -11,6 +11,7 @@
 #include "settings_menu.h"
 #include "ap_announce.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 #include "traplink.h"
 #include "ap_item_handler.h"
 #include "gate_topride_items.h"
@@ -36,16 +37,14 @@ void TrapLink_Send(TrapLinkKind kind)
     if (kind == TRAPLINK_KIND_NONE)
         return;
     if (recv_suppress_frames > 0)
-        return; // inside the receive guard window; a bounced trap is not ours to send
+        return;
 
     OSReport("[TrapLink] Send triggered (kind %d)\n", kind);
     ap_data->traplink_send = (uint)kind;
 
-    // Both directions are narrated locally under Messages -> Local -> Links, off by
-    // default: a client attached to the same event posts a line naming the other
-    // player a poll later.
+    // Behind Messages -> Local -> Links, off by default.
     if (APAnnounce_LocalEnabled(APLOCAL_LINK))
-        tb_api->EnqueueColoredNounFmt(NULL, "TrapLink", tb_api->TrapColor, " sent! (%s)",
+        tb_api->EnqueueColoredNounFmt(NULL, "TrapLink", APColor_Trap, " sent! (%s)",
                                       traplink_kind_names[kind]);
 }
 
@@ -112,7 +111,7 @@ static int ApplyCityTrialTrap(void)
         return 1; // treat as handled so we clear the flag
     }
 
-    // Fisher-Yates shuffle so the attempt order is randomized across frames.
+    // Shuffled so the trap that lands is a random eligible one, not the first.
     for (int i = count - 1; i > 0; i--)
     {
         int j = HSD_Randi(i + 1);
@@ -176,8 +175,9 @@ static int ApplyTopRideTrap(void)
     return GateTopRideItems_GiveItem(kind);
 }
 
-// Dispatch a mode-appropriate trap on receive. The GObj is only installed in 3D /
-// Top Ride scenes, so the major is always CITY/AIR/TOP here.
+// Dispatch a mode-appropriate trap on receive. Any other major - the title attract
+// demo installs this proc too - falls through the switch with handled = 0, holding
+// the flag for a real round.
 static void TrapLink_PerFrame(GOBJ *g)
 {
     // Before the receive check, so idle frames advance the guard too.
@@ -206,10 +206,7 @@ static void TrapLink_PerFrame(GOBJ *g)
                 handled = 1;
             }
             else if (CityTrial_IsInStadium())
-            {
-                OSReport("[TrapLink] Stadium - falling back to the sleep-ability trap\n");
                 handled = ApplyAirRideTrap();
-            }
             else
                 handled = ApplyCityTrialTrap();
             break;
@@ -224,7 +221,7 @@ static void TrapLink_PerFrame(GOBJ *g)
     if (handled)
     {
         if (APAnnounce_LocalEnabled(APLOCAL_LINK))
-            tb_api->EnqueueColoredNoun(NULL, "TrapLink", tb_api->TrapColor, " received!");
+            tb_api->EnqueueColoredNoun(NULL, "TrapLink", APColor_Trap, " received!");
         ap_data->traplink_receive = 0;
         // The apply is about to trigger our own send hooks.
         recv_suppress_frames = TRAPLINK_RECV_GUARD_FRAMES;
@@ -251,8 +248,9 @@ void TrapLink_OnTopRideLoadEnd()
 // clobbered: lwz r0, 0xA10(r20).
 static void TrapLink_OnBadPatch(MachineData *md)
 {
+    // Machine_GetRiderPly returns 5 for a riderless machine, one past ply_desc[5].
     int ply = Machine_GetRiderPly(md);
-    if (Ply_CheckIfCPU(ply))
+    if ((u32)ply >= 5 || Ply_GetPKind(ply) != PKIND_HMN)
         return;
     TrapLink_Send(TRAPLINK_KIND_BAD_PATCH);
 }

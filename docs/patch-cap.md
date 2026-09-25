@@ -87,3 +87,14 @@ Two things that are *not* on the `Patch_GetMaxValue` path:
 **Saturation textbox.** Once `min + patch_cap_count >= max`, further increments still enqueue "Patch cap increased! (max/max)" even though nothing moved. The `OSReport` distinguishes the two cases; the textbox does not. Cosmetic only.
 
 **`patch_cap_count` overflow.** The counter is `u8` and wraps at 256. Only `max - min` increments are ever useful and `PatchCap_GetCap()` clamps `min + count` to the max, so a wrap needs an APWorld shipping 256+ cap items - unreachable with the 18-30 max range, but a `patch_cap_count < max` guard in `Increment` would make it unconditionally safe.
+
+## Debug override
+
+The cap range normally arrives once, with the slot options, and is immutable for the seed.
+`archipelago_debug`'s Slot Options page writes `city_trial_patch_cap_min` and `_max` directly
+through `ArchipelagoAPI.DebugSetPatchCapRange`, so the flat-cap case (`min == max`), the
+one-per-item climb and the `PATCH_STAT_MAX` ceiling can each be exercised on one save.
+
+Both rows read back through `GetPatchCapRange`, and a stored 0 - options never received - shows
+as 127, which is what `PatchCap_GetMax` resolves it to. The effective cap, the received Patch Cap
+Increase count and the seed range all appear together in that mod's Report State output.

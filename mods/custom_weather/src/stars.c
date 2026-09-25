@@ -18,14 +18,10 @@
 #define STAR_MAX   220  // field capacity; resolved density clamps to this
 #define STAR_SEGS  6    // rim vertices of each soft dot (a coarse circle is plenty)
 
-// Each star sits at P = eye + skydir*dist (no parallax), with dist clamped inside
-// the backdrop dome - a depth-writing sphere at the origin that would otherwise
-// occlude it - and inside the far plane. Apparent size is referenced to
-// STAR_REF_DIST so it holds constant as the distance is clamped.
+// Each star sits at P = eye + skydir*dist, so panning sweeps a world-fixed field
+// with no parallax swim.
 #define STAR_MAX_DIST   6000.0f  // desired anchor distance (always clamped smaller)
-#define STAR_REF_DIST   1800.0f  // world radius == star.size at this distance
 #define STAR_FAR_FRAC   0.9f     // never exceed this fraction of the camera far plane
-#define STAR_DOME_R     2500.0f  // CT backdrop dome radius (geometry ~2856 * stage scale)
 #define STAR_DOME_FRAC  0.9f     // keep stars within this fraction of the dome distance
 
 // Only seed stars above this elevation so they read as sky, not horizon haze.
@@ -67,12 +63,8 @@
 #define SHOOT_FADE_IN      4     // brighten-in frames
 #define SHOOT_FADE_OUT     12    // fade-out frames
 
-// Render GObj drawn first on the XLU sub-pass (farthest back) so the moon and the
-// cloud deck blend over the starfield.
 #define STAR_GOBJ_CLASS  208
 #define STAR_GOBJ_PLINK  32
-#define STAR_GX_LINK     0
-#define STAR_GX_PRI      0
 
 typedef struct Star
 {
@@ -115,9 +107,7 @@ static float   stc_lum = STAR_DEF_LUM;
 static float   stc_base_size = STAR_DEF_SIZE;
 static float   stc_size_var = STAR_DEF_SIZE_VAR;
 
-// Menu knobs layered over the active preset. Stars {Preset,Off,On} gates the whole
-// feature; the rest override density/twinkle/luminosity/variance/tint.
-static char *show_names[] = {"Preset", "Off", "On"};
+// Index 0 ("Preset") is the pass-through value on every knob below.
 static int   show_index = 0;
 
 static const float density_factors[] = {1.0f, 0.5f, 1.0f, 1.7f};
@@ -149,9 +139,9 @@ static char *color_names[] = {"Preset", "White", "Warm", "Cool"};
 #define STAR_COLOR_NUM ((int)(sizeof(color_overrides) / sizeof(color_overrides[0])))
 static int color_index = 0;
 
-// Random lull range (frames) between meteors, indexed by cadence level 1 (Off) ..
-// 4 (Frequent). The index-0 range is never used (Preset resolves to a real level)
-// but is kept so the arrays line up with shoot_names.
+// Random lull range (frames) between meteors, indexed by cadence level. Slots 0
+// (Preset) and 1 (Off) are never read - RandLull remaps both to a real level - but
+// keep the arrays lined up with shoot_names.
 static const int shoot_lull_min[] = {600, 0, 1200, 600, 240};
 static const int shoot_lull_max[] = {1500, 0, 3000, 1500, 600};
 static char *shoot_names[] = {"Preset", "Off", "Rare", "Occasional", "Frequent"};
@@ -191,14 +181,6 @@ static int shoot_color_index = 0;
 
 static void Star_GX(GOBJ *g, int pass);
 
-static HSD_Fog *StarLiveFog(void)
-{
-    GrObj *gr = *stc_grobj;
-    if (!gr || !gr->sky_gobj)
-        return NULL;
-    return (HSD_Fog *)gr->sky_gobj->hsd_object;
-}
-
 // Seed one star: a direction uniformly over the sky cap above the min elevation,
 // a size scaled by the resolved variance, and a random twinkle.
 static void SeedStar(Star *s, float sin_min, float var)
@@ -216,12 +198,12 @@ static void SeedStar(Star *s, float sin_min, float var)
         scale = 0.3f;
     s->size = stc_base_size * STAR_SIZE_SCALE * scale;
 
-    s->bright = STAR_BRIGHT_MIN + HSD_Randf() * (1.0f - STAR_BRIGHT_MIN);
+    s->bright = Weather_RandRange(STAR_BRIGHT_MIN, 1.0f);
     s->tw_phase = HSD_Randf() * 2.0f * STAR_PI;
-    s->tw_speed = STAR_TW_SPEED_MIN + HSD_Randf() * (STAR_TW_SPEED_MAX - STAR_TW_SPEED_MIN);
+    s->tw_speed = Weather_RandRange(STAR_TW_SPEED_MIN, STAR_TW_SPEED_MAX);
 }
 
-// Scatter the field over the sky cap. No stage dependency, so this always succeeds.
+// No stage dependency, so this always succeeds.
 static void Star_Arm(void)
 {
     float var = stc_size_var * variance_factors[variance_index];
@@ -247,43 +229,17 @@ static void Star_Ensure(void)
 {
     if (stc_star_gobj)
         return;
-    stc_star_gobj = WeatherGX_EnsureLayer(STAR_GOBJ_CLASS, STAR_GOBJ_PLINK, Star_GX,
-                                          STAR_GX_LINK, STAR_GX_PRI,
-                                          "[Stars] Starfield layer");
+    stc_star_gobj = WeatherGX_EnsureLayer(STAR_GOBJ_CLASS, STAR_GOBJ_PLINK, Star_GX, "Stars");
 }
 
-// Emit one billboard vertex: P + u*right + v*up, flat color.
-static void StarVert(const Vec3 *P, const Vec3 *R, const Vec3 *U, float u, float v,
-                     u8 cr, u8 cg, u8 cb, u8 ca)
-{
-    GXPosition3f32(P->X + u * R->X + v * U->X,
-                   P->Y + u * R->Y + v * U->Y,
-                   P->Z + u * R->Z + v * U->Z);
-    GXColor4u8(cr, cg, cb, ca);
-}
-
-// Anchor a unit sky direction onto the backdrop dome: P = eye + dir*dist, dist
-// clamped inside the dome and the far plane. Returns the chosen distance.
 static float PlaceOnDome(const Vec3 *dir, const Vec3 *eye, float e2, float maxd, Vec3 *P)
 {
-    float edotd = eye->X * dir->X + eye->Y * dir->Y + eye->Z * dir->Z;
-    float disc = edotd * edotd + STAR_DOME_R * STAR_DOME_R - e2;
-    float t_dome = (disc > 0.0f) ? (-edotd + sqrtf(disc)) : STAR_DOME_R;
-    float dist = STAR_MAX_DIST;
-    float lim = STAR_DOME_FRAC * t_dome;
-    if (dist > lim)
-        dist = lim;
-    if (dist > maxd)
-        dist = maxd;
-    P->X = eye->X + dir->X * dist;
-    P->Y = eye->Y + dir->Y * dist;
-    P->Z = eye->Z + dir->Z * dist;
-    return dist;
+    return WeatherGX_PlaceOnDome(dir, eye, e2, STAR_MAX_DIST, STAR_DOME_FRAC, maxd, P);
 }
 
-// GX callback on the world camera link, XLU pass. Draws each star as a camera-facing
-// additive glow, fog-free (bracketed HSD_FogSet) so the distant dots aren't washed to
-// fog color, depth-tested but not depth-writing so terrain occludes them.
+// GX callback on the world camera link, XLU pass. Stars and meteors draw additively
+// and fog-free (bracketed HSD_FogSet) so the distant dots are not washed to the fog
+// color.
 static void Star_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -296,18 +252,13 @@ static void Star_GX(GOBJ *g, int pass)
     if (!cam)
         return;
 
-    // Rows 0/1 of the world->view rotation are the camera axes in world space,
-    // giving the billboard basis.
+    // Rows 0/1 of the world->view rotation are the billboard basis.
     float (*m)[4] = cam->view_mtx;
     Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
     Vec3 upW = {m[1][0], m[1][1], m[1][2]};
 
-    // Camera eye in world space, eye = -R^T * t.
-    Vec3 eye = {
-        -(m[0][0] * m[0][3] + m[1][0] * m[1][3] + m[2][0] * m[2][3]),
-        -(m[0][1] * m[0][3] + m[1][1] * m[1][3] + m[2][1] * m[2][3]),
-        -(m[0][2] * m[0][3] + m[1][2] * m[1][3] + m[2][2] * m[2][3]),
-    };
+    Vec3 eye;
+    WeatherGX_CameraEye(cam, &eye);
     float e2 = eye.X * eye.X + eye.Y * eye.Y + eye.Z * eye.Z;
     float maxd = cam->far * STAR_FAR_FRAC;
 
@@ -316,7 +267,7 @@ static void Star_GX(GOBJ *g, int pass)
     if (tw > 1.0f) tw = 1.0f;
     float lum = stc_lum * lum_factors[lum_index];
 
-    HSD_Fog *fog = StarLiveFog();
+    HSD_Fog *fog = Weather_LiveFog();
 
     WeatherGX_BeginXlu(cam, 1, 0); // additive: dots glow, never darken the sky
     if (fog)
@@ -336,15 +287,16 @@ static void Star_GX(GOBJ *g, int pass)
 
         Vec3 P;
         float dist = PlaceOnDome(&s->dir, &eye, e2, maxd, &P);
-        float r = s->size * (dist / STAR_REF_DIST);
+        float r = s->size * (dist / WEATHER_DOME_REF_DIST);
 
         GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, STAR_SEGS + 2);
-        StarVert(&P, &rightW, &upW, 0.0f, 0.0f, stc_color.r, stc_color.g, stc_color.b, A);
+        WeatherGX_BillboardVert(&P, &rightW, &upW, 0.0f, 0.0f,
+                                stc_color.r, stc_color.g, stc_color.b, A);
         for (int sgm = 0; sgm <= STAR_SEGS; sgm++)
         {
             float ang = 2.0f * STAR_PI * (float)sgm / (float)STAR_SEGS;
-            StarVert(&P, &rightW, &upW, cosf(ang) * r, sinf(ang) * r,
-                     stc_color.r, stc_color.g, stc_color.b, 0);
+            WeatherGX_BillboardVert(&P, &rightW, &upW, cosf(ang) * r, sinf(ang) * r,
+                                    stc_color.r, stc_color.g, stc_color.b, 0);
         }
     }
 
@@ -412,15 +364,15 @@ static void Star_GX(GOBJ *g, int pass)
                        sh->d0.Z * ch + sh->t.Z * shh};
             Vec3 HP;
             float hdist = PlaceOnDome(&hd, &eye, e2, maxd, &HP);
-            float hr = head_size * (hdist / STAR_REF_DIST);
+            float hr = head_size * (hdist / WEATHER_DOME_REF_DIST);
             u8 HA = (u8)(peak * env);
             GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, STAR_SEGS + 2);
-            StarVert(&HP, &rightW, &upW, 0.0f, 0.0f, sc.r, sc.g, sc.b, HA);
+            WeatherGX_BillboardVert(&HP, &rightW, &upW, 0.0f, 0.0f, sc.r, sc.g, sc.b, HA);
             for (int sgm = 0; sgm <= STAR_SEGS; sgm++)
             {
                 float ang = 2.0f * STAR_PI * (float)sgm / (float)STAR_SEGS;
-                StarVert(&HP, &rightW, &upW, cosf(ang) * hr, sinf(ang) * hr,
-                         sc.r, sc.g, sc.b, 0);
+                WeatherGX_BillboardVert(&HP, &rightW, &upW, cosf(ang) * hr, sinf(ang) * hr,
+                                        sc.r, sc.g, sc.b, 0);
             }
         }
     }
@@ -435,9 +387,7 @@ static int RandLull(void)
     int lvl = ShootLevel();
     if (lvl == 1) // Off falls back to Occasional for the (unused) seed delay
         lvl = 3;
-    int lo = shoot_lull_min[lvl];
-    int hi = shoot_lull_max[lvl];
-    return lo + HSD_Randi(hi - lo + 1);
+    return Weather_RandRangeI(shoot_lull_min[lvl], shoot_lull_max[lvl]);
 }
 
 // Launch a meteor into a free pool slot: a start direction high in the sky and a
@@ -456,7 +406,7 @@ static void Shoot_Spawn(void)
     if (!sh)
         return; // pool full; skip this launch
 
-    float el = (25.0f + HSD_Randf() * 50.0f) * STAR_DEG2RAD; // start 25..75 deg up
+    float el = Weather_RandRange(25.0f, 75.0f) * STAR_DEG2RAD;
     float az = HSD_Randf() * 2.0f * STAR_PI;
     float ce = cosf(el), se = sinf(el);
     Vec3 d0 = {ce * sinf(az), se, ce * cosf(az)};
@@ -481,8 +431,8 @@ static void Shoot_Spawn(void)
 
     sh->d0 = d0;
     sh->t = t;
-    sh->arc = SHOOT_ARC_MIN + HSD_Randf() * (SHOOT_ARC_MAX - SHOOT_ARC_MIN);
-    int base_life = SHOOT_LIFE_MIN + HSD_Randi(SHOOT_LIFE_MAX - SHOOT_LIFE_MIN + 1);
+    sh->arc = Weather_RandRange(SHOOT_ARC_MIN, SHOOT_ARC_MAX);
+    int base_life = Weather_RandRangeI(SHOOT_LIFE_MIN, SHOOT_LIFE_MAX);
     sh->life = (int)(base_life * shoot_speed_factors[shoot_speed_index]);
     if (sh->life < 1)
         sh->life = 1;
@@ -498,7 +448,6 @@ static void Shoot_Reset(void)
     stc_shoot_timer = RandLull();
 }
 
-// Advance live meteors and, per the menu cadence, launch new ones.
 static void Shoot_Tick(void)
 {
     for (int i = 0; i < SHOOT_MAX; i++)
@@ -521,18 +470,9 @@ static void Shoot_Tick(void)
     stc_shoot_timer = RandLull();
 }
 
-// Latch the active preset's star config, resolving each 0 field to its module
-// default and applying the menu overrides.
 void Star_SetActive(const StarDef *def)
 {
-    if (show_index == 1) // menu Off
-    {
-        stc_active = 0;
-        Shoot_Reset();
-        return;
-    }
-    int on = (def && def->enabled) || (show_index == 2);
-    if (!on)
+    if (!WeatherToggle(show_index, def && def->enabled))
     {
         stc_active = 0;
         Shoot_Reset();
@@ -579,12 +519,11 @@ void Star_Tick(void)
 
 void Star_Reset(void)
 {
-    // The engine frees every world GObj on scene teardown; drop the cached handle so
-    // the next active frame recreates it.
     stc_star_gobj = NULL;
     stc_inited = 0;
     stc_count = 0;
     stc_active = 0;
+    stc_time = 0.0f;
     Shoot_Reset();
 }
 
@@ -643,7 +582,7 @@ MenuDesc stars_menu = {
             .kind = OPTKIND_VALUE,
             .val = &show_index,
             .value_num = 3,
-            .value_names = show_names,
+            .value_names = weather_toggle_names,
         },
         &(OptionDesc){
             .name = "Density",

@@ -18,7 +18,7 @@ City Trial decides what to spawn in `CityItemSpawn_Think` (0x800eb108). It first
 |----------|---------|----------------------------------|--------------------------|
 | 0 | Patch | `CityItemSpawn_GetRandomItemID` (0x800eb7e4); `box_color = box_size = -1` | No (patches gated separately) |
 | 1 | Item box (**any** color) | `GrBoxGeneratorDetermine` at 0x800eb20c, return saved in r30 | **Yes** |
-| 2 | Legendary machine-piece carrier | hardcodes `box_color = 2`, `box_size = 2` at 0x800eb218, then `CityItemSpawn_SpawnLegendaryPiece` (0x800ed384) attaches the Dragoon/Hydra part | No |
+| 2 | Legendary machine-piece carrier | hardcodes `box_color = 2`, `box_size = 2` at 0x800eb218, then `CityItemSpawn_SpawnLegendaryPiece` (0x800ed384) attaches the Dragoon/Hydra part | No - gated on Red at the piece subsystems instead |
 | 3 | Nothing | returns early | - |
 
 The category has two sources inside `UpdateAndCheckToSpawn`. `CityItemSpawn_CheckToSpawnLegendaryPiece` (0x800ed2f0) returns **2** when a legendary piece is pending (the part flag is set and the round's progress threshold has passed) or **3** otherwise; when no piece is pending and the spawn cooldown has elapsed, a script-byte table (`DAT_805d617c`) selects **0** (patch) or **1** (box). **The script path never yields 2** - category 2 is reachable only through the legendary-piece subsystem.
@@ -31,11 +31,17 @@ color whose large weight is nonzero. Category 2 hardcodes `box_size = 2`, so eve
 box on the field came from the legendary-piece path (Dragoon, Hydra, or an AP Star sphere).
 Nothing announces a carrier, and this is the only thing that distinguishes one.
 
-**"Red box" is not one thing.** `GKYE01.map` labels category 1 "blue/green box" and category 2 "red box", which is misleading: category 1's picker selects from a 9-entry table that *includes* red, so normal red item boxes are fully gated here. Category 2 is not a normal box at all - it is the legendary piece carrier, which deliberately stays outside box-color gating. Locking Red suppresses every random red box; it does not hide Dragoon/Hydra part deliveries. A carrier is still a real red box, so it bumps the red-box break counter and keeps spawning with Red locked or the red pool empty. Breaking one while the red pool is empty is harmless: `CityItemSpawn_GetRandomItemID` walks a zero-length pool, `HSD_Randi(0)` returns 0 without dividing, and the roll falls through to `-1`, which spawns no item.
+**"Red box" is not one thing.** `GKYE01.map` labels category 1 "blue/green box" and category 2 "red box", which is misleading: category 1's picker selects from a 9-entry table that *includes* red, so normal red item boxes are fully gated here. Category 2 is not a normal box at all - it is the legendary piece carrier, and it never reaches the picker.
+
+A carrier is still a real red box, so Red's unlock gates it too - locking Red suppresses every random red box *and* every Dragoon, Hydra and Archipelago Star sphere delivery. That gate cannot be applied here, because suppressing a pending category 2 at the spawn seam stalls the whole item spawner: `CityItemSpawn_UpdateAndCheckToSpawn` keeps returning 2 while a piece is pending, so the script path that picks patches and boxes never runs again. It is applied instead at the two points where a round arms its piece deliveries, before anything can go pending - `GateItems_FilterLegendaryPieces()` for the vanilla machines and the mask `gate_ap_star.c` pushes into `ap_star` for the spheres. Both read `GateBoxes_IsUnlocked(BOXKIND_RED)`.
+
+The `BoxHasItems` auto-disable deliberately does **not** extend to carriers: they carry a `forced_item`, so an empty red pool costs them nothing. Breaking a carrier while the red pool is empty is harmless in any case: `CityItemSpawn_GetRandomItemID` walks a zero-length pool, `HSD_Randi(0)` returns 0 without dividing, and the roll falls through to `-1`, which spawns no item.
 
 `GrBoxGeneratorDetermine` (0x800ebc04) reads a 9-entry chance table from `grBoxGeneInfo->item_desc->box_spawn_chances`. It is 3 colors x 3 sizes, color-major (`[blue_small, blue_medium, blue_large, green_*, red_*]`). Vanilla sums the nine, rolls `HSD_Randi(total)`, walks the cumulative distribution to a `selected` index, then writes `selected / 3` to `*box_color` and `selected % 3` to `*box_size`. The table lives in read-only `.dat` data shared across spawn cycles, so it cannot be edited in place - the replacement copies the nine bytes to the stack and zeroes there.
 
 ## Implementation
+
+`GateBoxes_IsUnlocked(kind)` is the mask read the piece gates share; it answers 0 before a save is loaded. `GateBoxes_UnlockBox` calls `GateApStar_PushMask()` when Red arrives, and `Unlock_SetMask` does the same for `AP_UNLOCK_BOX`, since `ap_star` reads its sphere gate at 3D load start and never reads the box mask back itself.
 
 `GateBoxes_OnBoot()` installs `CODEPATCH_REPLACEFUNC(GrBoxGeneratorDetermine, GateBoxes_DetermineBoxType)`. The replacement runs vanilla's roll over a local copy of the chance table with every ineligible color's three size entries zeroed, and returns `-1` when nothing survives. A color is ineligible if its `box_unlocked_mask` bit is clear **or** `BoxHasItems()` finds no entry with `chance > 0` left in `obj->item_group_spawn[color]`.
 
@@ -51,7 +57,7 @@ Vanilla has no such exit. With an all-zero chance table its cumulative walk neve
 
 `BoxHasItems` is evaluated at decision time rather than tracked by the filters, so it always reflects the pool as the copy-ability, patch and item gates have left it - no separate update pass and no cross-system ordering rule. Without it a player could open a green box and get nothing because every green-box item was independently locked.
 
-The three pools are **disjoint**, so which gate can empty which color is fixed. `CityItemSpawn_InitItemFallChances` (0x800eb374) walks the stage's 52-entry `item_spawn` table (`ITKIND_ACCEL` through `ITKIND_GORDO`) and appends each kind to exactly one `item_group_spawn[]` slot, chosen by `Gm_GetItemsCommonAttr(kind)->box_kind`:
+The three pools are **disjoint**, so which gate can empty which color is fixed. `CityItemSpawn_InitItemFallChances` (0x800eb374) walks the stage's 52-entry `item_spawn` table (`ITKIND_ACCEL` through `ITKIND_GORDO`) and appends each kind to exactly one `item_group_spawn[]` slot, chosen by `Item_GetCommonAttr(kind)->box_kind`:
 
 | Color | Contents | Emptied by |
 |-------|----------|-----------|

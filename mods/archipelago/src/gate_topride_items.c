@@ -10,7 +10,9 @@
 #include "ap_announce.h"
 
 // One bit per Top Ride item kind whose blocked spawn has been reported this round.
-static u32 stc_blocked_reported;
+// One bit per TRITEM kind already reported, plus one for the out-of-range case.
+#define TR_BLOCKED_OUT_OF_RANGE 0x80000000u
+static u32 blocked_reported;
 
 // TR items whose copy ability unlock is an alternative key to their own TR unlock.
 static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
@@ -20,8 +22,7 @@ static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] 
     { TRITEM_WALKY,      COPYKIND_MIC },
 };
 
-// Applies the unlock mask to the ItemMgr's enabled bitmask.
-void GateTopRideItems_ApplyMask()
+static void GateTopRideItems_ApplyMask()
 {
     TopRideItemMgr *mgr = *stc_topride_itemmgr;
     if (!mgr)
@@ -53,7 +54,7 @@ void GateTopRideItems_ApplyMask()
     else
         mgr->enabled_mask &= ~(1 << TRITEM_PARTY_BALL_ALT);
 
-    stc_blocked_reported = 0;
+    blocked_reported = 0;
     OSReport("[GateTopRideItems] Enabled mask %s -> %s (item %s, ability %s)\n",
              MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM),
              MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM),
@@ -84,16 +85,20 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
     // table at 0x804ea2fc and crash on a garbage model-name pointer.
     if (item_kind < 0 || item_kind >= TRITEM_NUM)
     {
-        OSReport("[GateTopRideItems] Blocked spawn of out-of-range kind %d\n", item_kind);
+        if (!(blocked_reported & TR_BLOCKED_OUT_OF_RANGE))
+        {
+            blocked_reported |= TR_BLOCKED_OUT_OF_RANGE;
+            OSReport("[GateTopRideItems] Blocked spawn of out-of-range kind %d\n", item_kind);
+        }
         return 1;
     }
     if (mgr->enabled_mask & (1 << item_kind))
         return 0;
 
     // Party balls re-roll a locked kind repeatedly, so say it once per kind.
-    if (!(stc_blocked_reported & (1u << item_kind)))
+    if (!(blocked_reported & (1u << item_kind)))
     {
-        stc_blocked_reported |= (1u << item_kind);
+        blocked_reported |= (1u << item_kind);
         OSReport("[GateTopRideItems] Blocked spawn of locked kind %d (%s)\n",
                  item_kind, TopRideItemKind_Names[item_kind]);
     }
@@ -102,10 +107,12 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
 
 // Saves r3-r8 (the original SpawnAtPosition args) across the bl into the filter, since
 // the return value clobbers r3 and the function immediately derefs it (lwz r3, 4(r3) at
-// 0x8034bf68). Proceed path: restore args + LR + frame, then `b 0x1c` past the
-// block-path tail and the macro's cmpwi/bne, landing on the clobbered instruction with
-// r3 = mgr. Block path: restore LR + frame, set r3 = 1 so the macro branches to the alt
-// addr 0x8034c12c via the saved LR.
+// 0x8034bf68). Proceed path: restore args + LR + frame, then `b 0x18` over the four
+// block-path instructions and the macro's `bne`, landing on the clobbered
+// `stwu r1, -288(r1)` with r3 = mgr - skipping it would run the whole function on the
+// caller's frame and blr through a smashed LR. Block path: restore LR + frame, set
+// r3 = 1 so the macro branches to the alt addr 0x8034c12c, the bare blr that needs no
+// frame teardown.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     "stwu 1, -48(1)\n\t"
     "mflr 0\n\t"
@@ -128,7 +135,7 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     "lwz 0, 0x8(1)\n\t"
     "mtlr 0\n\t"
     "addi 1, 1, 48\n\t"
-    "b 0x1c\n\t"
+    "b 0x18\n\t"
     "1:\n\t"
     "lwz 0, 0x8(1)\n\t"
     "mtlr 0\n\t"
@@ -240,9 +247,11 @@ int GateTopRideItems_GiveItem(TopRideItemKind kind)
             continue;
 
         TopRide_KirbyApplyItem(k, kind);
-        applied = 1;
-        OSReport("[GateTopRideItems] Applied TR item %d (%s) to player %d\n",
-                 kind, TopRideItemKind_Names[kind], i);
+        applied++;
     }
+
+    if (applied)
+        OSReport("[GateTopRideItems] Applied TR item %d (%s) to %d player(s)\n",
+                 kind, TopRideItemKind_Names[kind], applied);
     return applied;
 }

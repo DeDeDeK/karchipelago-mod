@@ -42,9 +42,9 @@ ITEM_DAT = os.path.join(ROOT, "iso", "files", "Item.dat")
 MARK = os.path.join(ROOT, "art", "ap-icon.png")
 OUT = os.path.join(ROOT, "mods", "archipelago", "assets", "items", "ApBox.dat")
 
-# Must match mods/custom_items/include/custom_items_api.h and ap_patches.h.
+# Must match mods/custom_items/src/custom_items.h and ap_patches.h.
 CUSTOM_ITEM_MAGIC = 0x4349544D  # 'CITM'
-CUSTOM_ITEM_DESC_VERSION = 6
+CUSTOM_ITEM_DESC_VERSION = 7
 DESC_SIZE = 0x40
 NAME = "AP Box"
 
@@ -319,8 +319,8 @@ def main():
     struct.pack_into(">I", new_data, 0x14, remap[root_jobj])  # model (reloc)
     struct.pack_into(">I", new_data, 0x18, 0)  # effect_info
     struct.pack_into(">3H", new_data, 0x1C, 0, 0, 0)  # weight_box
-    struct.pack_into(">H", new_data, 0x22, 0)  # weight_free
-    struct.pack_into(">6H", new_data, 0x24, 0, 0, 0, 0, 0, 0)  # weight_event
+    struct.pack_into(">6H", new_data, 0x22, 0, 0, 0, 0, 0, 0)  # weight_event
+    struct.pack_into(">H", new_data, 0x2E, 0)  # pad2
     struct.pack_into(">I", new_data, 0x30, model_flag)
     struct.pack_into(">f", new_data, 0x34, 0.0)  # scale (inherit)
     struct.pack_into(">I", new_data, 0x38, 0)  # joint_anim

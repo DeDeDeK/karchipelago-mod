@@ -4,8 +4,8 @@
 #include "game.h"
 
 // Bump major on breaking changes, minor on additions.
-#define ARCHIPELAGO_API_MAJOR 3
-#define ARCHIPELAGO_API_MINOR 5
+#define ARCHIPELAGO_API_MAJOR 4
+#define ARCHIPELAGO_API_MINOR 1
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
@@ -14,8 +14,8 @@
 #define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
 #define AP_CHECKLIST_ROW   GMMODE_NUM
 
-// Ceiling on the AP Patch locations a seed may carry, matching the apworld's
-// ap_patches range end.
+// Width of the AP Patch location bitmask on the wire. The apworld's own option
+// range stops well short of it.
 #define AP_PATCH_MAX 512
 
 // AP item IDs - must match the IDs defined in the APWorld Python code.
@@ -402,11 +402,15 @@ typedef enum APItemId
     AP_STAR_PIECE_UNLOCK_BLUE,
     AP_STAR_PIECE_UNLOCK_YELLOW,
 
-    // Machine unlock items (830-854, aligned to MachineKind).
+    // Machine unlock items (830-856, aligned to the machine unlock mask's bits:
+    // MachineKind for the vanilla machines, then the Archipelago Star).
     // VCKIND_WHEELVSDEDEDE (would be 855) is not exposed: it is the Vs. King
     // Dedede stadium's CPU-only machine and no game code reads its unlock bit.
-    // 856 and up continue the alignment into the MachineKinds custom_machines
-    // registers, in the order it discovers them.
+    // The ids stay aligned to MachineKind, so three of them name a machine the
+    // AP world ships no item for and whose unlock bit therefore never clears:
+    // WINGKIRBY (847) and WHEELKIRBY (850) are copy-ability states, and
+    // WHEELNORMAL (849) is the enemy form whose rideable counterpart is
+    // WHEELIEBIKE (851).
     AP_MACHINE_UNLOCK_BASE = 830,
     AP_MACHINE_UNLOCK_WARP = 830,          // VCKIND_WARP
     AP_MACHINE_UNLOCK_COMPACT,             // VCKIND_COMPACT
@@ -433,6 +437,7 @@ typedef enum APItemId
     AP_MACHINE_UNLOCK_REXWHEELIE,          // VCKIND_REXWHEELIE
     AP_MACHINE_UNLOCK_WHEELIESCOOTER,      // VCKIND_WHEELIESCOOTER
     AP_MACHINE_UNLOCK_WHEELDEDEDE,         // VCKIND_WHEELDEDEDE - player-facing Dedede (Free Run / Stadium CSS)
+    AP_MACHINE_UNLOCK_AP_STAR = 856,       // the Archipelago Star, at whatever MachineKind it registered as
 
     // Box type unlock items (860-862, aligned to BoxKind)
     AP_BOX_UNLOCK_BASE = 860,
@@ -600,8 +605,8 @@ typedef enum BaseAbilityKind
 // SetUnlockMask truncates back to the underlying width.
 typedef enum APUnlockCategory
 {
-    AP_UNLOCK_MACHINE,         // u32 - VCKIND_*
-    AP_UNLOCK_ABILITY,         // u16 - COPYKIND_*
+    AP_UNLOCK_MACHINE,         // u32 - VCKIND_*, then AP_MACHINE_BIT_AP_STAR
+    AP_UNLOCK_ABILITY,       // u16 - COPYKIND_*
     AP_UNLOCK_EVENT,           // u32 - EVKIND_*
     AP_UNLOCK_PATCH,           // u16 - PATCHKIND_*
     AP_UNLOCK_ITEM,            // u32 - ITUNLOCK_*
@@ -615,6 +620,12 @@ typedef enum APUnlockCategory
     AP_UNLOCK_AP_STAR_PIECE,   // u8  - APStarPiece
     AP_UNLOCK_NUM,
 } APUnlockCategory;
+
+// The machine unlock mask's bits: one per vanilla MachineKind, then the Archipelago
+// Star. Any other registered custom machine has no bit and no item, and is always
+// available.
+#define AP_MACHINE_BIT_AP_STAR (AP_MACHINE_UNLOCK_AP_STAR - AP_MACHINE_UNLOCK_BASE)
+#define AP_MACHINE_BIT_NUM     (AP_MACHINE_BIT_AP_STAR + 1)
 
 // Which sphere of the Archipelago Star's set a sphere unlock item addresses, in
 // the order the AP_STAR_PIECE_UNLOCK_* item IDs above are assigned. The ap_star
@@ -630,6 +641,50 @@ typedef enum APStarPiece
     AP_STAR_PIECE_YELLOW,
     AP_STAR_PIECE_NUM,
 } APStarPiece;
+
+// Absolute clamp ceiling for per-stat patch totals, and so for the City Trial patch
+// cap range. Patch_GetMaxValue returns through extsb, so anything above 127
+// sign-extends negative.
+#define PATCH_STAT_MAX 127
+
+// What a client text message is about. Each kind has its own Settings menu toggle;
+// the mod filters on render and the client reads the toggle mask so it can skip
+// composing at all.
+typedef enum APTextKind
+{
+    APTEXT_KIND_CHECK = 0, // a location this slot completed was sent
+    APTEXT_KIND_ITEM,      // an item arrived for this slot
+    APTEXT_KIND_HINT,      // a server hint concerning this slot
+    APTEXT_KIND_STATUS,    // goal / release / collect, and client connect state
+    APTEXT_KIND_CHAT,      // player and server chat
+    APTEXT_KIND_LINK,      // DeathLink / TrapLink traffic, in both directions
+    APTEXT_KIND_NUM,
+} APTextKind;
+
+// What a checklist-mode row's goal is, one per row of APSlotOptions.goal. The AP
+// world orders them the same way and ships GOAL_NONE last.
+typedef enum APGoalKind
+{
+    GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
+    GOAL_N_CHECKLIST,           // Complete N checklist squares
+    GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
+    GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
+    GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
+    GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
+    GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
+    GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
+    GOAL_NONE,                  // No goal for this mode - always last, the AP world orders it last too
+} APGoalKind;
+
+// The AP checklist objectives whose predicate counts across sessions, so their
+// progress lives in the save rather than in a per-round observation.
+typedef enum APCheckProgressKind
+{
+    AP_PROGRESS_ALLUP_TOTAL,  // All Ups a human collected in City Trial; 5 completes the check
+    AP_PROGRESS_PURPLE_SR1,   // SINGLE RACE 1 wins taken as Purple Kirby; 3 completes it
+    AP_PROGRESS_RACE_COLORS,  // Bit N = an Air Ride race finished as KirbyColor N; 0xFF completes it
+    AP_PROGRESS_NUM,
+} APCheckProgressKind;
 
 // Public function-table API. Importer obtains a pointer via
 // `Hoshi_ImportMod(ARCHIPELAGO_MOD_NAME, ARCHIPELAGO_API_MAJOR, ARCHIPELAGO_API_MINOR)`.
@@ -689,33 +744,97 @@ typedef struct ArchipelagoAPI
     void (*DebugForceMarkAllChecks)(void);
     void (*DebugTriggerGoalComplete)(void);
 
-    // Simulate AP client side-channel writes, for testing the receive path.
-    void (*DebugWriteIncomingItem)(int ap_item_id);
+    // Simulate an AP client side-channel write, for testing the receive path.
     void (*DebugTriggerDeathlinkReceive)(void);
-    void (*DebugTriggerTraplinkReceive)(void);
 
     // Reveal every checkbox on one checklist-mode row (visual-only). Rows 0..2 are
     // the vanilla GameModes; row 3 is the AP tab.
     void (*DebugRevealChecklist)(int mode);
 
-    // (minor 2+) Drop one Archipelago Star sphere in front of a player's machine,
+    // Drop one Archipelago Star sphere in front of a player's machine,
     // bypassing the delivery schedule. `piece` is an APStarPiece. Returns 0 if
     // the sphere was locked when this scene loaded, since it has no ItemKind then.
     int (*DebugSpawnApStarPiece)(int piece, int ply);
 
-    // (minor 4+) Drop one AP Box in front of a player's machine, and claim the
+    // Drop one AP Box in front of a player's machine, and claim the
     // lowest unclaimed AP Patch outright. Both return 0 when the AP Patch
     // category is off, or when the drop-ins were not registered as this scene
     // loaded, since they have no ItemKind then.
     int (*DebugSpawnApBox)(int ply);
     int (*DebugCollectApPatch)(void);
 
-    // (minor 5+) The seed's AP Patch location count, and a debug override of it.
+    // The seed's AP Patch location count, and a debug override of it.
     // The drop-ins are held out of the item registry while the count is 0, so the
     // override is what lets a build with no such seed exercise the category; it
     // takes effect at the next round load.
     int (*GetApPatchCount)(void);
     void (*DebugSetApPatchCount)(int count);
+
+    // Clear every collected AP Patch bit, in the save and in the wire mirror, and
+    // drop the client's pending backfill so it cannot restore them. The lowest
+    // patch becomes claimable again without a round reload.
+    void (*DebugClearApPatchCollected)(void);
+
+    // Simulate the client's TrapLink side-channel write. Which trap lands is chosen
+    // by the mode that receives it, not by the caller. The per-frame receive proc
+    // only exists while the Trap Link setting was on as the scene loaded.
+    void (*DebugTriggerTraplinkReceive)(void);
+
+    // Post a canned client-authored text line of the given APTextKind, or one that
+    // fills all 8 colored runs and overflows the three rendered lines. Both return
+    // 0 if an earlier message is still waiting on the textbox.
+    int (*DebugSendText)(int kind);
+    int (*DebugSendOverlongText)(void);
+
+    // The goal for one checklist-mode row, and a debug override of it. `amount` is
+    // the square count GOAL_N_CHECKLIST needs and is ignored by every other kind;
+    // out_amount may be null. Setting a goal re-evaluates immediately, but
+    // GOAL_MAX_STATS_CT arms its rider proc at round load, so it only takes effect
+    // from the next round.
+    int (*GetGoal)(int row, int *out_amount);
+
+    // Override all CHECKLIST_MODE_NUM goals at once and re-evaluate. It is one call
+    // because victory is decided over the whole set, so applying rows one at a time
+    // can satisfy every row in passing and latch a goal the caller never asked for.
+    // `amount` reaches only the rows set to GOAL_N_CHECKLIST.
+    void (*DebugSetGoals)(const int *goals, int amount);
+
+    // Per-category access gating, mirroring the slot option the seed shipped.
+    // AP_UNLOCK_AP_STAR_PIECE has no flag of its own and reads as gated.
+    int (*GetGating)(APUnlockCategory cat);
+    void (*DebugSetGating)(APUnlockCategory cat, int enabled);
+
+    // The City Trial per-stat patch cap range and the item spawn-rate floor.
+    void (*GetPatchCapRange)(int *out_min, int *out_max);
+    int (*GetSpawnRateMin)(void);
+    void (*DebugSetPatchCapMin)(int min);
+    void (*DebugSetPatchCapMax)(int max);
+    void (*DebugSetSpawnRateMin)(int percent);
+
+    // Zero every unlock mask and re-run the connect-time pre-fill from the current
+    // slot options, the way a fresh connect would. Needed because the pre-fill only
+    // ever sets bits, so turning a category's gating back on is otherwise invisible.
+    void (*DebugReapplySlotOptions)(void);
+
+    // Cross-session AP checklist progress counters.
+    int (*GetCheckProgress)(APCheckProgressKind which);
+    void (*DebugSetCheckProgress)(APCheckProgressKind which, int value);
+
+    // The EnergyLink balance in whole MJ, and a debug override of it. The override
+    // is a pure balance store: the deposit and withdraw totals the client diffs are
+    // rising counters and are never moved. A connected client overwrites the balance
+    // on its next poll.
+    s64 (*GetEnergyBalance)(void);
+    void (*DebugSetEnergyBalance)(s64 mj);
+
+    // Log the whole AP save and wire state to the console.
+    void (*DebugReportState)(void);
+
+    // Reset everything AP receipts accumulate - patch cap, spawn rate, permanent
+    // patches, cross-session check progress and the item queue. Unlock masks are left
+    // alone; DebugReapplySlotOptions is what rebuilds those, and the slot options
+    // themselves are left as received.
+    void (*DebugResetProgression)(void);
 } ArchipelagoAPI;
 
 #endif // ARCHIPELAGO_API_H

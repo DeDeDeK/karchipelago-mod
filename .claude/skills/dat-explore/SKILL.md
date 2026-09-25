@@ -14,8 +14,9 @@ description: >
     - Plan the manifest custom_weather rebuilds a stage backdrop from
     - Author a texture or model .dat from PNGs
     Wraps the general `.dat` toolchain in `scripts/hsd/` (`explore.py`,
-    `carve_custom_item.py`, `clone_machine.py`, `machine_preview.py`,
-    `make_machine_art.py`, `verify_carved.py`, `geom_bounds.py`) and the
+    `carve_custom_item.py`, `machine_descriptor.py`,
+    `machine_preview.py`, `make_machine_art.py`, `verify_carved.py`,
+    `geom_bounds.py`) and the
     per-mod asset authors in `scripts/authoring/`. Reads files directly from
     disc - does not require Dolphin to be running.
 ---
@@ -209,7 +210,7 @@ bytes, listing the donor ranges for the mod to read at runtime.
   `_scene_models` model archive of textured quads for the title screen.
 
 See `docs/sky-backdrop-system.md` (backdrop consumption via the
-`3D_CreateStageModel` hook), `docs/custom-items.md` (custom item discovery +
+`CreateStageModel_3D` hook), `docs/custom-items.md` (custom item discovery +
 `CustomItemDesc`), `docs/ap-checklist.md` and `docs/custom-menu.md` for how
 each authored file is used at runtime.
 
@@ -235,7 +236,7 @@ same `sys.path` insert (both directories sit one level under `scripts/`).
   classified type); `--root`/`--root-type` override it.
 - `scripts/hsd/geom_bounds.py <Model.dat> <grModelX> [slot]` - measure a
   model subtree's bounding box / radius about the root origin (root scale
-  forced to 1, since `3D_CreateStageModel` overwrites it). Parses each
+  forced to 1, since `CreateStageModel_3D` overwrites it). Parses each
   POBJ's display list for drawn positions and accumulates joint transforms.
   Exposes `measure_root(arc, root)`, `scale_geometry(arc, root, f)` (uniform
   rescale) and `joint_world_positions(arc, off, world)`; the carve uses

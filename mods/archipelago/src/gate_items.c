@@ -4,6 +4,7 @@
 
 #include "main.h"
 #include "gate_items.h"
+#include "gate_boxes.h"
 #include "textbox_api.h"
 #include "inline.h"
 #include "ap_announce.h"
@@ -109,7 +110,7 @@ static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
     *num += 1;
 }
 
-// Under the Max Stats Insanity goal, make All-Up reachable from every patch source the
+// Under the Max Stats CT goal, make All-Up reachable from every patch source the
 // vanilla tables miss: the three box pools, the Same Item and subsequent pools, and the
 // destructible + Dyna Blade columns (vanilla already covers UFO/Tac/Meteor/Chamber).
 void GateItems_EnsureAllUpInSpawnPools()
@@ -155,81 +156,17 @@ void GateItems_EnsureAllUpInSpawnPools()
     }
 }
 
-static void FilterItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_num)
+int GateItems_IsItemLocked(u8 it_kind)
 {
-    u8 num = *pool_num;
-    u8 write = 0;
-    u32 mask = ap_save->item_unlocked_mask;
-
-    for (u8 read = 0; read < num; read++)
-    {
-        int bit = ItemKindToUnlockBit(pool_kinds[read]);
-        if (bit >= 0 && !(mask & (1 << bit)))
-            continue;
-
-        if (write != read)
-        {
-            pool_kinds[write] = pool_kinds[read];
-            pool_chances[write] = pool_chances[read];
-        }
-        write++;
-    }
-
-    *pool_num = write;
-}
-
-void GateItems_FilterSpawnTables()
-{
-    grBoxGeneObj *obj = *stc_grBoxGeneObj;
-    if (!obj)
-        return;
-
-    for (int box = 0; box < BOXKIND_NUM; box++)
-    {
-        FilterItemsFromPool(
-            obj->item_group_spawn[box].it_kind,
-            obj->item_group_spawn[box].chance,
-            &obj->item_group_spawn[box].num);
-    }
-
-    FilterItemsFromPool(
-        obj->sameitem_it_kind,
-        obj->sameitem_chance,
-        &obj->sameitem_num);
-
-    FilterItemsFromPool(
-        obj->subsequent_it_kind,
-        obj->subsequent_chance,
-        &obj->subsequent_num);
-}
-
-void GateItems_FilterEventDropTables()
-{
-    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (!info || !info->item_desc)
-        return;
-
-    u32 mask = ap_save->item_unlocked_mask;
-
-    for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
-    {
-        int bit = ItemKindToUnlockBit(info->item_desc->event_source_drop[i].it_kind);
-        if (bit >= 0 && !(mask & (1 << bit)))
-        {
-            info->item_desc->event_source_drop[i].chance_dyna = 0;
-            info->item_desc->event_source_drop[i].chance_tac = 0;
-            info->item_desc->event_source_drop[i].chance_meteor = 0;
-            info->item_desc->event_source_drop[i].chance_destructible = 0;
-            info->item_desc->event_source_drop[i].chance_chamber = 0;
-            info->item_desc->event_source_drop[i].chance_ufo = 0;
-        }
-    }
+    int bit = ItemKindToUnlockBit(it_kind);
+    return bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit));
 }
 
 // One bit per unlock index whose locked-spawn skip has been reported this round.
 static u32 stc_locked_reported;
 
-// Disable legendary piece spawns when all pieces of a type are locked.
+// Disable legendary piece spawns when all pieces of a type are locked, or when the red
+// carrier box they ride has not been unlocked.
 static void GateItems_FilterLegendaryPieces()
 {
     stc_locked_reported = 0;
@@ -237,6 +174,16 @@ static void GateItems_FilterLegendaryPieces()
     LegendaryPieceData *lpd = *stc_legendary_piece_data;
     if (!lpd)
         return;
+
+    // The carrier hardcodes red and never reaches the box color picker, so box gating
+    // has to be applied here or a locked Red still delivers pieces.
+    if (!GateBoxes_IsUnlocked(BOXKIND_RED))
+    {
+        lpd->machine[0].is_enabled = 0;
+        lpd->machine[1].is_enabled = 0;
+        OSReport("[GateItems] Legendary pieces disabled (Red Box locked)\n");
+        return;
+    }
 
     u32 mask = ap_save->item_unlocked_mask;
 
@@ -266,7 +213,7 @@ CODEPATCH_HOOKCREATE(0x800ec284,
 // REPLACECALL'd at the two LegendaryPiece_MarkAsSpawned bl sites in
 // CityItemSpawn_SpawnLegendaryPiece. Skipping the call leaves the box on its default
 // forced_item (-1 = random roll); the caller still advances next_piece_index.
-static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
+static void GateItems_MarkAsSpawnedGated(GOBJ *box, int item_kind)
 {
     int bit = ItemKindToUnlockBit(item_kind);
     if (bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit)))
@@ -280,7 +227,7 @@ static void GateItems_MarkAsSpawnedGated(int spawner, int item_kind)
         }
         return;
     }
-    LegendaryPiece_MarkAsSpawned(spawner, item_kind);
+    LegendaryPiece_MarkAsSpawned(box, item_kind);
 }
 
 void GateItems_OnBoot()
@@ -288,7 +235,7 @@ void GateItems_OnBoot()
     CODEPATCH_HOOKAPPLY(0x800ec284);
     CODEPATCH_REPLACECALL(0x800ed41c, GateItems_MarkAsSpawnedGated); // Dragoon piece bl
     CODEPATCH_REPLACECALL(0x800ed49c, GateItems_MarkAsSpawnedGated); // Hydra piece bl
-    OSReport("[GateItems] Legendary piece gating hooks installed\n");
+    OSReport("[GateItems] Hooks installed\n");
 }
 
 int GateItems_UnlockItem(ItemUnlockKind kind)

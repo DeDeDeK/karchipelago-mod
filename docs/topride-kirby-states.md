@@ -165,17 +165,17 @@ Fetch `*stc_topride_kirbymgr`, require `round_state == 2`, then for each non-NUL
 
 The `round_state == 2` (race active) gate is mandatory: before it, `state_handler`'s vtable is not fully wired and `vt[+8](-1)` will likely crash.
 
-Most wrappers take extra args (knockback `Vec3`, hit-frame u16s, damage variant codes). Passing zeros - including a pointer to a zeroed stack `Vec3` - produces a static stun: the animation plays in place with default duration and no knockback impulse. Several args are dereferenced before use, so a literal `0` faults where a pointer to a stack zero does not: `KirbyBurn`'s arg2 (`lwz r0, 0(r30)` at `0x802d5674`) and `KirbySpin`'s `Vec3` (fed to `PSVECMagnitude` at `0x802f7998`) both need real addresses.
+Most wrappers take extra args (knockback `Vec3`, hit-frame u16s, damage variant codes). Passing zeros - including a pointer to a zeroed stack `Vec3` - produces a static stun: the animation plays in place with default duration and no knockback impulse. Several args are dereferenced before use, so a literal `0` faults where a pointer to a stack zero does not: `KirbyBurn`'s arg2 (`lwz r0, 0(r30)` at `0x802d5674`) and `KirbySpin`'s `Vec3` (fed to `VECMag` at `0x802f7998`) both need real addresses.
 
 ### Velocity handling and visibility
 
 Two independent mechanisms decide what a mod-triggered state actually looks like.
 
-**AC_TOBASARE rescale.** The rescale callback at state vtable `[+0xE4]` (`0x802f3cfc`) reads `kirby+0xA0` - the inline charge component's velocity `Vec3` - through `PSVECMagnitude`, branches `ble` to the epilogue when `magnitude * scale <= threshold`, and otherwise normalizes-and-rescales the velocity in place. A kirby with non-zero entry velocity therefore has its launch direction locked to its running direction with the magnitude re-applied every frame, which reads as a teleport. Zero entry velocity takes the early exit and nothing happens. The teleport condition is **(the tick at `vt[+0x28]` calls `vt[+0xE4]`) AND (the setter did not zero velocity)**; the mere presence of the `[+0xE4]` slot is not the discriminator.
+**AC_TOBASARE rescale.** The rescale callback at state vtable `[+0xE4]` (`0x802f3cfc`) reads `kirby+0xA0` - the inline charge component's velocity `Vec3` - through `VECMag`, branches `ble` to the epilogue when `magnitude * scale <= threshold`, and otherwise normalizes-and-rescales the velocity in place. A kirby with non-zero entry velocity therefore has its launch direction locked to its running direction with the magnitude re-applied every frame, which reads as a teleport. Zero entry velocity takes the early exit and nothing happens. The teleport condition is **(the tick at `vt[+0x28]` calls `vt[+0xE4]`) AND (the setter did not zero velocity)**; the mere presence of the `[+0xE4]` slot is not the discriminator.
 
 **Input gating.** A damage state visibly stuns only if its tick at `vt[+0x28]` is *not* the shared `zz_802f3bd0_` (which has no input-gating logic), or its setter installs a JObj overlay (Freeze's ice block), or it uses a distinct animation that reads as a hit without an input lock (Press's `AC_FLAT_START` pancake). The animation string is not the discriminator: `AC_SIBIRE` is shared by the visible Numb and the silent Elec, and `AC_TOBASARE` by Strike/Explode/Crush.
 
-`mods/archipelago/src/deathlink.c` zeroes `kirby->charge.velocity` immediately **before and after** the wrapper call - the pre-zero pre-empts setters that scale entry velocity, the post-zero overrides setters that write a value of their own (Crush's helper `0x802f53dc` `PSVECNormalize`s the `&zero` `Vec3` *argument*, producing NaN regardless of what `kirby+0xA0` held). Results in that configuration:
+`mods/archipelago/src/deathlink.c` zeroes `kirby->charge.velocity` immediately **before and after** the wrapper call - the pre-zero pre-empts setters that scale entry velocity, the post-zero overrides setters that write a value of their own (Crush's helper `0x802f53dc` `VECNormalize`s the `&zero` `Vec3` *argument*, producing NaN regardless of what `kirby+0xA0` held). Results in that configuration:
 
 | State | ID | Tick fn at `vt[+0x28]` | Calls `vt[+0xE4]`? | Setter's own velocity write | Outcome |
 |-------|---:|------------------------|--------------------|-----------------------------|---------|
@@ -187,7 +187,7 @@ Two independent mechanisms decide what a mod-triggered state actually looks like
 | Strike | 5 | `zz_802f3bd0_` (shared) | yes | scales entry velocity by ~0.31 | **Silent** |
 | Explode | 4 | `zz_802f3bd0_` (shared) | yes | scales entry velocity by ~0.5 (by mass) | **Silent** |
 | Crush | 3 | `zz_802f3bd0_` (shared) | yes | writes `(NaN, ~1.69, NaN)` via `0x802f53dc` | Brief vertical spin, not a readable hit reaction |
-| Spin | 6 | `0x802fd49c` (unique) | yes (via shared helper) | none | **Still ejects the kirby** - the unique tick does `velocity.y -= gravity` with no `PSVECScale` drag step, so velocity re-accumulates every frame |
+| Spin | 6 | `0x802fd49c` (unique) | yes (via shared helper) | none | **Still ejects the kirby** - the unique tick does `velocity.y -= gravity` with no `VECScale` drag step, so velocity re-accumulates every frame |
 
 The shipped deathlink pool is therefore **Press, Freeze, Numb, Confuse**.
 

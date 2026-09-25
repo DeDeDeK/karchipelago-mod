@@ -8,7 +8,7 @@ path is the point - so re-running one regenerates exactly what the build stages.
 
     ap_star          make_ap_star_pieces.py   ApSphere*.dat, ApPieceIcons.dat
                      make_ap_star_shot.py     ApStarShot.dat
-                     make_ap_star_assembly.py ApStarParts.dat, ApStarGlow.dat
+                     make_ap_star_assembly.py ApStarAssembly.dat
     archipelago      make_ap_box.py           items/ApBox.dat
                      make_checklist_textures.py  ApChecklistTex.dat
                      make_menu_logo.py        MnTitleKarchi.dat

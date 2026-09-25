@@ -13,6 +13,8 @@
 #include "textbox_api.h"
 #include "inline.h"
 #include "ap_announce.h"
+#include "gate_ap_star.h"
+#include "ap_star_api.h"
 
 // Machines that don't naturally spawn in CT: Top Ride stars, transformation forms,
 // and the Meta Knight / Dedede character forms. All have a 0 base spawn chance, so
@@ -31,9 +33,7 @@
 // Weight handed to an unlocked machine the vanilla table gives 0 chance, so it can
 // still appear on the field. Only these four vanilla kinds reach it - every other
 // VCKIND either carries a real weight in all three table windows or sits in
-// CT_SPAWN_EXCLUDED_MASK. Vanilla per-machine weights run 6-10 out of a ~111-119
-// table total, so these land well under the machines the table actually wants:
-// Compact ~4% of spawns, Flight ~1.7%, each legendary ~0.8%.
+// CT_SPAWN_EXCLUDED_MASK. Set well under the per-machine weights the table does carry.
 static float ZeroChanceSpawnWeight(int vckind)
 {
     switch (vckind)
@@ -44,6 +44,26 @@ static float ZeroChanceSpawnWeight(int vckind)
     }
 }
 
+// The unlock mask bit a MachineKind is gated on, or -1 for a registered machine other
+// than the Archipelago Star, which has no unlock item and is never gated.
+static int GateBit(int kind)
+{
+    if (kind >= 0 && kind < VCKIND_NUM)
+        return kind;
+    if (kind >= VCKIND_NUM && kind == GateApStar_MachineKind())
+        return AP_MACHINE_BIT_AP_STAR;
+    return -1;
+}
+
+static int IsKindUnlocked(int kind)
+{
+    if (kind < 0)
+        return 0;
+
+    int bit = GateBit(kind);
+    return bit < 0 || ((ap_save->machine_unlocked_mask >> bit) & 1);
+}
+
 static int IsCKindUnlocked(CharacterKind ckind)
 {
     if (ckind < 0 || ckind >= CharacterKind_Num())
@@ -52,7 +72,7 @@ static int IsCKindUnlocked(CharacterKind ckind)
     if (!desc)
         return 0;
     MachineKind vckind = MachineKind_Resolve(desc->is_bike, desc->machine_kind);
-    return MachineKind_IsUnlocked(vckind);
+    return IsKindUnlocked(vckind);
 }
 
 // First unlocked City-Trial-spawnable MachineKind, or VCKIND_COMPACT as fallback.
@@ -62,7 +82,7 @@ static MachineKind GetFirstUnlockedCTMachine()
     {
         if (i < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << i)))
             continue;
-        if (MachineKind_IsUnlocked(i))
+        if (IsKindUnlocked(i))
             return i;
     }
     return VCKIND_COMPACT;
@@ -102,7 +122,7 @@ static CharacterKind RandomUnlockedKirbyCKind(void)
 static int IsTRMachineUnlocked(TopRideMachineKind tr)
 {
     MachineKind vckind = TOPRIDE_MACHINE_TO_VCKIND(tr);
-    return MachineKind_IsUnlocked(vckind);
+    return IsKindUnlocked(vckind);
 }
 
 static TopRideMachineKind GetFirstUnlockedTRMachine()
@@ -127,52 +147,59 @@ static TopRideMachineKind GetRandomUnlockedTRMachine()
     return unlocked[HSD_Randi(count)];
 }
 
-// Post-init fixup for TopRide_InitSelectData (0x8002cfd8), whose per-slot loop
-// unconditionally writes panel_machine[slot] = 0 (Free Star). Only the RaceInit site
-// (0x8002d748) runs after the panel-kind field is filled, so the other sites see
-// non-CPU and fall through to first-unlocked.
-void GateMachines_FixupTRInit(u8 *lobby_base)
+// Post-init fixup for the three TR lobby init paths, each of whose per-slot loop
+// writes panel_machine[slot] = 0 (Free Star) unconditionally. All three hook sites
+// sit past their loop, so panel_pkind is filled by the time this runs: at
+// InitSelectData every panel reads CPU, at SoloInit every panel but the active one.
+static void GateMachines_FixupTRInit(void)
 {
+    GameData *gd = Gm_GetGameData();
+    if (!gd)
+        return;
+
+    u8 *pkind   = gd->topride_select_ply.panel_pkind;
+    u8 *color   = gd->topride_select_ply.color;
+    u8 *machine = gd->topride_select_ply.panel_machine;
     TopRideMachineKind first = GetFirstUnlockedTRMachine();
-    // Relative to lobby base (GameData+0x197): 0x2f = panel_machine[slot], 0x23 = color[slot].
+
     for (int i = 0; i < 4; i++)
     {
-        if (lobby_base[0x1b + i] == 2) // CPU panel
+        if (pkind[i] != 2) // not a CPU panel
         {
-            // panel_pkind: 1 = HMN, 2 = CPU. Only the visible panels' colors are
-            // worth avoiding.
-            u8 taken[4];
-            int num_taken = 0;
-            for (int j = 0; j < 4; j++)
-            {
-                u8 pkind = lobby_base[0x1b + j];
-                if (j != i && (pkind == 1 || pkind == 2))
-                    taken[num_taken++] = lobby_base[0x23 + j];
-            }
-            lobby_base[0x2f + i] = (u8)GetRandomUnlockedTRMachine();
-            lobby_base[0x23 + i] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
+            machine[i] = (u8)first;
+            continue;
         }
-        else
-            lobby_base[0x2f + i] = (u8)first;
+
+        // panel_pkind: 1 = HMN, 2 = CPU. Only the visible panels' colors are
+        // worth avoiding.
+        u8 taken[4];
+        int num_taken = 0;
+        for (int j = 0; j < 4; j++)
+        {
+            if (j != i && (pkind[j] == 1 || pkind[j] == 2))
+                taken[num_taken++] = color[j];
+        }
+        machine[i] = (u8)GetRandomUnlockedTRMachine();
+        color[i] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
     }
 }
 
 // Hook at 0x8002d070 in TopRide_InitSelectData, just after the per-slot init loop
-// (0x8002d06c is already hooked). r31 = lobby base. The three following
-// `stb r3, {6,2,3}(r31)` lobby-flag clears rely on r3 = 0, which the C call wipes.
+// (0x8002d06c is already hooked). The three following `stb r3, {6,2,3}(r31)`
+// lobby-flag clears rely on r3 = 0, which the C call wipes.
 CODEPATCH_HOOKCREATE(0x8002d070,
-    "mr 3, 31\n\t",
+    "",
     GateMachines_FixupTRInit,
     "li 3, 0\n\t",
-    0x8002d074
+    0
 )
 
-// Race-init counterpart. TopRide_RaceInit re-zeros all four panel_machine slots at
-// 0x8002d6c4, after InitSelectData's fixup. Hook at 0x8002d748 (`bl gmGetGlobalP`),
-// past the panel_pkind CPU-fill loop whose caller-saved iterator r7 rules out landing
-// earlier; the re-executed bl restores r3 = GameData*, so no epilogue is needed.
+// Race-init counterpart. TopRide_RaceInit (0x8002d6c4) re-zeros all four
+// panel_machine slots. Hook at 0x8002d748 (`bl Gm_GetGameData`), past the panel_pkind
+// CPU-fill loop whose caller-saved iterator r7 rules out landing earlier; the
+// re-executed bl restores r3 = GameData*, so no epilogue is needed.
 CODEPATCH_HOOKCREATE(0x8002d748,
-    "mr 3, 31\n\t",
+    "",
     GateMachines_FixupTRInit,
     "",
     0
@@ -183,7 +210,7 @@ CODEPATCH_HOOKCREATE(0x8002d748,
 // 0x8002b8a8 and solo TopRide_SoloPanelThink 0x8002ca80) carry identical cyclers,
 // so one gate serves both hook sites. panel_base[0x2f] = panel_machine[panel];
 // input_bits = direction-edge bits (0x80002 = RIGHT, 0x40001 = LEFT).
-int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
+static int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
 {
     u8 current = panel_base[0x2f];
     u8 new_val = current;
@@ -232,13 +259,15 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002cb98,
     0x8002cbf0
 )
 
-// Solo-mode counterpart. TopRide_SoloInit hardcodes all four panel_machine slots to 0
-// at 0x8002db70, bypassing InitSelectData. Hook at 0x8002db90 (`add r30, r31, r28`),
-// one instruction past the already-hooked `li r28, 0`, so r28 = 0 and r31 = lobby base.
-CODEPATCH_HOOKCREATE(0x8002db90,
-    "mr 3, 31\n\t",
-    GateMachines_FixupTRInit,
+// Solo-mode counterpart. TopRide_SoloInit (0x8002d9e8) hardcodes all four
+// panel_machine slots to 0 at 0x8002db70, bypassing InitSelectData. Hook at
+// 0x8002dc48, the first instruction past the per-slot loop - 0x8002db90 is that
+// loop's back-edge target, so hooking there ran the fixup once per slot. The
+// clobbered `stb r0, 6(r31)` and the two stores after it all want r0 = 0.
+CODEPATCH_HOOKCREATE(0x8002dc48,
     "",
+    GateMachines_FixupTRInit,
+    "li 0, 0\n\t",
     0
 )
 
@@ -246,10 +275,9 @@ CODEPATCH_HOOKCREATE(0x8002db90,
 // defaults to Free, so Start would launch a machine the player doesn't own. Both hook
 // sites reach this only on the Start rising edge, so the buzzer fires once per press.
 // Returns 0 = allow start, 1 = block start.
-int GateMachines_TRLobbyCanStart(void)
+static int GateMachines_TRLobbyCanStart(void)
 {
-    u32 tr_mask = (1u << VCKIND_FREE) | (1u << VCKIND_STEER);
-    if (ap_save->machine_unlocked_mask & tr_mask)
+    if (ap_save->machine_unlocked_mask & TR_MACHINE_BITS)
         return 0;
 
     playSoundFX_errorNoise();
@@ -287,17 +315,17 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002cc80,
     0x8002cddc
 )
 
-// Replaces the bl CityTrial_CheckLegendaryMachineUnlocked inside
-// CityMachineSpawn_PickFreeRunKind (0x801de41c), Free Run's "place one of every
-// machine" picker. Vanilla asks the checklist there, which AP never writes, so an
-// owned Hydra or Dragoon would never appear on that screen however the mask reads.
-// Only kinds 4 and 8 reach this call; every other kind is taken unconditionally,
-// which is Free Run's own sandbox rule and is left alone.
-int GateMachines_CheckFreeRunLegendaryUnlocked(MachineKind kind)
+// Answers the per-kind candidate test inside CityMachineSpawn_PickFreeRunKind
+// (0x801de41c), Free Run's "place one of every machine" picker. Vanilla routes only
+// kinds 4 and 8 here, to a checklist query AP never writes, and takes every other
+// kind unconditionally; the widened branch below sends all 26 through, so the city
+// holds one of each unlocked machine instead of the whole roster. A kind the vanilla
+// per-kind spawn table already rules out never reaches the call.
+int GateMachines_CheckFreeRunKindUnlocked(MachineKind kind)
 {
     if (kind < 0 || kind >= MachineKind_Num())
         return 0;
-    return MachineKind_IsUnlocked(kind);
+    return IsKindUnlocked(kind);
 }
 
 // Weight filter handed to custom_machines, which owns the City Trial field spawn
@@ -309,7 +337,7 @@ float GateMachines_SpawnWeight(int kind, float default_weight)
         return 0.0f;
     if (kind < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << kind)))
         return 0.0f;
-    if (!MachineKind_IsUnlocked(kind))
+    if (!IsKindUnlocked(kind))
         return 0.0f;
 
     // A registered machine brings its own weight and takes no fallback: a descriptor
@@ -338,7 +366,7 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     int is_bike;
     int class_index;
 
-    if (!MachineKind_IsUnlocked(vckind))
+    if (!IsKindUnlocked(vckind))
         vckind = GetFirstUnlockedCTMachine();
 
     class_index = MachineKind_ClassIndexOf(vckind, &is_bike);
@@ -392,16 +420,6 @@ CODEPATCH_HOOKCREATE(0x801952c8,
     0x801952e0
 )
 
-// Replaces AirRide_CheckCharacterAvailable (0x8002090c), which decides who appears on
-// the Air Ride character select screen from checklist reward indices. Vanilla also
-// hardcodes Compact Star, Dragoon, Hydra and Flight Warp Star out of Air Ride whatever
-// the save holds; the mask is the only rule here, so an owned machine is selectable in
-// every mode whose select screen offers it. The icon archive backs all 20 characters.
-int GateMachines_CheckAirRideCharacterAvailable(CharacterKind ckind)
-{
-    return IsCKindUnlocked(ckind);
-}
-
 // Replaces TitleScreen_CheckMachineUnlocked (0x8000c364), the unlock query for the
 // title-screen attract demo's random machine picker (TitleScreen_SelectRandomMachine,
 // 0x8000daa0). It does NOT run for CPUs in real Air Ride races, which draw from the
@@ -415,15 +433,17 @@ int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
     if (vckind < 0 || vckind >= MachineKind_Num())
         return 0;
 
-    return MachineKind_IsUnlocked(vckind);
+    return IsKindUnlocked(vckind);
 }
 
 void GateMachines_OnBoot()
 {
-    // Free Run's picker asks the checklist whether the legendaries are unlocked.
-    CODEPATCH_REPLACECALL(0x801de528, GateMachines_CheckFreeRunLegendaryUnlocked);
+    // Free Run's picker asks the checklist whether the legendaries are unlocked. Widening
+    // the `beq` that guards that call into an unconditional branch puts every kind through
+    // it, so the mask decides Free Run's city roster the way it decides the field's.
+    CODEPATCH_REPLACECALL(0x801de528, GateMachines_CheckFreeRunKindUnlocked);
+    CODEPATCH_REPLACEINSTRUCTION(0x801de518, 0x4800000c); // b 0x801de524
 
-    CODEPATCH_REPLACEFUNC(AirRide_CheckCharacterAvailable, GateMachines_CheckAirRideCharacterAvailable);
     CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
 
     CODEPATCH_HOOKAPPLY(0x8002dea0);  // CT starting-machine finalize
@@ -433,7 +453,7 @@ void GateMachines_OnBoot()
     // each with its own init, cycler, and start-match handler.
     CODEPATCH_HOOKAPPLY(0x8002d070);  // TopRide_InitSelectData post-loop fixup (main-menu reset)
     CODEPATCH_HOOKAPPLY(0x8002d748);  // TopRide_RaceInit post-reset fixup (TR Main Game)
-    CODEPATCH_HOOKAPPLY(0x8002db90);  // TopRide_SoloInit post-zero fixup (Free Run / Time Attack)
+    CODEPATCH_HOOKAPPLY(0x8002dc48);  // TopRide_SoloInit post-zero fixup (Free Run / Time Attack)
     CODEPATCH_HOOKAPPLY(0x8002be44);  // TopRide_CSS_PanelThink L/R cycler (race lobby)
     CODEPATCH_HOOKAPPLY(0x8002cb98);  // TopRide_SoloPanelThink L/R cycler (Free Run / Time Attack)
     CODEPATCH_HOOKAPPLY(0x8002c52c);  // TopRide_PreGameThink start-match gate (race)
@@ -442,45 +462,29 @@ void GateMachines_OnBoot()
     OSReport("[GateMachines] Hooks installed\n");
 }
 
-// Display name for any MachineKind, vanilla or registered custom.
-const char *GateMachines_GetName(MachineKind kind)
+// The star's bit is kept whether or not this build registered the star.
+int GateMachines_UnlockMachine(int bit, int announce)
 {
-    if (kind >= 0 && kind < VCKIND_NUM)
-        return MachineKind_Names[kind];
-    const char *custom = cm_api ? cm_api->GetName(kind) : NULL;
-    return custom ? custom : "Unknown Machine";
-}
-
-int GateMachines_UnlockMachine(MachineKind kind, int announce)
-{
-    if (kind < 0 || kind >= MachineKind_Num())
+    if (bit < 0 || bit >= AP_MACHINE_BIT_NUM)
         return 0;
 
-    if (kind < AP_MACHINE_GATE_NUM)
-        ap_save->machine_unlocked_mask |= (1u << kind);
+    ap_save->machine_unlocked_mask |= (1u << bit);
 
+    const char *name = bit == AP_MACHINE_BIT_AP_STAR ? AP_STAR_MACHINE_NAME : MachineKind_Names[bit];
     if (!ap_regrant_quiet)
-    {
-        if (kind < AP_MACHINE_GATE_NUM)
-            OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n",
-                     kind, GateMachines_GetName(kind),
-                     MaskBits(ap_save->machine_unlocked_mask, 32));
-        else
-            OSReport("[GateMachines] Machine %d (%s) is past bit %d - always unlocked, not persisted\n",
-                     kind, GateMachines_GetName(kind), AP_MACHINE_GATE_NUM - 1);
-    }
+        OSReport("[GateMachines] Machine %d (%s) unlocked (mask = %s)\n", bit, name,
+                 MaskBits(ap_save->machine_unlocked_mask, AP_MACHINE_BIT_NUM));
     if (announce)
     {
         // VCKIND_WHEELDEDEDE / VCKIND_WINGMETAKNIGHT are the player-facing King Dedede
         // / Meta Knight unlocks, announced to match the checklist reward path.
         const char *prefix = "Unlocked Machine: ";
-        const char *name   = GateMachines_GetName(kind);
-        if (kind == VCKIND_WHEELDEDEDE)
+        if (bit == VCKIND_WHEELDEDEDE)
         {
             prefix = "Unlocked Character: ";
             name   = "King Dedede";
         }
-        else if (kind == VCKIND_WINGMETAKNIGHT)
+        else if (bit == VCKIND_WINGMETAKNIGHT)
         {
             prefix = "Unlocked Character: ";
             name   = "Meta Knight";

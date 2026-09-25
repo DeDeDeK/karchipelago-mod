@@ -38,25 +38,25 @@ static MenuDesc top_menu = {
     .options = {
         &(OptionDesc){
             .name = "Weather Presets",
-            .description = "Toggle which sky/lighting presets can appear in City Trial",
+            .description = "Fog distance, and which sky/lighting presets can appear in City Trial",
             .kind = OPTKIND_MENU,
             .menu_ptr = &weather_menu,
         },
         &(OptionDesc){
             .name = "Backdrops",
-            .description = "Toggle which 3D skybox backdrops can appear in City Trial",
+            .description = "Backdrop distance, and which 3D skyboxes can appear in City Trial",
             .kind = OPTKIND_MENU,
             .menu_ptr = &backdrop_menu,
         },
         &(OptionDesc){
             .name = "Rain",
-            .description = "Master rain intensity and wind slant for City Trial presets",
+            .description = "Rain intensity, fall speed, wind slant, and hail",
             .kind = OPTKIND_MENU,
             .menu_ptr = &rain_menu,
         },
         &(OptionDesc){
             .name = "Snow",
-            .description = "Master snow intensity, fall speed, and flutter for City Trial presets",
+            .description = "Snow intensity, fall speed, flutter, and wind slant",
             .kind = OPTKIND_MENU,
             .menu_ptr = &snow_menu,
         },
@@ -74,7 +74,7 @@ static MenuDesc top_menu = {
         },
         &(OptionDesc){
             .name = "Puddles",
-            .description = "Puddle slowdown strength, frequency, size, and disc visibility (Puddles preset)",
+            .description = "Puddle slowdown strength, frequency, size, roaming, and disc visibility",
             .kind = OPTKIND_MENU,
             .menu_ptr = &puddle_menu,
         },
@@ -86,7 +86,7 @@ static MenuDesc top_menu = {
         },
         &(OptionDesc){
             .name = "Clouds",
-            .description = "Cloud deck coverage, opacity, size, height, and tint for City Trial presets",
+            .description = "Cloud deck coverage, opacity, size, variance, height, and tint",
             .kind = OPTKIND_MENU,
             .menu_ptr = &clouds_menu,
         },
@@ -98,7 +98,7 @@ static MenuDesc top_menu = {
         },
         &(OptionDesc){
             .name = "Stars",
-            .description = "Starfield density, twinkle, luminosity, size variance, and tint for City Trial presets",
+            .description = "Starfield density, twinkle, luminosity, size variance, tint, and shooting stars",
             .kind = OPTKIND_MENU,
             .menu_ptr = &stars_menu,
         },
@@ -130,6 +130,7 @@ ModDesc mod_desc = {
     .author = "DeDeDK",
     .version.major = 1,
     .version.minor = 0,
+    .affects_gameplay = 1,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
     .OnFrameEnd = OnFrameEnd,

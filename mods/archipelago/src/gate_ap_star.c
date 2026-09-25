@@ -6,47 +6,66 @@
 #include "gate_ap_star.h"
 #include "ap_item_handler.h"
 #include "ap_check_detect.h"
+#include "gate_boxes.h"
 
 // APStarPiece and ap_star's own APStarPieceKind number the six spheres the same
 // way, which is what lets an index cross the boundary unchanged.
 #include "ap_star_api.h"
 #include "ap_announce.h"
 
-static const ApStarAPI *ap_star_api;
+_Static_assert((int)AP_STAR_PIECE_NUM == (int)APSTARPIECE_NUM,
+               "APStarPiece and APStarPieceKind must number the same spheres");
 
+static const ApStarAPI *ap_star_api;
+static int ap_star_kind = -1;
+
+// Set at OnSaveLoaded, past every mod's OnBoot, after which an import or a kind still
+// missing stays missing and is not asked after again.
+static int ap_star_settled;
+
+// ap_star fires this for every rider, CPUs included, the way vanilla gives a CPU the
+// Hydra cutscene. The objective is the player's, so a CPU set does not claim it.
 static void OnAssemble(int ply)
 {
-    (void)ply;
+    if (Ply_GetPKind(ply) != PKIND_HMN)
+        return;
     APCheckDetect_Observe(APCK_ASSEMBLE_AP_STAR);
+}
+
+static void Import(void)
+{
+    if (ap_star_api != NULL || ap_star_settled)
+        return;
+
+    ap_star_api = (const ApStarAPI *)Hoshi_ImportMod(
+        (char *)AP_STAR_MOD_NAME, AP_STAR_API_MAJOR, AP_STAR_API_MINOR);
+    if (ap_star_api != NULL)
+        ap_star_api->AddAssembleHandler(OnAssemble);
 }
 
 void GateApStar_Resolve(void)
 {
-    if (ap_star_api == NULL)
-    {
-        ap_star_api = (const ApStarAPI *)Hoshi_ImportMod(
-            (char *)AP_STAR_MOD_NAME, AP_STAR_API_MAJOR, AP_STAR_API_MINOR);
-        if (ap_star_api == NULL)
-            return;
-
-        ap_star_api->AddAssembleHandler(OnAssemble);
-    }
-
+    GateApStar_MachineKind();
+    ap_star_settled = 1;
     GateApStar_PushMask();
 }
 
 void GateApStar_PushMask(void)
 {
-    // ap_star sorts before us, so the import already answers during our own OnBoot -
-    // earlier than hoshi hands us a save. OnSaveLoaded pushes the real mask.
+    // The box and sphere masks both push through here, and GateBoxes_UnlockBox can
+    // run before hoshi hands us a save.
     if (ap_star_api == NULL || ap_save == NULL)
         return;
-    ap_star_api->SetPieceMask(ap_save->ap_star_piece_unlocked_mask);
+
+    // Spheres ride the same red carrier box the vanilla pieces do, so a locked Red
+    // arms none of them.
+    u8 mask = GateBoxes_IsUnlocked(BOXKIND_RED) ? ap_save->ap_star_piece_unlocked_mask : 0;
+    ap_star_api->SetPieceMask(mask);
 }
 
 int GateApStar_UnlockPiece(int piece)
 {
-    if (piece < 0 || piece >= AP_STAR_PIECE_NUM)
+    if (piece < 0 || piece >= AP_STAR_PIECE_NUM || ap_save == NULL)
         return 0;
 
     ap_save->ap_star_piece_unlocked_mask |= (u8)(1 << piece);
@@ -66,15 +85,22 @@ int GateApStar_UnlockPiece(int piece)
     return 1;
 }
 
+// Asked per kind by the gate filters, so the answer is cached once the registry has
+// handed the star a kind.
 int GateApStar_MachineKind(void)
 {
-    GateApStar_Resolve();
-    return ap_star_api ? ap_star_api->GetMachineKind() : -1;
+    if (ap_star_kind < 0 && !ap_star_settled)
+    {
+        Import();
+        if (ap_star_api != NULL)
+            ap_star_kind = ap_star_api->GetMachineKind();
+    }
+    return ap_star_kind;
 }
 
 int GateApStar_SpawnPiece(int piece, int ply)
 {
-    GateApStar_Resolve();
+    Import();
     return ap_star_api ? ap_star_api->SpawnPiece(piece, ply) : 0;
 }
 
@@ -85,7 +111,7 @@ int GateApStar_GivePiece(int piece)
 
     // Nothing a later round could change with the mod absent, so the item is
     // dropped rather than left retrying for the rest of the seed.
-    GateApStar_Resolve();
+    Import();
     if (ap_star_api == NULL)
     {
         OSReport("[GateApStar] Sphere %d give dropped with ap_star not built\n", piece);
@@ -109,7 +135,7 @@ int GateApStar_GivePiece(int piece)
 
 int GateApStar_GiveStar(void)
 {
-    GateApStar_Resolve();
+    Import();
     if (ap_star_api == NULL)
     {
         OSReport("[GateApStar] Star give dropped with ap_star not built\n");
@@ -127,11 +153,6 @@ int GateApStar_GiveStar(void)
         }
     }
     return AP_ITEM_RETRY;
-}
-
-int GateApStar_WasAssembled(void)
-{
-    return ap_star_api ? ap_star_api->WasAssembled() : 0;
 }
 
 int GateApStar_AssembledThisRound(int ply)

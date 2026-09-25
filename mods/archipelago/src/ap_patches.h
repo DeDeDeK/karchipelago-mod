@@ -17,8 +17,10 @@ void ApPatches_OnBoot(void);
 void ApPatches_On3DLoadStart(void);
 void ApPatches_On3DLoadEnd(void);
 void ApPatches_On3DExit(void);
-void ApPatches_OnFrameStart(void);
 void ApPatches_OnSaveLoaded(void);
+
+// Apply the AP Patches the client backfilled. Call only while ap_data->backfill_valid is set.
+void ApPatches_ApplyBackfill(void);
 
 // Clear every collected bit in both save and mirror, or fill the first
 // ap_patches of them. Neither persists - the caller owns the card write.
@@ -28,6 +30,10 @@ void ApPatches_DebugForceMarkAll(void);
 // Claim the lowest unclaimed patch, as a pickup does. Returns 0 when the category
 // is off or every patch is already collected.
 int ApPatches_DebugClaim(void);
+
+// Clear every collected bit in the save, the wire mirror and the client's pending
+// backfill, so the lowest patch is claimable again. Persists.
+void ApPatches_DebugClearCollected(void);
 
 // Spawn one AP Box in front of a player's machine, bypassing the spawner. Returns
 // 0 if the item was not registered when this scene loaded.

@@ -39,7 +39,7 @@ CityTrial_Check*Objectives    --accumulates-->  records block (CityTrial GameCle
 
 All six CT evaluators share a skeleton: bail unless `Checklist_IsCacheValid()`
 (`0x8007b650`) returns 0, then loop player slots 0..4, gate on
-`Ply_GetPKind(player)` (`0x8022c858`, `plGetPlayerKind` in the map; `0` = human),
+`Ply_GetPKind(player)` (`0x8022c858`; `0` = human),
 and call `ClearChecker_SetNewUnlock(2, kind)` (`0x8004a054`) for each met
 threshold. Per-game cells test a stat directly; cumulative cells fold the
 per-game value into the records block first. **Scope varies**: some accumulators
@@ -65,7 +65,7 @@ Known fields (offsets relative to `base`):
 | `+0x334` | int[11] | Per-`CopyKind` grant counter, bumped by `Rider_RecordCopyAbility` for every grant whatever the source | - | - |
 | `+0x360` | int[6] | Most recent `CopyKind`s granted, oldest first; entry count in the high 5 bits of `+0x378` (low 3 = the three ability-sequence flags `Rider_RecordCopyAbility` tests against the tables at `0x804b4c20`/`0x804b4c38`/`0x804b4c50`) | - | - |
 | `+0x37a` | u16 bits | Copy-Chance ability mask, **MSB-first**: bit `15 - CopyKind`, so byte `+0x37a` bit3 = Bomb and bit5 = Sleep. Written only by `Rider_MarkCopyAbilityObtained` (`0x8022f150`), which only the copy-wheel paths call, so the bit means "the wheel gave it" | `0x8022ed50` (bomb) / `0x8022eda8` (sleep) | 0x46 / 0x47 |
-| `+0x37c` | int[26] | Per-MachineKind change counter; sum = total Air Ride machine changes | `0x8022f19c` (sums all 26) | 0x06 |
+| `+0x37c` | int[26] | Per-MachineKind change counter; sum = total Air Ride machine changes. Written by `Ply_IncrementGetOnMachineNum` (`0x8022f5bc`) from its one caller `AS_GetOnStar` (`0x801ba190`), and only when `RiderData.respawn_machine_id` differs from the boarded `MachineData.instance_id` - so a swap is per machine *object*, not per kind, and re-boarding the machine the rider last respawned on never counts. Bikes index the array at `kind + 0x13`. | `0x8022f19c` (sums all 26) | 0x06 |
 | `+0x4b4` | int | KO-by-cause: CPU machine broken (written by `Ply_AddDeath` on cause byte) | `0x8022f418` | 0x4d |
 | `+0x4b8` | int | KO-by-cause: Firework | `0x8022f46c` | 0x60 |
 | `+0x4bc` | int | KO-by-cause: Gold Spike | `0x8022f4c0` | 0x5f |
@@ -153,6 +153,10 @@ first-20-seconds aggregate at `+0x804`, and not the Tac aggregate at `+0x808`.
 Without it an AP Patch would count as an Offense patch and an AP Box break as a
 blue box, letting one location category farm another's cells. Every other item,
 custom kinds included, takes the vanilla path unchanged.
+
+The only other writer is the mod's permanent-patch apply (`PermanentPatch_DoApply`),
+which adds each stat's round-start rise straight into the per-kind slot on the City
+Trial map, since `Machine_GivePatch` / `Machine_GiveAllUp` never reach this function.
 
 `Ply_DecrementItemCollectNum` has **two callers**, both on the drop pipeline:
 `Rider_SpawnDropPatchSeq` (`0x8019ce50`, two sites) when a rider sheds patches,
@@ -324,7 +328,7 @@ of the 24 `StadiumKind`s are unlocked, regardless of whether each was actually p
 
 The drag-race finish-time field `GameData+0x8B8[p]` and the polymorphic score
 field `GameData+0xA38[p]` are unit-`1/60 s` and plain-int respectively.
-`(IsBike, Mk)` = `Ply_GetIsBike` (PlayerData `+0x8E`, `0x8022c8b0`) and
+`(IsBike, Mk)` = `Ply_GetMachineIsBike` (PlayerData `+0x8E`, `0x8022c8b0`) and
 `Ply_GetMachineKind` (PlayerData `+0x8F`, `0x8022c8e0`); these are *per-category*
 machine indices, distinct from `VCKIND_*`.
 
@@ -553,7 +557,7 @@ accumulators: each sums `PKIND_HMN` (0) players always, plus `PKIND_CPU` (1) pla
 **only when** the mode is `AIRRIDEMODE_TIME` (1) - so a Time-Attack CPU's laps/etc. fold
 into the cross-game totals, while in Race/Free Run only human players are summed.
 
-**gr_kind -> stage** (`Stage_GetGrKindFromStageKind`, `0x80261ce8`): 0 = Fantasy
+**gr_kind -> stage** (`Gm_GetGrKindFromStageKind`, `0x80261ce8`): 0 = Fantasy
 Meadows, 1 = Magma Flows, 2 = Sky Sands, 3 = Checker Knights, 4 = Celestial
 Valley, 5 = Machine Passage, 7 = Beanstalk Park, 8 = Frozen Hillside (gr_kind 6
 is not used by the checklist). This engine gr_kind is **not** the `AirRideCourse`
@@ -657,7 +661,7 @@ The Fantasy Meadows >=20 mph cell (0x60) runs on a pair of bits.
 `AirRide_TrackMinLapSpeed` (`0x80231670`) is the per-frame watcher. It is not called
 directly: `Ply_UnkUpdate` (`0x80231340`, reached each frame per rider from
 `RiderThink_Unk` at `0x8018fc40`) resolves the stage group via
-`Stage_GetGrKindFromStageKind(Gm_GetCurrentStageKind())` and tail-dispatches through a
+`Gm_GetGrKindFromStageKind(Gm_GetCurrentStageKind())` and tail-dispatches through a
 group-indexed function-pointer table at `0x804b4cb8`. Only two slots are populated -
 group 0 -> `AirRide_TrackMinLapSpeed`, group 7 -> `0x80231700` (the Beanstalk Ferris-wheel
 tracker) - with group 9 handled by a separate `bl 0x8023177c`. So the watcher only runs
@@ -670,7 +674,7 @@ What it measures is `MachineData.world_velocity` (`+0x354`) - the machine's *mea
 per-frame displacement, computed by `Machine_ShadowThink` (`0x801c69f0`) as
 `pos (0x3e8) - prev_pos (0x3f4)`, not the commanded velocity at `+0x324`. Collisions,
 wall scrapes and slope drag are therefore already folded in. The watcher takes
-`PSVECMagnitude` of that vector, divides by the mile/km constant `1.609344` (double at
+`VECMag` of that vector, divides by the mile/km constant `1.609344` (double at
 `0x805e2a58`) and compares against `0.8101851f` (`0x805e2a60`); below that - or with the
 player on foot, since a null machine GObj takes the same branch - it clears `+0x84c`
 bit4. That is a raw threshold of **1.303867 world units per frame**, so the "mph" the

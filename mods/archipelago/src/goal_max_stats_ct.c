@@ -2,7 +2,7 @@
 #include "os.h"
 
 #include "main.h"
-#include "check_detection.h"
+#include "ap_goal.h"
 #include "patch_cap.h"
 #include "goal_max_stats_ct.h"
 
@@ -10,8 +10,6 @@
 // patches dominate the rolls without fully suppressing other drops.
 #define MAX_STATS_PATCH_BIAS 8
 
-// Latch the sticky save flag once every stat carries the slot's patch-cap target
-// worth of patches, then re-run goal evaluation.
 static void GoalMaxStatsCT_PerFrame(GOBJ *rg)
 {
     if (ap_save->max_stats_ct_achieved)
@@ -32,11 +30,14 @@ static void GoalMaxStatsCT_PerFrame(GOBJ *rg)
     ap_save->max_stats_ct_achieved = 1;
     OSReport("[GoalMaxStatsCT] Player %d reached patch target %d on all %d stats - goal latched\n",
              rd->ply + 1, (int)threshold, PATCHKIND_NUM);
-    CheckDetection_EvaluateGoal();
+    APGoal_Evaluate();
 }
 
 void GoalMaxStatsCT_On3DLoadEnd(void)
 {
+    if (Gm_IsAutoDemo())
+        return;
+
     if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
         return;
 
@@ -58,30 +59,10 @@ void GoalMaxStatsCT_On3DLoadEnd(void)
         GObj_AddProc(r, GoalMaxStatsCT_PerFrame, RDPRI_HITCOLL + 1);
         attached++;
     }
-    OSReport("[GoalMaxStatsCT] Active (%d players, target %d, %dx patch drop bias)\n",
-             attached, (int)ap_save->options.city_trial_patch_cap_max,
-             MAX_STATS_PATCH_BIAS);
-}
-
-
-static int IsPatchOrAllUpItemKind(u8 it_kind)
-{
-    switch (it_kind)
-    {
-        case ITKIND_WEIGHT:
-        case ITKIND_ACCEL:
-        case ITKIND_TOPSPEED:
-        case ITKIND_TURN:
-        case ITKIND_CHARGE:
-        case ITKIND_GLIDE:
-        case ITKIND_OFFENSE:
-        case ITKIND_DEFENSE:
-        case ITKIND_HP:
-        case ITKIND_ALLUP:
-            return 1;
-        default:
-            return 0;
-    }
+    if (attached)
+        OSReport("[GoalMaxStatsCT] Active (%d players, target %d, %dx patch drop bias)\n",
+                 attached, (int)ap_save->options.city_trial_patch_cap_max,
+                 MAX_STATS_PATCH_BIAS);
 }
 
 static u8 ScaleU8(u8 v)
@@ -102,14 +83,23 @@ static void BiasBoxPool(u8 *kinds, u8 *chances, u8 num)
 {
     for (u8 i = 0; i < num; i++)
     {
-        if (IsPatchOrAllUpItemKind(kinds[i]))
+        if (Item_IsStatUpKind(kinds[i]))
             chances[i] = ScaleU8(chances[i]);
     }
+}
+
+static int drop_bias_latched;
+
+void GoalMaxStatsCT_On3DLoadStart(void)
+{
+    drop_bias_latched = 0;
 }
 
 void GoalMaxStatsCT_ApplyDropBias(void)
 {
     if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
+        return;
+    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
@@ -125,12 +115,19 @@ void GoalMaxStatsCT_ApplyDropBias(void)
         BiasBoxPool(obj->subsequent_it_kind, obj->subsequent_chance, obj->subsequent_num);
     }
 
+    // grBoxGeneObj above is rebuilt from the archive by CityItemSpawn_InitItemFallChances
+    // on every call, so scaling it is self-limiting. event_source_drop is the archive
+    // table itself, so its scale compounds and runs once per round.
+    if (drop_bias_latched)
+        return;
+    drop_bias_latched = 1;
+
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
     if (info && info->item_desc)
     {
         for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
         {
-            if (!IsPatchOrAllUpItemKind((u8)info->item_desc->event_source_drop[i].it_kind))
+            if (!Item_IsStatUpKind(info->item_desc->event_source_drop[i].it_kind))
                 continue;
             info->item_desc->event_source_drop[i].chance_dyna         = ScaleU16(info->item_desc->event_source_drop[i].chance_dyna);
             info->item_desc->event_source_drop[i].chance_tac          = ScaleU16(info->item_desc->event_source_drop[i].chance_tac);

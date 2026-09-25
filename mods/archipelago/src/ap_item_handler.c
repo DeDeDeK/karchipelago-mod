@@ -7,6 +7,7 @@
 #include "checklist_rewards.h"
 #include "kirby_scale.h"
 #include "textbox_api.h"
+#include "ap_colors.h"
 #include "city_trial_event.h"
 #include "ability_item.h"
 #include "patch_item.h"
@@ -29,15 +30,13 @@
 #include "settings_menu.h"
 #include "ap_announce.h"
 
-// Bump the received counter, append to the unprocessed list, and acknowledge.
-// Returns 1 if an item was received.
-int APItems_CheckMailbox()
+static void APItems_CheckMailbox(void)
 {
     static int warned_full = 0;
 
     uint incoming = ap_data->incoming_item_id;
     if (incoming == 0)
-        return 0;
+        return;
 
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
@@ -51,7 +50,7 @@ int APItems_CheckMailbox()
                      MAX_RECEIVED_ITEMS, incoming);
             warned_full = 1;
         }
-        return 0;
+        return;
     }
     warned_full = 0;
 
@@ -67,7 +66,6 @@ int APItems_CheckMailbox()
 
     // Clear the mailbox so the client can write the next item
     ap_data->incoming_item_id = 0;
-    return 1;
 }
 
 // TextBox color for a directly-received ITKIND item, by category.
@@ -82,7 +80,7 @@ static GXColor ItemReceiveColor(ItemKind k)
         case ITKIND_ACCELFAKE:   case ITKIND_TOPSPEEDFAKE: case ITKIND_OFFENSEFAKE:
         case ITKIND_DEFENSEFAKE: case ITKIND_TURNFAKE:     case ITKIND_GLIDEFAKE:
         case ITKIND_CHARGEFAKE:  case ITKIND_WEIGHTFAKE:
-            return tb_api->TrapColor;
+            return APColor_Trap;
         case ITKIND_WEIGHT:                            return tb_api->PatchColors[PATCHKIND_WEIGHT];
         case ITKIND_ACCEL:                             return tb_api->PatchColors[PATCHKIND_ACCEL];
         case ITKIND_TOPSPEED:   case ITKIND_SPEEDMAX:  return tb_api->PatchColors[PATCHKIND_TOPSPEED];
@@ -133,7 +131,7 @@ int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
     ItemDesc desc;
     Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &md->up, &md->forward,
                   box_kind, size, 1, 3, -1, -1);
-    return Item_Create(&desc) != NULL;
+    return CityItem_Create(&desc) != NULL;
 }
 
 // Both return the number of human riders the item actually reached. A rider on
@@ -173,15 +171,15 @@ int APItems_HandleItem(uint ap_item_id)
         case AP_ITEM_CHECKBOX_FILLER_AIRRIDE:
             Checklist_GrantFiller(GMMODE_AIRRIDE);
             Checklist_AnnounceFiller(GMMODE_AIRRIDE);
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_TOPRIDE:
             Checklist_GrantFiller(GMMODE_TOPRIDE);
             Checklist_AnnounceFiller(GMMODE_TOPRIDE);
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_CITYTRIAL:
             Checklist_GrantFiller(GMMODE_CITYTRIAL);
             Checklist_AnnounceFiller(GMMODE_CITYTRIAL);
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO:
             // If the custom_checklist framework never registered the AP tab, drop
             // the item rather than dereference a NULL clear-data pointer.
@@ -192,10 +190,10 @@ int APItems_HandleItem(uint ap_item_id)
             return AP_ITEM_APPLIED;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
-            return 1;
+            return AP_ITEM_APPLIED;
         case AP_ITEM_SPAWN_RATE_UP:
             SpawnRate_Increment();
-            return 1;
+            return AP_ITEM_APPLIED;
     }
 
     // Above the 3D-only scene gate below because it also applies in Top Ride
@@ -269,16 +267,14 @@ int APItems_HandleItem(uint ap_item_id)
         return GateApStar_UnlockPiece(piece);
     }
 
-    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + MachineKind, IDs 830-854
-    // for the vanilla machines and 856 up for registered custom ones, capped at
-    // the end of the block so registered kinds can never reach another category's
-    // ids). ID 855 is WHEELVSDEDEDE (25), the stadium CPU-only Dedede machine,
-    // which is not exposed and falls through to the unknown-item path.
-    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + MachineUnlock_KindNum() &&
+    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + mask bit: 830-854 for the vanilla
+    // machines, 856 for the Archipelago Star). ID 855 is WHEELVSDEDEDE (25), the
+    // stadium CPU-only Dedede machine, which is not exposed and falls through to the
+    // unknown-item path.
+    if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + AP_MACHINE_BIT_NUM &&
         ap_item_id != AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
     {
-        MachineKind kind = ap_item_id - AP_MACHINE_UNLOCK_BASE;
-        return GateMachines_UnlockMachine(kind, /*announce=*/1);
+        return GateMachines_UnlockMachine(ap_item_id - AP_MACHINE_UNLOCK_BASE, /*announce=*/1);
     }
 
     // Box type unlock items (AP_BOX_UNLOCK_BASE + BoxKind)
@@ -330,7 +326,7 @@ int APItems_HandleItem(uint ap_item_id)
         // Notify here rather than in the give handler - TrapLink also calls it
         // and shows its own "TrapLink received!" message.
         int ok = GateTopRideItems_GiveItem(kind);
-        if (ok && (unsigned)kind < TRITEM_NUM && TopRideItemKind_Names[kind])
+        if (ok && TopRideItemKind_Names[kind])
             APAnnounce_Grant("Received: TR ", TopRideItemKind_Names[kind],
                              tb_api->TopRideItemColor, NULL);
         return ok;
@@ -408,7 +404,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         EventKind kind = ap_item_id - AP_EVENT_BASE;
         int ok = Event_GiveItem(kind);
-        if (ok && kind < EVKIND_NUM && EventKind_Names[kind])
+        if (ok && EventKind_Names[kind])
             APAnnounce_Grant("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
         return ok;
     }
@@ -428,7 +424,7 @@ int APItems_HandleItem(uint ap_item_id)
         {
             if (major != MJRKIND_CITY && major != MJRKIND_AIR)
                 return 0;
-            if (!Patch_GiveItem(patch_kind, 1))
+            if (!Patch_GiveItem(patch_kind))
                 return AP_ITEM_RETRY;
             NotifyItemReceived(it_kind);
             return AP_ITEM_APPLIED;
@@ -455,7 +451,7 @@ int APItems_HandleItem(uint ap_item_id)
             return 0;
         int ok = Patch_DropTrap();
         if (ok)
-            APAnnounce_Grant("Received: ", "Drop Patches", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "Drop Patches", APColor_Trap, NULL);
         return ok;
     }
 
@@ -490,7 +486,7 @@ int APItems_HandleItem(uint ap_item_id)
     {
         int ok = Patch_AllUp_GiveItem(-1);
         if (ok)
-            APAnnounce_Grant("Received: ", "All Down", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "All Down", APColor_Trap, NULL);
         return ok;
     }
 
@@ -522,7 +518,7 @@ int APItems_HandleItem(uint ap_item_id)
             }
         }
         if (applied)
-            APAnnounce_Grant("Received: ", "1 HP", tb_api->TrapColor, NULL);
+            APAnnounce_Grant("Received: ", "1 HP", APColor_Trap, NULL);
         return applied;
     }
 
@@ -540,14 +536,9 @@ int APItems_Queue(uint ap_item_id)
     return 1;
 }
 
-void APItems_OnSceneChange()
-{
-    GOBJ_EZCreator(0, 0, 0, 0, HSD_Free, HSD_OBJKIND_NONE, 0, APItems_PerFrame, 0, 0, 0, 0);
-}
-
 // Resolve at most one queued item per frame. Items that can't apply yet are
 // skipped so items behind them still process; only RETRY items stay in the queue.
-void APItems_PerFrame(GOBJ *g)
+static void APItems_PerFrame(GOBJ *g)
 {
     APItems_CheckMailbox();
 
@@ -565,5 +556,9 @@ void APItems_PerFrame(GOBJ *g)
         ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
         break;
     }
+}
 
+void APItems_OnSceneChange()
+{
+    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, APItems_PerFrame, 0, 0, 0, 0);
 }

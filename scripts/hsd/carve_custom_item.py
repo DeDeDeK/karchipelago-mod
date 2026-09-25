@@ -2,7 +2,7 @@
 
 Carves an item model subtree out of `iso/files/Item.dat` and packs it into a
 minimal standalone archive that exports a single public `customItem` (a
-`CustomItemDesc`, see mods/custom_items/include/custom_items_api.h). The
+`CustomItemDesc`, see mods/custom_items/src/custom_items.h). The
 descriptor's `model` field is relocated to point at the carved JOBJDesc root, so
 the custom_items mod can splice the model into the live item table.
 
@@ -12,8 +12,8 @@ pair whose `j` is the model's JOBJDesc root (and whose `flags` we carry into the
 descriptor's model_flag). We walk that subtree with the type-aware walker, then
 emit:
 
-    new_data[0x00 .. 0x37] : CustomItemDesc
-    new_data[0x38 ..      ] : name string, then the carved model ranges
+    new_data[0x00 .. 0x3f] : CustomItemDesc
+    new_data[0x40 ..      ] : name string, then the carved model ranges
 
 The descriptor's `model` (and optional `effect_info`) are synthetic relocations:
 they point into the carved ranges but have no source pointer in the donor.
@@ -47,10 +47,10 @@ from hsd.archive import Archive, build_archive, u16, u32
 from hsd.gx import FORMAT_NAME, GX_TF_RGB5A3, align32, encode_rgb5a3
 from hsd.walker import Walker, carve_ranges
 
-# Must match include/custom_items_api.h.
+# Must match mods/custom_items/src/custom_items.h.
 CUSTOM_ITEM_MAGIC = 0x4349544D  # 'CITM'
-CUSTOM_ITEM_DESC_VERSION = 3
-DESC_SIZE = 0x38
+CUSTOM_ITEM_DESC_VERSION = 7
+DESC_SIZE = 0x40
 ITDATA_STRIDE = 0x18
 
 
@@ -178,14 +178,16 @@ def carve(
     struct.pack_into(">H", new_data, 0x06, 0)
     struct.pack_into(">I", new_data, 0x08, name_off)  # name (reloc)
     struct.pack_into(">i", new_data, 0x0C, base_kind)
-    struct.pack_into(">i", new_data, 0x10, 0)  # reserved (group follows base_kind)
+    struct.pack_into(">i", new_data, 0x10, 0)  # flags (CUSTOM_ITEM_FLAG_*)
     struct.pack_into(">I", new_data, 0x14, remap[root_jobj])  # model (reloc)
     struct.pack_into(">I", new_data, 0x18, 0)  # effect_info (inherit base)
     struct.pack_into(">HHH", new_data, 0x1C, *weight_box)  # weight_box[3]
-    struct.pack_into(">H", new_data, 0x22, 0)  # weight_free (reserved)
-    struct.pack_into(">HHHHHH", new_data, 0x24, *weight_event)  # weight_event[6]
-    struct.pack_into(">I", new_data, 0x30, model_flag)  # model_flag (v2)
-    struct.pack_into(">f", new_data, 0x34, scale)  # scale (v3)
+    struct.pack_into(">HHHHHH", new_data, 0x22, *weight_event)  # weight_event[6]
+    struct.pack_into(">H", new_data, 0x2E, 0)  # pad2
+    struct.pack_into(">I", new_data, 0x30, model_flag)
+    struct.pack_into(">f", new_data, 0x34, scale)
+    struct.pack_into(">I", new_data, 0x38, 0)  # joint_anim (inherit)
+    struct.pack_into(">I", new_data, 0x3C, 0)  # mat_anim (inherit)
 
     new_relocs = res.relocs
 

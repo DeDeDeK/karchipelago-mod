@@ -2,31 +2,33 @@
 """Author a custom machine's UI art side-car from two renders.
 
 The game draws a machine picture from TexAnims whose animation frame is the
-CharacterKind, and custom_machines gives every appended character a frame in each
-of them. This writes the images that go in one machine's frames: a
+CharacterKind or the machine's kind, and custom_machines gives every appended machine
+a frame in each of them. This writes the images that go in one machine's frames: a
 `machines/VcStarAp.art` beside `machines/VcStarAp.dat`, which the registry finds by
-basename and splices in wherever that machine's CharacterKind is drawn. A machine
-with no side-car shows the registry's placeholder instead.
+basename and splices in wherever that machine is drawn. A machine with no side-car
+shows the registry's placeholder instead.
 
-Four images cover every bank, because a bank's role is fully determined by the
-geometry of the frame it clones:
+Five images cover every bank, because a bank's role is fully determined by the
+geometry of its frames:
 
     64x64 CMPR  portrait     the character-select grid tile
     80x48 C8    picture      the large art beside the CSS cursor and on results
     80x48 I4    silhouette   the bloom drawn under the picture
-    40x40 C4    icon         the time-attack board and the results-screen rows
+    40x40 C4    icon         the time-attack board, results rows and stadium HUD
+    32x32 C4    blip         the City Trial field blip
 
-They come from two renders of the machine, because the icon's angle is not the
+They come from two renders of the machine, because the icons' angle is not the
 picture's: a three-quarter hero view drives the first three, a straight top-down
-the fourth. Give both a transparent background - or a flat one and `--matte` to
-key it - a generous margin, and at least 4x the target resolution. Each render is
-cropped to what it draws before it is framed, so the margin costs nothing.
+the icon and blip. Give both a transparent background - or a flat one and `--matte`
+to key it - a generous margin, and at least 4x the target resolution. Each render is
+cropped to what it draws before it is framed, so the margin costs nothing. The blip is
+one flat pastel, of `--blip-color` or the top-down render's average color.
 
 The output exports one public:
 
   customMachineArt  - CustomMachineArt
 
-whose layout must match mods/custom_machines/include/custom_machines_api.h.
+whose layout must match mods/custom_machines/src/custom_machine_desc.h.
 
 Run from the repo root:
     uv run --with pillow python scripts/hsd/make_machine_art.py \\
@@ -46,7 +48,7 @@ from hsd.gx import FORMAT_NAME, align32
 from hsd.ui_art import BANK_ROLE, contact_sheet, key_matte, role_images
 from hsd.ui_banks import encode_art
 
-# Must match include/custom_machines_api.h.
+# Must match mods/custom_machines/src/custom_machine_desc.h.
 CUSTOM_MACHINE_ART_MAGIC = 0x434D4152  # 'CMAR'
 CUSTOM_MACHINE_ART_VERSION = 1
 ART_SIZE = 0x0C
@@ -54,8 +56,8 @@ ART_SIZE = 0x0C
 PUBLIC = "customMachineArt"
 
 
-def build(out_path, hero, topdown, preview=None):
-    images = role_images(hero, topdown)
+def build(out_path, hero, topdown, preview=None, blip_color=None):
+    images = role_images(hero, topdown, blip_color)
     if preview:
         os.makedirs(os.path.dirname(preview) or ".", exist_ok=True)
         contact_sheet(images).save(preview)
@@ -131,7 +133,13 @@ def main(argv):
     p.add_argument(
         "--preview",
         default=None,
-        help="also write a magnified contact sheet of the four images here",
+        help="also write a magnified contact sheet of the images here",
+    )
+    p.add_argument(
+        "--blip-color",
+        default=None,
+        help="RRGGBB the City Trial blip is a pastel of (default: the top-down "
+        "render's average color)",
     )
     p.add_argument(
         "--matte",
@@ -150,8 +158,12 @@ def main(argv):
         print(f"Keying #{back[0]:02X}{back[1]:02X}{back[2]:02X} out of the renders")
         hero, topdown = key_matte(hero, back), key_matte(topdown, back)
 
+    blip_color = None
+    if args.blip_color:
+        blip_color = tuple(int(args.blip_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
+
     print(f"Building {args.out}:")
-    build(args.out, hero, topdown, args.preview)
+    build(args.out, hero, topdown, args.preview, blip_color)
     return 0
 
 

@@ -1,28 +1,27 @@
-r"""Archipelago Star assembly-cinematic assets.
+r"""Archipelago Star assembly-cinematic asset.
 
-Writes the two archives the vanilla legendary assembly cinematic needs to run
-with the Archipelago Star in place of Hydra or Dragoon:
+Writes the archive the vanilla legendary assembly cinematic runs with the
+Archipelago Star in place of Hydra or Dragoon:
 
-    mods/ap_star/assets/ApStarParts.dat   apStarParts
-    mods/ap_star/assets/ApStarGlow.dat    apStarGlow, apStarCam
+    mods/ap_star/assets/ApStarAssembly.dat   apStarAssembly
 
-The cinematic reads a `vsData`, three pointers: a glow-model triple
-`{JOBJDesc*, FigaTree*, MatAnimJoint*}`, a parts-model triple of the same
-shape, and a pointer to a word holding a camera-animation descriptor. The two
-halves come from different donors - the parts from the star's own machine
-archive, the glow and camera from VsHydra.dat - so they are carved separately
-and the three-pointer vsData is assembled in mod RAM.
+The public is a `vsData` shaped like VsHydra.dat's vsDataHydra: three pointers,
+to a glow-model triple `{JOBJDesc*, FigaTree*, MatAnimJoint*}`, a parts-model
+triple of the same shape, and a word holding a camera-animation descriptor. The
+two halves come from different donors - the parts from the star's own machine
+archive, the glow and camera from VsHydra.dat - so each is carved on its own and
+the parts carve is grafted onto the end of the glow one.
 
-ApStarParts.dat is the star's main model with every joint's DObj chain trimmed
+The parts model is the star's main model with every joint's DObj chain trimmed
 to its high LOD (the cinematic draws every DObj, so all three LODs would
 overlap) plus a 150-frame FigaTree that flies the six pods in from 22 units out
 and spins the ring up once they land.
 
-ApStarGlow.dat is Hydra's glow model - the ribbon streaks and impact flashes -
-carved down to one streak group, copied back out to six, and given a FigaTree
-of its own that aims each streak along its pod's path. The camera descriptor
-block rides along byte for byte, with the path joint's scale tightened for a
-machine whose footprint is smaller than Hydra's.
+The glow model is Hydra's - the ribbon streaks and impact flashes - carved down
+to one streak group, copied back out to six, and given a FigaTree of its own
+that aims each streak along its pod's path. The camera descriptor block rides
+along byte for byte, with the path joint's scale tightened for a machine whose
+footprint is smaller than Hydra's.
 
 Usage:
     uv run python scripts/authoring/make_ap_star_assembly.py
@@ -43,9 +42,10 @@ from hsd.walker import Walker, carve_ranges
 
 MACHINE_DAT = "mods/ap_star/assets/machines/VcStarAp.dat"
 HYDRA_DAT = "iso/files/VsHydra.dat"
-OUT_DIR = "mods/ap_star/assets"
+OUT_PATH = "mods/ap_star/assets/ApStarAssembly.dat"
+OUT_PUBLIC = "apStarAssembly"
 
-# Joint indices in the star's main model, in HSD_JObjLoadJoint preorder.
+# Joint indices in the star's main model, in JObj_LoadJoint preorder.
 J_BODY = 6
 J_RING = 8
 J_POD0 = 9
@@ -172,7 +172,7 @@ class Track:
 def emit_figatree(out, node_count, tracks, end_frame=END_FRAME):
     """Write a FigaTree container and everything it points at. `tracks` is a
     list of Track in any order; they are grouped by node here, since the
-    per-node count table is walked in HSD_JObjLoadJoint preorder."""
+    per-node count table is walked in JObj_LoadJoint preorder."""
     by_node = [[] for _ in range(node_count)]
     for t in tracks:
         by_node[t.node].append(t)
@@ -296,7 +296,9 @@ def matanim_group(arc, root, remap):
     return [remap[o] for o in (root, mesh, anchor, head)]
 
 
-def build_parts(root_dir, verbose=True):
+def build_parts(root_dir):
+    """The parts carve, its model triple at offset 0, and the choreography it
+    was keyed from."""
     arc = Archive(os.path.join(root_dir, MACHINE_DAT))
     model_data = arc.deref(arc.publics["vcDataStarAp"] + 0x04)
     root = arc.deref(model_data + 0x00)
@@ -354,18 +356,7 @@ def build_parts(root_dir, verbose=True):
     out.set_ptr(0x00, res.remap[root])
     out.set_ptr(0x04, tree)
     out.set_ptr(0x08, None)
-
-    blob = build_archive(
-        out.data, sorted(out.relocs), [("apStarParts", 0)], arc.version
-    )
-    path = os.path.join(root_dir, OUT_DIR, "ApStarParts.dat")
-    with open(path, "wb") as f:
-        f.write(blob)
-    if verbose:
-        print(
-            f"{path}: {len(blob)} bytes, {len(out.relocs)} relocs, {len(tracks)} tracks"
-        )
-    return chor
+    return chor, out
 
 
 def hydra_glow_tracks(arc):
@@ -392,7 +383,8 @@ def hydra_glow_tracks(arc):
     return out
 
 
-def build_glow(root_dir, chor, verbose=True):
+def build_assembly(root_dir, verbose=True):
+    chor, parts = build_parts(root_dir)
     arc = Archive(os.path.join(root_dir, HYDRA_DAT))
     flash = hydra_glow_tracks(arc)
 
@@ -580,19 +572,22 @@ def build_glow(root_dir, chor, verbose=True):
     out.set_ptr(0x08, ma_root)
     out.set_ptr(0x10, rm[HYDRA_CAM_DESC])
 
+    parts_base = out.graft(parts)
+    vsdata = out.alloc(0x0C)
+    out.set_ptr(vsdata + 0x00, 0x00)
+    out.set_ptr(vsdata + 0x04, parts_base)
+    out.set_ptr(vsdata + 0x08, 0x10)
+
     blob = build_archive(
-        out.data,
-        sorted(out.relocs),
-        [("apStarGlow", 0), ("apStarCam", 0x10)],
-        arc.version,
+        out.data, sorted(out.relocs), [(OUT_PUBLIC, vsdata)], arc.version
     )
-    path = os.path.join(root_dir, OUT_DIR, "ApStarGlow.dat")
+    path = os.path.join(root_dir, OUT_PATH)
     with open(path, "wb") as f:
         f.write(blob)
     if verbose:
         print(
             f"{path}: {len(blob)} bytes, {len(out.relocs)} relocs, "
-            f"{len(tracks)} tracks, {node_count} joints"
+            f"{node_count} glow joints"
         )
 
 
@@ -600,8 +595,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--root", default=os.getcwd(), help="repo root (default: cwd)")
     args = ap.parse_args(argv)
-    chor = build_parts(args.root)
-    build_glow(args.root, chor)
+    build_assembly(args.root)
     return 0
 
 

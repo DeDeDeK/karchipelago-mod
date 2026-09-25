@@ -1,8 +1,8 @@
-// Lays out and packs more icons than either character select screen was built
-// for. The packed icon list in GameData grows into the free span past it - 33
-// entries on City Trial, which is the binding one - the icon positions past the
-// 20th anchor joint are computed rather than posed, and both screens' packing is
-// replaced because vanilla's walks a hard 10-column grid this mod widened.
+// Lays out and packs more icons than either character select screen was built for.
+// The packed icon list in GameData grows past its vanilla 20 entries, the icon
+// positions past the 20th anchor joint are computed rather than posed, and both
+// screens' packing is replaced because vanilla's walks a hard 10-column grid this mod
+// widened.
 
 #include "os.h"
 #include "hsd.h"
@@ -14,74 +14,52 @@
 
 #include "custom_machines.h"
 
-// Flags that sit just past a screen's packed icon list, which a widened list would
-// run over. Each moves to the far end of its screen's own free span: Air Ride's two
-// to +0x87 and +0x88, City's one to +0x87, which is the last byte before the one
-// CitySelect_Think reads.
-#define AIRRIDE_ROWSPLIT_OFF  0x87
-#define AIRRIDE_DEBUGGRID_OFF 0x88
-#define CITY_DEBUGGRID_OFF    0x87
+// Each screen's select block in GameData, as AirRide_PopulateSelectIcons (0x80020a08) and
+// CitySelect_CreateMachineIcons (0x8002e3c4) form it, and where the block keeps its packed
+// list: a count byte, then one CharacterKind per icon.
+#define AIRRIDE_SELECT_BASE 0x10a
+#define CITY_SELECT_BASE    0x1d0
+#define SELECT_COUNT        0x65
+#define SELECT_LIST         0x66
 
-// Every `lbz`/`stb` at Air Ride select base +0x7a, the row-layout flag.
+// The flags vanilla keeps just past a screen's list - Air Ride's row-layout flag at +0x7a
+// and debug-grid flag at +0x7b, City Trial's debug-grid flag at +0x7a - move into the
+// bytes at +0x11, which no engine code reads, so the list can grow over the ones they
+// vacate.
+#define AIRRIDE_ROWSPLIT_OFF  0x11
+#define AIRRIDE_DEBUGGRID_OFF 0x12
+#define CITY_DEBUGGRID_OFF    0x11
+
+// What a rebuild clears: the vanilla list and the flag bytes past it. An icon past this
+// span lands on the per-slot controller-claim arrays that follow.
+#define AIRRIDE_LIST_SPAN 22
+#define CITY_LIST_SPAN    21
+
+// Every `lbz`/`stb` of a flag relative to its screen's select block.
 static const u32 stc_airride_rowsplit_sites[] = {
-    0x80020b04, 0x80020b4c, 0x80020b98, 0x800214a4,
     0x80027f60, 0x800285c8, 0x80028818, 0x80028970, 0x80029c7c,
 };
-
-// The same at +0x7b, Air Ride's debug-grid flag. The site in
-// AirRide_PopulateSelectIcons is in the part this file replaces, and moves only so
-// the vanilla function stays self-consistent if it is ever reached.
 static const u32 stc_airride_debuggrid_sites[] = {
-    0x80020a88, 0x8002881c, 0x8002895c, 0x80028968, 0x80029c64, 0x80029c70,
+    0x8002881c, 0x8002895c, 0x80028968, 0x80029c64, 0x80029c70,
 };
-
-// City Trial's debug-grid flag at its own base +0x7a.
 static const u32 stc_city_debuggrid_sites[] = {
     0x8002e444, 0x80038d00, 0x8003a150, 0x8003a15c, 0x8003ac3c, 0x8003ac48,
 };
 
-// Icons the widened lists and the layout below can carry, which City Trial's
-// headroom decides for both screens. The engine's cursor navigation is built for
-// two rows, so the extra icons are absorbed by tightening the rows rather than
-// adding a third.
-#define SELECT_ICON_MAX 33
+// The debug-grid flags reached from GameData itself: the colour changers' unlock bypass,
+// CSS_airRide_colorChanger and CitySelect_ChangeColor, and CitySelect_LoadCityTrial's clear.
+static const u32 stc_airride_debuggrid_gamedata_sites[] = { 0x800216d8 };
+static const u32 stc_city_debuggrid_gamedata_sites[] = { 0x8002f2bc, 0x80038d98 };
 
-// Anchor joints each screen's ipos model ships with, and so the icons the engine
-// can pose by itself.
-#define ANCHOR_NUM 20
+// Positions of the icons past the anchor strip. The ipos userdata's position array ends
+// flush against the shared scale, so these are held here instead of extending it.
+static Vec3 stc_airride_extra[SELECT_ICON_MAX - SELECT_ICON_ANCHOR_NUM];
+static Vec3 stc_city_extra[SELECT_ICON_MAX - SELECT_ICON_ANCHOR_NUM];
 
-// Both screens keep the icons they offer in the same shape at their own base in
-// GameData: a count, then one CharacterKind per icon. City Trial's base arrives in
-// a register; Air Ride's is a fixed offset.
-#define AIRRIDE_SELECT_BASE 0x10a
-#define SELECT_COUNT        0x65
-#define SELECT_LIST         0x66
-
-// Columns per row before this mod widens the grid, and so also the count at which
-// a drawn row is full and the icons wrap to two.
-#define VANILLA_GRID_COLS 10
-
-// ipos GObj userdata: one Vec3 per icon at +0x60, then the scale every icon shares
-// and the icon count - in the opposite order on the two screens, so the scale's
-// offset is all the layout below has to name.
-#define IPOS_POSITIONS 0x60
-
-// Where an icon sits, in columns from the left edge of the block the two rows
-// span. The top row is ceil(N/2) columns wide; the bottom row holds the rest and
-// starts half a column in, so the rows interleave.
-typedef struct IconLayout
-{
-    int scale_off; // ipos userdata offset of the shared icon scale
-    // Icons past the anchor strip. The userdata's position array ends flush against
-    // the shared scale, so these are held here instead of extending it.
-    Vec3 extra[SELECT_ICON_MAX - ANCHOR_NUM];
-} IconLayout;
-
-static IconLayout stc_airride = { 0x150 };
-static IconLayout stc_city = { 0x154 };
-
-// Columns from the block's left edge to its right, which is what the spacing has
-// to divide to keep a count inside half_width.
+// Where an icon sits, in columns from the left edge of the block the two rows span. The
+// top row is ceil(N/2) columns wide; the bottom row holds the rest and starts half a
+// column in, so the rows interleave. This is what the spacing has to divide to keep a
+// count inside the block.
 static float RowSpread(int count)
 {
     int top = (count + 1) / 2;
@@ -91,47 +69,39 @@ static float RowSpread(int count)
 }
 
 // Redo the whole grid arithmetically, for the counts the anchor animation has no key
-// for; up to 20 the engine's own pass has already run.
-//
-// The block the rows span is measured off the strip the engine just posed rather
-// than named as a constant: Air Ride hangs its twenty anchors under a joint the
-// layout animation scales, so an authored coordinate is not the one that reaches the
-// position array, while City Trial's anchors carry that scale themselves. Past
-// twenty the animation holds its twenty-icon pose.
-static void Relayout(IconLayout *lay, int count, GOBJ *ipos)
+// for; up to 20 the engine's own pass has already run. The block the rows span is
+// measured off the strip the engine just posed, because Air Ride hangs its anchors
+// under a joint the layout animation scales; past twenty that animation holds its
+// twenty-icon pose, so the strip always arrives in that layout.
+static void Relayout(Vec3 *extra, int count, Vec3 *pos, Vec3 *scale)
 {
-    Vec3 *pos;
-    Vec3 *scale;
     float left, right, half, centre, top_y, bottom_y, z;
     float spread, step, shrink;
     int top;
 
-    if (ipos == NULL || count <= ANCHOR_NUM)
+    if (count <= SELECT_ICON_ANCHOR_NUM)
         return;
     if (count > SELECT_ICON_MAX)
         count = SELECT_ICON_MAX;
 
-    pos = (Vec3 *)((u8 *)ipos->userdata + IPOS_POSITIONS);
-    scale = (Vec3 *)((u8 *)ipos->userdata + lay->scale_off);
-
     // The bottom row starts half a column in and so ends half a column past the
     // top row, putting the block's right edge on the last icon of the strip.
     left = pos[0].X;
-    right = pos[ANCHOR_NUM - 1].X;
+    right = pos[SELECT_ICON_ANCHOR_NUM - 1].X;
     half = (right - left) * 0.5f;
     centre = (right + left) * 0.5f;
     top_y = pos[0].Y;
-    bottom_y = pos[ANCHOR_NUM / 2].Y;
+    bottom_y = pos[SELECT_ICON_ANCHOR_NUM / 2].Y;
     z = pos[0].Z;
 
     spread = RowSpread(count);
     step = 2.0f * half / spread;
-    shrink = RowSpread(ANCHOR_NUM) / spread;
+    shrink = RowSpread(SELECT_ICON_ANCHOR_NUM) / spread;
     top = (count + 1) / 2;
 
     for (int i = 0; i < count; i++)
     {
-        Vec3 *p = (i < ANCHOR_NUM) ? &pos[i] : &lay->extra[i - ANCHOR_NUM];
+        Vec3 *p = (i < SELECT_ICON_ANCHOR_NUM) ? &pos[i] : &extra[i - SELECT_ICON_ANCHOR_NUM];
         int col = (i < top) ? i : i - top;
 
         p->X = centre - half + step * (float)col + ((i < top) ? 0.0f : step * 0.5f);
@@ -144,71 +114,75 @@ static void Relayout(IconLayout *lay, int count, GOBJ *ipos)
     scale->Y *= shrink;
 }
 
-static void GetIconPos(IconLayout *lay, GOBJ *ipos, s8 index, Vec3 *out)
+static void GetIconPos(const Vec3 *extra, const Vec3 *pos, s8 index, Vec3 *out)
 {
-    if (ipos == NULL || index < 0 || index >= SELECT_ICON_MAX)
+    if (index < 0 || index >= SELECT_ICON_MAX)
         return;
-    if (index >= ANCHOR_NUM)
-        *out = lay->extra[index - ANCHOR_NUM];
-    else
-        *out = ((Vec3 *)((u8 *)ipos->userdata + IPOS_POSITIONS))[index];
+    *out = index >= SELECT_ICON_ANCHOR_NUM ? extra[index - SELECT_ICON_ANCHOR_NUM] : pos[index];
 }
 
 static void AirRideLayoutIcons(s8 count)
 {
+    GOBJ *ipos = Gm_GetMenuData()->airride_select.ipos_gobj;
+
     _AirRideSelect_LayoutIcons(count);
-    Relayout(&stc_airride, count, Gm_GetMenuData()->airride_select.ipos_gobj);
+    if (ipos != NULL)
+    {
+        AirRideSelectIposData *data = ipos->userdata;
+        Relayout(stc_airride_extra, count, data->pos, &data->scale);
+    }
 }
 
 static void AirRideGetIconPos(s8 index, Vec3 *out)
 {
-    GetIconPos(&stc_airride, Gm_GetMenuData()->airride_select.ipos_gobj, index, out);
+    GOBJ *ipos = Gm_GetMenuData()->airride_select.ipos_gobj;
+
+    if (ipos != NULL)
+        GetIconPos(stc_airride_extra, ((AirRideSelectIposData *)ipos->userdata)->pos, index, out);
 }
 
 static void CityLayoutIcons(s8 count)
 {
+    GOBJ *ipos = Gm_GetMenuData()->city_select.ipos_gobj;
+
     _CitySelect_LayoutMachineIcons(count);
-    Relayout(&stc_city, count, Gm_GetMenuData()->city_select.ipos_gobj);
+    if (ipos != NULL)
+    {
+        CitySelectIposData *data = ipos->userdata;
+        Relayout(stc_city_extra, count, data->pos, &data->scale);
+    }
 }
 
 static void CityGetIconPos(s8 index, Vec3 *out)
 {
-    GetIconPos(&stc_city, Gm_GetMenuData()->city_select.ipos_gobj, index, out);
+    GOBJ *ipos = Gm_GetMenuData()->city_select.ipos_gobj;
+
+    if (ipos != NULL)
+        GetIconPos(stc_city_extra, ((CitySelectIposData *)ipos->userdata)->pos, index, out);
 }
 
 // Each screen's array of icon GObjs holds 20 pointers and its writer indexes it
 // unguarded, so an icon past the strip walks into the scene-model pointers that
 // follow it. Both writers end in the same `extsb`/`slwi`/`add`/`stw` before the
-// epilogue, so the store is taken over here and appended indices go to storage of
-// our own. Nothing reads either array.
-static GOBJ *stc_extra_icon[2][SELECT_ICON_MAX - ANCHOR_NUM];
-
-static void StoreIcon(int screen, int index, GOBJ *gobj, u8 *table_base)
+// epilogue, so the store is taken over here and an appended index is dropped.
+// Nothing reads either array.
+static void StoreAirRideIcon(int index, GOBJ *gobj)
 {
-    if (index < 0 || index >= SELECT_ICON_MAX)
-        return;
-    if (index < ANCHOR_NUM)
-        ((GOBJ **)(table_base + 4))[index] = gobj;
-    else
-        stc_extra_icon[screen][index - ANCHOR_NUM] = gobj;
+    if (index >= 0 && index < SELECT_ICON_ANCHOR_NUM)
+        Gm_GetMenuData()->airride_select.sicon_gobj[index] = gobj;
 }
 
-static void StoreAirRideIcon(int index, GOBJ *gobj, u8 *table_base)
+static void StoreCityIcon(int index, GOBJ *gobj)
 {
-    StoreIcon(0, index, gobj, table_base);
+    if (index >= 0 && index < SELECT_ICON_ANCHOR_NUM)
+        Gm_GetMenuData()->city_select.sicon_gobj[index] = gobj;
 }
 
-static void StoreCityIcon(int index, GOBJ *gobj, u8 *table_base)
-{
-    StoreIcon(1, index, gobj, table_base);
-}
-
-// r28 is the icon index, r30 the GObj, r31 the array's base less four. Exiting past
-// the store leaves the engine's own epilogue to run.
+// r28 is the icon index and r30 the GObj. Exiting past the store leaves the engine's own
+// epilogue to run.
 CODEPATCH_HOOKCREATE(0x8015181c,
     "extsb 3, 28\n\t"
-    "mr 4, 30\n\t"
-    "mr 5, 31\n\t",
+    "mr 4, 30\n\t",
     StoreAirRideIcon,
     "",
     0x8015182c
@@ -216,8 +190,7 @@ CODEPATCH_HOOKCREATE(0x8015181c,
 
 CODEPATCH_HOOKCREATE(0x8015c2dc,
     "extsb 3, 28\n\t"
-    "mr 4, 30\n\t"
-    "mr 5, 31\n\t",
+    "mr 4, 30\n\t",
     StoreCityIcon,
     "",
     0x8015c2ec
@@ -225,7 +198,7 @@ CODEPATCH_HOOKCREATE(0x8015c2dc,
 
 static CustomMachineAvailabilityFilter stc_filter;
 
-void CustomMachineSelect_SetAvailabilityFilter(CustomMachineAvailabilityFilter filter)
+void CustomMachineSelectScreen_SetAvailabilityFilter(CustomMachineAvailabilityFilter filter)
 {
     stc_filter = filter;
 }
@@ -243,10 +216,10 @@ static int CityDefaultAvailable(int ckind)
 
     switch (ckind)
     {
-    case CKIND_DRAGOON:    reward = 30; break;
-    case CKIND_HYDRA:      reward = 34; break;
-    case CKIND_DEDEDE:     reward = 35; break;
-    case CKIND_METAKNIGHT: reward = 36; break;
+    case CKIND_DRAGOON:    reward = CITYTRIAL_REWARD_DRAGOON; break;
+    case CKIND_HYDRA:      reward = CITYTRIAL_REWARD_HYDRA; break;
+    case CKIND_DEDEDE:     reward = CITYTRIAL_REWARD_DEDEDE; break;
+    case CKIND_METAKNIGHT: reward = CITYTRIAL_REWARD_METAKNIGHT; break;
     default:               return 1;
     }
 
@@ -289,16 +262,16 @@ static int CountAvailable(int is_city)
 // the icons fit on one drawn row and from the grid otherwise; City Trial always uses
 // the grid. `show_all` is Air Ride's debug grid, which offers every character, gated
 // or not - but still not the sentinel, which has no icon frame. Returns the count.
-static int PackSelectList(u8 *base, int is_city, int allow_single_row, int show_all)
+static int PackSelectList(u8 *base, int span, int is_city, int allow_single_row, int show_all)
 {
-    int cols = CustomMachineCharacter_GetGridCols();
+    int cols = CustomMachineCharacterRegistry_GetGridCols();
     int ceiling = CustomMachines_GetCharacterKindCeiling();
     int n = 0;
 
-    for (int i = 0; i < SELECT_ICON_MAX; i++)
+    for (int i = 0; i < span; i++)
         base[SELECT_LIST + i] = 0;
 
-    if (!show_all && allow_single_row && CountAvailable(is_city) < VANILLA_GRID_COLS)
+    if (!show_all && allow_single_row && CountAvailable(is_city) < SELICON_GRID_COLS)
     {
         for (int i = 0; i < ceiling && n < SELECT_ICON_MAX; i++)
         {
@@ -309,7 +282,7 @@ static int PackSelectList(u8 *base, int is_city, int allow_single_row, int show_
     }
     else
     {
-        for (int row = 0; row < 2 && n < SELECT_ICON_MAX; row++)
+        for (int row = 0; row < SELICON_GRID_ROWS && n < SELECT_ICON_MAX; row++)
         {
             for (int col = 0; col < cols && n < SELECT_ICON_MAX; col++)
             {
@@ -326,12 +299,13 @@ static int PackSelectList(u8 *base, int is_city, int allow_single_row, int show_
     return n;
 }
 
-// Replaces the count store that opens the tail of CitySelect_CreateMachineIcons,
-// which flat-copies two 10-byte packing rows into the screen's list. The count goes
-// back in r27 for the store this hook displaced.
+// Replaces the count store that opens the tail of CitySelect_CreateMachineIcons, with
+// r30 the City Trial select block: packs the list, lays it out and creates the icons,
+// then exits past the vanilla flat copy and icon loop. The count goes back in r27 for
+// the store this hook displaced.
 static int FillCityIcons(u8 *base)
 {
-    int n = PackSelectList(base, 1, 0, 0);
+    int n = PackSelectList(base, CITY_LIST_SPAN, 1, 0, 0);
 
     CitySelect_LayoutMachineIcons((s8)n);
     for (int i = 0; i < n; i++)
@@ -339,10 +313,12 @@ static int FillCityIcons(u8 *base)
     return n;
 }
 
-static int CountCityAvailable(void)
-{
-    return CountAvailable(1);
-}
+CODEPATCH_HOOKCREATE(0x8002f0b8,
+    "mr 3, 30\n\t",
+    FillCityIcons,
+    "mr 27, 3\n\t",
+    0x8002f220
+)
 
 // Replaces AirRide_PopulateSelectIcons, whose grid pass packs into two 10-byte stack
 // rows and then rebalances them assuming the vanilla grid's fixed positions for the
@@ -351,71 +327,30 @@ static void PopulateAirRideIcons(void)
 {
     u8 *base = (u8 *)Gm_GetGameData() + AIRRIDE_SELECT_BASE;
     int debug_grid = base[AIRRIDE_DEBUGGRID_OFF] && *stc_dblevel > DB_DEBUG_DEVELOP;
-    int n = PackSelectList(base, 0, 1, debug_grid);
+    int n = PackSelectList(base, AIRRIDE_LIST_SPAN, 0, 1, debug_grid);
 
-    CustomMachineSelect_SetAirRideRowSplit(base, n >= VANILLA_GRID_COLS);
+    base[AIRRIDE_ROWSPLIT_OFF] = n >= SELICON_GRID_COLS;
 
     AirRideSelect_LayoutIcons((s8)n);
     for (int i = 0; i < n; i++)
         AirRideSelect_CreateSIcon((s8)base[SELECT_LIST + i], (s8)i);
 }
 
-// Mode 1 (Stadium) and mode 2 (Free Run) counting passes of
-// CitySelect_CreateMachineIcons. Result -> r27; exit past the loop where the mode is
-// rechecked before the array-building pass. The clobbered `li r24, 0` at the mode 2
-// site is harmless - r24 is unused after the loop this skips.
-CODEPATCH_HOOKCREATE(0x8002e4d0,
-    "",
-    CountCityAvailable,
-    "mr 27, 3\n\t",
-    0x8002e670
-)
-
-CODEPATCH_HOOKCREATE(0x8002e5c0,
-    "",
-    CountCityAvailable,
-    "mr 27, 3\n\t",
-    0x8002e670
-)
-
-// Tail of CitySelect_CreateMachineIcons. r30 = the City Trial select base; exit past
-// the flat copy and the icon loop, both of which this replaces.
-CODEPATCH_HOOKCREATE(0x8002f0b8,
-    "mr 3, 30\n\t",
-    FillCityIcons,
-    "mr 27, 3\n\t",
-    0x8002f220
-)
-
-int CustomMachineSelect_GetIconMax(void)
-{
-    return SELECT_ICON_MAX;
-}
-
-void CustomMachineSelect_SetAirRideRowSplit(void *select_base, int two_rows)
-{
-    ((u8 *)select_base)[AIRRIDE_ROWSPLIT_OFF] = (u8)(two_rows ? 1 : 0);
-}
-
-static void MoveFlag(const u32 *sites, int num, u32 offset)
+static void MoveFlags(const u32 *sites, int num, u32 offset)
 {
     for (int i = 0; i < num; i++)
-        CODEPATCH_REPLACEINSTRUCTION(sites[i], (*(u32 *)sites[i] & 0xFFFF0000) | offset);
+        CustomMachines_SetImmediate(sites[i], offset);
 }
 
-#define MOVE_FLAG(sites, off) MoveFlag(sites, sizeof(sites) / sizeof(u32), off)
+#define MOVE_FLAGS(sites, off) MoveFlags(sites, sizeof(sites) / sizeof(sites[0]), off)
 
-void CustomMachineSelect_OnBoot(void)
+void CustomMachineSelectScreen_OnBoot(void)
 {
-    MOVE_FLAG(stc_airride_rowsplit_sites, AIRRIDE_ROWSPLIT_OFF);
-    MOVE_FLAG(stc_airride_debuggrid_sites, AIRRIDE_DEBUGGRID_OFF);
-    MOVE_FLAG(stc_city_debuggrid_sites, CITY_DEBUGGRID_OFF);
-
-    // AirRide_CheckCharacterAvailable switches on a 20-entry jump table and reaches
-    // the checklist query with an uninitialised reward index for anything past it.
-    // Send appended characters to the `return 1` arm instead; a gating mod replaces
-    // the whole function and never runs this.
-    CODEPATCH_REPLACEINSTRUCTION(0x80020924, (*(u32 *)0x80020924 & 0xFFFF0000) | 0x24);
+    MOVE_FLAGS(stc_airride_rowsplit_sites, AIRRIDE_ROWSPLIT_OFF);
+    MOVE_FLAGS(stc_airride_debuggrid_sites, AIRRIDE_DEBUGGRID_OFF);
+    MOVE_FLAGS(stc_city_debuggrid_sites, CITY_DEBUGGRID_OFF);
+    MOVE_FLAGS(stc_airride_debuggrid_gamedata_sites, AIRRIDE_SELECT_BASE + AIRRIDE_DEBUGGRID_OFF);
+    MOVE_FLAGS(stc_city_debuggrid_gamedata_sites, CITY_SELECT_BASE + CITY_DEBUGGRID_OFF);
 
     CODEPATCH_REPLACEFUNC(AirRideSelect_LayoutIcons, AirRideLayoutIcons);
     CODEPATCH_REPLACEFUNC(AirRideSelect_GetIconPos, AirRideGetIconPos);
@@ -426,17 +361,14 @@ void CustomMachineSelect_OnBoot(void)
 
     CODEPATCH_HOOKAPPLY(0x8015181c);  // Air Ride icon-GObj store
     CODEPATCH_HOOKAPPLY(0x8015c2dc);  // City Trial icon-GObj store
-
-    CODEPATCH_HOOKAPPLY(0x8002e4d0);  // CT Stadium (mode 1) counting pass
-    CODEPATCH_HOOKAPPLY(0x8002e5c0);  // CT Free Run (mode 2) counting pass
     CODEPATCH_HOOKAPPLY(0x8002f0b8);  // CT select list, layout and icons
 
-    // The two array-building passes now have nothing to build: skip each straight to
-    // the tail above, which also skips the reorder between them. That reorder assumes
-    // vanilla's grid iteration (special characters at fixed col 0/9) and produces
-    // duplicate icons on a packed list.
-    CODEPATCH_REPLACEINSTRUCTION(0x8002e67c, 0x48000a3c);  // b 0x8002f0b8
-    CODEPATCH_REPLACEINSTRUCTION(0x8002e738, 0x48000980);  // b 0x8002f0b8
+    // CitySelect_CreateMachineIcons' Stadium and Free Run passes count the roster and
+    // pack the vanilla grid, then reorder it assuming the special characters sit at
+    // columns 0 and 9, which duplicates icons on a packed list. Both branch straight to
+    // the tail above instead.
+    CODEPATCH_REPLACEINSTRUCTION(0x8002e4d0, 0x48000be8);  // b 0x8002f0b8
+    CODEPATCH_REPLACEINSTRUCTION(0x8002e5c0, 0x48000af8);  // b 0x8002f0b8
 
     // CitySelect_Cursor1InputThink splits cursor rows at num>=10 (`cmpwi r3, 9; ble`),
     // but the grid renderer keeps up to 10 icons on one drawn row and only wraps at

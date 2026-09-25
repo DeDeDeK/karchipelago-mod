@@ -15,14 +15,10 @@
 #define MOON_PI      3.14159265358979f
 #define MOON_DEG2RAD (MOON_PI / 180.0f)
 
-// Anchored along the sky direction from the camera eye (no parallax), with the
-// distance clamped inside the backdrop dome - a depth-writing sphere at the world
-// origin that would otherwise occlude the moon. Apparent size is referenced to
-// MOON_REF_DIST so it holds constant as the distance is clamped.
+// Anchored along the sky direction from the camera eye, so there is no parallax
+// swim and apparent elevation is consistent.
 #define MOON_MAX_DIST   1800.0f  // desired anchor distance from the eye
-#define MOON_REF_DIST   1800.0f  // r == stc_size at this distance (sets apparent size)
 #define MOON_FAR_FRAC   0.85f    // never exceed this fraction of the camera far plane
-#define MOON_DOME_R     2500.0f  // CT backdrop dome radius (geometry ~2856 * stage scale)
 #define MOON_DOME_FRAC  0.82f    // keep the moon within this fraction of the dome distance
 
 #define MOON_BANDS        28
@@ -47,11 +43,8 @@
 #define MOON_CRATER_SHADE  0.58f  // crater RGB = disc RGB * this
 #define MOON_CRATER_ALPHA  95     // crater opacity over the disc
 
-// Disc render GObj, drawn first on the XLU sub-pass so the cloud deck blends over it.
 #define MOON_GOBJ_CLASS  207
 #define MOON_GOBJ_PLINK  31
-#define MOON_GX_LINK     0
-#define MOON_GX_PRI      0
 
 #define MOON_LOBJ_GOBJ_CLASS  39
 #define MOON_LOBJ_GOBJ_PLINK  33
@@ -73,9 +66,7 @@ static GXColor stc_light_color = {120, 140, 195, 255};
 static Vec3 stc_crater[MOON_CRATERS];
 static int  stc_crater_seeded = 0;
 
-// Menu knobs layered over the active preset. Moon {Preset,Off,On} gates the whole
-// feature; the rest override appearance/arc/phase.
-static char *show_names[] = {"Preset", "Off", "On"};
+// Index 0 ("Preset") is the pass-through value on every knob below.
 static int   show_index = 0;
 
 static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
@@ -109,39 +100,18 @@ static char *color_names[] = {"Preset", "White", "Silver", "Blue", "Amber"};
 #define MOON_COLOR_NUM ((int)(sizeof(color_overrides) / sizeof(color_overrides[0])))
 static int color_index = 0;
 
-static char *light_names[] = {"Preset", "Off", "On"};
 static int   light_index = 0;
 
 static void Moon_GX(GOBJ *g, int pass);
 
-static HSD_Fog *MoonLiveFog(void)
-{
-    GrObj *gr = *stc_grobj;
-    if (!gr || !gr->sky_gobj)
-        return NULL;
-    return (HSD_Fog *)gr->sky_gobj->hsd_object;
-}
-
-// Normalized round progress 0 (start) .. 1 (end) from the CT match timer; no timer
-// (menus, non-city, match intro) holds the moon at its rise point.
-static float MoonProgress(void)
-{
-    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (!info)
-        return 0.0f;
-    if (info->flags_x2a8 & 0x40) // is_match_intro
-        return 0.0f;
-    float p = info->match_progress;
-    if (p < 0.0f) p = 0.0f;
-    if (p > 1.0f) p = 1.0f;
-    return p;
-}
-
 // Sky direction at the current progress: rises at `stc_bearing`, peaks at `stc_arc`
 // elevation mid-round, sets at the opposite bearing. Below the horizon dir.Y <= 0.
+// No live round holds the moon at its rise point.
 static void MoonDirection(Vec3 *out)
 {
-    float p = MoonProgress();
+    float p = Weather_RoundProgress();
+    if (p < 0.0f)
+        p = 0.0f;
     float el = stc_arc * sinf(p * MOON_PI) * MOON_DEG2RAD;
     float az = (stc_bearing + 180.0f * p) * MOON_DEG2RAD;
     float ce = cosf(el), se = sinf(el);
@@ -150,7 +120,6 @@ static void MoonDirection(Vec3 *out)
     out->Z = ce * cosf(az);
 }
 
-// Effective phase (menu override wins over the preset).
 static int MoonPhaseNow(void)
 {
     return (phase_index > 0) ? (phase_index - 1) : stc_phase;
@@ -240,19 +209,8 @@ static void SeedCraters(void)
     stc_crater_seeded = 1;
 }
 
-// Emit one billboard vertex: P + u*right + v*up, flat color.
-static void MoonVert(const Vec3 *P, const Vec3 *R, const Vec3 *U, float u, float v,
-                     u8 cr, u8 cg, u8 cb, u8 ca)
-{
-    GXPosition3f32(P->X + u * R->X + v * U->X,
-                   P->Y + u * R->Y + v * U->Y,
-                   P->Z + u * R->Z + v * U->Z);
-    GXColor4u8(cr, cg, cb, ca);
-}
-
-// GX callback on the world camera link, XLU pass. Draws a camera-facing disc
-// fog-free (bracketed HSD_FogSet) so the distant disc isn't washed to fog color,
-// depth-tested but not depth-writing so terrain occludes it.
+// GX callback on the world camera link, XLU pass. The disc draws fog-free
+// (bracketed HSD_FogSet) so it is not washed to the fog color at this distance.
 static void Moon_GX(GOBJ *g, int pass)
 {
     (void)g;
@@ -277,39 +235,24 @@ static void Moon_GX(GOBJ *g, int pass)
     int side;
     PhaseParams(phase, &k, &side);
 
-    // Rows 0/1 of the world->view rotation are the camera axes in world space,
-    // giving the billboard basis.
+    // Rows 0/1 of the world->view rotation are the billboard basis.
     float (*m)[4] = cam->view_mtx;
     Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
     Vec3 upW = {m[1][0], m[1][1], m[1][2]};
 
-    // Camera eye in world space, eye = -R^T * t.
-    Vec3 eye = {
-        -(m[0][0] * m[0][3] + m[1][0] * m[1][3] + m[2][0] * m[2][3]),
-        -(m[0][1] * m[0][3] + m[1][1] * m[1][3] + m[2][1] * m[2][3]),
-        -(m[0][2] * m[0][3] + m[1][2] * m[1][3] + m[2][2] * m[2][3]),
-    };
-
-    // Distance from the eye to the backdrop dome (sphere at the origin) along the
-    // sky direction.
-    float edotd = eye.X * dir.X + eye.Y * dir.Y + eye.Z * dir.Z;
+    Vec3 eye;
+    WeatherGX_CameraEye(cam, &eye);
     float e2 = eye.X * eye.X + eye.Y * eye.Y + eye.Z * eye.Z;
-    float disc = edotd * edotd + MOON_DOME_R * MOON_DOME_R - e2;
-    float t_dome = (disc > 0.0f) ? (-edotd + sqrtf(disc)) : MOON_DOME_R;
 
-    // Anchor at the smallest of the desired distance, a fraction of the dome
-    // distance, and a fraction of the far plane.
-    float dist = MOON_MAX_DIST;
-    float lim = MOON_DOME_FRAC * t_dome;
-    if (dist > lim)
-        dist = lim;
-    float maxd = cam->far * MOON_FAR_FRAC;
-    if (dist > maxd)
-        dist = maxd;
-    Vec3 P = {eye.X + dir.X * dist, eye.Y + dir.Y * dist, eye.Z + dir.Z * dist};
+    Vec3 P;
+    float dist = WeatherGX_PlaceOnDome(&dir, &eye, e2, MOON_MAX_DIST, MOON_DOME_FRAC,
+                                       cam->far * MOON_FAR_FRAC, &P);
 
     // Apparent size stays constant as the distance is clamped.
-    float r = stc_size * size_factors[size_index] * MOON_SIZE_SCALE * (dist / MOON_REF_DIST);
+    float r = stc_size * size_factors[size_index] * MOON_SIZE_SCALE
+              * (dist / WEATHER_DOME_REF_DIST);
+    if (r <= 0.0f)
+        return;
 
     float bf = bright_factors[bright_index];
     int rr = (int)(stc_color.r * bf); if (rr > 255) rr = 255;
@@ -317,11 +260,11 @@ static void Moon_GX(GOBJ *g, int pass)
     int bb = (int)(stc_color.b * bf); if (bb > 255) bb = 255;
     u8 dR = (u8)rr, dG = (u8)gg, dB = (u8)bb, dA = stc_color.a;
 
-    HSD_Fog *fog = MoonLiveFog();
+    HSD_Fog *fog = Weather_LiveFog();
 
     WeatherGX_BeginXlu(cam, 0, 0);
     if (fog)
-        HSD_FogSet(NULL); // draw the distant moon fog-free
+        HSD_FogSet(NULL);
 
     // Scanline bands over the lit extent, each split into columns so the radial
     // soft-edge alpha blends the rim.
@@ -343,8 +286,8 @@ static void Moon_GX(GOBJ *g, int pass)
             float u1 = uL1 + (uR1 - uL1) * f;
             u8 a0 = (u8)(dA * MoonRimFade(u0, v0, r));
             u8 a1 = (u8)(dA * MoonRimFade(u1, v1, r));
-            MoonVert(&P, &rightW, &upW, u0, v0, dR, dG, dB, a0);
-            MoonVert(&P, &rightW, &upW, u1, v1, dR, dG, dB, a1);
+            WeatherGX_BillboardVert(&P, &rightW, &upW, u0, v0, dR, dG, dB, a0);
+            WeatherGX_BillboardVert(&P, &rightW, &upW, u1, v1, dR, dG, dB, a1);
         }
     }
 
@@ -361,12 +304,12 @@ static void Moon_GX(GOBJ *g, int pass)
             continue;
 
         GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, MOON_CRATER_SEGS + 2);
-        MoonVert(&P, &rightW, &upW, cu, cv, kR, kG, kB, kA);
+        WeatherGX_BillboardVert(&P, &rightW, &upW, cu, cv, kR, kG, kB, kA);
         for (int s = 0; s <= MOON_CRATER_SEGS; s++)
         {
             float a = 2.0f * MOON_PI * (float)s / (float)MOON_CRATER_SEGS;
-            MoonVert(&P, &rightW, &upW, cu + cosf(a) * crad, cv + sinf(a) * crad,
-                     kR, kG, kB, kA);
+            WeatherGX_BillboardVert(&P, &rightW, &upW, cu + cosf(a) * crad,
+                                    cv + sinf(a) * crad, kR, kG, kB, kA);
         }
     }
 
@@ -379,9 +322,7 @@ static void Moon_EnsureRender(void)
 {
     if (stc_moon_gobj)
         return;
-    stc_moon_gobj = WeatherGX_EnsureLayer(MOON_GOBJ_CLASS, MOON_GOBJ_PLINK, Moon_GX,
-                                          MOON_GX_LINK, MOON_GX_PRI,
-                                          "[Moon] Moon layer");
+    stc_moon_gobj = WeatherGX_EnsureLayer(MOON_GOBJ_CLASS, MOON_GOBJ_PLINK, Moon_GX, "Moon");
 }
 
 // Directional (INFINITE) moonlight. An INFINITE LOBJ uses only its position vector
@@ -404,18 +345,11 @@ static LObjDesc s_moon_lobj_desc = {
 };
 static LOBJ *s_moon_lobj = 0;
 
-// The secondary INFINITE stage light, zeroed while the moonlight is on so the moon
-// dominates (the primary sun *stc_main_light drives the weather runtime's terrain
-// tint). Cached so it can be restored.
+// City Trial carries two distant INFINITE lights. *stc_main_light is left alone -
+// the weather runtime's terrain tint owns it - so this module owns only the
+// secondary, zeroing it while the moonlight is on and caching it for restore.
 static LOBJ  *s_sup_lobj = 0;
 static GXColor s_sup_color, s_sup_hw;
-
-static int MoonLightOn(void)
-{
-    if (light_index == 1) return 0; // menu Off
-    if (light_index == 2) return 1; // menu On (force)
-    return stc_light;               // Preset
-}
 
 static void MoonLight_Ensure(void)
 {
@@ -427,7 +361,14 @@ static void MoonLight_Ensure(void)
     s_moon_lobj = LObj_LoadDesc(&s_moon_lobj_desc);
     if (!s_moon_lobj)
     {
-        OSReport("[Moon] Moonlight LOBJ failed to load\n");
+        // Destroying the carrier keeps the per-frame retry from orphaning a GObj.
+        GObj_Destroy(gobj);
+        static int load_warned = 0;
+        if (!load_warned)
+        {
+            OSReport("[Moon] Moonlight LOBJ failed to load\n");
+            load_warned = 1;
+        }
         return;
     }
     GObj_AddObject(gobj, HSD_OBJKIND_LOBJ, s_moon_lobj);
@@ -442,9 +383,8 @@ static void MoonLight_Zero(void)
     s_moon_lobj->hw_color.r = s_moon_lobj->hw_color.g = s_moon_lobj->hw_color.b = 0;
 }
 
-// Zero the secondary INFINITE stage light, found via the HW slot table and cached
-// on first touch. The slot table lags a frame, so this may resolve nothing and retry.
-static void SuppressSecondary(void)
+// The HW slot table lags a frame, so this may resolve nothing and retry.
+static void Moon_SuppressStageLight(void)
 {
     if (s_sup_lobj)
     {
@@ -469,8 +409,7 @@ static void SuppressSecondary(void)
     }
 }
 
-// Restore the suppressed light to its cached original; no-op if nothing was suppressed.
-static void RestoreSecondary(void)
+static void Moon_RestoreStageLight(void)
 {
     if (s_sup_lobj)
     {
@@ -482,10 +421,11 @@ static void RestoreSecondary(void)
 
 static void MoonLight_Tick(void)
 {
-    if (!MoonLightOn())
+    // A new moon draws no disc, so it casts no light either.
+    if (!WeatherToggle(light_index, stc_light) || MoonPhaseNow() == MOON_NEW)
     {
         MoonLight_Zero();
-        RestoreSecondary();
+        Moon_RestoreStageLight();
         return;
     }
     MoonLight_Ensure();
@@ -495,7 +435,7 @@ static void MoonLight_Tick(void)
     if (dir.Y <= 0.0f) // moon down: let the normal sun light the scene
     {
         MoonLight_Zero();
-        RestoreSecondary();
+        Moon_RestoreStageLight();
         return;
     }
 
@@ -513,26 +453,16 @@ static void MoonLight_Tick(void)
         s_moon_lobj->color.a = 0xFF;
         s_moon_lobj->hw_color = s_moon_lobj->color;
     }
-    SuppressSecondary();
+    Moon_SuppressStageLight();
 }
 
-// Latch the active preset's moon config, resolving each 0 field to its module
-// default and applying the menu overrides.
 void Moon_SetActive(const MoonDef *def)
 {
-    if (show_index == 1) // menu Off
+    if (!WeatherToggle(show_index, def && def->enabled))
     {
         stc_active = 0;
         MoonLight_Zero();
-        RestoreSecondary();
-        return;
-    }
-    int on = (def && def->enabled) || (show_index == 2);
-    if (!on)
-    {
-        stc_active = 0;
-        MoonLight_Zero();
-        RestoreSecondary();
+        Moon_RestoreStageLight();
         return;
     }
     stc_active = 1;
@@ -556,9 +486,8 @@ void Moon_SetActive(const MoonDef *def)
     stc_light_color = GXColor_Unpack((def && def->light_color) ? def->light_color
                                                               : MOON_DEF_LIGHT_COLOR);
 
-    // Restore the old preset's suppressed light and drop the cache so the new
-    // preset re-resolves it next tick.
-    RestoreSecondary();
+    // Drop the old preset's suppressed light so the new one re-resolves it.
+    Moon_RestoreStageLight();
 }
 
 void Moon_Tick(void)
@@ -572,9 +501,8 @@ void Moon_Tick(void)
 
 void Moon_Reset(void)
 {
-    // The engine frees every world GObj (and the stage LOBJs) on scene teardown;
-    // drop the cached handles so the next active frame recreates them, and never
-    // write through them after.
+    // The stage LOBJs are freed with the scene, so the suppressed light is dropped
+    // rather than restored.
     stc_moon_gobj = NULL;
     s_moon_lobj = 0;
     s_sup_lobj = 0;
@@ -590,7 +518,7 @@ MenuDesc moon_menu = {
             .kind = OPTKIND_VALUE,
             .val = &show_index,
             .value_num = 3,
-            .value_names = show_names,
+            .value_names = weather_toggle_names,
         },
         &(OptionDesc){
             .name = "Size",
@@ -634,11 +562,11 @@ MenuDesc moon_menu = {
         },
         &(OptionDesc){
             .name = "Moonlight",
-            .description = "Let the moon cast light and dim the distant sun: Preset / Off / On",
+            .description = "Let the moon cast light and zero the secondary stage light: Preset / Off / On",
             .kind = OPTKIND_VALUE,
             .val = &light_index,
             .value_num = 3,
-            .value_names = light_names,
+            .value_names = weather_toggle_names,
         },
     },
 };

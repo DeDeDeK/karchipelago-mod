@@ -7,6 +7,7 @@
 #include "item.h"
 #include "hurt.h"
 #include "code_patch/code_patch.h"
+#include "hoshi/func.h"
 
 #include "inline.h"
 
@@ -21,6 +22,7 @@
 // Objectives observed this boot, one bit per APCheckKind. Objectives that count
 // across boots read ap_save->checks instead.
 static u64 ap_observed;
+_Static_assert(APCK_NUM <= 64, "ap_observed is one u64");
 
 void APCheckDetect_Observe(int ck)
 {
@@ -31,6 +33,13 @@ void APCheckDetect_Observe(int ck)
     OSReport("[APCheckDetect] Objective %d achieved\n", ck);
 }
 
+// A player's widened MachineKind. hoshi's Ply_GetMachineKindAbs folds a custom star slot
+// onto the bike range, where it would match a vanilla bike.
+static MachineKind PlyMachineKind(int ply)
+{
+    return MachineKind_Resolve(Ply_GetMachineIsBike(ply), Ply_GetMachineKind(ply));
+}
+
 int APCheckDetect_IsSet(int ck)
 {
     switch (ck)
@@ -38,7 +47,6 @@ int APCheckDetect_IsSet(int ck)
     case APCK_ALLUPS_5:           return ap_save->checks.allup_collect_total >= AP_ALLUP_TOTAL_NEED;
     case APCK_SR1_PURPLE_3X:      return ap_save->checks.purple_sr1_wins >= AP_PURPLE_SR1_NEED;
     case APCK_AIRRIDE_ALL_COLORS: return ap_save->checks.race_color_mask == AP_RACE_COLOR_MASK_ALL;
-    case APCK_ASSEMBLE_AP_STAR:   return GateApStar_WasAssembled();
     default:
         if (ck < 0 || ck >= APCK_NUM)
             return 0;
@@ -107,8 +115,8 @@ static int WithinSphere(const Vec3 *p, const Vec3 *centre, float radius)
 // 10 seconds at 60fps.
 #define AP_NEBULA_AIR_FRAMES  600
 
-// Per-City-Trial-run item objectives, counted as a delta against a baseline taken
-// at the start of the run.
+// Per-City-Trial-run item objectives. Every 3D scene load zeroes item_collect, so
+// the raw count is the run's, including permanent patches credited at round start.
 typedef struct RunItemCheck
 {
     u8 ck;
@@ -117,27 +125,26 @@ typedef struct RunItemCheck
 } RunItemCheck;
 
 // ItemKind 0/1/2 are the three box colors, and a break bumps item_collect the same
-// way a pickup does, so the box counts ride the same per-run delta as the rest.
+// way a pickup does, so the box counts ride the same per-run count as the rest.
 static const RunItemCheck run_item_checks[] = {
-    { APCK_HP_PATCHES_10,  ITKIND_HP,            10 },
-    { APCK_BOX_BLUE_20,    ITKIND_BOXBLUE,       20 },
-    { APCK_BOX_GREEN_10,   ITKIND_BOXGREEN,      10 },
-    { APCK_BOX_RED_10,     ITKIND_BOXRED,        10 },
-    { APCK_FOOD_ICECREAM,  ITKIND_FOODICECREAM,   3 },
-    { APCK_FOOD_RICEBALL,  ITKIND_FOODRICEBALL,   3 },
-    { APCK_FOOD_CHICKEN,   ITKIND_FOODCHICKEN,    3 },
-    { APCK_FOOD_CURRY,     ITKIND_FOODCURRY,      3 },
-    { APCK_FOOD_RAMEN,     ITKIND_FOODRAMEN,      3 },
-    { APCK_FOOD_OMELET,    ITKIND_FOODOMELET,     3 },
-    { APCK_FOOD_HAMBURGER, ITKIND_FOODHAMBURGER,  3 },
-    { APCK_FOOD_APPLE,     ITKIND_FOODAPPLE,      3 },
+    { APCK_HP_PATCHES_10,      ITKIND_HP,            10 },
+    { APCK_OFFENSE_PATCHES_10, ITKIND_OFFENSE,       10 },
+    { APCK_BOX_BLUE_20,        ITKIND_BOXBLUE,       20 },
+    { APCK_BOX_GREEN_10,       ITKIND_BOXGREEN,      10 },
+    { APCK_BOX_RED_10,         ITKIND_BOXRED,        10 },
+    { APCK_FOOD_ICECREAM,      ITKIND_FOODICECREAM,   3 },
+    { APCK_FOOD_RICEBALL,      ITKIND_FOODRICEBALL,   3 },
+    { APCK_FOOD_CHICKEN,       ITKIND_FOODCHICKEN,    3 },
+    { APCK_FOOD_CURRY,         ITKIND_FOODCURRY,      3 },
+    { APCK_FOOD_RAMEN,         ITKIND_FOODRAMEN,      3 },
+    { APCK_FOOD_OMELET,        ITKIND_FOODOMELET,     3 },
+    { APCK_FOOD_HAMBURGER,     ITKIND_FOODHAMBURGER,  3 },
+    { APCK_FOOD_APPLE,         ITKIND_FOODAPPLE,      3 },
 };
 
 #define RUN_ITEM_NUM ((int)(sizeof(run_item_checks) / sizeof(run_item_checks[0])))
 
-static int run_base[5][RUN_ITEM_NUM];
 static int prev_allup[5];
-static int needs_baseline[5];
 
 // Coral placed by the loaded stage, sampled once at load (0 outside City Trial),
 // and how much of it anyone has broken this round.
@@ -146,25 +153,26 @@ static int coral_broken;
 
 // Is a City Trial Trial round loaded? The three-legendary poll needs it, and that
 // poll cannot ride the per-rider sampler: assembly ends in
-// Rider_RespawnFullRecreate, which tears the rider's machine down under it.
+// Rider_RespawnFullRecreate (0x80193900), which tears the rider's machine down.
 static int in_city_trial;
 
-// Kirbys KO'd by a human King Dedede in the current Destruction Derby game.
-static int dedede_kirby_kos;
+// Kirbys KO'd by each human King Dedede in the current Destruction Derby game. The
+// cell reads "KO 10 Kirbys in one game", so the ten are one player's.
+static int dedede_kirby_kos[5];
 
 #define AP_DEDEDE_KIRBY_KO_NEED 10
 
-// Enemies a human defeated mid-Mic-blast in the current KIRBY MELEE round, and
+// Enemies each human defeated mid-Mic-blast in the current KIRBY MELEE round, and
 // whether such a round is what is loaded. The melee stadiums are the only City
 // Trial stages that spawn the AI enemy pool at all.
-static int mic_enemy_kos;
+static int mic_enemy_kos[5];
 static int in_kirby_melee;
+
+#define AP_MIC_ENEMY_KO_NEED 10
 
 // Is Nebula Belt the loaded Air Ride course? Latched at load like in_kirby_melee,
 // because the objectives keyed off it are sampled once the round is already over.
 static int in_nebula;
-
-#define AP_MIC_ENEMY_KO_NEED 10
 
 // Is this player's rider singing? The Mic's damage lands over the blast animation
 // and its recovery, so both states count.
@@ -186,23 +194,9 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     int ply = rd->ply;
     PlayerStats *st = Ply_GetItemCollectArray(ply);
 
-    // Baseline after the intro, so the round's starting patches are not read as
-    // a collection.
-    if (needs_baseline[ply])
-    {
-        if (Gm_GetIntroState() != GMINTRO_END)
-            return;
-        needs_baseline[ply] = 0;
-        for (int i = 0; i < RUN_ITEM_NUM; i++)
-            run_base[ply][i] = st->item_collect[run_item_checks[i].it_kind];
-        prev_allup[ply] = st->item_collect[ITKIND_ALLUP];
-        return;
-    }
-
     for (int i = 0; i < RUN_ITEM_NUM; i++)
     {
-        int got = st->item_collect[run_item_checks[i].it_kind] - run_base[ply][i];
-        if (got >= (int)run_item_checks[i].need)
+        if (st->item_collect[run_item_checks[i].it_kind] >= (int)run_item_checks[i].need)
             APCheckDetect_Observe(run_item_checks[i].ck);
     }
 
@@ -222,11 +216,6 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     // Sleep cells make.
     if (st->copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC))
         APCheckDetect_Observe(APCK_MIC_COPY_CHANCE);
-
-    // Negative clearance is the engine's own out-of-bounds definition - what makes
-    // Machine_CheckFallDeath respawn the player.
-    if (calcDistanceFromOOB(&rd->pos) < 0.0f)
-        APCheckDetect_Observe(APCK_OUT_OF_BOUNDS);
 
     if (rd->pos.Y >= AP_MAX_ALTITUDE_Y)
         APCheckDetect_Observe(APCK_MAX_ALTITUDE);
@@ -269,12 +258,14 @@ static int AttachSamplers(void *proc)
 
 void APCheckDetect_On3DLoadEnd(void)
 {
-    for (int i = 0; i < 5; i++)
-        needs_baseline[i] = 1;
     coral_total = 0;
     coral_broken = 0;
-    dedede_kirby_kos = 0;
-    mic_enemy_kos = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        prev_allup[i] = 0;
+        dedede_kirby_kos[i] = 0;
+        mic_enemy_kos[i] = 0;
+    }
     in_city_trial = 0;
 
     StadiumKind st = Gm_GetCurrentStadiumKind();
@@ -287,7 +278,8 @@ void APCheckDetect_On3DLoadEnd(void)
     // Fantasy Meadows and GrSpace2 is Nebula Belt in every Air Ride mode.
     in_nebula = Scene_GetCurrentMajor() == MJRKIND_AIR && Gr_GetCurrentGrKind() == GR_SPACE2;
 
-    // The title screen's attract demo runs a real City Trial round with a CPU in
+    // The title screen's attract demo runs a real 3D round (City Trial on one of its
+// rotating slots) with a CPU in
     // every slot. The per-rider samplers below already skip it for want of a human,
     // but the coral objective counts a break whoever made it, so nothing arms.
     if (Gm_IsAutoDemo())
@@ -336,15 +328,13 @@ void APCheckDetect_OnFrameStart(void)
     }
 }
 
-// Replaces the one bl Ply_AddDeath, the engine's unified KO recorder, inside
-// Machine_GiveDamage. Who was KO'd is only available here: the per-player KO tally
+// Handed every KO by custom_machines, which owns the one bl Ply_AddDeath inside
+// Machine_GiveDamage. Who was KO'd is only available there: the per-player KO tally
 // the Destruction Derby cells read records the killer alone, and a stadium CPU can
 // be Meta Knight or King Dedede once those are unlocked, so a rival is not always
 // a Kirby.
-static void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int is_bike, MachineKind machine_kind)
+void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int machine_kind)
 {
-    Ply_AddDeath(victim, dmg_log, is_bike, machine_kind);
-
     if (!Gm_IsDestructionDerby())
         return;
 
@@ -356,11 +346,11 @@ static void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int is_bike, Mac
     if (Ply_GetRiderKind(killer) != RDKIND_DEDEDE || Ply_GetRiderKind(victim) != RDKIND_KIRBY)
         return;
 
-    dedede_kirby_kos++;
-    if (dedede_kirby_kos <= AP_DEDEDE_KIRBY_KO_NEED)
-        OSReport("[APCheckDetect] Kirbys KO'd as King Dedede: %d/%d\n",
-                 dedede_kirby_kos, AP_DEDEDE_KIRBY_KO_NEED);
-    if (dedede_kirby_kos >= AP_DEDEDE_KIRBY_KO_NEED)
+    dedede_kirby_kos[killer]++;
+    if (dedede_kirby_kos[killer] == AP_DEDEDE_KIRBY_KO_NEED)
+        OSReport("[APCheckDetect] Player %d KO'd %d Kirbys as King Dedede\n",
+                 killer + 1, AP_DEDEDE_KIRBY_KO_NEED);
+    if (dedede_kirby_kos[killer] >= AP_DEDEDE_KIRBY_KO_NEED)
         APCheckDetect_Observe(APCK_DD_DEDEDE_KO_KIRBY);
 }
 
@@ -379,11 +369,11 @@ static void APCheckDetect_EnemyDefeat(int ply, void *attacker_log, GOBJ *enemy)
     if (!IsMidMicBlast(ply))
         return;
 
-    mic_enemy_kos++;
-    if (mic_enemy_kos <= AP_MIC_ENEMY_KO_NEED)
-        OSReport("[APCheckDetect] Enemies defeated as Mic Kirby: %d/%d\n",
-                 mic_enemy_kos, AP_MIC_ENEMY_KO_NEED);
-    if (mic_enemy_kos >= AP_MIC_ENEMY_KO_NEED)
+    mic_enemy_kos[ply]++;
+    if (mic_enemy_kos[ply] == AP_MIC_ENEMY_KO_NEED)
+        OSReport("[APCheckDetect] Player %d defeated %d enemies as Mic Kirby\n",
+                 ply + 1, AP_MIC_ENEMY_KO_NEED);
+    if (mic_enemy_kos[ply] >= AP_MIC_ENEMY_KO_NEED)
         APCheckDetect_Observe(APCK_MIC_ENEMY_KOS);
 }
 
@@ -399,8 +389,8 @@ static void APCheckDetect_YakumonoBreak(int ply, int desc_id)
         return;
 
     coral_broken++;
-    if (coral_broken <= coral_total)
-        OSReport("[APCheckDetect] Coral broken: %d/%d\n", coral_broken, coral_total);
+    if (coral_broken == coral_total)
+        OSReport("[APCheckDetect] All %d coral broken\n", coral_total);
     if (coral_broken >= coral_total)
         APCheckDetect_Observe(APCK_BREAK_ALL_CORAL);
 }
@@ -509,7 +499,7 @@ static void SampleAirRide(const StadiumResults *r)
         if (won)
         {
             APCheckDetect_Observe(APCK_NEBULA_1ST);
-            if (Ply_GetMachineKindAbs(p) == VCKIND_WHEELIESCOOTER)
+            if (PlyMachineKind(p) == VCKIND_WHEELIESCOOTER)
                 APCheckDetect_Observe(APCK_NEBULA_1ST_SCOOTER);
         }
 
@@ -530,7 +520,7 @@ static void SampleAirRide(const StadiumResults *r)
         // airborne_time is the longest single airborne stretch, and PlayerStats is
         // only zeroed on the next 3D scene load, so it still reads this race's run.
         // The three flight machines are the only ones that hold a glide that long.
-        MachineKind mk = Ply_GetMachineKindAbs(p);
+        MachineKind mk = PlyMachineKind(p);
         if ((mk == VCKIND_DRAGOON || mk == VCKIND_FLIGHT || mk == VCKIND_WINGED) &&
             Ply_GetItemCollectArray(p)->airborne_time > AP_NEBULA_AIR_FRAMES)
             APCheckDetect_Observe(APCK_NEBULA_AIRBORNE);
@@ -562,7 +552,7 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
             APCheckDetect_Observe(APCK_SR1_FIRST + (st - STKIND_SINGLERACE1));
             if (st != STKIND_SINGLERACE1)
                 continue;
-            if (Ply_GetMachineKindAbs(p) == VCKIND_BULK)
+            if (PlyMachineKind(p) == VCKIND_BULK)
                 APCheckDetect_Observe(APCK_SR1_BULK);
             // Ply_GetColor reads PlayerDesc.color, a KirbyColor only for a Kirby
             // rider - the stadiums are reachable from a Dedede match too.
@@ -629,8 +619,46 @@ void APCheckDetect_On3DExit(void)
 
 void APCheckDetect_OnBoot(void)
 {
-    CODEPATCH_REPLACECALL(0x801e1f74, APCheckDetect_AddDeath);
+    // The one bl Ply_RecordEnemyDefeat, in EventActor_ResolveHit (0x802021fc).
     CODEPATCH_REPLACECALL(0x802022ec, APCheckDetect_EnemyDefeat);
     CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
     OSReport("[APCheckDetect] Hooks installed\n");
+}
+
+int APCheckDetect_GetProgress(APCheckProgressKind which)
+{
+    switch (which)
+    {
+    case AP_PROGRESS_ALLUP_TOTAL: return ap_save->checks.allup_collect_total;
+    case AP_PROGRESS_PURPLE_SR1:  return ap_save->checks.purple_sr1_wins;
+    case AP_PROGRESS_RACE_COLORS: return ap_save->checks.race_color_mask;
+    default:                      return 0;
+    }
+}
+
+// The objectives these feed are latched in ap_observed for the rest of the boot, so
+// a counter lowered past a check already recorded this session does not un-record it.
+void APCheckDetect_DebugSetProgress(APCheckProgressKind which, int value)
+{
+    if (value < 0)
+        value = 0;
+
+    switch (which)
+    {
+    case AP_PROGRESS_ALLUP_TOTAL:
+        ap_save->checks.allup_collect_total = (u16)value;
+        break;
+    case AP_PROGRESS_PURPLE_SR1:
+        ap_save->checks.purple_sr1_wins = (u8)value;
+        break;
+    case AP_PROGRESS_RACE_COLORS:
+        ap_save->checks.race_color_mask = (u8)value;
+        break;
+    default:
+        return;
+    }
+
+    // No card write: Hoshi_WriteSave stalls the frame and the menu fires this on every
+    // D-pad tick. The counters ride in the save block to the game's own save point.
+    OSReport("[APCheckDetect] Debug: progress %d set to %d\n", which, value);
 }

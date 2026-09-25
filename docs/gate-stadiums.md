@@ -2,7 +2,7 @@
 
 Each of the 24 City Trial stadiums can be individually locked behind an Archipelago unlock item. AP items 400-423 (`AP_STADIUM_UNLOCK_BASE` + `StadiumKind`) route through `ap_item_handler.c` to `GateStadiums_UnlockStadium(kind, /*announce=*/1)`, which sets the bit in `APSave.stadium_unlocked_mask`, ORs the kind into the vanilla "NEW" badge bitfield, and posts an `"Unlocked Stadium: <name>"` textbox with `tb_api->StadiumColor`. A locked stadium is excluded from both shuffle-mode and group-mode round selection and hidden from the stadium-list UI. The vanilla unlock-check pipeline and the per-round selector are both replaced outright.
 
-**File:** `mods/archipelago/src/gate_stadiums.c`. Function names follow `externals/hoshi/include/stadium.h` and `link.ld`; the symbol map names two of them differently - 0x8000C148 is `CityTrial_CheckIfStadiumIsDefaultUnlocked` and 0x8000C17C is `CityTrial_CheckStadiumIsUnlocked` there.
+**File:** `mods/archipelago/src/gate_stadiums.c`.
 
 | Group | Stadiums | AP items |
 |-------|----------|----------|
@@ -14,6 +14,25 @@ Each of the 24 City Trial stadiums can be individually locked behind an Archipel
 | Destruction Derby | DESTRUCTION1-5 | 409-413 |
 | Single Race | SINGLERACE1-9 | 414-422 |
 | VS King Dedede | VSKINGDEDEDE | 423 |
+
+## Stadium to Stage to Ground
+
+`Stadium_ApplyDescConfig` (0x800404c4) configures a round from a 24-entry descriptor table at `(*stc_gmdataall)+0x08`, stride 6: `{u8 city_kind, u8 stage_kind, u16 time_seconds, u8 flags, u8 pad}`. It writes `GameData.city_kind` (+0xa94) and `GameData.stage_kind` (+0xa97), and takes `is_damage_enabled` from `flags & 0x02` and `is_perma_death_enabled` from `flags & 0x01`. `stage_kind` is always `StadiumKind + 10`, and `Gm_GetGrKindFromStageKind` (0x80261ce8) maps that to the physical GroundKind through the `Stage.dat` table (`**(r13+0x7FC)`, stride 0x58, GroundKind at +0x00, ItemposId at +0x24).
+
+| Stadiums | city_kind | GroundKind -> file |
+|---|---|---|
+| Drag Race 1-4 | 7 | 13/11/10/12 -> `GrZeroyon5`/`3`/`1`/`4` |
+| Air Glider | 8 | 20 -> `GrJump3` |
+| Target Flight | 9 | 19 -> `GrJump2` |
+| High Jump | 11 | 18 -> `GrJump1` |
+| Kirby Melee 1-2 | 13 | 14 -> `GrPasture1`, 17 -> `GrColosseum5` |
+| Destruction Derby 1-5 | 14 | 15 -> `GrColosseum1`, 16 -> `GrColosseum3`, 21 -> `GrDedede1`, 9 -> `GrCity1` (x2) |
+| Single Race 1-9 | 15 | 0,1,2,8,7,4,5,3,6 - the nine Air Ride course grounds |
+| Vs. King Dedede | 18 | 15 -> `GrColosseum1` |
+
+Two pairings are worth knowing because the names invert what they suggest: **Destruction Derby 3 is the one fought in `GrDedede1`**, while **Vs. King Dedede reuses Destruction Derby 1's `GrColosseum1`** (with its own ItemposId, so a different item pool); Derby 4 and 5 are fought in the City Trial city itself.
+
+**No stadium is fought on foot.** `enableKirbyToExitVehicle` (0x801918d0) is `Gm_IsInCity()`, and it is the only gate on the walk state - its three callers are `Rider_InitWalk` (0x8018e1d8), `Rider_LoadFile` (0x801905ac) and `Rider_DropPatches` (0x8019d350) - so the open City Trial map is the one place a rider dismounts. Every stadium round is ridden, Kirby Melee included. `isRuleKirbyMelee` (0x80191930) is `Gm_GetCityKind() == 13` but has nothing to do with dismounting: its only caller is `Rider_StartCopyWheel` (0x801ae550), where it swaps the copy wheel's pool from `stc_copy_wheel_normal` to `stc_copy_wheel_melee`. King Dedede himself occupies player slot 4 on `VCKIND_WHEELVSDEDEDE` (`vsDedede_CPU_Cheating`, 0x80040b80).
 
 ## Vanilla Availability Pipeline
 

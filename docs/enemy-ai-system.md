@@ -206,7 +206,7 @@ the actor dies on the very next frame - death is effectively instantaneous.
 **Inhaled (0x0A).** func2 (0x80203a50) updates the attachment slot relative to the parent
 rider; func3 (0x80203b28) counts `inhale_timer` (ed+0xB20) and destroys the actor past 120
 frames; func4 (`EnemyState_InhaledFunc4`, 0x80203b64) tracks the rider's mouth bone with
-`JOBJ_GetWorldPosition` and shrinks the enemy toward it.
+`JObj_GetWorldPosition` and shrinks the enemy toward it.
 
 **Knockback (0x0B).** func1 (0x8020ddb4) builds the launch velocity from the direction fields
 (ed+0x334) scaled by `kb_speed_mult` (ed+0x878) and `param_speed_2` (ed+0x39C). func2
@@ -287,7 +287,7 @@ patroller that slashes when a rider crosses its front.
 **Scarfy (0x04)** - descriptor 0x804b2ff8, state table 0x804b2f80. The iconic
 Kirby-chaser puts its perception in func4 (0x8021027c, `Scarfy_TargetFOV`), which calls
 `EnemyActor_FindNearestPlayerFOV` with the global detection range
-(`stc_enemy_param_table + 0x90`), acquiring the nearest rider inside a forward hemisphere and
+(`EnemyParamTable.leash_range`, +0x90), acquiring the nearest rider inside a forward hemisphere and
 homing on a body bone.
 
 **Wheelie (0x08)** - state table 0x804b3350, init_cb 0x802132ec, 3 entries; init calls
@@ -459,7 +459,7 @@ Spawn (0x0E) randomly enters chase (0x0F) or a timed wander (0x12). In chase, fu
 runs the forward-cone probe
 `EnemyActor_FindPlayerInRangeFwd` (0x801fe764); with a rider in range and in front it commits
 to a dash and grab (0x14 -> 0x15), steering toward the target each frame with
-`RotateVecAroundAxis` while wall-avoiding at speed `param[4]`. A successful grab roll goes to
+`Vec3_RotateAboutUnitAxis` while wall-avoiding at speed `param[4]`. A successful grab roll goes to
 recover (0x16), which can re-dash or fall through to flee (0x17): TAC climbs past `param[5]`,
 disables its hitbox and `EventActor_Destroy`s once off-screen. Being hit drops it into
 hit-reaction (0x19). States 0x10/0x11/0x13 are chase sub-moves and 0x18 is an animation-driven
@@ -562,7 +562,7 @@ stationary - several state funcs use that return as their transition trigger.
 - With speed: check path following via `Enemy_CheckPathFollow` (0x8020b01c), ground collision
   via `Spline_FindNearest`, refresh the spline references (`ed+0x5DC/0x5FC/0x5D4/0x5D8`),
   compute the target from `EnemyPath_Advance`, build a local frame from the ground normal,
-  apply banked turning with `RotateVecAroundAxis_Vec3_`, and update facing through
+  apply banked turning with `Vec3_RotateAboutUnitAxis`, and update facing through
   `EventActor_UpdateOrientation` (0x802054e4).
 - With zero speed it derives an idle wander speed from `ed+0x974` and the animation rate and
   runs a line-of-sight/distance check against the target.
@@ -582,9 +582,9 @@ target index in `ed+0xB24` (s16, -1 = none) with a retarget cooldown in `ed+0xB2
 - Target with cooldown at 0: re-evaluate all players, take the nearest, reset the cooldown.
 - Cooldown above 0: decrement and keep the current target.
 
-The acquisition radius is the **global** `stc_enemy_param_table + 0x80` = 50.0 - a single
-scalar, not per-tier. The cooldown is `20 + HSD_Randi(40 - 20)` from `table+0x94`/`+0x98`,
-so 20-39 frames, which keeps a crowd of enemies from all retargeting on the same frame.
+The acquisition radius is the **global** `EnemyParamTable.detect_range` (+0x80) = 50.0 - a
+single scalar, not per-tier. The cooldown is `retarget_min + HSD_Randi(retarget_max -
+retarget_min)` (+0x94/+0x98 = 20/40), so 20-39 frames, which keeps a crowd of enemies from all retargeting on the same frame.
 
 Once a target is acquired and `ed+0xB28 == 0.0`, the function computes the normalized direction
 enemy -> player into `ed+0xB38`, points `ed+0x334` (forward) at the player and rebuilds the
@@ -594,7 +594,7 @@ orientation axes with cross products.
 between `ed+0x334` and the direction to each player with `Vec_GetAngleBetween_Vec3_` and
 applies a **180-degree hemisphere test** - it rejects only players behind the enemy, not a
 narrow cone. On a valid target it calls `zz_801fd878_` to aim at a bone joint via
-`JOBJ_GetWorldPosition`; with no target and a model present it falls back to interpolating the
+`JObj_GetWorldPosition`; with no target and a model present it falls back to interpolating the
 stored bone data at `ed+0x918` with factor 0.1.
 
 `EnemyActor_RumblePlayer` (0x801ff80c) resolves the player's rider GObj and triggers controller
@@ -650,8 +650,8 @@ The sub-entry is a small pointer block:
 
 `ed+0x48` (`anim_data`) resolves to `*(actor_data + 0x0C) + anim_idx * 0x10`; the entry layout
 is `EnemyAnimSeqEntry` in `externals/hoshi/include/enemy.h`. `EventActor_AnimDataInit`
-(0x80200c04) applies it: `HSD_JObjRemoveAnimAll`, then `HSD_JObjAddAnimAll(rootJObj, AnimJoint,
-MatAnimJoint, 0)`, then `HSD_JObjReqAnimAllByFlags`. The model's root JObj comes from
+(0x80200c04) applies it: `JObj_RemoveAnimAll`, then `JObj_AddAnimAll(rootJObj, AnimJoint,
+MatAnimJoint, 0)`, then `JObj_ReqAnimAllByFlags`. The model's root JObj comes from
 `ed+0x00` (HSD container) `+0x28`, **not** from `actor_data + 0x08`.
 
 ### Parameter block
@@ -675,7 +675,7 @@ MatAnimJoint, 0)`, then `HSD_JObjReqAnimAllByFlags`. The model's root JObj comes
 
 Four values past the copied block are read directly out of the archive rather than from
 `EnemyData`: `+0x94` turn-rate type (0 = none, 1 = orbit, 2 = fixed), `+0x98`/`+0x9C` turn rate
-params, `+0xA0` knockback launch multiplier.
+params, `+0xA0` post-hit intangibility multiplier.
 
 ### Tier-0 values per enemy
 
@@ -744,20 +744,27 @@ per-frame logic through the dead `per_type_cb` slot. `mods/custom_ai` uses only 
 
 ### The global parameter table
 
-`stc_enemy_param_table` (the hoshi macro for the pointer stored at 0x805dd878) is loaded from
-`Enemy.dat`'s `emDataAll` by `Enemy_LoadCommonParams` (0x801fd580) and is NULL until a stage
-with enemies loads. It is RAM-resident, so writing it retunes **all** enemies at once.
+`stc_enemy_param_table` (0x805dd878) points at `EnemyParamTable`, `Enemy.dat`'s `emDataAll`,
+loaded by `Enemy_LoadCommonParams` (0x801fd580). Its only caller is the enemy-system init
+`SceneLoad_3D` runs on every 3D scene load - each Air Ride course, the City Trial city, each
+stadium, the title demo. `lbLoadArchive` reuses a preloaded DRAM copy of the archive in
+place, so anything written into the table survives into the next load. Every enemy reads the
+same table, so writing it retunes **all** enemies at once.
 
-- **Distance ladder** (archive file offset 0x30): `+0x80` = 50.0 acquisition radius (read by
-  `EnemyActor_FindNearestPlayer`), `+0x84` = 30.0 close, `+0x88` = 30.0, `+0x8C` = 300.0 mid,
-  `+0x90` = 500.0 max/leash. The leash is the dominant range constant, read by around 15 AI
-  state funcs. Raise the acquisition and leash rungs to make enemies notice riders from
-  farther; drop them to make them passive.
-- `+0x94`/`+0x98` retarget cooldown bounds (20/40 -> 20-39 frames). Lower is twitchy switching,
-  higher locks onto one target.
-- `+0x04` damage scale (0.4), `+0x08/+0x0C/+0x10` damage-tier thresholds (10/21/32),
-  `+0x30/+0x40/+0x50/+0x60` per-tier knockback magnitude/scale/launch/stun - how hard enemies
-  are to knock out of the arena.
+- **Ranges.** `detect_range` (+0x80, 50.0) is the acquisition radius of
+  `EnemyActor_FindNearestPlayer`. `leash_range` (+0x90, 500.0) is the dominant range constant:
+  most per-type states pass it to `EnemyActor_FindNearestPlayerFOV` or test against it. Raise
+  both to make enemies notice riders from farther; drop them to make them passive. +0x88
+  (30.0) and +0x8C (300.0) are not AI ranges - `EnemyState_AnimTick` uses them as the inhale
+  capture radius and the distance at which a rider's inhale pull lets go.
+- `retarget_min`/`retarget_max` (+0x94/+0x98, 20/40) bound the retarget cooldown. Lower is
+  twitchy switching, higher locks onto one target.
+- `damage_scale` (+0x04, 0.4) and `tier_threshold[3]` (+0x08, 10/21/32) pick the damage tier.
+  Per tier, `kb_launch` (+0x50) is the knockback launch speed - `EnemyState_AnimTick` sets the
+  velocity to the knockback direction times it, so it decides how far a hit enemy flies - and
+  `stun_frames` (+0x60) the stun. `hit_iframes` (+0x30, int) times the actor's archive +0xA0
+  and `hit_iframes_scale` (+0x40, indexed by `GameData+0xa95`, not tier), clamped to >= 1, plus
+  the stun frames, is the post-hit intangibility handed to `HurtData_GiveIntangibility`.
 - Int array at `+0x14..+0x20` = {10, 30, 50, 70}; consumer unidentified.
 
 Per-archive detect/chase range is the other data-side lever: `EnemyActor_ClassifyRange` reads
@@ -770,22 +777,21 @@ frame, so a one-time post-spawn write is overwritten - re-assert it every frame.
 
 ### mods/custom_ai
 
-`EnemyAI_ApplyParams` (`enemy_hook.c`) retunes the global table from an epilogue hook on
+`EnemyAI_ApplyParams` retunes the global table from an epilogue hook on
 `Enemy_LoadCommonParams` at 0x801fd664 (`lwz r0,20(r1)`), by which point the table pointer is
-already stored to 0x805dd878, so the hook needs no register setup. It snapshots the vanilla
-values the first time it sees the table and thereafter always writes `base * mult`, which makes
-re-application idempotent whether the table buffer is reloaded fresh or returned cached and
-lets the "Default" preset restore the stock values exactly. `Scene_GetCurrentMajor()` picks the
-Air Ride versus City Trial selection, since only Air Ride courses and the City Trial Kirby
-Melee stadiums spawn pool enemies - the free-roam city has none.
+already stored, so the hook needs no register setup. Because a preloaded table can arrive
+already scaled, it snapshots the first table it ever sees - necessarily vanilla - and always
+writes `vanilla * mult`, so "Default" restores the stock values exactly.
+`Scene_GetCurrentMajor()` picks the Air Ride or City Trial selection; any other major (the
+title demo) gets Default, so a previous round's preset never carries into it.
 
 Each preset is three multipliers:
 
 | Dial | Table fields | Effect |
 |------|--------------|--------|
-| `range_mult` | +0x80 acquisition, +0x8C mid, +0x90 leash | How far enemies notice and pursue riders |
-| `retarget_mult` | +0x94/+0x98 cooldown bounds (result clamped >= 1) | <1 twitchy switching, >1 locks onto one target |
-| `knockback_mult` | +0x30/+0x40/+0x50 per-tier magnitude/scale/launch | <1 tanky, shrugs off hits |
+| `range` | `detect_range`, `leash_range` | How far enemies notice and pursue riders |
+| `retarget` | `retarget_min`/`retarget_max`, rounded | <1 twitchy switching, >1 locks onto one target |
+| `knockback` | `kb_launch[4]` | <1 flies less far when hit, harder to knock out of the arena |
 
 | Preset | range | retarget | knockback |
 |--------|-------|----------|-----------|
@@ -797,8 +803,10 @@ Each preset is three multipliers:
 | Tanky | 1.0 | 1.0 | 0.4 |
 | Random | one of the five non-Default presets, rolled per load | | |
 
-Changing the menu mid-session takes effect on the next enemy-system load - the next Air Ride
-course or City Trial entry.
+The City Trial selection reaches every enemy that reads the table in a City Trial scene: the
+Kirby Melee stadium pools, and in the city any actor that takes default knockback (TAC and Dyna
+Blade install their own hit reactions and read none of these fields). A menu change takes
+effect on the next 3D scene load.
 
 ### Injecting per-frame logic
 
@@ -817,13 +825,10 @@ Other options: overwrite the state callbacks `ed+0xAB8`-`ed+0xAC4` directly afte
 re-asserting after each state change); add a `GObj_AddProc(gobj, cb, priority)` of your own; or
 for fresh actors, drive `ed+0x2E0`/`ed+0x2EC`/`ed+0x2F8` (accel/vel/pos) directly.
 
-`mods/custom_events/src/spawn_enemy.c` is a worked but currently uncalled example of standalone
-spawning: `SpawnEnemy_Random` (a random actor near a machine, with optional `EnemyPath_Init`
-spline attach) and `SpawnEnemy_MeteorTrap` (a meteor over every human player). Its
-Its
-`SpawnEnemy_OnBoot`, called from the mod's `OnBoot`, installs null-safety patches for
-`EventActor_GetParentAnimRate` and `splArcLengthPoint`, both of which crash on the null
-parent/spline pointers a standalone spawn has.
+A standalone spawn carries a NULL `parent_gobj` and, until `EnemyPath_Init` assigns one, a NULL
+spline. `EventActor_GetParentAnimRate` (0x802049b8) dereferences the first without a check, but
+it is only called from the child-part follow-parent states; `splArcLengthPoint` (0x80415958)
+dereferences the second, so an actor whose callbacks walk a path before one is assigned faults.
 
 ### Constraints
 
@@ -904,7 +909,7 @@ parent/spline pointers a standalone spawn has.
 | Actor data table | 0x804b22b4 | `{data_index, flags}` per ActorID, stride 8 |
 | Archive loaded flags | 0x8055a210 | One byte per data_index (22 entries) |
 | Archive root pointers | 0x8055a228 | One pointer per data_index (22 entries) |
-| Enemy parameter table pointer | 0x805dd878 | Holds a pointer to the `emDataAll` block; NULL until enemies load |
+| Enemy parameter table pointer | 0x805dd878 | Holds a pointer to `EnemyParamTable` (`emDataAll`); set on every 3D scene load |
 | Animation script table (enemy) | 0x804b26b0 | Commands 11-25, 12-byte entries |
 | Animation script table (HSD) | 0x80499628 | Generic commands 0-10 |
 | Knockback jump table | 0x804b2b50 | 8 entries mapping hit type to knockback kind |

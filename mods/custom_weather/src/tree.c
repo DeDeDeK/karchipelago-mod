@@ -36,19 +36,14 @@ static int   stc_tree_count = 0;
 static int   stc_enumerated = 0;
 static float stc_phase = 0.0f;
 
-// Preset = trees bend in wind.
-static char *tree_toggle_names[] = {"Preset", "Off", "On"};
-static int   tree_enabled = 0;
+static int   tree_enabled = 1;
 
 static const float tree_strength_factors[] = {1.0f, 0.6f, 1.0f, 1.6f};
 static char *tree_strength_names[] = {"Preset", "Subtle", "Normal", "Strong"};
 #define TREE_STRENGTH_NUM ((int)(sizeof(tree_strength_factors) / sizeof(tree_strength_factors[0])))
 static int tree_strength_index = 0;
 
-// Collect the forest-tree yakumono GObjs (desc_id 34) into `out`, returning the
-// count. Every node of the yakumono GObj list is a live GObj, so its
-// userdata->desc_id is real; a scene record's owner slot is only ever compared
-// against these by pointer, never dereferenced.
+// Collect the forest-tree yakumono GObjs into `out`, returning the count.
 static int Tree_CollectParents(GOBJ **out, int max)
 {
     int n = 0;
@@ -64,9 +59,8 @@ static int Tree_CollectParents(GOBJ **out, int max)
     return n;
 }
 
-// Scan the ground scene-instance pool once per stage, caching every forest-tree
-// joint and its authored rotation. The pool holds every placed prop; trees are the
-// records whose owner is one of the tree-family yakumono GObjs.
+// Trees are the scene-instance records whose owner is one of the tree-family
+// yakumono GObjs. Scanned once per stage.
 static void Tree_Enumerate(void)
 {
     stc_tree_count = 0;
@@ -122,7 +116,7 @@ static void Tree_Enumerate(void)
 
 void Tree_Tick(void)
 {
-    if (!WeatherToggle(tree_enabled, 1))
+    if (!tree_enabled)
         return;
 
     if (!stc_enumerated)
@@ -179,11 +173,11 @@ MenuDesc tree_menu = {
     .options = {
         &(OptionDesc){
             .name = "Bend in Wind",
-            .description = "Let wind lean the City Trial forest trees (visual only; Preset = on, calm = rigid)",
+            .description = "Let wind lean the City Trial forest trees (visual only; calm wind = rigid)",
             .kind = OPTKIND_VALUE,
             .val = &tree_enabled,
-            .value_num = 3,
-            .value_names = tree_toggle_names,
+            .value_num = 2,
+            .value_names = weather_onoff_names,
         },
         &(OptionDesc){
             .name = "Sway Strength",

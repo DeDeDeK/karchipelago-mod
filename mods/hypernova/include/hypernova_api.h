@@ -16,16 +16,16 @@ typedef struct HypernovaAPI
 
     // Activate for one player slot (0..4) for `duration_frames` (0 = menu default).
     // Returns 1 if it started (mod enabled, CT gameplay, slot is a human), else 0.
-    // Refreshes that player's timer if already active. (API minor 1+.)
+    // Refreshes that player's timer if already active.
     int (*ActivatePlayer)(int player, int duration_frames);
 
-    // Stop immediately. Kirby eases back to normal size.
+    // Stop every active player immediately. Each eases back to normal size.
     void (*Deactivate)(void);
 
-    // 1 while active, else 0.
+    // 1 while any player is active, else 0.
     int (*IsActive)(void);
 
-    // Frames remaining while active (0 when inactive).
+    // Frames remaining on the longest-running player (0 when none is active).
     int (*FramesRemaining)(void);
 } HypernovaAPI;
 

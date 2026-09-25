@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "os.h"
+#include "game.h"
 #include "hoshi/mod.h"
 #include "hoshi/settings.h"
 
@@ -13,35 +14,52 @@
 #define HYPERNOVA_TRIGGER_ITEM_NAME "Miracle Fruit"
 
 static const CustomItemsAPI *stc_ci_api;
-static const HypernovaAPI   *stc_hn_api;
-static int stc_pickup_registered;
+static u32 stc_item_hash;
+static int stc_bind_warned;
 
 // Grants Hypernova to the player who collected the Miracle Fruit, and to nobody else.
 static void OnCustomItemPickup(u32 id_hash, const char *name, int player)
 {
-    (void)id_hash;
-    if (name == NULL || strcmp(name, HYPERNOVA_TRIGGER_ITEM_NAME) != 0)
-        return;
-    if (stc_hn_api == NULL)
-        stc_hn_api = (const HypernovaAPI *)Hoshi_ImportMod(
-            (char *)HYPERNOVA_MOD_NAME, HYPERNOVA_API_MAJOR, HYPERNOVA_API_MINOR);
-    if (stc_hn_api != NULL && stc_hn_api->ActivatePlayer != NULL)
-        stc_hn_api->ActivatePlayer(player, 0);
+    (void)name;
+    if (id_hash == stc_item_hash)
+        Hypernova_ActivatePlayer(player, 0);
 }
 
-// Called from boot and scene change, so registration succeeds regardless of mod load order.
-static void TryRegisterPickupHandler(void)
+// Run from scene changes: mods boot in FST order, so custom_items' export may not
+// exist yet when this one boots. The import is tried once, since a build without
+// custom_items would warn on every attempt.
+static void TryBind(void)
 {
-    if (stc_pickup_registered)
+    static int import_tried;
+
+    if (stc_item_hash != 0)
         return;
-    if (stc_ci_api == NULL)
+    if (!import_tried)
+    {
+        import_tried = 1;
         stc_ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
+    }
+
     if (stc_ci_api != NULL)
     {
-        stc_ci_api->AddPickupHandler(OnCustomItemPickup);
-        stc_pickup_registered = 1;
-        OSReport("[Hypernova] Miracle Fruit pickup handler registered\n");
+        for (int i = 0; i < stc_ci_api->GetCount(); i++)
+        {
+            const char *n = stc_ci_api->GetName(i);
+            if (n == NULL || strcmp(n, HYPERNOVA_TRIGGER_ITEM_NAME) != 0)
+                continue;
+            stc_item_hash = stc_ci_api->GetIdHash(i);
+            stc_ci_api->AddPickupHandler(OnCustomItemPickup);
+            OSReport("[Hypernova] Bound %s\n", HYPERNOVA_TRIGGER_ITEM_NAME);
+            return;
+        }
+    }
+
+    // Latched: without custom_items or the archive, only the API and self-test grant Hypernova.
+    if (!stc_bind_warned)
+    {
+        stc_bind_warned = 1;
+        OSReport("[Hypernova] %s unavailable\n", HYPERNOVA_TRIGGER_ITEM_NAME);
     }
 }
 
@@ -52,42 +70,39 @@ static char *stc_toggle_names[] = {
 };
 
 static char *stc_duration_names[] = {
-    "Short",   // 300 frames (~5s)
-    "Medium",  // 600 frames (~10s)
-    "Long",    // 1200 frames (~20s)
+    "Short",
+    "Medium",
+    "Long",
 };
-
-static void OnBoot(void)
-{
-    Hypernova_OnBoot();
-    TryRegisterPickupHandler();
-}
 
 static void OnSceneChange(void)
 {
     Hypernova_OnSceneChange();
-    TryRegisterPickupHandler(); // retry until custom_items is available
+    TryBind();
 }
 
-static void OnFrameEnd(void)
+// custom_items assigns kinds at CityItemSpawn_Init, after this, and skips a disabled item.
+static void On3DLoadStart(void)
 {
-    Hypernova_OnFrameEnd();
+    if (stc_ci_api != NULL && stc_item_hash != 0)
+        stc_ci_api->SetEnabled(stc_item_hash,
+                               hypernova_enabled && !Gm_IsAutoDemo() && Gm_IsInCity());
 }
 
+// Turning it off mid-round would otherwise strand live players: OnFrameEnd stops running, so
+// their scale, rainbow priority pin and claims would all freeze until the next scene.
 static void OnChangeEnabled(int val)
 {
-    OSReport("[Hypernova] Hypernova %s\n", val ? "enabled" : "disabled");
+    if (!val)
+        Hypernova_Deactivate();
+    OSReport("[Hypernova] %s\n", val ? "Enabled" : "Disabled");
 }
 
-static void OnChangeSelfTest(int val)
-{
-    OSReport("[Hypernova] Self-test trigger %s\n", val ? "enabled" : "disabled");
-}
-
-static void OnChangeDebugCone(int val)
-{
-    OSReport("[Hypernova] Debug cone overlay %s\n", val ? "enabled" : "disabled");
-}
+static void OnChangeDuration(int val) { OSReport("[Hypernova] Duration %s\n", stc_duration_names[val]); }
+static void OnChangeSuckProps(int val) { OSReport("[Hypernova] Suck props %s\n", val ? "enabled" : "disabled"); }
+static void OnChangeSuckMachines(int val) { OSReport("[Hypernova] Suck machines %s\n", val ? "enabled" : "disabled"); }
+static void OnChangeSelfTest(int val) { OSReport("[Hypernova] Self-test trigger %s\n", val ? "enabled" : "disabled"); }
+static void OnChangeDebugCone(int val) { OSReport("[Hypernova] Debug cone overlay %s\n", val ? "enabled" : "disabled"); }
 
 static MenuDesc top_menu = {
     .option_num = 6,
@@ -108,14 +123,16 @@ static MenuDesc top_menu = {
             .val = &hypernova_duration_sel,
             .value_num = HYPERNOVA_DURATION_NUM,
             .value_names = stc_duration_names,
+            .on_change = OnChangeDuration,
         },
         &(OptionDesc){
-            .name = "Suck Yakumono",
-            .description = "Also vacuum yakumonos",
+            .name = "Suck Props",
+            .description = "Also vacuum breakable props (they shatter on arrival)",
             .kind = OPTKIND_VALUE,
             .val = &hypernova_suck_yaku,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .on_change = OnChangeSuckProps,
         },
         &(OptionDesc){
             .name = "Suck Machines",
@@ -124,23 +141,26 @@ static MenuDesc top_menu = {
             .val = &hypernova_suck_machines,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .on_change = OnChangeSuckMachines,
         },
         &(OptionDesc){
             .name = "D Pad self test",
-            .description = "Hold D-Pad Up to trigger Hypernova",
+            .description = "Press D-Pad Up on port 1 to give every human Hypernova",
             .kind = OPTKIND_VALUE,
             .val = &hypernova_selftest,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .no_save = 1,
             .on_change = OnChangeSelfTest,
         },
         &(OptionDesc){
             .name = "Debug Cone",
-            .description = "Draw the suction cone",
+            .description = "Draw the suction cone, with or without Hypernova active",
             .kind = OPTKIND_VALUE,
             .val = &hypernova_debug_cone,
             .value_num = 2,
             .value_names = stc_toggle_names,
+            .no_save = 1,
             .on_change = OnChangeDebugCone,
         },
     },
@@ -154,12 +174,14 @@ OptionDesc ModSettings = {
 };
 
 ModDesc mod_desc = {
-    .name = "hypernova",
+    .name = HYPERNOVA_MOD_NAME,
     .author = "DeDeDK",
     .version.major = HYPERNOVA_API_MAJOR,
     .version.minor = HYPERNOVA_API_MINOR,
+    .affects_gameplay = 1,
     .option_desc = &ModSettings,
-    .OnBoot = OnBoot,
+    .OnBoot = Hypernova_OnBoot,
     .OnSceneChange = OnSceneChange,
-    .OnFrameEnd = OnFrameEnd,
+    .On3DLoadStart = On3DLoadStart,
+    .OnFrameEnd = Hypernova_OnFrameEnd,
 };

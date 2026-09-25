@@ -33,8 +33,8 @@ a heavy throb; this one breathes uniformly to PULSE_MIN on the same cadence.
 
 The same run writes ApPieceIcons.dat, the collection tracker's art: one alpha-cut
 textured quad per color under a single `apPieceIcons_scene_models` public, sized
-and shaped like the vanilla Hydra/Dragoon piece icons so a sphere sits in the same
-row of anchors those use.
+and shaped like the vanilla Hydra/Dragoon piece icons - black rim included - so a
+sphere sits in the same row of anchors those use.
 
 Run from the repo root:
     uv run --with pillow python scripts/authoring/make_ap_star_pieces.py
@@ -79,11 +79,11 @@ ICON_DAT = os.path.join(ROOT, "mods", "ap_star", "assets", "ApPieceIcons.dat")
 
 PUBLIC = "customItem"
 
-# Must match mods/custom_items/include/custom_items_api.h.
+# Must match mods/custom_items/src/custom_items.h.
 CUSTOM_ITEM_MAGIC = 0x4349544D  # 'CITM'
-CUSTOM_ITEM_DESC_VERSION = 5
+CUSTOM_ITEM_DESC_VERSION = 7
 CUSTOM_ITEM_FLAG_NO_MAT_ANIM = 0x1
-DESC_SIZE = 0x3C
+DESC_SIZE = 0x40
 
 ITKIND_HYDRA1 = 55
 ITGROUP_GOOD = 1
@@ -140,8 +140,12 @@ GX_TRIANGLEFAN = 0xA0
 AMBIENT_SCALE = 0.55
 
 ICON_PUBLIC = "apPieceIcons_scene_models"
-ICON_TEX = 32  # texture is square; the ball fills it
-ICON_HALF = 1.0  # HUD-space half extent, against the anchors' 2.5 spacing
+ICON_TEX = 36  # texture is square; the ball and its rim fill it
+ICON_BALL = 1.0  # HUD-space ball radius
+# The rim goes outside the ball rather than eating into it, which keeps the ball
+# the size the row was built at.
+ICON_RIM = 0.14
+ICON_HALF = ICON_BALL + ICON_RIM  # quad half extent, against the anchors' 2.5 spacing
 ICON_SUPERSAMPLE = 4
 
 
@@ -313,11 +317,12 @@ def build_piece(name, color, positions, normals, prims):
     ptr(desc + 0x14, root)  # model
     ptr(desc + 0x18, effect)  # effect_info
     struct.pack_into(">3H", data, desc + 0x1C, 0, 0, 0)  # weight_box
-    struct.pack_into(">H", data, desc + 0x22, 0)  # weight_free
-    struct.pack_into(">6H", data, desc + 0x24, 0, 0, 0, 0, 0, 0)  # weight_event
+    struct.pack_into(">6H", data, desc + 0x22, 0, 0, 0, 0, 0, 0)  # weight_event
+    struct.pack_into(">H", data, desc + 0x2E, 0)  # pad2
     w32(desc + 0x30, MODEL_FLAG_SIMPLE)
     wf32(desc + 0x34, SPHERE_SCALE)  # scale
     ptr(desc + 0x38, anim_root)  # joint_anim
+    w32(desc + 0x3C, 0)  # mat_anim (dropped by NO_MAT_ANIM)
 
     # PatchEffectInfo: no entries, so pickup grants nothing and dispatches nowhere.
     w32(effect + 0x00, 0)  # entries
@@ -391,22 +396,27 @@ def build_piece(name, color, positions, normals, prims):
 
 
 def icon_image(color):
-    """A shaded ball on transparent ground, lit from the upper left like the
-    scene lights the world models. Supersampled, so the resize gives the rim a
-    soft alpha edge instead of a stair-step."""
+    """A shaded ball in a black rim on transparent ground, lit from the upper left
+    like the scene lights the world models. Supersampled, so the resize gives the
+    rim a soft alpha edge instead of a stair-step."""
     from PIL import Image
 
     n = ICON_TEX * ICON_SUPERSAMPLE
     im = Image.new("RGBA", (n, n), (0, 0, 0, 0))
     px = im.load()
     c = (n - 1) / 2.0
-    radius = n / 2.0 - ICON_SUPERSAMPLE * 0.5
+    outer = n / 2.0 - ICON_SUPERSAMPLE * 0.5
+    ball = outer * (ICON_BALL / ICON_HALF)
     lx, ly, lz = -0.45, -0.50, 0.74
     for y in range(n):
         for x in range(n):
-            dx, dy = (x - c) / radius, (y - c) / radius
+            ex, ey = x - c, y - c
+            if ex * ex + ey * ey > outer * outer:
+                continue
+            dx, dy = ex / ball, ey / ball
             d2 = dx * dx + dy * dy
             if d2 > 1.0:
+                px[x, y] = (0, 0, 0, 255)
                 continue
             nz = math.sqrt(1.0 - d2)
             lam = max(0.0, dx * lx + dy * ly + nz * lz)

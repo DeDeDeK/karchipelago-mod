@@ -1,10 +1,10 @@
-// Private copies of shared vehicle particle bank generators, so a machine can tint
-// its exhaust without tinting every machine emitting the same index. Generators 3
-// and 8 of EfPtclVehicle.dat's 52 go unreferenced by any vanilla machine. The copy
-// is made at bank load because Ptcl_Alloc (0x8043294c) hands a generator node the
-// descriptor's program pointer once, at creation, and the node keeps it for life.
-
-#include <string.h>
+// The vehicle particle bank generators a machine brings. Every Ptcl_LoadEfPtclVehicle
+// points psGeneratorDesc[PTCL_BANK_VEHICLE] into the archive it just loaded, so each load
+// the table is copied into one wide enough for every registered machine's generators past
+// the bank's own, and the count raised to match. Ptcl_Alloc (0x8043294c) bounds an id by
+// that count alone, emits nothing for a NULL entry, and hands a generator node the
+// descriptor's program pointer once, at creation, which the registry's copies satisfy by
+// outliving every scene.
 
 #include "os.h"
 #include "particle.h"
@@ -12,64 +12,80 @@
 
 #include "custom_machines.h"
 
-#define PTCL_BANK_VEHICLE 0
-#define TRAIL_CLONE_MAX 4
+#define TRAIL_TABLE_MAX (CUSTOM_MACHINE_GENERATOR_BASE + CUSTOM_MACHINE_MAX * CUSTOM_MACHINE_GENERATOR_MAX)
 
-// Descriptors sit back to back in the bank with no length in front of them, so a
-// clone takes a fixed span instead of a measured one. This clears the largest
-// generator in the vehicle bank with room over; the slack past a shorter one is
-// still inside the loaded archive, and the program it copies ends at its own 0xff
-// wherever that falls.
-#define TRAIL_CLONE_SIZE 256
+// The bank's own entries are refilled per load; the machines' stay put.
+static u8 *stc_table[TRAIL_TABLE_MAX];
+static u32 stc_count;
 
-static u8 stc_clone[TRAIL_CLONE_MAX][TRAIL_CLONE_SIZE];
-static u8 stc_src[TRAIL_CLONE_MAX];
-static u8 stc_dst[TRAIL_CLONE_MAX];
-static int stc_count;
-
-static void InstallClones(void)
+static void InstallGenerators(void)
 {
     u8 **descs = psGeneratorDesc[PTCL_BANK_VEHICLE];
     u32 count = psGeneratorCount[PTCL_BANK_VEHICLE];
 
-    if (descs == NULL)
+    if (descs == NULL || descs == stc_table)
         return;
 
-    for (int i = 0; i < stc_count; i++)
+    // Machines number their generators from the base, so a bank holding more would
+    // have its own ids taken over.
+    if (count > CUSTOM_MACHINE_GENERATOR_BASE)
     {
-        if (stc_src[i] >= count || stc_dst[i] >= count || descs[stc_src[i]] == NULL)
-            continue;
-        memcpy(stc_clone[i], descs[stc_src[i]], TRAIL_CLONE_SIZE);
-        descs[stc_dst[i]] = stc_clone[i];
+        static int reported;
+
+        if (!reported)
+        {
+            reported = 1;
+            OSReport("[TrailBank] Vehicle bank holds %d generators, past the %d machines number theirs from - machine generators are off\n",
+                     count, CUSTOM_MACHINE_GENERATOR_BASE);
+        }
+        return;
     }
+
+    for (u32 i = 0; i < CUSTOM_MACHINE_GENERATOR_BASE; i++)
+        stc_table[i] = i < count ? descs[i] : NULL;
+
+    psGeneratorDesc[PTCL_BANK_VEHICLE] = stc_table;
+    psGeneratorCount[PTCL_BANK_VEHICLE] = stc_count;
 }
 
-// Tail of Ptcl_LoadEfPtclVehicle, at the mr that both install paths reach with
-// the bank's descriptor table already in place.
+// Tail of Ptcl_LoadEfPtclVehicle, where every install path meets with the bank's
+// descriptor table already in place.
 CODEPATCH_HOOKCREATE(0x802354bc,
     "",
-    InstallClones,
+    InstallGenerators,
     "",
     0
 )
 
-void CustomMachineTrail_OnBoot(void)
+void CustomMachineTrailBank_OnBoot(void)
 {
+    int installed = 0;
+
+    stc_count = CUSTOM_MACHINE_GENERATOR_BASE;
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
 
-        for (int k = 0; k < e->trail_clone_count && stc_count < TRAIL_CLONE_MAX; k++)
+        for (int k = 0; k < e->generator_count; k++)
         {
-            stc_src[stc_count] = e->trail_clone_src[k];
-            stc_dst[stc_count] = e->trail_clone_dst[k];
-            stc_count++;
+            struct PtclDesc *desc = (struct PtclDesc *)e->generator[k];
+
+            if (e->generator_size[k] == 0)
+                continue;
+
+            // A copy is installed past psRelocDataBanks, so it takes that pass's rewrite.
+            desc->flags = (desc->flags & ~PTCL_FLAGS_RELOC_MASK) | PTCL_FLAGS_RELOCATED;
+            stc_table[e->generator_base + k] = (u8 *)desc;
+            installed++;
         }
+        if ((u32)(e->generator_base + e->generator_count) > stc_count)
+            stc_count = e->generator_base + e->generator_count;
     }
 
-    if (stc_count == 0)
+    if (installed == 0)
         return;
 
     CODEPATCH_HOOKAPPLY(0x802354bc); // Ptcl_LoadEfPtclVehicle tail
-    OSReport("[TrailBank] %d generator clone(s), hooks installed\n", stc_count);
+    OSReport("[TrailBank] %d generator(s) installed at vehicle bank ids %d-%d\n",
+             installed, CUSTOM_MACHINE_GENERATOR_BASE, stc_count - 1);
 }

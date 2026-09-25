@@ -15,6 +15,9 @@ sub-node, then the detail for whichever sections the caller asked to
 expand.
 """
 
+import os
+import re
+
 from .archive import f32, s32, u16, u32
 from .format import COLL_JOINT_KINDS, SPLINE_TYPES, describe, rgba, vec3, zone_kind_name
 from .schema import array_length
@@ -335,33 +338,91 @@ def _subanim(arc, sn):
                 )
 
 
+# ItemKind names, read from hoshi so the two never drift.
+def _item_kind_names():
+    path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "externals", "hoshi", "include", "item.h"
+    )
+    try:
+        with open(path) as f:
+            src = f.read()
+    except OSError:
+        return []
+    body = re.search(r"typedef enum ItemKind\s*\{(.*?)\}\s*ItemKind;", src, re.S)
+    if not body:
+        return []
+    return re.findall(r"^\s*(ITKIND_\w+)\s*,", body.group(1), re.M)
+
+
+_ITEM_KINDS = _item_kind_names()
+
+
+def _item_kind_name(kind):
+    if 0 <= kind < len(_ITEM_KINDS):
+        return _ITEM_KINDS[kind][len("ITKIND_") :]
+    return str(kind)
+
+
+def _item_pool(arc, label, pool):
+    """A GrItemPool: {box_spawn_chances, entries, entry_num} with 0x10-byte
+    {it_kind, chance[3]} rows. CityItemSpawn_Init picks one chance column per
+    round with HSD_Randi(3), so identical columns mean a fixed pool."""
+    num = u32(arc.data, pool + 0x08)
+    entries = _deref(arc, pool + 0x04)
+    print(f"      {label} @ {pool:#x} entries={num}")
+    if not entries:
+        return
+    for i in range(num):
+        e = entries + i * 0x10
+        chances = [s32(arc.data, e + 0x04 + c * 4) for c in range(3)]
+        print(
+            f"        [{i:2d}] {_item_kind_name(s32(arc.data, e)):18s}"
+            f" chance={chances[0]:4d} {chances[1]:4d} {chances[2]:4d}"
+        )
+
+
 def _items(arc, it):
-    print(f"\n  ItemNode @ {it:#x}:")
-    for foff, name in (
-        (0x04, "TimingTable"),
-        (0x08, "CityTrial"),
-        (0x0C, "AirRide"),
-        (0x10, "Coliseum"),
-    ):
-        p = _deref(arc, it + foff)
-        print(
-            f"    +{foff:02X}  {name:12s} -> {p:#x}"
-            if p
-            else f"    +{foff:02X}  {name:12s} -> NULL"
-        )
-    timing = _deref(arc, it + 0x04)
-    if timing:
-        print(
-            f"      timing entries={u32(arc.data, timing + 0x08)} "
-            f"positions={u32(arc.data, timing + 0x10)} "
-            f"areas={u32(arc.data, timing + 0x18)}"
-        )
-    city = _deref(arc, it + 0x08)
-    if city:
-        print(
-            f"      citytrial item_chances={u32(arc.data, city + 0x08)} "
-            f"special_timings={u32(arc.data, city + 0x24)}"
-        )
+    """grData+0x2C is an *array* of 0x14-byte item nodes, indexed by the
+    stage's ItemposId (Stage.dat row +0x24), so stages sharing a ground file
+    get separate pools. The array has no count: walk while the entry still
+    looks like one."""
+    for idx in range(16):
+        node = it + idx * 0x14
+        if node + 0x14 > len(arc.data):
+            break
+        kind = s32(arc.data, node)
+        if not 0 <= kind <= 2 or not _deref(arc, node + 0x04):
+            break
+        print(f"\n  ItemNode[{idx}] @ {node:#x}:  kind={kind}")
+        for foff, name in (
+            (0x04, "TimingTable"),
+            (0x08, "item_desc"),
+            (0x0C, "pool_a"),
+            (0x10, "pool_b"),
+        ):
+            p = _deref(arc, node + foff)
+            print(
+                f"    +{foff:02X}  {name:12s} -> {p:#x}"
+                if p
+                else f"    +{foff:02X}  {name:12s} -> NULL"
+            )
+        timing = _deref(arc, node + 0x04)
+        if timing:
+            print(
+                f"      timing entries={u32(arc.data, timing + 0x08)} "
+                f"positions={u32(arc.data, timing + 0x10)} "
+                f"areas={u32(arc.data, timing + 0x18)}"
+            )
+        city = _deref(arc, node + 0x08)
+        if city:
+            print(
+                f"      item_desc item_chances={u32(arc.data, city + 0x08)} "
+                f"special_timings={u32(arc.data, city + 0x24)}"
+            )
+        for foff, label in ((0x0C, "pool_a"), (0x10, "pool_b")):
+            pool = _deref(arc, node + foff)
+            if pool:
+                _item_pool(arc, label, pool)
 
 
 def _fog(arc, fn):

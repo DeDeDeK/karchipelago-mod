@@ -93,7 +93,16 @@ delivers their parts on schedule; the AP spheres take the carriers left over.
 
 The schedule is rolled per round in `ApStarPieces_On3DLoadEnd`, mirroring
 `LegendaryPieces_Init` (`0x800ecfac`): the unlocked pieces are shuffled into a delivery
-order, and each step draws a match-progress threshold out of its own window.
+order, and each step draws a match-progress threshold out of its own window. The six
+windows, in percent of the round, are the n-th step's - not the n-th sphere's, since the
+order is shuffled:
+
+| Step | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| Window | 10-20 | 20-32 | 32-45 | 45-58 | 58-70 | 70-85 |
+
+A round with fewer spheres in play takes the first rows, so a short set still delivers
+early.
 
 Vanilla spreads three parts over 15-30 / 25-50 / 50-80 and rolls a flat 30% per machine
 for whether that machine's set appears at all. The AP set is always armed, so a full round
@@ -126,7 +135,7 @@ calls the same function on the AP carrier, so the set inherits this unchanged.
 
 What is *not* immortal is the piece inside. `Box_OutcomeLogic` hands the contents to
 `Box_SpawnContents` (`0x80253378`), which builds an ordinary descriptor through
-`CityItem_InitDesc` (`0x802509a0`); that function gives every item
+`Item_InitDesc` (`0x802509a0`); that function gives every item
 `lifetime_min + HSD_Randi(lifetime_variance)` and special-cases kinds `0x37`-`0x3c`, the six
 legendary pieces, only to clear their `flags`. The lifetime is untouched, so a broken-open
 piece left on the ground expires like anything else. That is vanilla behavior and the set
@@ -153,12 +162,20 @@ single `ItemKind` and `Box_OutcomeLogic` (`0x80250ae8`) spawns one item from it.
 
 The set arms only in `CITYMODE_TRIAL`. Free Run and the stadiums leave it disabled, and so
 does the title screen's attract demo - `Gm_IsAutoDemo()`, a real City Trial round run inside
-`MJRKIND_TITLE` with a CPU in every slot. Nothing in the assembly path asks who the player
-is, so a CPU completing the set there would award the star's location check.
+`MJRKIND_TITLE` with a CPU in every slot. The demo is held out at four points: no sphere is
+registered for it, no schedule is rolled, and `CollectPiece` and `Assemble` both refuse it,
+so neither an item give nor a debug spawn can complete a set there.
 
-For testing, `archipelago_debug` drops one sphere in front of player 1 on each **R + D-Pad
-Down**, walking the six in order, so six presses and six drive-overs run the whole assembly
-without waiting on the schedule. It goes through `ArchipelagoAPI.DebugSpawnApStarPiece`, which
+Outside the demo the assembly path asks nothing about who the player is, and it should not -
+a CPU assembling the star gets the cutscene and the machine exactly as it gets Hydra's. So a
+consumer that only cares about human players filters on the `ply` its assemble handler is
+given; the handler is the only signal, and `AssembledThisRound` the only other read, so there
+is no boot-wide flag to poll that would hide the distinction.
+
+For testing, `archipelago_debug` drops one sphere in front of player slot 0 on each **R + D-Pad
+Down** during a round, walking the six in order from the Rose sphere and restarting the cycle at
+each round load, so six presses and six drive-overs run the whole assembly without waiting on the
+schedule. It goes through `ArchipelagoAPI.DebugSpawnApStarPiece`, which
 reads the sphere's `ItemKind` out of the `custom_items` registry - a sphere that was locked when the
 scene loaded was never registered and cannot be spawned until it is unlocked and the round
 reloads. Deathlink's trigger is **L + D-Pad Down**, and a bare **D-Pad Down** spawns an AP Box.
@@ -175,8 +192,7 @@ the spheres that are in, taking the first rows of the delivery schedule, so a pa
 still delivers - it just cannot complete.
 
 Every bit of the gate starts set, so the mod on its own assembles the star the way Hydra
-and Dragoon assemble. A consumer narrows it through `ApStarAPI.SetPieceEnabled` or
-`SetPieceMask`. The API is phrased as a gate rather than an unlock, because whether a
+and Dragoon assemble. A consumer narrows it through `ApStarAPI.SetPieceMask`. The API is phrased as a gate rather than an unlock, because whether a
 sphere is earned, bought or awarded is the consumer's idea - all the mod knows is which
 spheres are in play, and announcing anything about one arriving belongs to whatever
 narrowed the gate.
@@ -188,11 +204,10 @@ rather than letting `ap_star` read, because mods run in the order their `.bin` f
 the FST and `ap_star` sorts before `archipelago`: by the time `archipelago`'s own load-start
 callback runs, `ap_star` has already armed the round.
 
-`SetEnabled` writes `custom_items`' consumer gate, which is a field of its own alongside
-the per-item settings-menu toggle rather than the same one - so driving it on every scene
-load never overwrites the player's saved menu choice. Both gates have to be open for a
-sphere to reach the field, which means an unlocked sphere still stays out of the round if
-its `custom_items` menu toggle is off.
+`SetEnabled` writes `custom_items`' one per-item gate, which every consumer of that
+registry shares - there is no separate menu toggle behind it. Last writer per scene wins,
+so a sphere reaches the field exactly when the last `SetEnabled` before
+`CityItemSpawn_Init` opened it.
 
 The Archipelago mask is its own `APSave` field rather than six more bits of
 `item_unlocked_mask`, which `ITUNLOCK_NUM` has all but filled, and it is reached through
@@ -201,7 +216,9 @@ that gate off `archipelago` pre-fills all six at connect, unless `GOALGATE_AP_ST
 says the seed's goal is the assembly, in which case the six stay locked and the apworld
 ships them as items.
 
-The Archipelago Star's **machine** item (856) is a separate thing. It decides whether the
+The Archipelago Star's **machine** item (856) is a separate thing, bound to the star by its
+descriptor name as bit 26 of the machine unlock mask rather than to the `MachineKind` the
+registry happened to hand it. It decides whether the
 assembled star spawns loose on the City Trial field and whether it is selectable, the same
 split Hydra and Dragoon have between their piece items and their machine items. Assembling
 the star mounts the player on it whatever that bit says, exactly as assembling Hydra from
@@ -218,7 +235,10 @@ trip mid-trial restarts the collection - the same scope the vanilla sets have.
 Each pickup climbs `Ply_OnLegendaryPieceCollect` (`0x8027a4e8`), whose ladder is written
 for a three-piece set: counts 1, 2 and 3 play rising tones, and 4 plays the pair of
 sounds the assembly cinematic uses on completion. Six pieces climb the same three rungs
-two at a time, and the sixth plays the completion pair.
+two at a time. The sixth plays no rung of its own - it hands off to the cinematic, which
+plays the completion pair itself 150 frames later; rung 4 is used only on the fallback
+path, where the cinematic could not run and the mount and the sounds are both owed
+directly.
 
 ### Dropping a sphere
 
@@ -243,13 +263,19 @@ index.
 
 **The quota.** `allups_dropped` is capped against
 `Ply_GetHydraCollection + Ply_GetDragoonCollection`, so a rider holding only spheres queues
-no legendary drop at all and `Rider_TickDropAllUp` is never dispatched. The seam adds
-`Popcount(piece_mask[ply])` to the Dragoon half of that sum, which is the whole of it - the
-quota and the masks then drain together, one decrement per successful throw.
+no legendary drop at all and `Rider_TickDropAllUp` is never dispatched. The seam adds the
+rider's *droppable* sphere count to the Dragoon half of that sum, which is the whole of it -
+the quota and the masks then drain together, one decrement per successful throw.
+
+Droppable means the sphere has an `ItemKind` this round. `CollectPiece` ignores the gate, so
+a player can hold a sphere that was never registered, and there is no item to throw for one.
+Counting it would put it in the roll below, which would then fall through to kind 54 -
+`ITKIND_GORDO` - and throw a Gordo while leaving the sphere's bit set, so the quota would
+never drain and the rider would keep throwing one per cooldown for the rest of the round.
 
 **The roll.** Vanilla has already picked uniformly among the pieces in its two masks by the
-time the kind is stored. The hook re-rolls over that count plus the rider's spheres, so
-every piece held is equally likely to be the one that comes out. It reads a kind of **54**
+time the kind is stored. The hook re-rolls over that count plus the rider's droppable
+spheres, so every piece that can be thrown is equally likely to be the one that comes out. It reads a kind of **54**
 as "no vanilla piece": `local_68[0]` is still `-1` when the candidate list is empty and the
 code adds `0x37` regardless. Vanilla never throws that value because its quota is zero when
 no piece is held, and putting spheres in the quota is exactly what makes it reachable.
@@ -286,9 +312,13 @@ the per-player-count spacing (2.5 / 2.4 / 2.1 units) for free.
 
 An icon is created exactly the way a vanilla one is: `HUD_CreateElement` on the
 collecting player, relinked to `GAMEPLINK_PAUSEHUD` with `GObj_SetPLink`, given element
-data of kind `0x3b`, and positioned at its anchor. The vanilla tracker diffs the piece
+data of `HUDKIND_LEGENDARYPIECE` (59), and positioned at its anchor. The vanilla tracker diffs the piece
 mask against a cached copy once a frame rather than reacting to the pickup; this does the
 same, so no GObj is created from inside the collision call that collected the sphere.
+The diff runs both ways: a dropped sphere clears its bit, its icon is destroyed and the
+icons behind it slide left onto the freed anchors, so the row never shows a color the
+player no longer holds and collecting that color again cannot put a second icon of it on
+the row.
 Icons are destroyed on assembly, which is also when the vanilla mount clears its own masks
 and the vanilla icons vanish.
 
@@ -297,8 +327,10 @@ loads and the anchors are read before the delivery schedule is rolled, because a
 given through `CollectPiece` lands whether or not any sphere is in play that round.
 
 The art is `mods/ap_star/assets/ApPieceIcons.dat`, one alpha-cut textured quad per
-color under a single `apPieceIcons_scene_models` public, each a 32x32 RGB5A3 shaded ball
-on a 2.0-unit quad, inside the 2.5-unit anchor spacing it is hung on.
+color under a single `apPieceIcons_scene_models` public, each a 36x36 RGB5A3 shaded ball
+of 1.0-unit radius inside a 0.14-unit black rim, on a 2.28-unit quad against the 2.5-unit
+anchor spacing it is hung on. The rim reads as a thin outline next to the vanilla piece
+icons rather than matching their heavier black.
 
 ## Assembly and the Mount
 
@@ -307,11 +339,11 @@ registered with `ApStarAPI.AddAssembleHandler`, and starts the cinematic, which 
 mount and plays the completion sounds 150 frames later. `archipelago` is on that handler
 list, and what it does there is latch the checklist objective.
 
-The cinematic is not this mod's. `custom_machines` owns the vanilla legendary cutscene and
-drives it for any registered machine off the archive names in the machine descriptor - the
-star's descriptor names `ApStarGlow.dat` (models plus the camera animation) and
-`ApStarParts.dat` (the parts), and both are queued alongside `VsDragoon.dat` and
-`VsHydra.dat` when City Trial loads, so the run's synchronous load never hits the disc. The
+The cinematic's engine side is not this mod's. `custom_machines` owns the vanilla legendary
+cutscene and drives it for any registered machine off the archive its descriptor names; this
+mod authors that archive. The star's descriptor names `ApStarAssembly.dat`, which is queued
+alongside `VsDragoon.dat` and `VsHydra.dat` when City Trial loads, so the run's synchronous
+load never hits the disc. The
 star gets the same 28-frame lead-in, world freeze, HUD drop, rider pose, scripted camera,
 150-frame run, audio bracket and legendary theme Hydra and Dragoon get, with six pods flying
 in on six streaks where Hydra has three parts on three.
@@ -321,7 +353,7 @@ This mod's whole share is one call, on the frame a player completes the set:
 registry. It returns 0 when the cinematic could not run - no machine registered, one already
 up, or a rider the vanilla assembly state does not cover, since
 `Rider_EnterLegendaryAssembly` (`0x8019248c`) ignores Meta Knight and King Dedede and the
-cinematic would play and hand back no machine - and the caller then owes the plain mount and
+cinematic would play and hand back no machine - and this mod then gives the plain mount and
 the completion sounds instead.
 
 It runs under `machine_index` 1, so the rider gets Hydra's pose and the motion script that
@@ -331,16 +363,16 @@ reads the index again, so the machine that arrives is entirely the star's own
 
 The mount itself is the tail of the vanilla assembly, and what that tail does is general:
 the rider's assembly state stages that pair, and the state's own motion script fires
-`Rider_RespawnFullRecreate` (`0x80193900`) on it. The star's class slot comes from
-`CustomMachinesAPI.ClassIndexFromKind` rather than a literal, since it is whatever the
-registry handed the machine this boot, and the player's `starting_machine_idx` is set to the
-star as well so a later respawn keeps it.
+`Rider_RespawnFullRecreate` (`0x80193900`) on it. The registry stages the star's own pair,
+since its class slot is whatever the registry handed the machine this boot, and sets the
+player's `starting_machine_idx` to the star as well so a later respawn keeps it.
 
-`MountStar` is the fallback for the cases the cinematic cannot cover, firing that recreate
-directly with no presentation around it. It waits for the frame boundary, since collection
-lands inside `Machine_OnTouchItem` and the recreate would tear down the machine that call is
-running on; with a cinematic the mount comes out of its own proc instead, which is already
-past that call.
+`ApStar_Mount` is the fallback for the cases the cinematic cannot cover, and the mount is the
+registry's there too: it hands the star to `CustomMachinesAPI.MountMachine`, which fires that
+same recreate with no presentation around it. The registry runs it at the next frame
+boundary, since collection lands inside `Machine_OnTouchItem` and the recreate would tear
+down the machine that call is running on; with a cinematic the mount comes out of its own
+proc instead, which is already past that call.
 
 A player already riding the star is re-mounted like anyone else, which costs them the
 patches on the machine the recreate tears down. That is what vanilla does: the pickup arm of
@@ -348,19 +380,23 @@ patches on the machine the recreate tears down. That is what vanilla does: the p
 and that no cinematic is already running, so a player riding Hydra who collects three more
 Hydra pieces gets a fresh Hydra with base stats.
 
-## The Cinematic's Archives
+## The Cinematic's Archive
 
-The cinematic reads a `vsData`: a glow-model triple `{JOBJDesc*, FigaTree*, MatAnimJoint*}`,
-a parts-model triple of the same shape, and a pointer to a word holding a camera-animation
-descriptor. The two halves come from different donors, so they are two archives and the
-three-pointer block is assembled in mod RAM.
+`ApStarAssembly.dat` has one public, `apStarAssembly`, shaped like `VsHydra.dat`'s
+`vsDataHydra`. It is three pointers:
 
-| File | Publics | What it is |
-|---|---|---|
-| `ApStarParts.dat` | `apStarParts` | the star's own model plus a 150-frame FigaTree that flies the pods in |
-| `ApStarGlow.dat` | `apStarGlow`, `apStarCam` | Hydra's streaks and flashes rebuilt for six pods, plus the camera descriptor |
+| Slot | Points at |
+|---|---|
+| glow | a `{JOBJDesc*, FigaTree*, MatAnimJoint*}` triple: Hydra's streaks and flashes rebuilt for six pods |
+| parts | a triple of the same shape: the star's own model plus a 150-frame FigaTree that flies the pods in |
+| camera | a word holding the camera descriptor |
 
-Both are written by `uv run python scripts/authoring/make_ap_star_assembly.py`.
+The two models come from different donors, the parts from `VcStarAp.dat` and the glow and
+camera from `VsHydra.dat`, so each is carved on its own and the parts carve is grafted onto the
+end of the glow one with every pointer in it rebased. The graft starts on a 32-byte boundary,
+so every carved range keeps the alignment it was carved at.
+
+It is written by `uv run python scripts/authoring/make_ap_star_assembly.py`.
 
 **The parts model** is a carve of `VcStarAp.dat`'s main model, all 17 joints. Each drawn
 joint's DObj chain is trimmed to its high LOD, plus the pods' XLU glow quad, because the

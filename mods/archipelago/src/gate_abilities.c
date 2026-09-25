@@ -17,76 +17,10 @@ static int IsAbilityUnlocked(CopyKind kind)
     return (ap_save->ability_unlocked_mask & (1 << kind)) != 0;
 }
 
-static int IsCopyItemLocked(u8 it_kind)
+int GateAbilities_IsItemLocked(u8 it_kind)
 {
     CopyKind ck = Ability_ItKindToCopyKind(it_kind);
     return ck != COPYKIND_NONE && !IsAbilityUnlocked(ck);
-}
-
-static void FilterCopyItemsFromPool(u8 *pool_kinds, u8 *pool_chances, u8 *pool_num)
-{
-    u8 num = *pool_num;
-    u8 write = 0;
-
-    for (u8 read = 0; read < num; read++)
-    {
-        if (IsCopyItemLocked(pool_kinds[read]))
-            continue;
-
-        if (write != read)
-        {
-            pool_kinds[write] = pool_kinds[read];
-            pool_chances[write] = pool_chances[read];
-        }
-        write++;
-    }
-
-    *pool_num = write;
-}
-
-void GateAbilities_FilterEventDropTables()
-{
-    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (!info || !info->item_desc)
-        return;
-
-    for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
-    {
-        if (IsCopyItemLocked(info->item_desc->event_source_drop[i].it_kind))
-        {
-            info->item_desc->event_source_drop[i].chance_dyna = 0;
-            info->item_desc->event_source_drop[i].chance_tac = 0;
-            info->item_desc->event_source_drop[i].chance_meteor = 0;
-            info->item_desc->event_source_drop[i].chance_destructible = 0;
-            info->item_desc->event_source_drop[i].chance_chamber = 0;
-            info->item_desc->event_source_drop[i].chance_ufo = 0;
-        }
-    }
-}
-
-void GateAbilities_FilterSpawnTables()
-{
-    grBoxGeneObj *obj = *stc_grBoxGeneObj;
-    if (!obj)
-        return;
-
-    for (int box = 0; box < BOXKIND_NUM; box++)
-    {
-        FilterCopyItemsFromPool(
-            obj->item_group_spawn[box].it_kind,
-            obj->item_group_spawn[box].chance,
-            &obj->item_group_spawn[box].num);
-    }
-
-    FilterCopyItemsFromPool(
-        obj->sameitem_it_kind,
-        obj->sameitem_chance,
-        &obj->sameitem_num);
-
-    FilterCopyItemsFromPool(
-        obj->subsequent_it_kind,
-        obj->subsequent_chance,
-        &obj->subsequent_num);
 }
 
 // Replaces Rider_CheckAndGiveAbility (0x80192650), the single entry point for copy
@@ -105,7 +39,7 @@ int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
 
     // Rider_GiveAbility returns 0 when the rider is in an unable state; gating the
     // send on a successful grant avoids phantom traps.
-    if (result && kind == COPYKIND_SLEEP && !Ply_CheckIfCPU(rd->ply))
+    if (result && kind == COPYKIND_SLEEP && Ply_GetPKind(rd->ply) == PKIND_HMN)
         TrapLink_Send(TRAPLINK_KIND_SLEEP);
 
     return result;
@@ -332,8 +266,9 @@ static void FilterMode2(EnemySpawnData *data)
             zeroed_categories++;
         }
     }
-    OSReport("[GateAbilities] Mode 2: zeroed %d/%d entries, %d/%d categories\n",
-             zeroed_entries, data->spawn_count, zeroed_categories, num_categories);
+    if (zeroed_entries || zeroed_categories)
+        OSReport("[GateAbilities] Mode 2: zeroed %d/%d entries, %d/%d categories\n",
+                 zeroed_entries, data->spawn_count, zeroed_categories, num_categories);
 }
 
 // Zero spawn weights for enemies whose copy ability is locked. Modifies the .dat data
@@ -366,8 +301,8 @@ void GateAbilities_OnBoot()
     CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility);
     CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility);
     // GateAbilities_RandomGiveAbility marks the substituted kind instead.
-    CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: aPress bl MarkCopyAbilityObtained
-    CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: autoSelect bl MarkCopyAbilityObtained
+    CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: randomAbility_aPress bl MarkCopyAbilityObtained
+    CODEPATCH_REPLACEINSTRUCTION(0x801ae910, 0x60000000); // NOP: randomAbility_autoSelect bl MarkCopyAbilityObtained
     OSReport("[GateAbilities] Hooks installed\n");
 }
 

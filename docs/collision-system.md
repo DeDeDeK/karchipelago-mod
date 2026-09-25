@@ -20,7 +20,7 @@ The arrays behind `coll` and `coll_terrain` are shared but their counts are sepa
 
 ### Allocation lifetime
 
-`grColl_Alloc` (`0x800d6dcc`) zeroes `coll_max`, runs `grColl_CountArrays` over the terrain node and both prop lists to accumulate counts, then makes **nine separate `HSD_MemAlloc` calls** (`0x800d6f7c` onward), one per array, each sized exactly `count * stride`. `grColl_Free` (`0x800d7060`) releases them the same way, field by field. Everything is plain writable MEM1 for the life of the stage.
+`grColl_Alloc` (`0x800d6dcc`) zeroes `coll_max`, runs `grColl_CountArrays` over the terrain node, every `YakumonoTable.spawn_data_array` block and every generic `entries[]` record to accumulate counts, then makes **nine separate `HSD_MemAlloc` calls** (`0x800d6f7c` onward), one per array, each sized exactly `count * stride`. `grColl_Free` (`0x800d7060`) releases them the same way, field by field. Everything is plain writable MEM1 for the life of the stage.
 
 Consequences for mod code:
 
@@ -90,7 +90,26 @@ Owners:
 | Enemies | `EnemyData+0x594` | `EventActor_EnvCollRaycastDown` / `Up` (`0x80204e24` / `0x80204e44`), `EventActor_GroundSnap` (`0x80204fac`), `Enemy_GroundPhysicsVelocity` (`0x80209104`), `Enemy_GroundAttach` (`0x8020a664`). |
 | Items | `ItemData+0x1A4`, often NULL | `CityItem_EnvColl` (`0x8024f814`) GObj proc into `Item_GenericEnvColl` (`0x80255438`). |
 
-`Machine_GetGroundHandle` (`0x80247fac`) searches a body's collision entries for ground type `0x19`.
+### Ground Types
+
+`GrCollTri.kind` bits 4..11 carry the surface's ground type, the tag
+`grGetGroundTypeFromTriangleID` (`0x800cec28`) returns. `Machine_GetGroundHandle`
+(`0x80247fac`) searches for type `0x19`.
+
+City Trial's terrain uses type 29 for the sea and type 30 for the two invisible
+barriers that ring the city. Both barriers are one closed loop each, following the
+coastline rather than any box:
+
+| Barrier | Wall triangles | Shape |
+|---|---|---|
+| inner | 321, about 100 units above the terrain they follow | 147-vertex loop, radius 497 to 957, with an 80-unit break on the volcano's north slope |
+| outer | 72, floor to the ceiling at Y 1040.9 | 36-vertex loop, radius 748 to 1146, plus a 34-triangle lid at Y 1040.9 |
+
+A machine with wings clears the inner barrier; nothing gets past the outer one.
+Both sit entirely inside `StageNode`'s +/-1300 out-of-bounds box, so
+`calcDistanceFromOOB` (`0x800d4f20`) never returns a negative clearance in the
+city and `Machine_CheckFallDeath` (`0x801e6464`) never fires its out-of-bounds
+branch there.
 
 ## Scene Objects and Breakable Props
 
@@ -170,7 +189,7 @@ Raycast helpers on this path: `Item_Raycast` (`0x802546e4`) walks `Raycast_Groun
 
 ### Spawning items from mod code
 
-`Item_InitDesc` (`0x802509a0`, `CityItem_InitDesc` in the symbol map) takes **13 parameters**: 8 GPR (r3-r10), 1 FPR (f1, the scale), and 4 on the stack. The GC EABI does not shadow floats in GPRs, so the float argument does not consume a GPR slot and the last four arguments genuinely go on the stack. Pass all 13 - a short call leaves the stack four with garbage, and garbage in the `coll_kind` slot is the crash above.
+`Item_InitDesc` (`0x802509a0`) takes **13 parameters**: 8 GPR (r3-r10), 1 FPR (f1, the scale), and 4 on the stack. The GC EABI does not shadow floats in GPRs, so the float argument does not consume a GPR slot and the last four arguments genuinely go on the stack. Pass all 13 - a short call leaves the stack four with garbage, and garbage in the `coll_kind` slot is the crash above.
 
 The prototype is in `externals/hoshi/include/item.h`. The four stack arguments are, in order, `is_airborne`, `coll_kind`, `x38` and `x3c` (the last two map to `ItemData[0x34]` / `[0x38]` and are `-1` in every vanilla caller).
 

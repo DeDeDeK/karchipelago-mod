@@ -5,7 +5,6 @@
 #include "rider.h"
 
 void GateTopRideItems_OnBoot();
-void GateTopRideItems_ApplyMask();
 int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce);
 
 // Applies the item to every human Kirby directly. Only valid in a Top Ride scene with
