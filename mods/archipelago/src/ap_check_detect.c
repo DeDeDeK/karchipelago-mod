@@ -232,11 +232,6 @@ static int in_kirby_melee;
 // king_dedede_ko_frame for.
 #define AP_VSKD_BOSS_PLY 4
 
-// Players whose machine took its credited hit from a sphere shot this frame. The hit
-// resolves at machine proc prio 9 and a KO it causes lands at prio 10 of the same
-// frame, so the mask is cleared at every frame start.
-static u8 shot_hit_mask;
-
 // Bust one machine while riding another, in the city.
 typedef struct BustCheck
 {
@@ -557,8 +552,6 @@ void APCheckDetect_On3DLoadEnd(void)
 
 void APCheckDetect_OnFrameStart(void)
 {
-    shot_hit_mask = 0;
-
     if (!in_city_trial || Observed(APCK_ASSEMBLE_ALL_LEGENDARY))
         return;
 
@@ -624,7 +617,7 @@ void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int machine_kind)
         if (CityEvent_GetActiveKind() == EVKIND_FOG)
             APCheckDetect_Observe(APCK_EVENT_FOG_KO);
         ObserveBusts(killer, machine_kind);
-        if ((shot_hit_mask & (1 << victim)) && Ply_GetPKind(victim) == PKIND_CPU)
+        if (GateApStar_IsShotAttack(dmg_log->credited_attack) && Ply_GetPKind(victim) == PKIND_CPU)
             APCheckDetect_Observe(APCK_AP_STAR_SHOT_KO_CPU);
     }
 
@@ -1072,26 +1065,6 @@ CODEPATCH_HOOKCREATE(0x801dacb4,
     0
 )
 
-// Runs as Machine_ActOnHitCollision takes its projectile branch, the one place the
-// credited hit's projectile is named: the attacker log it copies onto the victim
-// carries only the kind's attack word, which the sphere shot shares with the Plasma
-// ability's spread.
-static void APCheckDetect_ProjectileHit(GOBJ *proj, int victim)
-{
-    if (in_city_trial && victim >= 0 && victim < 4 && GateApStar_IsShot(proj))
-        shot_hit_mask |= 1 << victim;
-}
-
-// Clobbered: mr r3, r28 (the projectile), re-executed after. r25 is the ply riding the
-// machine that was hit.
-CODEPATCH_HOOKCREATE(0x801d73b8,
-    "mr 3, 28\n\t"
-    "mr 4, 25\n\t",
-    APCheckDetect_ProjectileHit,
-    "",
-    0
-)
-
 // Replaces stadiumPrediction's bl HSD_Randi(24), the one-in-five arm that names any
 // StadiumKind; the other four name the real one. The guess is only judged once the
 // trial's stadium loads, since a random pick can still land on the right stadium.
@@ -1429,7 +1402,6 @@ void APCheckDetect_OnBoot(void)
     CODEPATCH_REPLACECALL(0x801d741c, APCheckDetect_RailFireHit);
     CODEPATCH_REPLACECALL(0x80196668, APCheckDetect_RailFireHit);
     CODEPATCH_HOOKAPPLY(0x801dacb4);
-    CODEPATCH_HOOKAPPLY(0x801d73b8);
     CODEPATCH_REPLACECALL(0x801279a0, APCheckDetect_PredictRandom);
     CODEPATCH_REPLACECALL(0x802acd4c, APCheckDetect_TopRideKirby);
     OSReport("[APCheckDetect] Hooks installed\n");

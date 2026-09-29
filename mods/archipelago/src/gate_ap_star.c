@@ -160,7 +160,7 @@ int GateApStar_AssembledThisRound(int ply)
     return ap_star_api ? ap_star_api->AssembledThisRound(ply) : 0;
 }
 
-int GateApStar_IsShot(GOBJ *proj)
+int GateApStar_IsShotAttack(int credited_attack)
 {
-    return ap_star_api ? ap_star_api->IsShot(proj) : 0;
+    return (credited_attack & 0xFF) == AP_STAR_SHOT_ATTACK_CAUSE;
 }

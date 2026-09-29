@@ -472,33 +472,21 @@ named.
 | 42 | As King Dedede, KO 10 Kirbys in one derby | gated on `Gm_IsDestructionDerby()` (`Gm_GetCityKind() == 14`, so any of DD 1-5); counts a KO whose killer is a `PKIND_HMN` slot with `Ply_GetRiderKind == RDKIND_DEDEDE` and whose victim is a different slot with `RDKIND_KIRBY`. The counter is per game, reset in `On3DLoadEnd` alongside the other per-round counters |
 | 75-77 | In the city, bust Rex Wheelie on Wheelie Scooter / Winged Star on Flight Warp Star / Shadow Star on Archipelago Star | gated on `in_city_trial`; a `bust_checks[]` row matches the victim's `MachineKind` against the busted machine and `PlyMachineKind(killer)` against the ridden one, with the killer on its machine (`Rider_IsOnMachine`) as the KO lands. The Archipelago Star resolves through `GateApStar_MachineKind()` |
 | 81 | VS. KING DEDEDE KO King Dedede as Meta Knight | a KO of slot 4 - King Dedede in his own stadium, the victim `Ply_AddDeath` stamps `king_dedede_ko_frame` (`PlayerStats+0x848`) for - under `InStadium()` on `STKIND_VSKINGDEDEDE`, by a human killer whose `Ply_GetRiderKind` is `RDKIND_METAKNIGHT` |
-| 97 | In the city, KO a CPU with a sphere shot from the Archipelago Star | gated on `in_city_trial`; the victim is a `PKIND_CPU` slot whose bit is set in `shot_hit_mask`, the players whose machine took its credited hit from a sphere shot this frame (below) |
+| 97 | In the city, KO a CPU with a sphere shot from the Archipelago Star | gated on `in_city_trial`; the victim is a `PKIND_CPU` slot and `GateApStar_IsShotAttack(dmg_log->credited_attack)` holds - the credited hit was a sphere shot (below) |
 
 Testing the victim's rider kind is not a formality. A stadium CPU draws its character from the
 gated select grid, so once King Dedede or Meta Knight is unlocked - and this box needs Dedede
 unlocked - a rival can be one of them rather than a Kirby. The player can assign each CPU a
 machine from that grid, so an all-Kirby field stays arrangeable.
 
-The KO record cannot name the sphere shot on its own. For a projectile hit,
-`Machine_ActOnHitCollision` credits the projectile's owner and copies the attack block at
-`proj+0x17c` onto the victim's `DmgLog`. That word comes from the kind's state entry through
-`Projectile_AssignStateFlags` (`0x80222298`), so the shot carries `0x109`, the same word as the
-Plasma ability's own spread (`PROJKIND_PLASMA_SPREAD_MID`). A Plasma Kirby riding the star
-would therefore look identical. The projectile's GObj is named only while the hit resolves, as
-the attacker HurtData's `+0x04`, and `HitColl_ResolveLogEntry` (`0x8018db10`) asserts once the
-shared hit log has moved on to another victim. So a `CODEPATCH_HOOKCREATE` sits at the head of
-the projectile branch (`0x801d73b8`, `mr r3, r28`, re-executed after). It reads the projectile
-from r28 and the ply riding the hit machine from r25. If ap_star's `IsShot` recognises the
-projectile, the hook sets that ply's bit in `shot_hit_mask`. `IsShot` checks for the
-`user_hook_0` that only a sphere shot carries.
-
-The hit resolves in `Machine_UpdateHitColl`, a machine proc at priority 9. A KO it causes lands
-in `Machine_DmgApply` at priority 10, which calls `Machine_GiveDamage` and so reaches
-`Ply_AddDeath` in the same `GObj_UpdateAll` pass. `APCheckDetect_OnFrameStart` clears the mask
-before that pass, so a shot that hits without destroying the machine cannot lend its bit to a
-later KO. Only the credited hit counts - the one with the strongest knockback that frame, the
-same hit the game credits the KO to. Damage from earlier hits and the frame's other hits can
-wear the machine down.
+The sphere shot is a projectile kind of its own, and its state's attack word carries an
+attack cause no vanilla attack uses, `AP_STAR_SHOT_ATTACK_CAUSE` (`0x03`, in `ap_star_api.h`).
+`Machine_StoreAttacker` (`0x80231d90`) writes the credited attack's word to the victim's
+`DmgLog.credited_attack` in the same call that writes `attacker_ply`, so the KO's damage log names the
+shot directly: `GateApStar_IsShotAttack` compares the word's low byte, with no runtime import of
+`ap_star`. The log names the credited attack, the one the game credits the KO to, so a CPU a
+shot wore down and something that credits nobody finished off still counts, exactly as the
+killer is still credited.
 
 The bust boxes use their own table rather than vanilla's. `Ply_AddDeath` records vanilla's eight
 City Trial bust pairs into `PlayerStats+0x4c4` from a fixed ten-entry `{busted, riding}` table at

@@ -8,12 +8,16 @@
 // this mod owns the charge-release shot and the six-sphere collection.
 
 #define AP_STAR_MOD_NAME  "ap_star"
-#define AP_STAR_API_MAJOR 4
-#define AP_STAR_API_MINOR 1
+#define AP_STAR_API_MAJOR 5
+#define AP_STAR_API_MINOR 0
 
-// CustomMachineDesc.name of the machine archive. The registry is generic, so
-// this string is the only thing tying machines/VcStarAp.dat to this code.
+// CustomMachineDesc.name authored into the star's machine archive. The registry is
+// generic, so this string is the only thing binding that archive to this code.
 #define AP_STAR_MACHINE_NAME "Archipelago Star"
+
+// The attack cause a sphere shot hit leaves in the low byte of the victim's
+// DmgLog.credited_attack. No vanilla attack uses it, so it names the shot on its own.
+#define AP_STAR_SHOT_ATTACK_CAUSE 0x03
 
 // The six spheres, in the logo's ring order - rose at twelve o'clock, then clockwise.
 typedef enum APStarPieceKind
@@ -27,13 +31,14 @@ typedef enum APStarPieceKind
     APSTARPIECE_NUM,
 } APStarPieceKind;
 
-// Fired once the frame a player completes a set. `ply` is the 0..4 slot.
+// Run as a player assembles the star, from a completed set or through Assemble.
+// `ply` is the 0..4 slot.
 typedef void (*ApStarAssembleFn)(int ply);
 
 typedef struct ApStarAPI
 {
-    // MachineKind the star registered as, or -1. Resolves lazily, so it answers
-    // -1 during a mod's own OnBoot.
+    // MachineKind the star registered as, or -1. Answers -1 until custom_machines
+    // has booted.
     int (*GetMachineKind)(void);
 
     // Display name of one sphere, which is its archive's CustomItemDesc.name.
@@ -51,22 +56,21 @@ typedef struct ApStarAPI
     int (*AssembledThisRound)(int ply);
 
     // Drop one sphere in front of a player's machine, bypassing the delivery
-    // schedule. 0 if the sphere's gate was closed when this scene loaded.
+    // schedule. City Trial only; 0 for a sphere with no ItemKind this round, which a
+    // gate closed at load leaves it, or a player with no machine.
     int (*SpawnPiece)(int piece, int ply);
 
     // Add one sphere to a player's set with no pickup, completing the set if it is
-    // the sixth. Independent of the gate, which is how a consumer awards one
-    // directly. City Trial only, and 0 with the player not riding.
+    // the sixth; a sphere already held is left as it is. Independent of the gate,
+    // which is how a consumer awards one directly. City Trial only, and 0 for an
+    // empty player slot.
     int (*CollectPiece)(int piece, int ply);
 
     // Put a player straight through the assembly without the set: the cutscene (or
     // the mount and completion sounds when it cannot run), the assembled flags and
-    // the handlers. Their collected set is cleared. City Trial only.
+    // the handlers. Their collected set is cleared. City Trial only, and 0 with the
+    // star unregistered or an empty player slot.
     int (*Assemble)(int ply);
-
-    // 1 if this projectile GObj is a sphere shot. A hit's attacker log names only the
-    // projectile kind, which the shot shares with the Plasma ability's spread.
-    int (*IsShot)(GOBJ *proj);
 } ApStarAPI;
 
 #endif // AP_STAR_API_H

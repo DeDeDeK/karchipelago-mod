@@ -19,12 +19,31 @@ particle-effect handles, per-state callback pointers.
 
 Two more per-kind tables hang off `kind`:
 
-- The **vtable** at `0x804b4338[kind]` (`ProjKindVTable`) - `init` and `post_init` one-shots run by
-  `Projectile_Create`, two per-frame transform refreshers, two aux hooks, a `despawn` slot, and the
-  pointer to the state table. A NULL `despawn` falls back to `GObj_Destroy`; most bullet kinds
-  install a slot that is itself a bare `GObj_Destroy`, so they vanish without a fade.
-- The **kind data** at `0x8055a9a8[kind]` (`ProjKindData`) - model, animation specs, default
-  lifetime, mpColl description, vulnerable-region list.
+- The **vtable** at `0x804b4338[kind]` (`ProjKindVTable`) - the pointer to the state table, a
+  `system_init` that `Projectile_SystemInit` (`0x8021f1fc`) runs on every 3D load, `init` and
+  `post_init` one-shots run by `Projectile_Create`, two render-state loaders that fill `proj+0x104`
+  from the kind data, an `aux_a` teardown hook run by the dtor, an `on_hit` callback at `+0x1c`
+  (`int (proj, hit)`, called from prio 10; non-zero destroys the projectile) and a `despawn` slot. A
+  NULL `despawn` falls back to `GObj_Destroy`; most bullet kinds install a slot that is itself a
+  bare `GObj_Destroy`, so they vanish without a fade.
+- The **kind data** at `0x8055a9a8[kind]` (`ProjKindData`) - params (`params[0]` root model scale,
+  `params[3]` default lifetime), render-state template, model, per-state animation specs, mpColl
+  description, vulnerable-region list.
+
+Both tables are exactly 17 entries. The word after the vtable table (`0x804b437c`) is the start of
+the `"WnCommon.dat"` string `Projectile_LoadCommonArchive` (`0x80220194`) loads, so an 18th kind needs
+the vtable table relocated: it is formed by `lis`/`addi` pairs at 10 sites (`Projectile_SystemInit`,
+three in `Projectile_Create`, `Projectile_Proc10_HitReact`, `Projectile_UserDataDtor`,
+`Projectile_Despawn`, `Projectile_LoadKindParams` and two in `Projectile_ReloadKindParams` (`0x80220654`)), and the `Projectile_SystemInit`
+loop is bounded at 17. The word after the kind-data table (`0x8055a9ec`) is padding: the clear loop
+stops at 17 and the registrar writes only the kinds its list names. Nothing else in the engine is
+indexed by kind - `Projectile_GetKind` (`0x80223184`) readers only compare against fixed kinds.
+
+Every function slot in the vtable is NULL-checked where it is called, so a custom kind fills only the
+slots it uses. `ap_star` appends an 18th kind, the Archipelago Star's sphere shot, this way: at boot it
+copies the 17 vanilla pointers into a table of its own and repoints nine of the ten sites - all but
+`Projectile_SystemInit`, whose loop has nothing to run for it - and it stores its `ProjKindData` in
+`0x8055a9ec` once, at boot.
 
 Two kind pairs alias at the vtable pointer level: `PROJKIND_PLASMA_A` (5) and `_PLASMA_B` (6) both
 use `0x804b47e0`; `PROJKIND_PLASMA_SPREAD_MID` (7) and `_SIDE` (8) both use `0x804b4848`. What
@@ -35,24 +54,38 @@ separates each pair is the per-kind *data*, not code.
 `0x8055a9a8` is filled **all at once by rider creation**, not per stage and not per copy ability.
 `Rider_Create` (`0x8018e21c`) hands `rdData->rdDataKirby+0x20` - a `(count, entries[])` list that
 `Rider_LoadMotionFile` (`0x801a5a8c`) copies out of `RdKirbyAbility.dat` - to the kind-data registrar
-at `0x802201e0`. That list covers all 17 kinds, so every kind is spawnable once any rider exists.
-`Projectile_ClearKindDataTable` (`0x8022011c`) zeroes the table at system init and `Projectile_Create`
+`Projectile_RegisterKindDataList` (`0x802201e0`), which fills only the slots that are still NULL, so
+the first registrar after a clear wins. That list covers all 17 kinds, so every kind is spawnable
+once any rider exists. `Projectile_ClearKindDataTable` (`0x8022011c`) zeroes the table from
+`Projectile_SystemInit` on every 3D load and `Projectile_Create`
 dereferences the slot unguarded (`0x8021f5c4`), so custom spawners outside the normal rider lifetime
 must check `((void **)0x8055a9a8)[kind] != NULL`.
 
 ### Environment collider
 
 A kind whose `ProjKindData.mpcoll_desc` (`+0x14`) is non-NULL gets an mpColl `CollData` of its own at
-`proj->coll_data` (`+0x138`), created by `zz_80221cf0_` (`0x80221cf0`) with the projectile GObj as its
+`proj->coll_data` (`+0x138`), created by `Projectile_CreateEnvColl` (`0x80221cf0`) with the projectile GObj as its
 owner and shaped by `Projectile_RebuildCollShape` (`0x80221c9c`) from the descriptor's radius and
 extents. A kind with no descriptor stores NULL there and has no environment collision at all.
 
 `Projectile_UpdateEnvColl` (`0x80221fd4`) is one frame of that collider: `mpColl_Update`, the map
 sweep and the pushback substep, then `flag_b` bit 0 set if anything was contacted. Every kind that
-does environment collision opens its `state_fn2` with it - plasma's (`0x802269fc`) calls it and then
-bursts the shot when the contact normal is steeper than the threshold in its render-state block. **A
-mod that replaces `state_fn2` has to call it itself**, or that projectile stops colliding with the
-world entirely.
+does environment collision opens its `state_fn2` with it. **A mod that replaces `state_fn2` has to
+call it itself**, or that projectile stops colliding with the world entirely.
+
+The pushback is written back: `mpColl_UpdateShapeExtents` stores the resolved collider centre into
+`proj->position`, and velocity is left alone. A projectile driving into a wall is pushed back out
+along the wall's plane every frame and slides along it until its `fn2` ends it, and a sweep test from
+`position_prev` to `position` run after `UpdateEnvColl` never crosses the wall. What was touched is
+read off `coll_data->coll_info` afterwards - `under_rec_num`, `wall_rec_num`, `top_rec_num` - with
+`Projectile_HasFloorContact` (`0x80222144`) and `Projectile_GetFloorContactNormal` (`0x802221b8`) as
+the floor accessors.
+
+Plasma's `fn2` (`PlasmaSpread_State0_EnvCollide`, `0x802269fc`) bursts on any contact with no floor
+in it, and on a floor contact only when the angle between velocity and the floor normal reaches
+render-state word 1 (135 degrees for kind 7, 150 for kind 8). A frame that touches a floor tests only
+the floor, so a plasma shot skimming the ground at a shallow angle slides along any wall it meets at
+the same time.
 
 The sweep it runs is also the City Trial prop-break dispatch, gated on `CollData.flags` (`+0x34c`)
 bit 2 - which `mpColl_Create` clears and only machines set. The break force it weighs against a
@@ -80,7 +113,17 @@ registered by `Projectile_Create` dispatch the slots each frame at priorities 1,
 2. Writes `proj+0x24 = index`, `proj+0x2c = entry.state_id`, copies the four fn pointers into
    `proj+0x150..0x15c`, and writes `proj+0x38 = kind_data->state_anim_spec_array + state_id*16` (the
    per-state animation/blend spec, 16 bytes per entry - **not** the 24-byte state_table entry).
-3. Runs the animation transition via `Projectile_AssignStateFlags`.
+3. Binds the state's animation spec onto the projectile's loaded model with
+   `Projectile_BindStateAnim` (`0x80220b20`) and runs its script once (`Projectile_RunScript`,
+   `0x802211cc`), then resets the attack block with `Projectile_AssignStateFlags` and records the
+   attack with `Ply_RecordAttackUsed`.
+
+The animation binds to whatever tree the projectile loaded, joint by joint in preorder, so a model
+swapped in for a kind's own still receives that kind's tracks - scale and rotation keys on the
+matching joints, and particle-spawn keys (a PTCL track on the root) that emit under the projectile's
+efgroup. `Projectile_AnimThink` (`0x802208fc`) advances it at prio 1 each frame. A 16-byte spec
+(`ProjStateAnimSpec`) is `{AnimJoint*, MatAnimJoint*, script*, flags}`; NULL anims are safe, and the
+script carries the hitbox commands (op `0xc`, `ProjScript_CmdHitbox` `0x80220ca0`, fields x0.004).
 
 It does **not** touch physics velocity. Vanilla throw code writes velocity first, then transitions.
 
@@ -129,24 +172,29 @@ non-obvious cases:
 - The **"absorbed" state 1** of plasma A/B/C and firecracker is a rider-alive watchdog reading
   `proj+0x1b8`/`0x1bc`, not an active phase.
 
-### State flags word
+### State flags word - the attack block
 
-The `flags` word at entry+0x04 is routed through `Projectile_AssignStateFlags` (`0x80222298`), called
-from `Projectile_SetState`. The upper byte is a boolean "animated state"; the lower byte is a
-per-kind animation-class tag, compared as a whole value rather than tested as bits - no state table
-uses more than two distinct flag values (one "animated", plus 0x0000 for held/sentinel states).
+The `flags` word at entry+0x04 is the state's **attack word**. `Projectile_SetState` hands it to
+`Projectile_AssignStateFlags` (`0x80222298`), which resets the projectile's attack block at
+`proj+0x17c`: the word itself, the hit counter at `+0x184` and the victim mask at `+0x18a`/`0x18b`.
+When a hit lands, `Machine_StoreAttacker` (`0x80231d90`) copies the block onto the victim's `DmgLog`
+(the word at `DmgLog+0x4`, `credited_attack`, next to `attacker_ply` at `+0x1c`), so the word names what hit the victim
+until the next credited hit replaces it.
 
-What the low byte gates is *whether a fresh animation-instance id is minted*. `proj+0x194` gets a new
-id from `AllocSeqId16` (`0x80231b68`) when the low byte is 0 **or** differs from the previous
-transition's low byte; if the anim class is unchanged and nonzero, the old id is kept. `AllocSeqId16`
-takes no arguments - it reads, increments, and writes back a global `u16` counter at `0x805DD8A0`
-(`r13+0x7c0`), returns the pre-increment value, and resets to 1 on wrap. So `proj+0x194` is a
-generation counter that bumps on every anim-class change, not an id resolved from a lookup table.
+- **Low byte - attack cause**, an index into the per-player stat arrays. Causes 1..0x1a are
+  bounds-checked in `Machine_StoreAttacker` and `Ply_RecordEnemyDefeat`; 0 or >= 0x1b credit only with
+  bit `0x8000` set. `Ply_RecordAttackUsed` (`0x80231bdc`), which `Projectile_SetState` runs on every
+  cause change, indexes `PlayerStats+0x16c + cause*4` with no bound for causes >= 0x1b - from 0x29 up
+  that overwrites the per-actor defeat counters. `Ply_AddDeath` compares the cause against
+  0x11 / 0x12 / 0x13 (Firework / Sensor Bomb / Gold Spike KOs). Plasma spread's word is `0x109`
+  (cause 9).
+- **Bit `0x100`** is set on every active vanilla projectile state. **`0x1000`** makes
+  `Ply_RecordAttackUsed` set `PlayerStats+0x330`.
 
-The flag word itself is stored verbatim at `proj+0x17c`, whose low byte is what the next transition
-compares against; `proj+0x184` and parts of `proj+0x18a`/`0x18b` are zeroed each transition. These
-stored words are what the per-kind `refresh_xfm_*` callbacks read each frame to drive the HSD
-animation object.
+`proj+0x194` is the attack-instance id: `AllocSeqId16` (`0x80231b68`, a global `u16` counter at
+`0x805DD8A0` that returns the pre-increment value and wraps to 1) mints a new one when the cause is 0
+or differs from the previous one, and `Machine_StoreAttacker` copies it to `DmgLog+0x1a` (`credited_attack_id`), which is
+how one attack is credited to a victim once. Nothing render-side reads the block.
 
 ## Per-Frame Update Procs
 
@@ -158,14 +206,14 @@ state entries, never through extra procs.
 | Prio | Addr | Name | What it does |
 |-----:|------|------|--------------|
 | 0 | `0x8021f9b4` | `Projectile_Proc0_FrameStart` | Bump `proj+0x110` frame counter, zero accel (via `0x80220350`), `HurtData_ResetFrame`, tick the `proj+0x134` intang timer, call the `proj+0x160` user hook. The hook runs **after** the accel zeroing and before prio 4 integrates, which is what makes it the place to write a custom accel. |
-| 1 | `0x8021fa18` | `Projectile_Proc1_RunStateFn0` | `HurtData_UpdatePerFrame`, call `state_fn0`, then tick `proj+0x10c` lifetime and despawn at zero. |
+| 1 | `0x8021fa18` | `Projectile_Proc1_RunStateFn0` | `HurtData_UpdatePerFrame`, advance the state animation and its script (`Projectile_AnimThink`), call `state_fn0`, then tick `proj+0x10c` lifetime and despawn at zero. |
 | 4 | `0x8021faa4` | `Projectile_Proc4_Physics` | Call `state_fn1`; integrate `vel += accel` then `pos += vel`. Does **not** touch `pos_prev` - prio 21 does that. |
 | 5 | `0x8021fb44` | `Projectile_Proc5_RunStateFn2` | Clear the env-coll flag, call `state_fn2`. |
-| 6 | `0x8021fb88` | `Projectile_Proc6_RunStateFn3` | Call `state_fn3`, then `0x80220310` (mpColl pos sync), then a per-kind sub-cleanup. |
+| 6 | `0x8021fb88` | `Projectile_Proc6_RunStateFn3` | Call `state_fn3`, then `Projectile_SyncRootMtx` (`0x80220310`) - rebuilds the root JObj matrix from the basis and position, scaled by `cur_scale * params[0]` - then a per-kind sub-cleanup. |
 | 7 | `0x8021fbec` | `Projectile_Proc7_PostState` | Call the `proj+0x164` user hook. If `pos.y` falls below a floor threshold, `GObj_Destroy`; else update HurtData radius/position from `cur_scale` and `type_flag`. |
 | 8 | `0x8021fc70` | `Projectile_Proc8_Stub` | Single `blr`. Reserved priority. |
 | 9 | `0x8021fc74` | `Projectile_Proc9_HitColl` | Outbound hit detection. |
-| 10 | `0x8021fcd4` | `Projectile_Proc10_HitReact` | Resolve the strongest logged hit, run the per-kind on-hit callback (`proj+0x16c`); state-transition if it returns non-zero. |
+| 10 | `0x8021fcd4` | `Projectile_Proc10_HitReact` | Resolve the strongest logged hit, run the on-hit callback its branch selects (the `proj+0x16c` / `+0x170` hooks or the vtable's `on_hit`); `GObj_Destroy` if it returns non-zero. |
 | 21 | `0x8021fed4` | `Projectile_Proc21_EndOfFrame` | Compute `vel_diff = pos - pos_prev`, save `pos -> pos_prev`, finalise the HurtColl attach. |
 
 ## Hit Detection And Damage

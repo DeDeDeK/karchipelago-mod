@@ -6,6 +6,7 @@
 #include "hsd.h"
 #include "obj.h"
 #include "machine.h"
+#include "particle.h"
 
 #include "ap_star.h"
 #include "ap_star_palette.h"
@@ -20,10 +21,6 @@
 #define TRAIL_RGB_NUM 4
 static const u16 stc_trail_rgb[TRAIL_RGB_NUM] = { 0x53, 0x5a, 0x60, 0x89 };
 
-// A color opcode's operands start past the opcode and its duration byte.
-#define PTCL_COLOR_OPERAND_SKIP 2
-
-static int stc_bound;
 static float stc_phase;       // 0..1 around the palette
 static float stc_phase_per_tick;
 static u32 stc_last_tick;
@@ -45,9 +42,8 @@ static void Advance(void)
         stc_last_tick = now;
         return;
     }
-    // A gap of a whole cycle or more - no star was on the field, or the tick counter
-    // wrapped - carries no information about where the cycle should be, so it resumes
-    // where it left off instead.
+    // A gap of a whole cycle or more - no star was on the field - carries no
+    // information about where the cycle should be, so it resumes where it left off.
     float step = (float)(now - stc_last_tick) * stc_phase_per_tick;
     stc_last_tick = now;
     if (step >= 1.0f)
@@ -58,7 +54,7 @@ static void Advance(void)
         stc_phase -= 1.0f;
 }
 
-static u8 Mix(u32 from, u32 to, float f)
+static u8 Mix(u8 from, u8 to, float f)
 {
     return (u8)((float)from + ((float)to - (float)from) * f);
 }
@@ -75,11 +71,11 @@ static void PaletteColor(GXColor *out)
     float f = walk - (float)i;
     f = f * f * (3.0f - 2.0f * f);
 
-    u32 from = ap_star_piece_colors[i];
-    u32 to = ap_star_piece_colors[(i + 1) % APSTARPIECE_NUM];
-    out->r = Mix((from >> 16) & 0xFF, (to >> 16) & 0xFF, f);
-    out->g = Mix((from >> 8) & 0xFF, (to >> 8) & 0xFF, f);
-    out->b = Mix(from & 0xFF, to & 0xFF, f);
+    const GXColor *from = &ap_star_piece_colors[i];
+    const GXColor *to = &ap_star_piece_colors[(i + 1) % APSTARPIECE_NUM];
+    out->r = Mix(from->r, to->r, f);
+    out->g = Mix(from->g, to->g, f);
+    out->b = Mix(from->b, to->b, f);
     out->a = 0xFF;
 }
 
@@ -141,39 +137,27 @@ static void BindTrail(int kind)
     {
         int size = 0;
         u8 *gen = cm_api->GetGenerator(kind, g, &size);
+        if (gen == NULL)
+            continue;
 
         for (int k = 0; k < TRAIL_RGB_NUM; k++)
         {
             int rgb = stc_trail_rgb[k];
-            int op = -1;
-
-            if (gen != NULL && rgb + 3 <= size)
-                op = gen[rgb - PTCL_COLOR_OPERAND_SKIP] & 0xF0;
-            if (op != 0xC0 && op != 0xD0)
-            {
-                OSReport("[ApStarPalette] Generator %d +0x%x is not a color operand, left untinted\n",
-                         g, rgb);
+            if (rgb + 3 > size)
                 continue;
-            }
-            stc_trail[stc_trail_num++] = gen + rgb;
+
+            int op = gen[rgb - PTCL_OP_COLOR_OPERANDS] & PTCL_OP_COLOR_MASK;
+            if (op == PTCL_OP_COLOR || op == PTCL_OP_COLOR2)
+                stc_trail[stc_trail_num++] = gen + rgb;
         }
     }
 }
 
-// Idempotent. custom_machines exports after this mod boots, and a registered kind is
-// fixed for the run once it has, so the first scene change that finds the star binds it.
-void ApStarPalette_OnSceneChange(void)
+void ApStarPalette_Bind(int kind)
 {
-    if (stc_bound)
-        return;
-
-    int kind = ApStar_MachineKind();
-    if (kind < 0 || !cm_api->SetAnimHandler(kind, OnStarAnim))
-        return;
-
-    stc_bound = 1;
+    cm_api->SetAnimHandler(kind, OnStarAnim);
     stc_phase_per_tick = 1.0f / (CYCLE_PERIOD * (float)(os_info->bus_clock / 4));
     BindTrail(kind);
-    OSReport("[ApStarPalette] Platform cycling with %d trail operand(s), handler installed\n",
-             stc_trail_num);
+    OSReport("[ApStarPalette] Anim handler installed, %d of %d trail operands tinted\n",
+             stc_trail_num, TRAIL_GEN_NUM * TRAIL_RGB_NUM);
 }

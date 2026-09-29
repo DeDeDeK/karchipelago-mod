@@ -26,10 +26,12 @@ mods/ap_star/
     ApPieceIcons.dat               the collection tracker's art
   src/
     main.c                         ModDesc, hoshi callbacks, settings page
-    ap_star.c / .h                 kind lookup, sphere gate, sphere colors, handler lists, API export
+    ap_star.c / .h                 machine binding, sphere colors, API export
     ap_star_palette.c / .h         the platform color cycle and exhaust tint
-    ap_star_shot.c / .h            the charge-release projectile
-    ap_star_pieces.c / .h          sphere delivery, collection, tracker, assembly
+    ap_star_shot.c / .h            the charge-release projectile and its projectile kind
+    ap_star_shot_fx.c / .h         the shot's glow and trail
+    ap_star_pieces.c / .h          sphere gate, delivery, collection, drops, assembly, handler list
+    ap_star_piece_hud.c / .h       the collection tracker's icon row
 ```
 
 `mods/*/assets/` is copied to the FST root by the ordinary asset step, so a machine mod
@@ -108,9 +110,10 @@ fixed-point exponent cannot hold a brighter value takes a lower exponent rather 
 format, which keeps every keyframe buffer the same length.
 
 The six colors and their ring order are the assembly pieces' own list in
-`scripts/authoring/make_ap_star_pieces.py`, imported rather than restated, so a pod and the
-sphere the player collects for it can never drift apart. Slot 0 sits on +Z, the machine's
-front, and the rest run clockwise seen from above. The code carries the same six as
+`scripts/authoring/make_ap_star_pieces.py`. The pods were painted from that list, but the archive is
+edited in place rather than generated, so a change to the list means repainting the pods by hand.
+Slot 0 sits on +Z, the machine's front, and the rest run from there toward +X, which in the engine's
+right-handed, Y-up frame is counterclockwise seen from above. The code carries the same six as
 `ap_star_piece_colors`, indexed by `APStarPieceKind`, whose order is the ring's; the shot and the
 platform cycle both read it, so a change to the list is made there as well.
 
@@ -154,10 +157,10 @@ it alone and `MODULATE` shades it, which is why the disc's two stages are built 
 the field is written separately rather than through the archive. The write runs from the machine's
 Anim handler (`CustomMachinesAPI.SetAnimHandler`), at the end of `Machine_AnimThink` after
 `Machine_ColAnimThink` has reapplied the ColAnim overlays, so it is the color that draws. The
-handler is claimed from `OnSceneChange` by the first scene change that finds the star registered.
-Phase advances on the time-base delta, so the period holds through slowdown; every star on the
-field shares one phase, and a gap of a whole cycle or more - no star on the field, or the 32-bit
-tick counter wrapping at about 106 seconds - resumes where it left off instead of jumping.
+handler is claimed once, when the machine binding settles at the first scene change. Phase advances
+on the time-base delta, so the period holds through slowdown; the unsigned subtraction carries the
+32-bit tick counter's wrap, every star on the field shares one phase, and a gap of a whole cycle or
+more - no star on the field - resumes where it left off instead of jumping.
 
 A particle's color is read out of its generator on the frame it spawns, so overwriting the
 operands of the generator's color opcodes paints the particles born that frame and leaves the ones
@@ -165,8 +168,8 @@ in flight alone - the trail comes out as the cycle stretched along it rather tha
 flashing at once. The generators are the star's own, reached through
 `CustomMachinesAPI.GetGenerator`, which hands back the registry's copy the vehicle bank points at,
 so nothing else on the field emits a program this paints. Each of the eight operands is resolved
-once and checked to sit two bytes past a `0xc0` or `0xd0` color opcode; one that does not is
-reported and left alone.
+once and checked to sit two bytes past a `PTCL_OP_COLOR` (`0xc0`) or `PTCL_OP_COLOR2` (`0xd0`)
+opcode; one that does not is left alone, and the bind reports how many of the eight took.
 
 The color is pushed to full saturation before it goes into the trail. Particles blend additively,
 so wherever a trail overlaps itself the channels sum and clamp, and a pastel palette arrives at
@@ -186,11 +189,13 @@ refusing a second machine under a taken name. The string lives in `ap_star_api.h
 archive; changing one without the other unbinds the machine, and the code then runs as if the
 archive were absent.
 
-Resolution is lazy, not done at `OnBoot`. Mods run in the order their `.bin` files sit in
-the FST, `ap_star` sorts before `custom_machines`, and a mod's export is not available
-until its own `OnBoot` has run - so an `OnBoot` lookup always answers -1. Everything that
-needs the kind asks for it at `OnSceneChange`, `On3DLoadEnd` or later, and every entry point
-tolerates -1 by doing nothing.
+The binding settles at the mod's first `OnSceneChange`, not at `OnBoot`. Mods run in the order
+their `.bin` files sit in the FST, `ap_star` sorts before `custom_machines`, and a mod's export is
+not available until its own `OnBoot` has run - so an `OnBoot` lookup always answers -1. The first
+scene change is past every `OnBoot`, so the import and the name lookup are tried there once and the
+answer is fixed for the run: the kind is cached, the star's class slot resolved, and the Init, Think
+and Anim handler slots claimed. A lookup before that resolves on demand without settling. Without `custom_machines`, or with no machine under the name,
+the mod says so once and every entry point that needs the kind does nothing.
 
 ## The API
 
@@ -203,12 +208,17 @@ Consumers import it with
 | `GetPieceName` | one sphere's display name, which is its archive's `CustomItemDesc.name` |
 | `SetPieceMask` | the sphere gate, one bit per `APStarPieceKind` |
 | `AddAssembleHandler` | called as a player completes a set |
-| `AssembledThisRound` | per-player, cleared on every 3D load |
+| `AssembledThisRound` | per-player, cleared at every scene change |
 | `SpawnPiece` | drop one sphere in front of a machine |
 | `CollectPiece` | add one sphere to a player's set with no pickup |
 | `Assemble` | award the star outright, spheres not required |
 
-The gate starts with all six bits set. A closed sphere is held out of the item registry
+The header also carries `AP_STAR_SHOT_ATTACK_CAUSE`, the attack cause a sphere shot's hit leaves in
+the low byte of the victim's `DmgLog.credited_attack`. It needs no import: a consumer compares a KO's
+damage log against it directly.
+
+The gate starts with all six bits set, and each write that changes it is logged once with the new
+mask. A closed sphere is held out of the item registry
 entirely, so it never receives an `ItemKind` and no path can spawn it; a round arms only
 the open ones and a partial set delivers but cannot complete. The gate is read at 3D load
 start, because `custom_items` registers its items in `CityItemSpawn_Init`'s epilogue and
@@ -225,13 +235,20 @@ star can be awarded with all six closed. That is what a consumer awarding a sphe
 machine as a prize goes through, and it is why the gate is about what spawns in a round
 rather than about what a player can be handed.
 
+`CollectPiece` leaves a sphere the player already holds as it is and still answers 1, the way a
+duplicate pickup would do nothing.
+
 `Assemble` is the set-completion path itself, entered without the set: the cutscene, or
 when it cannot run the plain mount `custom_machines` owns (`CustomMachinesAPI.MountMachine`)
 and the completion sounds; then the assembled flags and the assemble handlers, with the
-player's collected spheres cleared the way a completed set clears them. It answers 0 outside
-a City Trial round - the title screen's attract demo included, since that is a real City
-Trial round with a CPU in every slot - with the star unregistered, or with the player not
-riding. A consumer awarding the star as an item goes through it rather than through the
+player's collected spheres cleared the way a completed set clears them. It answers 0 with the
+star unregistered or an empty player slot, and outside a live City Trial round.
+
+"City Trial only" is enforced by a flag the mod raises at the end of a City Trial round's 3D load
+and drops at every scene change, rather than by the game-mode reads alone: `Gm_IsInCity` and the
+City mode persist after a round ends, so a menu or Top Ride scene entered from a quit round would
+otherwise pass. The flag also stays down for the title screen's attract demo, a real City Trial round with a
+CPU in every slot. `SpawnPiece`, `CollectPiece` and `Assemble` all require it. A consumer awarding the star as an item goes through it rather than through the
 machine registry, so everything watching the assembly still sees one.
 
 The API is a gate, not an unlock: whether a sphere is earned, bought or awarded is the
@@ -243,8 +260,8 @@ that can drift out of step with `items/ApSphere*.dat`.
 
 ## The Archipelago consumer
 
-`mods/archipelago/src/gate_ap_star.c` is the whole of the Archipelago side, and the only
-file in that mod that imports this one. It holds `APSave.ap_star_piece_unlocked_mask` -
+`mods/archipelago/src/gate_ap_star.c` is the only file in that mod that imports this one, and
+holds its sphere and give logic. It holds `APSave.ap_star_piece_unlocked_mask` -
 reached from the client through the ordinary `AP_UNLOCK_AP_STAR_PIECE` category - announces
 an arriving sphere with the same `"Unlocked Item: "` textbox every other unlock uses, and
 latches `APCK_ASSEMBLE_AP_STAR` from an assemble handler. It also carries the two give
@@ -265,8 +282,9 @@ It **pushes** the mask into the gate on every write rather than letting `ap_star
 back. `ap_star` sorts before `archipelago` in the FST, so by the time `archipelago`'s own
 load-start callback runs, `ap_star` has already armed the round. Every writer of the mask
 therefore ends in `GateApStar_PushMask()`: the boot restore in `OnSaveLoaded`, the
-per-sphere unlock, and `Unlock_SetMask`, which is the single choke point the client and the
-ungated pre-fill both go through. The box mask feeds it too, so its writers push as well -
+per-sphere unlock `GateApStar_UnlockPiece` that the client's sphere items go through, and
+`Unlock_SetMask`, which the ungated pre-fill, the debug re-apply and
+`ArchipelagoAPI.SetUnlockMask` go through. The box mask feeds it too, so its writers push as well -
 `GateBoxes_UnlockBox` on Red and `Unlock_SetMask` on `AP_UNLOCK_BOX`.
 
 The star is gated like any vanilla machine. Its unlock item is 856
@@ -280,7 +298,7 @@ once 856 has arrived; assembling it mounts the player whatever the bit says. Any
 machine `custom_machines` registers has no bit and is left ungated.
 
 **Title screen.** Archipelago also chooses the star as the title screen's idle demo machine,
-in `main_menu.c`. The title scene's demo player is set up at `0x8000d300` from three `li r4`
+in `main_menu.c`. The title scene's demo player is set up in `SceneLoad_TitleScreen` (`0x8000d26c`) from three `li r4`
 operands: `RiderKind` at `0x8000d340`, `is_bike` at `0x8000d34c`, class slot at `0x8000d358`.
 `main_menu.c` rewrites the rider and the class slot on each title entry, since the registry
 only resolves after every mod has booted, pointing them at Kirby on the Archipelago Star

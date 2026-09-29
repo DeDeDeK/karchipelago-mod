@@ -43,7 +43,7 @@ int GateApStar_GiveStar(void);
 // 1 if this player assembled the star in the round currently loaded.
 int GateApStar_AssembledThisRound(int ply);
 
-// 1 if this projectile GObj is one of the star's sphere shots.
-int GateApStar_IsShot(struct GOBJ *proj);
+// 1 if a DmgLog.credited_attack names one of the star's sphere shots.
+int GateApStar_IsShotAttack(int credited_attack);
 
 #endif

@@ -7,14 +7,18 @@ a HUD row of their own, and collecting all six mounts the player on the star.
 
 Assembly is one of two ways to get the star. The other is finding one already built on the
 field: the machine's `CustomMachineDesc` carries a City Trial spawn weight of 1.0, the same
-token weight `mods/archipelago/src/gate_machines.c` hands Hydra and Dragoon, so once the
-Archipelago Star machine item is in it turns up loose at roughly 0.8% of field spawns. That
-machine item and the six sphere items are independent of each other.
+token weight `mods/archipelago/src/gate_machines.c` hands Hydra and Dragoon, so it turns up loose at
+roughly 0.8% of field spawns - built on its own, always; in an Archipelago build, once the
+Archipelago Star machine item is in. That machine item and the six sphere items are independent of
+each other.
 
-The collection half is `mods/ap_star/src/ap_star_pieces.c`; the gate it reads and the
-handler list it fires are in `mods/ap_star/src/ap_star.c`. Both need `custom_items` for the
-sphere items and `custom_machines` for the machine; with either missing nothing resolves, no
-schedule is installed, and City Trial is untouched.
+The collection half is `mods/ap_star/src/ap_star_pieces.c`, which also holds the sphere gate
+and the assemble handler list; the tracker row is `mods/ap_star/src/ap_star_piece_hud.c`. It
+needs `custom_items` for the sphere items and `custom_machines` for the machine. Without
+`custom_items` no sphere has a kind, no schedule is rolled and City Trial is untouched. Without
+`custom_machines` the spheres still deliver and collect, but a completed set has no machine to
+mount: the handlers still fire and the completion sounds still play, and the player stays on
+what they were riding.
 
 ## The Six Spheres
 
@@ -130,8 +134,8 @@ if (lifetime == 0) CityItem_EnterExpire(gobj);
 
 so a lifetime of `-1` is never decremented and never equals 0. A carrier stands in the city
 for the rest of the round until a player breaks it, and the six accumulate. One delivery is
-a guaranteed delivery, and it is guaranteed to still be there an hour later. `SpawnPiece`
-calls the same function on the AP carrier, so the set inherits this unchanged.
+a guaranteed delivery, and it is guaranteed to still be there an hour later. The replacement at
+`0x800eb27c` calls the same function on the AP carrier, so the set inherits this unchanged.
 
 What is *not* immortal is the piece inside. `Box_OutcomeLogic` hands the contents to
 `Box_SpawnContents` (`0x80253378`), which builds an ordinary descriptor through
@@ -172,8 +176,8 @@ consumer that only cares about human players filters on the `ply` its assemble h
 given; the handler is the only signal, and `AssembledThisRound` the only other read, so there
 is no boot-wide flag to poll that would hide the distinction.
 
-For testing, `archipelago_debug` drops one sphere in front of player slot 0 on each **R + D-Pad
-Down** during a round, walking the six in order from the Rose sphere and restarting the cycle at
+For testing, `archipelago_debug` drops one sphere in front of the debug menu's Target Player on
+each **R + D-Pad Down** during a round, walking the six in order from the Rose sphere and restarting the cycle at
 each round load, so six presses and six drive-overs run the whole assembly without waiting on the
 schedule. It goes through `ArchipelagoAPI.DebugSpawnApStarPiece`, which
 reads the sphere's `ItemKind` out of the `custom_items` registry - a sphere that was locked when the
@@ -182,7 +186,7 @@ reloads. Deathlink's trigger is **L + D-Pad Down**, and a bare **D-Pad Down** sp
 
 ## Gating
 
-Each sphere carries a gate bit in `ap_star_piece_gate`, and a sphere whose bit is clear is
+Each sphere carries a gate bit in `ap_star_pieces.c`'s `piece_gate`, and a sphere whose bit is clear is
 held out of the item registry entirely. `ApStarPieces_On3DLoadStart` calls
 `CustomItemsAPI.SetEnabled` on each sphere with its bit - and with the attract demo held out
 alongside - which is early enough:
@@ -228,9 +232,10 @@ three parts hands over Hydra.
 
 `custom_items` fires the mod's pickup handler from its hook on `Machine_OnTouchItem`,
 naming the item and the collecting player. The handler ORs a bit into a per-player
-six-bit mask held in the mod (`PlayerData + 0x908` has room for three bits per vanilla
-set and two spare, nowhere near six) and cleared on every 3D scene load, so a stadium
-trip mid-trial restarts the collection - the same scope the vanilla sets have.
+six-bit mask held in the mod rather than in the player data, where `Ply_GetHydraPieceMask`
+(`0x8022cce8`) and `Ply_GetDragoonPieceMask` (`0x8022cdac`) read the vanilla sets' three-bit
+masks. The mask is cleared at every scene change, so each round starts from an
+empty set - the same scope the vanilla sets have.
 
 Each pickup climbs `Ply_OnLegendaryPieceCollect` (`0x8027a4e8`), whose ladder is written
 for a three-piece set: counts 1, 2 and 3 play rising tones, and 4 plays the pair of
@@ -276,8 +281,8 @@ never drain and the rider would keep throwing one per cooldown for the rest of t
 **The roll.** Vanilla has already picked uniformly among the pieces in its two masks by the
 time the kind is stored. The hook re-rolls over that count plus the rider's droppable
 spheres, so every piece that can be thrown is equally likely to be the one that comes out. It reads a kind of **54**
-as "no vanilla piece": `local_68[0]` is still `-1` when the candidate list is empty and the
-code adds `0x37` regardless. Vanilla never throws that value because its quota is zero when
+as "no vanilla piece": the candidate list's first entry is seeded to `-1`, and when the list is
+empty the code adds `0x37` to it regardless. Vanilla never throws that value because its quota is zero when
 no piece is held, and putting spheres in the quota is exactly what makes it reachable.
 
 **The counter.** `PlayerStats.item_collect[]` is `0x45` entries indexed by `ItemKind`, and
@@ -334,9 +339,9 @@ icons rather than matching their heavier black.
 
 ## Assembly and the Mount
 
-Collecting the sixth sphere clears the player's mask and their icon row, fires the handlers
-registered with `ApStarAPI.AddAssembleHandler`, and starts the cinematic, which owns the
-mount and plays the completion sounds 150 frames later. `archipelago` is on that handler
+Collecting the sixth sphere clears the player's mask, which takes their icon row down on the
+next frame, starts the cinematic, which owns the mount and plays the completion sounds 150 frames
+later, and then fires the handlers registered with `ApStarAPI.AddAssembleHandler`. `archipelago` is on that handler
 list, and what it does there is latch the checklist objective.
 
 The cinematic's engine side is not this mod's. `custom_machines` owns the vanilla legendary
@@ -351,10 +356,11 @@ in on six streaks where Hydra has three parts on three.
 This mod's whole share is one call, on the frame a player completes the set:
 `ApStar_StartAssembly(ply)`, which resolves the star's `MachineKind` and hands it to the
 registry. It returns 0 when the cinematic could not run - no machine registered, one already
-up, or a rider the vanilla assembly state does not cover, since
-`Rider_EnterLegendaryAssembly` (`0x8019248c`) ignores Meta Knight and King Dedede and the
-cinematic would play and hand back no machine - and this mod then gives the plain mount and
-the completion sounds instead.
+up, the star's cutscene already run once this round, or a rider the vanilla assembly state does
+not cover, since `Rider_EnterLegendaryAssembly` (`0x8019248c`) is Kirby-only and the cinematic
+would play and hand back no machine - and this mod then gives the plain mount and the completion
+sounds instead. So a second star assembled in one round, a CPU's or an awarded one, arrives with
+no cutscene.
 
 It runs under `machine_index` 1, so the rider gets Hydra's pose and the motion script that
 fires the machine swap, and the shot gets Hydra's SFX and sky preset. Nothing downstream
@@ -466,15 +472,17 @@ animation's own: `CityItem_BindStateAnim` (`0x80251894`) reads bit 30 of the ite
 
 The icons are rendered with a fixed light from the upper left, supersampled four times
 and downsampled so the rim gets a soft alpha edge instead of a stair-step, then encoded
-RGB5A3 - the format costs 2 KB per icon and carries the alpha the quad's cutout needs.
+RGB5A3 - the format costs about 2.5 KB per icon and carries the alpha the quad's cutout needs.
 
 ## The Archipelago Locations
 
-`APCK_ASSEMBLE_AP_STAR` is `clear_kind` 50 on the Archipelago checklist tab, which makes
-it AP location 411. Its predicate is a read of a boot-sticky flag the assembly sets, so
-the cell also fills in on a later load rather than only in the session that earned it. On
-the apworld side the location takes the City Trial region and requires all six sphere
-items whenever City Trial items are gated.
+`APCK_ASSEMBLE_AP_STAR` is `clear_kind` 49 on the Archipelago checklist tab, which makes
+it AP location 410. `archipelago`'s assemble handler latches it through
+`APCheckDetect_Observe` into the objectives observed this boot, for a human player only, and the
+predicate reads that latch, so the cell also fills in on a later scene rather than only on the
+frame that earned it. On the apworld side the location takes the City Trial region and requires
+all six sphere items whenever City Trial items are gated or the spheres are goal-forced, plus the
+Red Box while boxes are gated.
 
 `APCK_ASSEMBLE_ALL_LEGENDARY` is `clear_kind` 50 (AP location 411): Dragoon, Hydra and the
 Archipelago Star all assembled by one player in one round. Its three inputs are per-round -

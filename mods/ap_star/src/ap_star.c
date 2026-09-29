@@ -1,52 +1,56 @@
 #include "os.h"
-#include "inline.h"
 #include "hoshi/mod.h"
 
 #include "ap_star.h"
+#include "ap_star_palette.h"
 #include "ap_star_pieces.h"
 #include "ap_star_shot.h"
 
 const CustomMachinesAPI *cm_api;
 
-u32 ap_star_piece_gate = AP_STAR_PIECE_ALL;
-
-const u32 ap_star_piece_colors[APSTARPIECE_NUM] = {
-    [APSTARPIECE_ROSE]   = 0xC97682,
-    [APSTARPIECE_GREEN]  = 0x75C275,
-    [APSTARPIECE_VIOLET] = 0xCA94C2,
-    [APSTARPIECE_TAN]    = 0xD9A07D,
-    [APSTARPIECE_BLUE]   = 0x767EBD,
-    [APSTARPIECE_YELLOW] = 0xEEE391,
+const GXColor ap_star_piece_colors[APSTARPIECE_NUM] = {
+    [APSTARPIECE_ROSE]   = { 0xC9, 0x76, 0x82, 0xFF },
+    [APSTARPIECE_GREEN]  = { 0x75, 0xC2, 0x75, 0xFF },
+    [APSTARPIECE_VIOLET] = { 0xCA, 0x94, 0xC2, 0xFF },
+    [APSTARPIECE_TAN]    = { 0xD9, 0xA0, 0x7D, 0xFF },
+    [APSTARPIECE_BLUE]   = { 0x76, 0x7E, 0xBD, 0xFF },
+    [APSTARPIECE_YELLOW] = { 0xEE, 0xE3, 0x91, 0xFF },
 };
 
-#define AP_STAR_HANDLER_MAX 4
+static int stc_settled;
+static int stc_kind = -1;
 
-static ApStarAssembleFn assemble_handlers[AP_STAR_HANDLER_MAX];
-
-// Retried until it resolves: mods boot in FST order and an import only finds a mod that
-// has already booted, so a lookup from any mod's OnBoot - ours or a consumer's - runs
-// before custom_machines exports.
-static void ResolveCustomMachines(void)
+// custom_machines boots after this mod, and an import only finds a mod that has already
+// booted. Until the first scene change a lookup resolves on demand; from there the
+// answer is fixed for the run.
+static int ResolveKind(void)
 {
-    if (cm_api)
-        return;
-
-    cm_api = (const CustomMachinesAPI *)Hoshi_ImportMod(
-        (char *)CUSTOM_MACHINES_MOD_NAME, CUSTOM_MACHINES_API_MAJOR, CUSTOM_MACHINES_API_MINOR);
+    if (cm_api == NULL)
+        cm_api = (const CustomMachinesAPI *)Hoshi_ImportMod(
+            (char *)CUSTOM_MACHINES_MOD_NAME, CUSTOM_MACHINES_API_MAJOR, CUSTOM_MACHINES_API_MINOR);
+    return cm_api ? cm_api->FindKindByName(AP_STAR_MACHINE_NAME) : -1;
 }
 
 int ApStar_MachineKind(void)
 {
-    ResolveCustomMachines();
-    return cm_api ? cm_api->FindKindByName(AP_STAR_MACHINE_NAME) : -1;
+    return stc_settled ? stc_kind : ResolveKind();
 }
 
-int ApStar_ClassIndex(int *is_bike)
+void ApStar_OnSceneChange(void)
 {
-    int kind = ApStar_MachineKind();
-    if (kind < 0)
-        return -1;
-    return CustomMachines_ClassIndexOf(cm_api, (MachineKind)kind, is_bike);
+    if (stc_settled)
+        return;
+
+    stc_kind = ResolveKind();
+    stc_settled = 1;
+    if (stc_kind < 0)
+    {
+        OSReport("[ApStar] %s not registered, shot and platform cycle are off\n",
+                 AP_STAR_MACHINE_NAME);
+        return;
+    }
+    ApStarShot_Bind(stc_kind);
+    ApStarPalette_Bind(stc_kind);
 }
 
 int ApStar_StartAssembly(int ply)
@@ -65,68 +69,15 @@ int ApStar_Mount(int ply)
     return cm_api->MountMachine(kind, ply);
 }
 
-void ApStar_FireAssemble(int ply)
-{
-    for (int i = 0; i < AP_STAR_HANDLER_MAX; i++)
-    {
-        if (assemble_handlers[i] != NULL)
-            assemble_handlers[i](ply);
-    }
-}
-
-static void SetPieceEnabled(int piece, int enabled)
-{
-    u32 bit = 1u << piece;
-    if (((ap_star_piece_gate & bit) != 0) == (enabled != 0))
-        return;
-
-    if (enabled)
-        ap_star_piece_gate |= bit;
-    else
-        ap_star_piece_gate &= ~bit;
-
-    OSReport("[ApStar] %s %s (mask = %s)\n", ApStarPieces_GetName(piece),
-             enabled ? "enabled" : "disabled",
-             MaskBits(ap_star_piece_gate, APSTARPIECE_NUM));
-}
-
-// Per-bit so a mask write reports exactly like a single gate change.
-static void ApiSetPieceMask(u32 mask)
-{
-    for (int i = 0; i < APSTARPIECE_NUM; i++)
-        SetPieceEnabled(i, (mask >> i) & 1);
-}
-
-static void ApiAddAssembleHandler(ApStarAssembleFn fn)
-{
-    if (fn == NULL)
-        return;
-    for (int i = 0; i < AP_STAR_HANDLER_MAX; i++)
-    {
-        if (assemble_handlers[i] == fn)
-            return;
-    }
-    for (int i = 0; i < AP_STAR_HANDLER_MAX; i++)
-    {
-        if (assemble_handlers[i] == NULL)
-        {
-            assemble_handlers[i] = fn;
-            return;
-        }
-    }
-    OSReport("[ApStar] Assemble handler list full\n");
-}
-
 static const ApStarAPI api = {
     .GetMachineKind     = ApStar_MachineKind,
     .GetPieceName       = ApStarPieces_GetName,
-    .SetPieceMask       = ApiSetPieceMask,
-    .AddAssembleHandler = ApiAddAssembleHandler,
+    .SetPieceMask       = ApStarPieces_SetGate,
+    .AddAssembleHandler = ApStarPieces_AddAssembleHandler,
     .AssembledThisRound = ApStarPieces_AssembledThisRound,
     .SpawnPiece         = ApStarPieces_SpawnPiece,
     .CollectPiece       = ApStarPieces_CollectPiece,
     .Assemble           = ApStarPieces_Assemble,
-    .IsShot             = ApStarShot_IsShot,
 };
 
 void ApStar_ExportApi(void)
