@@ -846,12 +846,17 @@ static char *allup_values[] = {"0", "1", "2", "3", "4", "5"};
 static char *purple_values[] = {"0", "1", "2", "3"};
 static char *race_color_values[] = {"None", "Partial", "All"};
 static const int race_color_map[] = {0x00, 0x7F, ((1 << KIRBYCOLOR_NUM) - 1)};
+static const int steer_win_map[] = {0x00, 0x3F, ((1 << TOPRIDE_NUM) - 1)};
 static int allup_state;
 static int purple_state;
 static int race_color_state;
+static int tr_color_state;
+static int steer_win_state;
 static int allup_synced = -1;
 static int purple_synced = -1;
 static int race_color_synced = -1;
+static int tr_color_synced = -1;
+static int steer_win_synced = -1;
 
 static void OnAllUpProgressChange(int v)
 {
@@ -874,18 +879,40 @@ static void OnRaceColorProgressChange(int v)
     ap_api->DebugSetCheckProgress(AP_PROGRESS_RACE_COLORS, race_color_map[v]);
 }
 
+static void OnTopRideColorProgressChange(int v)
+{
+    if (!ap_api || v == tr_color_synced) return;
+    tr_color_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_TR_COLORS, race_color_map[v]);
+}
+
+static void OnSteerWinProgressChange(int v)
+{
+    if (!ap_api || v == steer_win_synced) return;
+    steer_win_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_TR_STEER_WINS, steer_win_map[v]);
+}
+
+// A mask shows as None, All, or Partial for everything in between.
+static int MaskRow(int mask, int all)
+{
+    return (mask == 0) ? 0 : ((mask == all) ? 2 : 1);
+}
+
 static void RefreshCheckProgress(void)
 {
     allup_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_ALLUP_TOTAL) : 0;
     if (allup_state > 5) allup_state = 5;
     purple_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_PURPLE_SR1) : 0;
     if (purple_state > 3) purple_state = 3;
-    // A mask, so the middle row stands for every partial state rather than one value.
-    int colors = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_RACE_COLORS) : 0;
-    race_color_state = (colors == 0) ? 0 : ((colors == race_color_map[2]) ? 2 : 1);
+    race_color_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_RACE_COLORS) : 0, race_color_map[2]);
+    tr_color_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_TR_COLORS) : 0, race_color_map[2]);
+    steer_win_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_TR_STEER_WINS) : 0, steer_win_map[2]);
     allup_synced = allup_state;
     purple_synced = purple_state;
     race_color_synced = race_color_state;
+    tr_color_synced = tr_color_state;
+    steer_win_synced = steer_win_state;
 }
 
 // EnergyLink balance. The cheapest purchase is 200 MJ and the dearest 50000, so the
@@ -1641,11 +1668,13 @@ static MenuDesc slot_options_menu = {
 };
 
 static MenuDesc progress_menu = {
-    .option_num = 3,
+    .option_num = 5,
     .options = {
         V("All Ups Collected", "Lifetime CT All Ups, toward the 5 that check needs",  allup_state,      allup_values,       OnAllUpProgressChange),
         V("Purple SR1 Wins",   "SINGLE RACE 1 wins as Purple Kirby, toward 3",        purple_state,     purple_values,      OnPurpleProgressChange),
         V("Race Colors",       "Which Kirby colors have finished an Air Ride race",   race_color_state, race_color_values,  OnRaceColorProgressChange),
+        V("Top Ride Colors",   "Which Kirby colors have finished a Top Ride race",    tr_color_state,   race_color_values,  OnTopRideColorProgressChange),
+        V("Steer Star Wins",   "Which Top Ride courses have been won on Steer Star",  steer_win_state,  race_color_values,  OnSteerWinProgressChange),
     },
 };
 

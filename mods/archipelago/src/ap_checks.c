@@ -324,17 +324,18 @@ void APChecks_DebugForceMarkAll(void)
 {
     _Static_assert(CLEAR_KIND_NUM > 64 && CLEAR_KIND_NUM <= 128,
                    "clear-kind packing assumes 2 u64 words");
-    _Static_assert(APCK_NUM <= 64, "the AP row's mask below assumes one word");
+    _Static_assert(APCK_NUM > 64 && APCK_NUM < 128, "the AP row's masks below assume two words");
     const u64 lo_mask = ~0ULL;
     const u64 hi_mask = (CLEAR_KIND_NUM == 128) ? ~0ULL
                                                  : ((1ULL << (CLEAR_KIND_NUM - 64)) - 1);
+    const u64 ap_hi_mask = (1ULL << (APCK_NUM - 64)) - 1;
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         // Only the AP tab's first APCK_NUM cells back a location, and its blank
         // ones decode into the AP Patch code block, so they must stay clear.
         int ap = (r == AP_CHECKLIST_ROW);
-        ap_save->sent_checks[r][0] = ap ? (1ULL << APCK_NUM) - 1 : lo_mask;
-        ap_save->sent_checks[r][1] = ap ? 0 : hi_mask;
+        ap_save->sent_checks[r][0] = lo_mask;
+        ap_save->sent_checks[r][1] = ap ? ap_hi_mask : hi_mask;
         ap_data->sent_checks[r][0] = ap_save->sent_checks[r][0];
         ap_data->sent_checks[r][1] = ap_save->sent_checks[r][1];
         ap_save->goal_announced[r] = 1;

@@ -230,11 +230,53 @@ static void GateItems_MarkAsSpawnedGated(GOBJ *box, int item_kind)
     LegendaryPiece_MarkAsSpawned(box, item_kind);
 }
 
+// Slot 0 of every UFO ring is a hardcoded All Up, past the event-drop table the spawn
+// filter zeroes. A locked All Up rolls the UFO column like the other slots, and a -1
+// there leaves the slot empty.
+static ItemKind GateItems_UfoRingLeadItem(void)
+{
+    if (GateItems_IsItemLocked(ITKIND_ALLUP))
+        return CityItem_GetEventItem(EVDROP_UFO);
+    return ITKIND_ALLUP;
+}
+
+// li r29, ITKIND_ALLUP in each UFO stop's ring loop, the b past the pool roll after it,
+// and the mr r29, r3 that roll returns through.
+static const u32 ufo_ring_lead_sites[] = {
+    0x8010b268, // CityUFO_State0Think
+    0x8010b958, // CityUFO_State1Think
+    0x8010c0cc, // spawnUFOItems
+    0x8010c7a4, // CityUFO_State3Think
+    0x8010ce44, // CityUFO_State4Think
+};
+
+// Dyna Blade's one hardcoded throw: the All Up she gives up once enough damage lands.
+// A locked All Up gives way to one roll of her regular column.
+static void GateItems_DynaBladeThrowReward(ItemKind kind, int spawn_group, Vec3 *pos, Vec3 *dir,
+                                           int flags, f32 elev_angle, f32 speed)
+{
+    if (GateItems_IsItemLocked(kind))
+    {
+        kind = CityItem_GetEventItem(EVDROP_DYNA);
+        if (kind < 0)
+            return;
+    }
+    CityItem_Throw(kind, spawn_group, pos, dir, flags, elev_angle, speed);
+}
+
 void GateItems_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800ec284);
     CODEPATCH_REPLACECALL(0x800ed41c, GateItems_MarkAsSpawnedGated); // Dragoon piece bl
     CODEPATCH_REPLACECALL(0x800ed49c, GateItems_MarkAsSpawnedGated); // Hydra piece bl
+
+    for (int i = 0; i < (int)(sizeof(ufo_ring_lead_sites) / sizeof(ufo_ring_lead_sites[0])); i++)
+    {
+        u32 site = ufo_ring_lead_sites[i];
+        CODEPATCH_REPLACECALL(site, GateItems_UfoRingLeadItem);
+        CODEPATCH_REPLACEINSTRUCTION(site + 4, 0x4800000c); // b +0xc, onto mr r29, r3
+    }
+    CODEPATCH_REPLACECALL(0x8021ddf4, GateItems_DynaBladeThrowReward);
     OSReport("[GateItems] Hooks installed\n");
 }
 

@@ -590,6 +590,14 @@ static void ApStarShot_ChargeRelease(RiderData *rd)
     AS_StarChargeRelease(rd);
 }
 
+// Only a sphere shot carries ShotScaleThink, and the kind's single state never
+// transitions, so the hook stays in place for the shot's whole life.
+int ApStarShot_IsShot(GOBJ *proj)
+{
+    ProjectileData *pd = proj ? (ProjectileData *)proj->userdata : NULL;
+    return pd != NULL && pd->user_hook_0 == ShotScaleThink;
+}
+
 void ApStarShot_OnBoot(void)
 {
     CODEPATCH_REPLACECALL(0x801abc44, ApStarShot_ChargeRelease);

@@ -235,8 +235,8 @@ int GateTopRideItems_GiveItem(TopRideItemKind kind)
     if (kirby_mgr->round_state != 2)
         return 0;
 
-    // Deliberately not gated on kirby->is_active: that bit is only set during a Race
-    // round, never in Time Attack or Free Run, even while the human is playing.
+    // Deliberately not gated on kirby->standing: the solo modes never rank it, so it
+    // reads 0 for every kirby in Time Attack and Free Run.
     int applied = 0;
     for (int i = 0; i < 4; i++)
     {

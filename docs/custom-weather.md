@@ -293,7 +293,7 @@ rain preset is active and hail is on, each machine carries a tight box of real w
 hailstones falling under gravity plus the wind slant. Unlike a raindrop - camera-relative,
 with no persistent world position - a hailstone is a true world point, so the hit is honest:
 entering a machine's body sphere (radius 20, lifted 10 off the machine origin) deals
-`Machine_GiveDamage(md, 1, mg)` and respawns the stone at the top of its box. A 10-frame
+`Machine_GiveDamage(md, 1, &md->hurt_data->hitcoll_log_idx)` and respawns the stone at the top of its box. A 10-frame
 per-machine cooldown caps it to chip damage; a fully eroded machine dies through the engine's
 own death path.
 

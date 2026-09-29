@@ -113,6 +113,19 @@ FOG's `start`, `end` and `end2` are empty stubs - the fog is entirely the sky pr
 
 The map names the functions after internal event names that differ from the enum: `event_stationFire` = RAILFIRE, `event_rubberyItems` = BOUNCE, `event_denseFog` = FOG, `event_sameItems` = SAMEITEM, `event_restorationAreas` = RESTORATIONAREA, `event_fakeItems` = FAKEPOWERUPS, `event_formation_init` = the MACHINEFORMATION check.
 
+## What Each Event Does
+
+- **RUNAMOK** - `event_runAmok_start` calls `Ply_SetRunAmok(ply, duration)` (0x8022d5c8) on every HMN and CPU slot: `PlayerData+0x909` bit 0x40 plus a timed Charge Max on the ridden machine (`Rider_ApplyChargemaxEffect` for a rider on foot). The active function clears the flag with `zz_8022d620_` at the duration.
+- **RAILFIRE** - `event_stationFire_start` creates one yakumono desc 65 (`YAKU_DESC_RAILFIRE`) per event position: `bgm_sky[6]` holds 10 positions, one pair per rail station, 5 stations. The hitbox is static for the whole event, and the active function destroys every desc-65 GObj at the duration. Nothing else creates desc 65. A logged hit from one plays `Ply_PlayRailFireHitSFX` (0x8027aa1c) from `Machine_ActOnHitCollision` (bl at 0x801d741c) or `Rider_ActOnHitCollision` (bl at 0x80196668).
+- **SAMEITEM** - sets `CityItemMgr.flags |= CTEVF_SAMEITEMS` and, through `CityEvent_ModifyItemFallDesc(7)`, `grBoxGeneInfo.event_active_flags` bit 4 with `same_item_it_kind` reset to -1. The first box to open rolls the `sameitem` pool and latches the kind; every later box gives it, 2 copies from a medium box and 4 from a large one. Sky drops stay normal.
+- **LIGHTHOUSE** - the lighthouse is permanent stage yakumono desc 68. The event's start stores it at `stc_lighthouse_gobj` (r13+0x670) and turns it on; its two lights are lit in yakumono state 3 and heal what they cover. `CityLighthouse_InBeam` (0x8010d910) is the per-light cone test. At the duration the active function only flags the lighthouse to switch off; the lighthouse's own think then clears the global and calls `CityEvent_EndWithSkyRestore`.
+- **PREDICTION** - no functions. `stadiumPrediction` rolls `HSD_Randi(5)`: 0 names a random `StadiumKind` (`HSD_Randi(24)`, bl at 0x801279a0), anything else names `Gm_GetCurrentStadiumKind()`. Nothing reads the prediction back, so about 19% of predictions are wrong. It carries weight 200 in every stadium group against 10-60 for the other kinds.
+- **MACHINEFORMATION** - five riderless `Machine_Create` machines fly a straight line between one of seven position pairs (weights 1 x7, 0 x3), hovering at about 10 units/s for 69-131 s. `MachineData.formation_slot` (+0x19) holds each one's slot 0-4, `MACHINE_FORMATION_NONE` otherwise, and `stc_event_formation_slots` (r13+0x790) indexes the GObjs by slot. A bump, hit, boarding or destroy takes a machine out and decrements `stc_event_machineformation_loadnum`. The active function ends the event once that count is 0, never reading the duration.
+- **UFO** - yakumono desc 0x43 flies one of the stage's paths through a five-state script and ends the event itself as it leaves. Each state drops a ring of items with `spawn_type` 9 (`ITSPAWN_UFO`), expiring with the stop; slot 0 is a hardcoded `ITKIND_ALLUP`, the rest come from the UFO event pool. The state table at 0x804a7390 holds the five thinks: `CityUFO_State0Think`, `CityUFO_State1Think`, `spawnUFOItems`, `CityUFO_State3Think` and `CityUFO_State4Think`.
+- **BOUNCE** - `CityItem_InitLocatorEvent` sets the bounce physics, expires every live item, and switches the city to up to 50 items spawning every 1-5 frames from the normal pools.
+- **FOG** - the sky preset alone.
+- **FAKEPOWERUPS** - `CityItem_InitFakeEvent` (bl at 0x801119e8) at the start, `CityItem_ClearFakeEvent` (0x80111a34) at the end. Fakes are `ITKIND_ACCELFAKE`-`ITKIND_WEIGHTFAKE`, dropped from boxes and the sky at about 59% of patch-type spawns.
+
 ## Music
 
 A siren event hands the music between the two BGM slots:

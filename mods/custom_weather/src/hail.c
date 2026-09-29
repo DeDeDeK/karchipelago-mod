@@ -103,7 +103,7 @@ static void SeedCloud(HailCloud *c, const MachineData *md)
     c->seeded = 1;
 }
 
-static void StepCloud(HailCloud *c, MachineData *md, GOBJ *mg)
+static void StepCloud(HailCloud *c, MachineData *md)
 {
     float r2 = HAIL_HIT_RADIUS * HAIL_HIT_RADIUS;
     float stray2 = HAIL_STRAY * HAIL_STRAY;
@@ -121,8 +121,7 @@ static void StepCloud(HailCloud *c, MachineData *md, GOBJ *mg)
 
         if (c->hit_cd == 0 && (dx * dx + dy * dy + dz * dz) <= r2)
         {
-            // The machine GObj is the damage source (City Trial requires non-NULL).
-            Machine_GiveDamage(md, 1.0f, mg);
+            Machine_GiveDamage(md, 1.0f, &md->hurt_data->hitcoll_log_idx);
             c->hit_cd = HAIL_HIT_COOLDOWN;
             RespawnStone(s, md);
             continue;
@@ -277,7 +276,7 @@ void Hail_Tick(void)
 
         if (!c->seeded)
             SeedCloud(c, md);
-        StepCloud(c, md, mg);
+        StepCloud(c, md);
     }
 }
 

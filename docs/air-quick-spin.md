@@ -26,8 +26,10 @@ The flick itself is detected by two shared functions. `Rider_UpdateQuickSpinTime
 (`0x80191a58`) ticks a pair of byte accumulators at `RiderData+0xa40` / `+0xa41` - frames since
 the stick was last held past the threshold to the right / to the left, held at 0 while the
 stick is there and saturating at 0xfe. `Rider_CheckQuickSpinInput` (`0x80191980`) then reads
-them back: one accumulator at 0 while the other is still under the config threshold at
-`*0x805DD814 + 0x1b0` means the stick just snapped across, and it reports the direction. A
+them back: one accumulator at 0 while the other is still under
+`RiderCommonParam.quickspin_flick_window` (+0x1b0, 7.0; the block `RdCommon.dat` loads,
+reached through `stc_rider_param`) means the stick just snapped across, and it reports the
+direction. A
 state that never calls the tick leaves the accumulators frozen, so the detector cannot fire
 there at all.
 

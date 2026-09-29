@@ -176,9 +176,10 @@ handling block; Flight Warp Star's whole difference is thirty-four fields.
 ## The boost curve
 
 `vcAttributes.boost_gain[11]` (`+0x0a8`..`+0x0d0`) is what a charge release is worth.
-`Machine_ApplyChargeBoost` (`0x801da3c0`) calls `LerpTable(0.1, charge_display_value,
+Both boost functions, `Machine_ApplyGroundChargeBoost` (`0x801d93a0`) on the ground and
+`Machine_ApplyChargeBoost` (`0x801da3c0`) on rails, call `LerpTable(0.1, charge_display_value,
 boost_gain)` (`0x80062c4c`), which takes `i = (int)(charge / 0.1)` and lerps between
-`boost_gain[i]` and `boost_gain[i+1]`, then multiplies by `boost_gain_any` - 1.0 on every
+`boost_gain[i]` and `boost_gain[i+1]`. Each then multiplies by `boost_gain_any` - 1.0 on every
 machine - and writes the boost velocity. Entry `n` is therefore the gain at `n/10` charge.
 
 | Machine | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |

@@ -6,6 +6,10 @@
 #include "rider.h"
 #include "item.h"
 #include "hurt.h"
+#include "event.h"
+#include "machine.h"
+#include "yakumono.h"
+#include "topride.h"
 #include "code_patch/code_patch.h"
 #include "hoshi/func.h"
 
@@ -19,17 +23,21 @@
 // predicate each frame in every scene, so a predicate is only ever a read of state
 // latched by the hooks below.
 
-// Objectives observed this boot, one bit per APCheckKind. Objectives that count
-// across boots read ap_save->checks instead.
-static u64 ap_observed;
-_Static_assert(APCK_NUM <= 64, "ap_observed is one u64");
+// Objectives observed this boot, one bit per APCheckKind, packed like a sent_checks
+// row. Objectives that count across boots read ap_save->checks instead.
+static u64 ap_observed[2];
+_Static_assert(APCK_NUM <= 128, "ap_observed is two u64 words");
+
+static int Observed(int ck)
+{
+    return (ap_observed[ck >> 6] >> (ck & 63)) & 1ULL;
+}
 
 void APCheckDetect_Observe(int ck)
 {
-    u64 bit = 1ULL << ck;
-    if (ap_observed & bit)
+    if (ck < 0 || ck >= APCK_NUM || Observed(ck))
         return;
-    ap_observed |= bit;
+    ap_observed[ck >> 6] |= 1ULL << (ck & 63);
     OSReport("[APCheckDetect] Objective %d achieved\n", ck);
 }
 
@@ -40,6 +48,19 @@ static MachineKind PlyMachineKind(int ply)
     return MachineKind_Resolve(Ply_GetMachineIsBike(ply), Ply_GetMachineKind(ply));
 }
 
+#define MACHINE_ANY     -1
+// The Archipelago Star's MachineKind is whatever the registry handed it this boot.
+#define MACHINE_AP_STAR -2
+
+static int MachineMatches(int want, MachineKind mk)
+{
+    if (want == MACHINE_ANY)
+        return 1;
+    if (want == MACHINE_AP_STAR)
+        want = GateApStar_MachineKind();
+    return want >= 0 && mk == want;
+}
+
 int APCheckDetect_IsSet(int ck)
 {
     switch (ck)
@@ -47,10 +68,12 @@ int APCheckDetect_IsSet(int ck)
     case APCK_ALLUPS_5:           return ap_save->checks.allup_collect_total >= AP_ALLUP_TOTAL_NEED;
     case APCK_SR1_PURPLE_3X:      return ap_save->checks.purple_sr1_wins >= AP_PURPLE_SR1_NEED;
     case APCK_AIRRIDE_ALL_COLORS: return ap_save->checks.race_color_mask == AP_RACE_COLOR_MASK_ALL;
+    case APCK_TR_ALL_COLORS:      return ap_save->checks.tr_color_mask == AP_RACE_COLOR_MASK_ALL;
+    case APCK_TR_ALL_COURSES_STEER: return ap_save->checks.tr_steer_win_mask == AP_TR_COURSE_MASK_ALL;
     default:
         if (ck < 0 || ck >= APCK_NUM)
             return 0;
-        return (ap_observed >> ck) & 1ULL;
+        return Observed(ck);
     }
 }
 
@@ -107,13 +130,45 @@ static int WithinSphere(const Vec3 *p, const Vec3 *centre, float radius)
 
 #define AP_FEET_PER_METRE (1.0f / 0.3048f)
 
+// A checklist time MM:SS:00 in frames at 60fps.
+#define AP_MMSS_FRAMES(m, s) (((m) * 60 + (s)) * 60)
+
 // Targets of the Air Ride NEBULA BELT objectives. Each is quoted in its cell label and
 // in the matching AP location name, so changing one is a two-repo edit.
-#define AP_NEBULA_FEET_NEED   5500.0f
-// 02:30:00 at 60fps.
-#define AP_NEBULA_2LAP_FRAMES 9000
+#define AP_NEBULA_FEET_NEED        5500.0f
+#define AP_NEBULA_2LAP_FRAMES      AP_MMSS_FRAMES(2, 30)
+#define AP_NEBULA_2LAP_FAST_FRAMES AP_MMSS_FRAMES(2, 6)
 // 10 seconds at 60fps.
-#define AP_NEBULA_AIR_FRAMES  600
+#define AP_NEBULA_AIR_FRAMES       600
+
+// Time Attack finish and Free Run best-lap objectives, the shape of vanilla's per-course
+// TA and FR cells. Targets are quoted in the labels, so a change is a two-repo edit.
+typedef struct TimedRunCheck
+{
+    u8 ck;
+    u8 mode;        // AIRRIDEMODE_TIME or AIRRIDEMODE_FREE
+    u8 gr_kind;
+    short machine;  // MachineKind, MACHINE_ANY or MACHINE_AP_STAR
+    int frames;
+} TimedRunCheck;
+
+static const TimedRunCheck timed_run_checks[] = {
+    { APCK_NEBULA_TA,           AIRRIDEMODE_TIME, GR_SPACE2,   MACHINE_ANY,           AP_MMSS_FRAMES(3, 35) },
+    { APCK_NEBULA_TA_FAST,      AIRRIDEMODE_TIME, GR_SPACE2,   MACHINE_ANY,           AP_MMSS_FRAMES(3, 10) },
+    { APCK_NEBULA_TA_HYDRA,     AIRRIDEMODE_TIME, GR_SPACE2,   VCKIND_HYDRA,          AP_MMSS_FRAMES(3, 15) },
+    { APCK_NEBULA_FR,           AIRRIDEMODE_FREE, GR_SPACE2,   MACHINE_ANY,           AP_MMSS_FRAMES(1, 15) },
+    { APCK_NEBULA_FR_FAST,      AIRRIDEMODE_FREE, GR_SPACE2,   MACHINE_ANY,           AP_MMSS_FRAMES(1, 3) },
+    { APCK_NEBULA_FR_WARP,      AIRRIDEMODE_FREE, GR_SPACE2,   VCKIND_WARP,           AP_MMSS_FRAMES(1, 10) },
+    { APCK_VALLEY_FR_AP_STAR,   AIRRIDEMODE_FREE, GR_VALLEY2,  MACHINE_AP_STAR,       AP_MMSS_FRAMES(1, 0) },
+    { APCK_CHECKER_TA_FLIGHT,   AIRRIDEMODE_TIME, GR_CHECK2,   VCKIND_FLIGHT,         AP_MMSS_FRAMES(4, 0) },
+    { APCK_PASSAGE_FR_COMPACT,  AIRRIDEMODE_FREE, GR_MACHINE2, VCKIND_COMPACT,        AP_MMSS_FRAMES(1, 5) },
+    { APCK_FROZEN_TA_WHEELIE,   AIRRIDEMODE_TIME, GR_ICE1,     VCKIND_WHEELIEBIKE,    AP_MMSS_FRAMES(3, 0) },
+    { APCK_SANDS_TA_FLIGHT,     AIRRIDEMODE_TIME, GR_DESERT1,  VCKIND_FLIGHT,         AP_MMSS_FRAMES(2, 50) },
+    // Meta Knight only ever rides his own wing.
+    { APCK_MAGMA_TA_METAKNIGHT, AIRRIDEMODE_TIME, GR_HEAT2,    VCKIND_WINGMETAKNIGHT, AP_MMSS_FRAMES(3, 15) },
+};
+
+#define TIMED_RUN_NUM ((int)(sizeof(timed_run_checks) / sizeof(timed_run_checks[0])))
 
 // Per-City-Trial-run item objectives. Every 3D scene load zeroes item_collect, so
 // the raw count is the run's, including permanent patches credited at round start.
@@ -170,9 +225,168 @@ static int in_kirby_melee;
 
 #define AP_MIC_ENEMY_KO_NEED 10
 
+// KIRBY MELEE KOs a King Dedede needs in one game, quoted in the label.
+#define AP_MELEE_DEDEDE_KO_NEED 30
+
+// King Dedede's slot in his own stadium, the victim Ply_AddDeath stamps
+// king_dedede_ko_frame for.
+#define AP_VSKD_BOSS_PLY 4
+
+// Players whose machine took its credited hit from a sphere shot this frame. The hit
+// resolves at machine proc prio 9 and a KO it causes lands at prio 10 of the same
+// frame, so the mask is cleared at every frame start.
+static u8 shot_hit_mask;
+
+// Bust one machine while riding another, in the city.
+typedef struct BustCheck
+{
+    u8 ck;
+    short busted; // MachineKind or MACHINE_AP_STAR
+    short riding;
+} BustCheck;
+
+static const BustCheck bust_checks[] = {
+    { APCK_BUST_REX_ON_SCOOTER,    VCKIND_REXWHEELIE, VCKIND_WHEELIESCOOTER },
+    { APCK_BUST_WINGED_ON_FLIGHT,  VCKIND_WINGED,     VCKIND_FLIGHT },
+    { APCK_BUST_SHADOW_ON_AP_STAR, VCKIND_SHADOW,     MACHINE_AP_STAR },
+};
+
+#define BUST_NUM ((int)(sizeof(bust_checks) / sizeof(bust_checks[0])))
+
+// Is a stadium loaded? A Trial's closing stadium keeps CITYMODE_TRIAL, so the mode
+// alone only finds the ones entered from the Stadium menu.
+static int InStadium(void)
+{
+    return Scene_GetCurrentMajor() == MJRKIND_CITY && CityTrial_IsInStadium();
+}
+
 // Is Nebula Belt the loaded Air Ride course? Latched at load like in_kirby_melee,
 // because the objectives keyed off it are sampled once the round is already over.
 static int in_nebula;
+
+// Targets of the City Trial event objectives, each quoted in its label.
+#define AP_RUNAMOK_FEET_NEED  1000.0f
+#define AP_SAMEITEM_NEED      20
+#define AP_BOUNCE_ITEMS_NEED  11 // "over 10"
+#define AP_FAKE_PATCHES_NEED  5
+
+// PlayerStats distance units in feet, by the factor vanilla's mileage cells use.
+#define AP_DIST_UNIT_FEET (11.4285717f * 5280.0f / 160934.4f)
+
+// Rail Fire lights a fire at each end of GrCity1's five stations. These are each
+// pair's midpoint: every fire is within 75 units of its own, and the closest two
+// stations are 793 apart, so the nearest one names the station a burn came from.
+static const Vec3 rail_stations[] = {
+    { -735.2f, 172.7f, -569.1f },
+    {  662.6f, 100.3f, -801.7f },
+    {  673.0f,  42.5f,   -9.1f },
+    {  360.2f,  32.1f,  976.8f },
+    { -668.9f,  23.2f,  651.5f },
+};
+
+#define RAIL_STATION_NUM  ((int)(sizeof(rail_stations) / sizeof(rail_stations[0])))
+#define RAIL_STATIONS_ALL ((1 << RAIL_STATION_NUM) - 1)
+
+// The lights are on in the lighthouse's yakumono state 3.
+#define LIGHTHOUSE_STATE_LIT 3
+
+// What each human has done during the City Trial event running now. Cleared whenever
+// the active event changes, so one run of an event is one attempt.
+typedef struct EventRun
+{
+    int kind;               // the active EventKind these belong to, -1 for none
+    float dist_start;       // Run Amok: distance travelled when it began
+    u8 stations;            // Rail Fire: one bit per station burned at
+    u8 lights;              // Lighthouse: one bit per light stood under
+    u8 items;               // Bounce: pickups; Fake Powerups: good patches
+    u8 touched_fake;        // Fake Powerups
+    u8 same_item[ITKIND_NUM]; // Same Item: pickups per kind
+} EventRun;
+
+static EventRun event_runs[4];
+
+// Which stadium a Prediction named when it guessed at random, -1 when it named the
+// real one or none was made this trial.
+static int predicted_stadium;
+
+static float PlyDistance(int ply)
+{
+    PlayerStats *st = Ply_GetItemCollectArray(ply);
+    return st->distance_grounded + st->distance_airborne;
+}
+
+// This player's run of the event active now. Only call during a loaded City Trial
+// round: stc_eventcheck_gobj still points at the last round's GObj between scenes.
+static EventRun *SyncEventRun(int ply)
+{
+    EventRun *ev = &event_runs[ply];
+    int kind = CityEvent_GetActiveKind();
+    if (ev->kind == kind)
+        return ev;
+
+    // An event leaves state 2 only through its own end - no event can start over a
+    // running one - so a change away from Fake Powerups means it ran its course.
+    if (ev->kind == EVKIND_FAKEPOWERUPS && !ev->touched_fake &&
+        ev->items >= AP_FAKE_PATCHES_NEED)
+        APCheckDetect_Observe(APCK_EVENT_FAKE_NONE);
+
+    memset(ev, 0, sizeof(*ev));
+    ev->kind = kind;
+    if (kind == EVKIND_RUNAMOK)
+        ev->dist_start = PlyDistance(ply);
+    return ev;
+}
+
+// The game's own beam test, run per light: CityLighthouse_InBeam's caller stops at the
+// first light that holds the point and never says which.
+static int UnderLighthouseLight(GOBJ *lighthouse, int light, const Vec3 *pos)
+{
+    YakumonoData *yd = lighthouse->userdata;
+    typeof(yd->data_ptr->lighthouse) lp = yd->data_ptr->lighthouse;
+    int joint = lp->light_joints[light];
+
+    Vec3 origin, dir, end;
+    Gr_GetNodeWorldPos(joint, &origin);
+    Gr_GetNodeWorldAxisY(joint, &dir);
+    VEC_NormalizeAndSnap(&dir, &dir);
+    end.X = origin.X - dir.X * lp->beam_len;
+    end.Y = origin.Y - dir.Y * lp->beam_len;
+    end.Z = origin.Z - dir.Z * lp->beam_len;
+    return CityLighthouse_InBeam((Vec3 *)pos, &origin, &end, lp->beam_slope, lp->beam_base);
+}
+
+// The per-frame half of the event objectives.
+static void SampleEvent(RiderData *rd, EventRun *ev)
+{
+    switch (ev->kind)
+    {
+    case EVKIND_RUNAMOK:
+        if ((PlyDistance(rd->ply) - ev->dist_start) * AP_DIST_UNIT_FEET > AP_RUNAMOK_FEET_NEED)
+            APCheckDetect_Observe(APCK_EVENT_RUNAMOK_DIST);
+        break;
+
+    case EVKIND_LIGHTHOUSE:
+    {
+        // Rewritten by this event's start, so current while the event is active.
+        GOBJ *lh = *stc_lighthouse_gobj;
+        if (!lh || GrYakumono_GetState(lh) != LIGHTHOUSE_STATE_LIT)
+            break;
+        YakumonoData *yd = lh->userdata;
+        int light_num = yd->data_ptr->lighthouse->light_num;
+        for (int k = 0; k < light_num && k < 8; k++)
+        {
+            if (UnderLighthouseLight(lh, k, &rd->pos))
+                ev->lights |= 1 << k;
+        }
+        if (light_num > 0 && ev->lights == (1 << light_num) - 1)
+            APCheckDetect_Observe(APCK_EVENT_LIGHTHOUSE_BOTH);
+        break;
+    }
+
+    default:
+        break;
+    }
+}
 
 // Is this player's rider singing? The Mic's damage lands over the blast animation
 // and its recovery, so both states count.
@@ -185,6 +399,25 @@ static int IsMidMicBlast(int ply)
     RiderData *rd = rg->userdata;
     return rd->copy_kind == COPYKIND_MIC &&
            (rd->state_idx == RIDERSTATE_MIC_SING || rd->state_idx == RIDERSTATE_MIC_END);
+}
+
+// Grants in a row the copy-ability objective asks for, quoted in its label.
+#define AP_SAME_COPY_NEED 3
+
+// Were this player's last AP_SAME_COPY_NEED copy grants all one ability? Every grant
+// path appends to the history - pickups, the Copy Chance Wheel, an Archipelago item. A
+// zeroed history reads COPYKIND_FIRE throughout, so the entry count bounds the test.
+static int SameCopyStreak(const PlayerStats *st)
+{
+    int n = COPY_HISTORY_NUM(st);
+    if (n < AP_SAME_COPY_NEED)
+        return 0;
+    for (int i = n - AP_SAME_COPY_NEED; i < n - 1; i++)
+    {
+        if (st->copy_history[i] != st->copy_history[n - 1])
+            return 0;
+    }
+    return 1;
 }
 
 // Per-frame proc on each human rider during a City Trial round.
@@ -217,8 +450,14 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     if (st->copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC))
         APCheckDetect_Observe(APCK_MIC_COPY_CHANCE);
 
+    if (SameCopyStreak(st))
+        APCheckDetect_Observe(APCK_SAME_COPY_3X);
+
     if (rd->pos.Y >= AP_MAX_ALTITUDE_Y)
         APCheckDetect_Observe(APCK_MAX_ALTITUDE);
+
+    if (ply < 4)
+        SampleEvent(rd, SyncEventRun(ply));
 
     if (!Rider_IsOnMachine(rd))
     {
@@ -267,11 +506,14 @@ void APCheckDetect_On3DLoadEnd(void)
         mic_enemy_kos[i] = 0;
     }
     in_city_trial = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        memset(&event_runs[i], 0, sizeof(event_runs[i]));
+        event_runs[i].kind = -1;
+    }
 
     StadiumKind st = Gm_GetCurrentStadiumKind();
-    in_kirby_melee = Scene_GetCurrentMajor() == MJRKIND_CITY &&
-                     Gm_GetCityMode() == CITYMODE_STADIUM &&
-                     (st == STKIND_MELEE1 || st == STKIND_MELEE2);
+    in_kirby_melee = InStadium() && (st == STKIND_MELEE1 || st == STKIND_MELEE2);
 
     // The loaded terrain, not GameData.stage_kind - that field is only the menu's
     // course selection and holds a stale value outside a race, while GrPlants1 is
@@ -293,11 +535,20 @@ void APCheckDetect_On3DLoadEnd(void)
         return;
     }
 
+    // The stadium was decided before the trial's city loaded, and nothing changes it.
+    if (InStadium() && Gm_GetCityMode() == CITYMODE_TRIAL)
+    {
+        if (predicted_stadium >= 0 && predicted_stadium != Gm_GetCurrentStadiumKind())
+            APCheckDetect_Observe(APCK_EVENT_PREDICTION_WRONG);
+        predicted_stadium = -1;
+    }
+
     // City Trial rounds only: "in one game" means one CT Trial run.
     if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
     in_city_trial = 1;
+    predicted_stadium = -1;
     coral_total = Gr_GetYakumonoSpawnTotal(AP_CORAL_DESC_ID);
 
     OSReport("[APCheckDetect] Sampling %d player(s) (coral total %d)\n",
@@ -306,7 +557,9 @@ void APCheckDetect_On3DLoadEnd(void)
 
 void APCheckDetect_OnFrameStart(void)
 {
-    if (!in_city_trial || (ap_observed & (1ULL << APCK_ASSEMBLE_ALL_LEGENDARY)))
+    shot_hit_mask = 0;
+
+    if (!in_city_trial || Observed(APCK_ASSEMBLE_ALL_LEGENDARY))
         return;
 
     for (int ply = 0; ply < 5; ply++)
@@ -329,19 +582,53 @@ void APCheckDetect_OnFrameStart(void)
 }
 
 // Handed every KO by custom_machines, which owns the one bl Ply_AddDeath inside
-// Machine_GiveDamage. Who was KO'd is only available there: the per-player KO tally
-// the Destruction Derby cells read records the killer alone, and a stadium CPU can
-// be Meta Knight or King Dedede once those are unlocked, so a rival is not always
-// a Kirby.
-void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int machine_kind)
+// Machine_GiveDamage. Who was KO'd, and on what, is only available there: the
+// per-player KO tally the Destruction Derby cells read records the killer alone, and
+// a stadium CPU can be Meta Knight or King Dedede once those are unlocked, so a rival
+// is not always a Kirby.
+// The killer has to be on its machine as the KO lands.
+static void ObserveBusts(int killer, MachineKind busted)
 {
-    if (!Gm_IsDestructionDerby())
+    GOBJ *rg = Ply_GetRiderGObj(killer);
+    if (rg == NULL || !Rider_IsOnMachine(rg->userdata))
         return;
 
+    MachineKind riding = PlyMachineKind(killer);
+    for (int i = 0; i < BUST_NUM; i++)
+    {
+        if (MachineMatches(bust_checks[i].busted, busted) &&
+            MachineMatches(bust_checks[i].riding, riding))
+            APCheckDetect_Observe(bust_checks[i].ck);
+    }
+}
+
+void APCheckDetect_AddDeath(int victim, DmgLog *dmg_log, int machine_kind)
+{
     int killer = dmg_log->attacker_ply;
-    if (victim < 0 || victim >= 4 || killer < 0 || killer >= 4 || killer == victim)
+    if (killer < 0 || killer >= 4 || killer == victim || Ply_GetPKind(killer) != PKIND_HMN)
         return;
-    if (Ply_GetPKind(killer) != PKIND_HMN)
+
+    if (victim == AP_VSKD_BOSS_PLY)
+    {
+        if (InStadium() && Gm_GetCurrentStadiumKind() == STKIND_VSKINGDEDEDE &&
+            Ply_GetRiderKind(killer) == RDKIND_METAKNIGHT)
+            APCheckDetect_Observe(APCK_VSKD_METAKNIGHT_KO);
+        return;
+    }
+    if (victim < 0 || victim >= 4)
+        return;
+
+    if (in_city_trial)
+    {
+        // Fog has no logic of its own - the event is the sky preset alone.
+        if (CityEvent_GetActiveKind() == EVKIND_FOG)
+            APCheckDetect_Observe(APCK_EVENT_FOG_KO);
+        ObserveBusts(killer, machine_kind);
+        if ((shot_hit_mask & (1 << victim)) && Ply_GetPKind(victim) == PKIND_CPU)
+            APCheckDetect_Observe(APCK_AP_STAR_SHOT_KO_CPU);
+    }
+
+    if (!Gm_IsDestructionDerby())
         return;
     if (Ply_GetRiderKind(killer) != RDKIND_DEDEDE || Ply_GetRiderKind(victim) != RDKIND_KIRBY)
         return;
@@ -465,8 +752,9 @@ static void RecordRaceColor(const GameData *gd, int p)
              MaskBits(ap_save->checks.race_color_mask, KIRBYCOLOR_NUM));
 }
 
-// The two "finish 1st as <character>" objectives, on any course, plus the color mask and
-// everything Nebula Belt asks for. The mask is the only thing here latched across boots.
+// The "finish 1st as <character>" and "on Archipelago Star" objectives, on any course,
+// plus the color mask and everything Nebula Belt asks for. The mask is the only thing
+// here latched across boots.
 static void SampleAirRide(const StadiumResults *r)
 {
     GameData *gd = Gm_GetGameData();
@@ -491,6 +779,8 @@ static void SampleAirRide(const StadiumResults *r)
                 APCheckDetect_Observe(APCK_AIRRIDE_1ST_METAKNIGHT);
             else if (rk == RDKIND_DEDEDE)
                 APCheckDetect_Observe(APCK_AIRRIDE_1ST_DEDEDE);
+            if (MachineMatches(MACHINE_AP_STAR, PlyMachineKind(p)))
+                APCheckDetect_Observe(APCK_AIRRIDE_1ST_AP_STAR);
         }
 
         if (!in_nebula)
@@ -514,8 +804,13 @@ static void SampleAirRide(const StadiumResults *r)
         // AirRide_CheckRaceLapObjectives keys off the configured lap total rather
         // than laps completed, so a 3-lap race cannot pay out the 2-lap time.
         if (Gm_GetCityKind() == AIRRIDE_RULE_LAPS && Gm_GetRaceLapTotal() == 2 &&
-            r->ply_race_time[p] != 0 && r->ply_race_time[p] <= AP_NEBULA_2LAP_FRAMES)
-            APCheckDetect_Observe(APCK_NEBULA_2LAP_TIME);
+            r->ply_race_time[p] != 0)
+        {
+            if (r->ply_race_time[p] <= AP_NEBULA_2LAP_FRAMES)
+                APCheckDetect_Observe(APCK_NEBULA_2LAP_TIME);
+            if (r->ply_race_time[p] <= AP_NEBULA_2LAP_FAST_FRAMES)
+                APCheckDetect_Observe(APCK_NEBULA_2LAP_FAST);
+        }
 
         // airborne_time is the longest single airborne stretch, and PlayerStats is
         // only zeroed on the next 3D scene load, so it still reads this race's run.
@@ -575,13 +870,16 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
             if (r->ply_dist[p] * AP_FEET_PER_METRE > 2000.0f)
                 APCheckDetect_Observe(APCK_AIRGLIDER_2000);
         }
-        else if (st == STKIND_MELEE1 && r->ply_points[p] > 100)
+        else if (st == STKIND_MELEE1 || st == STKIND_MELEE2)
         {
-            APCheckDetect_Observe(APCK_MELEE1_100);
-        }
-        else if (st == STKIND_MELEE2 && r->ply_points[p] > 60)
-        {
-            APCheckDetect_Observe(APCK_MELEE2_60);
+            int kos = r->ply_points[p];
+            if (st == STKIND_MELEE1 && kos > 100)
+                APCheckDetect_Observe(APCK_MELEE1_100);
+            if (st == STKIND_MELEE2 && kos > 60)
+                APCheckDetect_Observe(APCK_MELEE2_60);
+            if (kos >= AP_MELEE_DEDEDE_KO_NEED &&
+                Gm_GetGameData()->ply_desc[p].rider_kind == RDKIND_DEDEDE)
+                APCheckDetect_Observe(APCK_MELEE_DEDEDE_KO_30);
         }
         else if (st == STKIND_DESTRUCTION3 && r->ply_points[p] >= 10)
         {
@@ -601,13 +899,11 @@ void APCheckDetect_On3DExit(void)
     if (gd->is_replay)
         return;
 
-    MajorKind major = Scene_GetCurrentMajor();
-    if (major == MJRKIND_CITY)
+    if (InStadium())
     {
-        if (Gm_GetCityMode() == CITYMODE_STADIUM)
-            SampleStadium(&gd->stadium_results, Gm_GetCurrentStadiumKind());
+        SampleStadium(&gd->stadium_results, Gm_GetCurrentStadiumKind());
     }
-    else if (major == MJRKIND_AIR)
+    else if (Scene_GetCurrentMajor() == MJRKIND_AIR)
     {
         if (Gm_GetAirRideMode() != AIRRIDEMODE_RACE)
             return;
@@ -617,11 +913,525 @@ void APCheckDetect_On3DExit(void)
     }
 }
 
+// The vanilla dispatchers also bail while Checklist_IsCacheValid, which gates only the
+// vanilla cells; these objectives record through ap_checks regardless of it.
+static int TimedRunCounts(int ply, AirRideMode mode)
+{
+    return !Gm_IsReplay() && Scene_GetCurrentMajor() == MJRKIND_AIR &&
+           Ply_GetPKind(ply) == PKIND_HMN && Gm_GetAirRideMode() == mode;
+}
+
+static void SampleTimedRun(int ply, AirRideMode mode, int frames)
+{
+    if (frames == 0)
+        return;
+
+    GroundKind gr = Gr_GetCurrentGrKind();
+    MachineKind mk = PlyMachineKind(ply);
+    for (int i = 0; i < TIMED_RUN_NUM; i++)
+    {
+        const TimedRunCheck *c = &timed_run_checks[i];
+        if (c->mode == mode && c->gr_kind == gr && frames <= c->frames &&
+            MachineMatches(c->machine, mk))
+            APCheckDetect_Observe(c->ck);
+    }
+}
+
+// Replaces AirRide_OnFinishRace's one bl to the Free Run dispatcher, which runs once per
+// completed lap, after that lap has been folded into the best-lap time.
+static void APCheckDetect_FreeRunLap(int ply)
+{
+    AirRide_DispatchFreeRunObjectives(ply);
+    if (TimedRunCounts(ply, AIRRIDEMODE_FREE))
+        SampleTimedRun(ply, AIRRIDEMODE_FREE, Gm_GetPlayerFreeRunTime(ply));
+}
+
+// Replaces race3D_isFinished's one bl to the race / Time Attack dispatcher, which runs as
+// a player crosses the line, with the finish time already latched.
+static void APCheckDetect_RaceFinish(int ply)
+{
+    AirRide_DispatchRaceTimeAttackObjectives(ply);
+    if (TimedRunCounts(ply, AIRRIDEMODE_TIME))
+        SampleTimedRun(ply, AIRRIDEMODE_TIME, Gm_GetPlayerFinishTime(ply));
+}
+
+// Replaces Machine_OnTouchItem's one bl Ply_IncrementItemCollectNum, which every pickup
+// and box break passes through with its kind folded to the vanilla base and its
+// spawn_type as src_tag. ap_patches' conditional hook just above it skips the call for
+// the Archipelago kinds.
+static void APCheckDetect_ItemCollect(int ply, ItemKind kind, int src_tag)
+{
+    Ply_IncrementItemCollectNum(ply, kind, src_tag);
+
+    if (!in_city_trial || ply < 0 || ply >= 4 || Ply_GetPKind(ply) != PKIND_HMN)
+        return;
+    if (kind <= ITKIND_BOXRED || kind >= ITKIND_NUM)
+        return;
+
+    // Every UFO stop leads its ring with an All Up while All Up is unlocked. The kind test
+    // is in any state, since the last stop's items outlive the UFO by a few frames, and it
+    // keeps out the two ring spawners whose spawn_type comes from stage data.
+    if (kind == ITKIND_ALLUP && src_tag == ITSPAWN_UFO && CityEvent_GetCurrentKind() == EVKIND_UFO)
+        APCheckDetect_Observe(APCK_EVENT_UFO_ALLUP);
+
+    EventRun *ev = SyncEventRun(ply);
+    switch (ev->kind)
+    {
+    case EVKIND_SAMEITEM:
+        if (ev->same_item[kind] < 255 && ++ev->same_item[kind] >= AP_SAMEITEM_NEED)
+            APCheckDetect_Observe(APCK_EVENT_SAMEITEM_20);
+        break;
+
+    case EVKIND_BOUNCE:
+        if (ev->items < 255 && ++ev->items >= AP_BOUNCE_ITEMS_NEED)
+            APCheckDetect_Observe(APCK_EVENT_BOUNCE_ITEMS);
+        break;
+
+    case EVKIND_FAKEPOWERUPS:
+        // An Archipelago item spawns ITSPAWN_DIRECT and is picked up on the spot, so a
+        // fake-patch trap cannot fail the run and a patch sent from another world
+        // cannot pad it.
+        if (src_tag == ITSPAWN_DIRECT)
+            break;
+        if (kind >= ITKIND_ACCELFAKE && kind <= ITKIND_WEIGHTFAKE)
+            ev->touched_fake = 1;
+        else if (CityItem_IsGoodPatch(kind) && ev->items < 255)
+            ev->items++;
+        break;
+
+    default:
+        break;
+    }
+}
+
+// Replaces the bl Ply_PlayRailFireHitSFX in Machine_ActOnHitCollision and in
+// Rider_ActOnHitCollision - the one thing either does for a Rail Fire station's hit.
+static void APCheckDetect_RailFireHit(int ply)
+{
+    Ply_PlayRailFireHitSFX(ply);
+
+    if (!in_city_trial || ply < 0 || ply >= 4 || Ply_GetPKind(ply) != PKIND_HMN)
+        return;
+    GOBJ *rg = Ply_GetRiderGObj(ply);
+    if (!rg)
+        return;
+
+    EventRun *ev = SyncEventRun(ply);
+    if (ev->kind != EVKIND_RAILFIRE)
+        return;
+
+    RiderData *rd = rg->userdata;
+    int nearest = 0;
+    float nearest_d2 = 0.0f;
+    for (int i = 0; i < RAIL_STATION_NUM; i++)
+    {
+        float dx = rd->pos.X - rail_stations[i].X;
+        float dy = rd->pos.Y - rail_stations[i].Y;
+        float dz = rd->pos.Z - rail_stations[i].Z;
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (i == 0 || d2 < nearest_d2)
+        {
+            nearest = i;
+            nearest_d2 = d2;
+        }
+    }
+
+    if (ev->stations & (1 << nearest))
+        return;
+    ev->stations |= 1 << nearest;
+    OSReport("[APCheckDetect] Player %d burned at rail station %d (stations = %s)\n",
+             ply + 1, nearest, MaskBits(ev->stations, RAIL_STATION_NUM));
+    if (ev->stations == RAIL_STATIONS_ALL)
+        APCheckDetect_Observe(APCK_EVENT_RAILFIRE_ALL);
+}
+
+static int HumanRides(MachineData *md)
+{
+    int ply = Machine_GetRiderPly(md);
+    return ply >= 0 && ply < 4 && Ply_GetPKind(ply) == PKIND_HMN;
+}
+
+// Runs as Machine_CheckMachineBumpCollision commits to a bump, before either machine's
+// hit reaction takes a formation machine out of its flight slot.
+static void APCheckDetect_MachineBump(MachineData *self, MachineData *other)
+{
+    if (!in_city_trial)
+        return;
+    if ((self->formation_slot != MACHINE_FORMATION_NONE && HumanRides(other)) ||
+        (other->formation_slot != MACHINE_FORMATION_NONE && HumanRides(self)))
+        APCheckDetect_Observe(APCK_EVENT_FORMATION_BUMP);
+}
+
+// Clobbered: mr r3, r28 (the other machine, for its Machine_EnterHitReaction), re-executed
+// after. r30 is the machine running the check.
+CODEPATCH_HOOKCREATE(0x801dacb4,
+    "mr 3, 30\n\t"
+    "mr 4, 28\n\t",
+    APCheckDetect_MachineBump,
+    "",
+    0
+)
+
+// Runs as Machine_ActOnHitCollision takes its projectile branch, the one place the
+// credited hit's projectile is named: the attacker log it copies onto the victim
+// carries only the kind's attack word, which the sphere shot shares with the Plasma
+// ability's spread.
+static void APCheckDetect_ProjectileHit(GOBJ *proj, int victim)
+{
+    if (in_city_trial && victim >= 0 && victim < 4 && GateApStar_IsShot(proj))
+        shot_hit_mask |= 1 << victim;
+}
+
+// Clobbered: mr r3, r28 (the projectile), re-executed after. r25 is the ply riding the
+// machine that was hit.
+CODEPATCH_HOOKCREATE(0x801d73b8,
+    "mr 3, 28\n\t"
+    "mr 4, 25\n\t",
+    APCheckDetect_ProjectileHit,
+    "",
+    0
+)
+
+// Replaces stadiumPrediction's bl HSD_Randi(24), the one-in-five arm that names any
+// StadiumKind; the other four name the real one. The guess is only judged once the
+// trial's stadium loads, since a random pick can still land on the right stadium.
+static int APCheckDetect_PredictRandom(int n)
+{
+    int st = HSD_Randi(n);
+    if (Gm_GetCityMode() == CITYMODE_TRIAL)
+        predicted_stadium = st;
+    return st;
+}
+
+// 0.20 seconds and 1 second at 60fps, the Top Ride photo finish and Time Attack lap
+// spread. Both are quoted in their labels.
+#define AP_TR_PHOTO_FINISH_FRAMES 12
+#define AP_TR_EVEN_LAP_FRAMES     60
+
+// The CPU Level byte of a level-5 CPU, the value vanilla's per-course CPU cells test.
+#define AP_TR_CPU_LEVEL_5 4
+
+// Counts the Top Ride labels quote.
+#define AP_TR_FREEZE_VICTIMS_NEED 3
+#define AP_TR_HITS_NEED           5
+#define AP_TR_SPEEDDOWN_NEED      3
+
+// Top Ride Time Attack finishes and Free Run laps, the shape of vanilla's per-course
+// cells, whose thresholds are frames at 60fps as well.
+typedef struct TopRideTimedCheck
+{
+    u8 ck;
+    u8 mode;    // TOPRIDEMODE_TIME or TOPRIDEMODE_FREE
+    u8 course;  // TopRideCourse
+    u8 machine; // TopRideMachineKind
+    int frames;
+} TopRideTimedCheck;
+
+static const TopRideTimedCheck tr_timed_checks[] = {
+    { APCK_TR_TA_GRASS_STEER, TOPRIDEMODE_TIME, TOPRIDE_GRASS, TR_MACHINE_STEER, AP_MMSS_FRAMES(0, 33) },
+    { APCK_TR_TA_METAL_STEER, TOPRIDEMODE_TIME, TOPRIDE_METAL, TR_MACHINE_STEER, AP_MMSS_FRAMES(0, 57) },
+    { APCK_TR_FR_SKY_STEER,   TOPRIDEMODE_FREE, TOPRIDE_SKY,   TR_MACHINE_STEER, AP_MMSS_FRAMES(0, 11) },
+};
+
+#define TR_TIMED_NUM ((int)(sizeof(tr_timed_checks) / sizeof(tr_timed_checks[0])))
+
+// The four items Top Ride has in place of copy abilities.
+static const u8 tr_ability_items[] = { TRITEM_FIRE, TRITEM_FREEZE_FAN, TRITEM_BOMB, TRITEM_WALKY };
+
+#define TR_ABILITY_ITEM_NUM  ((int)(sizeof(tr_ability_items) / sizeof(tr_ability_items[0])))
+#define TR_ABILITY_ITEMS_ALL ((1 << TR_ABILITY_ITEM_NUM) - 1)
+
+// What each kirby slot has done this round. Only the state vtable is kept for CPUs,
+// which is what finds a rival being frozen.
+typedef struct TopRideRun
+{
+    void *prev_vt;       // state vtable at the last sample
+    int laps;            // lap_progress at the last sample
+    int lap_min;         // Time Attack: fastest and slowest lap so far
+    int lap_max;
+    u8 lap_num;          // Time Attack: laps timed
+    u8 judged;           // the finish has been judged
+    u8 burned;
+    u8 ant_doom;
+    u8 hits;             // hit reactions entered
+    u8 ability_items;    // bit per tr_ability_items entry applied
+    u8 speed_downs;
+    u8 fan_victims;      // slots frozen while this human holds the current Freeze Fan
+} TopRideRun;
+
+static TopRideRun tr_runs[4];
+
+// Is the loaded Top Ride round one a human plays? The title screen's attract demo runs
+// one with a CPU in every slot.
+static int tr_armed;
+
+static int BitCount(u32 v)
+{
+    int n = 0;
+    for (; v; v &= v - 1)
+        n++;
+    return n;
+}
+
+// The states a hit puts a kirby in. Ant Doom and the falls are course routes vanilla
+// asks the player to take, and Speed Down is an item the player picks up, so none of
+// those counts.
+static int IsHitState(void *vt)
+{
+    return vt == TR_KSTATE_VT_PRESS || vt == TR_KSTATE_VT_CRUSH || vt == TR_KSTATE_VT_EXPLODE ||
+           vt == TR_KSTATE_VT_STRIKE || vt == TR_KSTATE_VT_SPIN || vt == TR_KSTATE_VT_SANDSPIN ||
+           vt == TR_KSTATE_VT_NUMB || vt == TR_KSTATE_VT_ELEC || vt == TR_KSTATE_VT_BURN ||
+           vt == TR_KSTATE_VT_FREEZE || vt == TR_KSTATE_VT_CONFUSE;
+}
+
+// The Freeze Fan freezes through effectors that live inside its power state, so a kirby
+// newly frozen while a human holds the fan was frozen by it.
+static void CreditFreeze(TopRideKirbyMgr *mgr, int victim)
+{
+    for (int s = 0; s < 4; s++)
+    {
+        TopRideKirby *h = mgr->kirbys[s];
+        if (s == victim || !h || TopRide_GetPlayerKind(s) != TR_PKIND_HMN)
+            continue;
+        if (TopRide_KirbyStateVtable(h) != TR_ITEMPOWER_VT_FREEZE_FAN)
+            continue;
+        tr_runs[s].fan_victims |= 1 << victim;
+        if (BitCount(tr_runs[s].fan_victims) >= AP_TR_FREEZE_VICTIMS_NEED)
+            APCheckDetect_Observe(APCK_TR_FREEZE_FAN_3);
+    }
+}
+
+static void SampleTopRideTimed(int slot, TopRideMode mode, int frames)
+{
+    if (frames == 0)
+        return;
+
+    int course = TopRide_GetSelectedCourse();
+    TopRideMachineKind machine = TopRide_GetMachineKind(slot);
+    for (int i = 0; i < TR_TIMED_NUM; i++)
+    {
+        const TopRideTimedCheck *c = &tr_timed_checks[i];
+        if (c->mode == mode && c->course == course && c->machine == machine && frames <= c->frames)
+            APCheckDetect_Observe(c->ck);
+    }
+}
+
+static void OnTopRideLap(TopRideKirby *k, TopRideRun *run, TopRideMode mode)
+{
+    int t = k->prev_lap_frames;
+    if (mode == TOPRIDEMODE_FREE)
+    {
+        SampleTopRideTimed(k->player_slot, mode, t);
+        return;
+    }
+    if (mode != TOPRIDEMODE_TIME)
+        return;
+
+    if (run->lap_num == 0 || t < run->lap_min)
+        run->lap_min = t;
+    if (run->lap_num == 0 || t > run->lap_max)
+        run->lap_max = t;
+    if (run->lap_num < 255)
+        run->lap_num++;
+}
+
+// Fastest and slowest lap of a finished Time Attack no further apart than the label's
+// spread. Lap 1 is timed from the start signal, not from the line.
+static void JudgeTimeAttack(TopRideKirby *k, TopRideRun *run)
+{
+    SampleTopRideTimed(k->player_slot, TOPRIDEMODE_TIME, k->finish_time);
+    if (run->lap_num >= 2 && run->lap_max - run->lap_min <= AP_TR_EVEN_LAP_FRAMES)
+        APCheckDetect_Observe(APCK_TR_TA_EVEN_LAPS);
+}
+
+static int TopRideRivals(TopRideKirbyMgr *mgr, int slot)
+{
+    int n = 0;
+    for (int s = 0; s < 4; s++)
+    {
+        if (s != slot && mgr->kirbys[s])
+            n++;
+    }
+    return n;
+}
+
+static int RivalsAllLevel5(int slot)
+{
+    TopRideConfig *cfg = &Gm_GetGameData()->topride_config;
+    for (int s = 0; s < 4; s++)
+    {
+        if (s == slot)
+            continue;
+        if (TopRide_GetPlayerKind(s) != TR_PKIND_CPU || cfg->slots[s].handicap != AP_TR_CPU_LEVEL_5)
+            return 0;
+    }
+    return 1;
+}
+
+static void RecordTopRideColor(int slot)
+{
+    int color = TopRide_GetColor(slot);
+    if (color < 0 || color >= KIRBYCOLOR_NUM)
+        return;
+
+    u8 bit = (u8)(1 << color);
+    if (ap_save->checks.tr_color_mask & bit)
+        return;
+    ap_save->checks.tr_color_mask |= bit;
+    OSReport("[APCheckDetect] Top Ride race finished as %s (colors = %s)\n",
+             KirbyColor_Names[color], MaskBits(ap_save->checks.tr_color_mask, KIRBYCOLOR_NUM));
+}
+
+static void RecordSteerWin(int course)
+{
+    if (course < 0 || course >= TOPRIDE_NUM)
+        return;
+
+    u8 bit = (u8)(1 << course);
+    if (ap_save->checks.tr_steer_win_mask & bit)
+        return;
+    ap_save->checks.tr_steer_win_mask |= bit;
+    OSReport("[APCheckDetect] Top Ride %s won on Steer Star (courses = %s)\n",
+             TopRideCourse_Names[course], MaskBits(ap_save->checks.tr_steer_win_mask, TOPRIDE_NUM));
+}
+
+// Runs on the frame a human's finish lands. standing is the results order, and its 0 on
+// that frame is the 1st place vanilla's own cells test.
+static void JudgeTopRideRace(TopRideKirbyMgr *mgr, TopRideKirby *k, TopRideRun *run)
+{
+    int slot = k->player_slot;
+    RecordTopRideColor(slot);
+
+    if (k->standing != 0 || TopRideRivals(mgr, slot) == 0)
+        return;
+
+    int course = TopRide_GetSelectedCourse();
+    if (course == TOPRIDE_FIRE && !run->burned)
+        APCheckDetect_Observe(APCK_TR_FIRE_NO_BURN);
+    if (course == TOPRIDE_SAND && !run->ant_doom)
+        APCheckDetect_Observe(APCK_TR_SAND_NO_ANTDOOM);
+    if (RivalsAllLevel5(slot))
+        APCheckDetect_Observe(APCK_TR_1ST_VS_3_LV5);
+    if (TopRide_GetMachineKind(slot) == TR_MACHINE_STEER)
+        RecordSteerWin(course);
+    // With nothing spawning, the only hits left are rams and the course's own.
+    if (run->hits == 0 && Gm_GetGameData()->topride_config.item_rule != TOPRIDE_ITEM_RULE_ZERO)
+        APCheckDetect_Observe(APCK_TR_NO_HIT);
+    if (run->hits >= AP_TR_HITS_NEED)
+        APCheckDetect_Observe(APCK_TR_HIT_5_WIN);
+    if (run->speed_downs >= AP_TR_SPEEDDOWN_NEED)
+        APCheckDetect_Observe(APCK_TR_SPEEDDOWN_3_WIN);
+}
+
+// A human and any other finisher within AP_TR_PHOTO_FINISH_FRAMES. An unfinished
+// kirby's finish_time is a projection, so both have to have crossed the line.
+static void SampleTopRidePhoto(TopRideKirbyMgr *mgr, TopRideKirby *k)
+{
+    for (int s = 0; s < 4; s++)
+    {
+        TopRideKirby *o = mgr->kirbys[s];
+        if (!o || o == k || !o->finished)
+            continue;
+        int gap = (int)k->finish_time - (int)o->finish_time;
+        if (gap < 0)
+            gap = -gap;
+        if (gap <= AP_TR_PHOTO_FINISH_FRAMES)
+            APCheckDetect_Observe(APCK_TR_PHOTO);
+    }
+}
+
+static void SampleTopRideHuman(TopRideKirbyMgr *mgr, TopRideKirby *k, TopRideRun *run, void *vt, int entered)
+{
+    TopRideMode mode = TopRide_GetMode();
+
+    if (vt != TR_ITEMPOWER_VT_FREEZE_FAN)
+        run->fan_victims = 0;
+    if (entered && IsHitState(vt) && run->hits < 255)
+        run->hits++;
+    if (vt == TR_KSTATE_VT_BURN)
+        run->burned = 1;
+    if (vt == TR_KSTATE_VT_DOODLEBUG || vt == TR_KSTATE_VT_DOODLEBUG_OUT)
+        run->ant_doom = 1;
+
+    // TopRide_CheckPerCourseObjectives resets this once it has read it, so here, just
+    // before it, it is whatever TopRide_KirbyApplyItem applied since the last frame.
+    int item = k->active_item_kind;
+    if (item < TRITEM_NUM)
+    {
+        if (item == TRITEM_SPEED_DOWN && run->speed_downs < 255)
+            run->speed_downs++;
+        for (int i = 0; i < TR_ABILITY_ITEM_NUM; i++)
+        {
+            if (item == tr_ability_items[i])
+                run->ability_items |= 1 << i;
+        }
+        if (run->ability_items == TR_ABILITY_ITEMS_ALL)
+            APCheckDetect_Observe(APCK_TR_ABILITY_ITEMS);
+    }
+
+    if (k->lap_progress > run->laps)
+    {
+        run->laps = k->lap_progress;
+        OnTopRideLap(k, run, mode);
+    }
+
+    if (!k->finished)
+        return;
+    if (mode == TOPRIDEMODE_RACE)
+        SampleTopRidePhoto(mgr, k);
+    if (run->judged)
+        return;
+    run->judged = 1;
+    if (mode == TOPRIDEMODE_TIME)
+        JudgeTimeAttack(k, run);
+    else if (mode == TOPRIDEMODE_RACE)
+        JudgeTopRideRace(mgr, k, run);
+}
+
+// Replaces TopRide_CheckForNewUnlocks' one bl to the per-kirby evaluator, which runs for
+// every occupied slot once TopRide_KirbyMgrUpdate has moved, lapped and ranked the
+// kirbys for the frame.
+static void APCheckDetect_TopRideKirby(TopRideKirbyRecord *rec)
+{
+    TopRideKirbyMgr *mgr = *stc_topride_kirbymgr;
+    TopRideKirby *k = rec->kirby;
+    if (tr_armed && mgr && mgr->round_state == 2 && k && k->player_slot < 4)
+    {
+        int slot = k->player_slot;
+        TopRideRun *run = &tr_runs[slot];
+        void *vt = TopRide_KirbyStateVtable(k);
+        int entered = vt != run->prev_vt;
+        run->prev_vt = vt;
+
+        if (entered && vt == TR_KSTATE_VT_FREEZE)
+            CreditFreeze(mgr, slot);
+        if (TopRide_GetPlayerKind(slot) == TR_PKIND_HMN)
+            SampleTopRideHuman(mgr, k, run, vt, entered);
+    }
+
+    TopRide_CheckPerCourseObjectives(rec);
+}
+
+void APCheckDetect_OnTopRideLoadEnd(void)
+{
+    memset(tr_runs, 0, sizeof(tr_runs));
+    tr_armed = !Gm_IsAutoDemo();
+}
+
 void APCheckDetect_OnBoot(void)
 {
     // The one bl Ply_RecordEnemyDefeat, in EventActor_ResolveHit (0x802021fc).
     CODEPATCH_REPLACECALL(0x802022ec, APCheckDetect_EnemyDefeat);
     CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
+    CODEPATCH_REPLACECALL(0x80010418, APCheckDetect_FreeRunLap);
+    CODEPATCH_REPLACECALL(0x80010d68, APCheckDetect_RaceFinish);
+    CODEPATCH_REPLACECALL(0x801db928, APCheckDetect_ItemCollect);
+    CODEPATCH_REPLACECALL(0x801d741c, APCheckDetect_RailFireHit);
+    CODEPATCH_REPLACECALL(0x80196668, APCheckDetect_RailFireHit);
+    CODEPATCH_HOOKAPPLY(0x801dacb4);
+    CODEPATCH_HOOKAPPLY(0x801d73b8);
+    CODEPATCH_REPLACECALL(0x801279a0, APCheckDetect_PredictRandom);
+    CODEPATCH_REPLACECALL(0x802acd4c, APCheckDetect_TopRideKirby);
     OSReport("[APCheckDetect] Hooks installed\n");
 }
 
@@ -632,6 +1442,8 @@ int APCheckDetect_GetProgress(APCheckProgressKind which)
     case AP_PROGRESS_ALLUP_TOTAL: return ap_save->checks.allup_collect_total;
     case AP_PROGRESS_PURPLE_SR1:  return ap_save->checks.purple_sr1_wins;
     case AP_PROGRESS_RACE_COLORS: return ap_save->checks.race_color_mask;
+    case AP_PROGRESS_TR_COLORS:   return ap_save->checks.tr_color_mask;
+    case AP_PROGRESS_TR_STEER_WINS: return ap_save->checks.tr_steer_win_mask;
     default:                      return 0;
     }
 }
@@ -653,6 +1465,12 @@ void APCheckDetect_DebugSetProgress(APCheckProgressKind which, int value)
         break;
     case AP_PROGRESS_RACE_COLORS:
         ap_save->checks.race_color_mask = (u8)value;
+        break;
+    case AP_PROGRESS_TR_COLORS:
+        ap_save->checks.tr_color_mask = (u8)value;
+        break;
+    case AP_PROGRESS_TR_STEER_WINS:
+        ap_save->checks.tr_steer_win_mask = (u8)value;
         break;
     default:
         return;

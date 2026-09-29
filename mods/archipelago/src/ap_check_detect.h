@@ -88,6 +88,74 @@ typedef enum APCheckKind
     // covers the first; this covers the last one with no cell anywhere.
     APCK_OFFENSE_PATCHES_10,     // 51
 
+    // The Nebula Belt mode cells every other course has: the faster race lap tier,
+    // and Time Attack and Free Run's two open tiers plus one machine tier each.
+    APCK_NEBULA_2LAP_FAST,       // 52
+    APCK_NEBULA_TA,              // 53
+    APCK_NEBULA_TA_FAST,         // 54
+    APCK_NEBULA_TA_HYDRA,        // 55
+    APCK_NEBULA_FR,              // 56
+    APCK_NEBULA_FR_FAST,         // 57
+    APCK_NEBULA_FR_WARP,         // 58
+
+    // Machine tiers for the machines no vanilla Air Ride cell names.
+    APCK_VALLEY_FR_AP_STAR,      // 59
+    APCK_CHECKER_TA_FLIGHT,      // 60
+    APCK_PASSAGE_FR_COMPACT,     // 61
+    APCK_FROZEN_TA_WHEELIE,      // 62
+    APCK_SANDS_TA_FLIGHT,        // 63
+
+    // One per City Trial event vanilla writes no cell about, each earned while that
+    // event is running.
+    APCK_EVENT_RUNAMOK_DIST,     // 64
+    APCK_EVENT_RAILFIRE_ALL,     // 65
+    APCK_EVENT_SAMEITEM_20,      // 66
+    APCK_EVENT_LIGHTHOUSE_BOTH,  // 67
+    APCK_EVENT_PREDICTION_WRONG, // 68
+    APCK_EVENT_UFO_ALLUP,        // 69
+    APCK_EVENT_FORMATION_BUMP,   // 70
+    APCK_EVENT_BOUNCE_ITEMS,     // 71
+    APCK_EVENT_FOG_KO,           // 72
+    APCK_EVENT_FAKE_NONE,        // 73
+
+    // One copy ability three grants running, from any mix of sources.
+    APCK_SAME_COPY_3X,           // 74
+
+    // Bust one machine while riding another in the city, the shape of vanilla's eight
+    // bust cells, for machines none of them names.
+    APCK_BUST_REX_ON_SCOOTER,    // 75
+    APCK_BUST_WINGED_ON_FLIGHT,  // 76
+    APCK_BUST_SHADOW_ON_AP_STAR, // 77
+
+    // The two characters and the Archipelago Star, where no cell names them yet.
+    APCK_MAGMA_TA_METAKNIGHT,    // 78
+    APCK_AIRRIDE_1ST_AP_STAR,    // 79
+    APCK_MELEE_DEDEDE_KO_30,     // 80
+    APCK_VSKD_METAKNIGHT_KO,     // 81
+
+    // Top Ride. Vanilla's 120 cells never name a machine or a Kirby color, only Fire,
+    // Buzz Saw and Bomb hit a rival, and only SKY and METAL ask a course hazard to be
+    // avoided.
+    APCK_TR_FREEZE_FAN_3,        // 82
+    APCK_TR_FIRE_NO_BURN,        // 83
+    APCK_TR_SAND_NO_ANTDOOM,     // 84
+    APCK_TR_1ST_VS_3_LV5,        // 85
+    APCK_TR_PHOTO,               // 86
+    APCK_TR_ALL_COLORS,          // 87
+    APCK_TR_TA_GRASS_STEER,      // 88
+    APCK_TR_TA_METAL_STEER,      // 89
+    APCK_TR_FR_SKY_STEER,        // 90
+    APCK_TR_ALL_COURSES_STEER,   // 91
+    APCK_TR_NO_HIT,              // 92
+    APCK_TR_HIT_5_WIN,           // 93
+    APCK_TR_ABILITY_ITEMS,       // 94
+    APCK_TR_SPEEDDOWN_3_WIN,     // 95
+    APCK_TR_TA_EVEN_LAPS,        // 96
+
+    // The Archipelago Star's charge-release shot lands the killing hit on a CPU, in
+    // the city.
+    APCK_AP_STAR_SHOT_KO_CPU,    // 97
+
     APCK_NUM,
 } APCheckKind;
 
@@ -104,11 +172,14 @@ int APCheckDetect_GetProgress(APCheckProgressKind which);
 void APCheckDetect_DebugSetProgress(APCheckProgressKind which, int value);
 
 // Handed to custom_machines' KO seam once the registry resolves. Counts the Kirbys
-// a human King Dedede has KO'd in Destruction Derby.
+// a human King Dedede has KO'd in Destruction Derby, and latches the bust, sphere
+// shot and VS. King Dedede objectives.
 void APCheckDetect_AddDeath(int victim, struct DmgLog *dmg_log, int machine_kind);
 
 // Installs the enemy-defeat and yakumono-break interceptions the Mic and coral
-// objectives read from. The rival KO arrives through custom_machines instead.
+// objectives read from, the Time Attack / Free Run dispatch wrappers, the City Trial
+// event seams, the machine projectile-hit hook and the Top Ride per-kirby sampler.
+// The rival KO arrives through custom_machines instead.
 void APCheckDetect_OnBoot(void);
 
 // Attaches the per-frame sampler to every human rider - the City Trial one for a
@@ -116,9 +187,13 @@ void APCheckDetect_OnBoot(void);
 // counters.
 void APCheckDetect_On3DLoadEnd(void);
 
-// Polls the three-legendary objective. Not part of the per-rider sampler because
-// assembly ends in Rider_RespawnFullRecreate, which tears the rider's machine down
-// under it.
+// Clears the per-round Top Ride counters. Top Ride loads through its own minor, so
+// On3DLoadEnd never runs for it.
+void APCheckDetect_OnTopRideLoadEnd(void);
+
+// Clears the frame's sphere-shot hits and polls the three-legendary objective. The
+// poll is not part of the per-rider sampler because assembly ends in
+// Rider_RespawnFullRecreate, which tears the rider's machine down under it.
 void APCheckDetect_OnFrameStart(void);
 
 // Samples the stadium results block, which Stadium_ExitMinor finishes latching

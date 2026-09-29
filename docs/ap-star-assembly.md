@@ -476,7 +476,7 @@ the cell also fills in on a later load rather than only in the session that earn
 the apworld side the location takes the City Trial region and requires all six sphere
 items whenever City Trial items are gated.
 
-`APCK_ASSEMBLE_ALL_LEGENDARY` is `clear_kind` 51 (AP location 412): Dragoon, Hydra and the
+`APCK_ASSEMBLE_ALL_LEGENDARY` is `clear_kind` 50 (AP location 411): Dragoon, Hydra and the
 Archipelago Star all assembled by one player in one round. Its three inputs are per-round -
 `PlayerStats.flags_84d` bits `0x04` and `0x08`, which `Ply_MarkLegendaryMachineAssembled`
 (`0x80231198`) sets and which are zeroed with the rest of `PlayerStats` on scene load, plus

@@ -159,3 +159,8 @@ int GateApStar_AssembledThisRound(int ply)
 {
     return ap_star_api ? ap_star_api->AssembledThisRound(ply) : 0;
 }
+
+int GateApStar_IsShot(GOBJ *proj)
+{
+    return ap_star_api ? ap_star_api->IsShot(proj) : 0;
+}

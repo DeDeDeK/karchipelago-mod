@@ -114,7 +114,7 @@ Root option "Archipelago Debug": nine submenus, a Target Player row, and two act
 | Checks | Sent-check bitmask, goal stickies, checklist reveal, AP Patches |
 | Goals | The goal of each of the four checklist rows |
 | Slot Options | Category gating, patch cap range, spawn rate floor, re-apply |
-| Check Progress | The three cross-session AP checklist counters |
+| Check Progress | The five cross-session AP checklist counters |
 | Messages | Canned client text lines, one per `APTextKind` |
 | Links | Arm a DeathLink or TrapLink receive |
 | EnergyLink | Set, add to or drain the energy balance |
@@ -270,17 +270,17 @@ not replayed, so nothing brings them back.
 
 ### Check Progress
 
-The three AP checklist objectives whose predicate counts across sessions, so that verifying them
+The five AP checklist objectives whose predicate counts across sessions, so that verifying them
 does not mean grinding: All Ups collected (5 completes `APCK_ALLUPS_5`), SINGLE RACE 1 wins as
-Purple Kirby (3 completes `APCK_SR1_PURPLE_3X`), and the per-colour race mask (all eight
-completes `APCK_AIRRIDE_ALL_COLORS`). Set a counter one short of its target and the next real
-event in a round completes the check. None of the three writes the memory card as it is moved -
+Purple Kirby (3 completes `APCK_SR1_PURPLE_3X`), the Air Ride and Top Ride per-colour race masks
+(all eight complete `APCK_AIRRIDE_ALL_COLORS` / `APCK_TR_ALL_COLORS`), and the per-course Steer
+Star win mask (all seven complete `APCK_TR_ALL_COURSES_STEER`). Set a counter one short of its
+target and the next real event in a round completes the check. None of the five writes the memory card as it is moved -
 that would be a blocking card write per D-pad tick - so they ride in the save block to the game's
 own next save point.
 
-The colour row is a mask rather than a count, so it offers None / Partial / All: Partial writes
-seven of the eight bits, and any live mask that is neither empty nor complete displays as
-Partial.
+The three mask rows offer None / Partial / All rather than a count: Partial writes all but the
+last bit, and any live mask that is neither empty nor complete displays as Partial.
 
 Lowering a counter past a check already recorded this session does not un-record it: the
 objectives latch in `ap_check_detect.c`'s boot-scoped observed set, which has no reset.

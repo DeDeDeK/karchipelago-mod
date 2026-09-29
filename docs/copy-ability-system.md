@@ -30,8 +30,10 @@ Both teardown slots are live. Most grant functions fill **+0x7f8** plus the +0x7
 2. Look up the grant function in `stc_ability_init_table` at **0x804af4f0** (11 entries indexed by `CopyKind`); a null entry aborts with a 0 return.
 3. `Rider_AbilityRemoveModel` (0x80191554) - strip the currently-held ability.
 4. `Rider_AbilityClearQueued` (0x801915c4) - frees the pending queued objects (+0x8fc / +0x904) and resets `queued_ability_kind` / `queued_powerup_kind` to -1.
-5. `Rider_RecordCopyAbility(ply, kind)` (0x8022ee00) - appends to the 6-entry ability history (`PlayerStats+0x360`, count and the three sequence flags packed into `+0x378`), tests the sequence tables at 0x804b4c20 / 0x804b4c38 / 0x804b4c50, and bumps the per-kind grant counter `PlayerStats.copy_obtain_count[kind]` (`+0x334`).
+5. `Rider_RecordCopyAbility(ply, kind)` (0x8022ee00) - appends to the 6-entry ability history (`PlayerStats+0x360`, oldest first; once full it drops the oldest, so the last entry is always the newest grant. The entry count is the high 5 bits of `+0x378`, the three sequence flags the low 3), tests the sequence tables at 0x804b4c20 / 0x804b4c38 / 0x804b4c50, and bumps the per-kind grant counter `PlayerStats.copy_obtain_count[kind]` (`+0x334`).
 6. Call the per-kind grant function; return 1.
+
+Every grant path records through `Rider_RecordCopyAbility`: besides `Rider_GiveAbility` it is called by `Rider_ResolveQueuedAbility` (0x801a8454) and `zz_801a8630_` for a queued grant, and by `randomAbility_giveAbility` (0x801a61d4) for the Copy Chance Wheel.
 
 `Rider_MarkCopyAbilityObtained` (0x8022f150) is **not** part of this sequence - only the copy-wheel callers invoke it (`randomAbility_aPress` at 0x801ae874, `randomAbility_autoSelect` at 0x801ae910). It sets `PlayerStats.copy_chance_mask` (`+0x37a`), MSB-first bit `15 - CopyKind`, so that mask means "the Copy Chance Wheel granted this kind" while `copy_obtain_count` counts grants from every source.
 

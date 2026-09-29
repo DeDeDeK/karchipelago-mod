@@ -5,7 +5,7 @@
 
 // Bump major on breaking changes, minor on additions.
 #define ARCHIPELAGO_API_MAJOR 4
-#define ARCHIPELAGO_API_MINOR 1
+#define ARCHIPELAGO_API_MINOR 2
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
@@ -683,6 +683,8 @@ typedef enum APCheckProgressKind
     AP_PROGRESS_ALLUP_TOTAL,  // All Ups a human collected in City Trial; 5 completes the check
     AP_PROGRESS_PURPLE_SR1,   // SINGLE RACE 1 wins taken as Purple Kirby; 3 completes it
     AP_PROGRESS_RACE_COLORS,  // Bit N = an Air Ride race finished as KirbyColor N; 0xFF completes it
+    AP_PROGRESS_TR_COLORS,    // Bit N = a Top Ride race finished as KirbyColor N; 0xFF completes it
+    AP_PROGRESS_TR_STEER_WINS, // Bit N = TopRideCourse N won on Steer Star; 0x7F completes it
     AP_PROGRESS_NUM,
 } APCheckProgressKind;
 

@@ -843,6 +843,7 @@ void OnTopRideLoadEnd()
     if (ap_menu_settings.deathlink_enabled)
         DeathLink_OnTopRideLoadEnd();
 
+    APCheckDetect_OnTopRideLoadEnd();
     KirbyScale_OnTopRideLoadEnd();
     DropAbility_OnTopRideLoadEnd();
 }

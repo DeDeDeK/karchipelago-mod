@@ -195,6 +195,15 @@ Both tails index their table by `md->kind` and call the entry only if it is non-
 already relocates both tables into arrays it owns and starts a custom slot's entries at NULL, so
 installing a handler is a store. The third slot, Anim, belongs to the platform color cycle.
 
+## Identifying a shot
+
+`ApStarAPI.IsShot` (`ApStarShot_IsShot`) tells whether a projectile GObj is a sphere shot. It checks
+for `ShotScaleThink` in `user_hook_0`, which no other projectile carries. The kind has a single state
+that never transitions, so no `Projectile_SetState` clears the hook while the shot is alive. A
+consumer needs this call because a hit cannot identify the shot. The attack word it copies onto the
+victim's `DmgLog` belongs to the kind, and the Plasma ability's own spread uses the same kind and so
+the same word.
+
 ## Tuning
 
 Shot speed, lifetime, grow and fade lengths, the seed scale, ride height, probe reach, collapse and

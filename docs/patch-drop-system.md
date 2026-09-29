@@ -27,7 +27,7 @@ queue is still draining *adds* to the count and updates the mode without resetti
 still ticking, then dispatches: all-ups first if any are owed, otherwise patches.
 
 `Rider_TickDropAllUp` (0x8019d55c) handles the all-up phase. It picks the matching
-`Game3dData.patch_drop_modeN_params` block and calls `CityItem_Throw` directly - but what it
+`RiderCommonParam.patch_drop_modeN_params` block and calls `CityItem_Throw` directly - but what it
 throws is a collected **Legendary-machine piece** (item kinds 0x37-0x3c; Hydra 0x37-0x39,
 Dragoon 0x3a-0x3c), *not* `ITKIND_ALLUP`. The candidate list is the six bits of the two piece
 masks packed into a stack array; when it is empty the array's first entry is still -1 and the
@@ -38,7 +38,7 @@ Hydra/Dragoon collection mask. Each successful spawn decrements `allups_dropped`
 `patch_drop_mode == 1`, but that branch is dead in practice: mode 1 never queues all-ups.
 
 `Rider_TickDropPatch` (0x8019d9b4) handles the patch phase and has two paths. While
-`patch_drop_progress < Game3dData.patch_drop_burst_threshold` it defers to
+`patch_drop_progress < RiderCommonParam.patch_drop_burst_threshold` it defers to
 `Rider_SpawnDropPatchSeq`; once the threshold is crossed it switches to a silent burst path
 that mutates stats without spawning anything (see below).
 
@@ -73,7 +73,7 @@ spawns anything.
 The queue lives entirely in `RiderData` fields (declared in `externals/hoshi/include/rider.h`):
 
 - `patch_drop_cooldown` (0x590) - ticked down by the consumer, reset to
-  `Game3dData.patch_drop_cooldown_init` after each spawn.
+  `RiderCommonParam.patch_drop_cooldown_init` after each spawn.
 - `patch_drop_progress` (0x594) - drops dispatched this session, incremented on **every**
   successful spawn by both sub-handlers. Because the all-up phase drains first, all-up spawns
   already advance progress before any patch is thrown - which is what pushes the patch phase
@@ -102,31 +102,53 @@ direction, with `forward` negated for mode 1 so drops fly behind the rider.
 | 1 | Sum of positive stats x `patch_drop_mode1_factor` | None - the all-up block is skipped entirely | Behind |
 | 2 | Sum of positive stats x `patch_drop_mode2_factor` | All remaining all-ups in the quota, deterministically | Forward |
 
-## Tuning in Game3dData
+## The Damage Trigger
+
+A heavy hit drops patches through `Rider_DropPatchesOnDamage` (`0x8019cdfc`). It calls
+`Rider_DropPatches(rd, stats, 0)` when the hit's damage, truncated to an int, exceeds
+`RiderCommonParam.patch_drop_damage_min` (+0x1b8, 8.0). There are two callers:
+
+- A ridden machine in the city, through `Machine_GiveDamage` -> `Machine_DropPatchesOnDamage`
+  (`0x801e09ac`) -> `RiderGObj_DropPatchesOnDamage` (`0x80192980`), with the machine's master
+  stats at +0x94c.
+- The rider on foot (`0x801a06f0`), with the rider's own stats.
+
+That covers every `Machine_GiveDamage` call, including direct ones from mod code. Both callers
+also pass a hand position and a deflect direction, and the function ignores both.
+
+## Tuning in RdCommon.dat
+
+Every tuning value lives in `RiderCommonParam` (`rider.h`), the first member of the
+`rdDataCommon` root of `RdCommon.dat`. `fn_rdLoadCommon` (`0x80190418`) loads the archive to the
+stay heap once and stores the root at r13+0x730 (`stc_rd_common_data`) and its first member at
+r13+0x734 (`stc_rider_param`). Every function in the pipeline reads through
+`*stc_rider_param`, so the values are shared by all riders and all modes. Writing to the loaded
+block retunes the drops.
 
 Each mode has a `PatchDropModeParams` block (24 bytes, three float pairs):
 `patch_drop_mode0_params` (0x1d4), `patch_drop_mode1_params` (0x1ec),
 `patch_drop_mode2_params` (0x204). The pairs are `lerp(lo, hi, rand)` ranges:
 
-| Pair | Offset | Use |
-|------|--------|-----|
-| A | +0x00 / +0x04 | Throw **speed** - the magnitude the pitched direction is scaled by. |
-| B | +0x08 / +0x0c | Throw **elevation angle**, degrees, multiplied by `deg2rad` before use. |
-| C | +0x10 / +0x14 | Forward **spawn offset** - scales the normalized fanned forward and adds it to the hand-bone position. |
+| Pair | Offset | Use | Mode 0 | Mode 1 | Mode 2 |
+|------|--------|-----|--------|--------|--------|
+| A | +0x00 / +0x04 | Throw **speed** - the magnitude the pitched direction is scaled by. | 0.81 / 1.134 | 0.567 / 0.81 | 0.324 / 0.405 |
+| B | +0x08 / +0x0c | Throw **elevation angle**, degrees, multiplied by `deg2rad` before use. | 65 / 80 | 65 / 80 | 87 / 20 |
+| C | +0x10 / +0x14 | Forward **spawn offset** - scales the normalized fanned forward and adds it to the hand-bone position. | 0.4 / 1.6 | 1.0 / 1.2 | 0.7 / 1.2 |
 
-The scalar fields (all named in `game.h`):
+The scalar fields:
 
-| Field | Offset | Meaning |
-|-------|--------|---------|
-| `patch_drop_mode0_count` | 0x1bc | Queue length for a mode-0 drop. `Rider_DropPatches` takes no count argument. |
-| `patch_drop_spawn_arg7` | 0x1c0 | Passed verbatim as `CityItem_Throw`'s `flag`, stored at `item+0x248`. |
-| `patch_drop_spawn_y_bias` | 0x1c4 | Added to spawn Y, lifting drops off the hand bone. |
-| `patch_drop_mode2_factor` | 0x1c8 | Multiplier on the sum of positive stats for mode 2. |
-| `patch_drop_mode1_factor` | 0x1cc | Same for mode 1. |
-| `patch_drop_throw_spread` | 0x1d0 | Max throw-spread half-angle in degrees. Scaled by `deg2rad` and a random `[0,1)` factor, with the sign flipped on odd `patch_drop_count` values, so successive drops fan out left/right. |
-| `patch_drop_cooldown_init` | 0x21c | Frames written into `patch_drop_cooldown` after each spawn. |
-| `patch_drop_burst_threshold` | 0x220 | Progress at which the patch sub-handler goes silent-burst. |
-| `patch_drop_allup_rng_max` | 0x224 | Mode-0 only: ceiling for the all-up roll (`HSD_Randi(this) >= remaining_quota` means no all-up). |
+| Field | Offset | Vanilla | Meaning |
+|-------|--------|---------|---------|
+| `patch_drop_damage_min` | 0x1b8 | 8.0 | A hit whose damage, truncated to an int, exceeds this drops patches (`Rider_DropPatchesOnDamage`). |
+| `patch_drop_mode0_count` | 0x1bc | 1 | Queue length for a mode-0 drop. `Rider_DropPatches` takes no count argument. |
+| `patch_drop_throw_flag` | 0x1c0 | 50 | Passed verbatim as `CityItem_Throw`'s `flag`, stored at `item+0x248`. |
+| `patch_drop_spawn_y_bias` | 0x1c4 | 2.0 | Added to spawn Y, lifting drops off the hand bone. |
+| `patch_drop_mode2_factor` | 0x1c8 | 0.5 | Multiplier on the sum of positive stats for mode 2. |
+| `patch_drop_mode1_factor` | 0x1cc | 0.25 | Same for mode 1. |
+| `patch_drop_throw_spread` | 0x1d0 | 70.0 | Max throw-spread half-angle in degrees. Scaled by `deg2rad` and a random `[0,1)` factor, with the sign flipped on odd `patch_drop_count` values, so successive drops fan out left/right. |
+| `patch_drop_cooldown_init` | 0x21c | 4 | Frames written into `patch_drop_cooldown` after each spawn. |
+| `patch_drop_burst_threshold` | 0x220 | 10 | Progress at which the patch sub-handler goes silent-burst. |
+| `patch_drop_allup_rng_max` | 0x224 | 3 | Mode-0 only: ceiling for the all-up roll (`HSD_Randi(this) >= remaining_quota` means no all-up). |
 
 ## Throw Geometry
 

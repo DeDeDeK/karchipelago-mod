@@ -9,7 +9,7 @@
 
 #define AP_STAR_MOD_NAME  "ap_star"
 #define AP_STAR_API_MAJOR 4
-#define AP_STAR_API_MINOR 0
+#define AP_STAR_API_MINOR 1
 
 // CustomMachineDesc.name of the machine archive. The registry is generic, so
 // this string is the only thing tying machines/VcStarAp.dat to this code.
@@ -63,6 +63,10 @@ typedef struct ApStarAPI
     // the mount and completion sounds when it cannot run), the assembled flags and
     // the handlers. Their collected set is cleared. City Trial only.
     int (*Assemble)(int ply);
+
+    // 1 if this projectile GObj is a sphere shot. A hit's attacker log names only the
+    // projectile kind, which the shot shares with the Plasma ability's spread.
+    int (*IsShot)(GOBJ *proj);
 } ApStarAPI;
 
 #endif // AP_STAR_API_H

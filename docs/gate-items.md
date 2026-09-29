@@ -44,6 +44,15 @@ Stadium and Air Ride modes don't run the CT init path, so `ItemSpawnFilter_On3DL
 
 The box-pool pass is a stable two-pointer forward compaction: each surviving `it_kind`/`chance` pair is copied down to the next write slot and `num` rewritten. Order is preserved - this is not a swap-with-last delete. The event-drop table cannot compact, since the entry's index is its ITKIND, so a locked row stays in place with all six `chance_*` columns zeroed.
 
+## Hardcoded Event All Ups
+
+Two event sources throw an All Up without rolling any table, so the pool filter cannot reach them. `gate_items.c` gates each at its call site. A locked All Up there gives way to one roll of the source's own event-drop column, which the filter has already zeroed for locked kinds. A roll of -1 spawns nothing.
+
+- **The UFO.** Each of its five state thinks (`CityUFO_State0Think`, `CityUFO_State1Think`, `spawnUFOItems`, `CityUFO_State3Think`, `CityUFO_State4Think`) drops a ring whose slot 0 is `li r29, 20` (`ITKIND_ALLUP`) and whose other slots call `CityItem_GetEventItem(EVDROP_UFO)`. At each of 0x8010b268, 0x8010b958, 0x8010c0cc, 0x8010c7a4 and 0x8010ce44 the `li` becomes a `bl GateItems_UfoRingLeadItem`, and the `b` after it is shortened by 4 to land on the `mr r29, r3` the pool roll returns through. No volatile register is live there, since the other arm makes a call at the same point.
+- **Dyna Blade.** `DynaBlade_ThrowItems` (0x8021db44) throws a single `ITKIND_ALLUP` once enough damage lands, instead of that throw's usual `EVDROP_DYNA` rolls. `GateItems_DynaBladeThrowReward` is `REPLACECALL`ed over that `bl CityItem_Throw` at 0x8021ddf4.
+
+The rest of the event sources already roll gated tables: Tac, the meteor, the Secret Chamber, pillars and the other breakables use their `event_source_drop` columns. Same Item, Bounce and Fake Powerups draw from the box pools. The Machine Formation's machines come through custom_machines' gated spawn roll.
+
 ## Legendary Piece Spawn Gating
 
 Hydra and Dragoon parts are gated here as spawn items, separately from the assembled-machine gating in `gate_machines.c`: whether the *pieces* appear in boxes and whether the *assembled machine* is available are different questions, and the YAML can set either independently.

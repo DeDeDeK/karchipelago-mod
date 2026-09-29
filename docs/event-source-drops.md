@@ -36,7 +36,7 @@ Both emitters read `drop_source` from `desc[7]` (`+0x1c`). If it is not -1 they 
 | 2 | `chance_meteor` | `zz_8021efd8_` (meteor actor) |
 | **3** | **`chance_destructible`** | only via `City_SpawnMiscItems` |
 | 9 | `chance_chamber` | `spawnSecretChamberItems` (0x8010a998) |
-| 12 | `chance_ufo` | `spawnUFOItems` (0x8010be88) + 4 unnamed UFO event handlers |
+| 12 | `chance_ufo` | the UFO's five state thinks: `CityUFO_State0Think` (0x8010b024), `CityUFO_State1Think` (0x8010b714), `spawnUFOItems` (0x8010be88), `CityUFO_State3Think` (0x8010c560), `CityUFO_State4Think` (0x8010cca4) |
 
 `chance_destructible` (input 3) is **never passed as a literal** by any caller. It is reached exclusively through the per-instance descriptor's `drop_source` field, populated from stage data - which is why one drop column is shared by every yaku-break object that drops items.
 
@@ -95,6 +95,7 @@ Shape of the pools:
 
 - `chance_dyna` and `chance_meteor` are patches-only. Dyna Blade weights GLIDE 4x higher than the other patches (8 vs 2); meteor weights every patch the same.
 - `chance_ufo` is patches + ALLUP + CHARGEMAX. It is the only source with meaningful weight for ALLUP (10) and the only source at all for CHARGEMAX (5) - the "big stat boost" source.
+- Two throws skip the table entirely. Slot 0 of every UFO ring is a hardcoded `ITKIND_ALLUP`, and Dyna Blade throws one hardcoded `ITKIND_ALLUP` (`bl CityItem_Throw` at 0x8021ddf4) once enough damage lands, instead of that throw's `chance_dyna` rolls. Zeroing the ALLUP row does not reach either one.
 - `chance_destructible` is the broadest pool: patches, three copy abilities (Bomb, Sleep, Mic), most foods, all three traps (Fireworks, PanicSpin, SensorBomb), and Gordo.
 - `chance_tac` skews toward food, with patches at modest weight and Sleep as the only copy ability.
 - `chance_chamber` is patches + a few foods + Fireworks - narrower than destructible.

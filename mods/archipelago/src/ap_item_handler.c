@@ -513,7 +513,7 @@ int APItems_HandleItem(uint ap_item_id)
             float damage = md->hp - 1.0f;
             if (damage > 0.0f)
             {
-                Machine_GiveDamage(md, damage, mg);
+                Machine_GiveDamage(md, damage, &md->hurt_data->hitcoll_log_idx);
                 applied = 1;
             }
         }

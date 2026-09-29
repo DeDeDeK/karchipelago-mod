@@ -72,7 +72,7 @@ Known fields (offsets relative to `base`):
 | `+0x4c0` | int | KO-by-cause: Sensor Bomb | `0x8022f514` | 0x5e |
 | `+0x4c4` | u16 | **Vehicle-bust bitfield** (MSB-first, bit `15-idx`). idx 0..7 -> cells 0x6f..0x76; entries 8/9 (bits 7/6) are Dragoon<->Hydra mutual busts, never read. | `0x8022f3a4(player,idx)` | 0x6f-0x76 |
 | `+0x4c8` | int[] | **Item-collect array**, indexed by `ItemKind` (valid `0..0x44`). 0/1/2 = boxes; 3..0x43 = everything else. | see Item-collect subsystem | many |
-| `+0x5e4`, `+0x5e8` | int | Drive-time components (frames): `+0x5e4` = grounded, `+0x5e8` = airborne ("glide"; AR reuses it). Split by `MachineData+0x754`, speed-gated; sum = drive time. | `0x80231510` (sums both) | 0x09-0x0B |
+| `+0x5e4`, `+0x5e8` | int | Drive-time components (frames): `+0x5e4` = grounded, `+0x5e8` = airborne ("glide"; AR reuses it). `Ply_TickTimeStats` (`0x80231200`) adds a frame while the ridden machine's speed `|MachineData+0x36c|` is at least 0.02 (`0x805e2a50`), split by `MachineData+0x754`; no machine-class or glide-input test, so bikes accrue airtime too. Sum = drive time. | `0x80231510` (sums both) | 0x09-0x0B |
 | `+0x5f4` | int | Airborne time, 60 fps frames | `0x802315c0` | 0x18 / 0x1C / 0x22 |
 | `+0x604` | int | 20 s round timer: frame countdown seeded to 1200 (`PlData.dat` `plDataCommon`), decremented per live frame. `+0x804` increments only while nonzero. Sibling `+0x608` = 600-frame (10 s) timer (cell 0x49). | - | 0x48 |
 | `+0x60c`, `+0x610` | f32 | Distance components: `+0x60c` = grounded, `+0x610` = airborne (split by `MachineData+0x754`). Summed by `0x80231614`, accumulated into `records+0x14` for the "race over N miles" cells. | `0x80231614` (sums both) | 0x00 / 0x01 |
@@ -85,7 +85,7 @@ Known fields (offsets relative to `base`):
 | `+0x830` | int | Fastest huge-pillar break time (frames; valid iff `+0x653`) | `0x8022fdc0` | 0x33 |
 | `+0x834` | int | High-plains hole entries | `0x80230420` | 0x40 |
 | `+0x838` | int | Super-jump-ramp building landings | `0x80230474` | 0x43 |
-| `+0x840` | int | Min consecutive-frame run during which **all** human players were simultaneously off-machine (init -1; live counter `+0x83c`; updater `Ply_UpdateAllOffMachines` (`0x8022df1c`), 2+ humans only). `!= -1 && <= 60` => unlock. | `0x8022de74` | 0x4a |
+| `+0x840` | int | Min consecutive-frame run during which **all** present players (CPUs included) were simultaneously off-machine (init -1; live counter `+0x83c`; updater `Ply_UpdateAllOffMachines` (`0x8022df1c`), which does nothing unless `GameData+0xa95` - the occupied player-slot count the menu writes - is above 1). `!= -1 && <= 60` => unlock. | `0x8022de74` | 0x4a |
 | `+0x848` | int | King Dedede KO timestamp (frame of first KO of the KD boss = victim slot 4). 0 = not yet. | `0x8022f568` | 0x2f |
 | `+0x84c` | u8 bits | bit0 = damaged Dyna Blade, bit1 = trampled by Dyna Blade, bit7 = damaged a rival within 10 s (`ClearChecker_CheckJustUnlocked_CityTrial_RivalDamage10Sec`, `0x8022ebdc`). | bit7 via `0x8022ebdc` | 0x30 / 0x31 / 0x49 |
 | `+0x84d` | u8 bits | bit1 = reached sky garden, bit2 = Dragoon assembled, bit3 = Hydra assembled, bit4 = entered castle chamber, bit5 = used a restoration area. bits2/3 written by `Ply_MarkLegendaryMachineAssembled` (`0x80231198`), whose `machine_index` 0 (Dragoon) sets bit2. | inline | 0x3e/0x77/0x38/0x36 |
@@ -124,6 +124,17 @@ The enemy-side counterpart, reached only from `0x802022ec`. Args: credited playe
 `+0xe0` (enemies defeated), `+0xe4[cause]` (enemy-defeat-by-method) and the
 per-ACTORID defeat counter at `+0x210`, and routes cause `0x0e` into the Tornado
 KO counter `+0x7d8` via `0x8022ed18`.
+
+`0x802022ec` sits in `EventActor_ResolveHit` (`0x802021fc`), which runs for every
+hit with knockback on an enemy, so a "defeat" is credited at hit time whatever the
+knockback tier. The credited player comes from the attacker kind: a rider, the
+rider of a machine, or a projectile's owner (exhaled stars included). The same
+function then calls `EventActor_CreditStadiumKO` (`0x802025dc`), which for enemy
+kinds passing `ActorID_CountsAsKO` (`0x802049fc`) bumps the stadium enemy-KO
+counter (see `GameData+0xA38`). Inhale never reaches it: `Rider_InhaleCaptureScan`
+(`0x8019c63c`) captures by its own overlap scan, and the swallow recorder
+`Ply_RecordEnemySwallow` (`0x80230cec`) writes only the swallow fields (`+0x6a0`,
+`+0x7d0`, `+0x6a8[]`, `+0x7c8`).
 
 ## Item-Collect Subsystem
 
@@ -379,7 +390,7 @@ Written at stadium finish; per-player fields are `[5]` arrays, stride 4, based a
 | `+0x5AD` | u8 | `StadiumKind` (full enum; DD1 = 9, etc.) |
 | `+0x852+p` | u8 | per-player participated/finished flag (gate) |
 | `+0x8B8+4p` | s32 | drag-race finish time (1/60 s ticks) |
-| `+0xA38+4p` | s32 | polymorphic score: TF points / DD enemy-KO / Melee enemy-KO / per-game KO count |
+| `+0xA38+4p` | s32 | polymorphic score: TF points / DD KOs / Melee enemy-KOs / per-game KO count. `Game_Think` refreshes it per `city_kind`: Destruction Derby copies `Ply_GetKONum` (rider/machine KOs from `Ply_AddDeath`), Kirby Melee copies the game manager's counter `(*0x805dd570)+0xd0[p]`, which only `GameManager_AddEnemyKO` (`0x80010fd8`) increments (from `EventActor_ResolveHit`, so swallows never count) |
 | `+0xA4C+4p` | f32 | distance in meters (High Jump height / Air Glider distance); feet = `/0.3048` |
 | `+0xA94` | u8 | **`city_kind`** (named in `game.h`): City Trial scene/minigame kind. 5 = free-roam City Trial (6 = variant); stadium minigames 7 = Drag Race, 8 = Air Glider, 9 = Target Flight, 11 = High Jump, 13 = Kirby Melee, 14 = Destruction Derby, 18 = VS King Dedede (each family collapsed to one value). Set on stadium load (`0x8004051c`) from `stadium_desc[StadiumKind].city_kind` (first byte of the 6-byte descriptor; siblings -> `stage_kind` @0xA97, time @0xA9C). `CityTrial_IsInStadium` (`0x8000ad48`) treats 7-18 as in-stadium. Not `StadiumGroup`/`StadiumKind`. |
 
@@ -608,7 +619,7 @@ for CT, with Air-Ride-specific bits.
 | Offset | Type | Meaning | Getter | Drives |
 |---|---|---|---|---|
 | `+0x74` | int[0x1b] | rival-hit-by-method; idx 0x10 = Quick Spin | `0x8022ea98` | 0x20 |
-| `+0xe0` | int | enemies defeated (non-swallow) | `0x8022eb88` | 0x04 / 0x05 |
+| `+0xe0` | int | enemies defeated (non-swallow), bumped at hit time by `Ply_RecordEnemyDefeat` | `0x8022eb88` | 0x04 / 0x05 |
 | `+0xe4` | int[0x1b] | enemy-defeat-by-method; idx 0xf/0x15 = exhaled star, 0x10 = Quick Spin | `0x8022eb10` | 0x0f / 0x1f |
 | `+0x5e8` | int | glide time, frames (AR uses this single field, not the CT drive-time pair) | `0x8023156c` | 0x02 / 0x03 |
 | `+0x654` | u8[13] | volcano-rail used-bitmask (Magma) | `0x802300b4` | 0x6e |
@@ -634,7 +645,7 @@ for CT, with Air-Ride-specific bits.
 | `+0x84c` bit6 | bit | touched a wall (Machine Passage; cell wants it **clear**) | `0x80230a88` | 0x6d |
 | `+0x84d` bit6 | bit | lap-time last two digits equal | `0x8022e7e0` | 0x53 |
 | `+0x854` bit0 / bit1 | bits | finished with Needle / Fire | `0x8022e2e0` / `0x8022e288` | 0x5b / 0x5a |
-| `+0x854` bit2/5/6/7 | bits | finished with Sleep / while damaged / flying / spinning | `0x8022e230` / `0x8022e0d0` / `0x8022e128` / `0x8022e078` | 0x59 / 0x57 / 0x58 / 0x56 |
+| `+0x854` bit2/5/6/7 | bits | finished with Sleep / while damaged / flying / spinning. "Spinning" is `MachineGObj_IsQuickSpinning` (`0x801c7b00`): `MachineData+0xc34` bit4 (spin active) and `+0x1bb4` bit5, which only `Machine_EnterQuickSpin` (`0x801e3098`) sets; spin panels (`Machine_CheckSpinZone`, `0x801e359c`) and the other spins enter through `Machine_EnterForcedSpin` (`0x801e32f8`), which clears it | `0x8022e230` / `0x8022e0d0` / `0x8022e128` / `0x8022e078` | 0x59 / 0x57 / 0x58 / 0x56 |
 | `+0x855` bit7 | bit | finished with Wing | `0x8022e338` | 0x5c |
 
 The yakumono-break array `+0x62b` is shared with City Trial; Air Ride adds two

@@ -59,6 +59,8 @@ extern int ap_regrant_quiet;
 #define AP_PURPLE_SR1_NEED  3
 // One bit per KirbyColor, all 8 set.
 #define AP_RACE_COLOR_MASK_ALL 0xFF
+// One bit per TopRideCourse, all 7 set.
+#define AP_TR_COURSE_MASK_ALL 0x7F
 
 // AP Patch locations get their own bitmask, sized so AP_PATCH_MAX packs into
 // whole u64 words.
@@ -138,6 +140,8 @@ typedef struct APCheckProgress
     u16 allup_collect_total; // APCK_ALLUPS_5: lifetime All Ups picked up by a human in City Trial
     u8 purple_sr1_wins;      // APCK_SR1_PURPLE_3X: SINGLE RACE 1 first places taken by a Purple Kirby
     u8 race_color_mask;      // APCK_AIRRIDE_ALL_COLORS: bit N = an Air Ride race finished as KirbyColor N
+    u8 tr_color_mask;        // APCK_TR_ALL_COLORS: bit N = a Top Ride race finished as KirbyColor N
+    u8 tr_steer_win_mask;    // APCK_TR_ALL_COURSES_STEER: bit N = TopRideCourse N won on Steer Star
 } APCheckProgress;
 
 // Bumped whenever APSave's layout changes, so hoshi discards a stale block instead of

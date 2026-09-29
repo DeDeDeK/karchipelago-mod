@@ -39,7 +39,7 @@ and **sub-regions** (stride 0x44) are defensive hurtboxes built from model joint
 |--------|--------|----------------|-----------------------|
 | MachineData | +0x660 | 4 | per model joints |
 | RiderData | +0x390 | 4 | per model joints |
-| EnemyData | +0x410 | 2 (meteor = 8) | per model joints |
+| EnemyData | +0x410 | 2 (Dyna Blade = 8) | per model joints |
 | GrYakuData (stage hazards) | +0xEC | 2 | per model joints |
 | ItemData (city items) | +0x148 | varies | varies |
 | ProjectileData | +0x108 | 2 (hardcoded) | per model joints |
@@ -62,13 +62,27 @@ which also stores its `flags` argument at +0x38. HurtParams field X therefore la
 | 0x20 | (HurtParams x1c) | scale / magnitude factor |
 | 0x24 | `base_knockback` | read by `HitColl_CalcKnockback` |
 | 0x28 | `kb_distance_factor` | knockback scales by relative velocity; 0 = fixed |
-| 0x30 | `hit_flags` | bits 3-5 = hurt type (`(b>>3)&7`; value 8 = skip); bits 10-16 = collision-layer mask matched against `1 << victim_player_index` |
-| 0x31 | filter byte | bits 0/1 tested against the victim's vulnerability class |
+| 0x30 | `hit_flags` | read as a word `w`. `(byte +0x30) >> 3` = hurt type (8 = skip); the victim's hit reaction and `HurtData.attacker_flags` take it. `(w >> 10) & 0x7f` = victim mask, tested against `1 << victim HurtData.kind`. `((u16 +0x32) >> 2) & 0xff` = rehit interval in frames |
+| 0x31 | filter byte | bit 1 admits victims of vulnerability class 0, bit 2 class 1; class 2 always passes |
 | 0x33 | disable byte | bit 0 skips the region (`lbz 0x33; clrlwi.,31`) |
 | 0x38 | `flags` | `Trigger_InitParameters` 3rd arg; `EnemyKnockback_Default` reads it as the hurt-entry type |
 | 0x40 | `pos_cur` | Vec3, fallback velocity source |
 | 0x4C | `radius` | collision sphere radius |
 | 0x50 | `pos_prev` | Vec3, fallback velocity source |
+| 0x68 | victim list | 12 `{victim HurtData *, frames}` pairs; next slot to overwrite at +0x3c |
+
+A region hits a given victim once per rehit interval. `HitColl_SetDamageLog` records the victim in
+every attacker region of the same group through `HitColl_ClearLogEntry` (`0x80189e3c`), which despite
+its name stores `{victim, rehit frames}`. It does so before its knockback and vulnerability tests, so
+a hit on an invulnerable victim still spends the interval. `HitColl_CheckCollision` skips a victim
+that `Hit_IsVictimRecorded` (`0x8018a408`) finds listed, `Hit_TickVictimTimers` (`0x80189fd4`)
+counts the timers down, and `Hit_ResetVictimList` (`0x80189d34`) clears the list when a region is
+re-armed.
+
+The victim mask is by `HurtData.kind`: 0 rider, 1 ridden machine, 2 empty machine, 3 event actor
+(enemies, Dyna Blade), 4 item, 5 projectile, 6 stage object. A machine's HurtData is created as kind
+2; mounting switches it to 1 (`0x801c82f8`) and `setEmptyVehicleHitbox` (`0x801c8384`) switches it
+back.
 
 Everything from +0x04 to +0x34 is the HurtParams copy, so no independent geometry or joint index
 lives in that band. Per-frame velocity normally comes from the **`HurtData.pos_tracker`** object
@@ -119,9 +133,10 @@ walk follows the GObj `p_link` next pointer at GObj+0x08.
 `EventActor_ProcHitColl` (`0x801fc8ec`) is the priority-9 GObj proc, inbound only. (Priority 8,
 `EventActor_ProcHitCollInit` at `0x801fc8e8`, is a no-op `blr` stub.) Per frame, per enemy actor:
 
-1. Gating: `damage_accum_1` (EnemyData+0x994) against the HP threshold param at +0x3B0, a float gate
-   at EnemyData+0x364, a flag/state check at EnemyData+0xB08, and a type test that makes meteor
-   variants (0x48, 0x4A) skip entirely.
+1. Gating: the pass runs only while `damage_accum_1` (EnemyData+0x994) is below the HP threshold
+   param at +0x3B0, so an actor stops taking hits once its accumulated damage reaches it. Also a
+   float gate at EnemyData+0x364, a flag/state check at EnemyData+0xB08, and a type test that makes
+   the special actors 0x48-0x4A (special Broom Hatter, Sword Knight, Waddle Dee Truck) skip entirely.
 2. `HitColl_Init(ed->hurtdata)` - EnemyData+0x410 is the **victim**.
 3. Five sub-checks, each opening with `HitColl_SetUnk(0)` (`0x8018cf84`) and then walking one p_link
    list into `HitColl_CheckCollision(ed+0x410, attacker_hurtdata)`: riders `0x8020200c`, machines
@@ -133,12 +148,13 @@ walk follows the GObj `p_link` next pointer at GObj+0x08.
 
 ### HitColl_CheckCollision (0x8018d284)
 
-Called with two HurtData objects: **r3 = victim** (its sub-regions are iterated, and the
-player-index collision-mask source is read from victim+0x00), **r4 = attacker** (`region_count` from
+Called with two HurtData objects: **r3 = victim** (its sub-regions are iterated, and its `kind` at
++0x00 is what the victim mask is tested against), **r4 = attacker** (`region_count` from
 attacker+0x08 and `regions` from attacker+0x0C).
 
-1. Iterate the attacker's regions (stride 0xC8). For each active region, check the collision-layer
-   mask against the victim's player index.
+1. Iterate the attacker's regions (stride 0xC8). For each active region, check the victim mask
+   against `1 << victim.kind`, the filter byte against the victim's vulnerability class, and the
+   region's victim list.
 2. Iterate the victim's sub-regions (stride 0x44) and run `Hit_CheckOverlap`, a sphere-vs-sphere
    test, for each pair.
 3. On overlap, call `HitColl_SetDamageLog` with the attacker's **region entry** as the damage source.
@@ -157,11 +173,12 @@ present, else from region+0x40/+0x50.
 **Knockback** comes from `HitColl_CalcKnockback` (`0x8018ab90`), with the same shape:
 `kb_distance_factor == 0` gives plain `base_knockback` with no velocity term and no clamp.
 
-Both results are scaled by the victim's `dmg_multiplier` (HurtData+0x80; for machines this is sourced
-from MachineData+0x4EC). The hit is then **skipped and not logged** if any of: the scaled knockback
-is at or below the SDA2 threshold `FLOAT_805e1040` (approximately 0), `HurtData_CheckVulnerability`
-(`0x8018cd9c`) returns non-zero (intangible or invulnerable victim), or the entry already has a
-pending hit.
+Both results are multiplied by `1 - dmg_multiplier` of the victim (HurtData+0x80), so the field is a
+damage-reduction fraction. For machines it is MachineData+0x4EC, the vcAttributes `base_defense`
+(+0x8c) after the stat scaling: 0.2 on Warp Star, 0.5 on Hydra. The hit is then **skipped and not
+logged** if any of: the scaled knockback is at or below the SDA2 threshold `FLOAT_805e1040`
+(approximately 0), `HurtData_CheckVulnerability` (`0x8018cd9c`) returns non-zero (intangible or
+invulnerable victim), or the entry already has a pending hit.
 
 A logged hit is appended to `stc_hitcolldata.log` (max 20 entries; asserts on overflow) with the
 attacker hurt struct, the trigger/region params, the per-region log object, the attacker position and
@@ -185,25 +202,120 @@ If `kb_mag != 0`, a switch on the attacker's `HurtKind` decides the bookkeeping 
 | Attacker kind | Source | Special cases |
 |---------------|--------|---------------|
 | 0 | Rider | records attacker player index |
-| 1 | Machine | records attacker player index |
-| 3 | Event actor | special-cases meteor (type 0x4D) |
-| 5 | Enemy | records enemy type for tracking |
-| 6 | Item / ground | special-cases types 0x3D, 0x41 |
+| 1 | Ridden machine | records the rider's player index; attack word from `MachineGObj_GetAttackerLog` |
+| 2, 4 | Empty machine, item | no attacker recorded |
+| 3 | Event actor | Dyna Blade (0x4D) hitting with its region 1 or 2 sets the victim's "trampled by Dyna Blade" bit |
+| 5 | Projectile | records the owner's player index (`Projectile_GetOwnerPly`, `0x802230c4`); the attack block is `proj+0x17c` (`Projectile_GetAttackerLog`, `0x80223178`), the kind's state flags, so it names the kind, not the projectile |
+| 6 | Stage object | special-cases yakumono descs 0x3D, 0x41 |
+
+The attacker's player is credited through `Machine_StoreAttacker` (`0x80231d90`), which keys on the
+low byte of the attack word: a cause of 1-0x1A always counts, any other only while bit 0x8000 is set.
 
 ## Damage Application
 
-`Machine_GiveDamage(md, float damage, GOBJ *source_gobj)` (`0x801e1ee8`) - `damage` arrives in `f1`
-and the third argument is the GObj that dealt the hit, **not** a flags integer. It adds `damage` to
-`MachineData.dmg_accumulator` (+0x6AC) clamped to a max constant, calls `Gm_IsDamageEnabled`
-(`0x8000a188`) and subtracts from `MachineData.hp` (+0xA18) only when damage is enabled, enters the
-death sequence at minimum HP, applies the low-HP warning color animation, and triggers hit-spark
-visuals via `Machine_OnDamageVisual`. That visual reads the source GObj's forward vector, so
-`source_gobj` **must not be NULL in City Trial**.
+`Machine_GiveDamage(md, float damage, int *hit)` (`0x801e1ee8`) - `damage` arrives in `f1`. It
+adds `damage` to `MachineData.dmg_accumulator` (+0x6AC) clamped to a max constant, calls
+`Gm_IsDamageEnabled` (`0x8000a188`) and subtracts from `MachineData.hp` (+0xA18) only when damage is
+enabled, enters the death sequence at minimum HP and applies the low-HP warning color animation.
+
+It then calls `Machine_DropPatchesOnDamage` (`0x801e09ac`), which is where a heavy hit knocks
+patches out. In the city (`Gm_IsInCity`) with a rider aboard (`MachineData.rider_gobj`), that call
+passes the machine's master stats (+0x94c) and the damage, truncated to an int, to
+`RiderGObj_DropPatchesOnDamage` (`0x80192980`) -> `Rider_DropPatchesOnDamage` (`0x8019cdfc`). That
+runs a mode-0 `Rider_DropPatches` when the damage exceeds `RiderCommonParam.patch_drop_damage_min`
+(+0x1b8 of the rider tuning block `RdCommon.dat` loads, 8.0). The on-foot damage path (`0x801a06f0`) reaches the
+same function with the rider's own stats.
+
+`hit` is the machine's hit record, `&md->hurt_data->hitcoll_log_idx`, which is what both
+`Machine_DmgApply` call sites pass. It is **not** a GObj. The drop call reads it for a deflect
+direction: `Hit_CalcDeflectDir` (`0x80194ca4`) takes the record's `knockback_dir` (+0x20 from the
+record, `HurtData+0x3c`) and mirrors it off the ground plane. `Rider_DropPatchesOnDamage` then
+ignores both that direction and the hand position it is also handed, so the contents never
+matter. The pointer is still dereferenced in the city with a rider aboard, so it **must not be
+NULL**.
 
 `Machine_GiveDamage` does **not** itself cause knockback or bounce.
 
 `Machine_EnterHitReaction(md)` (`0x801e05bc`) does: it saves the previous state, clears formation
 tracking, calls `HurtData_UpdateVulnState` on the machine's HurtData, and registers the hit reaction.
+
+`Machine_DmgApply` (`0x801c6834`) is where a logged hit lands: when `kb_mag != 0` it passes
+`dmg_taken` to `Machine_GiveDamage`, then `Machine_DispatchHitReaction` (`0x801e2620`). That calls
+`0x801e2324` (mapped as `Machine_EnterDeath?`, but it sets up the reaction, not a death). It stores the
+attacker's hurt type at +0x1ba4 and a duration from `kb_mag`, with a 0-2 strength tier at +0x1bb0.
+The dispatcher then enters one of sub-states 4-11 through the table at `0x804b0e70`, indexed by
+hurt type. None of the reaction actions carries a hitbox.
+
+## Machine Hit Regions
+
+| Region | Role | Live while |
+|--------|------|------------|
+| 0 | spins | an action script arms it: quick spin (sub-state 1, actions 0x41 / 0x42) and the plain forced spin (sub-state 2, actions 0x43 / 0x45), each for about 44 frames |
+| 1 | boost | `VcCommon x0+0x130` = 2 frames from the first frame of each charge boost (`MachineData.xc34` bit 0x02) |
+| 2 | Candy | `xc36` bit 0x40 is set (`Machine_StartCandy`) and a rider is aboard; no speed or state test |
+| 3 | ram | a rider is aboard, `xc39` bits 4-5 are clear, and `\|world_velocity\| >= VcCommon x0+0xe4` |
+
+**The switch.** Regions 1-3 are armed and updated only while `Gm_IsMachineHitboxEnabled`
+(`0x8000a200`, GameData+0xaa5 bit 0x01) returns 1.
+- `CityTrial_Init` sets it.
+- `Stadium_ApplyDescConfig` copies it from byte 4 bit 0x20 of the stadium's 6-byte entry at
+  `gmDataAll+8` in GmData.dat. The bit is clear for all 24 StadiumKinds.
+- Every exit of `MinorExit_AirRideMachineSelect` clears it.
+
+So ram, boost and Candy damage exist only in the city. Region 0 is not switched, so the spins hit
+in every mode.
+
+**Ram (region 3).** `Machine_UpdateMovingHitbox` (`0x801d7604`) runs each frame.
+- It first sets the attack word's bit 0x8000.
+- If Candy or the boost region is live, that region takes the frame and the ram region stays off.
+- With no rider, or with `xc39` bits 4-5 set, it clears bit 0x8000 and turns the region off.
+  `Machine_EnterCharge`, the grounded hit reaction and other states set those bits;
+  `MachineStateChange` clears them.
+- Otherwise, while the measured speed is at least 0.6075 per frame (about 9.3 mph), it arms the
+  region: a sphere of radius vcAttributes +0x70, centered +0x74 ahead along `world_velocity`. Only the
+  front of the machine hits.
+- Side and rear contact go through `Machine_CheckMachineBumpCollision` (`0x801daac4`), which pushes
+  the machines apart with knockback and a hit reaction but never calls `Machine_GiveDamage`.
+
+**Regions 1-3 share one damage shape.** Each sets per frame:
+- `base_damage = (int)(MachineData+0x46c * damage attr)`
+- `dmg_distance_factor = 24.6857 * factor attr`, so damage grows with relative speed
+- knockback of the same form
+
+MachineData+0x46c is vcAttributes +0x0c after the Weight, Glide and Defense scaling. The Offense stat
+scales the ram sphere (+0x70). The attribute offsets:
+
+| Region | Size | Offset | Damage | Damage factor | Knockback | Knockback factor |
+|--------|------|--------|--------|---------------|-----------|------------------|
+| 1 boost | +0x11c | +0x120 along facing | +0x124 | +0x128 | +0x12c | +0x130 |
+| 2 Candy | +0x108 | centered | +0x10c | +0x110 | +0x114 | +0x118 |
+| 3 ram | +0x70 | +0x74 along velocity | +0x78 | +0x7c | +0x80 | +0x84 |
+
+A Warp Star ram deals `20 + 12.3 * |dv|` damage and `20 + 24.7 * |dv|` knockback before the
+victim's reduction. On most machines the boost region's damage factor is twice the ram's.
+
+The HurtParams templates for regions 3, 2 and 1 sit at `vcDataCommon` +0x24 / +0x28 / +0x2c in
+VcCommon.dat. All three carry the hit word 0x0017ec78:
+- hurt type 0;
+- victim mask 0x7b, every kind but an empty machine;
+- a 30-frame rehit.
+
+Candy (`Machine_GiveCandy`) also makes the machine invincible through `HurtData_SetCandyInvincible`.
+
+**Credit.** While the updater holds bit 0x8000, a ram, boost or Candy hit credits the rider with
+cause 0. That counts for rivals through `Machine_StoreAttacker` and for event actors through
+`Ply_RecordEnemyDefeat`. Every credited hit on Dyna Blade (actor 0x4D) also sets the rider's
+"damaged Dyna Blade" bit (`Ply_SetDamagedDynaBlade`). The spin sub-states' `attack_log` is 0x110, so every spin
+hit, spin panels included, is credited as cause 0x10, Quick Spin.
+
+**Kirby's one-frame hitbox.** Kirby's rider states 30 (`AS_RaceStartGo`) and 40
+(`AS_StarBeginCharge`) play action 100.
+- At frame 2 it arms a rider region-0 hitbox for one frame.
+- Base damage 2; victim mask 0x78 (event actors, items, projectiles, stage objects).
+- The switch does not gate it.
+
+The state's `attack_log` is 0, so `Ply_RecordEnemyDefeat` returns without crediting anyone. An actor
+it touches is still knocked out.
 
 ## Vulnerability
 
@@ -227,8 +339,8 @@ Two timers drive it, both counting down each frame:
 ### HurtData creation
 
 `EventActor_HurtDataCreate` (`0x80201ee8`) builds the HurtData at EnemyData+0x410 with
-`HurtData_Create(gobj, HURTKIND_3, N, joint_count, 0)` - `N` is 8 attack regions for the meteor (type
-0x4D) and 2 for every other enemy. It sets `on_damage_callback` to `EventActor_OnDamageCallback` and
+`HurtData_Create(gobj, HURTKIND_3, N, joint_count, 0)` - `N` is 8 attack regions for Dyna Blade
+(actor 0x4D) and 2 for every other enemy. It sets `on_damage_callback` to `EventActor_OnDamageCallback` and
 walks the actor's joint descriptor to build the defensive sub-regions via `HurtData_InitRegion`.
 
 ### Attack hitboxes toggle per animation frame
@@ -258,11 +370,11 @@ a direct damage call instead.
 ### Receiving damage
 
 `EventActor_ProcDamage` (`0x801fc9f0`) dereferences the enemy GObj's userdata and early-returns for
-meteor types (EnemyData+0x0C in [0x48, 0x4A]). Otherwise, reading the HurtData at EnemyData+0x410:
+the special actors 0x48-0x4A (EnemyData+0x0C). Otherwise, reading the HurtData at EnemyData+0x410:
 
 1. Reads `kb_mag` and `dmg_taken`.
 2. `kb_mag == 0` is the sentinel: it calls `giveEnemyDamage(dmg_taken)` only when `dmg_taken` is
-   non-zero - a cosmetic accumulator update, no launch.
+   non-zero - an accumulator update, no launch.
 3. `kb_mag != 0`: clamp `dmg_taken`, call `giveEnemyDamage`, then dispatch knockback through the
    enemy's **custom damage handler at EnemyData+0xAD0** if set, else `EnemyKnockback_Default`
    (`0x8020bcd8`) - a thin dispatcher that reads the hurt-entry type at `region+0x38` and calls
@@ -292,21 +404,23 @@ Enemies have no HP. `Enemy_ApplyKnockback` (`0x8020b784`):
 Death occurs when the launch/stun counter at +0xA18 reaches 0 during the knockback state.
 
 `giveEnemyDamage` (`0x8020b680`) adds damage to two accumulators at EnemyData+0x994 and +0x998,
-capped at 9999 each. These are **cosmetic only** - nothing reads them for death logic.
+capped at 9999 each. Neither drives the launch or its death timer, but +0x994 gates hittability:
+`EventActor_ProcHitColl` skips its pass once +0x994 reaches the HP threshold at +0x3B0.
 
 ## Applying Damage From Custom Code
 
 ### Direct, bypassing the collision pipeline
 
-Fetch the machine GObj (`Ply_GetMachineGObj`), call `Machine_GiveDamage(md, amount, mg)` with the
-machine GObj as the source, optionally write `md->hurt_data->kb_mag` for the physics response, and
-call `Machine_EnterHitReaction(md)` to enter the bounce state. Skipping the last two gives HP loss
-with no visible reaction.
+Fetch the machine (`Ply_GetMachineGObj`), call
+`Machine_GiveDamage(md, amount, &md->hurt_data->hitcoll_log_idx)`, optionally write
+`md->hurt_data->kb_mag` for the physics response, and call `Machine_EnterHitReaction(md)` to enter
+the bounce state. Skipping the last two gives HP loss with no visible reaction. An amount over 8 in
+the city also knocks patches out of the rider, as a vanilla heavy hit does.
 
 Live consumers: the 1 HP trap in `mods/archipelago/src/ap_item_handler.c` calls
-`Machine_GiveDamage(md, md->hp - 1.0f, mg)` per human player, and the hail weather effect in
-`mods/custom_weather/src/hail.c` calls `Machine_GiveDamage(md, 1.0f, mg)` on a cooldown. Both pass
-the machine's own GObj as the source, which is the standard way to satisfy the non-NULL requirement.
+`Machine_GiveDamage` for `md->hp - 1.0f` per human player, so in the city it also drops a patch.
+The hail weather effect in `mods/custom_weather/src/hail.c` deals 1 on a cooldown, under the drop
+threshold.
 
 ### Through the collision pipeline
 
@@ -329,7 +443,10 @@ victim's normal `HitColl_ActOnCollision` / `Machine_ActOnHitCollision` resolutio
 | HitColl_ActOnCollision | 0x8018d878 | Resolves the log to the strongest knockback |
 | HitColl_CalcContactPoint | 0x8018a5b8 | Contact point between two collision shapes |
 | HitColl_CalcKnockbackDir | 0x8018ab10 | Knockback direction from contact data |
-| HitColl_ClearLogEntry | 0x80189e3c | Clears log entries matching an attacker kind |
+| HitColl_ClearLogEntry | 0x80189e3c | Records a victim in a region's victim list with the rehit timer |
+| Hit_IsVictimRecorded | 0x8018a408 | 1 while a victim is in a region's list |
+| Hit_ResetVictimList | 0x80189d34 | Clears a region's victim list |
+| Hit_TickVictimTimers | 0x80189fd4 | Counts a region's victim timers down, dropping expired pairs |
 | HitColl_ResolveLogEntry | 0x8018db10 | Retrieves entry data for `Machine_ActOnHitCollision` |
 | Hit_SetInactive | 0x80189d1c | `region.active = 0`; reached via the index wrapper 0x8018c7f8 |
 | Trigger_SetState1 | 0x8018a0e8 | `region.active = 1`; de-facto `Hit_SetActive` |
@@ -343,20 +460,32 @@ victim's normal `HitColl_ActOnCollision` / `Machine_ActOnHitCollision` resolutio
 | HurtData_GiveInvincibility | 0x8018cc38 | Sets the invulnerability timer |
 | HurtData_UpdateVulnState | 0x8018cb28 | Refreshes `vuln.kind` from the timers |
 | Machine_ApplyHurt | 0x8018d1a8 | Applies hurt from a HurtParams through the log |
-| Machine_GiveDamage | 0x801e1ee8 | `(md, damage, source_gobj)`; HP only, no knockback. source_gobj must be non-NULL in City Trial |
+| Machine_GiveDamage | 0x801e1ee8 | `(md, damage, hit)`; HP only, no knockback. `hit` is `&hurt_data->hitcoll_log_idx`, non-NULL in the city |
+| Machine_DropPatchesOnDamage | 0x801e09ac | In the city with a rider aboard, a hit over 8 damage drops patches (mode 0) |
 | Machine_EnterHitReaction | 0x801e05bc | Enters bounce/hit state 5 |
 | Machine_UpdateHitColl | 0x801c67a0 | Per-frame pipeline orchestrator (machine side) |
 | Machine_CheckEventCollision | 0x801d71ec | Enemy/event-actor check (p_link 12); delivers enemy outbound attacks |
 | Machine_CheckStageHazardCollision | 0x801d72a4 | Stage-hazard check (p_link 8) |
 | Machine_ActOnHitCollision | 0x801d7308 | Attacker identification + hit reaction dispatch |
 | Machine_InitHurtData | 0x801d6e84 | Creates a machine's HurtData |
+| Gm_IsMachineHitboxEnabled | 0x8000a200 | GameData+0xaa5 bit 0x01, the switch for machine regions 1-3 |
+| Machine_UpdateMovingHitbox | 0x801d7604 | Per-frame driver of regions 1-3; arms the ram region |
+| Machine_InitRamHitbox | 0x801d74cc | Arms region 3 from its template |
+| Machine_InitCandyHitbox / Machine_UpdateCandyHitbox | 0x801d785c / 0x801d7980 | Region 2 |
+| Machine_InitBoostHitbox / Machine_UpdateBoostHitbox | 0x801d7ac8 / 0x801d7bf4 | Region 1 |
+| Machine_CheckMachineBumpCollision | 0x801daac4 | Side contact: push, knockback and hit reaction, no damage |
+| Machine_DmgApply | 0x801c6834 | Applies a logged hit: damage, then the hit reaction |
+| Machine_DispatchHitReaction | 0x801e2620 | Enters the hit-reaction sub-state for the attacker's hurt type |
+| MachineGObj_GetAttackerLog | 0x801c8708 | &MachineData.dmg_log, whose first word is the attack word |
+| Machine_StoreAttacker | 0x80231d90 | Credits the attacker's player on a machine hit |
+| HurtData_SetCandyInvincible / HurtData_ClearCandyInvincible | 0x8018cbc8 / 0x8018cbe8 | Candy invincibility on and off |
 | Rider_InitHurtData | 0x80196170 | Creates a rider's HurtData |
 | Rider_UpdateHitColl | 0x8018f95c | Per-frame pipeline (rider side); has NO event-actor sub-check |
 | RiderGObj_GetHurtData | 0x80192788 | RiderData+0x390 |
 | MachineGObj_GetHurtData | 0x801c8660 | MachineData+0x660 |
 | EventActorGObj_GetHurtData | 0x80204878 | EnemyData+0x410 |
 | GrYaku_GetHurtData | 0x800f8248 | GrYakuData+0xEC |
-| EventActor_HurtDataCreate | 0x80201ee8 | Creates enemy HurtData (2 attack regions; 8 for meteor 0x4D) |
+| EventActor_HurtDataCreate | 0x80201ee8 | Creates enemy HurtData (2 attack regions; 8 for Dyna Blade 0x4D) |
 | EventActor_RefreshAttackParams | 0x80201ba4 | Per attack frame: anim descriptor -> TriggerData (EnemyData+0x45C), enables the region |
 | EventActor_ProcHitCollInit | 0x801fc8e8 | Priority-8 no-op `blr` stub |
 | EventActor_ProcHitColl | 0x801fc8ec | Priority-9 enemy inbound hitcoll (enemy as victim only) |
@@ -368,6 +497,6 @@ victim's normal `HitColl_ActOnCollision` / `Machine_ActOnHitCollision` resolutio
 | Enemy_ClassifyDamageTier | 0x8020b740 | Classifies damage into tier 0-3 |
 | Enemy_ApplyKnockback | 0x8020b784 | Full enemy knockback sequence |
 | Enemy_ScaleDamage | 0x8020b71c | Scales damage by a global factor from the enemy param table |
-| giveEnemyDamage | 0x8020b680 | Adds to the cosmetic damage accumulators |
+| giveEnemyDamage | 0x8020b680 | Adds to the damage accumulators; +0x994 gates hittability |
 | Gm_IsDamageEnabled | 0x8000a188 | Gates the HP subtraction in `Machine_GiveDamage` |
 | EnemyActor_RumblePlayer | 0x801ff80c | Controller rumble - NOT a damage function, despite sitting next to them |

@@ -4,6 +4,7 @@
 
 #include "ap_star.h"
 #include "ap_star_pieces.h"
+#include "ap_star_shot.h"
 
 const CustomMachinesAPI *cm_api;
 
@@ -125,6 +126,7 @@ static const ApStarAPI api = {
     .SpawnPiece         = ApStarPieces_SpawnPiece,
     .CollectPiece       = ApStarPieces_CollectPiece,
     .Assemble           = ApStarPieces_Assemble,
+    .IsShot             = ApStarShot_IsShot,
 };
 
 void ApStar_ExportApi(void)
