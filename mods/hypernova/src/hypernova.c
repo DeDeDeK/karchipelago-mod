@@ -93,7 +93,7 @@ static int StopPlayer(int p)
     if (stc_inhale_phase[p] == HYPERNOVA_PHASE_LOOP)
     {
         GOBJ *rg = Ply_GetRiderGObj(p);
-        if (rg != NULL && ((RiderData *)rg->userdata)->state_idx == HYPERNOVA_INHALE_LOOP)
+        if (rg != NULL && ((RiderData *)rg->userdata)->status == RDSTATE_DRAW)
             Rider_EndInhale((RiderData *)rg->userdata);
     }
 
@@ -241,12 +241,12 @@ static void SelfTestPoll(void)
 // Owns the IDLE -> GULP -> LOOP gesture. Returns 1 while a suck is being driven.
 static int DriveInhale(RiderData *rd, int player, int held)
 {
-    int st = rd->state_idx;
+    int st = rd->status;
 
     if (!held)
     {
         // End an active suck through the engine's own END; a mere tap's gulp finishes itself.
-        if (stc_inhale_phase[player] == HYPERNOVA_PHASE_LOOP && st == HYPERNOVA_INHALE_LOOP)
+        if (stc_inhale_phase[player] == HYPERNOVA_PHASE_LOOP && st == RDSTATE_DRAW)
             Rider_EndInhale(rd);
         stc_inhale_phase[player] = HYPERNOVA_PHASE_IDLE;
         return 0;
@@ -262,7 +262,7 @@ static int DriveInhale(RiderData *rd, int player, int held)
         case HYPERNOVA_PHASE_GULP:
             // Promote the same frame the gulp leaves START, so the open mouth doesn't flicker
             // back to neutral.
-            if (st != HYPERNOVA_INHALE_START)
+            if (st != RDSTATE_DRAWSTART)
             {
                 Rider_StartInhaleLoop(rd);
                 stc_inhale_phase[player] = HYPERNOVA_PHASE_LOOP;
@@ -270,11 +270,11 @@ static int DriveInhale(RiderData *rd, int player, int held)
             break;
 
         case HYPERNOVA_PHASE_LOOP:
-            if (st == HYPERNOVA_INHALE_LOOP)
+            if (st == RDSTATE_DRAW)
             {
                 rd->inhale_timer = HYPERNOVA_INHALE_TIMER_HOLD;
             }
-            else if (st != HYPERNOVA_INHALE_END && st != HYPERNOVA_INHALE_START)
+            else if (st != RDSTATE_DRAWEND && st != RDSTATE_DRAWSTART)
             {
                 // Engine dropped us out of the loop while still held: re-enter without a gulp.
                 Rider_StartInhaleLoop(rd);

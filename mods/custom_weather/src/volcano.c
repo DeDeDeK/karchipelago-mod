@@ -9,7 +9,7 @@
 #include "stage.h"
 #include "obj.h"
 #include "rider.h"
-#include "projectile.h"
+#include "weapon.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
@@ -51,11 +51,11 @@
 
 // A volley picks uniformly within the theme's list. Every kind here survives an
 // ownerless spawn, which is what limits the roster.
-static const u8 theme_fire[]   = { PROJKIND_FIRE_BULLET };
-static const u8 theme_plasma[] = { PROJKIND_PLASMA_A, PROJKIND_PLASMA_B,
-                                   PROJKIND_PLASMA_SPREAD_MID, PROJKIND_PLASMA_SPREAD_SIDE };
-static const u8 theme_bomb[]   = { PROJKIND_BOMB, PROJKIND_SENSORBOMB };
-static const u8 theme_star[]   = { PROJKIND_SWORD_STAR_CHARGED };
+static const u8 theme_fire[]   = { WPKIND_FIRE_BULLET };
+static const u8 theme_plasma[] = { WPKIND_PLASMA_A, WPKIND_PLASMA_B,
+                                   WPKIND_PLASMA_SPREAD_MID, WPKIND_PLASMA_SPREAD_SIDE };
+static const u8 theme_bomb[]   = { WPKIND_BOMB, WPKIND_SENSORBOMB };
+static const u8 theme_star[]   = { WPKIND_SPITCHARGED };
 
 typedef struct ThemeKinds
 {
@@ -139,7 +139,7 @@ static int theme_index = 0;
 // acceleration vector and before prio 4 integrates it into velocity.
 static void VolcanoGravity(void *p)
 {
-    ((ProjectileData *)p)->accel.Y = -VOLC_GRAVITY;
+    ((WeaponData *)p)->accel.Y = -VOLC_GRAVITY;
 }
 
 // Resolve the theme to a concrete kind, rerolling per projectile under Chaos.
@@ -154,7 +154,7 @@ static int PickKind(void)
 
     const ThemeKinds *t = &theme_table[theme];
     int kind = t->kinds[HSD_Randi(t->count)];
-    if (proj_kind_data[kind] == NULL)
+    if (wp_kind_data[kind] == NULL)
         return -1;
     return kind;
 }
@@ -167,9 +167,9 @@ static void LaunchOne(void)
         return;
 
     // FIRE_BULLET's init and post_init read rider fields through the owner GObj from
-    // inside Projectile_Create; every other kind here tolerates a null owner.
+    // inside Weapon_Create; every other kind here tolerates a null owner.
     void *donor = NULL;
-    if (kind == PROJKIND_FIRE_BULLET)
+    if (kind == WPKIND_FIRE_BULLET)
     {
         donor = Weather_FindDonorRider();
         if (!donor)
@@ -188,7 +188,7 @@ static void LaunchOne(void)
     dir.Y = ct;
     dir.Z = st * ca;
 
-    // Projectile_Create crosses forward with up to build the orientation basis, and
+    // Weapon_Create crosses forward with up to build the orientation basis, and
     // a near-vertical launch makes world up parallel to forward. This is the unit
     // vector perpendicular to dir in the same vertical plane, so it never degenerates.
     Vec3 up;
@@ -209,11 +209,11 @@ static void LaunchOne(void)
     vel.Y = dir.Y * speed;
     vel.Z = dir.Z * speed;
 
-    ProjectileDesc desc;
+    WeaponDesc desc;
     memset(&desc, 0, sizeof(desc));
-    desc.kind = (ProjectileKind)kind;
+    desc.kind = (WeaponKind)kind;
     desc.owner_gobj = donor;
-    desc.owner_unk2 = 0;
+    desc.owner_gobj2 = NULL;
     desc.position = pos;
     desc.forward = dir;
     desc.up = up;
@@ -222,10 +222,10 @@ static void LaunchOne(void)
     desc.type_flag = 1;
     desc.charge = 1.0f;
 
-    GOBJ *handle = Projectile_Create(&desc);
+    GOBJ *handle = Weapon_Create(&desc);
     if (!handle)
         return;
-    ProjectileData *proj = (ProjectileData *)handle->userdata;
+    WeaponData *proj = (WeaponData *)handle->userdata;
     if (!proj)
         return;
 
@@ -234,29 +234,29 @@ static void LaunchOne(void)
     // an eruption is excluded from nobody and no damage lands on a player's tally.
     proj->owner_gobj = NULL;
 
-    // Projectile_Create only snapshots desc.velocity at proj+0x88, and the plasma
+    // Weapon_Create only snapshots desc.velocity at proj+0x88, and the plasma
     // and sword-star post_inits then derive proj+0x94 from their own muzzle speed.
     // Overwriting it here is what makes the launch speed ours.
     proj->velocity = vel;
 
     // Bomb and sensor bomb spawn holding on a rider hand that does not exist; their
     // state-0 slot would dereference the missing owner on the very next frame.
-    if (kind == PROJKIND_BOMB)
-        Projectile_SetState(proj, BOMB_STATE_THROWN, 1.0f, 1.0f, 1);
-    else if (kind == PROJKIND_SENSORBOMB)
-        Projectile_SetState(proj, SENSOR_BOMB_STATE_ARMED_FLYING, 1.0f, 1.0f, 1);
+    if (kind == WPKIND_BOMB)
+        Weapon_StateChange(proj, BOMB_STATE_THROWN, 1.0f, 1.0f, 1);
+    else if (kind == WPKIND_SENSORBOMB)
+        Weapon_StateChange(proj, SENSOR_BOMB_STATE_ARMED_FLYING, 1.0f, 1.0f, 1);
     // Single-state kinds are already in their one flying state after create.
 
     // kind_scratch word 0 is the normalized charge, word 1 the burst size. A borrowed
     // rider is never charged, so both would arrive 0 and the burst would land inert.
-    if (kind == PROJKIND_FIRE_BULLET)
+    if (kind == WPKIND_FIRE_BULLET)
     {
         float *charge = (float *)proj->kind_scratch;
         charge[0] = 1.0f;
         charge[1] = scale;
     }
 
-    // The hook write must follow the transition, since Projectile_SetState clears
+    // The hook write must follow the transition, since Weapon_StateChange clears
     // the user-hook slots. The per-kind default lifetimes are unusable here: plasma
     // expires in 6 to 9 frames, and bomb and sensor bomb never expire at all.
     proj->lifetime = VOLC_LIFETIME;

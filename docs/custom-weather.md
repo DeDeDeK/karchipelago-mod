@@ -554,13 +554,13 @@ corners. Speed and `VOLC_GRAVITY` are tuned as a pair - gravity scales with the 
 speed, so changing how fast an arc plays out leaves where shots land alone. Flight is around 8
 seconds at the steepest tilt, hence the generous `VOLC_LIFETIME` (1680) backstop. `desc.up` is
 built as the unit vector perpendicular to the launch ray in the same vertical plane rather than
-world up, because `Projectile_Create` crosses forward with up to build the orientation basis and
+world up, because `Weapon_Create` crosses forward with up to build the orientation basis and
 a near-vertical launch would make those parallel.
 
 **Ownerless projectiles.** Volcano shots end up with `owner_gobj` NULL, which
 `HitColl_CheckIfSamePlayer` reads as "never the same player" - so the volcano is excluded from
 nobody and threatens everyone, with no damage misattributed. That constrains the usable kinds:
-plain sword stars and plasma C/D dereference the owner inside `Projectile_Create` and also home,
+plain sword stars and plasma C/D dereference the owner inside `Weapon_Create` and also home,
 and all three auras re-snap to the owner's hand bone every frame. The themes therefore draw from
 plasma A/B, the two spread shots, bomb, sensor bomb, the charged sword star, and the Fire
 ability's bullet. Bomb and sensor bomb are transitioned to their thrown state in the same call as
@@ -568,14 +568,14 @@ the spawn, before their hand-snapping state-0 slot can run.
 
 Fire bullet is the one kind that cannot be created with a null owner - its `init` and
 `post_init` read rider fields through it - so `LaunchOne` lends it the first live rider from
-`stc_playerdata` for the duration of `Projectile_Create` and clears `proj->owner_gobj`
+`stc_playerdata` for the duration of `Weapon_Create` and clears `proj->owner_gobj`
 immediately after; nothing in its per-frame slots reads the owner again. It also seeds the fire
 bullet's charge scratch, because the borrowed rider is never holding a charged Fire ability and
 its `init` would otherwise cache a zero there - which the kind later turns into a zero-radius
 hitbox and a zero-scale model on impact. `kind_scratch` word 0 (the hitbox-radius multiplier) gets 1.0,
 vanilla's full-charge ceiling, and word 1 gets the shot's rolled size since the kind assigns
-it to `cur_scale` on impact. Every launch guards on `proj_kind_data[kind] != NULL`, since
-that table is empty until the first rider is created and `Projectile_Create` does not check
+it to `cur_scale` on impact. Every launch guards on `wp_kind_data[kind] != NULL`, since
+that table is empty until the first rider is created and `Weapon_Create` does not check
 it.
 
 **Arcs.** Nothing in the projectile pipeline applies gravity, and prio 0 zeroes the accel vector
@@ -643,7 +643,7 @@ the matrix keeps euler order out of it and overrides whatever the effect's own a
 the root joint.
 
 Two more consequences of mode 1. The effect's one-shot init never runs, so looping is armed by
-hand (`JObj_SetAllAOBJLoopByFlags(root, ALL_ANIM)`) and the tick calls `JObj_AnimAll(root)`
+hand (`JObj_SetAllAOBJLoopByFlags(root, ANIMBYFLAGS_ALL)`) and the tick calls `JObj_AnimAll(root)`
 itself, because no proc advances a detached effect's animation. And the effect **must not be
 destroyed by hand**: the spawn node still points at the GObj, and the engine's per-node kill
 destroys it again when the group is retired - a double free that corrupts the GObj free list and

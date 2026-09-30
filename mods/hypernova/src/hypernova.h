@@ -47,11 +47,6 @@
 // B, not A: A is the boost/charge button in Air Ride.
 #define HYPERNOVA_TRIGGER_BUTTON    PAD_BUTTON_B
 
-// Vanilla inhale action-states (RiderData.state_idx); they do NOT chain on their own.
-#define HYPERNOVA_INHALE_START      0x2f
-#define HYPERNOVA_INHALE_LOOP       0x30
-#define HYPERNOVA_INHALE_END        0x31
-
 // RiderData.inhale_timer is topped up to this each frame to keep the suck alive. Must be >= 2,
 // one decrement landing before the next write. It aliases copy_wheel_result, so other systems
 // can write it - the suck is ended explicitly rather than by letting this lapse.

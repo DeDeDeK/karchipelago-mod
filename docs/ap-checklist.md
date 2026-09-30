@@ -255,7 +255,7 @@ test.
 | 38 | NEBULA BELT 2 laps under 02:30:00 | `Gm_GetCityKind() == AIRRIDE_RULE_LAPS` + `Gm_GetRaceLapTotal() == 2` + `ply_race_time[p]` nonzero and `<= 9000` frames |
 | 52 | NEBULA BELT 2 laps under 02:06:00 | the same gates as 38, `<= 7560` frames |
 | 39 | NEBULA BELT 1st on Wheelie Scooter | `won` + `Ply_GetMachineKindAbs(p) == VCKIND_WHEELIESCOOTER` |
-| 40 | NEBULA BELT airborne over 10 s on a flight machine | `Ply_GetMachineKindAbs(p)` in `VCKIND_DRAGOON` / `VCKIND_FLIGHT` / `VCKIND_WINGED` + `Ply_GetItemCollectArray(p)->airborne_time > 600` frames |
+| 40 | NEBULA BELT airborne over 10 s on a flight machine | `Ply_GetMachineKindAbs(p)` in `VCKIND_DRAGOON` / `VCKIND_FLIGHT` / `VCKIND_WINGED` + `Ply_GetStats(p)->max_time_spent_airborne > 600` frames |
 
 Boxes 36-40 and 52 are gated on `in_nebula`, latched at `On3DLoadEnd` from `Gr_GetCurrentGrKind() ==
 GR_SPACE2`. That is the loaded terrain rather than `GameData.stage_kind`, for the same reason
@@ -276,8 +276,8 @@ the rules menu's time field at its 2:00 default. `AirRide_CheckRaceLapObjectives
 (`0x8004d248`) likewise keys its "Finish N laps in under MM:SS:FF!" cells off the *configured*
 lap total, not laps completed, so a longer race cannot pay out the 2-lap time.
 
-`airborne_time` (`PlayerStats+0x5f4`) is the longest single airborne stretch, not a total -
-`airborne_streak` accumulates consecutive frames and feeds it as a running maximum.
+`max_time_spent_airborne` (`PlayerStats+0x5f4`) is the longest single airborne stretch, not a total -
+`current_time_spent_airborne` accumulates consecutive frames and feeds it as a running maximum.
 `Player_InitAll` zeroes `PlayerStats` on the next 3D scene load, so at this hook it still
 holds the race that just ended.
 
@@ -508,7 +508,7 @@ so `APCheckDetect_OnBoot` repoints it at a wrapper the same way as the two recor
 |---|---|---|
 | 1 | Break all the coral in one game | a per-round count of breaks with `desc_id` 33 - coral - reaching `Gr_GetYakumonoSpawnTotal(33)`, which is 10 on `GrCity1`. The total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does. The counter is reset in `On3DLoadEnd` alongside the other per-game ones, and gated on a nonzero total, which scopes it to City Trial |
 
-Counting at the credit path rather than reading `PlayerStats.yakumono_break[33]` is what makes
+Counting at the credit path rather than reading `PlayerStats.yakumono_break[33 - 0x15]` is what makes
 the box mean "the coral is gone", not "one player broke all of it".
 `Ply_IncrementYakumonoBreakCount` bumps only the crediting player's record - and a break with
 no identifiable attacker falls back to the first occupied slot (`GrYakuBreak_GetAttackerPly`,
@@ -524,7 +524,7 @@ enemy-side counterpart of `Ply_AddDeath`: it credits a player with an enemy kill
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 44 | KIRBY MELEE (All): KO 10 enemies as Mic Kirby in one game | gated on a loaded KIRBY MELEE round (`InStadium()` with `Gm_GetCurrentStadiumKind()` of `STKIND_MELEE1`/`STKIND_MELEE2`, from the Stadium menu or closing a trial), latched in `On3DLoadEnd`; counts a defeat credited to a `PKIND_HMN` slot whose rider holds `COPYKIND_MIC` and is in action state `RIDERSTATE_MIC_SING` (`0x61`) or `RIDERSTATE_MIC_END` (`0x62`). The counter is per game, reset in `On3DLoadEnd` alongside the Destruction Derby one |
+| 44 | KIRBY MELEE (All): KO 10 enemies as Mic Kirby in one game | gated on a loaded KIRBY MELEE round (`InStadium()` with `Gm_GetCurrentStadiumKind()` of `STKIND_MELEE1`/`STKIND_MELEE2`, from the Stadium menu or closing a trial), latched in `On3DLoadEnd`; counts a defeat credited to a `PKIND_HMN` slot whose rider holds `COPYKIND_MIC` and is in action state `RDSTATE_MIKESING` (`0x61`) or `RDSTATE_MIKEEND` (`0x62`). The counter is per game, reset in `On3DLoadEnd` alongside the Destruction Derby one |
 
 The rider's live state is what identifies the blast, not the attack-method index the
 recorder itself keys off. That index - byte 3 of the attacker log - is what vanilla's own
@@ -571,7 +571,7 @@ runs, because a round that ends mid-event tears the event GObj down without its 
 
 | clear_kind | Event | Objective | Detection |
 |---|---|---|---|
-| 64 | Run Amok | travel over 1,000 feet | per-rider proc: `distance_grounded + distance_airborne` (`PlayerStats+0x60c/+0x610`) minus the value snapshotted when the event began, in feet at vanilla's mileage factor (1 unit = `11.4285717 * 5280 / 160934.4` ft, about 0.375). `Ply_UnkUpdate` (`0x80231340`) accumulates `|world_velocity|` into them while the rider is on a machine |
+| 64 | Run Amok | travel over 1,000 feet | per-rider proc: `total_distance_grounded + total_distance_airborne` (`PlayerStats+0x60c/+0x610`) minus the value snapshotted when the event began, in feet at vanilla's mileage factor (1 unit = `11.4285717 * 5280 / 160934.4` ft, about 0.375). `Ply_UnkUpdate` (`0x80231340`) accumulates `|world_velocity|` into them while the rider is on a machine |
 | 65 | Rail Fire | catch fire at all 5 stations | `Ply_PlayRailFireHitSFX` (`0x8027aa1c`), the burn sound, is the one thing a station's hit adds. Its two `bl`s - in `Machine_ActOnHitCollision` (`0x801d741c`) and in the on-foot `Rider_ActOnHitCollision` (`0x80196668`) - are repointed at a wrapper that classifies the burn by the nearest of `rail_stations[]` |
 | 66 | Same Item | get 20 of the box item | pickups per `ItemKind` in the item-collect wrapper, any kind reaching 20 |
 | 67 | Lighthouse | go under both lights | per-rider proc: `CityLighthouse_InBeam` per light, while the lighthouse (`stc_lighthouse_gobj`) is in yakumono state 3 |

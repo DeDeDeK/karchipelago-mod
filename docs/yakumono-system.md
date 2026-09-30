@@ -126,7 +126,7 @@ City Trial therefore uses 14 descriptor ids: 17, 18, 29, 32, 33, 34, 35, 36, 37,
 
 ### Breakable inventory
 
-The identity anchor is the per-`desc_id` break counter: `GrYaku_IncrementBreakCount` (`0x80105d80`) reads the broken prop's `desc_id` and calls `Ply_IncrementYakumonoBreakCount` (`0x8022fed8`), which bumps `PlayerStats.yakumono_break[desc_id]` (PlayerStats+0x62b, valid range `desc_id` 0x15..0x28). Each checklist cell's human-readable text therefore pins a `desc_id` to a concrete object. Family comes from the descriptor's `coll_func`.
+The identity anchor is the per-`desc_id` break counter: `GrYaku_IncrementBreakCount` (`0x80105d80`) reads the broken prop's `desc_id` and calls `Ply_IncrementYakumonoBreakCount` (`0x8022fed8`), which bumps `PlayerStats.yakumono_break[desc_id - 0x15]` (byte `PlayerStats+0x62b+desc_id`, valid range `desc_id` 0x15..0x28). Each checklist cell's human-readable text therefore pins a `desc_id` to a concrete object. Family comes from the descriptor's `coll_func`.
 
 | desc_id | object | family / `coll_func` | props placed in CT |
 |---:|---|---|---:|
@@ -333,7 +333,7 @@ Past +0x130 the struct is a per-kind overlay - the break families' per-prop arra
 
 - **Observing spawns**: hook `GrYaku_Create`. The 70-descriptor table is read-only ROM data, so replacing it would need a CODEPATCH pointing at a copy - rarely worth it.
 - **Observing or gating damage**: hook `GrYakumono_Proc9_HitColl` (the whole HitColl pipeline) or a kind's `on_damage` callback. A "no breakables" rule goes here.
-- **Counting breaks**: the vanilla path is already wired. Every break-family drop handler and `hitWeakObject` calls `GrYaku_IncrementBreakCount`, which bumps `PlayerStats.yakumono_break[desc_id]` - the array the checklist's "break N of object X" cells read. `Ply_GetYakumonoBreakCount` (`0x8022fccc`) reads it back and returns 0 outside `desc_id` 0x15..0x28.
+- **Counting breaks**: the vanilla path is already wired. Every break-family drop handler and `hitWeakObject` calls `GrYaku_IncrementBreakCount`, which bumps `PlayerStats.yakumono_break[desc_id - 0x15]` - the array the checklist's "break N of object X" cells read. `Ply_GetYakumonoBreakCount` (`0x8022fccc`) reads it back and returns 0 outside `desc_id` 0x15..0x28.
 - **Goal hooks**: WhispyWoods (desc 69) and the Lighthouse (desc 68) are both addressable through their damage-on callback or their terminal state.
 - **Enumerating live props**: walk the `GAMEPLINK_YAKUMONO` list, or walk `Gr_GetCollRecords()` and filter on a non-NULL `yaku_gobj` when you want individual props rather than parent GObjs. `GrObj.yaku` is NULL in City Trial and `GrObj.yaku_num` counts GObjs (~31), not props (hundreds).
 

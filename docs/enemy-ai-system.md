@@ -100,7 +100,7 @@ the `word1` column and are never dispatched.
 | 12 | 0x80200eb8 | Emit a HitColl attack-box descriptor: decodes ~6 operand words (int16 offsets/sizes -> float-scaled + packed flag bits) into a collision-box descriptor and pushes it into the enemy's HurtData (`ed+0x410`), indexing a fn-pointer table at `ed+0x2B4` |
 | 13 | 0x80201138 | Disable a HitColl box by index (operand `& 0x03FFFFFF`) via `Hit_SetInactive` |
 | 14 | 0x80201180 | Flush the pending HitColl boxes: `Hit_SetInactive` on each box of the `ed+0x410` array, clear the enable flag |
-| 15 | 0x802011bc | Spawn a projectile / sub-actor (optional random variant; decodes transform operands, calls `EventActor_SpawnProjectile` 0x8020c738) |
+| 15 | 0x802011bc | Spawn a projectile / sub-actor (optional random variant; decodes transform operands, calls `EventActor_SpawnWeapon` 0x8020c738) |
 | 16 | 0x80201418 | Broadcast controller rumble (per human player) |
 | 17 | 0x80201488 | No-op: advance script ptr 1 word |
 | 18 | 0x80201498 | Spawn/refresh a persistent particle effect (`Effect_SpawnSync`; handle stored to `ed+0xA70`/`ed+0xA74`, prior one destroyed) |

@@ -7,7 +7,7 @@
 #include "rider.h"
 #include "machine.h"
 #include "collision.h"
-#include "projectile.h"
+#include "weapon.h"
 #include "code_patch/code_patch.h"
 
 #include "ap_star.h"
@@ -21,11 +21,11 @@
 #define AP_STAR_RING_MAX 32
 
 // The shot is a projectile kind of its own, appended after the vanilla ones. Its
-// ProjKindVTable goes in a relocated copy of the engine's table; its ProjKindData goes
-// in the padding word after proj_kind_data's slots, which nothing clears or fills.
-#define AP_STAR_SHOT_KIND PROJKIND_NUM
+// WeaponKindVTable goes in a relocated copy of the engine's table; its WeaponKindData goes
+// in the padding word after wp_kind_data's slots, which nothing clears or fills.
+#define AP_STAR_SHOT_KIND WPKIND_NUM
 
-#define AP_STAR_SHOT_ATTACK (PROJ_ATTACK_ACTIVE | AP_STAR_SHOT_ATTACK_CAUSE)
+#define AP_STAR_SHOT_ATTACK (WP_ATTACK_ACTIVE | AP_STAR_SHOT_ATTACK_CAUSE)
 
 // The shot model's joint count, which has to match what the archive holds.
 #define AP_STAR_SHOT_JOINTS 2
@@ -360,12 +360,12 @@ typedef struct ShotState
     int fx;         // ApStarShotFx handle, 0 for none
 } ShotState;
 
-_Static_assert(sizeof(ShotState) <= sizeof(((ProjectileData *)0)->kind_scratch),
+_Static_assert(sizeof(ShotState) <= sizeof(((WeaponData *)0)->kind_scratch),
                "ShotState must fit the projectile's kind scratch");
 
 static ShotState *ShotStateOf(void *proj)
 {
-    return (ShotState *)((ProjectileData *)proj)->kind_scratch;
+    return (ShotState *)((WeaponData *)proj)->kind_scratch;
 }
 
 // Where a player can be hit: their machine while they ride it, else the rider.
@@ -418,7 +418,7 @@ static float Alignment(const Vec3 *pos, const Vec3 *dir, const Vec3 *target, int
 // left is already down.
 static void ShotThink(void *p)
 {
-    ProjectileData *proj = p;
+    WeaponData *proj = p;
 
     if (proj->lifetime <= SHOT_FADE_FRAMES)
     {
@@ -439,7 +439,7 @@ static void ShotThink(void *p)
 // an arc of fixed radius. Speed is kept, so the carry from the machine stays.
 static void ShotSteer(void *p)
 {
-    ProjectileData *proj = p;
+    WeaponData *proj = p;
     ShotState *st = ShotStateOf(proj);
     if (st->homing_done || proj->frame_counter < HOMING_DELAY)
         return;
@@ -513,16 +513,16 @@ static void ShotSteer(void *p)
         proj->velocity.Y = nd.Y * speed;
 }
 
-// Prio 5. Projectile_UpdateEnvColl pushes a shot out of whatever it touched and leaves
+// Prio 5. Weapon_UpdateEnvColl pushes a shot out of whatever it touched and leaves
 // its velocity alone, so a shot left running would slide along the wall; it ends
 // instead. Any contact ends an air shot. A ground shot rides the floor on purpose, so
 // only a wall or a ceiling ends it.
 static void ShotEnvCollide(void *p)
 {
-    ProjectileData *proj = p;
+    WeaponData *proj = p;
 
-    Projectile_UpdateEnvColl(proj);
-    if (!(proj->flag_b & PROJ_FLAGB_ENV_CONTACT))
+    Weapon_UpdateEnvColl(proj);
+    if (!(proj->flag_b & WP_FLAGB_ENV_CONTACT))
         return;
 
     mpCollInfo *ci = proj->coll_data->coll_info;
@@ -534,7 +534,7 @@ static void ShotEnvCollide(void *p)
 // pick up the position. Over a gap the probe misses and the shot holds its altitude.
 static void ShotFollowGround(void *p)
 {
-    ProjectileData *proj = p;
+    WeaponData *proj = p;
     if (!ShotStateOf(proj)->grounded)
         return;
 
@@ -552,8 +552,8 @@ static void ShotFollowGround(void *p)
 // Flies at the spawn velocity, with no muzzle kick of its own.
 static void ShotPostInit(void *p)
 {
-    ProjectileData *proj = p;
-    Projectile_SetState(proj, 0, 0.0f, 1.0f, 0);
+    WeaponData *proj = p;
+    Weapon_StateChange(proj, 0, 0.0f, 1.0f, 0);
     proj->velocity = proj->spawn_velocity;
 }
 
@@ -572,11 +572,11 @@ static void ShotTeardown(void *p)
     ApStarShotFx_Detach(ShotStateOf(p)->fx);
 }
 
-static const ProjectileStateEntry stc_shot_states[] = {
+static const WeaponStateEntry stc_shot_states[] = {
     { 0, AP_STAR_SHOT_ATTACK, ShotThink, ShotSteer, ShotEnvCollide, ShotFollowGround },
 };
 
-static const ProjKindVTable stc_shot_vtable = {
+static const WeaponKindVTable stc_shot_vtable = {
     .state_table = stc_shot_states,
     .aux_a = ShotTeardown,
     .post_init = ShotPostInit,
@@ -597,25 +597,25 @@ static const u32 stc_shot_script[] = {
 };
 
 // No animation: the hitbox script still runs, and nothing moves the sphere joint.
-static const ProjStateAnimSpec stc_shot_anim = {
+static const WeaponStateAnimSpec stc_shot_anim = {
     .script = stc_shot_script,
 };
 
-static const ProjKindParams stc_shot_params = {
+static const WeaponKindParams stc_shot_params = {
     .model_scale = SHOT_RADIUS / SHOT_MODEL_RADIUS,
     .cull_scale = SHOT_RADIUS,
     .lifetime = SHOT_LIFETIME,
 };
 
-static const ProjCollDesc stc_shot_coll = {
+static const WeaponCollDesc stc_shot_coll = {
     .radius = SHOT_COLL_RADIUS,
 };
 
-static ProjModelBlock stc_shot_model_block = {
+static WeaponModelBlock stc_shot_model_block = {
     .joint_num = AP_STAR_SHOT_JOINTS,
 };
 
-static ProjKindData stc_shot_kind_data = {
+static WeaponKindData stc_shot_kind_data = {
     .params = &stc_shot_params,
     .model_desc = &stc_shot_model_block,
     .state_anim_spec_array = &stc_shot_anim,
@@ -623,20 +623,20 @@ static ProjKindData stc_shot_kind_data = {
 };
 
 // The vanilla table's 17 entries plus the shot's.
-static const ProjKindVTable *stc_vtables[AP_STAR_SHOT_KIND + 1];
+static const WeaponKindVTable *stc_vtables[AP_STAR_SHOT_KIND + 1];
 
-// Every lis / addi pair that forms the vtable table's address but Projectile_SystemInit's,
+// Every lis / addi pair that forms the vtable table's address but Weapon_SystemInit's,
 // whose loop runs the vanilla kinds' system_init and has nothing to run for the shot.
 static const u32 stc_vtable_sites[][2] = {
-    { 0x8021f4b4, 0x8021f4c4 }, // Projectile_Create, state table
-    { 0x8021f64c, 0x8021f650 }, // Projectile_Create, init
-    { 0x8021f790, 0x8021f794 }, // Projectile_Create, post_init
-    { 0x8021fde0, 0x8021fde4 }, // Projectile_Proc10_HitReact
-    { 0x8021ff94, 0x8021ff98 }, // Projectile_UserDataDtor
-    { 0x8022036c, 0x80220374 }, // Projectile_Despawn
-    { 0x802205f0, 0x802205f8 }, // Projectile_LoadKindParams
-    { 0x8022065c, 0x80220664 }, // Projectile_ReloadKindParams, load_render_state
-    { 0x802206bc, 0x802206c0 }, // Projectile_ReloadKindParams, reset_render_state
+    { 0x8021f4b4, 0x8021f4c4 }, // Weapon_Create, state table
+    { 0x8021f64c, 0x8021f650 }, // Weapon_Create, init
+    { 0x8021f790, 0x8021f794 }, // Weapon_Create, post_init
+    { 0x8021fde0, 0x8021fde4 }, // Weapon_Proc10_HitReact
+    { 0x8021ff94, 0x8021ff98 }, // Weapon_UserDataDtor
+    { 0x8022036c, 0x80220374 }, // Weapon_Despawn
+    { 0x802205f0, 0x802205f8 }, // Weapon_LoadKindParams
+    { 0x8022065c, 0x80220664 }, // Weapon_ReloadKindParams, load_render_state
+    { 0x802206bc, 0x802206c0 }, // Weapon_ReloadKindParams, reset_render_state
 };
 
 // addi sign-extends its immediate, so the high half carries the borrow.
@@ -652,14 +652,14 @@ static void RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
 
 static void RegisterShotKind(void)
 {
-    for (int k = 0; k < PROJKIND_NUM; k++)
-        stc_vtables[k] = proj_kind_vtables[k];
+    for (int k = 0; k < WPKIND_NUM; k++)
+        stc_vtables[k] = wp_kind_vtables[k];
     stc_vtables[AP_STAR_SHOT_KIND] = &stc_shot_vtable;
 
     for (u32 i = 0; i < sizeof(stc_vtable_sites) / sizeof(stc_vtable_sites[0]); i++)
         RepointTable(stc_vtable_sites[i][0], stc_vtable_sites[i][1], stc_vtables);
 
-    proj_kind_data[AP_STAR_SHOT_KIND] = &stc_shot_kind_data;
+    wp_kind_data[AP_STAR_SHOT_KIND] = &stc_shot_kind_data;
 }
 
 static void PaintShot(GOBJ *handle, GXColor diffuse)
@@ -717,11 +717,11 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
     float carry = VECDotProduct(&md->velocity, &dir);
     float speed = SHOT_SPEED + (carry > 0.0f ? carry : 0.0f);
 
-    ProjectileDesc desc;
+    WeaponDesc desc;
     memset(&desc, 0, sizeof(desc));
     desc.kind = AP_STAR_SHOT_KIND;
     desc.owner_gobj = rd->gobj;
-    desc.owner_unk2 = (int)rd->gobj;
+    desc.owner_gobj2 = rd->gobj;
     desc.position = muzzle;
     desc.forward = dir;
     desc.up = up;
@@ -732,12 +732,12 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
     desc.type_flag = 1;
     desc.charge = 1.0f;
 
-    GOBJ *handle = Projectile_Create(&desc);
+    GOBJ *handle = Weapon_Create(&desc);
     if (handle == NULL)
         return;
 
     // Written before any of the shot's procs run.
-    ProjectileData *proj = (ProjectileData *)handle->userdata;
+    WeaponData *proj = (WeaponData *)handle->userdata;
     ShotState *st = ShotStateOf(proj);
     st->owner_ply = (s8)RiderGObj_GetPly(rd->gobj);
     st->target = -1;

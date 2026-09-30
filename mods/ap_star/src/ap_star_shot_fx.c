@@ -5,7 +5,7 @@
 #include "obj.h"
 #include "gx.h"
 #include "game.h"
-#include "projectile.h"
+#include "weapon.h"
 
 #include "ap_star_shot_fx.h"
 
@@ -33,7 +33,7 @@
 
 typedef struct ShotFx
 {
-    ProjectileData *proj;      // NULL once the shot is gone
+    WeaponData *proj;      // NULL once the shot is gone
     Vec3 pt[TRAIL_POINTS];     // ring of past positions, newest at `head`
     float radius;              // the shot's at cur_scale 1
     float scale;               // cur_scale, held from the frame the shot went
@@ -301,7 +301,7 @@ static int EnsureGObj(void)
     return 1;
 }
 
-int ApStarShotFx_Attach(ProjectileData *proj, GXColor color, float radius)
+int ApStarShotFx_Attach(WeaponData *proj, GXColor color, float radius)
 {
     if (!EnsureGObj())
         return 0;

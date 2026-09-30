@@ -38,7 +38,7 @@ completely:
    field `k` lands at `md->attr + 0xac + k` - and `+0x20` is `Machine_AdjustAttributesStar`
    (`0x801e906c`) or `Machine_AdjustAttributesBike` (`0x801f4dac`), which apply the stat
    scaling;
-3. set `top_speed_current` (`+0x398`) from `top_speed_ground` while `action_state_class`
+3. set `top_speed_current` (`+0x398`) from `top_speed_ground` while `is_airborne`
    (`+0x754`) is 0 and from `top_speed_air` otherwise, and carry the change in `hp_max` into
    current HP, clamping down if the new maximum is lower.
 

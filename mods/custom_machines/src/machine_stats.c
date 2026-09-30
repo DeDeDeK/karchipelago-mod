@@ -1,5 +1,5 @@
 // Per-machine counters wide enough for the appended MachineKinds. PlayerStats'
-// machine_change_count and kills_by_machine are int[0x1a] indexed by the engine's
+// machine_mount_kind_num and kills_by_machine are int[0x1a] indexed by the engine's
 // absolute-kind fold with no bounds check, so a custom machine's appended slot counts
 // under another kind or, far enough out, writes into the KO-by-cause counters, the
 // vehicle-bust mask and the item tally. Both are relocated here and widened; the

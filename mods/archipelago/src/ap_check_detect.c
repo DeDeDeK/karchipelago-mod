@@ -306,8 +306,8 @@ static int predicted_stadium;
 
 static float PlyDistance(int ply)
 {
-    PlayerStats *st = Ply_GetItemCollectArray(ply);
-    return st->distance_grounded + st->distance_airborne;
+    PlayerStats *st = Ply_GetStats(ply);
+    return st->total_distance_grounded + st->total_distance_airborne;
 }
 
 // This player's run of the event active now. Only call during a loaded City Trial
@@ -393,7 +393,7 @@ static int IsMidMicBlast(int ply)
 
     RiderData *rd = rg->userdata;
     return rd->copy_kind == COPYKIND_MIC &&
-           (rd->state_idx == RIDERSTATE_MIC_SING || rd->state_idx == RIDERSTATE_MIC_END);
+           (rd->status == RDSTATE_MIKESING || rd->status == RDSTATE_MIKEEND);
 }
 
 // Grants in a row the copy-ability objective asks for, quoted in its label.
@@ -420,7 +420,7 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
 {
     RiderData *rd = rg->userdata;
     int ply = rd->ply;
-    PlayerStats *st = Ply_GetItemCollectArray(ply);
+    PlayerStats *st = Ply_GetStats(ply);
 
     for (int i = 0; i < RUN_ITEM_NUM; i++)
     {
@@ -559,7 +559,7 @@ void APCheckDetect_OnFrameStart(void)
     {
         if (Ply_GetPKind(ply) != PKIND_HMN)
             continue;
-        PlayerStats *st = Ply_GetItemCollectArray(ply);
+        PlayerStats *st = Ply_GetStats(ply);
         // flags_84d is per-round state, zeroed with the rest of PlayerStats on
         // scene load, so this is the "in one game" scope vanilla's two-machine
         // cell has.
@@ -805,12 +805,12 @@ static void SampleAirRide(const StadiumResults *r)
                 APCheckDetect_Observe(APCK_NEBULA_2LAP_FAST);
         }
 
-        // airborne_time is the longest single airborne stretch, and PlayerStats is
+        // max_time_spent_airborne is the longest single airborne stretch, and PlayerStats is
         // only zeroed on the next 3D scene load, so it still reads this race's run.
         // The three flight machines are the only ones that hold a glide that long.
         MachineKind mk = PlyMachineKind(p);
         if ((mk == VCKIND_DRAGOON || mk == VCKIND_FLIGHT || mk == VCKIND_WINGED) &&
-            Ply_GetItemCollectArray(p)->airborne_time > AP_NEBULA_AIR_FRAMES)
+            Ply_GetStats(p)->max_time_spent_airborne > AP_NEBULA_AIR_FRAMES)
             APCheckDetect_Observe(APCK_NEBULA_AIRBORNE);
     }
 }

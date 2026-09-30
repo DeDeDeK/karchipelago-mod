@@ -349,7 +349,7 @@ the break zone to fully open.
 
 1. **Relocates the debris-anchor node onto the rider for the break instant.**
    `Hypernova_WeakDebrisNode` walks the same chain `hitWeakObject` uses - family break data
-   (`YakumonoData.data_ptr->break_family->placement`) -> per-instance `YakuBreakEntry` ->
+   (`YakumonoData.data_ptr->break_family`) -> per-instance `YakuBreakEntry` ->
    `node_id`, resolved through `Gr_GetJoint` - matching the instance by its record pointer in the
    family's parallel record array (`YakumonoData.region_audio_arr`). It sets the node's
    world-matrix translation to the contact point and sets `JOBJ_USER_DEFINED_MTX` so
@@ -467,7 +467,7 @@ suck-START anim `0x2f` (action-state `0x76`), spawns the native suction **whirlw
 (`0x20037`), and installs the per-frame capture callbacks (which, in CT, harmlessly scan the
 empty EventActor bucket and capture nothing).
 
-**The inhale is three action-states that do NOT chain automatically.** `RiderData.state_idx` is
+**The inhale is three action-states that do NOT chain automatically.** `RiderData.status` is
 the anim id; the parallel action-state runs `0x76`/`0x77`/`0x78`. Anims: `0x2f` suck START,
 `0x30` suck LOOP, `0x31` suck END.
 
@@ -506,16 +506,16 @@ underneath); releasing lets it end like a vanilla inhale. Its return value is wh
 cone scan.
 
 It drives the inhale from whatever riding state the rider is in. Kirby's neutral riding is
-**not** a single action-state - `state_idx` cycles through a wide cluster of lean/turn/idle
+**not** a single action-state - `status` cycles through a wide cluster of lean/turn/idle
 riding states (e.g. `0x21`-`0x2a`, `0x6a`), and vanilla lets you inhale from all of them - so
 the start is not gated on any one state, and GULP is promoted to LOOP by detecting that the gulp
 has simply **left its START state**:
 
 - **IDLE + held** -> `Rider_StartInhale`, phase GULP.
-- **GULP** -> the frame `state_idx` is no longer `0x2f`, call `Rider_StartInhaleLoop` and go to
+- **GULP** -> the frame `status` is no longer `0x2f`, call `Rider_StartInhaleLoop` and go to
   LOOP. Promoting on that same frame (before render) keeps the open mouth from flickering back
   to neutral.
-- **LOOP** -> while `state_idx == 0x30`, write `HYPERNOVA_INHALE_TIMER_HOLD` (8) into
+- **LOOP** -> while `status == 0x30`, write `HYPERNOVA_INHALE_TIMER_HOLD` (8) into
   `inhale_timer` so the engine's countdown never expires; if the engine dropped the rider out of
   the loop entirely (not START, not END) while the button is still held, re-enter the loop.
 - **Released** -> if a LOOP was running, `Rider_EndInhale` for the engine's own close-mouth ->

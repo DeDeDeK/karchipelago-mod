@@ -18,7 +18,7 @@ Three layers turn gameplay into a checked checklist box:
 
 1. **Per-player stat struct** - a live per-player record updated every frame
    during a game (item pickups, boxes broken, distance raced, KOs, ...). Accessor:
-   `Ply_GetItemCollectArray` (`0x8022d248`).
+   `Ply_GetStats` (`0x8022d248`).
 2. **Evaluators** - `CityTrial_CheckForNewUnlocks` (`0x8004db74`) and its five CT
    siblings read the per-player struct via the `Ply_Get*` getter family, fold each
    player's totals into a **persistent records block**, test every condition's
@@ -48,7 +48,7 @@ sum over *human* players only, others over all *present* players (`PKind != 4`)
 
 ## Per-Player Stat Struct
 
-`Ply_GetItemCollectArray(int player)` (`0x8022d248`) returns the base of the
+`Ply_GetStats(int player)` (`0x8022d248`) returns the base of the
 calling player's stat record:
 
 ```
@@ -73,7 +73,7 @@ Known fields (offsets relative to `base`):
 | `+0x4c4` | u16 | **Vehicle-bust bitfield** (MSB-first, bit `15-idx`). idx 0..7 -> cells 0x6f..0x76; entries 8/9 (bits 7/6) are Dragoon<->Hydra mutual busts, never read. | `0x8022f3a4(player,idx)` | 0x6f-0x76 |
 | `+0x4c8` | int[] | **Item-collect array**, indexed by `ItemKind` (valid `0..0x44`). 0/1/2 = boxes; 3..0x43 = everything else. | see Item-collect subsystem | many |
 | `+0x5e4`, `+0x5e8` | int | Drive-time components (frames): `+0x5e4` = grounded, `+0x5e8` = airborne ("glide"; AR reuses it). `Ply_TickTimeStats` (`0x80231200`) adds a frame while the ridden machine's speed `|MachineData+0x36c|` is at least 0.02 (`0x805e2a50`), split by `MachineData+0x754`; no machine-class or glide-input test, so bikes accrue airtime too. Sum = drive time. | `0x80231510` (sums both) | 0x09-0x0B |
-| `+0x5f4` | int | Airborne time, 60 fps frames | `0x802315c0` | 0x18 / 0x1C / 0x22 |
+| `+0x5f4` | int | Longest airborne streak, 60 fps frames (`+0x5f8` is the current streak) | `0x802315c0` | 0x18 / 0x1C / 0x22 |
 | `+0x604` | int | 20 s round timer: frame countdown seeded to 1200 (`PlData.dat` `plDataCommon`), decremented per live frame. `+0x804` increments only while nonzero. Sibling `+0x608` = 600-frame (10 s) timer (cell 0x49). | - | 0x48 |
 | `+0x60c`, `+0x610` | f32 | Distance components: `+0x60c` = grounded, `+0x610` = airborne (split by `MachineData+0x754`). Summed by `0x80231614`, accumulated into `records+0x14` for the "race over N miles" cells. | `0x80231614` (sums both) | 0x00 / 0x01 |
 | `+0x62b` | u8[20] | **Yakumono-break bucket array**, valid idx `0x15..0x28`. One counter per destructible-object descriptor stat-index. See dedicated section. | `0x8022fccc(player,idx)` | many |
@@ -103,7 +103,8 @@ The name notwithstanding, it is the unified **KO-event recorder**, run on every 
 Args: victim = arg0, achiever/killer = `*(arg1+0x1c)`. From a single KO it
 writes several of the killer's stat fields:
 
-- kills-by-machine `+0x44c[]`, deaths-by-machine `+0x3e4[]`
+- kills-by-machine `+0x3e4[]` on the killer's record, deaths-by-machine `+0x44c[]` on
+  the victim's
 - the four KO-by-cause counters `+0x4b4/+0x4b8/+0x4bc/+0x4c0`, selected by the
   victim's cause byte (`victim+7`)
 - the **vehicle-bust bitfield** `+0x4c4` via a 10-entry / 8-byte table at
@@ -487,8 +488,8 @@ airborne states) - so `+0x60c` = grounded distance, `+0x610` = airborne distance
 The miles math sums both, so it is unaffected by the split. The same
 `MachineData+0x754` flag drives the drive-time split (`+0x5e4` / `+0x5e8`). A third
 per-frame accumulator at `+0x614` adds the same delta only while
-`MachineData+0xbae` bit 5 (a consolidated hit/damage-reaction flag) is set -
-distance travelled while taking a hit - and is summed by no getter.
+`MachineData+0xbae` bit 5 is set - the rail-state flag the RailRun, RailRunPush and
+RailChange state tables raise - so it is distance travelled on rails, summed by no getter.
 
 ## Per-Player Getters
 
@@ -530,7 +531,7 @@ The address-to-field index for the stat layer. All of these carry these names in
 "damaged this game" bitfield at `statbase+0x331` (one bit per opponent slot),
 so cell 0x4e fires at 3 distinct rivals. `Ply_GetStatRecordBase` (`0x8022d260`)
 is a second accessor returning the same per-player record base as
-`Ply_GetItemCollectArray`.
+`Ply_GetStats`.
 
 ## Air Ride (Mode 0)
 
@@ -612,7 +613,7 @@ caps**, unlike CT's u8/u16 records.
 ### Air Ride per-player stat fields
 
 On the shared per-player struct (`base = player*0x90c + 0x8055AAA0`, accessor
-`Ply_GetItemCollectArray` `0x8022d248`). These extend the City Trial table near
+`Ply_GetStats` `0x8022d248`). These extend the City Trial table near
 the top of this doc; the `+0x84c`/`+0x854`/`+0x855` bytes reuse bytes also listed
 for CT, with Air-Ride-specific bits.
 
@@ -622,8 +623,8 @@ for CT, with Air-Ride-specific bits.
 | `+0xe0` | int | enemies defeated (non-swallow), bumped at hit time by `Ply_RecordEnemyDefeat` | `0x8022eb88` | 0x04 / 0x05 |
 | `+0xe4` | int[0x1b] | enemy-defeat-by-method; idx 0xf/0x15 = exhaled star, 0x10 = Quick Spin | `0x8022eb10` | 0x0f / 0x1f |
 | `+0x5e8` | int | glide time, frames (AR uses this single field, not the CT drive-time pair) | `0x8023156c` | 0x02 / 0x03 |
-| `+0x654` | u8[13] | volcano-rail used-bitmask (Magma) | `0x802300b4` | 0x6e |
-| `+0x661` | u8[63] | boost-panel used-bitmask (Magma) | `0x80230294` | 0x70 |
+| `+0x654` | u8[13] | rail used-bitmask, one bit per rail id grabbed on any stage (read for Magma) | `0x802300b4` | 0x6e |
+| `+0x661` | u8[63] | zone used-bitmask: dash, dash-gate, jump and super-jump zones touched (read for Magma's boost panels) | `0x80230294` | 0x70 |
 | `+0x6a0` | int | enemies swallowed | `0x802306d4` | 0x0e, 0x04/0x05 |
 | `+0x6a8` | int[ ] | per-ACTORID swallow counter; one enemy = base+T1+T2 tiers (stride 0x18) summed | `0x8023077c` | 0x06-0x09, 0x5f/0x62/0x65 |
 | `+0x7c8` | int | consecutive garbage-enemy swallows (no copy) | `0x802307e4` | 0x10 |

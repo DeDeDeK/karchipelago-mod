@@ -207,13 +207,13 @@ static JOBJ *Hypernova_WeakDebrisNode(GOBJ *yaku_gobj, GrCollRecord *record)
         return NULL;
     if (yd->data_ptr == NULL || yd->data_ptr->break_family == NULL)
         return NULL;
-    YakuBreakPlacement *pl = yd->data_ptr->break_family->placement;
+    YakuBreakPlacement *pl = yd->data_ptr->break_family;
     GrCollRecord **rec_arr = (GrCollRecord **)yd->region_audio_arr; // family's per-prop record array
-    if (pl == NULL || pl->entries == NULL || rec_arr == NULL || pl->count <= 0)
+    if (pl == NULL || pl->entries == NULL || rec_arr == NULL || pl->target_num <= 0)
         return NULL;
 
     int inst = -1;
-    for (int k = 0; k < pl->count; k++)
+    for (int k = 0; k < pl->target_num; k++)
     {
         if (rec_arr[k] == record)
         {

@@ -42,7 +42,7 @@ and **sub-regions** (stride 0x44) are defensive hurtboxes built from model joint
 | EnemyData | +0x410 | 2 (Dyna Blade = 8) | per model joints |
 | GrYakuData (stage hazards) | +0xEC | 2 | per model joints |
 | ItemData (city items) | +0x148 | varies | varies |
-| ProjectileData | +0x108 | 2 (hardcoded) | per model joints |
+| WeaponData | +0x108 | 2 (hardcoded) | per model joints |
 
 The two output fields the rest of the game reads are `kb_mag` (+0x24) - non-zero is what triggers a
 hit reaction - and `dmg_taken` (+0x28), the frame's accumulated damage.
@@ -106,7 +106,7 @@ walk follows the GObj `p_link` next pointer at GObj+0x08.
 | 9 | Machines | `MachineGObj_GetHurtData` (`0x801c8660`) - MachineData+0x660 |
 | 10 | Riders | `RiderGObj_GetHurtData` (`0x80192788`) - RiderData+0x390 |
 | 12 | Event actors / enemies | `EventActorGObj_GetHurtData` (`0x80204878`) - EnemyData+0x410 |
-| 14 | Projectiles | accessor at `0x80223120` - ProjectileData+0x108 |
+| 14 | Projectiles | accessor at `0x80223120` - WeaponData+0x108 |
 
 ## Damage Pipeline
 
@@ -118,7 +118,7 @@ walk follows the GObj `p_link` next pointer at GObj+0x08.
    `stc_hitcolldata.hurt_data` at this victim.
 2. Eight collision sub-checks, each walking one list and calling `HitColl_SetDamageLog` on overlap:
    `Machine_CheckRiderCollision` (`0x801d6fd0`, p_link 10), `Machine_CheckMachineCollision`
-   (`0x801d706c`, p_link 9), `Machine_CheckProjectileCollision` (`0x801d7118`, p_link 14),
+   (`0x801d706c`, p_link 9), `Machine_CheckWeaponCollision` (`0x801d7118`, p_link 14),
    **`Machine_CheckEventCollision` (`0x801d71ec`, p_link 12 - where all enemy damage enters)**,
    `Machine_CheckItemCollision` (`0x801d7248`), `Machine_CheckStageHazardCollision` (`0x801d72a4`,
    p_link 8), `Machine_CheckMachineBumpCollision` (`0x801daac4`), `Machine_CheckPatchColl`
@@ -205,7 +205,7 @@ If `kb_mag != 0`, a switch on the attacker's `HurtKind` decides the bookkeeping 
 | 1 | Ridden machine | records the rider's player index; attack word from `MachineGObj_GetAttackerLog` |
 | 2, 4 | Empty machine, item | no attacker recorded |
 | 3 | Event actor | Dyna Blade (0x4D) hitting with its region 1 or 2 sets the victim's "trampled by Dyna Blade" bit |
-| 5 | Projectile | records the owner's player index (`Projectile_GetOwnerPly`, `0x802230c4`); the attack block is `proj+0x17c` (`Projectile_GetAttackerLog`, `0x80223178`), the kind's state flags, so it names the kind, not the projectile |
+| 5 | Projectile | records the owner's player index (`Weapon_GetOwnerPly`, `0x802230c4`); the attack block is `proj+0x17c` (`Weapon_GetAttackerLog`, `0x80223178`), the kind's state flags, so it names the kind, not the projectile |
 | 6 | Stage object | special-cases yakumono descs 0x3D, 0x41 |
 
 The attacker's player is credited through `Machine_StoreAttacker` (`0x80231d90`), which keys on the
@@ -339,7 +339,7 @@ Two timers drive it, both counting down each frame:
 ### HurtData creation
 
 `EventActor_HurtDataCreate` (`0x80201ee8`) builds the HurtData at EnemyData+0x410 with
-`HurtData_Create(gobj, HURTKIND_3, N, joint_count, 0)` - `N` is 8 attack regions for Dyna Blade
+`HurtData_Create(gobj, HURTKIND_EVENTACTOR, N, joint_count, 0)` - `N` is 8 attack regions for Dyna Blade
 (actor 0x4D) and 2 for every other enemy. It sets `on_damage_callback` to `EventActor_OnDamageCallback` and
 walks the actor's joint descriptor to build the defensive sub-regions via `HurtData_InitRegion`.
 

@@ -73,7 +73,7 @@ Each drop-capable family gates the spawn on a NULL check of an optional drop-des
 | CHARGEMAX | 0 | 0 | 0 | 0 | 0 | 5 |
 | COPYBOMB | 0 | 0 | 0 | 10 | 0 | 0 |
 | COPYSLEEP | 0 | 2 | 0 | 5 | 0 | 0 |
-| COPYMIC | 0 | 0 | 0 | 10 | 0 | 0 |
+| COPYMIKE | 0 | 0 | 0 | 10 | 0 | 0 |
 | FOODMAXIMTOMATO | 0 | 2 | 0 | 2 | 2 | 0 |
 | FOODENERGYDRINK | 0 | 2 | 0 | 2 | 0 | 0 |
 | FOODICECREAM | 0 | 2 | 0 | 2 | 0 | 0 |

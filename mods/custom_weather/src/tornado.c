@@ -268,7 +268,7 @@ static void TornadoCollectMaterials(JOBJ *j)
 // init, so the anim loop is armed here and stepped from the tick.
 static void TornadoPrepareModel(JOBJ *root)
 {
-    JObj_SetAllAOBJLoopByFlags(root, ALL_ANIM);
+    JObj_SetAllAOBJLoopByFlags(root, ANIMBYFLAGS_ALL);
     stc_mat_count = 0;
     TornadoCollectMaterials(root);
     stc_model_ready = 1;

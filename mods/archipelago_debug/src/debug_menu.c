@@ -210,8 +210,8 @@ GIVE_FN(GiveCopyWing,    AP_ITKIND_COPYBIRD)
 GIVE_FN(GiveCopyPlasma,  AP_ITKIND_COPYPLASMA)
 GIVE_FN(GiveCopyTornado, AP_ITKIND_COPYTORNADO)
 GIVE_FN(GiveCopySword,   AP_ITKIND_COPYSWORD)
-GIVE_FN(GiveCopyNeedle,  AP_ITKIND_COPYSPIKE)
-GIVE_FN(GiveCopyMike,    AP_ITKIND_COPYMIC)
+GIVE_FN(GiveCopyNeedle,  AP_ITKIND_COPYNEEDLE)
+GIVE_FN(GiveCopyMike,    AP_ITKIND_COPYMIKE)
 
 GIVE_FN(GiveUnlockInhale,    AP_BASE_ABILITY_UNLOCK_INHALE)
 GIVE_FN(GiveUnlockQuickSpin, AP_BASE_ABILITY_UNLOCK_QUICKSPIN)
@@ -476,7 +476,7 @@ void DebugMenu_GiveRandomModeItem(MajorKind major)
     {
         // Only copy abilities are honored outside CT; every other ITKIND no-ops
         // behind the Gm_IsInCity gate.
-        picked = AP_ITKIND_COPYBOMB + HSD_Randi(AP_ITKIND_COPYMIC - AP_ITKIND_COPYBOMB + 1);
+        picked = AP_ITKIND_COPYBOMB + HSD_Randi(AP_ITKIND_COPYMIKE - AP_ITKIND_COPYBOMB + 1);
         mode_name = "AR";
     }
     else if (major == MJRKIND_TOP)

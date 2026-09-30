@@ -49,8 +49,8 @@ CopyKind Ability_ItKindToCopyKind(ItemKind it_kind)
         case ITKIND_COPYSWORD:   return COPYKIND_SWORD;
         case ITKIND_COPYBOMB:    return COPYKIND_BOMB;
         case ITKIND_COPYPLASMA:  return COPYKIND_PLASMA;
-        case ITKIND_COPYSPIKE:   return COPYKIND_NEEDLE;
-        case ITKIND_COPYMIC:     return COPYKIND_MIC;
+        case ITKIND_COPYNEEDLE:  return COPYKIND_NEEDLE;
+        case ITKIND_COPYMIKE:    return COPYKIND_MIC;
         case ITKIND_COPYICE:     return COPYKIND_FREEZE;
         case ITKIND_COPYTORNADO: return COPYKIND_TORNADO;
         case ITKIND_COPYBIRD:    return COPYKIND_BIRD;

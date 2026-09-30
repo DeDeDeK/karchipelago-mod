@@ -137,8 +137,8 @@ static MenuDesc copy_abilities_menu = {
         BUY(AP_ITKIND_COPYPLASMA,  600, "Plasma"),
         BUY(AP_ITKIND_COPYTORNADO, 600, "Tornado"),
         BUY(AP_ITKIND_COPYSWORD,   600, "Sword"),
-        BUY(AP_ITKIND_COPYSPIKE,   600, "Needle"),
-        BUY(AP_ITKIND_COPYMIC,     600, "Mike"),
+        BUY(AP_ITKIND_COPYNEEDLE,  600, "Needle"),
+        BUY(AP_ITKIND_COPYMIKE,    600, "Mike"),
     },
 };
 

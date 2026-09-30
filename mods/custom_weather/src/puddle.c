@@ -385,7 +385,7 @@ void Puddle_Tick(void)
         MachineData *md = (MachineData *)mg->userdata;
         if (md == NULL)
             continue;
-        if (md->action_state_class != 0) // grounded states only
+        if (md->is_airborne != 0) // grounded states only
             continue;
         if (Machine_IsDead(md))
             continue;

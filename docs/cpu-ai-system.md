@@ -378,15 +378,15 @@ ever appears via state 1's `0xf00` OR, never in the tables).
 
 ### Desire-Flag Seed Tables
 
-The seeder is a flat array lookup, no search. Index by `RiderData.state_idx` (+0x1c),
+The seeder is a flat array lookup, no search. Index by `RiderData.status` (+0x1c),
 the rider's current action/motion-state id (0x00..0x82). Each entry is
 `{u32 id; u32 flags}` (the `id` just re-states the row index); the seeder ORs `flags`
 into `desire_flags`. Selection:
 
-- `state_idx < RiderData+0x20` (which holds **29**) -> **Table 1** at `0x804b7b18`
+- `status < RiderData+0x20` (which holds **29**) -> **Table 1** at `0x804b7b18`
   (29 entries, ids 0x00..0x1c) - applies to **all rider kinds**.
 - otherwise -> **Table 2** at `0x804b7c00` (102 entries, ids 0x1d..0x82), indexed by
-  `state_idx - 29`, but **only when `RiderData.kind` (+0x04) == 0** (Kirby). A
+  `status - 29`, but **only when `RiderData.kind` (+0x04) == 0** (Kirby). A
   non-Kirby rider in a state >= 29 gets *no* seed (flags unchanged).
 
 The raw `flags` words carry vestigial bits (`0x001/0x010/0x020`) that decorate some
@@ -462,7 +462,7 @@ Priority order (first match wins):
 | - | *(skip)* | `machine_gobj == NULL` -> jump to fallback |
 | 4 | **0x12** TapOnce | attack/target-scan picks a scored target (RNG, ai_state-bucketed) |
 | 5 | **0x13** Wiggle | threat sub-scan hit + roll (gated by desire `0x400`, bypassed by copy_kind==9) |
-| 6 | **9** DodgeProjectile | MachineData+0xc33 bit 0x02 (being-hit) |
+| 6 | **9** DodgeWeapon | MachineData+0xc33 bit 0x02 (being-hit) |
 | 7 | **0xd** ChargeCentered | `status_flags` 0x40 (Navigate sets it) + desire `0x1000000` clear + a `Rider_CPUScanCityObjects` pick outscoring the current machine + roll < 0.05*scale (or a 1/100 short-circuit) |
 | 8 | **0x14** Brake | ai_state in {2,4,7,9} + difficulty > 3 + machine brakeable + roll < scale |
 | 9 | **7** ChargeHold | ENABLE `0x01` + machine chargeable + per-machine dist/cone gate (`VECSquareDistance(pos, item_target_pos) < dist` AND charge < cone) |
@@ -511,7 +511,7 @@ hands control onward.
 | 5,6 | 0x8026ee7c | **ApproachWaypoint** | Far -> delegate to maneuver 1; close + aligned -> press+hold 10 on arrival. |
 | 7 | 0x8026ed4c | **ChargeHold** | Steer, hold the charge button, release when charge tops off. |
 | 8 | 0x8026fbe0 | **AvoidObstacle** | 3-point scan over the **route-waypoint buffer** (0x8055e964), snapping to a clear waypoint then steering to `nav_target_pos`; terrain-shaped accel (helper 0x8026f0e4); no button. Gated on velocity-stuck. |
-| 9 | 0x8026fe7c | **DodgeProjectile** | Reads the **machine's own incoming-projectile state** (not the hazard list); on an intercept-course projectile within ~4 units' closing time, RNG-gated evasive burst (set stick + press/hold 60 / release 20). |
+| 9 | 0x8026fe7c | **DodgeWeapon** | Reads the **machine's own incoming-projectile state** (not the hazard list); on an intercept-course projectile within ~4 units' closing time, RNG-gated evasive burst (set stick + press/hold 60 / release 20). |
 | 10 | 0x8026f00c | **ChargeRelease** | Press/hold charge toward nav target until full, then return to `base_maneuver`. |
 | 0xb | 0x80270154 | **SteerTarget/Wiggle** | Steer at target; on a difficulty-scaled roll, a stick-wiggle; bail to 10 if misaligned. |
 | 0xc | 0x802704c4 | **SteerTarget/Advance** | Aligned -> steer target; else press + steer toward nav. |
@@ -814,7 +814,7 @@ The presets act through three seams:
 |--------|-------|----------|--------------|
 | Default | both | vanilla | - |
 | Cautious | both | vetoes RamCharge and PursueLOS; a second roll at the hazard Wiggle | dodge chance 0.05 -> 0.35 a frame |
-| Reckless | both | vetoes DodgeProjectile and the hazard Wiggle; a second roll at RamCharge | ram chance 0.02 -> 0.22 a frame |
+| Reckless | both | vetoes DodgeWeapon and the hazard Wiggle; a second roll at RamCharge | ram chance 0.02 -> 0.22 a frame |
 | Aggressive | City Trial | steers at the `Rider_CPURivalSelect` rival while it is in range, ahead of items and machines; a second roll at RamCharge | chase range 150 -> 600 units; ram chance as Reckless |
 | Hoarder | City Trial | scores patches, boxes, the timed Max boosts and legendary parts 100 and abilities, weapons and candy 0, keeping food's HP-scaled score; rescans the whole city for a better item target on an interval; vetoes RamCharge and PursueLOS | rescan every 300 -> 30 frames |
 | Random | both | one of that menu's presets above Default, rolled per rider | per rolled preset |
@@ -916,7 +916,7 @@ charge byte) or full replace both work, on the kirby's 2-axis steer instead of a
 | Machine steer table | 0x804b8f30 | `CpuMachineSteer`, 19 star rows, stride 0x14: +4 / +8 heading-alignment cosines (`Rider_CPUGetMachineAlignCosNear` / `Far`), +0xc turn tolerance in radians (`Rider_CPUGetMachineTurnTolerance`), +0x10 stuck angle (`Rider_CPUGetMachineStuckAngle`). The bike table after it at 0x804b90ac is never read: bikes and riders with no machine get row 0 |
 | Stadium machine pairs | 0x804b8a5c / 0x804b8b24 | `CpuStadiumMachineParam`, 25 each by absolute kind, `{pitch, min_len}` for Air Glider (`Rider_CPUGetAirGliderMachineParam`) and High Jump (`Rider_CPUGetHighJumpMachineParam`) |
 | Machine kind switches | r2 0x805e31a4-0x805e31c0 | `Machine_CPUGetChargeHoldGate` gives Bulk, Hydra, Rocket and Formula a charge-hold gate pair and `Machine_CPUGetChargeReleaseOverride` gives Bulk and Hydra a release level; `Rider_CPUEmitSteerStick` holds the stick up on Hydra and down on Winged and Jet Star once moving, off the cached `CpuData+0x0d` |
-| Desire-flag seed tables | 0x804b7b18 / 0x804b7c00 | `{u32 id; u32 inhibitor_flags}`, stride 8; indexed by `RiderData.state_idx` (+0x1c). Table 1 = 29 entries (ids 0x00..0x1c, all kinds); Table 2 = 102 entries (ids 0x1d..0x82, `kind==0` only, indexed by `state_idx-29`) |
+| Desire-flag seed tables | 0x804b7b18 / 0x804b7c00 | `{u32 id; u32 inhibitor_flags}`, stride 8; indexed by `RiderData.status` (+0x1c). Table 1 = 29 entries (ids 0x00..0x1c, all kinds); Table 2 = 102 entries (ids 0x1d..0x82, `kind==0` only, indexed by `status-29`) |
 | Course path-graph object | `stc_grobj_ptr` 0x805dd6cc (r13[0x5ec]) | Per-stage spline node array (`[grobj+0x120]+id*0x1c`); the id space for `target_primary/secondary` |
 | CpuData registry / count | 0x8055de08 / 0x8055de1c | Up to 5 allocated `CpuData*` + a count byte. **Never freed per-rider** (bulk-freed at scene teardown); iterated **only** by a debug-text overlay, never by gameplay |
 | CPU stat-growth budget | `GameData.city.cpu_stat_budget` (`+0x46c`) | `float[5]`, per-slot remaining stat pool. Seeded by `SceneLoad_3D` from `cpu_level`, drained by `CityTrial_GrowCpuStats`. 0 for humans |

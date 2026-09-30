@@ -23,7 +23,7 @@ are all zero**, so the shipped attribute value *is* the machine's top speed ther
 City Trial patches move it.
 
 Finally `top_speed_current` (`+0x398`) is set from `top_speed_ground` while
-`action_state_class` (`+0x754`) is 0 and from `top_speed_air` otherwise; that is the cap
+`is_airborne` (`+0x754`) is 0 and from `top_speed_air` otherwise; that is the cap
 the movement controllers clamp velocity against.
 
 ## Units and the mph scale

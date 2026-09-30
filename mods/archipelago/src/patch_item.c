@@ -220,7 +220,7 @@ static void PermanentPatch_DoApply()
         // aggregate.
         if (credit)
         {
-            PlayerStats *st = Ply_GetItemCollectArray(p);
+            PlayerStats *st = Ply_GetStats(p);
             for (int i = 0; i < PATCHKIND_NUM; i++)
             {
                 int got = (int)(md->stats.values[i] - before[i] + 0.5f);

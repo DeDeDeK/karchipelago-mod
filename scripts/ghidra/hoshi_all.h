@@ -57,7 +57,7 @@
 #include "item.h"
 #include "machine.h"
 #include "rider.h"
-#include "projectile.h"
+#include "weapon.h"
 #include "enemy.h"
 #include "yakumono.h"
 #include "stage.h"

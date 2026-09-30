@@ -123,7 +123,7 @@ static void Wind_ApplyToItems(float wx, float wz)
     }
 }
 
-// Push gliding machines: only airborne ones (action_state_class == 1), scaled by
+// Push gliding machines: only airborne ones (is_airborne == 1), scaled by
 // their glide stat so a Winged Star catches far more wind than a Wheelie Bike.
 static void Wind_ApplyToMachines(float wx, float wz)
 {
@@ -135,7 +135,7 @@ static void Wind_ApplyToMachines(float wx, float wz)
         MachineData *md = (MachineData *)mg->userdata;
         if (md == NULL)
             continue;
-        if (md->action_state_class != 1) // grounded -> not gliding
+        if (md->is_airborne != 1) // grounded -> not gliding
             continue;
         if (Machine_IsDead(md))
             continue;

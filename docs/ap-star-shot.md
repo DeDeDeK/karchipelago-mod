@@ -39,30 +39,30 @@ the state the release transitions into - and the ring holding at least one pod a
 
 ## The projectile kind
 
-The shot is a projectile kind of its own, `PROJKIND_NUM` (17), appended after the 17 vanilla kinds.
+The shot is a projectile kind of its own, `WPKIND_NUM` (17), appended after the 17 vanilla kinds.
 A kind is two table entries, and neither vanilla table has room for an 18th:
 
-- **The vtable table** (`proj_kind_vtables`, `0x804b4338`) is followed directly by the
+- **The vtable table** (`wp_kind_vtables`, `0x804b4338`) is followed directly by the
   `"WnCommon.dat"` string. At boot the mod copies the 17 vanilla pointers into an 18-entry table of
   its own, adds the shot's, and repoints the `lis`/`addi` pairs that form the table's address: three
-  in `Projectile_Create`, and one each in `Projectile_Proc10_HitReact`, `Projectile_UserDataDtor`,
-  `Projectile_Despawn`, `Projectile_LoadKindParams` and two in `Projectile_ReloadKindParams`
+  in `Weapon_Create`, and one each in `Weapon_Proc10_HitReact`, `Weapon_UserDataDtor`,
+  `Weapon_Despawn`, `Weapon_LoadKindParams` and two in `Weapon_ReloadKindParams`
   (`0x80220654`). The tenth site,
-  `Projectile_SystemInit`'s loop over each kind's `system_init`, stays on the vanilla table - it is
+  `Weapon_SystemInit`'s loop over each kind's `system_init`, stays on the vanilla table - it is
   bounded at 17 and the shot has no `system_init` to run.
-- **The kind data** (`proj_kind_data`, `0x8055a9a8`) is followed by a padding word at `0x8055a9ec`
-  that `Projectile_ClearKindDataTable` never zeroes and `Projectile_RegisterKindDataList` never
-  fills, so the mod stores its `ProjKindData` pointer there once, at boot.
+- **The kind data** (`wp_kind_data`, `0x8055a9a8`) is followed by a padding word at `0x8055a9ec`
+  that `Weapon_ClearKindDataTable` never zeroes and `Weapon_RegisterKindDataList` never
+  fills, so the mod stores its `WeaponKindData` pointer there once, at boot.
 
 Nothing else in the engine is indexed by kind: no switch runs on it, and the few
-`Projectile_GetKind` readers compare against fixed vanilla kinds.
+`Weapon_GetKind` readers compare against fixed vanilla kinds.
 
 Every vtable function slot is NULL-checked where it is called, so the kind fills only what it uses:
 
 | Slot | What it does |
 |------|--------------|
 | `state_table` | one state, below |
-| `post_init` | enters the state (`Projectile_SetState(proj, 0, 0, 1, 0)`) and sets the live velocity to the spawn velocity, with no muzzle kick of its own |
+| `post_init` | enters the state (`Weapon_StateChange(proj, 0, 0, 1, 0)`) and sets the live velocity to the spawn velocity, with no muzzle kick of its own |
 | `on_hit` | stops the homing once the shot has hit anything; returns 0, so the shot flies on |
 | `aux_a` | run by the dtor on every ending; detaches the trail so it drains |
 
@@ -76,7 +76,7 @@ The one state entry carries the attack word `0x103` and four per-frame callbacks
 | fn0 | 1 | `ShotThink` | grow in and shrink out |
 | fn1 | 4 | `ShotSteer` | homing, ahead of integration |
 | fn2 | 5 | `ShotEnvCollide` | environment sweep and the surface rule |
-| fn3 | 6 | `ShotFollowGround` | ground-follow snap, ahead of `Projectile_SyncRootMtx` and the prio-7 HurtData refresh |
+| fn3 | 6 | `ShotFollowGround` | ground-follow snap, ahead of `Weapon_SyncRootMtx` and the prio-7 HurtData refresh |
 
 The kind data is all static in the mod:
 
@@ -90,26 +90,26 @@ The kind data is all static in the mod:
 
 The hitbox script is plasma spread's single hitbox command with only its size changed: the size is
 the high half of the command's second word in 1/250 units, 1125 for a 4.5 radius. Damage and
-knockback are the Plasma ability's. With no animation to bind, `Projectile_AnimThink` still runs the
+knockback are the Plasma ability's. With no animation to bind, `Weapon_AnimThink` still runs the
 script every frame, and nothing moves the sphere joint.
 
 Owner exclusion stays on - `desc.owner_gobj` is the rider GObj, as `spawnPlasmaSpread` (`0x801a9870`)
 passes - so a shot never hits the player who fired it. Boxes are hit either way:
-`Box_CheckProjectileCollision` (`0x80252334`) does no owner check.
+`Box_CheckWeaponCollision` (`0x80252334`) does no owner check.
 
 Per-shot state (owner, homing target, ground mode, the trail handle) sits in the kind's scratch at
-`proj+0x1b8`, which no shared projectile code reads or writes. `Projectile_Create` zeroes it, and
+`proj+0x1b8`, which no shared projectile code reads or writes. `Weapon_Create` zeroes it, and
 `Fire` fills it before any of the shot's procs run.
 
 ### Size
 
-`cur_scale` is the shot's only size. `Projectile_SyncRootMtx` scales the root joint by
+`cur_scale` is the shot's only size. `Weapon_SyncRootMtx` scales the root joint by
 `cur_scale * params.model_scale`, the prio-7 HurtData refresh sizes the hitbox by `cur_scale`, and
 the render cull uses `cur_scale * params.cull_scale + 5`. At `cur_scale` 1 the drawn sphere and the
 hitbox are both radius 4.5, and they stay equal all the way through the grow and the fade.
 
 The shot is created at `cur_scale` 0.05, passed as `desc.velocity_scale`, which
-`Projectile_InitRuntimeState` copies into `cur_scale`. `ShotThink` grows it to 1 over the first 30
+`Weapon_InitRuntimeState` copies into `cur_scale`. `ShotThink` grows it to 1 over the first 30
 frames and takes it back to 0.05 over the last 30. The fade is needed because the kind has no
 despawn of its own, so a shot that simply ran out of life would vanish between two frames. Prio 1
 runs ahead of that frame's lifetime decrement, so a shot with one frame left is already down.
@@ -129,7 +129,7 @@ carries one lit, untextured UV sphere of radius 3.0, public `apStarShot_model`. 
 and it is loaded per scene with `Gm_LoadGameFile` at `On3DLoadEnd`. The pointer is dropped at every
 scene change, since the heap reset has just freed the archive. That matters beyond the 3D modes: the
 title screen rides a star with no 3D load at all, and a model left over from the last round would be
-built into a shot from freed memory. `Projectile_CollectWeaponParts` (`0x80221914`) asserts on more than 10
+built into a shot from freed memory. `Weapon_CollectParts` (`0x80221914`) asserts on more than 10
 joints or a count other than the model block's, so the block's count byte tracks the archive.
 
 The material ships white, lit and untextured, so the mod writes the loaded copy's `ambient` and
@@ -154,18 +154,18 @@ pointing.
 **Ground.** The velocity is the heading flattened to horizontal. `ShotFollowGround` raycasts down
 each frame at prio 6 and snaps `position.Y` to the hit plus 5.0, half a unit more than the sphere's
 radius, so the sphere rides just clear of the surface. Prio 6 runs after the environment pushback and
-before `Projectile_SyncRootMtx`, so the model, the HurtData and the next frame's collider all start
+before `Weapon_SyncRootMtx`, so the model, the HurtData and the next frame's collider all start
 from the snapped position. Off a ledge the probe misses and the shot holds its altitude, flying flat
 until its lifetime expires.
 
 ### Ending on a surface
 
-`Projectile_UpdateEnvColl` (`0x80221fd4`) pushes a projectile back out of whatever it touched and
+`Weapon_UpdateEnvColl` (`0x80221fd4`) pushes a projectile back out of whatever it touched and
 writes the resolved position back, but leaves its velocity alone - so a shot that only collided would
 slide along the wall every frame. `ShotEnvCollide` runs the sweep, then ends the shot with
 `GObj_Destroy` on a contact:
 
-- An air shot ends on any contact (`flag_b` bit 0, `PROJ_FLAGB_ENV_CONTACT`).
+- An air shot ends on any contact (`flag_b` bit 0, `WP_FLAGB_ENV_CONTACT`).
 - A ground shot rides the floor on purpose, so only a wall or ceiling contact ends it
   (`coll_info->wall_rec_num` or `top_rec_num`). The city's building sides are wall triangles.
 
@@ -184,7 +184,7 @@ and picks again when they leave it.
 Each frame the heading turns toward the target by `speed / 240` radians, at most 0.07. A fixed turn
 radius means the arc is the same shape at any speed, where a fixed turn rate would bend a slow shot
 sharply and a boosted one barely at all. Speed is kept, so the carry from the machine stays. A ground
-shot only turns horizontally. The engine's own homing helper (`Projectile_HomingSteer`, `0x80223298`)
+shot only turns horizontally. The engine's own homing helper (`Weapon_HomingSteer`, `0x80223298`)
 is not used: it decays speed back to a base value, homes on enemies as well, and its target tracker
 registers on the target rider and must be freed by the kind.
 
@@ -277,7 +277,7 @@ installing a handler is a store. The third slot, Anim, belongs to the platform c
 
 ## Identifying a shot's hit
 
-The state's attack word is `PROJ_ATTACK_ACTIVE | AP_STAR_SHOT_ATTACK_CAUSE` (`0x103`), with the cause `0x03` published in
+The state's attack word is `WP_ATTACK_ACTIVE | AP_STAR_SHOT_ATTACK_CAUSE` (`0x103`), with the cause `0x03` published in
 `ap_star_api.h`. No vanilla attack uses cause 3, and it is inside the 1..0x1a range
 `Machine_StoreAttacker` (`0x80231d90`) bounds-checks, so a shot's hit credits the shooter like any
 other attack, under a stat index no vanilla cell reads. `Machine_StoreAttacker` writes the word to
