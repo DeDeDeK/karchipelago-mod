@@ -357,16 +357,34 @@ int GateMachines_FilterSelectCharacter(int ckind, int default_available)
     return IsCKindUnlocked(ckind);
 }
 
+// MachineKind each player spawned on this scene, -1 for none.
+static int stc_start_kind[PLY_NUM];
+
+void GateMachines_On3DLoadEnd(void)
+{
+    for (int ply = 0; ply < PLY_NUM; ply++)
+    {
+        stc_start_kind[ply] = -1;
+        if (Ply_GetRiderGObj(ply) != NULL)
+            stc_start_kind[ply] = MachineKind_Resolve(Ply_GetMachineIsBike(ply),
+                                                      Ply_GetMachineKind(ply));
+    }
+}
+
 // Replaces the respawn machine assignment in Rider_ResetStartingMachine, which
-// hardcodes VCKIND_COMPACT.
+// hardcodes VCKIND_COMPACT. A custom_machines mount wins over the machine the player
+// spawned on.
 void GateMachines_ResetStartingMachine(RiderData *rd)
 {
     u8 ply = rd->ply;
-    MachineKind vckind = rd->starting_machine_idx;
+    int kind = CustomMachines_GetRespawnKind(cm_api, ply);
     int is_bike;
     int class_index;
 
-    if (!IsKindUnlocked(vckind))
+    if (kind < 0)
+        kind = stc_start_kind[ply];
+    MachineKind vckind = (MachineKind)kind;
+    if (kind < 0 || !IsKindUnlocked(vckind))
         vckind = GetFirstUnlockedCTMachine();
 
     class_index = MachineKind_ClassIndexOf(vckind, &is_bike);
@@ -377,8 +395,8 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
 // Finalize the City Trial starting machine at the convergence point of
 // CitySelect_InitPlayerMachines (0x8002dea0), where the Trial and Stadium / Free Run
 // branches merge. Fires once per slot.
-//   x215[slot]: 0 = human, 2 = CPU, else inactive.
-//   x1d0: 0 = Trial (no machine grid), nonzero = Stadium / Free Run, which pick their
+//   slot_kind[slot]: 0 = human, 2 = CPU, else inactive.
+//   mode: 0 = Trial (no machine grid), nonzero = Stadium / Free Run, which pick their
 //   machine on the grid and are left alone.
 void GateMachines_FinalizeCTMachine(int slot)
 {
@@ -386,11 +404,11 @@ void GateMachines_FinalizeCTMachine(int slot)
     if (!gd)
         return;
 
-    u8 kind = gd->city_select_ply.x215[slot];
+    u8 kind = gd->city_select_ply.slot_kind[slot];
     if (kind != 0 && kind != 2)
         return; // inactive slot
 
-    if (gd->city_select_ply.x1d0 != 0)
+    if (gd->city_select_ply.mode != 0)
         return;
 
     CharacterKind ck;

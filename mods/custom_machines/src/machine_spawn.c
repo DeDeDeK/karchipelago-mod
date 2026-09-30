@@ -147,7 +147,7 @@ CODEPATCH_HOOKCREATE(0x801df44c,
 // Free Run keeps one machine of each kind on the field, counting them per absolute kind
 // in the VCKIND_NUM-wide MachineSpawnData.freerun_placed through Machine_EncodeVehicleKind,
 // which answers a custom machine's own MachineKind. A custom kind has no Free Run spot to
-// be re-placed at, so it stays out of the counts. This is CityMachineSpawn_Init's
+// be re-placed at, so it stays out of the counts. This is CityMachineSpawnGObj_Init's
 // per-player count, r28 the player and r31 the spawn data.
 static void CountStartingMachine(int ply, MachineSpawnData *msd)
 {

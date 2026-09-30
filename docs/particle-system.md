@@ -154,8 +154,8 @@ Two separate free-list pools, both with 148-byte nodes but distinct heads.
 
 **The particle pool** is 256 nodes with its free-list head at `r13 + 4764` (`0x805de37c`), built by
 `Ptcl_PoolInit` (`0x80430298`). The allocator is `Ptcl_Alloc(type, sub, kind, a, b)` (`0x8043294c`):
-it bounds-checks `type` (< 32), `sub` (< 64) and `kind`, fetches `desc = psGeneratorDesc[bank][id]`
-with `id` checked against `psGeneratorCount[bank]`, pops the free-list head, increments the active
+it bounds-checks `type` (< 32), `sub` (< 64) and `kind`, fetches `desc = stc_ps_generator_desc[bank][id]`
+with `id` checked against `stc_ps_generator_count[bank]`, pops the free-list head, increments the active
 count (`r13+4740`, `0x805de364`) and high-water mark (`r13+4734`, `0x805de35e`), splices the node into
 the active bank list, and copies the template from the `PtclDesc`.
 
@@ -197,17 +197,17 @@ emit from. A bike's `vcAnimationWheel` names one cruise generator at `+0x20` and
 at `+0x24`, emitted at up to four joints from `+0x28` - the cruise one on a timer from
 `Machine_Wheel_Think` (`0x801f5390`), the boost one at all four joints from the class's boost proc
 (`0x801f516c`). Each slot is a bank-0 generator ID or `-1`, read off the loaded animation bank on
-every spawn with nothing translating it: the Slick Star's `20` and `51` are `psGeneratorDesc[0][20]`
+every spawn with nothing translating it: the Slick Star's `20` and `51` are `stc_ps_generator_desc[0][20]`
 and `[51]` directly.
 
 Of the 52 vehicle generators only `3` and `8` go unreferenced by any machine. Several that look spare
 belong to the bikes.
 
 A generator is bank data, but the table naming it can be grown. `psInitDataBanks` (`0x8042a734`) points
-`psGeneratorDesc[bank]` at the offset array inside the loaded archive and sets `psGeneratorCount[bank]`,
+`stc_ps_generator_desc[bank]` at the offset array inside the loaded archive and sets `stc_ps_generator_count[bank]`,
 the particle teardowns at `0x8042ad44` and `0x8042af18` clear both, and nothing else writes either. Both
 readers - `Ptcl_Alloc` and the spawn helper at `0x8042b350` - bound an id by the count alone. So copy a
-bank's pointers into an array of your own, append descriptors held anywhere, point `psGeneratorDesc[bank]`
+bank's pointers into an array of your own, append descriptors held anywhere, point `stc_ps_generator_desc[bank]`
 at the array and raise the count, and an emitter naming an appended id draws from a descriptor no other
 id reaches. Effect ids arrive whole: the spawn helpers `Effect_SpawnSync` (`0x80236c40`) dispatches to
 take the bank as `id / 10000` and hand the id itself to `Ptcl_Alloc`, so a bank has room far past its
@@ -260,8 +260,8 @@ callback, and links the particle into its render-group list.
 
 ### PtclDesc and the fields it seeds
 
-`psGeneratorDesc[bank][id]` holds one `PtclDesc` per generator a bank installed; `EfPtclVehicle.dat`
-is bank 0 with 52 of them. Both `psGeneratorDesc` (`0x8058c708`) and `psGeneratorCount`
+`stc_ps_generator_desc[bank][id]` holds one `PtclDesc` per generator a bank installed; `EfPtclVehicle.dat`
+is bank 0 with 52 of them. Both `stc_ps_generator_desc` (`0x8058c708`) and `stc_ps_generator_count`
 (`0x8058c608`) are rebuilt on every scene load that installs banks, so a descriptor must be
 re-resolved rather than cached. The struct itself is declared in `particle.h`; what the header does
 not say is where each field lands in the 148-byte node:
@@ -421,8 +421,8 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x8023603c` | `Effect_InstallBankGroup` | resolve a bank's `_ptcl`/`_texg`/`_ref` symbols |
 | `0x802360b8` | `Effect_InstallBankGroupReloc` | same, with a `psRelocDataBanks` pass first |
 | `0x80235394` | `Ptcl_LoadEfPtclVehicle` | load `EfPtclVehicle.dat` and install it as bank 0 |
-| `0x801c4f98` | `Machine_StoreVcDataPtr` | binds a machine's `vcData`, including its generator IDs |
+| `0x801c4f98` | `MachineGObj_StoreVcDataPtr` | binds a machine's `vcData`, including its generator IDs |
 | `0x8058cce8` | particle render-group bank array | 3x `u32[32]`: owner / head / tail |
-| `0x8058c708` | `psGeneratorDesc` | `descTable[bank][id]` |
-| `0x8058c608` | `psGeneratorCount` | per bank, bounds for `id` |
+| `0x8058c708` | `stc_ps_generator_desc` | `descTable[bank][id]` |
+| `0x8058c608` | `stc_ps_generator_count` | per bank, bounds for `id` |
 | `0x80504fe8` | descriptor-program jump table | 128 entries, indexed by `opcode - 0x80` |

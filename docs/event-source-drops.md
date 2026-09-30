@@ -13,13 +13,13 @@ Each row is 0x10 bytes: an `ItemKind` followed by six `u16` weight columns, one 
 | `chance_chamber` | Secret chamber |
 | `chance_ufo` | UFO |
 
-Star pole, event pillar, volcano walls and houses all share the destructible pool; only Dyna Blade keys off `chance_dyna`.
+The star pole and the event pillars share the destructible pool; only Dyna Blade keys off `chance_dyna`. City Trial's HP-coll props (volcano walls, volcano-base holes, houses) do not use this table: their broken-state callback `zz_80109458_` spawns each prop's own item list through `CityEvent_GetRandomItem`.
 
 **The array is indexed positionally by other code, so rows must never be reordered or compacted.** Gating a kind off means zeroing all six of its columns in place - that is what `item_spawn_filter.c` does in one pass, over every row the archipelago mod's combined locked predicate (abilities, patches, individual items) rejects. `custom_items` adds rows by copying the stage's rows into a static array, appending after them, and repointing `item_desc->event_source_drop`/`_num` at the copy (`item_registry.c`); the per-event re-bias overwrites that pointer, so it is re-applied by `CustomItemRegistry_ReinjectPools`.
 
 ## Drop Pipeline
 
-Rock and house breakables call their drop helper from the destruction callback at `obj+0x100`; coral calls it directly. All three - `GrYakuBreakRock_DropItems` (0x8010203c), `GrYakuBreakHouse_DropItems` (0x80102794), `GrYakuBreakCoral_DropItems` (0x801040fc) - funnel into `City_SpawnMiscItems` (0x80104db0) with a per-instance drop descriptor.
+`GrYakuBreakRock_DropItems` (0x8010203c) and `GrYakuBreakCoral_DropItems` (0x801040fc) are `on_damage_callback`s at `obj+0x100`; `GrYakuBreakHouse_DropItems` (0x80102794) is a descriptor `coll_func`, and `hitBigStar` (0x80103eb8, the BreakCoral `coll_func`) also drops directly on a force break. All four funnel into `City_SpawnMiscItems` (0x80104db0) with a per-instance drop descriptor.
 
 `City_SpawnMiscItems` picks the emitter from a shape flag at `desc[8]` (`+0x20`): value `1` -> `shootPowerUps?` (directed cone, 0x801058c0), value `0` or lower -> `City_SpawnMiscItemsRing` (omnidirectional, 0x80104e10). Values > 1 hit an assert. (The trailing `?` is part of the map name, marking an unconfirmed signature.)
 
@@ -36,23 +36,23 @@ Both emitters read `drop_source` from `desc[7]` (`+0x1c`). If it is not -1 they 
 | 2 | `chance_meteor` | `zz_8021efd8_` (meteor actor) |
 | **3** | **`chance_destructible`** | only via `City_SpawnMiscItems` |
 | 9 | `chance_chamber` | `spawnSecretChamberItems` (0x8010a998) |
-| 12 | `chance_ufo` | the UFO's five state thinks: `CityUFO_State0Think` (0x8010b024), `CityUFO_State1Think` (0x8010b714), `spawnUFOItems` (0x8010be88), `CityUFO_State3Think` (0x8010c560), `CityUFO_State4Think` (0x8010cca4) |
+| 12 | `chance_ufo` | the UFO's five state thinks: `CityUFO_State0Think` (0x8010b024), `CityUFO_State1Think` (0x8010b714), `CityUFO_State2Think` (0x8010be88), `CityUFO_State3Think` (0x8010c560), `CityUFO_State4Think` (0x8010cca4) |
 
 `chance_destructible` (input 3) is **never passed as a literal** by any caller. It is reached exclusively through the per-instance descriptor's `drop_source` field, populated from stage data - which is why one drop column is shared by every yaku-break object that drops items.
 
 ## Destructible Sources
 
-Destructible objects in City Trial are a family of `gryakubreak*.c` source files. Only three emit items, and all three route through `chance_destructible`:
+Destructible objects are a family of `gryakubreak*.c` source files. Only three emit items this way, and all three route through `chance_destructible`:
 
 | Source file | Drop helper | Examples |
 |---|---|---|
-| `gryakubreakrock.c` | `GrYakuBreakRock_DropItems` (0x8010203c) | volcano walls, **event pillars** - the `event_pillar` event (0x80111604) calls `zz_80101a00_`, which assigns the rock destroy callback |
-| `gryakubreakhouse.c` | `GrYakuBreakHouse_DropItems` (0x80102794) | houses |
-| `gryakubreakcoral.c` | `GrYakuBreakCoral_DropItems` (0x801040fc), `hitBigStar` (0x80103eb8) | "BigStar" - the **star pole** structure. Despite the `coral` filename, in shipped City Trial these are the tall poles with stars on top. |
+| `gryakubreakrock.c` | `GrYakuBreakRock_DropItems` (0x8010203c), `on_damage_callback` | the Pillar event's **huge pillars** (`YAKUKIND_EVENTPILLAR`, 40) only - `event_pillar` (0x80111604) calls `zz_80101a00_`, which installs it, and kind 40's state 1 (`zz_80101ca4_`) re-installs it. The file's other kind, 39 (Frozen Hillside), never does |
+| `gryakubreakhouse.c` | `GrYakuBreakHouse_DropItems` (0x80102794), the `coll_func` of kinds 22/23 | `YAKUKIND_BREAKHOUSE` (22, placed only on the `GrSimple2` test ground) and kind 23, the Destruction Derby 1 rocks. City Trial's houses are the HP-coll kind 38, not this file |
+| `gryakubreakcoral.c` | `GrYakuBreakCoral_DropItems` (0x801040fc) as `on_damage_callback`, `hitBigStar` (0x80103eb8) as `coll_func` | Sky Sands coral (`YAKUKIND_BREAKCORAL`, 24), kind 28 (Celestial Valley) and the City Trial **star pole** (`YAKUKIND_STARPOLE`, 29). Each creator installs `GrYakuBreakCoral_DropItems` right after its initial state change (star pole: `0x801043c8`), and `hitBigStar` re-installs it when a weak hit arms the second phase. City Trial's coral is kind 33 in `gryakubreakcoll.c`, which has no drop call |
 
 The other families (`gryakubreakicicle.c`, `gryakuanimfloor.c`, `gryakubreakfloor.c`, `gryakubreakfan.c`, `gryakubreakcommon.c`) have no drop call at all.
 
-Each drop-capable family gates the spawn on a NULL check of an optional drop-descriptor pointer inside its per-instance param block: `param[0x24]` for rock, `param[0x28]` for coral, `param[0x30]` for house. If it is NULL the destruction proceeds with no drops. So two instances of the same yaku-break kind behave differently purely by stage data: in City Trial the star pole instances carry a non-NULL descriptor with `drop_source = 3`, while coral-shaped instances (if any are placed) leave the pointer NULL and silently skip the drop call.
+Each drop-capable family gates the spawn on a NULL check of an optional drop-descriptor pointer inside its per-instance param block: `param[0x24]` for rock, `param[0x28]` for coral, `param[0x30]` for house. If it is NULL the destruction proceeds with no drops. So two instances of the same yaku-break kind can behave differently purely by stage data: in City Trial the star pole carries a non-NULL descriptor with `drop_source = 3`, and a placement that leaves the pointer NULL silently skips the drop call.
 
 ## Enumerated Table - City Trial (`GrCity1.dat`)
 

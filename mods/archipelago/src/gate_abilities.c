@@ -23,7 +23,7 @@ int GateAbilities_IsItemLocked(u8 it_kind)
     return ck != COPYKIND_NONE && !IsAbilityUnlocked(ck);
 }
 
-// Replaces Rider_CheckAndGiveAbility (0x80192650), the single entry point for copy
+// Replaces RiderGObj_CheckAndGiveAbility (0x80192650), the single entry point for copy
 // abilities from item pickups and enemy interactions. Ability_GiveItem calls
 // Rider_GiveAbility directly, so AP grants bypass this gate.
 int GateAbilities_CheckAndGiveAbility(GOBJ *gobj, int kind)
@@ -64,7 +64,7 @@ static int RandomUnlockedAbility()
 }
 
 // Replaces randomAbility_giveAbility (0x801a61d4): a locked wheel result is swapped
-// for a random unlocked ability. Rider_MarkCopyAbilityObtained is called here with the
+// for a random unlocked ability. Ply_MarkCopyAbilityObtained is called here with the
 // substituted kind, so the callers' own calls are NOPed in OnBoot.
 int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 {
@@ -85,15 +85,15 @@ int GateAbilities_RandomGiveAbility(RiderData *rd, int kind)
 
     Rider_AbilityRemoveModel(rd);
     Rider_AbilityClearQueued(rd);
-    Rider_RecordCopyAbility(rd->ply, kind);
-    Rider_MarkCopyAbilityObtained(rd->ply, kind);
+    Ply_RecordCopyAbility(rd->ply, kind);
+    Ply_MarkCopyAbilityObtained(rd->ply, kind);
     stc_ability_init_table[kind](rd);
     return 1;
 }
 
 // Copy-ability theme per enemy slot. T0/T1/T2 share this 24-slot mapping - the theme
 // follows the archive (data_index), not the tier flags.
-static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
+static const s8 enemy_slot_copykind[ENEMYKIND_ENEMIES_PER_TIER] = {
     COPYKIND_NONE,    // 0  Broom Hatter
     COPYKIND_NONE,    // 1  Broom Hatter (dup)
     COPYKIND_NONE,    // 2  Bronto Burt
@@ -102,10 +102,10 @@ static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
     COPYKIND_SWORD,   // 5  Sword Knight
     COPYKIND_NONE,    // 6  Cappy
     COPYKIND_NONE,    // 7  Cappy (flags=4)
-    COPYKIND_WHEEL,   // 8  Wheelie
+    COPYKIND_TIRE,   // 8  Wheelie
     COPYKIND_FIRE,    // 9  Phan Phan / Heat Phan-Phan
     COPYKIND_SLEEP,   // 10 Noddy
-    COPYKIND_FREEZE,  // 11 Chilly
+    COPYKIND_ICE,  // 11 Chilly
     COPYKIND_BIRD,    // 12 Flappy
     COPYKIND_PLASMA,  // 13 Plasma Wisp
     COPYKIND_NONE,    // 14 Gordo
@@ -115,7 +115,7 @@ static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
     COPYKIND_FIRE,    // 18 Dayl
     COPYKIND_FIRE,    // 19 Dayl (flags=4)
     COPYKIND_TORNADO, // 20 Caller (internal: Shaturn)
-    COPYKIND_MIC,     // 21 Walky
+    COPYKIND_MIKE,     // 21 Walky
     COPYKIND_NONE,    // 22 Waddle Dee Truck
     COPYKIND_NONE,    // 23 Waddle Dee
 };
@@ -123,9 +123,9 @@ static const s8 enemy_slot_copykind[ACTORID_ENEMIES_PER_TIER] = {
 // T0/T1/T2 fold to the same slot; specials are all NONE except SP Sword Knight (0x49).
 static CopyKind EnemyIDToCopyKind(int enemy_id)
 {
-    if (enemy_id >= ACTORID_TIER0_START && enemy_id < ACTORID_SPECIAL_START)
-        return enemy_slot_copykind[(enemy_id - ACTORID_TIER0_START) % ACTORID_ENEMIES_PER_TIER];
-    if (enemy_id == ACTORID_SP_SWORD_KNIGHT)
+    if (enemy_id >= ENEMYKIND_TIER0_START && enemy_id < ENEMYKIND_SPECIAL_START)
+        return enemy_slot_copykind[(enemy_id - ENEMYKIND_TIER0_START) % ENEMYKIND_ENEMIES_PER_TIER];
+    if (enemy_id == ENEMYKIND_SP_SWORD_KNIGHT)
         return COPYKIND_SWORD;
     return COPYKIND_NONE;
 }
@@ -298,7 +298,7 @@ void GateAbilities_On3DLoadEnd()
 
 void GateAbilities_OnBoot()
 {
-    CODEPATCH_REPLACEFUNC(Rider_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility);
+    CODEPATCH_REPLACEFUNC(RiderGObj_CheckAndGiveAbility, GateAbilities_CheckAndGiveAbility);
     CODEPATCH_REPLACEFUNC(randomAbility_giveAbility, GateAbilities_RandomGiveAbility);
     // GateAbilities_RandomGiveAbility marks the substituted kind instead.
     CODEPATCH_REPLACEINSTRUCTION(0x801ae874, 0x60000000); // NOP: randomAbility_aPress bl MarkCopyAbilityObtained

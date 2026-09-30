@@ -78,7 +78,6 @@ int APCheckDetect_IsSet(int ck)
 }
 
 // Coral is yakumono descriptor 33.
-#define AP_CORAL_DESC_ID 33
 
 // Places in the city a rider has to reach on foot, and the radius that counts as
 // having reached one.
@@ -364,7 +363,7 @@ static void SampleEvent(RiderData *rd, EventRun *ev)
     {
         // Rewritten by this event's start, so current while the event is active.
         GOBJ *lh = *stc_lighthouse_gobj;
-        if (!lh || GrYakumono_GetState(lh) != LIGHTHOUSE_STATE_LIT)
+        if (!lh || YakumonoGObj_GetState(lh) != LIGHTHOUSE_STATE_LIT)
             break;
         YakumonoData *yd = lh->userdata;
         int light_num = yd->data_ptr->lighthouse->light_num;
@@ -392,7 +391,7 @@ static int IsMidMicBlast(int ply)
         return 0;
 
     RiderData *rd = rg->userdata;
-    return rd->copy_kind == COPYKIND_MIC &&
+    return rd->copy_kind == COPYKIND_MIKE &&
            (rd->status == RDSTATE_MIKESING || rd->status == RDSTATE_MIKEEND);
 }
 
@@ -442,7 +441,7 @@ static void APCheckDetect_PerFrame(GOBJ *rg)
     // Only the copy-wheel grant paths set this mask, so a Mic panel picked up off
     // the ground does not count - the same wheel-only demand vanilla's Bomb and
     // Sleep cells make.
-    if (st->copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC))
+    if (st->copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIKE))
         APCheckDetect_Observe(APCK_MIC_COPY_CHANCE);
 
     if (SameCopyStreak(st))
@@ -544,7 +543,7 @@ void APCheckDetect_On3DLoadEnd(void)
 
     in_city_trial = 1;
     predicted_stadium = -1;
-    coral_total = Gr_GetYakumonoSpawnTotal(AP_CORAL_DESC_ID);
+    coral_total = Gr_GetYakumonoSpawnTotal(YAKUKIND_CORAL);
 
     OSReport("[APCheckDetect] Sampling %d player(s) (coral total %d)\n",
              AttachSamplers(APCheckDetect_PerFrame), coral_total);
@@ -658,14 +657,14 @@ static void APCheckDetect_EnemyDefeat(int ply, void *attacker_log, GOBJ *enemy)
 }
 
 // Replaces the one bl Ply_IncrementYakumonoBreakCount, inside
-// GrYaku_IncrementBreakCount, the single path every break family credits through.
+// YakumonoGObj_IncrementBreakCount, the single path every break family credits through.
 // PlayerStats.yakumono_break only counts the props that player broke, so the coral
 // objective counts here instead - a CPU breaking coral fills the same round total.
-static void APCheckDetect_YakumonoBreak(int ply, int desc_id)
+static void APCheckDetect_YakumonoBreak(int ply, YakuKind kind)
 {
-    Ply_IncrementYakumonoBreakCount(ply, desc_id);
+    Ply_IncrementYakumonoBreakCount(ply, kind);
 
-    if (desc_id != AP_CORAL_DESC_ID || coral_total <= 0)
+    if (kind != YAKUKIND_CORAL || coral_total <= 0)
         return;
 
     coral_broken++;
@@ -725,14 +724,14 @@ static int PhotoFinish(const StadiumResults *r)
 }
 
 // One bit per KirbyColor a human has finished an Air Ride race as. Like the Purple
-// SINGLE RACE objective this needs the rider-kind test: Ply_GetColor reads
+// SINGLE RACE objective this needs the rider-kind test: Ply_GetDescColor reads
 // PlayerDesc.color, a KirbyColor only for a Kirby rider.
 static void RecordRaceColor(const GameData *gd, int p)
 {
     if (gd->ply_desc[p].rider_kind != RDKIND_KIRBY)
         return;
 
-    int color = Ply_GetColor(p);
+    int color = Ply_GetDescColor(p);
     if (color < 0 || color >= KIRBYCOLOR_NUM)
         return;
 
@@ -842,10 +841,10 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
                 continue;
             if (PlyMachineKind(p) == VCKIND_BULK)
                 APCheckDetect_Observe(APCK_SR1_BULK);
-            // Ply_GetColor reads PlayerDesc.color, a KirbyColor only for a Kirby
+            // Ply_GetDescColor reads PlayerDesc.color, a KirbyColor only for a Kirby
             // rider - the stadiums are reachable from a Dedede match too.
             if (Gm_GetGameData()->ply_desc[p].rider_kind == RDKIND_KIRBY &&
-                Ply_GetColor(p) == KIRBYCOLOR_PURPLE &&
+                Ply_GetDescColor(p) == KIRBYCOLOR_PURPLE &&
                 ap_save->checks.purple_sr1_wins < AP_PURPLE_SR1_NEED)
             {
                 ap_save->checks.purple_sr1_wins++;
@@ -906,7 +905,7 @@ void APCheckDetect_On3DExit(void)
     }
 }
 
-// The vanilla dispatchers also bail while Checklist_IsCacheValid, which gates only the
+// The vanilla dispatchers also bail while Net_IsSessionActive, which gates only the
 // vanilla cells; these objectives record through ap_checks regardless of it.
 static int TimedRunCounts(int ply, AirRideMode mode)
 {

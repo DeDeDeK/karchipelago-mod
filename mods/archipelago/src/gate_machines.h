@@ -4,6 +4,7 @@
 #include "machine.h"
 
 void GateMachines_OnBoot();
+void GateMachines_On3DLoadEnd(void);
 
 // The filters custom_machines gates through, registered once the registry resolves:
 // who gets a select-screen icon, and what a kind weighs in the City Trial field

@@ -23,7 +23,7 @@ a separate C++ mode** operating on `TopRideKirby`, with its own CPU handling
 Two GObj procs on each rider drive the CPU. They run every frame:
 
 ```
-Rider_CPUThink (0x8018fc58)            // proc: decide + fill the virtual pad
+RiderGObj_CPUThink (0x8018fc58)            // proc: decide + fill the virtual pad
   +- if Ply_GetPKind(RiderData.ply) == PKIND_CPU (1):
        _Rider_UpdateCPU (0x80275c70)   // thin wrapper
          +- Rider_UpdateCPU (0x8026beec)            // orchestrator, 4 stages:
@@ -32,7 +32,7 @@ Rider_CPUThink (0x8018fc58)            // proc: decide + fill the virtual pad
               +- Rider_ProcessCPUManeuver (0x8026bf30)   // 3. process (tactical maneuver, CpuData+0x10 -> commands)
               +- Rider_CPUProcessCmd      (0x80275cbc)   // 4. emit    (command stream -> virtual pad)
 
-Rider_InputThink (0x8018ee28)          // proc: read effective input for this frame
+RiderGObj_InputThink (0x8018ee28)          // proc: read effective input for this frame
   +- if Ply_GetPKind == PKIND_CPU:
        RiderData.held   (0x3d8) = Rider_GetCPUButtons(RiderData)  // 0x80275cb0
        RiderData.stickX (0x3ec) = Rider_GetCPUStickX(RiderData)   // 0x80275c90
@@ -43,8 +43,8 @@ Rider_CopyInputToMachine (0x80190c54)  // rider input -> machine
 ```
 
 `Ply_GetPKind` (0x8022c858) returns the `PKIND` of a controller slot
-(`PKIND_HMN`=0, `PKIND_CPU`=1, `PKIND_NONE`). It is distinct from
-`Ply_CheckIfCPU` (0x8000948c), a separate query.
+(`PlayerData.player_kind`: `PKIND_HMN`=0, `PKIND_CPU`=1, `PKIND_NONE`). It is distinct from
+`Ply_GetDescPKind` (0x8000948c), which reads the same kind from `GameData.ply_desc[ply]`.
 
 ### Stage roles
 
@@ -149,7 +149,7 @@ the racing line - so the id space can only ever point the AI at a course node, n
 an arbitrary world point or a moving entity.
 
 Rival pursuit is a **separate channel** that bypasses the id space: the Attack/Patrol
-states read `rival_player_idx` (+0x70) and write the rival's *live* position straight
+states read `rival_ply` (+0x70) and write the rival's *live* position straight
 into `nav_target_pos` (+0xb8) via `Ply_GetPosition`. Driving the `+0x38/+0x44` ids from
 outside is therefore not practical; steer via `nav_target_pos` (+0xb8), re-asserted
 each frame after the decide stage, or write the pad.
@@ -162,7 +162,7 @@ object lists - none are ids an external caller can synthesize.
 
 - **Rival** - `Rider_CPURivalSelect` (0x80264210), shared by states 1, 2/4, 8, and 10
   (Patrol only when its sub-state == 1) - **not** Patrol-exclusive. Re-picks only when
-  `rival_player_idx` (+0x70) == 5 (none) or `rival_reselect_timer` (+0x72) expired; else
+  `rival_ply` (+0x70) == 5 (none) or `rival_reselect_timer` (+0x72) expired; else
   decrements the timer. Scores all 5 slots (skipping self/null/ineligible): distance band
   (close 3 / mid 2 / far 1) **+2** if the rival isn't already engaged, **+2** if the rival
   is human (no `CpuData`), and a low-HP bonus (+1, or +5 when this rider is aggressive)
@@ -204,8 +204,9 @@ object lists - none are ids an external caller can synthesize.
 `Rider_CPUUpdateNavTarget` (0x8026b6d0) is the nearest-node query that assigns
 `target_primary` (+0x38) + its arc (+0x3c); `target_secondary` (+0x44) is a transient
 promotion candidate, cleared after use. Movement along the graph itself goes through
-`Rider_CPUWalkRoute` (0x80264924), which advances by arc-length and returns
-`{node_id, along, side}` - `side` being a discrete link-direction tag (-1/0/+1), not a
+`Rider_CPUWalkRoute` (0x80264924), which advances from a `start` record into an `out`
+record, both `{node_id, along, side}`, stepping with `Spline_GetForward` or
+`Spline_GetBackward` - `side` being a discrete link-direction tag (-1/0/+1), not a
 lateral offset.
 
 The hazard list the steering and dodge logic read is filled by
@@ -251,9 +252,10 @@ absolute is 129, and release-and-hold is 151.)
 
 `RiderData.cpu` (offset 0x778) points to the CPU rider's AI state, allocated only for
 CPU riders and NULL for humans. Its first three fields *are* the virtual pad -
-`buttons` (+0x00), `stick_x` (+0x04), `stick_y` (+0x06) - and the three getters are
-trivial struct reads (`Rider_GetCPUStickX` is `lwz r3,0x778(r3); lha r0,4(r3);
-extsb r3,r0`), so writing those fields is exactly equivalent to pressing the pad.
+`buttons` (+0x00), `stick_x` (+0x04, s16), `stick_y` (+0x06, s16) - and the three getters
+are trivial struct reads (`Rider_GetCPUStickX` is `lwz r3,0x778(r3); lha r0,4(r3);
+extsb r3,r0`, truncating the s16 to the rider's s8 stick), so writing those fields is
+exactly equivalent to pressing the pad.
 
 `struct CpuData` in `externals/hoshi/include/rider.h` maps the whole 0x19c block with
 per-field notes. The fields that matter for influencing behavior are `ai_state`
@@ -383,7 +385,7 @@ the rider's current action/motion-state id (0x00..0x82). Each entry is
 `{u32 id; u32 flags}` (the `id` just re-states the row index); the seeder ORs `flags`
 into `desire_flags`. Selection:
 
-- `status < RiderData+0x20` (which holds **29**) -> **Table 1** at `0x804b7b18`
+- `status < RiderData.common_state_num` (+0x20, which holds **29**) -> **Table 1** at `0x804b7b18`
   (29 entries, ids 0x00..0x1c) - applies to **all rider kinds**.
 - otherwise -> **Table 2** at `0x804b7c00` (102 entries, ids 0x1d..0x82), indexed by
   `status - 29`, but **only when `RiderData.kind` (+0x04) == 0** (Kirby). A
@@ -696,7 +698,7 @@ From then on the pool is only spent down.
 
 **Consumer - `CityTrial_GrowCpuStats` (0x80015a00).** Called every frame from
 `Game_Think` (call site 0x80011f48). Every `gp->ct_cpu_stat_interval` City Trial frames
-(`Gm_GetCityTrialFrame` 0x800132b8), for each slot that is `PKIND_CPU`, still has budget,
+(`Gm_GetRoundFrames` 0x800132b8), for each slot that is `PKIND_CPU`, still has budget,
 and has a valid `Ply_GetCpuLevel` (0x8022d7b0), it reads the slot's 9-entry `stat_aux`
 block (`Ply_GetStatAux` 0x8022d0cc), spends `ct_cpu_stat_rate[cpu_level] * HSD_Randf()`
 of the budget, sprinkles that amount onto the block in sub-1.0 chunks (`HSD_Randi(9)`
@@ -746,11 +748,11 @@ are the shipped defaults.
 ### How it reaches the machine
 
 `Ply_SetStatAux` (0x8022d128) writes the PlayerData `stat_aux` block (+0x68) and, while
-the rider is on a machine, pushes the same values into the machine: `cityTrial_setMasterStats`
+the rider is on a machine, pushes the same values into the machine: `MachineGObj_SetMasterStats`
 (0x801c8258) -> `Machine_SetStatBlockClamped` (0x80194f64, clamps each stat to
 `Patch_GetMinValue`/`Patch_GetMaxValue`) into the machine's added-patch block
 (`MachineData+0x9e8`) -> `Machine_AdjustAttributes` recombines it into the **master stat
-block `MachineData+0x94c`**. That master block is what `cityTrial_getMasterStats`
+block `MachineData+0x94c`**. That master block is what `MachineGObj_GetMasterStats`
 (0x801c81c0) copies back onto the rider every frame while riding. This is the **same
 pipeline patch pickups use** (`Stat_AddClamped` / `Stat_AddClampedAll`, 0x80194d80 /
 0x80194e60, are the pickup primitives), so the growth is indistinguishable downstream
@@ -873,11 +875,11 @@ Top Ride hook (below).
 Because the entire rider/machine pipeline consumes the virtual pad, custom logic only
 has to produce stick + button values - either at `RiderData.cpu` (`+0x00` buttons,
 `+0x04` stick_x, `+0x06` stick_y) after the vanilla brain has run, or at the rider
-input fields (`held` 0x3d8, `stickX` 0x3ec, `stickY` 0x3ed) after `Rider_InputThink`,
+input fields (`held` 0x3d8, `stickX` 0x3ec, `stickY` 0x3ed) after `RiderGObj_InputThink`,
 which bypasses the AI entirely.
 
 The cleanest hook is `_Rider_UpdateCPU` (0x80275c70): a trivial wrapper whose only body
-is `bl Rider_UpdateCPU`, whose sole caller `Rider_CPUThink` already gates it behind
+is `bl Rider_UpdateCPU`, whose sole caller `RiderGObj_CPUThink` already gates it behind
 `Ply_GetPKind == PKIND_CPU` and passes `RiderData*` in `r3`. Trampolining it (or the
 `bl` at 0x8018fc80) yields a CPU-gated entry with the pad in hand and no command-language
 knowledge required - write `cpu->stick_x`/`stick_y`/`buttons` directly. Calling
@@ -912,10 +914,10 @@ charge byte) or full replace both work, on the kirby's 2-axis steer instead of a
 | Ability press-hold table | 0x804b7f30 | per-difficulty ability-press hold frames `{15,12,10,8,6,4,2,1,0}` (idx by `+0x22`), read by `Rider_CPUGetAbilityPressHold` |
 | Steer envelope table | 0x804b7f54 | per-difficulty stick `(step, cap)` pairs (9 entries), read by `Rider_CPUGetSteerEnvelope` |
 | Machine attack-score table | 0x804b8000 | per-machine, stride 0x14: +4/+6/+8 attack scores (base / damage-off / damage-on), +0xc range weight, +0x10 bit 0x40 = priority-target |
-| Machine capability tables | 0x804b8854 / 0x804b89d0 | `CpuMachineCaps`, 19 star / 7 bike rows, stride 0x14: +4 `swap_score` (desirability as a field machine; `Rider_CPUScanCityObjects` skips 0), +8 flags (0x80 may leave it for a better machine, 0x40 brake, 0x20 charge-hold, 0x10 ram-charge, 0x08 no preferred Machine Passage branch), +0xc `charge_release` (a charge-holding CPU holds while the gauge is at or under it). Read by the `Machine_CPU*` accessors at 0x8027699c-0x80276d1c, each splitting `Machine_GetAbsoluteKind` back into a class slot |
+| Machine capability tables | 0x804b8854 / 0x804b89d0 | `CpuMachineCaps`, 19 star / 7 bike rows, stride 0x14: +4 `swap_score` (desirability as a field machine; `Rider_CPUScanCityObjects` skips 0), +8 flags (0x80 may leave it for a better machine, 0x40 brake, 0x20 charge-hold, 0x10 ram-charge, 0x08 no preferred Machine Passage branch), +0xc `charge_release` (a charge-holding CPU holds while the gauge is at or under it). Read by the `MachineGObj_CPU*` accessors at 0x8027699c-0x80276d1c, each splitting `MachineGObj_GetAbsoluteKind` back into a class slot |
 | Machine steer table | 0x804b8f30 | `CpuMachineSteer`, 19 star rows, stride 0x14: +4 / +8 heading-alignment cosines (`Rider_CPUGetMachineAlignCosNear` / `Far`), +0xc turn tolerance in radians (`Rider_CPUGetMachineTurnTolerance`), +0x10 stuck angle (`Rider_CPUGetMachineStuckAngle`). The bike table after it at 0x804b90ac is never read: bikes and riders with no machine get row 0 |
 | Stadium machine pairs | 0x804b8a5c / 0x804b8b24 | `CpuStadiumMachineParam`, 25 each by absolute kind, `{pitch, min_len}` for Air Glider (`Rider_CPUGetAirGliderMachineParam`) and High Jump (`Rider_CPUGetHighJumpMachineParam`) |
-| Machine kind switches | r2 0x805e31a4-0x805e31c0 | `Machine_CPUGetChargeHoldGate` gives Bulk, Hydra, Rocket and Formula a charge-hold gate pair and `Machine_CPUGetChargeReleaseOverride` gives Bulk and Hydra a release level; `Rider_CPUEmitSteerStick` holds the stick up on Hydra and down on Winged and Jet Star once moving, off the cached `CpuData+0x0d` |
+| Machine kind switches | r2 0x805e31a4-0x805e31c0 | `MachineGObj_CPUGetChargeHoldGate` gives Bulk, Hydra, Rocket and Formula a charge-hold gate pair and `MachineGObj_CPUGetChargeReleaseOverride` gives Bulk and Hydra a release level; `Rider_CPUEmitSteerStick` holds the stick up on Hydra and down on Winged and Jet Star once moving, off the cached `CpuData+0x0d` |
 | Desire-flag seed tables | 0x804b7b18 / 0x804b7c00 | `{u32 id; u32 inhibitor_flags}`, stride 8; indexed by `RiderData.status` (+0x1c). Table 1 = 29 entries (ids 0x00..0x1c, all kinds); Table 2 = 102 entries (ids 0x1d..0x82, `kind==0` only, indexed by `status-29`) |
 | Course path-graph object | `stc_grobj_ptr` 0x805dd6cc (r13[0x5ec]) | Per-stage spline node array (`[grobj+0x120]+id*0x1c`); the id space for `target_primary/secondary` |
 | CpuData registry / count | 0x8055de08 / 0x8055de1c | Up to 5 allocated `CpuData*` + a count byte. **Never freed per-rider** (bulk-freed at scene teardown); iterated **only** by a debug-text overlay, never by gameplay |

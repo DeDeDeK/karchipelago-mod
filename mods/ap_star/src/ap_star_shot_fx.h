@@ -15,7 +15,7 @@ void ApStarShotFx_OnBoot(void);
 // Forgets every trail, which belonged to the scene just torn down.
 void ApStarShotFx_OnSceneChange(void);
 
-// Starts drawing a shot. `radius` is its size at cur_scale 1. Returns the handle
+// Starts drawing a shot. `radius` is its size at scale 1. Returns the handle
 // ApStarShotFx_Detach takes, or 0 with every slot in use or no GObj to draw from.
 int ApStarShotFx_Attach(WeaponData *proj, GXColor color, float radius);
 

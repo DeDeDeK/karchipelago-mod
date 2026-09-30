@@ -65,7 +65,7 @@ GrObj  (gr_kind=9, City Trial)
 | 0x800ef618  | `AreaLight_StageInit`                      | Stage-init helper: stack-builds a default `AreaLightData` from the defaults chain and stores the resulting AreaLight at `grobj+0x718`. |
 | 0x800ef864  | `AreaLight_LerpToLive`                     | Adapter called from `Sky_Update`: extracts `grobj+0x718` and dispatches to `AreaLight_Lerp`. |
 | 0x8007a2c0  | `AreaLight_RegistryWalk`                   | Walks the AreaLight registry into a consumer's nearest-lights array. Guards on the kind's walk handler being non-NULL. |
-| 0x80079948  | `AreaLight_BroadcastVisFlag`               | Walks the registry and writes bit 0x80 of byte +0x38 on every matching entry from `light_vis_flag` bit 0. |
+| 0x80079948  | `AreaLight_BroadcastVisFlag`               | Walks the registry and writes `is_visible` (bit 0x80 of byte +0x38) on every entry of the given kind from `light_vis_flag` bit 0. |
 | 0x800eef04  | `Sky_AllocFade`                            | `grobj+0x714 = ScreenFade_Alloc(3)`. |
 | 0x800eef50  | `Sky_BeginFade(grobj, &color, frames)`     | `ScreenFade_GetState(3)` then `ScreenFade_Begin`. |
 | 0x800eefb0  | `Sky_FreeFade`                             | Frees the lbfade slot at scene teardown. |
@@ -99,8 +99,9 @@ The facts that matter for working on this system:
 - A preset is 0x48 bytes and embeds a 0x2C-byte `AreaLightData` at +0x18. Its
   `transition_frames` is the lerp denominator; `fade_color` fires the lbfade overlay and
   is used *only* on transitions.
-- `light_vis_flag` at preset +0x44 is a single bit broadcast (not lerped) into bit 0x80
-  of AreaLight +0x38 by `AreaLight_BroadcastVisFlag`, from `Sky_LoadPreset` only.
+- `light_vis_flag` at preset +0x44 is a single bit broadcast (not lerped) into
+  `AreaLight.is_visible` (bit 0x80 of +0x38) by `AreaLight_BroadcastVisFlag`, from
+  `Sky_LoadPreset` only.
   `AreaLight_Create` force-sets that bit, so the default state is "visible".
 - `AreaLightData.flags & 0x04` decides whether `AreaLight_Lerp` interpolates at all;
   without it the fields snap to target on every call.
@@ -445,13 +446,13 @@ per-face collision-enable flag.
 
 ### Effects that are not HSD lights
 
-- **Lighthouse (yaku desc 68).** `Lighthouse_Create` (0x8010d228) / `Lighthouse_Init`
+- **Lighthouse (`YAKUKIND_LIGHTHOUSE`, 68).** `Lighthouse_Create` (0x8010d228) / `Lighthouse_Init`
   (0x8010d260) are plain yakumono. They iterate a per-instance joint-index list at
   `param[0x0C]` and toggle a render-node visibility bit on a JOBJ. The visible beam is a
   yellow alpha-blended cone mesh revealed by flag toggles - no HSD light, no GXLightID
   consumed, no surface actually lit. The four `YakumonoParam.lighthouse` anim slots (start,
   active, end, inactive) drive matanim / jobj-anim swaps for the spinning beam.
-- **Light Tunnel (`YAKUKIND_LIGHTTUNNEL`).** A textured cylinder with scrolling UVs. Its
+- **Light Tunnel.** A textured cylinder with scrolling UVs. Its
   functions live anonymously inside the gryaku block at 0x8010xxxx (no `Lighttunnel_*`
   symbols in the map).
 - **Bombs, fireworks, projectile flashes, charge auras.** AOBJ-driven MOBJ material color
@@ -559,7 +560,7 @@ projection camera from it. CT never invokes it.
   render flag lives at shadow-node +0x30 (`SimpleShadow_SetRenderEnable`/`Disable`/
   `GetRenderFlag`, 0x8027b524/0x8027b534/0x8027b544).
 - **Ground find is a down-raycast, never a light vector.** Placement uses `EnvColl_Raycast`
-  (0x800d1ac4) on a fixed +/-Y segment (`EventActor_ShadowInit` 0x80200208 builds
+  (0x800d1ac4) on a fixed +/-Y segment (`EventActor_UpdateShadow` 0x80200208 builds
   `pos +/- offset*+Y`).
 - **Size fades with height.** Scale = base x `(maxHeight - height) / maxHeight`, culled past
   `maxHeight`. `SimpleShadow_UpdateSize_` (0x8027b568) writes the scale,

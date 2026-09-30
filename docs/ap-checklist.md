@@ -90,11 +90,10 @@ The descriptor's callbacks bind the framework's presentation to AP's authoritati
   clear_kind)`, which `ap_checks`'s `CODEPATCH_REPLACEFUNC`
   (`APChecks_SetNewUnlockReplacement`) intercepts for `ap_checklist_mode`: on a fresh
   cell it runs `RecordCheck`, which resolves the row via `ChecklistModeRow`, sets the
-  `sent_checks` bit, fires the "Check sent" textbox and re-evaluates goals - and, mid-run
-  (unlock cache invalid), sets `clear[].is_new` and plays the unlock SFX. The framework
-  seeds the cell's `is_new` afterward so the flip-and-sparkle runs even for a check that
-  lands outside a gamemode - a stadium objective latched at `On3DExit`, say - which hits the
-  cache-valid short-circuit.
+  `sent_checks` bit, fires the "Check sent" textbox and re-evaluates goals - and, outside a
+  LAN session (`Net_IsSessionActive`), sets `clear[].is_new` and plays the unlock SFX. The
+  framework seeds the cell's `is_new` afterward regardless, so the flip-and-sparkle runs on
+  the next tab entry even when the replacement skipped the store.
 
 So the AP tab's completion path is unchanged from a plain checklist objective:
 predicate -> `ClearChecker_SetNewUnlock` -> `ap_checks` -> `sent_checks` row -> AP.
@@ -244,10 +243,10 @@ test.
 | 80 | KIRBY MELEE (All) KO 30 enemies as King Dedede | `ply_points[p] >= 30` on `STKIND_MELEE1` or `STKIND_MELEE2` + `ply_desc[p].rider_kind == RDKIND_DEDEDE` |
 | 41 | DESTRUCTION DERBY 3 KO a rival 10x | `ply_points[p] >= 10` on `STKIND_DESTRUCTION3`. For a derby the polymorphic score is `GameData.destruction_derby_ko_num[p]`, which is exactly what the vanilla DD cells count, so this reads the same number vanilla's own DD 3 cell does |
 | 25 | SINGLE RACE 1 1st on Bulk Star | placement + an opponent + `Ply_GetMachineKindAbs(p) == VCKIND_BULK` |
-| 26 | SINGLE RACE 1 1st 3x as Purple | placement + an opponent + `rider_kind == RDKIND_KIRBY` + `Ply_GetColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.checks.purple_sr1_wins`. The rider-kind test is required because `Ply_GetColor` reads `PlayerDesc.color`, which is only a `KirbyColor` for a Kirby rider, and the stadiums are reachable from a Dedede match |
+| 26 | SINGLE RACE 1 1st 3x as Purple | placement + an opponent + `rider_kind == RDKIND_KIRBY` + `Ply_GetDescColor(p) == KIRBYCOLOR_PURPLE`, counted in `APSave.checks.purple_sr1_wins`. The rider-kind test is required because `Ply_GetDescColor` reads `PlayerDesc.color`, which is only a `KirbyColor` for a Kirby rider, and the stadiums are reachable from a Dedede match |
 | 27 | Photo finish in any DRAG RACE | a human and any other finisher with `ply_race_time` within 6 frames (0.10 s at 60 fps), on any of `STKIND_DRAG1`-`STKIND_DRAG4` |
 | 28 | Photo finish on any Air Ride course | same pairing, gated on `MJRKIND_AIR` + `AIRRIDEMODE_RACE` and not looking at the course |
-| 29 | Finish an Air Ride race as every Kirby color | per human `RDKIND_KIRBY` slot with `ply_finished[p]`, `1 << Ply_GetColor(p)` OR-ed into `APSave.checks.race_color_mask`; the predicate wants all 8 bits. Same `MJRKIND_AIR` + `AIRRIDEMODE_RACE` gate, and the same rider-kind test box 26 needs. A player with no color unlocked rides Pink, so Pink can latch unowned - harmless, since the apworld requires all 8 color items to reach the box |
+| 29 | Finish an Air Ride race as every Kirby color | per human `RDKIND_KIRBY` slot with `ply_finished[p]`, `1 << Ply_GetDescColor(p)` OR-ed into `APSave.checks.race_color_mask`; the predicate wants all 8 bits. Same `MJRKIND_AIR` + `AIRRIDEMODE_RACE` gate, and the same rider-kind test box 26 needs. A player with no color unlocked rides Pink, so Pink can latch unowned - harmless, since the apworld requires all 8 color items to reach the box |
 | 34 / 35 | Air Ride 1st place as Meta Knight / King Dedede | `won` + `ply_desc[p].rider_kind == RDKIND_METAKNIGHT` / `RDKIND_DEDEDE`, on any course |
 | 79 | Air Ride 1st place on Archipelago Star | `won` + `PlyMachineKind(p) == GateApStar_MachineKind()`, on any course |
 | 36 | NEBULA BELT finish 1st | `won` |
@@ -346,8 +345,8 @@ same scope the vanilla City Trial cells use.
 | 31 | Visit the flower on top of the volcanic cliffs on foot | the third `foot_visit_checks[]` entry: within 5 units of `(-107.0, 205.1, -847.3)`, on foot. The flower sits on the cliff top, reachable on foot from the surrounding terrain, so the sphere is the same size as the sky garden's rather than the tight one Castle Hall's platform needs. |
 | 32 | Visit the top of the garden in the sky on foot | the fourth `foot_visit_checks[]` entry: within 5 units of `(-67.9, 463.8, -0.3)`, on foot. Vanilla's own "Make your way to the garden in the sky!" cell only asks the player to reach the garden, so the sphere sits on the top surface rather than anywhere on the structure. |
 | 33 | Fly to the highest point possible | `rd->pos.Y >= AP_MAX_ALTITUDE_Y` (1000). A climb into the city's ceiling stops at 1040.3 - a collision, not an apex: vertical velocity is zeroed in one frame and the fall that follows is exactly the stage's `gravity_strength` of 0.025/frame. That ceiling is 460 below `StageNode.oob_max.Y` (1500), so the out-of-bounds lid is never what stops the climb and `calcDistanceFromOOB` cannot measure this. The threshold's 40-unit margin means the contact frame need not be sampled, and it sits far above the sky garden at 464, the highest place reachable without flying. |
-| 43 | Get the Mic ability from the Copy Chance Wheel | `PlayerStats.copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIC)`. Only `Rider_MarkCopyAbilityObtained` (`0x8022f150`) sets that mask, and only the two copy-wheel paths call it (`randomAbility_aPress` `0x801ae7f4`, `randomAbility_autoSelect` `0x801ae890`) - so a Mic panel picked up off the ground does not satisfy it, the same wheel-only demand vanilla's Bomb and Sleep cells make. The mask is MSB-first, bit `15 - CopyKind`. |
-| 74 | In one game, get the same copy ability 3 times in a row | the last three entries of `PlayerStats.copy_history` (`+0x360`) name one `CopyKind`. `Rider_RecordCopyAbility` (`0x8022ee00`) appends every grant whatever its source - a panel, the Copy Chance Wheel, a queued grant, an Archipelago item - so any mix counts. The history holds the last 6, oldest first, dropping the oldest once full; its entry count is the high 5 bits of `copy_history_num` (`+0x378`, `COPY_HISTORY_NUM`). The count has to bound the test: a zeroed history reads `COPYKIND_FIRE` in every entry |
+| 43 | Get the Mic ability from the Copy Chance Wheel | `PlayerStats.copy_chance_mask & COPY_CHANCE_BIT(COPYKIND_MIKE)`. Only `Ply_MarkCopyAbilityObtained` (`0x8022f150`) sets that mask, and only the two copy-wheel paths call it (`randomAbility_aPress` `0x801ae7f4`, `randomAbility_autoSelect` `0x801ae890`) - so a Mic panel picked up off the ground does not satisfy it, the same wheel-only demand vanilla's Bomb and Sleep cells make. The mask is MSB-first, bit `15 - CopyKind`. |
+| 74 | In one game, get the same copy ability 3 times in a row | the last three entries of `PlayerStats.copy_history` (`+0x360`) name one `CopyKind`. `Ply_RecordCopyAbility` (`0x8022ee00`) appends every grant whatever its source - a panel, the Copy Chance Wheel, a queued grant, an Archipelago item - so any mix counts. The history holds the last 6, oldest first, dropping the oldest once full; its entry count is the high 5 bits of `copy_history_num` (`+0x378`, `COPY_HISTORY_NUM`). The count has to bound the test: a zeroed history reads `COPYKIND_FIRE` in every entry |
 | 45-47 | Break 20 blue / 10 green / 10 red boxes in one game | `item_collect[ITKIND_BOXBLUE/GREEN/RED]` - `ItemKind` 0/1/2 *are* the three box colors, and a break bumps the array the same way a pickup does. Vanilla counts boxes only as an all-colors lifetime total (`CityTrialClearRecords.box_total`, its 500/1000 cells), so per-color counts are unclaimed. The thresholds are unequal because the colors are: `GrCity1`'s 9-entry `box_spawn_chances` table rolls blue 45/71, red 14/71 and green 12/71 |
 
 `item_collect` is bumped by `Ply_IncrementItemCollectNum`, which `Machine_OnTouchItem` calls
@@ -399,7 +398,7 @@ walk `timed_run_checks[]`, one `{ clear_kind, mode, GroundKind, machine, frames 
 
 A wrapper counts a player the way the dispatcher does - not a replay (`Gm_IsReplay`),
 `MJRKIND_AIR`, a `PKIND_HMN` slot, and `Gm_GetAirRideMode()` equal to the row's mode - but
-without the dispatcher's `Checklist_IsCacheValid` bail, which only concerns the vanilla cells.
+without the dispatcher's `Net_IsSessionActive` bail, which only concerns the vanilla cells.
 The course is `Gr_GetCurrentGrKind()`, as for the Nebula and Fantasy Meadows gates. The time
 is the value the matching vanilla evaluator reads: `Gm_GetPlayerFinishTime` (`0x800097d0`) for
 Time Attack, and for Free Run `Gm_GetPlayerFreeRunTime` (`0x80009fb8`), the best lap so far,
@@ -499,14 +498,14 @@ Boxes 80 and 81 are played from the Stadium menu. The Trial start never gives a 
 or Meta Knight - their riders' 3D HUD is short-circuited in the Trial city - so a trial's closing
 stadium always has a Kirby rider.
 
-**The yakumono break recorder - the coral box.** `GrYaku_IncrementBreakCount`
+**The yakumono break recorder - the coral box.** `YakumonoGObj_IncrementBreakCount`
 (`0x80105d80`) is where every break family credits its break, and its single
 `bl Ply_IncrementYakumonoBreakCount` at `0x80105da0` is the one call site that function has,
 so `APCheckDetect_OnBoot` repoints it at a wrapper the same way as the two recorders above.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 1 | Break all the coral in one game | a per-round count of breaks with `desc_id` 33 - coral - reaching `Gr_GetYakumonoSpawnTotal(33)`, which is 10 on `GrCity1`. The total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does. The counter is reset in `On3DLoadEnd` alongside the other per-game ones, and gated on a nonzero total, which scopes it to City Trial |
+| 1 | Break all the coral in one game | a per-round count of breaks of `YAKUKIND_CORAL` (33) reaching `Gr_GetYakumonoSpawnTotal(33)`, which is 10 on `GrCity1`. The total is read from the stage rather than hardcoded, exactly as the vanilla Sky Sands "break all coral" cell does for its own coral, which is a different kind (24, `YAKUKIND_BREAKCORAL`, read by `Ply_GetAllCoralBrokenFlag` `0x8022fd48`). The counter is reset in `On3DLoadEnd` alongside the other per-game ones, and gated on a nonzero total, which scopes it to City Trial |
 
 Counting at the credit path rather than reading `PlayerStats.yakumono_break[33 - 0x15]` is what makes
 the box mean "the coral is gone", not "one player broke all of it".
@@ -518,19 +517,19 @@ counter ever reaching 10. The wrapper is also above the vanilla function's own
 
 **The enemy-defeat recorder - the Mic count.** `Ply_RecordEnemyDefeat` (`0x8023205c`) is the
 enemy-side counterpart of `Ply_AddDeath`: it credits a player with an enemy kill, bumping
-`PlayerStats.enemies_defeated`, the per-ACTORID defeat counter and
+`PlayerStats.enemies_defeated`, `enemy_defeat_by_kind[]` and
 `enemy_defeat_by_method[]`. Like the rival recorder it has exactly one call site
 (`0x802022ec`), so `APCheckDetect_OnBoot` repoints that `bl` at a wrapper the same way.
 
 | clear_kind | Objective | Detection |
 |---|---|---|
-| 44 | KIRBY MELEE (All): KO 10 enemies as Mic Kirby in one game | gated on a loaded KIRBY MELEE round (`InStadium()` with `Gm_GetCurrentStadiumKind()` of `STKIND_MELEE1`/`STKIND_MELEE2`, from the Stadium menu or closing a trial), latched in `On3DLoadEnd`; counts a defeat credited to a `PKIND_HMN` slot whose rider holds `COPYKIND_MIC` and is in action state `RDSTATE_MIKESING` (`0x61`) or `RDSTATE_MIKEEND` (`0x62`). The counter is per game, reset in `On3DLoadEnd` alongside the Destruction Derby one |
+| 44 | KIRBY MELEE (All): KO 10 enemies as Mic Kirby in one game | gated on a loaded KIRBY MELEE round (`InStadium()` with `Gm_GetCurrentStadiumKind()` of `STKIND_MELEE1`/`STKIND_MELEE2`, from the Stadium menu or closing a trial), latched in `On3DLoadEnd`; counts a defeat credited to a `PKIND_HMN` slot whose rider holds `COPYKIND_MIKE` and is in action state `RDSTATE_MIKESING` (`0x61`) or `RDSTATE_MIKEEND` (`0x62`). The counter is per game, reset in `On3DLoadEnd` alongside the Destruction Derby one |
 
 The rider's live state is what identifies the blast, not the attack-method index the
-recorder itself keys off. That index - byte 3 of the attacker log - is what vanilla's own
+recorder itself keys off. That index - the attacker log's `attack_data.kind` - is what vanilla's own
 ability cells read back out of `enemy_defeat_by_method[]` (`0xe` Tornado, `0xf`/`0x15`
 exhaled star, `0x10` Quick Spin), and it would be the tighter signal, but the Mic's index is
-not identified: `ability_Mic` (`0x801b3dac`) installs no hitbox of its own, and the rider's
+not identified: `ability_Mike` (`0x801b3dac`) installs no hitbox of its own, and the rider's
 single `TriggerData` (`RiderData+0x674`) takes its cause from the rider archetype once at
 `Rider_Create`. Reading the state instead means a *ram* kill landing inside the blast
 animation also counts - the same direction of error the item-collect objectives accept, and
@@ -548,7 +547,7 @@ other Mic source: neither `GrPasture1` nor `GrColosseum5` ships an `ItemNode`, s
 panels spawn there.
 
 Of the two, **only KIRBY MELEE 2 can supply the ability**. `GrColosseum5`'s spawn table
-carries Walky as `ACTORID_T1_WALKY` (`0x2D`) across 54 of its 285 positions - four by direct
+carries Walky as `ENEMYKIND_T1_WALKY` (`0x2D`) across 54 of its 285 positions - four by direct
 reference (weight 5/100) and the rest through meta-groups `0x53`/`0x55` - which works out to
 roughly 0.26% of the enemies that actually spawn. `GrPasture1`'s 28-entry mode-2 table
 contains no Walky of any tier, and mode 2 does no meta expansion that could introduce one, so
@@ -598,9 +597,9 @@ Archipelago items spawn `ITSPAWN_DIRECT` (0) and are picked up on the spot, so F
 ignores type 0: a fake-patch trap cannot fail the run and a patch sent from another world cannot
 pad it. Fakes spawn from boxes (2) and the sky (1).
 
-**Rail Fire.** `event_stationFire_start` creates one yakumono desc 65 (`YAKU_DESC_RAILFIRE`) per
+**Rail Fire.** `event_stationFire_start` creates one yakumono of kind 65 (`YAKUKIND_RAILFIRE`) per
 event position - `bgm_sky[6]` holds 10 positions in 5 pairs, one per station, and nothing else
-creates desc 65. The hit is static for the whole event. The `rail_stations[]` centres are each
+creates kind 65. The hit is static for the whole event. The `rail_stations[]` centres are each
 pair's midpoint:
 
 | Station | Positions | Centre |
@@ -615,7 +614,7 @@ Every fire is within 75 units of its own centre and the closest two centres are 
 the rider's nearest centre names the station unambiguously. The shortest tour of all five is
 about 4130 units, some 1650 frames at 2.5 units/frame, against a 3000-frame event.
 
-**Lighthouse.** The lighthouse is permanent stage yakumono desc 68. The event's start stores it at
+**Lighthouse.** The lighthouse is permanent stage yakumono kind 68 (`YAKUKIND_LIGHTHOUSE`). The event's start stores it at
 `stc_lighthouse_gobj` (`r13+0x670`) and turns it on, and its lights are lit in yakumono state 3.
 Its parameter arm names the lamp joints (`light_joints`, 149 and 153 on GrCity1, `light_num` 2)
 and the beam shape (`beam_len` 250, `beam_slope` 40, `beam_base` 0.2). The game's heal test walks
@@ -638,7 +637,7 @@ menu round reads `CITYMODE_STADIUM` - so the player sees the miss, and a random 
 trial's city load clears the guess. PREDICTION carries weight 200 in every stadium group against
 10-60 for the rest, and is once-only, so most trials make one prediction.
 
-**UFO.** The UFO (yakumono desc 0x43) flies one of the stage's paths through a five-state script
+**UFO.** The UFO (yakumono kind 0x43, `YAKUKIND_UFO`) flies one of the stage's paths through a five-state script
 and ends the event itself when it leaves; the player cannot stop it. Each state drops a ring of
 items relative to a UFO joint, all with `spawn_type` 9 and a lifetime that ends with the stop.
 Slot 0 of every ring is a hardcoded `ITKIND_ALLUP` (`li r29, 20`), the others come from the UFO
@@ -650,7 +649,7 @@ comes from stage data.
 
 **Machine Formation.** The formation is five riderless `Machine_Create` machines. While one flies,
 `MachineData.formation_slot` (`+0x19`) holds its slot 0-4; every other machine reads
-`MACHINE_FORMATION_NONE` (5), set by `Machine_StoreVcDataPtr`. A bump, hit, boarding or destroy
+`MACHINE_FORMATION_NONE` (5), set by `MachineGObj_StoreVcDataPtr`. A bump, hit, boarding or destroy
 takes a machine out of the formation and back to 5. A real bump in
 `Machine_CheckMachineBumpCollision` calls `Machine_EnterHitReaction` on the other machine
 (`0x801dacb8`) and then on this one (`0x801dacc0`). The first of those takes the formation machine

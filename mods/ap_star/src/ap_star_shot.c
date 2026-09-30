@@ -382,7 +382,7 @@ static int PlayerTarget(int ply, Vec3 *out)
     MachineData *md = mg != NULL ? (MachineData *)mg->userdata : NULL;
     if (md != NULL && Rider_IsOnMachine(rd))
     {
-        if (Machine_IsDead(md))
+        if (md->is_dead)
             return 0;
         *out = md->pos;
     }
@@ -413,7 +413,7 @@ static float Alignment(const Vec3 *pos, const Vec3 *dir, const Vec3 *target, int
 }
 
 // Swells in over the first frames and shrinks out over the last, since lifetime ends
-// in a plain GObj_Destroy. cur_scale sizes the model, the hitbox and the render cull
+// in a plain GObj_Destroy. The weapon's scale sizes the model, the hitbox and the render cull
 // together. Runs at prio 1, ahead of the lifetime decrement, so a shot with one frame
 // left is already down.
 static void ShotThink(void *p)
@@ -425,12 +425,12 @@ static void ShotThink(void *p)
         float t = (float)(proj->lifetime - 1) / (float)SHOT_FADE_FRAMES;
         if (t < 0.0f)
             t = 0.0f;
-        proj->cur_scale = SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t;
+        proj->scale = SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t;
     }
     else if (proj->frame_counter <= SHOT_GROW_FRAMES)
     {
         float t = (float)proj->frame_counter / (float)SHOT_GROW_FRAMES;
-        proj->cur_scale = SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t;
+        proj->scale = SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t;
     }
 }
 
@@ -445,7 +445,7 @@ static void ShotSteer(void *p)
         return;
 
     int flat = st->grounded;
-    Vec3 dir = { proj->velocity.X, flat ? 0.0f : proj->velocity.Y, proj->velocity.Z };
+    Vec3 dir = { proj->vel.X, flat ? 0.0f : proj->vel.Y, proj->vel.Z };
     float speed2 = VECSquareMag(&dir);
     if (speed2 < 0.0001f)
         return;
@@ -461,7 +461,7 @@ static void ShotSteer(void *p)
     if (st->target >= 0)
     {
         if (PlayerTarget(st->target, &tp))
-            best = Alignment(&proj->position, &dir, &tp, flat, &aim);
+            best = Alignment(&proj->pos, &dir, &tp, flat, &aim);
         if (best < HOMING_CONE_COS)
             st->target = -1;
     }
@@ -472,7 +472,7 @@ static void ShotSteer(void *p)
         {
             if (ply == st->owner_ply || !PlayerTarget(ply, &tp))
                 continue;
-            float c = Alignment(&proj->position, &dir, &tp, flat, &to);
+            float c = Alignment(&proj->pos, &dir, &tp, flat, &to);
             if (c >= best)
             {
                 best = c;
@@ -507,10 +507,10 @@ static void ShotSteer(void *p)
         nd.Z = dir.Z * c + perp.Z * k;
     }
 
-    proj->velocity.X = nd.X * speed;
-    proj->velocity.Z = nd.Z * speed;
+    proj->vel.X = nd.X * speed;
+    proj->vel.Z = nd.Z * speed;
     if (!flat)
-        proj->velocity.Y = nd.Y * speed;
+        proj->vel.Y = nd.Y * speed;
 }
 
 // Prio 5. Weapon_UpdateEnvColl pushes a shot out of whatever it touched and leaves
@@ -538,15 +538,15 @@ static void ShotFollowGround(void *p)
     if (!ShotStateOf(proj)->grounded)
         return;
 
-    Vec3 from = { proj->position.X, proj->position.Y + SHOT_PROBE_UP, proj->position.Z };
-    Vec3 to = { proj->position.X, proj->position.Y - SHOT_PROBE_DOWN, proj->position.Z };
+    Vec3 from = { proj->pos.X, proj->pos.Y + SHOT_PROBE_UP, proj->pos.Z };
+    Vec3 to = { proj->pos.X, proj->pos.Y - SHOT_PROBE_DOWN, proj->pos.Z };
     Vec3 hit;
 
     if (Raycast_Ground(&from, &to, &hit) < 0)
         return;
 
-    proj->position.Y = hit.Y + SHOT_HOVER;
-    proj->velocity.Y = 0.0f;
+    proj->pos.Y = hit.Y + SHOT_HOVER;
+    proj->vel.Y = 0.0f;
 }
 
 // Flies at the spawn velocity, with no muzzle kick of its own.
@@ -554,7 +554,7 @@ static void ShotPostInit(void *p)
 {
     WeaponData *proj = p;
     Weapon_StateChange(proj, 0, 0.0f, 1.0f, 0);
-    proj->velocity = proj->spawn_velocity;
+    proj->vel = proj->spawn_vel;
 }
 
 // Once a shot has hit something it stops steering, so it cannot wheel back through a
@@ -722,13 +722,13 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
     desc.kind = AP_STAR_SHOT_KIND;
     desc.owner_gobj = rd->gobj;
     desc.owner_gobj2 = rd->gobj;
-    desc.position = muzzle;
+    desc.pos = muzzle;
     desc.forward = dir;
     desc.up = up;
-    desc.velocity_scale = SHOT_SEED_SCALE; // cur_scale starts here and ShotThink grows it
-    desc.velocity.X = dir.X * speed;
-    desc.velocity.Y = dir.Y * speed;
-    desc.velocity.Z = dir.Z * speed;
+    desc.scale = SHOT_SEED_SCALE; // scale starts here and ShotThink grows it
+    desc.vel.X = dir.X * speed;
+    desc.vel.Y = dir.Y * speed;
+    desc.vel.Z = dir.Z * speed;
     desc.type_flag = 1;
     desc.charge = 1.0f;
 
@@ -792,12 +792,12 @@ static void TryFire(RiderData *rd)
         Fire(rd, md, r, pod);
 }
 
-// Both callers of AS_StarChargeRelease (0x801abc64). Call replacements rather than
+// Both callers of RiderState_StarChargeReleaseEnter (0x801abc64). Call replacements rather than
 // a hook on the entry, which has no instruction to displace without losing LR.
 static void ApStarShot_ChargeRelease(RiderData *rd)
 {
     TryFire(rd);
-    AS_StarChargeRelease(rd);
+    RiderState_StarChargeReleaseEnter(rd);
 }
 
 void ApStarShot_OnBoot(void)

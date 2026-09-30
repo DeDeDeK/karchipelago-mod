@@ -209,10 +209,10 @@ static void MainMenu_TitleExit(void *data)
 
         if (md != 0)
         {
-            if (md->audio.x860 != -1)
-                FGM_Stop(md->audio.x860);
-            if (md->audio.x87c_fgm_instance != -1)
-                FGM_Stop(md->audio.x87c_fgm_instance);
+            if (md->audio.surface_loop_fgm != -1)
+                FGM_Stop(md->audio.surface_loop_fgm);
+            if (md->audio.engine_loop_fgm != -1)
+                FGM_Stop(md->audio.engine_loop_fgm);
 
             Machine_FreeAudioEmitter(md);
         }

@@ -281,7 +281,7 @@ Item receipt and application are decoupled. When the game reads an item from the
 The handler is a ladder, and where a range sits in that ladder is what determines its scene requirement:
 
 - **Above any scene check** (apply anywhere, including menus): the four checkbox fillers, patch cap increase, spawn rate up, checklist rewards, permanent patches (save-only; the stat lands at the next round start), and every `*_UNLOCK_` category.
-- **Above the 3D gate but with their own checks**: the cosmetic Kirby scale items (`KirbyScale_HandleItem`, returns RETRY until Kirby models exist) and the Top Ride item gives (`GateTopRideItems_GiveItem`). Both also apply in Top Ride, which uses `MNRKIND_19` and would never satisfy the 3D gate.
+- **Above the 3D gate but with their own checks**: the cosmetic Kirby scale items (`KirbyScale_HandleItem`, returns RETRY until Kirby models exist) and the Top Ride item gives (`GateTopRideItems_GiveItem`). Both also apply in Top Ride, which uses `MNRKIND_TOPRIDE` and would never satisfy the 3D gate.
 - **Top Ride copy-ability remap**: in `MJRKIND_TOP`, an ITKIND copy item is translated to its Top Ride analog via `Ability_ItKindToCopyKind` then `GateTopRideItems_AbilityToItem`, because Top Ride has no `RiderData` Kirbys. Abilities with no TR analog return RETRY and land in City Trial or Air Ride instead.
 - **The 3D gate**: everything below requires major `MJRKIND_CITY` / `MJRKIND_AIR` / `MJRKIND_TOP`, minor `MNRKIND_3D`, and `Gm_GetIntroState() == GMINTRO_END`. The minor check matters: the CSS shares the major, and `intro_state` reads `GMINTRO_END` outside 3D.
 - **Copy ability gives (IDs 328-338)** clear the 3D gate and nothing more. They grant through the rider API (`Ability_GiveItem` -> `Rider_GiveAbility`), which only indexes the static `stc_ability_init_table`, so they apply in every 3D mode including the stadiums and City Trial Free Run, and they bypass the ability unlock gate.
@@ -385,10 +385,10 @@ Each category sets a bit in a save-data mask; see the `gate_*.c` files.
 
   | Index | Engine item | Gating ability |
   |-------|-------------|----------------|
-  | 9  | `TRITEM_FREEZE_FAN` | `COPYKIND_FREEZE` |
+  | 9  | `TRITEM_FREEZE_FAN` | `COPYKIND_ICE` |
   | 11 | `TRITEM_FIRE`       | `COPYKIND_FIRE` |
   | 13 | `TRITEM_BOMB`       | `COPYKIND_BOMB` |
-  | 16 | `TRITEM_WALKY`      | `COPYKIND_MIC` |
+  | 16 | `TRITEM_WALKY`      | `COPYKIND_MIKE` |
 
 - **1 is an engine duplicate.** Index 12 is `TRITEM_PARTY_BALL_ALT` (the KirbyKusdama Party Ball variant). AP exposes only one Party Ball, at index 21 (`TRITEM_PARTY_BALL`); the mod mirrors bit 21's unlock onto bit 12 so both spawn together, and AP never sends ID 912 directly.
 
@@ -573,7 +573,7 @@ Values are defined in `mods/archipelago/src/traplink.h`. Unknown kinds (future a
 
 - **Applying traps**: `TrapLink_PerFrame` is a GObj installed only in 3D and Top Ride scenes. It checks `traplink_receive` gated on `Gm_GetIntroState() == GMINTRO_END` (which only bites in 3D; Top Ride has no intro and defaults to `GMINTRO_END`), then dispatches on the scene major:
   - **City Trial**: picks a random trap from a table (stat downs, sleep, meteors, rail fire, bounce, fake powerups, run amok, fake patch) and applies it through `APItems_HandleItem`. Free Run drops the trap outright, since item data tables aren't loaded and the spawn would crash; stadiums fall back to the Air Ride sleep trap, where riders are always mounted.
-  - **Air Ride**: gives `COPYKIND_SLEEP` to every human rider directly through `Rider_GiveAbility`, bypassing `Rider_CheckAndGiveAbility` so neither the ability gate nor the sleep-send hook re-triggers. Riders not currently on a machine are skipped - the sleep animation's MObj callback calls `Rider_CopyInputToMachine` and would deref a null machine GObj.
+  - **Air Ride**: gives `COPYKIND_SLEEP` to every human rider directly through `Rider_GiveAbility`, bypassing `RiderGObj_CheckAndGiveAbility` so neither the ability gate nor the sleep-send hook re-triggers. Riders not currently on a machine are skipped - the sleep animation's MObj callback calls `Rider_CopyInputToMachine` and would deref a null machine GObj.
   - **Top Ride**: applies `TRITEM_SPEED_DOWN` through the shared give path (`GateTopRideItems_GiveItem` -> `TopRide_KirbyApplyItem`) - a direct apply, not a position spawn. Only items whose TR dispatcher installs a self-debuff state qualify as traps; most TR items buff the user or arm an attack.
 
   If the trap can't apply the flag stays set and it retries next frame; once applied the flag is cleared.

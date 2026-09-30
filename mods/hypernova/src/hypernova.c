@@ -166,7 +166,7 @@ static int StartPlayer(int player, int duration_frames)
         if (PlayerHoldsAbility(rd))
         {
             Rider_AbilityRemoveModel(rd);     // clears copy_kind/powerup_kind
-            Rider_LoseAbilityState_Enter(rd); // spit-out -> neutral
+            RiderState_LoseAbilityEnter(rd); // spit-out -> neutral
         }
     }
     stc_active[player] = 1;

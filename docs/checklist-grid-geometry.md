@@ -131,4 +131,4 @@ instruction patches and points at `REPLACEFUNC` reimplementations reading a per-
 shape.
 
 Geometry writes must come from in-frame mod code: an asynchronous write to these
-JObjs from outside the frame races the per-frame `HSD_JObjAnimAll` tree walk.
+JObjs from outside the frame races the per-frame `JObj_AnimAll` tree walk.

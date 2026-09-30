@@ -68,7 +68,7 @@ Each screen keeps the icons it is offering in its own block of `GameData`, at th
 
 The bytes right after each 20-entry list are live, and there is no slack behind them. Air Ride carries its row-layout flag - 1 when the icons wrap to two rows, read by the input grabbers and the race/free-time updates - at `+0x7a` and its debug-grid flag at `+0x7b`, then four 4-byte per-slot arrays at `+0x7c`, `+0x80`, `+0x84` and `+0x88`. City Trial carries its debug-grid flag at `+0x7a` and the same four arrays at `+0x7b`, `+0x7f`, `+0x83` and `+0x87`. Each debug-grid flag is also read straight off `GameData` by its screen's colour changer, which treats every Kirby colour as unlocked while the flag is 1 - `lbz r0,0x185(r3)` at `0x800216d8` in `CSS_airRide_colorChanger` and `lbz r0,0x24a(r3)` at `0x8002f2bc` in `CitySelect_ChangeColor` - and City Trial's is cleared by `stb r0,0x24a(r3)` at `0x80038d98` in `CitySelect_LoadCityTrial`.
 
-The four arrays are controller-claim state for multi-console (LAN) play: a per-console claimed-pad bitmask, each slot's ordinal on its console, each slot's console index, and each slot's claimed pad (`-1` = none). `CSS_airRide_ModeDispatch` (from `0x8002a220`) and `CitySelect_MinorLoad` (from `0x8003b330`) initialise them before the list is built, and every other reader and writer sits behind the engine's session check, the call hoshi names `Checklist_IsCacheValid` (`0x8007b650`). The list is built exactly once per screen load, always after that initialisation, and no engine code reads a list entry past the count.
+The four arrays are controller-claim state for multi-console (LAN) play: a per-console claimed-pad bitmask, each slot's ordinal on its console, each slot's console index, and each slot's claimed pad (`-1` = none). `CSS_airRide_ModeDispatch` (from `0x8002a220`) and `CitySelect_MinorLoad` (from `0x8003b330`) initialise them before the list is built, and every other reader and writer sits behind the engine's session check, the call hoshi names `Net_IsSessionActive` (`0x8007b650`). The list is built exactly once per screen load, always after that initialisation, and no engine code reads a list entry past the count.
 
 Base `+0x11`..`+0x20` on both screens is 16 bytes no engine code reads; only the block memsets touch them. `custom_machines` moves the three flags there by rewriting the displacement of every instruction that reaches them - Air Ride's row-split to `+0x11` (`GameData+0x11b`) across five base-relative sites, its debug-grid to `+0x12` (`GameData+0x11c`) across five plus the colour-changer read, and City Trial's debug-grid to `+0x11` (`GameData+0x1e1`) across six plus the colour-changer read and the clear. A rebuild then clears only the vanilla list and the vacated flag bytes - 22 bytes on Air Ride (`+0x66`..`+0x7b`), 21 on City Trial (`+0x66`..`+0x7a`). The list can still run to 33 entries, and entries past the 22nd (Air Ride) or 21st (City Trial) land on the controller-claim arrays, which is harmless offline and breaks controller claiming only in LAN play.
 
@@ -155,7 +155,7 @@ For non-bikes (`is_bike = 0`), `CharacterDesc.machine_kind` **is** the VCKIND. F
 - `case 0` (CKIND_COMPACT): **always returns 0** - Compact Star never appears in vanilla Air Ride
 - `case 1` (CKIND_WARP): **always returns 1** - Warp Star always available
 - `case 15, 16, 17` (DRAGOON, HYDRA, FLIGHT): **always returns 0** - City Trial-only
-- All others: map to an Air Ride checklist reward index and query it (`Checklist_IsCacheValid` 0x8007b650 -> `Checklist_CheckCachedUnlock_AirRide` 0x80007e34, else `ClearChecker_CheckUnlocked` 0x80049e24)
+- All others: map to an Air Ride checklist reward index and query it (`Net_IsSessionActive` 0x8007b650 -> `Checklist_CheckCachedUnlock_AirRide` 0x80007e34, else `ClearChecker_CheckUnlocked` 0x80049e24)
 
 | CharacterKind | Reward Index |
 |---|---|
@@ -213,7 +213,7 @@ The other fields worth knowing: 0x10b is the init trigger (`+0x01`), 0x113 the r
 | `CITYMODE_STADIUM` | 1 | `CitySelect_LoadStadium` (0x80039e20) |
 | `CITYMODE_FREERUN` | 2 | `CitySelect_LoadMachineSelect` (0x8003a904) |
 
-`CitySelect_Init` (0x80135060) sets the screen up and `CitySelect_CreatePlayers` (0x801352b0) makes the player GObjs; `CitySelect_MinorThink` (0x8003b4c8) forwards to `CitySelect_Think` (0x80037a90), the main per-frame loop. Input runs through `CitySelect_InputUpdate` (0x80032d34) and the per-player `CitySelect_PlayerThink` (0x800348f8). `CitySelect_InitPlayerMachines` (0x8002ddd8) makes the initial machine assignments, `CitySelect_CreateMachineIcons` (0x8002e3c4) builds the icon grid, and `CitySelect_GetColorAnimFrame` (0x80009630) picks the color-display animation frame.
+`CitySelect_Init` (0x80135060) sets the screen up and `CitySelect_CreatePlayers` (0x801352b0) makes the player GObjs; `CitySelect_MinorThink` (0x8003b4c8) forwards to `CitySelect_Think` (0x80037a90), the main per-frame loop. Input runs through `CitySelect_InputUpdate` (0x80032d34) and the per-player `CitySelect_PlayerThink` (0x800348f8). `CitySelect_InitPlayerMachines` (0x8002ddd8) makes the initial machine assignments, `CitySelect_CreateMachineIcons` (0x8002e3c4) builds the icon grid, and `Gm_GetColorAnimFrame` (0x80009630) picks the color-display animation frame.
 
 ### City Trial Select Data
 
@@ -246,7 +246,7 @@ Each CSS calls its input grabbers once per player per frame from its Think callb
 | Top Ride | `CSS_topRide_colorChanger` | 0x8002a400 |
 | City Trial | `CitySelect_ChangeColor` | 0x8002f238 |
 
-Each cycles the slot's `color[]` through 0-7 and then runs an availability check on the candidate. In vanilla, **colors 0-3 are unconditionally available** (`li r3, 1`) and **colors 4-7 are checklist rewards** - reward indices 15, 16, 17, 18 respectively, queried through the same `Checklist_IsCacheValid` / `ClearChecker_CheckUnlocked` pair the machine check uses. All the branches merge at a single convergence point per function (Air Ride 0x8002176c, Top Ride 0x8002a510, City Trial 0x8002f350), which is where the mod's mask override attaches.
+Each cycles the slot's `color[]` through 0-7 and then runs an availability check on the candidate. In vanilla, **colors 0-3 are unconditionally available** (`li r3, 1`) and **colors 4-7 are checklist rewards** - reward indices 15, 16, 17, 18 respectively, queried through the same `Net_IsSessionActive` / `ClearChecker_CheckUnlocked` pair the machine check uses. All the branches merge at a single convergence point per function (Air Ride 0x8002176c, Top Ride 0x8002a510, City Trial 0x8002f350), which is where the mod's mask override attaches.
 
 ### CPU Level / Handicap Bar Widget
 

@@ -31,10 +31,10 @@ Every frame, each active player slot (City Trial, up to 4) is driven by an eased
 | Lever | Field | Notes |
 |-------|-------|-------|
 | Rider model | `RiderData.model_scale` (+0x348) | Baked into the rider model matrix every frame by `Rider_ApplyModelMatrix` (0x80190848). Writing the field is the whole mechanism, the same one Big/Small Kirby uses. Visual only. |
-| Machine model | `MachineData.model_scale` (+0x310), written as `model_scale_default` (+0x30C) x factor | `Machine_ApplyModelMatrix` (0x801c9074) and its articulated siblings bake `model_scale x model_scale_base` (+0x468) into the model's user matrix every frame. `Machine_StoreVcDataPtr` (0x801c4f98) seeds both +0x30C and +0x310 from the spawn descriptor, and hit-reaction exits restore `model_scale` from +0x30C. Visual only. |
+| Machine model | `MachineData.model_scale` (+0x310), written as `model_scale_default` (+0x30C) x factor | `Machine_ApplyModelMatrix` (0x801c9074) and its articulated siblings bake `model_scale x model_scale_base` (+0x468) into the model's user matrix every frame. `MachineGObj_StoreVcDataPtr` (0x801c4f98) seeds both +0x30C and +0x310 from the spawn descriptor, and hit-reaction exits restore `model_scale` from +0x30C. Visual only. |
 | Machine collision | `MachineData.coll_data` (+0x6F8) -> `shape_data->radius` / `radius2` (+0x30 / +0x34) | The sphere radii `mpColl_GetSphereRadius` reads; see below for what the engine rewrites. |
 | World speed | Per-frame delta of `MachineData.pos` (+0x3E8) | Each frame, the position is pulled back by `(1 - factor)` of the distance moved since the last pass, so only `factor` of the displacement survives. |
-| Camera | Each player camera's eye->interest distance | A shim on the `bl CObj_SetEyePosition` inside `PlyCam_Think` (call site 0x800b3900) moves the final eye toward the interest along their line by `factor`. |
+| Camera | Each player camera's eye->interest distance | A shim on the `bl CObj_SetEyePosition` inside `PlyCamGObj_Think` (call site 0x800b3900) moves the final eye toward the interest along their line by `factor`. |
 
 **The model and collision levers must move together.** The collision system holds the sphere center one radius above the contacting triangle, and the model is drawn around that center, so shrinking the radius lowers the machine's ground-rest height for free. Shrink only the model and it floats inside a full-size sphere; shrink only the sphere and the full-size model clips into the ground.
 
@@ -69,9 +69,9 @@ Uniformly scaling a whole scene, geometry **and** camera rig, produces a pixel-i
 
 FOV is the wrong lever: a wider FOV magnifies but also warps perspective, whereas a dolly preserves it exactly.
 
-The shim replaces the eye-set call inside `PlyCam_Think` (0x800b3540) instead of poking the COBJ from the event loop, for two reasons:
+The shim replaces the eye-set call inside `PlyCamGObj_Think` (0x800b3540) instead of poking the COBJ from the event loop, for two reasons:
 - The camera is recomputed from scratch every frame *after* most game logic, so an external write would be overwritten.
-- `PlyCam_Think`'s own input (`CamData.x14`) is recomputed inside the same function just before it is consumed, so there is nothing to pre-seed.
+- `PlyCamGObj_Think`'s own input (`CamData.x14`) is recomputed inside the same function just before it is consumed, so there is nothing to pre-seed.
 
 Intercepting the final `CObj_SetEyePosition` (0x804018ac) puts the shim downstream of the entire camera pipeline: kind dispatch, C-stick `zoom_amt`, rail/normal transitions. It works regardless of how the eye was produced. The interest was written to the same COBJ by the `bl CObj_SetInterest` one instruction earlier (0x800b38f4), so the shim reads the dolly target straight back off the COBJ, with no capture and no lag.
 
@@ -108,7 +108,7 @@ The camera lever is stateless: the shim is a verbatim passthrough whenever `fact
 
 The camera shim is installed once at boot by `ScaleChange_InstallHooks` (called from `CustomEvents_OnBoot`) and reads the live `factor`, so it follows the same ease for free.
 
-The abort matters because the shim outlives the round. `PlyCam_Think` runs in every minor-18 3D scene: Air Ride, City Trial, stadiums and the attract demo. Without the abort, a round that ended mid-event would keep the dolly in the following stadium and beyond.
+The abort matters because the shim outlives the round. `PlyCamGObj_Think` runs in every minor-18 3D scene: Air Ride, City Trial, stadiums and the attract demo. Without the abort, a round that ended mid-event would keep the dolly in the following stadium and beyond.
 
 ### Tuning knobs
 
@@ -127,7 +127,7 @@ All `#define`s at the top of `event_scale_change.c`:
 
 - **The ground-state sphere is only partly shrunk.** `mpColl_Update` rewrites `radius2` to full size every grounded frame, so the effective radius on the ground is a lerp between the scaled and full radii (see above).
 - **On-foot riders are not collision-shrunk.** Only the machine collision sphere is scaled. A player who dismounts mid-event keeps a full-size on-foot sphere (`RiderData`-side mpColl), and the shrunk model floats slightly. This is rare in City Trial, where riders are almost always mounted.
-- **The camera dolly affects every player view.** `PlyCam_Think` drives every player camera, including all split-screen views, so while the event is active every view dollies in. That is correct for a world-wide event. The shim only adjusts the final eye, not the C-stick `zoom_amt` (`CamData+0x8c`), so a player's manual zoom still applies on top.
+- **The camera dolly affects every player view.** `PlyCamGObj_Think` drives every player camera, including all split-screen views, so while the event is active every view dollies in. That is correct for a world-wide event. The shim only adjusts the final eye, not the C-stick `zoom_amt` (`CamData+0x8c`), so a player's manual zoom still applies on top.
 - **All players shrink, including CPUs.** A machine shrinks only while someone rides it; a loose city machine stays full size, and a machine a player leaves returns to full size at once.
 - **The speed lever scales displacement, not velocity.** A hard knockback exceeding `5 x top_speed_current` in one frame reads as a teleport, and that frame is not slowed. A respawn slides to its target over a few frames instead of snapping. Anything reading raw velocity sees full speed.
 - **`RiderData.model_scale` is shared with Big/Small Kirby.** If the archipelago mod's `kirby_scale` is also driving `model_scale`, this event overwrites it for its duration and restores 1.0 at the end, cancelling an active Big/Small Kirby.
@@ -138,13 +138,13 @@ All `#define`s at the top of `event_scale_change.c`:
 |--------|---------|-------|
 | `Rider_ApplyModelMatrix` | 0x80190848 | Bakes `base x model_scale` into the rider model matrix each frame |
 | `Machine_ApplyModelMatrix` | 0x801c9074 | Machine analogue: bakes `model_scale x model_scale_base` into the machine model's user matrix (articulated siblings at 0x801c9308/9464/9694 do the same per sub-joint) |
-| `Machine_StoreVcDataPtr` | 0x801c4f98 | Seeds `model_scale` and `model_scale_default` from the spawn descriptor |
-| `gmLanMenu_Scale3DObject` | 0x80054414 | Builds an SRT matrix from a scale + 3 vectors and bakes it into a JObj's user matrix (`JObj+0x44`); shared by the rider, machine, item and actor appliers |
+| `MachineGObj_StoreVcDataPtr` | 0x801c4f98 | Seeds `model_scale` and `model_scale_default` from the spawn descriptor |
+| `JObj_SetFromBasis` | 0x80054414 | Builds an SRT matrix from a scale + 3 vectors and bakes it into a JObj's user matrix (`JObj+0x44`); shared by the rider, machine, item and actor appliers |
 | `Machine_PhysicsThink` | 0x801c6368 | Integrates `MachineData.pos` from velocity plus impulse vectors; the displacement the speed lever scales |
 | `Machine_AdjustAttributes` | 0x801c7278 | Re-derives `top_speed_current` from `top_speed_ground` (+0x4f0) / airborne (+0x5ac); its value sizes the teleport threshold |
 | `mpColl_Update` | 0x80245f70 | Per-frame sphere update; stores `f1` into `CollData.radius` and `f2` into `CollShapeData.radius2` unless -1 |
 | `mpColl_GetSphereRadius` | 0x802415a8 | Returns `radius` when it equals `radius2`, else a lerp between them |
 | `Machine_ProcessEnvColl` | 0x801e5108 | Per-frame machine env collision; queries the CollData at `MachineData+0x6F8` |
-| `PlyCam_Think` | 0x800b3540 | Per-frame player-camera update; the `bl CObj_SetEyePosition` at 0x800b3900 is the camera lever's hook site (`bl CObj_SetInterest` at 0x800b38f4) |
+| `PlyCamGObj_Think` | 0x800b3540 | Per-frame player-camera update; the `bl CObj_SetEyePosition` at 0x800b3900 is the camera lever's hook site (`bl CObj_SetInterest` at 0x800b38f4) |
 | `CObj_SetEyePosition` | 0x804018ac | Writes a Vec3 into the COBJ's eye WObj (`COBJ+0x24` -> `WObj+0xC`); the call the shim replaces |
 | `CObj_SetInterest` | 0x804017d4 | Writes a Vec3 into the COBJ's interest WObj (`COBJ+0x28`); the value the shim reads back as the dolly target |

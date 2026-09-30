@@ -31,15 +31,15 @@ Two different lookup tables are keyed off an ID and answer different questions:
 
 1. **ID to per-kind descriptor** - `Effect_GetModelData` (`0x80235190`). Decodes the decimal ID,
    bounds-checks `group` in `[24,37)`, reads the per-group descriptor table pointer at
-   `*(gEffectMgr + 0x24 + group*4)`, then indexes `table[entry*8]` (8-byte stride) for the per-kind
+   `*(stc_effect_mgr + 0x24 + group*4)`, then indexes `table[entry*8]` (8-byte stride) for the per-kind
    `EffectModelDesc *`. This is what model-effect creation uses. Among the resident banks only
    **group 24** is populated, from the `EfCommon.dat` `efModelData` symbol (installed by
    `Effect_InstallModelData`, `0x8023515c`); a per-stage bank would have to ship its own
    model-descriptor symbol to fill groups 25 to 36.
 2. **ID to group index** - `Effect_GetUnkFromEfGroup` (`0x80234cf0`; the name in the map, though it
    maps ID to group rather than the reverse). Returns an `s16` group index from an 8-byte-stride LUT
-   at `*(gEffectMgr + 0x24C)`; valid ID range 1 to 517. Early-outs returning 1 if the busy flag at
-   `gEffectMgr + 0x254` is set.
+   at `*(stc_effect_mgr + 0x24C)`; valid ID range 1 to 517. Early-outs returning 1 if the busy flag at
+   `stc_effect_mgr + 0x254` is set.
 
 Groups 37 and up (the event-actor and machine-hit IDs at `0x5a592`-`0x5a5b9`) are **not** in the
 `[24,37)` descriptor table; an explicit special-case branch in the spawn body handles them.
@@ -49,7 +49,8 @@ Groups 37 and up (the event-actor and machine-hit IDs at `0x5a592`-`0x5a5b9`) ar
 `Effect_SpawnSync` (`0x80236c40`) is the universal entry point, declared in
 `externals/hoshi/include/effect.h`. It is one `0x4ba4`-byte function running to `0x8023b7e4`; the
 map's `Effect_SpawnSync_mid` at `0x8023af88` is a label inside its per-ID `switch`, not a second
-entry point. It returns a 64-bit handle in `{r3, r4}`.
+entry point. It returns a 64-bit handle in `{r3, r4}`, which `ItemData.effect_id` keeps whole;
+`effect.h` declares only the low word, which is enough to test for failure (0).
 
 The third argument is the **EfGroup**, not an owner pointer, and the fourth is an **anchor mode**,
 not a joint index. Both are load-bearing: `efgroup == -1` trips
@@ -101,7 +102,7 @@ Four call sites pin the signature:
 
 | Caller | parent | id | efgroup | mode | Notes |
 |--------|--------|----|---------|------|-------|
-| `Rider_StartInhale` (`0x801ad2c4`) | rider GObj | `0x3a982` | `RiderData.efgroup` | 218 (mouth) | call site `0x801ad374`, args `(rd->gobj, 0x3a982, rd->efgroup, 218, hatJObj, hatJObj, ply)`; handle discarded |
+| `Rider_StartInhale` (`0x801ad2c4`) | rider GObj | `0x3a982` | `RiderData.efgroup2` | 218 (mouth) | call site `0x801ad374`, args `(rd->gobj, 0x3a982, rd->efgroup2, 218, hatJObj, hatJObj, ply)`; handle discarded |
 | `EventActor_SpawnEffect` (`0x8020d30c`) | actor GObj | `0x5a59f`-`0x5a5a1` by kind arg | - | 510 | call site `0x8020d3ac`; stores the handle at actor `+0xA70`/`+0xA74` |
 | `Machine_SpawnHitEffect` (`0x8018dba0`) | machine GObj | caller arg, else fixed `0x5a592` | - | 215 | two mutually exclusive call sites (`0x8018dc44` arg-id, `0x8018dc6c` fallback), not two effects |
 | `TornadoSpawnModel` (`mods/custom_weather/src/tornado.c`) | NULL | `0x3a982` | borrowed from a live rider | **1** | the world-anchored case: a detached, scaled-up whirlwind driven as a tornado funnel |
@@ -152,7 +153,7 @@ and radial scale, and overrides whatever the effect's own animation writes to th
 A model effect is a `GOBJ` carrying an HSD `JOBJ` model, built by `EffectModel_CreateGObj`
 (`0x8023ccb4`):
 
-1. Allocate an `Effect` state struct from a `gEffectMgr` object pool.
+1. Allocate an `Effect` state struct from a `stc_effect_mgr` object pool.
 2. `GObj_Create(entity_class = 25, p_link = 16, p_priority = 0)`.
 3. `GObj_AddUserData(gobj, data_kind = 25, dtor = 0x80233ddc, userdata = Effect)`.
 4. The instance init at `0x80233e24`, `Effect_Init(effect, kind, gobj)`, wires the back-pointers and
@@ -221,7 +222,7 @@ untouched, `0` means the one-shot intro is playing, `1` means looping. Nothing d
 nothing destroys an effect from it. Its only writer is `Effect_SetAnimLoop` (`0x8023ff80`), and the
 loop watcher at `0x8023e6bc` flips `0` to `1` once the intro anim ends, enabling AOBJ looping.
 Writing a nonzero value before the intro finishes is what freezes the animation: the watcher then
-never arms looping.
+never arms looping. Pinning it therefore cannot extend a finite effect; spawn a new one instead.
 
 The **spawn list-node** is a separate allocation (`0x8023475c`) that carries the returned handle and
 the back-pointers: `+0x00` list link, `+0x08` parent GObj (stored at `0x8023b76c`), `+0x10`/`+0x14`
@@ -234,7 +235,7 @@ dereferences to reach the model, exposed as `EFFECT_NODE_GOBJ` in `effect.h`.
 Two distinct globals back the effect system, both SDA/absolute addresses declared as pointer casts in
 `effect.h` rather than in `link.ld`.
 
-**`gEffectMgr` at `0x8055D7A0`** is the effect-instance manager, built by `Effect_InitObjAllocs`
+**`stc_effect_mgr` at `0x8055D7A0`** is the effect-instance manager, built by `Effect_InitObjAllocs`
 (`0x802332c4`):
 
 | Offset | Contents |
@@ -249,7 +250,7 @@ Two distinct globals back the effect system, both SDA/absolute addresses declare
 | `+0x24C` | pointer to the flat 8-byte-stride ID-to-group LUT |
 | `+0x254` | busy/fallback flag checked by `Effect_GetUnkFromEfGroup` |
 
-**`efGlobal` at `0x8058C208`** is the bank-install registry, written when an effect `.dat` loads.
+**`stc_ef_global` at `0x8058C208`** is the bank-install registry, written when an effect `.dat` loads.
 Parallel `u32[64]` arrays indexed by group:
 
 | Array base | Per-group contents |
@@ -262,8 +263,8 @@ Parallel `u32[64]` arrays indexed by group:
 
 `psInitDataBanks` (`0x8042a734`) populates these from a loaded archive's symbols, with a sibling
 installer at `0x8042abe8` sharing its panic strings. **The two stores are independent.**
-`psInitDataBanks` never touches `gEffectMgr` or `efModelData`, `efGlobal` is consumed only by the
-point-particle path, and model-effect descriptor lookup reads only `gEffectMgr+0x24`.
+`psInitDataBanks` never touches `stc_effect_mgr` or `efModelData`, `stc_ef_global` is consumed only by the
+point-particle path, and model-effect descriptor lookup reads only `stc_effect_mgr+0x24`.
 
 ## Bank loading and data files
 
@@ -387,7 +388,7 @@ Practical notes:
 
 ## Boot init
 
-`Effect_Init` (`0x80233908`) runs at boot: `Effect_InitObjAllocs` builds `gEffectMgr` (three object
+`Effect_Init` (`0x80233908`) runs at boot: `Effect_InitObjAllocs` builds `stc_effect_mgr` (three object
 pools, the per-group descriptor array, the ID-to-group LUT), then it allocates the particle and
 generator pools, registers the effect update / draw / cleanup hooks, and loads `EfCommon` plus the
 vehicle particle bank.
@@ -399,7 +400,7 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | Address | Name | Role |
 |---------|------|------|
 | `0x80233908` | `Effect_Init` | boot init |
-| `0x802332c4` | `Effect_InitObjAllocs` | build `gEffectMgr` |
+| `0x802332c4` | `Effect_InitObjAllocs` | build `stc_effect_mgr` |
 | `0x80236c40` | `Effect_SpawnSync` | universal effect spawn (decimal ID) |
 | `0x8023af88` | `Effect_SpawnSync_mid` | mid-function label inside `Effect_SpawnSync`, not an entry point |
 | `0x80240284` | (anchor resolver) | fills the 52-byte placement descriptor from the varargs |
@@ -416,12 +417,12 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x8023e6bc` | (anim loop watcher) | priority 11: arms AOBJ looping once the intro anim ends |
 | `0x8023ff80` | `Effect_SetAnimLoop` | the only writer of `Effect.life` |
 | `0x80235190` | `Effect_GetModelData` | ID to per-kind `EffectModelDesc *` |
-| `0x80234cf0` | `Effect_GetUnkFromEfGroup` | ID to group index via the LUT at `gEffectMgr+0x24C` |
-| `0x8023515c` | `Effect_InstallModelData` | write `gEffectMgr+0x24+group*4` from `efModelData` |
+| `0x80234cf0` | `Effect_GetUnkFromEfGroup` | ID to group index via the LUT at `stc_effect_mgr+0x24C` |
+| `0x8023515c` | `Effect_InstallModelData` | write `stc_effect_mgr+0x24+group*4` from `efModelData` |
 | `0x80236144` | `Effect_ResolveModelData` | resolve the `efModelData` symbol for the installer |
 | `0x80235524` / `0x802354d8` | `Effect_LoadEfCommon` / `Effect_PreloadEfCommon` | load `EfCommon.dat` |
 | `0x80235394` / `0x80235348` | `Ptcl_LoadEfPtclVehicle` / `Ptcl_PreloadEfPtclVehicle` | load `EfPtclVehicle.dat` |
-| `0x8042a734` | `psInitDataBanks` | populate `efGlobal` from a bank's `_ptcl`/`_ref`/`_form` symbols |
+| `0x8042a734` | `psInitDataBanks` | populate `stc_ef_global` from a bank's `_ptcl`/`_ref`/`_form` symbols |
 | `0x8042a874` | `psRelocDataBanks` | file-offset to pointer fixup for a loaded bank |
 | `0x8042abe8` | (sibling bank installer) | shares `psInitDataBanks`' panic strings |
 | `0x80233b74` / `0x80233ba0` | `Ptcl_Think` / `Ptcl_Think2` | point-particle updater thunks (pool masks 0 / `0xFFFD0000`) |
@@ -436,6 +437,6 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x801ad2c4` | `Rider_StartInhale` | spawns the whirlwind from its call site at `0x801ad374` |
 | `0x8020d30c` | `EventActor_SpawnEffect` | spawns actor effects by kind, storing the handle at actor `+0xA70`/`+0xA74` |
 | `0x8018dba0` | `Machine_SpawnHitEffect` | hit effect: caller-supplied ID, else the fixed `0x5a592` fallback |
-| `0x8055D7A0` | `gEffectMgr` | effect-instance manager (SDA global) |
-| `0x8058C208` | `efGlobal` | bank-install registry (4x `u32[64]`) |
+| `0x8055D7A0` | `stc_effect_mgr` | effect-instance manager (SDA global) |
+| `0x8058C208` | `stc_ef_global` | bank-install registry (4x `u32[64]`) |
 | `0x804B51CC` | `EfCommon.dat` descriptor | file descriptor used by `Effect_LoadEfCommon` |

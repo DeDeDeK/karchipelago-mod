@@ -46,31 +46,31 @@ void GateBaseAbilities_StartInhale(RiderData *rd)
     Rider_StartInhale(rd);
 }
 
-// Replaces both bl Rider_QuickSpin_Enter sites: 0x801b7ec0 in Rider_IASACheck_QuickSpin
+// Replaces both bl RiderState_QuickSpinEnter sites: 0x801b7ec0 in RiderState_QuickSpinInterrupt
 // and 0x801b7e58 in Rider_TryQuickSpinNeutral. Kirby only - Dedede and Meta Knight have
 // their own enters below.
 void GateBaseAbilities_QuickSpinEnter(float f, RiderData *rd, int dir, int flag)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
         return;
-    Rider_QuickSpin_Enter(f, rd, dir, flag);
+    RiderState_QuickSpinEnter(f, rd, dir, flag);
 }
 
 // Dedede and Meta Knight have their own quick-spin enters, one call site each:
-// Rider_Dedede_IASACheck_QuickSpin (0x801c05a8) and
-// Rider_MetaKnight_IASACheck_QuickSpin (0x801c3f40).
+// RiderState_DededeQuickSpinInterrupt (0x801c05a8) and
+// RiderState_MetaKnightQuickSpinInterrupt (0x801c3f40).
 void GateBaseAbilities_DededeSpinEnter(RiderData *rd, int dir)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
         return;
-    Rider_Dedede_QuickSpin_Enter(rd, dir);
+    RiderState_DededeQuickSpinEnter(rd, dir);
 }
 
 void GateBaseAbilities_MetaKnightSpinEnter(RiderData *rd, int dir)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
         return;
-    Rider_MetaKnight_QuickSpin_Enter(rd, dir);
+    RiderState_MetaKnightQuickSpinEnter(rd, dir);
 }
 
 // Replaces every bl Machine_IncrementCharge: 0x801ef424 in MachinePhys_Charge, 0x801ef350

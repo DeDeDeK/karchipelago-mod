@@ -73,7 +73,7 @@ static void EnterAssembly(int ply, int machine_index)
     RiderData *rd = rg->userdata;
     rd->respawn_is_bike = e->is_bike;
     rd->respawn_class_slot = e->class_slot;
-    rd->starting_machine_idx = (MachineKind)e->machine_kind;
+    CustomMachineMount_SetRespawnKind(ply, e->machine_kind);
 }
 
 // Replaces the bl LegendaryMachine_PreloadAssemblyArchives at 0x80262be8, the tail of
@@ -154,7 +154,7 @@ int CustomMachineCinematic_Start(int machine_kind, int ply)
     if (mg == NULL || rg == NULL || Gm_IsLegendaryAssembling() || stc_running != NULL)
         return 0;
 
-    // Rider_EnterLegendaryAssembly (0x8019248c) is Kirby-only, and the mount rides
+    // RiderGObj_EnterLegendaryAssembly (0x8019248c) is Kirby-only, and the mount rides
     // on the state it enters, so anyone else would get the whole shot and no machine.
     if (((RiderData *)rg->userdata)->kind != RDKIND_KIRBY)
         return 0;

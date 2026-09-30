@@ -61,8 +61,8 @@ unlock animation has played), `has_reward` (0x08, set by
 | `0x8017f3bc` | `Checklist_Think()` | Checklist state machine (filler placement, unlock animations, cursor) |
 | `0x80181d70` | `Checklist_UpdateCellInfo()` | Per-frame hover display: looks up the reward for the hovered cell, displays text/icon |
 | `0x801822f4` | `Checklist_Init()` | Loads SIS, creates grid cells, calls `SetRewardFlagOnUnlocks` |
-| `0x80007af0` | `Checklist_BuildUnlockBitfields()` | Caches unlock status into the `GameData+0xd50` bitfields, via `ClearChecker_CheckUnlocked` |
-| `0x8007b650` | `Checklist_IsCacheValid()` | 1 when the unlock bitfield cache is valid; the short-circuit both `SetNewUnlock` variants take |
+| `0x80007af0` | `Checklist_BuildUnlockBitfields()` | Snapshots unlock status into `GameData.unlock_cache` (`+0xd50`) via `ClearChecker_CheckUnlocked` when a LAN session connects |
+| `0x8007b650` | `Net_IsSessionActive()` | 1 while a LAN multi-console session runs (net manager `0x80552a30`, `+0x1c`), 0 otherwise. Unlock queries then read `GameData.unlock_cache`, and both `SetNewUnlock` variants return without writing |
 
 ### Cell visibility: the board expands outward
 
@@ -132,7 +132,7 @@ silently skipped. `Text.sis_id` (offset `0x4f`, u8) selects the slot; rendering
 
 - Filler grants increment `checkbox_filler_num` (uncapped u8) and
   `checkbox_filler_list_len` (capped at 5). `Checklist_GrantFiller(mode)` is a static
-  inline in `game.h`.
+  inline in `game.h`; vanilla's own grant caps both counts at 5.
 - Filler placement is handled by `Checklist_Think` states 5-9; state 8 validates that
   the target slot is empty.
 - `checkbox_filler_num` lives in `GameClearData` (the game's native clear data), **not**
@@ -312,9 +312,9 @@ mode, low byte = target clear_kind, `0xFFFF` = remote) and writes `has_reward` t
 correct mode's `GameClearData.clear[]`. It **does not set `is_unlocked`** - that bit is
 reserved as the source of truth for "the player completed this checkbox in gameplay" and
 is owned by `ap_checks.c`. The reward icon still appears because it is driven by
-`has_reward`. It also **does not write** the `GameData+0xd50` unlock cache:
-`Checklist_BuildUnlockBitfields` rebuilds that from the replaced
-`ClearChecker_CheckUnlocked`, so it picks up the new bit on its own.
+`has_reward`. It also **does not write** the `GameData+0xd50` unlock cache, the LAN-session
+snapshot `Checklist_BuildUnlockBitfields` rebuilds from the replaced
+`ClearChecker_CheckUnlocked` on connect, so it picks up the new bit on its own.
 
 `ApplyVanillaRewardUnlock(mode, reward_index, reward_type)` is invoked from Grant so the
 gate-mask bit flips regardless of whether the reward arrived as an AP item or was earned
@@ -432,7 +432,7 @@ instruction: `lbz r0, 0(r31)` (re-executed in the trampoline epilogue).
 
 **Vanilla reward-loop filler grant - neutralized** (REPLACEINSTRUCTION at `0x8017e00c`):
 the vanilla reward loop bumps `checkbox_filler_num`/`checkbox_filler_list_len` for reward
-indices in `stc_special_rewards[mode]` (the hardcoded `{0,1,2,3,4}` filler rows). Its
+indices in `stc_filler_reward_indices[mode]` (the hardcoded `{0,1,2,3,4}` filler rows). Its
 first instruction (`li r0,5`) is replaced with `b +0x58` (-> `0x8017e064`, the loop
 increment), skipping the entire grant block while leaving the preceding `has_reward` store
 (`0x8017e000`-`0x8017e008`) intact.
@@ -610,7 +610,7 @@ trackers. It accepts the AP checklist tab's runtime mode as well, since the AP t
 1. Reads the current `clear[mode][clear_kind]` byte. If neither `is_new` nor
    `is_unlocked` is already set, this is a true transition - call
    `RecordCheck(mode, clear_kind)`. **Transition detection runs regardless of the vanilla
-   cache-valid short-circuit** so AP never misses a check.
+   LAN-session short-circuit** so AP never misses a check.
 2. `RecordCheck()` resolves the row via `ChecklistModeRow` (bailing on `-1`, and on the AP
    row rejecting `clear_kind >= APCK_NUM` so a spent filler cannot send a location code
    the multiworld has never heard of), sets the bit in `ap_save->sent_checks` and the
@@ -619,7 +619,7 @@ trackers. It accepts the AP checklist tab's runtime mode as well, since the AP t
    with the source reward type - or a "no local reward placement" line for remote/empty
    cells), enqueues the "Check sent" textbox, and calls `APGoal_Evaluate()`. It does **not**
    write the memory card.
-3. Reimplements the vanilla SetNewUnlock logic: bail if the cache is valid, OOB clamp,
+3. Reimplements the vanilla SetNewUnlock logic: bail while `Net_IsSessionActive`, OOB clamp,
    play the unlock SFX (`SFX_PlayFullVolume(0x10008)`) guarded by the one-frame cooldown
    at `*stc_clearchecker_sfx_last_frame`, then set the `is_new` bit.
 

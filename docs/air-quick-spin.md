@@ -36,11 +36,17 @@ there at all.
 Each character funnels a successful detection into its own enter, via its own per-frame
 interrupt check:
 
-- Kirby: `Rider_IASACheck_QuickSpin` (`0x801b7e80`) -> `Rider_QuickSpin_Enter` (`0x801b7ee4`)
-- Dedede: `Rider_Dedede_IASACheck_QuickSpin` (`0x801c05a8`) -> `Rider_Dedede_QuickSpin_Enter`
+- Kirby: `RiderState_QuickSpinInterrupt` (`0x801b7e80`) -> `RiderState_QuickSpinEnter` (`0x801b7ee4`)
+- Dedede: `RiderState_DededeQuickSpinInterrupt` (`0x801c05a8`) -> `RiderState_DededeQuickSpinEnter`
   (`0x801c05f8`)
-- Meta Knight: `Rider_MetaKnight_IASACheck_QuickSpin` (`0x801c3f40`) ->
-  `Rider_MetaKnight_QuickSpin_Enter` (`0x801c3f90`)
+- Meta Knight: `RiderState_MetaKnightQuickSpinInterrupt` (`0x801c3f40`) ->
+  `RiderState_MetaKnightQuickSpinEnter` (`0x801c3f90`)
+
+Kirby's check excludes `copy_kind` PLASMA, and his enter has a second caller, the neutral-state
+entry `Rider_TryQuickSpinNeutral` (`0x801b7e0c`). `RiderState_QuickSpinEnter` puts Kirby in
+`RDSTATE_QUICKSPINTURN` (mstatus `0x6a` CCW / `0x6b` CW) with invincibility, and its `flag`
+argument also runs `Rider_MachineEnterQuickSpin`. Dedede's enter uses status `0x2c`, Meta Knight's
+`0x2d`, each from a single call site.
 
 All three grounded paths run an earlier interrupt check, then the accumulator tick, then the
 quick spin check, and skip the last two when the earlier check already fired. Kirby's

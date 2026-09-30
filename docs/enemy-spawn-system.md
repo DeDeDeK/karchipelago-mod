@@ -10,7 +10,7 @@ and how to bypass the manager and spawn actors standalone.
 
 79 actor IDs (0x00-0x4E), all sharing the table at 0x804b22b4 (stride 8,
 `{int data_index, int flags}`). `data_index` selects the archive, `flags` selects a variant
-inside it. The `ActorID` enum lives in `externals/hoshi/include/enemy.h`.
+inside it. The `EnemyKind` enum lives in `externals/hoshi/include/enemy.h`.
 
 Tier 0 IDs 0x00-0x17, with the archive each maps to. There are 22 archives in all; the group
 symbol is the file base with `Group` appended (`EmBroomData.dat` -> `emBroomDataGroup`).
@@ -76,15 +76,15 @@ mode_scale is 1.0 in Air Ride, 1.1 in Top Ride, 1.2 in City Trial.
 
 ### Loading
 
-- `Enemy_CheckAndLoad(actor_id)` (0x801fd060) validates the ID and calls `Enemy_LoadFile`. It
+- `Enemy_CheckAndLoad(kind)` (0x801fd060) validates the kind and calls `Enemy_LoadFile`. It
   is idempotent - a no-op for an already-loaded archive.
-- `Enemy_LoadFile(actor_id)` (0x801fd348) looks up `data_index`, checks the loaded flag at
+- `Enemy_LoadFile(kind)` (0x801fd348) looks up `data_index`, checks the loaded flag at
   `0x8055a210[data_index]`, and loads via `lbLoadArchive` if needed.
 - `Enemy_LoadStageEnemies()` (0x800f25b4) runs during `grLoadStage` and loads every archive in
   the stage's enemy ID list, event actors included. It is **skipped entirely in City Trial
   Free Run** (`major == MJRKIND_CITY && city_mode == CITYMODE_FREERUN`), so nothing is loaded
   there by default.
-- `Enemy_GetActorData(actor_id)` (0x801fd498) is the runtime lookup: table at 0x804b22b4 for
+- `Enemy_GetActorData(kind)` (0x801fd498) is the runtime lookup: table at 0x804b22b4 for
   `{data_index, flags}`, archive root from `0x8055a228[data_index]`, then the flags-selected
   sub-entry. It returns 0 if the archive is not loaded, and `EventActor_Create` uses it
   internally - an actor whose archive is missing fails to create properly.
@@ -92,18 +92,19 @@ mode_scale is 1.0 in Air Ride, 1.1 in Top Ride, 1.2 in City Trial.
 ## EventActor_Create (0x801fbb50)
 
 The universal factory. It takes a pointer to a 0x60-byte `EventActorDesc` (declared in
-`externals/hoshi/include/enemy.h`) and accepts any actor ID 0x00-0x4E. Descriptors are built
+`externals/hoshi/include/enemy.h`) and accepts any `EnemyKind` 0x00-0x4E. Descriptors are built
 by `Enemy_SpawnActor`, `Enemy_SpawnActorMode2` and the `event_dynablade` / `event_meteor` event
-starters; `EventActor_InitFromDesc` (0x801fb53c) copies the fields into `EnemyData`.
+starters; `EventActorGObj_InitFromDesc` (0x801fb53c) copies the fields into `EnemyData`.
 
 The descriptor fields with non-obvious semantics:
 
 - `spawn_index` (+0x2C) and `spawn_slot` (+0x30) are **-1 for standalone actors**. A non-(-1)
   `spawn_index` is what makes the `lifetime` field (+0x38) take effect at all.
-- `bounds_flag` (+0x50) of -1.0 means "use the default collision bounds" (the all-zero block at
-  0x804b1d40); any other value selects the `custom_bounds` vector at +0x44.
-- `+0x3C` is the parent GOBJ for the special child actors 0x48-0x4A and doubles as their
-  variant flag; it is 0 for everything else.
+- `leash_radius` (+0x50) of -1.0 means no leash, which also enables path following; any other
+  value clamps the actor's position to that horizontal radius around `leash_center` (+0x44).
+- `variant` (+0x3C) is the tier/variant selector copied to `EnemyData.tier_flags`. For the
+  special child actors 0x48-0x4A it carries the parent GOBJ instead, and their `tier_flags` is 0.
+- `is_airborne` (+0x40) seeds `EnemyData.is_airborne`; `Enemy_SpawnActor` passes 1.
 - `scale` (+0x28) feeds damage and size calculations, not just the model matrix.
 
 ### Creation flow
@@ -111,11 +112,11 @@ The descriptor fields with non-obvious semantics:
 1. Create a GOBJ with entity class 21 (0x15) and plink 12 (0xC, `GAMEPLINK_ENEMY`).
 2. Allocate the 0xBC0-byte `EnemyData` with `HSD_ObjAlloc` and memset it.
 3. Attach it with `GObj_AddUserData` at priority 21, destructor
-   `EventActor_GObjDestroyHandler` (0x801fcca0).
-4. `EventActor_InitFromDesc` copies the descriptor in.
-5. `Enemy_GetActorData(actor_id)` resolves the per-type data.
+   `EventActor_Destructor` (0x801fcca0).
+4. `EventActorGObj_InitFromDesc` copies the descriptor in.
+5. `Enemy_GetActorData(kind)` resolves the per-type data.
 6. Load the JObj model from the archive.
-7. Call the per-type init callback from `PTR_PTR_804b1d98[actor_id]`.
+7. Call the per-type init callback from `stc_enemy_kind_desc_table[kind]` (0x804b1d98).
 8. Attach the ten GOBJProcs below.
 9. Register a GXLink with `Enemy_GX` (0x801fd158), priority 9, render pass 1.
 10. Dispatch the descriptor's post-init callback, which ground/spline re-snaps the actor and
@@ -127,16 +128,16 @@ All ten are registered unconditionally on every actor, whatever its type.
 
 | Priority | Function | Address | Purpose |
 |----------|----------|---------|---------|
-| 0 | `EventActor_ProcResetDamage` | 0x801fc670 | Zeros per-frame damage accumulators via `HurtData_ResetPerFrame` |
-| 1 | `EventActor_ProcUpdate` | 0x801fc698 | HSD anim advance + animation-script machine + `state_func1` dispatch (calls `EventActor_AnimProcessor` 0x80200838 through `EventActor_UpdateState`) |
-| 4 | `EnemyPhysicsProc` | 0x801fc6fc | `state_func2` dispatch, `vel += accel`, `pos += vel`, OOB floor kill (skipped for actor_id >= 0x4C) |
-| 5 | `EventActor_ProcStateActive` | 0x801fc7c4 | `state_func3` dispatch - main per-state AI logic |
-| 6 | `EventActor_ProcSharedModel` | 0x801fc7f8 | Shadow update, `state_func4` dispatch, position/direction into the model matrix |
-| 7 | `EventActor_ProcPerType` | 0x801fc848 | `per_type_cb` dispatch, HurtData update, position snap |
-| 8 | `EventActor_ProcHitCollInit` | 0x801fc8e8 | No-op stub (`blr`) |
-| 9 | `EventActor_ProcHitColl` | 0x801fc8ec | HitColl setup; checks `damage_accum_1` (+0x994) against `param_hp_threshold` (+0x3B0) |
-| 10 | `EventActor_ProcDamage` | 0x801fc9f0 | Reads HurtData output, calls `giveEnemyDamage`, dispatches `hit_reaction_cb2` |
-| 21 | `EventActor_ProcFinal` | 0x801fcabc | `pos` -> `pos_prev`, ground-state flags, lifetime/despawn, OOB destroy |
+| 0 | `EventActorGObj_ProcResetDamage` | 0x801fc670 | Zeros per-frame damage accumulators via `HurtData_ResetPerFrame` |
+| 1 | `EventActorGObj_ProcAnim` | 0x801fc698 | HSD anim advance + animation-script machine + `anim_cb` dispatch (calls `EventActor_AnimProcessor` 0x80200838 through `EventActor_UpdateState`) |
+| 4 | `EventActorGObj_ProcPhys` | 0x801fc6fc | `phys_cb` dispatch, `vel += accel`, `pos += vel`, OOB floor kill (skipped for kinds >= 0x4C) |
+| 5 | `EventActorGObj_ProcEnvColl` | 0x801fc7c4 | `envcoll_cb` dispatch - main per-state AI logic |
+| 6 | `EventActorGObj_ProcSharedModel` | 0x801fc7f8 | Shadow update, `pri6_cb` dispatch, position/direction into the model matrix |
+| 7 | `EventActorGObj_ProcTrigger` | 0x801fc848 | `trigger_cb` dispatch, HurtData update, position snap |
+| 8 | `EventActorGObj_ProcHitCollInit` | 0x801fc8e8 | No-op stub (`blr`) |
+| 9 | `EventActorGObj_ProcHitColl` | 0x801fc8ec | HitColl; skipped while `alpha` (+0x364) is below 1.0 or once `damage_accum_1` (+0x994) reaches `param_hp` (+0x3B0) |
+| 10 | `EventActorGObj_ProcDmgApply` | 0x801fc9f0 | Reads HurtData output, calls `EventActor_GiveDamage`, dispatches `hit_reaction_cb2` |
+| 21 | `EventActorGObj_ProcEndOfFrame` | 0x801fcabc | `pos` -> `pos_prev`, ground-state flags, lifetime/despawn, OOB destroy |
 
 ### Parent/child actors
 
@@ -147,10 +148,10 @@ SP Broom Hatter (0x48), Sword Knight (0x05) spawns SP Sword Knight (0x49), Waddl
 `EventActor_SpawnChild` (0x801fcda0) creates the child and sets `child.parent_gobj` to the
 parent. The child's state functions read it back: `EventActor_FollowParent` (0x80219eec) takes
 the parent's animation rate then copies position data, `EventActor_CopyParentState`
-(0x80219fd4) copies position and direction, and `EventActor_GetParentAnimRate` (0x802049b8)
+(0x80219fd4) copies position and direction, and `EventActorGObj_GetAnimRate` (0x802049b8)
 reads `parent_gobj->userdata + 0x2B0` (`anim_rate`).
 
-**`EventActor_GetParentAnimRate` crashes on a null parent** (DAR = 0x2C null deref). For a
+**`EventActorGObj_GetAnimRate` crashes on a null parent** (DAR = 0x2C null deref). For a
 standalone spawn of an actor whose states call it, `parent_gobj` (EnemyData+0x08) must be set
 to a valid GOBJ after creation - pointing it at a player's machine GOBJ both avoids the crash
 and makes the actor track that player.
@@ -160,18 +161,18 @@ and makes the actor track that player.
 Spawning outside the spawn-slot system, in any mode:
 
 ```c
-Enemy_CheckAndLoad(ACTORID_WADDLE_DEE); // idempotent; required in CT Free Run and Air Ride
+Enemy_CheckAndLoad(ENEMYKIND_WADDLE_DEE); // idempotent; required in CT Free Run and Air Ride
 
 EventActorDesc desc;
 memset(&desc, 0, sizeof(desc));
-desc.actor_id = ACTORID_WADDLE_DEE;
+desc.kind = ENEMYKIND_WADDLE_DEE;
 desc.position = spawn_pos;
 desc.forward = (Vec3){ 0.0f, 0.0f, 1.0f };
 desc.up = (Vec3){ 0.0f, 1.0f, 0.0f };
 desc.scale = 1.0f;
 desc.spawn_index = -1;
 desc.spawn_slot = -1;
-desc.bounds_flag = -1.0f;
+desc.leash_radius = -1.0f;
 
 GOBJ *actor = EventActor_Create(&desc);
 if (actor)
@@ -183,8 +184,8 @@ Constraints:
 - **Memory.** Each archive occupies heap; loading all 22 at once may exceed what is available.
 - **Position.** Regular enemies (0x00-0x47) have patrol AI that references their spawn
   position; event actors (0x48-0x4E) move autonomously.
-- **Cleanup.** These are GOBJs on plink 0xC - destroy with `GObj_Destroy` or let the scene
-  change collect them.
+- **Cleanup.** These are GOBJs on plink 0xC - destroy with `EventActorGObj_Destroy`, which also
+  tears down children and inter-actor references, or let the scene change collect them.
 - **Collision.** Hurt/hit collision comes free with the GOBJProcs; the actor interacts with
   machines and riders through the standard collision system.
 
@@ -209,7 +210,7 @@ Four globals hold the manager state, all r13-relative:
 | +0x0C | u32 | frame_counter | Incremented every Think frame |
 | +0x10 | u32 | total_spawns | Lifetime spawn count |
 | +0x14 | u16 | active_count | Current alive enemy count |
-| +0x16 | u16 | active_event_count | Alive "event" enemies (actor_id >= 0x18), CT mode 3 only |
+| +0x16 | u16 | active_event_count | Alive "event" enemies (kind >= 0x18), CT mode 3 only |
 | +0x18 | u16 | (reserved) | Zeroed at init, never read or written again |
 | +0x1A | s16 | slots_initialized | Count of initialized spawn slots |
 | +0x1C | s16 | last_spawn_slot | Last slot index used |
@@ -250,7 +251,7 @@ common confusion.
 | +0x2E | s16[4] | Weight entries |
 | +0x34 | s16 | respawn_timer |
 | +0x4A | u8 | flags (bit 7 = occupied) |
-| +0x4C | s16 | actor_id (-1 if empty) |
+| +0x4C | s16 | enemy kind (-1 if empty) |
 | +0x4E | s16 | spawn tracking counter |
 | +0x50 | s16 | owning slot index |
 | +0x58 | ptr | actor_gobj |
@@ -264,7 +265,7 @@ carries `max_respawn_delay` (+0x24), a random respawn range (+0x26) and the **mo
 which is 1 for Air Ride courses, 2 for Kirby Melee 1 and 3 for Kirby Melee 2.
 
 `EnemySpawnEntry` is loaded verbatim from the stage `.dat` and only ever read. Its
-`location_index` (+0x00) indexes the stage enemy-position table (`GrData+0x138`, stride 0x24 of
+`location_index` (+0x00) indexes the stage enemy-position table (`GrObj+0x138`, stride 0x24 of
 three Vec3s), resolved by `loadEnemy_spawnXYLocation` (0x800d0cd4) into the runtime per-position
 extended data - not back into the entry. `scale` (+0x30) is negated if negative and defaults to
 1.0 if zero; `variant` (+0x34) goes into the descriptor's parent/variant slot.
@@ -343,15 +344,15 @@ then calls `Enemy_SpawnerDecide`.
 
 `Enemy_UnregisterFromSpawnSlot` (0x800f3b28) runs when an enemy dies or despawns. It returns
 immediately if `spawn_slot` is negative (a standalone actor), verifies the GOBJ matches the
-slot entry, clears the slot (`actor_id = -1`, null GOBJ, flags cleared), decrements
+slot entry, clears the slot (kind = -1, null GOBJ, flags cleared), decrements
 `active_count` (City Trial Free Run tracks tier >= 0x18 separately in `active_event_count`), and
 assigns a fresh respawn timer from the config's base (+0x24) and random range (+0x26).
 
-`EventActor_Destroy` (0x801fbf2c) is **recursive depth-first**. The child chain (each node's
+`EventActorGObj_Destroy` (0x801fbf2c) is **recursive depth-first**. The child chain (each node's
 `child_gobj` at EnemyData+0x04) is walked with the first five levels manually unrolled and a
-sixth level recursing back into `EventActor_Destroy`. Per node, deepest child first: destroy
+sixth level recursing back into `EventActorGObj_Destroy`. Per node, deepest child first: destroy
 the child and clear the parent's `child_gobj`; conditionally unregister from the spawn slot;
-clean up the VFX/SFX handles (`EventActor_CleanupVfxA3C` 0x8020c6e0, `EventActor_CleanupVfxA40`
+kill the effect groups (`EventActor_KillEfGroup` 0x8020c6e0, `EventActor_KillEfGroup2`
 0x8020c70c); call `GObj_Destroy`.
 
 That unregister is **not** `Enemy_UnregisterFromSpawnSlot` but a separate path
@@ -394,10 +395,11 @@ which come through the event system.
 Three different "kind" numbers get conflated here, and `stage.h` defines a distinct enum for
 each of the two that mod code touches.
 
-- **StageKind** (`stage.h`, `STAGEKIND_*`) is the 0-59 stage *selection* index, returned by
-  `Gm_GetCurrentStageKind()` (GameData+0xA97) and `stGetCurrentStageKind()` (r13[0x7F8]
-  cache). For Air Ride it equals the `AirRideCourse` value (0-8); City Trial stadiums occupy
-  9-33, each stadium member being `STKIND_x + 10`. `STAGEKIND_KIRBYMELEE1 = 17`,
+- **StageKind** (`stage.h`, `STAGEKIND_*`) is the 0-58 stage *selection* index
+  (`STAGEKIND_NUM` = 59), returned by `Gm_GetCurrentStageKind()` (GameData+0xA97) and
+  `stGetCurrentStageKind()` (r13[0x7F8] cache). For Air Ride it equals the `AirRideCourse` value
+  (0-8); City Trial is 9 and its stadiums occupy 10-33, each stadium member being
+  `STKIND_x + 10`. `STAGEKIND_KIRBYMELEE1 = 17`,
   `STAGEKIND_KIRBYMELEE2 = 18`.
 - **GroundKind** (`stage.h`, `GR_*`) is which ground geometry file loads: an index into the
   stage-file table in `main.dol` at 0x804A2FFC. `0 = GrPlants1 ... 8 = GrIce1, 9 = GrCity1,
@@ -468,7 +470,7 @@ Enemies have no traditional HP - death comes from per-hit knockback, not accumul
 Incoming damage is first scaled by **0.4** (`Enemy_ScaleDamage` 0x8020b71c, reading param table
 +0x04), then classified into a response tier 0-3 by `Enemy_ClassifyDamageTier` (0x8020b740)
 against three float thresholds at the table's +0x08, +0x0C and +0x10 (10.0, 21.0, 32.0).
-`Enemy_ApplyKnockback` (0x8020b784) indexes three per-tier arrays by that tier (`ed+0xA1C`):
+`EventActor_ApplyKnockback` (0x8020b784) indexes three per-tier arrays by that tier (`ed+0xA1C`):
 
 | Tier | Damage | Stun frames (ed+0xA18, +0x60) | Launch speed (ed+0x9D8, +0x50) | Intangibility base (+0x30, int) |
 |------|--------|-------------------------------|--------------------------------|---------------------------------|
@@ -480,32 +482,35 @@ against three float thresholds at the table's +0x08, +0x0C and +0x10 (10.0, 21.0
 These values are **global** - shared by every enemy type and tier: they live in `Enemy.dat`
 (public `emDataAll`, `EnemyParamTable`), loaded by `Enemy_LoadCommonParams` (0x801fd580), which
 stores the table pointer to `*0x805dd878`. The launch speed is what sends the enemy flying:
-`EnemyState_AnimTick` sets its velocity to the knockback direction times it. The intangibility
+`EventActor_CommonPhys` sets its velocity to the knockback direction times it. The intangibility
 handed to `HurtData_GiveIntangibility` is `int(base[tier] * actor_data->+0x00->+0xA0 *
 scale)`, clamped to at least 1, plus the tier's stun frames, where `scale` is the table's +0x40
-`{1.0, 0.8, 0.6, 0.5}` indexed by `GameData+0xa95` rather than by tier.
+`{1.0, 0.8, 0.6, 0.5}` indexed by `GameData.player_num` rather than by tier.
 
 The death sequence: a hit sets `stun_frames` (ed+0xA18) from the response tier;
-`EnemyState_AnimExit` (0x8020c558, func3 for states 0x00-0x08) decrements it each frame during
-knockback; at zero the enemy enters the death state; `death_timer` (ed+0xA28) then counts up and
-the actor is destroyed after 30 frames.
+`EventActor_CommonEnvColl` (0x8020c558, envcoll_cb for states 0x00-0x08) decrements it each frame
+and `EventActor_CommonPhys` launches the enemy when it reaches zero. Once the hit's intangibility
+runs out, `EventActor_CommonPhys` runs the death: `death_timer` (ed+0xA28) counts up and the actor
+is destroyed after 30 frames.
 
 `damage_accum_1` (ed+0x994) and `damage_accum_2` (ed+0x998) track total damage received, capped
-at 9999. `giveEnemyDamage` (0x8020b680) writes them but nothing reads them for death logic -
-they are cosmetic.
+at 9999. `EventActor_GiveDamage` (0x8020b680) writes them and nothing reads them for death logic,
+but `damage_accum_1` gates hit collision: `EventActorGObj_ProcHitColl` stops testing the actor
+once it reaches the archive's `param_hp` (ed+0x3B0).
 
 ## Spline Path Following
 
-Enemies can follow the splines embedded in stage data (`GrData->spline` at +0x14).
+Enemies can follow the splines embedded in stage data, reached through `GrObj.spline` (+0x11C) as
+`{entries, count}`.
 
-`EnemyPath_Init` (0x80206e2c) calls `Spline_FindNearest` (0x800cf07c) for the segment nearest
+`EventActor_PathInit` (0x80206e2c) calls `Spline_FindNearest` (0x800cf07c) for the segment nearest
 `ed->pos`. On a hit it stores the segment index to `ed->spline_segment` (+0x5DC), the arc
 parameter to `ed->spline_arc_param` (+0x5FC), and picks the curve pointers
 `spline_primary`/`spline_secondary` (+0x5D4/+0x5D8) according to `spline_direction` (+0x5F8).
 On a miss it sets bit 2 of `ed+0xB0A`, the alternative-movement flag.
 
-`EnemyPath_FollowUpdate` (0x80209ce4) runs each frame for enemies whose `path_active_flag`
-(+0xA8C) is -1.0: it confirms the stage has splines via `Spline_GetCount` (0x800cf38c),
+`EventActor_PathFollowUpdate` (0x80209ce4) runs each frame for enemies whose `leash_radius`
+(+0xA8C) is -1.0 (no leash): it confirms the stage has splines via `Spline_GetCount` (0x800cf38c),
 evaluates `splArcLengthPoint` on the enemy's spline to get a direction, and advances the
 position along the path.
 
@@ -515,8 +520,8 @@ follow a path:
 ```c
 ed->spline_path_ready = 1;    // +0x654
 ed->spline_direction = 1;     // +0x5F8, 1 = forward
-ed->path_active_flag = -1.0f; // +0xA8C, enables path following
-EnemyPath_Init(ed);
+ed->leash_radius = -1.0f;     // +0xA8C, no leash; enables path following
+EventActor_PathInit(ed);
 ```
 
 `splArcLengthPoint` (0x80415958) dereferences the spline unconditionally, so a standalone actor
@@ -527,13 +532,13 @@ whose init callbacks walk a path before this setup faults.
 | Function | Address | Purpose |
 |----------|---------|---------|
 | `EventActor_Create` | 0x801fbb50 | Universal actor factory |
-| `EventActor_Destroy` | 0x801fbf2c | Recursive actor destruction, children first |
-| `EventActor_InitFromDesc` | 0x801fb53c | Copies descriptor fields into EnemyData |
+| `EventActorGObj_Destroy` | 0x801fbf2c | Recursive actor destruction, children first |
+| `EventActorGObj_InitFromDesc` | 0x801fb53c | Copies descriptor fields into EnemyData |
 | `EventActor_SpawnChild` | 0x801fcda0 | Spawns a child/rider actor and links `parent_gobj` |
-| `EventActor_GObjDestroyHandler` | 0x801fcca0 | EnemyData userdata destructor, priority 21 |
+| `EventActor_Destructor` | 0x801fcca0 | EnemyData userdata destructor, priority 21 |
 | `EventActor_FollowParent` | 0x80219eec | Child state func: follow the parent's position/timing |
 | `EventActor_CopyParentState` | 0x80219fd4 | Child state func: copy position/direction from parent |
-| `EventActor_GetParentAnimRate` | 0x802049b8 | Reads `parent_gobj->userdata + 0x2B0` (`anim_rate`); crashes on null |
+| `EventActorGObj_GetAnimRate` | 0x802049b8 | Reads `parent_gobj->userdata + 0x2B0` (`anim_rate`); crashes on null |
 | `EventActor_AnimProcessor` | 0x80200838 | Advances the JObj animation, extracts the position delta into ed+0x550, zeros the JObj translate. Called through `EventActor_UpdateState`, not registered as a proc. |
 | `Enemy_SpawnActor` | 0x800f13a8 | Spawn-slot wrapper for modes 1/3: variant extraction, descriptor build |
 | `Enemy_SpawnActorMode2` | 0x800f16c0 | Mode-2 spawn helper |
@@ -544,42 +549,41 @@ whose init callbacks walk a path before this setup faults.
 | `Enemy_CityTrialThink` | 0x800f33c0 | City Trial manager proc, includes the spawn decision phase |
 | `Enemy_InitSpawner` | 0x800f2ee4 | Create the enemy manager GOBJ |
 | `Enemy_InitPositionData` | 0x800f2634 | Load spawn positions from the stage and pick the mode |
-| `Enemy_GetActorData` | 0x801fd498 | Archive data pointer by ActorID, tier-aware |
+| `Enemy_GetActorData` | 0x801fd498 | Archive data pointer by EnemyKind, tier-aware |
 | `Enemy_CheckAndLoad` | 0x801fd060 | Load an actor's archive; idempotent |
 | `Enemy_LoadFile` | 0x801fd348 | Low-level archive loader |
 | `Enemy_LoadStageEnemies` | 0x800f25b4 | Stage batch loader; skipped in CT Free Run |
 | `Enemy_GetStagesEnemies` | 0x80262808 | Enemy ID list for a stage |
 | `Enemy_LoadCommonParams` | 0x801fd580 | Load `Enemy.dat` `emDataAll`, store the table pointer to `*0x805dd878` |
-| `Gm_CheckEnemyEnabled` | 0x8000a348 | Bit 4 of GameData+0xAA7 - enemies enabled for the current stage/mode |
+| `Gm_IsEventsEnabled` | 0x8000a348 | Bit 4 of GameData+0xAA7 - enemies enabled for the current stage/mode |
 | `grGetEnemyposNum` | 0x800d0c88 | Number of enemy spawn positions for the stage |
 | `loadEnemy_spawnXYLocation` | 0x800d0cd4 | Load enemy spawn locations from stage data |
 | `loadEventLocations` | 0x800d11fc | Load event position data |
 | `Enemy_GX` | 0x801fd158 | GXLink render callback, priority 9, render pass 1 |
-| `gmLanMenu_Scale3DObject` | 0x80054414 | Sets a JObj world matrix from position, forward/up and scale |
-| `giveEnemyDamage` | 0x8020b680 | Apply damage, write the accumulators |
+| `JObj_SetFromBasis` | 0x80054414 | Sets a JObj world matrix from position, forward/up and scale |
+| `EventActor_GiveDamage` | 0x8020b680 | Apply damage, write the accumulators |
 | `Enemy_ScaleDamage` | 0x8020b71c | Scale incoming damage by table +0x04 (0.4) |
 | `Enemy_ClassifyDamageTier` | 0x8020b740 | Damage -> response tier 0-3 via the 10/21/32 thresholds |
-| `Enemy_ApplyKnockback` | 0x8020b784 | Full knockback transition: stun frames, velocity, state |
-| `EnemyState_AnimExit` | 0x8020c558 | func3 for states 0x00-0x08: stun countdown, ground physics, spark VFX, death at 0 |
-| `EnemyPath_Init` | 0x80206e2c | Find the nearest spline and assign path data |
-| `EnemyPath_FollowUpdate` | 0x80209ce4 | Path-following movement update |
+| `EventActor_ApplyKnockback` | 0x8020b784 | Full knockback transition: stun frames, velocity, state |
+| `EventActor_CommonEnvColl` | 0x8020c558 | envcoll_cb for states 0x00-0x08: stun countdown, surface bounce once launched, spark VFX |
+| `EventActor_PathInit` | 0x80206e2c | Find the nearest spline and assign path data |
+| `EventActor_PathFollowUpdate` | 0x80209ce4 | Path-following movement update |
 | `Spline_FindNearest` | 0x800cf07c | Spline segment nearest a position |
 | `Spline_GetCount` | 0x800cf38c | Number of splines in the loaded stage |
-| `splArcLengthPoint` | 0x80415958 | Evaluate a spline position (wrapper) |
+| `splArcLengthPoint` | 0x80415958 | Spline point at arc length `s` (wrapper) |
 | `splGetSplinePoint` | 0x80414fc0 | Evaluate a spline at a parameter |
-| `splArcLengthGetParameter` | 0x80415758 | Arc-length parameter for a spline |
+| `splArcLengthGetParameter` | 0x80415758 | Spline parameter at arc length `s` |
 | `Gm_GetGrKindFromStageKind` | 0x80261ce8 | StageKind -> physical GroundKind |
 
 ## Data Addresses
 
 | Data | Address | r13 offset | Description |
 |------|---------|-----------|-------------|
-| Actor data table | 0x804b22b4 | - | `{data_index, flags}` per actor ID, stride 8 |
+| Actor data table | 0x804b22b4 | - | `{data_index, flags}` per EnemyKind, stride 8 (`stc_enemy_kind_archive`) |
 | Archive loaded flags | 0x8055a210 | - | One byte per data_index, 1 = loaded |
 | Archive root pointers | 0x8055a228 | - | Archive root pointer per data_index |
 | Archive filename pointers | 0x804b2204 | - | Two pointers per data_index (dat, group) |
-| Per-type descriptor table | 0x804b1d98 | - | One pointer per actor ID |
-| Default collision bounds | 0x804b1d40 | - | All-zero bounds used when `bounds_flag == -1.0` |
+| Per-type descriptor table | 0x804b1d98 | - | One `EnemyKindDesc` pointer per EnemyKind (`stc_enemy_kind_desc_table`) |
 | Enemy parameter table pointer | 0x805dd878 | - | Pointer to `EnemyParamTable` (`emDataAll`), set on every 3D scene load. Damage scale +0x04, tier thresholds +0x08, intangibility base/scale +0x30/+0x40, per-tier launch speed/stun +0x50/+0x60, detection range +0x80, leash range +0x90, retarget cooldown +0x94/+0x98 |
 | Stage-file table | 0x804A2FFC | - | Stage-def pointers indexed by physical GroundKind |
 | EnemyMgr pointer | 0x805DD714 | +0x634 | EnemyMgr struct (0x3C bytes) |

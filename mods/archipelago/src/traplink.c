@@ -133,7 +133,7 @@ static int ApplyCityTrialTrap(void)
 
 // Air Ride receive: give the sleep copy ability to every human rider. Most City
 // Trial trap items need Gm_IsInCity, so this bypasses APItems_HandleItem. Calls
-// the raw rider API rather than Rider_CheckAndGiveAbility so the ability gate and
+// the raw rider API rather than RiderGObj_CheckAndGiveAbility so the ability gate and
 // the sleep-send hook do not re-trigger.
 static int ApplyAirRideTrap(void)
 {

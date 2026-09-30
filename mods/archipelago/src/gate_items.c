@@ -245,7 +245,7 @@ static ItemKind GateItems_UfoRingLeadItem(void)
 static const u32 ufo_ring_lead_sites[] = {
     0x8010b268, // CityUFO_State0Think
     0x8010b958, // CityUFO_State1Think
-    0x8010c0cc, // spawnUFOItems
+    0x8010c0cc, // CityUFO_State2Think
     0x8010c7a4, // CityUFO_State3Think
     0x8010ce44, // CityUFO_State4Think
 };

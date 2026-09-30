@@ -42,8 +42,10 @@ texture label `GrSimple` paints on the matching zone box.
 | 10 | `GrCZK_Spin` | `grGetSpinZoneParam` (0x800d2654) |
 | 25 | `GrCZK_LocalDead` | `grGetLocalDeadZoneParam` (0x800d50f8) |
 
-Each getter asserts that the zone it is handed actually carries its kind, then
-fills the caller's out-params from the stage's per-kind parameter block.
+Each getter takes a zone index into `GrObj.coll.zone`, asserts that the zone
+actually carries its kind, then fills the caller's out-params from the stage's
+per-kind parameter block (`grGetSpinZoneParam` instead returns whether the
+zone's parameter index is non-zero).
 `grGetDashZoneParam` (0x800d1ff0) serves the plain dash surfaces.
 
 Distribution across all shipped stages, by face count:
@@ -68,7 +70,7 @@ Kind 32 (area light) dominates because nearly every stage boxes its lighting.
 
 ## Authored Data
 
-`GrData.pos_data` (`GrData+0x18`) points at a `GrCollisionNode`, the paired
+`GrData.coll_node` (`GrData+0x18`) points at a `GrCollisionNode`, the paired
 `{pointer, count}` mirror of the runtime `GrCollParam`. Its zone half is three
 arrays: `zone_vtx` (always `zone_num * 8` entries), `faces` (always
 `zone_num * 12`), and `zones` itself. The structs are declared in

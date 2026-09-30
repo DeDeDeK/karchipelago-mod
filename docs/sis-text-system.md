@@ -46,7 +46,7 @@ Functionally the opcodes group as:
 - **Structure**: `0x00` TERMINATE, `0x01` SUBTEXT_RESET, `0x02` SUBTEXT_BREAK, `0x07` POS (the subtext header: s16 x in pixels right of canvas-left, s16 y in the same pre-viewport-scale units the measured height uses, 32 per line at scale 1), `0x08` JUMP and `0x09` CALL (both take an HSD-relocated absolute pointer).
 - **Layout**: `0x03` LINEBREAK (advances `cursor.y` by `16 * scale_y * viewport_scale.y`), `0x04` LINEBREAK_REFLOW, `0x1a` SPACE (advances `cursor.x` by `scale_x * (32 + 16) * fit_squeeze`), `0x0a`/`0x0b` POSPUSH/POSPUSHEND for inline relative repositioning in 1/256 units, gated by `text->pospush_flags`.
 - **Style**: `0x0c`/`0x0d` COLOR, `0x0e`/`0x0f` SCALE (operands are u16 fixed-point over 256), `0x10`/`0x12`/`0x14` align center/left/right with `0x11`, `0x13` and `0x15` all aliasing the same pop, `0x16`/`0x17` kerning on/off, `0x18`/`0x19` aspect-fit on/off.
-- **Timing**: `0x05` DELAY (u16 frames into `temp.wait_countdown`), `0x06` TIMING (u16 char then u16 space, operand order at 0x80451e20; it updates the renderer's working registers and `temp.space_delay`, not `temp.char_delay`).
+- **Timing**: `0x05` DELAY (u16 frames into `temp.wait_countdown`), `0x06` TIMING (u16 char then u16 space, operand order at 0x80451e20; it loads the renderer's working delays and leaves `temp.char_delay` / `temp.space_delay` untouched).
 
 The style opcodes mutate the `temp.*` mirrors, never the public `use_aspect` / `kerning` / `align` fields at `+0x48`-`+0x4a`.
 
@@ -127,7 +127,7 @@ Both first `vsnprintf` into a stack buffer, then run `Text_ConvertASCIIToShiftJI
 
 **`\n` and `\t` are not mapped.** They fall into the table-lookup branch and produce nothing, so multi-line text must be built from separate `Text_AddSubtext` calls, one `0x07` header each. `%d`, `%s` and `%f` work normally because `vsnprintf` resolves them first.
 
-There is no brace syntax for inline opcodes. To change color or scale mid-buffer, write opcode bytes directly or call `Text_SetColor` / `Text_SetScale`, which patch the per-subtext header bytes located by `Text_GetCommand` (`text.h`). Position is the `0x07` header itself rather than an inline opcode, so `Text_SetSubtextPos` rewrites its two `s16` fields in place.
+There is no brace syntax for inline opcodes. To change color or scale mid-buffer, write opcode bytes directly or call `Text_SetColor` / `Text_SetSubtextScale`, which patch the per-subtext header bytes located by `Text_GetCommand` (`text.h`). Position is the `0x07` header itself rather than an inline opcode, so `Text_SetSubtextPos` rewrites its two `s16` fields in place.
 
 ### Chained subtexts share one TERMINATE
 
@@ -163,8 +163,8 @@ Pass 2 is the per-Text draw. It pulls `Text *t` from `gobj->userdata`, early-ret
 
 `Text_CreateCanvas(sis_idx, no_create_cam_gobj, gobj_entityclass, gobj_plink, gobj_ppriority, gxlink, gxpri, cobj_gxpri)` (0x8044f674):
 
-1. Allocates a `TextCanvas` and chains it onto `stc_textcanvas_first` (0x805de56c).
-2. Creates a GObj on the given entity class / plink / priority.
+1. Allocates a `TextCanvas`, chains it onto `stc_textcanvas_first` (0x805de56c) and stores the entity class / plink / priority there for its Text GObjs. It returns the canvas's index within `sis_idx`.
+2. Unless `no_create_cam_gobj` is nonzero (which leaves `cam_gobj` NULL and skips steps 3-4), creates the camera GObj on that entity class / plink / priority.
 3. `COBJ_LoadDesc` on the canonical text-camera descriptor at `0x805096a0`, then `CObj_SetOrtho(0, -480, 0, 640)`.
 4. `GObj_AddObject(g, COBJ, cobj)` and `GOBJ_InitCamera(g, CObjThink_Common, cobj_gxpri)`, which registers the pass-0 viewport/scissor callback for every gxlink beneath it.
 

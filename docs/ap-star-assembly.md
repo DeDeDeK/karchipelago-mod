@@ -129,7 +129,7 @@ It works because **the carrier box never expires**. `LegendaryPiece_ClearSpawnRe
 
 ```
 if (0 < lifetime) lifetime--;
-if (lifetime == 0) CityItem_EnterExpire(gobj);
+if (lifetime == 0) ItemGObj_EnterExpire(gobj);
 ```
 
 so a lifetime of `-1` is never decremented and never equals 0. A carrier stands in the city
@@ -357,7 +357,7 @@ This mod's whole share is one call, on the frame a player completes the set:
 `ApStar_StartAssembly(ply)`, which resolves the star's `MachineKind` and hands it to the
 registry. It returns 0 when the cinematic could not run - no machine registered, one already
 up, the star's cutscene already run once this round, or a rider the vanilla assembly state does
-not cover, since `Rider_EnterLegendaryAssembly` (`0x8019248c`) is Kirby-only and the cinematic
+not cover, since `RiderGObj_EnterLegendaryAssembly` (`0x8019248c`) is Kirby-only and the cinematic
 would play and hand back no machine - and this mod then gives the plain mount and the completion
 sounds instead. So a second star assembled in one round, a CPU's or an awarded one, arrives with
 no cutscene.
@@ -370,8 +370,9 @@ reads the index again, so the machine that arrives is entirely the star's own
 The mount itself is the tail of the vanilla assembly, and what that tail does is general:
 the rider's assembly state stages that pair, and the state's own motion script fires
 `Rider_RespawnFullRecreate` (`0x80193900`) on it. The registry stages the star's own pair,
-since its class slot is whatever the registry handed the machine this boot, and sets the
-player's `starting_machine_idx` to the star as well so a later respawn keeps it.
+since its class slot is whatever the registry handed the machine this boot, and records the
+star as the player's respawn kind (`CustomMachinesAPI.GetRespawnKind`), which `archipelago`'s
+respawn hook reads first so a later respawn keeps it.
 
 `ApStar_Mount` is the fallback for the cases the cinematic cannot cover, and the mount is the
 registry's there too: it hands the star to `CustomMachinesAPI.MountMachine`, which fires that
@@ -467,7 +468,7 @@ The joint animation is authored alongside them: an `AnimJointDesc` pair mirrorin
 model's two joints, with the root bare and an `AObjDesc` on the geometry joint holding
 one keyframe stream shared by the SCAX/SCAY/SCAZ tracks. Its keys are raw floats
 (`value_flag` 0) rather than the packed integers the vanilla tracks use. Looping is not the
-animation's own: `CityItem_BindStateAnim` (`0x80251894`) reads bit 30 of the item's
+animation's own: `ItemGObj_BindStateAnim` (`0x80251894`) reads bit 30 of the item's
 `ItemAnimEntry` flags, inherited from kind 55, and loops every bound `AObj` at runtime.
 
 The icons are rendered with a fixed light from the upper left, supersampled four times

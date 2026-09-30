@@ -12,7 +12,7 @@ A `Vc*.dat`'s one public is a `vcData`, and two of its seven pointers are attrib
 | `vcData` field | Struct | Size | Copied to |
 |---|---|---|---|
 | `+0x00` `attr` | `vcAttributes` | `0x1f0` | `MachineData + 0x460` |
-| `+0x14` `handling_attr` | `vcHandlingAttr` | `0xf8` | `md->attr->handling`, i.e. `*(md+0x650) + 0xac` |
+| `+0x14` `handling_attr` | `vcHandlingAttr` (star) | `0xf8`, `0x108` on a bike | `md->attr->handling`, i.e. `*(md+0x650) + 0xac`; `+ 0x1c` on a bike |
 
 `MachineData + 0x650` is a separate `0x1a4`-byte allocation made per machine by
 `Machine_AllocAttrStruct` (`0x801c71a8`), not a pointer into `MachineData`. Its first
@@ -21,8 +21,11 @@ the class archive's `vcDataKindStar` (`VcStar.dat`); its `+0x1c` is the class-wi
 `accelerateStar` (`0x801ec074`) clamps velocity to. The handling block follows at `+0xac`
 and runs to the end of the allocation; that half is the machine's own.
 
-Both classes author a `0xf8` handling block, but the star and bike controllers read
-different subsets of it, so a field named for one class means nothing under the other.
+That layout is the star class's (`MachineAttrWork`). The bike class authors a `0x108`-byte
+handling block instead, and its attribute copy (`0x801f3c94`) puts a `0x1c`-byte class block
+at the front of the same allocation and the handling block right behind it at `+0x1c`
+(`MachineAttrWorkWheel`, `0x124` bytes), so a `vcHandlingAttr` field name means nothing on a
+bike.
 
 ## The rebuild
 
@@ -32,12 +35,13 @@ completely:
 1. memcpy 62 pairs of words - `0x1f0` bytes - from `md->vcData->attr` to `md+0x460`, so
    `vcAttributes` field `k` lands at `md + 0x460 + k`. `hp_max` is `+0x4cc`,
    `top_speed_ground` is `+0x4f0`, `top_speed_air` is `+0x5ac`;
-2. dispatch through a per-`is_bike` table at `r13+0x770`: `+0x1c` is
-   `Machine_CopyCommonAttributes` (`0x801e812c`), which refills `md->attr` - the class block
-   from `vcDataKindStar.attr`, the handling half from `md->vcData->handling_attr`, so handling
-   field `k` lands at `md->attr + 0xac + k` - and `+0x20` is `Machine_AdjustAttributesStar`
-   (`0x801e906c`) or `Machine_AdjustAttributesBike` (`0x801f4dac`), which apply the stat
-   scaling;
+2. dispatch through the class's `MachineClassDesc` (`stc_machine_class_desc`, `r13-0x6148`,
+   indexed by `is_bike`): `copy_attr` (`+0x1c`) is `Machine_CopyCommonAttributes`
+   (`0x801e812c`) for stars, which refills `md->attr` - the class block from
+   `vcDataKindStar.attr`, the handling half from `md->vcData->handling_attr`, so handling
+   field `k` lands at `md->attr + 0xac + k` - and `adjust_attr` (`+0x20`) is
+   `Machine_AdjustAttributesStar` (`0x801e906c`) or `Machine_AdjustAttributesBike`
+   (`0x801f4dac`), which apply the stat scaling;
 3. set `top_speed_current` (`+0x398`) from `top_speed_ground` while `is_airborne`
    (`+0x754`) is 0 and from `top_speed_air` otherwise, and carry the change in `hp_max` into
    current HP, clamping down if the new maximum is lower.
@@ -74,10 +78,10 @@ low half of every pair.
 | Top Speed | `top_speed_ground`, `top_speed_air`, `+0x1a0` | `accel_floor`, `x040[0..4]`, `x054[4]`, `air_accel`, `air_impulse` |
 | Turn | `glide_up_speed`, `glide_down_speed`, `+0x18c`, `+0x190`, `+0x19c` | `turn_rate_rest`, `turn_rate_top`, `x054[3..4]`, `x068[0]`, `x068[2..4]` |
 | Charge | `charge_rate`, `charge_rate_turning`, `charge_full_duration`, `charge_cooldown_duration` | `x040[0..4]` |
-| Glide | the four `descent_*`, `glide_up_speed`, `glide_down_speed`, `x164`/`x168`/`x16c`/`x170`, `turn_speed_on_slope`, `base_offense`, `base_defense` | `lift_ceiling`, `x024[0..1]`, `x040[0..4]`, `x068[3..4]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `air_impulse`, `air_recover_len`, `x0cc[0]` |
+| Glide | the four `descent_*`, `glide_up_speed`, `glide_down_speed`, `x164`/`x168`/`x16c`/`x170`, `turn_speed_on_slope`, `coll_radius`, `base_defense` | `lift_ceiling`, `x024[0..1]`, `x040[0..4]`, `x068[3..4]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `air_impulse`, `air_recover_len`, `x0cc[0]` |
 | Weight | `top_speed_ground`, `slope_speed_up`, `slope_speed_down`, `ground_grip`, `base_hp`-adjacent damage terms, `air_grip`, the fall tiers | `accel_floor`, `turn_rate_rest`, `turn_rate_top`, `x014`, `x024[0..1]`, `x040[0..4]`, `x054[4]`, `x068[2]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `air_impulse`, `air_recover_len`, `x0cc[0]`, `x0cc[3]` |
-| Offense | `hitbox_size`, `+0x088` | - |
-| Defense | `base_hp`, `base_defense`, `base_offense` | - |
+| Offense | `hitbox_size`, `weapon_charge_scale` | - |
+| Defense | `base_hp`, `base_defense`, `coll_radius` | - |
 | HP | - | - |
 
 Two rows are worth reading twice. `x040[0..4]` (handling `+0x040`..`+0x050`) is scaled by
@@ -112,7 +116,7 @@ multiplies:
 |---|---|---|
 | `+0x60 + 8 * kind` | Top Speed | `top_speed_ground` |
 | `+0x98 + 8 * kind` | Top Speed | `top_speed_air` |
-| `+0x128`, `+0x160`, `+0x198`, `+0x1d0`, `+0x208`, `+0x240`, `+0x278`, `+0x2b0`, each `+ 8 * kind` | Turn | the class block's `+0x74`, `+0x78`, `+0x84`, `+0x88`, `+0x94`, `+0x98`, `+0x9c` and `+0xa0`, in that order |
+| `+0x128`, `+0x160`, `+0x198`, `+0x1d0`, `+0x208`, `+0x240`, `+0x278`, `+0x2b0`, each `+ 8 * kind` | Turn | `md->attr` `+0x74`, `+0x78`, `+0x84`, `+0x88`, `+0x94`, `+0x98`, `+0x9c` and `+0xa0`, in that order - the machine's own handling block, which starts at `+0x1c` on a bike |
 
 A bike kind past 6 reads the next block's first row, or a fixed pair for the last block of
 each stat.

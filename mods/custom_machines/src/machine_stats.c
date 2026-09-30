@@ -47,7 +47,7 @@ static int Total(int ply, int stat)
     return sum;
 }
 
-// Replaces the bl at 0x801ba190 in AS_GetOnStar, whose r4 is the machine GObj the
+// Replaces the bl at 0x801ba190 in RiderState_GetOnStarEnter, whose r4 is the machine GObj the
 // rider just mounted. The engine's own counter is left unwritten; its only reader
 // is replaced below.
 static void CountMachineChange(int ply, GOBJ *machine_gobj)

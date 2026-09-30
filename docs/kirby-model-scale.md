@@ -19,15 +19,17 @@ required - and the change naturally persists until the object is recreated
 Initialized to 1.0. Consumed by `Rider_ApplyModelMatrix` (0x80190848):
 
 ```c
-gmLanMenu_Scale3DObject(base_scale(rider+0x2c8) * model_scale(rider+0x348),
+JObj_SetFromBasis(x2c8(rider+0x2c8) * model_scale(rider+0x348),
                         rider_model_jobj, forward(+0x324), up(+0x330), pos(+0x300));
 ```
 
-`gmLanMenu_Scale3DObject` (0x80054414) bakes `scale x orientation` into the
+`x2c8` is `rider_scale` (+0x2c4, `PlayerData.rider_scale` at spawn) as copied by
+`Rider_InitWalk`. `JObj_SetFromBasis` (0x80054414) bakes `scale x orientation` into the
 model JObj's matrix (JOBJ+0x44) and marks it dirty. `Rider_ApplyModelMatrix` is
 called from `Rider_ModelMatrixThink` (0x8018f79c), which `Rider_Create`
 registers as GObj proc priority 6 - i.e. it runs **every frame** (it also
-refreshes the hand-bone world position for held items). So the rider model
+refreshes `hand_bone_pos` (+0x318), the held bomb's position and the Fire / Needle /
+Ice aura spawn point, read through `RiderGObj_GetHandBonePos` 0x80191ffc). So the rider model
 matrix, including `model_scale`, is rebuilt each frame.
 
 ### Top Ride - `TopRideKirby.model_scale` (+0x524)

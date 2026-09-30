@@ -158,8 +158,8 @@ arrives through the picker seam below, which overrides the outcome the table alr
 | Site | Patch | Behavior |
 |---|---|---|
 | `0x800eb20c`, the `bl` into `GrBoxGeneratorDetermine` inside `CityItemSpawn_Think` | `REPLACECALL` | On a winning roll, return the AP box's `ItemKind` in place of the color the picker chose |
-| `0x80258384`, the `bl` into `Box_OutcomeLogic` inside `Box_Break` | `REPLACECALL` | AP box -> spawn its contents directly; anything else -> forward to vanilla |
-| `0x80258344` and `0x802575f0`, the `bl`s into `Box_SpawnImpactEffect` inside `Box_Break` and `Box_OnTakeDamage` | `REPLACECALL` | AP box -> swap in a recolored particle generator for the length of the spawn |
+| `0x80258384`, the `bl` into `Box_OutcomeLogic` inside `ItemGObj_BoxBreak` | `REPLACECALL` | AP box -> spawn its contents directly; anything else -> forward to vanilla |
+| `0x80258344` and `0x802575f0`, the `bl`s into `ItemGObj_BoxSpawnImpactEffect` inside `ItemGObj_BoxBreak` and `Box_OnTakeDamage` | `REPLACECALL` | AP box -> swap in a recolored particle generator for the length of the spawn |
 | `0x801db91c`, just ahead of the `bl` into `Ply_IncrementItemCollectNum` inside `Machine_OnTouchItem` | conditional hook | Skip the call for the two AP kinds; fall through for everything else |
 
 Three of the four have to tell an AP item from a vanilla one, and by the time any runs the
@@ -176,7 +176,7 @@ patches (category 0) and the legendary carrier (category 2) never pass through i
 
 ## Recoloring the burst
 
-`Box_SpawnImpactEffect` (`0x80251f64`) throws the chunks a box scatters when it is hit and when
+`ItemGObj_BoxSpawnImpactEffect` (`0x80251f64`) throws the chunks a box scatters when it is hit and when
 it breaks. It picks one of the six yakumono-bank particle effects `50000..50005` off
 `ItemData.kind` and `is_break`, then `Effect_SpawnSync`s it onto joint 1 in anchor mode 205. The
 behavior clamp has already made an AP Box a `BOXBLUE`, so it draws `50000` and `50001` - the
@@ -188,16 +188,16 @@ color operands. Two of those are `PTCL_OP_COLOR` at `+0x3c` and `PTCL_OP_COLOR2`
 each an opcode, a ramp duration and an RGBA quad, holding the box's bright and dark shades.
 
 Rewriting them in place would recolor every blue box on the field, so the mod copies instead.
-Once a round it takes both descriptors out of `psGeneratorDesc` and writes six recolored copies
+Once a round it takes both descriptors out of `stc_ps_generator_desc` and writes six recolored copies
 of each, one per AP face color, forcing the tint's hue onto each operand while keeping the
 operand's own value - so the bright primary stays bright and the dark secondary stays dark. The
-seam then points `psGeneratorDesc[5][id]` at the copy for the length of the spawn and restores it
+seam then points `stc_ps_generator_desc[5][id]` at the copy for the length of the spawn and restores it
 after. `Ptcl_Alloc` stores `descriptor + 0x3c` in the generator instance, so the burst reads the
 mod's copy for its whole life, while every other box on the field still allocates off the vanilla
 descriptor. The color advances one step per spawn, so a box that is hit twice and broken throws
 three different faces' worth.
 
-`psGeneratorDesc[bank]` is biased by the bank's base id and `psGeneratorCount[bank]` holds
+`stc_ps_generator_desc[bank]` is biased by the bank's base id and `stc_ps_generator_count[bank]` holds
 `base + n`, so both are indexed by the whole effect id rather than a slot. `psInitDataBanks`
 rebuilds them on every scene load, which is why the copies are rebuilt per round and the two
 opcodes are checked rather than assumed - a descriptor that does not start with `0xcf` / `0xdf`
@@ -312,7 +312,7 @@ the round without disabling the items, so a `!collect` or a backfill mid-session
 next load.
 
 `box_color` is only ever read as an index into the 3-wide `grBoxGeneObj.item_group_spawn[]`, and
-the `Box_Break` seam takes an AP box before any pool lookup happens, so the color it carries does
+the `ItemGObj_BoxBreak` seam takes an AP box before any pool lookup happens, so the color it carries does
 not matter beyond staying in range. The one case the picker cannot answer is its own `-1`: box
 gating has left no vanilla color eligible, and it wrote neither out-param. No gate ever sees the AP
 box, so it still lands there - `RollBoxSize` re-rolls a size off the stage's chance table with the
@@ -332,13 +332,13 @@ pool roll because its 1 / 2 / 4 count only applies when the rolled kind is a van
   `box_spawn_offset_min_v` / `max_v` / `box_spawn_yaw_range`, with the per-slot yaw offsets
   `{0, 180, 90, -90}` degrees vanilla uses;
 - `Box_SpawnContents` per patch, writing each child into `ItemData.child_gobjs[]` and setting the
-  child's `parent_gobj`, which is what the rest of `Box_Break` walks.
+  child's `parent_gobj`, which is what the rest of `ItemGObj_BoxBreak` walks.
 
 The one branch the reproduction leaves out is vanilla's forced-item path. Only the red legendary
 carrier ever has `forced_item` written, on the `CityItemSpawn_SpawnLegendaryPiece` seam, and an AP
 box is spawned through `PowerUp_SpawnFromSky` instead, so it can never be carrying one.
 
-The count comes off `ItemData + 0x40`, the box size the stage's `box_spawn_chances` table rolled
+The count comes off `ItemData.box_size` (+0x40), which the stage's `box_spawn_chances` table rolled
 at spawn time. City Trial's table is `[20, 15, 10, 5, 4, 3, 7, 7, 0]` across 3 colors x 3 sizes,
 which is 45.1% small / 36.6% medium / 18.3% large, so vanilla's 1 / 2 / 4 averages 1.92 items per
 box.
@@ -384,7 +384,7 @@ Three properties the category is required to hold, and what enforces each.
 flat billboard model class, the state script, the pickup reaction and the SFX. It supplies no
 stat, because the descriptor overrides `effect_info` with a `count = 0` record and
 `Machine_OnTouchItem` applies grants by walking it. Downstream of that: no `Machine_GivePatch`,
-no `Machine_SetStatCap`, so no patch-cap interaction and no permanent-patch entry; and
+so no patch-cap interaction and no permanent-patch entry; and
 `Rider_TickDropAllUp` builds its candidate list from stats actually held, so an AP Patch can
 never be knocked loose. Offense is the base kind precisely because it is the only one of the
 eight stat patches whose `item_collect[]` slot no checklist cell counts, so nothing depends on it

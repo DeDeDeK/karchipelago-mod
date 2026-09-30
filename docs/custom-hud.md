@@ -33,7 +33,7 @@ Two adjacent variants, `HUD_CreateMiscGObj2` (0x8011487c) and `HUD_CreateMiscGOb
 | Function | Address | Notes |
 |----------|---------|-------|
 | `HUD_CreateElement(int ply, JOBJDesc *j)` | 0x80114ba4 | `GObj_Create(27,26,0)` + `GObj_AddGXLink(g, HUD_GXLink, 21, 1)` |
-| `HUD_AddElementData(GOBJ *g, int kind, int a, int ply)` | 0x80114e24 | `hud.h` names arg 2 "size" but it is `HUDKind` |
+| `HUD_AddElementData(GOBJ *g, HUDKind kind, int ply, int ply2)` | 0x80114e24 | |
 | `HUD_UpdateElement(JOBJ *j, int frame)` | 0x8011503c | sets the JObj animation frame |
 | `HUD_GXLink(GOBJ *g, int pass)` | 0x80114f1c | per-player viewport/scissor + visibility GX callback |
 | `JObj_GX(GOBJ *g, int pass)` | 0x8042a258 | unconditional JObj render |
@@ -65,7 +65,7 @@ Symbols starting with a digit (`3DHud_*`) are present in `GKYE01.map` but `scrip
 1. `HSD_ObjAlloc` a `HUDElementData`, then `memset(p, 0, 0xe4)` - the struct is 228 bytes
 2. `GObj_AddUserData(gobj, 27, destructor = 0x801151e8, p)`
 3. stores `kind` (arg 2) as a full int at +0x4
-4. packs arg 3 into the top nibble of byte +0x8 (mask 0xf0) and arg 4 into the 2-bit `ply` field (mask 0x0c)
+4. packs arg 3 into the 4-bit `ply` field of byte +0x8 (mask 0xf0) and arg 4 into the 2-bit `ply2` field (mask 0x0c)
 5. sets `is_visible` to 1
 
 Step 5 is the one that makes anything appear. `HUD_SetVisible` (0x80114eec) and `HUD_SetInvisible` (0x80114f04) toggle the bit afterwards.
@@ -138,7 +138,7 @@ Flags: `JOBJ_HIDDEN` = `1 << 4` (0x10), `JOBJ_OPA` = `1 << 18`, `JOBJ_XLU` = `1 
    or through the hoshi helper `JObj_LoadSet_SetPri(is_hidden, set, anim_id, start_frame, p_link, gx_link, is_add_anim, proc, proc_pri)`, which uses plain `JObj_GX` and has no visibility gate.
 4. Reach child JObjs by depth-first index: `GObj_GetJObjIndex(gobj, child_index)` (0x80055af0).
 
-`HUD_UpdateElement(jobj, value)` (0x8011503c) runs `JObj_ReqAnim(jobj, (float)value)`, then `JObj_SetAllAOBJRateByFlags(jobj, 0xffff, 1.0)`, then `HSD_JObjAnimAll(jobj)`. The digit models are texture-swap material animations, so frame N selects image N. The `ScInfPausegaugect` digit `TexAnim` carries 11 `ImageDesc` entries (16x15, format 0), enough for 0-9 plus one spare.
+`HUD_UpdateElement(jobj, value)` (0x8011503c) runs `JObj_ReqAnim(jobj, (float)value)`, then `JObj_SetAllAOBJRateByFlags(jobj, 0xffff, 1.0)`, then `JObj_AnimAll(jobj)`. The digit models are texture-swap material animations, so frame N selects image N. The `ScInfPausegaugect` digit `TexAnim` carries 11 `ImageDesc` entries (16x15, format 0), enough for 0-9 plus one spare.
 
 To discover what a loaded archive holds at runtime, walk `arch->header.nb_public`, reading each name at `arch->symbols + arch->public_info[i].symbol` and its data at `arch->data + arch->public_info[i].offset`.
 

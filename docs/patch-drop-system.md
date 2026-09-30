@@ -57,7 +57,7 @@ itemkind > 2.
 
 `CityItem_Throw` (0x80253ce4) takes `(item_kind, spawn_group, pos, throw_dir, flag,
 elev_angle, speed)`. It builds a spawn descriptor via `Item_InitDesc` (0x802509a0), maps
-the `ItemKind` through `CityItem_GetUnkKindFromItemKind` (0x8024ea54), hands the descriptor to
+the `ItemKind` through `Item_GetCategory` (0x8024ea54), hands the descriptor to
 `CityItem_Create` (0x8024eef4), and asserts the throw direction is non-zero and non-pathological
 (`itlib.c`: `"*** Item throw front dir is Zero!"` / `"*** Item throw front dir is
 Irregul(%f, %f, %f)!"`). The caller's `flag` lands at `(item+0x2c)+0x248`.
@@ -109,8 +109,8 @@ A heavy hit drops patches through `Rider_DropPatchesOnDamage` (`0x8019cdfc`). It
 `RiderCommonParam.patch_drop_damage_min` (+0x1b8, 8.0). There are two callers:
 
 - A ridden machine in the city, through `Machine_GiveDamage` -> `Machine_DropPatchesOnDamage`
-  (`0x801e09ac`) -> `RiderGObj_DropPatchesOnDamage` (`0x80192980`), with the machine's master
-  stats at +0x94c.
+  (`0x801e09ac`) -> `RiderGObj_DropPatchesOnDamage` (`0x80192980`), with the machine's live patch
+  stats (`MachineData.stats`, +0x94c).
 - The rider on foot (`0x801a06f0`), with the rider's own stats.
 
 That covers every `Machine_GiveDamage` call, including direct ones from mod code. Both callers
@@ -156,7 +156,7 @@ The scalar fields:
 to get the throw direction. Pair **C** then scales the *normalized* fanned forward and adds it
 to the hand-bone position: that is the spawn origin, not a velocity.
 
-`CityItem_Throw` does the rest. It builds a horizontal axis from `Gm_GetDownVector` +
+`CityItem_Throw` does the rest. It builds a horizontal axis from `Gr_GetDownVector` +
 `VEC_CrossNormalizeSnap(down, throw_dir)`, pitches the direction around that axis by the pair-**B**
 elevation angle via `Vec3_RotateAboutUnitAxis`, scales each component by the pair-**A** speed, and
 writes the result to the item's velocity at `(item+0x2c)+0xc4/0xc8/0xcc`. Neither float argument
@@ -201,15 +201,15 @@ large `patch_drop_count` would silently zero stats instead of fountaining patche
 
 `CityItem_Throw`'s `spawn_group` argument identifies what spawned the item. The patch-drop
 pipeline passes **3** from both sub-handlers; the yakumono-break helpers (`zz_8021c8ec_`,
-`zz_8021db44_`, `zz_8021efd8_`) pass 4/5/6. `Item_InitDesc` stores it at desc+8 and
-`CityItem_InitData` (0x8024eaf4) copies it to `(item+0x2c)+0x20`, where it is written once at
+`zz_8021db44_`, `zz_8021efd8_`) pass 4/5/6. `Item_InitDesc` stores it at `ItemDesc.spawn_type` (+0x08) and
+`CityItem_InitData` (0x8024eaf4) copies it to `ItemData.spawn_type` (+0x20), where it is written once at
 creation and never overwritten.
 
 No gameplay logic branches on it. Inside the city-item subsystem it is read only by two
 ground-collision assertions - in `CityItem_LifetimeThink`
 (`"Item pos is ground center(%d:%d,%d)"`) and the under-ground check
 (`"*** Error : Why? Item under ground not found!(%d,%d:%d,%d)"`) - which print it next to the
-item id (`+0x1c`) and spawn-location indices (`+0x34`/`+0x38`). It is a debug source-attribution
+item id (`+0x1c`) and spawn-location indices (`spawn_area` / `spawn_coll_kind`, `+0x34`/`+0x38`). It is a debug source-attribution
 tag, not a control input.
 
 ## Mod Use

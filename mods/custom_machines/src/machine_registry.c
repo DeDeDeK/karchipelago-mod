@@ -28,7 +28,7 @@ static const u32 stc_star_handler_sites[2][2] = {
 static CustomMachineHandler stc_star_handlers[2][CUSTOM_VCSTAR_NUM];
 static CustomMachineHandler stc_bike_handlers[2][CUSTOM_VCWHEEL_NUM];
 
-// In registry order. Machine_AnimThink (0x801c618c) is shared by both classes and
+// In registry order. MachineGObj_AnimThink (0x801c618c) is shared by both classes and
 // dispatches through nothing indexed by kind, so these run from a replacement of its
 // last call.
 static CustomMachineHandler stc_anim_handlers[CUSTOM_MACHINE_MAX];
@@ -49,7 +49,7 @@ int CustomMachineRegistry_SetHandler(CustomMachineHandlerSlot slot, int machine_
     return 1;
 }
 
-// Replaces the bl Machine_ColAnimThink at 0x801c6274, Machine_AnimThink's last call, which
+// Replaces the bl Machine_ColAnimThink at 0x801c6274, MachineGObj_AnimThink's last call, which
 // runs once per machine per frame after the ColAnim overlays and before the draw.
 static void AnimThinkTail(MachineData *md)
 {
@@ -178,7 +178,7 @@ CODEPATCH_HOOKCREATE(0x801c8d8c,
     0
 )
 
-// Repoint Machine_StoreVcDataPtr's (0x801c4f98) inline `stc_vcDataLookup[is_bike][kind]`
+// Repoint MachineGObj_StoreVcDataPtr's (0x801c4f98) inline `stc_vcDataLookup[is_bike][kind]`
 // read at stc_vc_lookup. Patching the arithmetic rather than hooking keeps the
 // caller-saved registers the surrounding code still needs (r0, r4, r5) untouched.
 static void PatchLookupBase(void)

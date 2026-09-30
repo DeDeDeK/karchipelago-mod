@@ -295,7 +295,7 @@ static void TornadoSpawnModel(void)
         return;
 
     RiderData *rd = (RiderData *)rider_gobj->userdata;
-    Effect_SpawnSync(NULL, TORN_EFFECT_ID, rd->efgroup, TORN_EFFECT_ANCHOR,
+    Effect_SpawnSync(NULL, TORN_EFFECT_ID, rd->efgroup2, TORN_EFFECT_ANCHOR,
                      TornadoAdoptEffect);
 }
 
@@ -392,7 +392,7 @@ static int TornadoIsWeakFamily(GOBJ *yaku_gobj)
     YakumonoData *yd = (YakumonoData *)yaku_gobj->userdata;
     if (!yd)
         return 0;
-    return Yaku_GetDescCollFunc(yd->desc_id) == (void *)hitWeakObject;
+    return Yaku_GetDescCollFunc(yd->kind) == (void *)hitWeakObject;
 }
 
 // Break a carried prop through its own family coll_func, so debris, item drops,
@@ -615,12 +615,18 @@ static void TornadoClaimMachines(void)
 // The CT breakables the tornado is allowed to rip up: star pole, forest pitfall,
 // coral, trees, rocks, volcano walls, volcano-base holes, houses. Passive zones and
 // the big set-piece structures are left alone.
-static int TornadoIsBreakableYaku(int desc_id)
+static int TornadoIsBreakableYaku(YakuKind kind)
 {
-    switch (desc_id)
+    switch (kind)
     {
-    case 29: case 32: case 33: case 34:
-    case 35: case 36: case 37: case 38:
+    case YAKUKIND_STARPOLE:
+    case YAKUKIND_BREAKFLOOR:
+    case YAKUKIND_CORAL:
+    case YAKUKIND_TREE:
+    case YAKUKIND_ROCK:
+    case YAKUKIND_BREAKHPCOLLDOOR:
+    case YAKUKIND_BREAKHPCOLLHOLE:
+    case YAKUKIND_BREAKHPCOLLHOUSE:
         return 1;
     default:
         return 0;
@@ -636,7 +642,7 @@ static int TornadoCollectBreakParents(GOBJ **out, int max)
         if (g->entity_class != YAKUMONO_GOBJ_KIND)
             continue;
         YakumonoData *yd = (YakumonoData *)g->userdata;
-        if (yd && TornadoIsBreakableYaku(yd->desc_id))
+        if (yd && TornadoIsBreakableYaku(yd->kind))
             out[n++] = g;
     }
     return n;

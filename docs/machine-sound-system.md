@@ -69,8 +69,8 @@ Six loop handles live in `MachineData`, each `-1` when silent:
 
 | Handle | Loop |
 |---|---|
-| `+0x860` | surface |
-| `+0x87c` | engine |
+| `+0x860` `surface_loop_fgm` | surface |
+| `+0x87c` `engine_loop_fgm` | engine |
 | `+0x888` | charge, with the id it was started from at `+0x88c` |
 | `+0x890` | ground rumble, with its id at `+0x894` |
 | `+0x898` | wind |
@@ -81,7 +81,7 @@ starts the surface and engine loops at volume 0.0.
 
 ### Engine loop
 
-`Machine_UpdateEngineLoop` (`0x801dcb18`) restarts the loop whenever `+0x87c` is
+`Machine_UpdateEngineLoop` (`0x801dcb18`) restarts the loop whenever `engine_loop_fgm` is
 -1, so it is effectively always alive, and stops it while `md->xc39` bit 0 is
 set. Its input is the engine load `Machine_Star_Think` maintains at `+0x870`:
 

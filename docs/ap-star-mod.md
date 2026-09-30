@@ -155,7 +155,7 @@ it alone and `MODULATE` shades it, which is why the disc's two stages are built 
 
 `MObjLoad` (`0x803f9f04`) gives every model instance its own `HSD_Material` copy, so each star on
 the field is written separately rather than through the archive. The write runs from the machine's
-Anim handler (`CustomMachinesAPI.SetAnimHandler`), at the end of `Machine_AnimThink` after
+Anim handler (`CustomMachinesAPI.SetAnimHandler`), at the end of `MachineGObj_AnimThink` after
 `Machine_ColAnimThink` has reapplied the ColAnim overlays, so it is the color that draws. The
 handler is claimed once, when the machine binding settles at the first scene change. Phase advances
 on the time-base delta, so the period holds through slowdown; the unsigned subtraction carries the

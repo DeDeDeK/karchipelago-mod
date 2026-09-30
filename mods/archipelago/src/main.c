@@ -798,7 +798,8 @@ void On3DLoadEnd()
         GOBJ *rg = Ply_GetRiderGObj(i);
         RiderData *rd = rg->userdata;
         n += sprintf(&roster[n], "%sP%d r%d/c%d/m%d", n ? ", " : "",
-                     i + 1, rd->kind, rd->color_idx, rd->starting_machine_idx);
+                     i + 1, rd->kind, rd->color_idx,
+                     MachineKind_Resolve(Ply_GetMachineIsBike(i), Ply_GetMachineKind(i)));
     }
     if (n)
         OSReport("[Main] Players - %s\n", roster);
@@ -806,6 +807,7 @@ void On3DLoadEnd()
     if (Gm_IsAutoDemo())
         OSReport("[Main] Title attract demo round - no check counts toward the seed\n");
 
+    GateMachines_On3DLoadEnd();
     GateAbilities_On3DLoadEnd();
     ItemSpawnFilter_On3DLoadEnd();
     PermanentPatch_On3DLoadEnd();

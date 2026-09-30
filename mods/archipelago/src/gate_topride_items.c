@@ -16,10 +16,10 @@ static u32 blocked_reported;
 
 // TR items whose copy ability unlock is an alternative key to their own TR unlock.
 static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
-    { TRITEM_FREEZE_FAN, COPYKIND_FREEZE },
+    { TRITEM_FREEZE_FAN, COPYKIND_ICE },
     { TRITEM_FIRE,       COPYKIND_FIRE },
     { TRITEM_BOMB,       COPYKIND_BOMB },
-    { TRITEM_WALKY,      COPYKIND_MIC },
+    { TRITEM_WALKY,      COPYKIND_MIKE },
 };
 
 static void GateTopRideItems_ApplyMask()

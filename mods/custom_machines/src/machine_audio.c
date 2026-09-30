@@ -147,7 +147,7 @@ static void LoadDropinBanks(void)
 
         stc_stamp_base = next_index + 1;
         FGM_QueueLoad(path, slot, NULL, NULL);
-        FGM_SychronousLoad(DoTasks);
+        FGM_SynchronousLoad(DoTasks);
         stc_stamp_base = 0;
 
         SSMChunk *chunk = stc_ssm_slot_chunks[slot];

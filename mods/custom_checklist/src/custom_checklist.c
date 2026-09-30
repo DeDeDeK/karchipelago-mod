@@ -156,7 +156,7 @@ static u8 CC_GetRewardNum(GameMode mode)
 {
     if (g_build_active >= 0 && mode == GMMODE_CITYTRIAL)
         return 0;
-    return (unsigned)mode < GMMODE_NUM ? stc_clear_num[mode] : 0;
+    return (unsigned)mode < GMMODE_NUM ? stc_reward_num[mode] : 0;
 }
 
 // REPLACEFUNC for Checklist_GetClearKindFromRewardIndex (0x80049c84): 0 for custom tabs
@@ -170,7 +170,7 @@ static u8 CC_GetClearKindFromRewardIndex(GameMode mode, u8 reward_index)
 
 // REPLACECALL at Checklist_Think's only call of ClearChecker_GetRewardFromClearKind
 // (0x80049ec4), reached by A on an is_unlocked or is_filler cell. That function bounds
-// the mode itself and indexes stc_clear_num / stc_reward_table_ptrs directly instead of
+// the mode itself and indexes stc_reward_num / stc_reward_table_ptrs directly instead of
 // going through Checklist_GetRewardNum, so a custom tab's completed cell asserts inside
 // it. Patched at the call site, not the entry, so a consumer mod can still own the entry
 // for its own reward table. Vanilla leaves out_reward_param alone on a miss.
@@ -185,7 +185,7 @@ static void CC_GetRewardFromClearKind(GameMode mode, u8 clear_kind,
     ClearChecker_GetRewardFromClearKind(mode, clear_kind, out_reward_index, out_reward_param);
 }
 
-// Gm_GetClearChecker's pointer walk (0x8017cf14) without its assert. NULL before the
+// Gm_GetClearCheckerPhase's pointer walk (0x8017cf14) without its assert. NULL before the
 // grid GObj exists.
 static ClearCheckerUI *CC_GetUI(void)
 {
@@ -352,7 +352,7 @@ static void CC_LoadTexturesForList(int idx)
 // custom check into the checklist.
 static int CC_CheckForNewUnlocks(GameMode mode)
 {
-    if (Checklist_IsCacheValid())
+    if (Net_IsSessionActive())
         return 0;
     return CC_HasPendingUnlock(gmGetClearcheckerTypeP(mode)) || CC_FirstPending() >= 0;
 }
@@ -378,7 +378,7 @@ static void CC_SetNextMinor(int minor)
         g_postrun = 1;
         GameMode mode = (GameMode)(minor - MNRKIND_AIRRIDECHECKLIST);
         GameClearData *cd = gmGetClearcheckerTypeP(mode);
-        if (Checklist_IsCacheValid() || !CC_HasPendingUnlock(cd))
+        if (Net_IsSessionActive() || !CC_HasPendingUnlock(cd))
         {
             int idx = CC_FirstPending();
             if (idx >= 0)
@@ -456,7 +456,7 @@ static int CC_RingStep(int minor, int dir)
 // With no tabs registered the ring is just AR/TR/CT and this matches vanilla.
 static void CC_MinorThink(void)
 {
-    ClearCheckerPhase phase = (ClearCheckerPhase)Gm_GetClearChecker();
+    ClearCheckerPhase phase = (ClearCheckerPhase)Gm_GetClearCheckerPhase();
     int minor = Scene_GetCurrentMinor();
 
     switch (phase)
@@ -822,14 +822,14 @@ static int CC_InstallMinor(void)
 // Vanilla checklist "objective completed" cue.
 #define CC_UNLOCK_SFX 0x10008
 
-// Suppressed when the unlock cache is valid (in menus the flip-and-sparkle animates on
-// tab entry instead), and gated on the engine's one-frame cooldown so a record path
-// through ClearChecker_SetNewUnlock can't double-play.
+// Suppressed during a LAN session, as vanilla does, and gated on the engine's
+// one-frame cooldown so a record path through ClearChecker_SetNewUnlock can't
+// double-play.
 static void CC_PlayUnlockSfx(void)
 {
-    if (Checklist_IsCacheValid())
+    if (Net_IsSessionActive())
         return;
-    int frame = ClearChecker_GetFrameIndex();
+    int frame = Gm_GetEngineFrames();
     if (*stc_clearchecker_sfx_last_frame != frame)
     {
         SFX_PlayFullVolume(CC_UNLOCK_SFX);

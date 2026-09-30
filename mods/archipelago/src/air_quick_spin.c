@@ -15,7 +15,7 @@
 void AirQuickSpin_TryAerialSpin(RiderData *rd, int tornado_fired)
 {
     if (ap_menu_settings.air_quick_spin_enabled && !tornado_fired)
-        Rider_IASACheck_QuickSpin(rd);
+        RiderState_QuickSpinInterrupt(rd);
 }
 
 CODEPATCH_HOOKCREATE(0x801ac170,
@@ -35,7 +35,7 @@ void AirQuickSpin_TryAerialSpinMetaKnight(RiderData *rd, int charge_fired)
         return;
 
     Rider_UpdateQuickSpinTimers(rd);
-    Rider_MetaKnight_IASACheck_QuickSpin(rd);
+    RiderState_MetaKnightQuickSpinInterrupt(rd);
 }
 
 CODEPATCH_HOOKCREATE(0x801c2b28,
@@ -54,7 +54,7 @@ void AirQuickSpin_DededeAerialSpin(RiderData *rd)
     Rider_UpdateQuickSpinTimers(rd);
 
     if (ap_menu_settings.air_quick_spin_enabled)
-        Rider_Dedede_IASACheck_QuickSpin(rd);
+        RiderState_DededeQuickSpinInterrupt(rd);
 }
 
 void AirQuickSpin_OnBoot(void)

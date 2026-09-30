@@ -39,11 +39,6 @@
 // Machines are KO'd on arrival; wider than the yakumono radius so the model does not clip in.
 #define HYPERNOVA_MACHINE_BREAK_RADIUS 45.0f
 
-// The BreakDown state callback (Star 0x801f0234, Wheel 0x801fb3d0) runs Machine_KOExplode -
-// explosion, break SFX, GObj_Destroy - only if MachineData.x78 bit 0x40 is set. Machine_OnKO
-// enters BreakDown but never sets the bit, so a forced break has to.
-#define HYPERNOVA_MACHINE_KO_GATE_BIT  0x40
-
 // B, not A: A is the boost/charge button in Air Ride.
 #define HYPERNOVA_TRIGGER_BUTTON    PAD_BUTTON_B
 

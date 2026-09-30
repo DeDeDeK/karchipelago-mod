@@ -22,8 +22,8 @@ That reversibility rules out `CODEPATCH_REPLACEFUNC`, which writes a bare branch
 
 Kirby, Dedede and Meta Knight are separate rider characters with separate enters, all covered by the one mask bit.
 
-- **Kirby** funnels both entries - the IASA check `Rider_IASACheck_QuickSpin` (0x801b7e80) and the neutral-state entry `Rider_TryQuickSpinNeutral` (0x801b7e0c) - into `Rider_QuickSpin_Enter` (0x801b7ee4).
-- **Dedede / Meta Knight** never touch that function. Their per-character IASA checks call `Rider_Dedede_QuickSpin_Enter` (0x801c05f8, action-state 0x2c) and `Rider_MetaKnight_QuickSpin_Enter` (0x801c3f90, action-state 0x2d), each `void W(RiderData*, int dir)` with a single call site.
+- **Kirby** funnels both entries - the IASA check `RiderState_QuickSpinInterrupt` (0x801b7e80) and the neutral-state entry `Rider_TryQuickSpinNeutral` (0x801b7e0c) - into `RiderState_QuickSpinEnter` (0x801b7ee4).
+- **Dedede / Meta Knight** never touch that function. Their per-character IASA checks call `RiderState_DededeQuickSpinEnter` (0x801c05f8, action-state 0x2c) and `RiderState_MetaKnightQuickSpinEnter` (0x801c3f90, action-state 0x2d), each `void W(RiderData*, int dir)` with a single call site.
 
 All three share the rotation detector `Rider_CheckQuickSpinInput` (0x80191980). The Tornado copy ability shares that detector too but enters through yet another function gated on `copy_kind == COPYKIND_TORNADO`, so it is untouched by any of these gates.
 
@@ -46,7 +46,7 @@ Thirteen `CODEPATCH_REPLACECALL`s plus one `CODEPATCH_HOOKCONDITIONALCREATE`, al
 | Ability | Patch site(s) | Enclosing function | Wrapper |
 |---------|---------------|--------------------|---------|
 | Inhale | `0x8019c610` | `Rider_TryStartInhale` (0x8019c5ac) | `GateBaseAbilities_StartInhale` |
-| Quick spin (Kirby) | `0x801b7ec0`, `0x801b7e58` | `Rider_IASACheck_QuickSpin` (0x801b7e80), `Rider_TryQuickSpinNeutral` (0x801b7e0c) | `GateBaseAbilities_QuickSpinEnter` |
+| Quick spin (Kirby) | `0x801b7ec0`, `0x801b7e58` | `RiderState_QuickSpinInterrupt` (0x801b7e80), `Rider_TryQuickSpinNeutral` (0x801b7e0c) | `GateBaseAbilities_QuickSpinEnter` |
 | Quick spin (Dedede) | `0x801c05d4` | Dedede IASA check | `GateBaseAbilities_DededeSpinEnter` |
 | Quick spin (Meta Knight) | `0x801c3f6c` | Meta Knight IASA check | `GateBaseAbilities_MetaKnightSpinEnter` |
 | Charge (grounded) | `0x801ef424`, `0x801ef350` | `MachinePhys_Charge` (0x801ef364) and its minimal sibling | `GateBaseAbilities_IncrementCharge` |

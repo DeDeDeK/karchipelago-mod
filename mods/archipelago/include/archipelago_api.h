@@ -326,14 +326,14 @@ typedef enum APItemId
     // Copy ability unlock items (760-770, aligned to CopyKind)
     AP_ABILITY_UNLOCK_BASE = 760,
     AP_ABILITY_UNLOCK_FIRE = 760,          // COPYKIND_FIRE
-    AP_ABILITY_UNLOCK_WHEEL,               // COPYKIND_WHEEL
+    AP_ABILITY_UNLOCK_WHEEL,               // COPYKIND_TIRE
     AP_ABILITY_UNLOCK_SLEEP,               // COPYKIND_SLEEP
     AP_ABILITY_UNLOCK_SWORD,               // COPYKIND_SWORD
     AP_ABILITY_UNLOCK_BOMB,                // COPYKIND_BOMB
     AP_ABILITY_UNLOCK_PLASMA,              // COPYKIND_PLASMA
     AP_ABILITY_UNLOCK_NEEDLE,              // COPYKIND_NEEDLE
-    AP_ABILITY_UNLOCK_MIC,                 // COPYKIND_MIC
-    AP_ABILITY_UNLOCK_FREEZE,              // COPYKIND_FREEZE
+    AP_ABILITY_UNLOCK_MIC,                 // COPYKIND_MIKE
+    AP_ABILITY_UNLOCK_FREEZE,              // COPYKIND_ICE
     AP_ABILITY_UNLOCK_TORNADO,             // COPYKIND_TORNADO
     AP_ABILITY_UNLOCK_BIRD,                // COPYKIND_BIRD
 

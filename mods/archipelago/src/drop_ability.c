@@ -36,7 +36,7 @@ static void DropAbility_PerFrame(GOBJ *g)
         {
             OSReport("[DropAbility] Player %d dropped %s\n", i + 1, CopyKind_Names[rd->copy_kind]);
             Rider_AbilityRemoveModel(rd);     // clear copy_kind + poof VFX/SFX + remove model
-            Rider_LoseAbilityState_Enter(rd); // spit-out animation
+            RiderState_LoseAbilityEnter(rd); // spit-out animation
         }
     }
 }

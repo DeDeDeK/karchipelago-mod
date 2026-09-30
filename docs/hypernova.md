@@ -107,7 +107,7 @@ applied to Hypernova both ways:
 - **Activating** Hypernova strips whatever the rider was holding: `Hypernova_ActivatePlayer`
   calls `Rider_AbilityRemoveModel` (`0x80191554`) - which clears **both** `copy_kind` and
   `powerup_kind` by invoking the held kind's installed remove callback - then
-  `Rider_LoseAbilityState_Enter` (`0x801b0adc`) for the spit-out to neutral. Without this strip
+  `RiderState_LoseAbilityEnter` (`0x801b0adc`) for the spit-out to neutral. Without this strip
   the guard below would read the pre-existing state and cancel Hypernova on its first frame.
 - **While active**, the frame the rider *gains* a copy ability or power-up (`PlayerHoldsAbility`),
   `Hypernova_OnFrameEnd` ends Hypernova for that player. This runs **before `DriveInhale`** -
@@ -123,7 +123,7 @@ action-state and animation.
 
 The rider model matrix is rebuilt every frame by `Rider_ApplyModelMatrix` (`0x80190848`, via
 `Rider_ModelMatrixThink` `0x8018f79c`, GObj proc priority 6), which feeds
-`gmLanMenu_Scale3DObject` (`0x80054414`) the **product** of `RiderData.base_scale` (`+0x2c8`)
+`JObj_SetFromBasis` (`0x80054414`) the **product** of `RiderData.x2c8` (`+0x2c8`, a copy of `rider_scale`)
 and `RiderData.model_scale` (`+0x348`) along with the rider's forward/up/pos.
 
 Writing `model_scale` is the entire mechanism - no JObj poking; the engine consumes it every
@@ -133,8 +133,8 @@ frame, and it resets to 1.0 on scene change because models are recreated. `TickS
 deactivate, writing the field directly each frame. A settled, inactive player's `model_scale` is
 left alone entirely so the mod never fights other scale writers.
 
-**Do not also bump `base_scale` for the 2x look** - the model uses the product, so raising both
-compounds to 4x. `base_scale` is also the vanilla inhale's range knob (`HurtVolume_OverlapTest`
+**Do not also bump `x2c8` for the 2x look** - the model uses the product, so raising both
+compounds to 4x. `x2c8` is also the vanilla inhale's range knob (`HurtVolume_OverlapTest`
 `0x80189784` scales the mouth sphere by it), but that sphere is only tested against EventActor
 candidates, of which City Trial has none, so widening it buys nothing. The vacuum's reach is an
 independent mod constant.
@@ -219,7 +219,7 @@ all NULL/zero. The visible geometry lives in the **ground scene-instance pool**:
 prop is a `GrCollRecord` (`Gr_GetCollRecords`) carrying its own `jobj` (world matrix
 `JOBJ.rotMtx`) and a `yaku_gobj` back-pointer to its owning parent GObj. The vacuum therefore
 moves the per-prop **records**, not the GObj, sidestepping the per-family layout differences of
-`YakumonoData.region_audio_arr`. `on_damage` is NULL for these families, so the break is
+`YakumonoData.region_audio_arr`. `on_damage_callback` is NULL for these families, so the break is
 collision-force driven, not damage-driven.
 
 **Skeleton-joint families.** The static families (houses 38, walls 36, holes 37, floor 32,
@@ -230,20 +230,20 @@ write. `Hypernova_PullInstance` sets `JOBJ_USER_DEFINED_MTX` on each joint first
 that setup keep our matrix (idempotent for the static families).
 
 **Enumeration** is two steps: collect the breakable *parent* GObjs from the yakumono p_link
-bucket (`GAMEPLINK_YAKUMONO`, 8; `entity_class == YAKUMONO_GOBJ_KIND` 15; breakable `desc_id`;
+bucket (`GAMEPLINK_YAKUMONO`, 8; `entity_class == YAKUMONO_GOBJ_KIND` 15; breakable `kind`;
 up to 32 parents); then scan the scene-instance pool and keep each record whose `yaku_gobj` is
 one of those parents. Matching by pointer means a non-break record's owner field is never
 trusted.
 
 **How props break (collision force vs HP).** `collideWithObject` (`0x800f5004`) reads the prop's
-`desc_id`, indexes the 70-entry descriptor table `stc_yaku_descs` (`0x804a5be8`), and calls that
+`kind`, indexes the 70-entry descriptor table `stc_yaku_descs` (`0x804a5be8`), and calls that
 descriptor's **`coll_func`**: `coll_func(yaku_gobj, otherCollData, gcp, tri_idx, contact)`. The
 handler (`hitWeakObject` `0x80107914` / `hitStrongObject` `0x801086d0` / `hitBreakableFloor`
 `0x80106bd0` / `hitBigStar` `0x80103eb8`) computes a **force** = `otherCollData.radius *
 impactSpeed^2` (`GrYaku_TestImpactBreak` `0x80104cd4` / `GrYaku_ApplyImpactDamage` `0x80104be0`)
 and breaks when `force > HP` (weak and BigStar: one-shot threshold; strong: subtractive per-
 triangle HP; floor: one crack-stage per hit). There is no "deal N damage" entry that bypasses a
-collider, and seeding `HurtData` does nothing because `on_damage` is NULL for these families.
+collider, and seeding `HurtData` does nothing because `on_damage_callback` is NULL for these families.
 
 **`impactSpeed` is a normal projection, not `|delta|`.** `grScene_GetImpactSpeed` (`0x800d8edc`)
 takes the collider's frame delta (`CollData.pos_delta`), projects it onto the contacted
@@ -338,14 +338,14 @@ the flight continues.
   from the dragged instance JObj, pinned at the prop's baked spot. The weak path also drops no
   items; only the strong path runs the drop table.
 
-In every case the tail calls `grScene_SetInstanceColl(record, 0)`, `GrYaku_IncrementBreakCount`
+In every case the tail calls `grScene_SetInstanceColl(record, 0)`, `YakumonoGObj_IncrementBreakCount`
 (`0x80105d80`) credits the checklist, and the family's remaining-prop counter decrements. The
-multi-stage floor (desc 32) advances one crack-stage per call, so it may take a few frames in
+multi-stage floor (kind 32) advances one crack-stage per call, so it may take a few frames in
 the break zone to fully open.
 
 **Weak-family rubble.** Because the weak rubble is debris pinned to a separate stage joint,
 `Hypernova_BreakInstanceNative` does two extra things when
-`Yaku_GetDescCollFunc(desc_id) == hitWeakObject` (`Hypernova_IsWeakBreakFamily`):
+`Yaku_GetDescCollFunc(kind) == hitWeakObject` (`Hypernova_IsWeakBreakFamily`):
 
 1. **Relocates the debris-anchor node onto the rider for the break instant.**
    `Hypernova_WeakDebrisNode` walks the same chain `hitWeakObject` uses - family break data
@@ -364,7 +364,7 @@ the break zone to fully open.
 
 Strong families need neither step - they shatter and hide inline at the contact.
 
-**Targeting.** `Hypernova_IsBreakableYaku` admits these `desc_id`s: 29 star pole, 32 forest
+**Targeting.** `Hypernova_IsBreakableYaku` admits these `YakuKind`s: 29 star pole, 32 forest
 pitfall, 33 coral, 34 forest trees, 35 volcano + high-plains rocks, 36 volcano rock walls, 37
 volcano-base holes, 38 dilapidated houses. Not targets: 17/18 (passive zones), 46 (gondola), 61
 (decorative), 68 (Lighthouse), 69 (WhispyWoods).
@@ -394,16 +394,22 @@ position override from being fought. The write lands in `OnFrameEnd`, after the 
 and is picked up by the next frame's `Machine_ApplyModelMatrix` (`0x801c9074`, priority 6).
 Machines are not shrunk - a full-size machine erupting on a 2x Kirby reads better - and their
 break radius (`HYPERNOVA_MACHINE_BREAK_RADIUS`, 45.0) is wider than the yakumono one so the
-machine detonates before its model clips into the rider.
+machine is KO'd and released before its model clips into the rider.
 
-**KO.** On arrival, `Hypernova_KOMachine` arms the break gate and calls **`Machine_OnKO`**
-(`0x801e568c`). That captures the rider ply into `+0x1b48` (sentinel **5** when unridden), sets
-`is_dead`, disables the machine's hit-collision, and enters the **BreakDown** state (29). The
-BreakDown state callback (`0x801f0234` for stars, `0x801fb3d0` for wheels) is what runs
-`Machine_KOExplode` (`0x801e5838`) - explosion VFX (`Effect_SpawnSync` 0x2799 + a debris
-effect), break SFX, then `GObj_Destroy` - and it is gated on a **byte** load of `MachineData.x78`,
-bit `0x40`. `Machine_OnKO` itself neither reads nor sets that bit, so a forced break has to OR it
-in first or the machine enters BreakDown and then sits there dead but undestroyed.
+**KO.** On arrival, `Hypernova_KOMachine` ORs `MACHINE_MSTATUS_ENDED` into `mstatus_flags` and
+calls **`Machine_OnKO`** (`0x801e568c`). That captures the rider ply into `+0x1b48` (sentinel **5**
+when unridden), sets `is_dead`, disables the machine's hit-collision, and enters the **BreakDown**
+state (29 for stars, 35 for wheels). The BreakDown anim callback (`0x801f0234` for stars,
+`0x801fb3d0` for wheels) is what runs `Machine_KOExplode` (`0x801e5838`) - explosion VFX
+(`Effect_SpawnSync` 0x2799 + a debris effect), break SFX, then `GObj_Destroy` - and it is gated on
+a **byte** load of `MachineData.mstatus_flags` (+0x78), bit `0x40` (`MACHINE_MSTATUS_ENDED`).
+`Machine_OnKO` itself neither reads nor sets that bit, and the mod's OR does not survive the call:
+BreakDown plays class motion `0x4f`, and starting a motion (`0x801d4b0c`) clears the bit before any
+BreakDown callback runs. The per-frame motion step (`0x801d4150`, from `MachineGObj_AnimThink`)
+sets it again once that non-looping motion reaches its end frame (120 frames in the star class
+data), and the same `MachineGObj_AnimThink` pass then runs the BreakDown callback. So the machine
+explodes on its own about two seconds after the KO, the same as a vanilla HP-0 break; the OR is
+redundant but harmless.
 The whole destroy tail is **rider-safe**: every rider dereference guards on the
 `+0x1b48 == 5` sentinel, so an unridden machine spawns the VFX and frees cleanly with no rider
 eject and no out-of-range player index. The claim is dropped the instant `Machine_OnKO` is
@@ -433,16 +439,16 @@ enemies:
    (`0x8019c5ac`) and the per-frame `Rider_InhaleCaptureScan` (`0x8019c63c`) iterate exactly one
    GObj list: the EventActor bucket (p_link 12). Items (p_link 13) and yakumono (p_link 8) are
    never visited.
-2. **The predicate admits EventActors only.** `EventActor_IsInhalable` (`0x802041c8`) rejects
+2. **The predicate admits EventActors only.** `EventActorGObj_IsInhalable` (`0x802041c8`) rejects
    GObj classes `0xE` / `0x26` / `0x3E` (rider/player/projectile) and then requires the
    candidate to pass the EventActor test.
 3. **The overlap test reads an EventActor volume.** `HurtVolume_OverlapTest` (`0x80189784`)
-   compares the rider's mouth volume (`RiderData+0x828`) against the candidate's volume at
+   compares the rider's mouth volume (`RiderData+0x828`) against the candidate's `hit_region` at
    `EnemyData+0x45c`, which items/yakumono do not have.
 4. **Capture is EventActor-specific.** `EventActor_OnCapture` (`0x802038c4`) puts the actor into
    the captured state and writes EnemyData fields.
-5. **The captured driver reads/writes EnemyData.** `EnemyState_InhaledFunc4` (`0x80203b64`,
-   mouth-follow + shrink + destroy past 120 frames) and `EnemyState_AnimTick` (`0x8020be1c`)
+5. **The captured driver reads/writes EnemyData.** `EventActor_InhaledPri6` (`0x80203b64`,
+   mouth-follow + shrink + destroy past 120 frames) and `EventActor_CommonPhys` (`0x8020be1c`)
    read attraction/scale fields. Feeding an `ItemData` / `YakumonoData` pointer here reads the
    wrong struct.
 
@@ -461,15 +467,15 @@ full (`Rider_IsInhaleMouthFull` `0x801adf40`, capture count < 3). It is checked 
 visual even when Kirby holds an ability. The attack bit is also **transient**, set only on the
 single frame the attack input registers, so the gate reads false on nearly every frame.
 
-**Force lever: `Rider_StartInhale` (`0x801ad2c4`).** No gate, no target needed. It plays the
-suck-START anim `0x2f` (action-state `0x76`), spawns the native suction **whirlwind**
+**Force lever: `Rider_StartInhale` (`0x801ad2c4`).** No gate, no target needed. It enters the
+suck-START status `0x2f` (`RDSTATE_DRAWSTART`, mstatus `0x76`), spawns the native suction **whirlwind**
 (`Effect_SpawnSync(..., 0x3a982, ...)`) anchored to the mouth bone, plays the inhale **SFX**
 (`0x20037`), and installs the per-frame capture callbacks (which, in CT, harmlessly scan the
 empty EventActor bucket and capture nothing).
 
-**The inhale is three action-states that do NOT chain automatically.** `RiderData.status` is
-the anim id; the parallel action-state runs `0x76`/`0x77`/`0x78`. Anims: `0x2f` suck START,
-`0x30` suck LOOP, `0x31` suck END.
+**The inhale is three statuses that do NOT chain automatically.** `RiderData.status` (+0x1c)
+holds `0x2f` suck START (`RDSTATE_DRAWSTART`), `0x30` suck LOOP (`RDSTATE_DRAW`) or `0x31` suck
+END (`RDSTATE_DRAWEND`); `RiderData.mstatus` (+0x28) is the motion each plays, `0x76`/`0x77`/`0x78`.
 
 - **START (`0x2f`) is a one-shot gulp.** `Rider_InhaleStartProc` (`0x801ad1dc`) holds the anim
   while it plays, then on `Rider_IsBodyAnimDone` (`0x80198b00`) hands off to the generic
@@ -535,12 +541,14 @@ trigger is held) - it is the power-up's signature look. The recolor is real-time
 touch the `.dat`; it drives live model state.
 
 **Kirby's body color is texture-swap, not a material color register.** The rider keeps a flat
-array at `RiderData+0x2c0` (one entry per material slot) whose entries are **`hsd_tobj`**
-texture objects. Each TObj holds an array of `ImageDesc` pointers (one per color variant) and an
-`AObj` whose playhead selects which variant is shown. The 8 player colors
+array at `RiderData+0x2c0` (`tobj_lookup_arr`) whose entries are **`hsd_tobj`** texture objects -
+every TObj of the body model's DObj/MObj chains, collected at spawn by `0x801968d0`. Each TObj
+holds an array of `ImageDesc` pointers (one per color variant) and an `AObj` (`TObj+0x64`) whose
+playhead selects which variant is shown. The 8 player colors
 (pink/yellow/blue/red/green/purple/brown/white) + wing/fire are just entries in that texture
-array; `RiderKirby_SetMaterialColorAndUpdate` (`0x80198d3c`) walks the array and drives every
-TObj's AObj to a variant index. Texture selection is discrete, so there is no continuous body
+array; `RiderKirby_SetMaterialColorAndUpdate` (`0x80198d3c`) walks the part's list of indices into
+`tobj_lookup_arr` and seeks each listed TObj's AObj to a variant index (`AOBJ_ReqAnim`, then
+`HSD_TObjAnim`). Texture selection is discrete, so there is no continuous body
 color register to sweep - driving the AObj continuously snaps between baked textures rather than
 blending.
 

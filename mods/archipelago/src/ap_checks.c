@@ -88,14 +88,14 @@ static void APChecks_SetNewUnlockReplacement(int mode, int clear_kind)
     if (fresh)
         RecordCheck(mode, clear_kind);
 
-    // Vanilla short-circuit: when the unlock cache is valid the rest is a no-op.
-    if (Checklist_IsCacheValid() != 0)
+    // Vanilla short-circuit: during a LAN session the rest is a no-op.
+    if (Net_IsSessionActive() != 0)
         return;
 
     // Vanilla plays the unlock SFX at most once per frame.
     if (fresh)
     {
-        int frame = ClearChecker_GetFrameIndex();
+        int frame = Gm_GetEngineFrames();
         if (*stc_clearchecker_sfx_last_frame != frame)
         {
             SFX_PlayFullVolume(CHECKLIST_UNLOCK_SFX);
@@ -123,8 +123,8 @@ static void APChecks_SetNewUnlockSilentReplacement(int mode, int clear_kind)
     if (fresh)
         RecordCheck(mode, clear_kind);
 
-    // Vanilla short-circuit: when the unlock cache is valid the store is skipped.
-    if (Checklist_IsCacheValid() != 0)
+    // Vanilla short-circuit: during a LAN session the store is skipped.
+    if (Net_IsSessionActive() != 0)
         return;
 
     cd->clear[clear_kind].is_new = 1;

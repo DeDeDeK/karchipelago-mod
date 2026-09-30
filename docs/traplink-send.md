@@ -44,11 +44,11 @@ The other two modes do not actually re-fire their hooks - TR applies its debuff 
 
 Fires when the player picks up an item the game classifies as bad or fake: SPEEDMIN, CHARGENONE, all `*DOWN` stat patches, all `*FAKE` patches.
 
-`CODEPATCH_HOOKCREATE` at `0x801DB504` in `Machine_OnTouchItem` (0x801db34c), on the branch taken when `CityItem_IsGoodPatch` (0x802540a8) returns 0. r20 = `MachineData*` there. `TrapLink_OnBadPatch` looks the player up with `Machine_GetRiderPly`, drops CPUs via `Ply_CheckIfCPU`, and calls `TrapLink_Send(TRAPLINK_KIND_BAD_PATCH)`.
+`CODEPATCH_HOOKCREATE` at `0x801DB504` in `Machine_OnTouchItem` (0x801db34c), on the branch taken when `CityItem_IsGoodPatch` (0x802540a8) returns 0. r20 = `MachineData*` there. `TrapLink_OnBadPatch` looks the player up with `Machine_GetRiderPly`, drops CPUs via `Ply_GetDescPKind`, and calls `TrapLink_Send(TRAPLINK_KIND_BAD_PATCH)`.
 
 ### Sleep copy ability (City Trial / Air Ride)
 
-Fires when the player receives COPYSLEEP from a sleep-granting enemy or a copy ability item. This one is not a code patch but an inline check inside `GateAbilities_CheckAndGiveAbility` in `gate_abilities.c`, the REPLACEFUNC that stands in for `Rider_CheckAndGiveAbility` (0x80192650). The replacement returns 0 early if the ability is locked, otherwise calls `Rider_GiveAbility` and captures the result; a successful grant of `COPYKIND_SLEEP` to a human sends. Checking the result matters: `Rider_GiveAbility` returns 0 when the rider is in an unable state, and without the check that produces phantom traps.
+Fires when the player receives COPYSLEEP from a sleep-granting enemy or a copy ability item. This one is not a code patch but an inline check inside `GateAbilities_CheckAndGiveAbility` in `gate_abilities.c`, the REPLACEFUNC that stands in for `RiderGObj_CheckAndGiveAbility` (0x80192650). The replacement returns 0 early if the ability is locked, otherwise calls `Rider_GiveAbility` and captures the result; a successful grant of `COPYKIND_SLEEP` to a human sends. Checking the result matters: `Rider_GiveAbility` returns 0 when the rider is in an unable state, and without the check that produces phantom traps.
 
 ### Bad Top Ride item pickup
 
@@ -69,7 +69,7 @@ Fires when a human Top Ride Kirby collects a bad TR item - currently only `TRITE
 | City Trial - open city | `ApplyCityTrialTrap`: builds a candidate list from `trap_items[]` minus any whose event is locked (`IsTrapItemLocked`), Fisher-Yates shuffles it, then tries each candidate through `APItems_HandleItem` **in one tick** until one applies. Trying every eligible trap in a single frame avoids the slow path where one random pick keeps failing and the receive flag lingers for frames. |
 | City Trial - Free Run (`Gm_GetCityMode() == CITYMODE_FREERUN`) | Dropped, but treated as handled so the flag clears. Item data tables are not loaded, and CT trap effects would crash. |
 | City Trial - stadium (`CityTrial_IsInStadium()`) | Falls back to the Air Ride sleep trap. Stadium riders are always mounted, so the sleep trap's on-machine requirement always holds. |
-| Air Ride | `ApplyAirRideTrap`: calls `Rider_GiveAbility(rd, COPYKIND_SLEEP)` directly on every human Kirby rider that is on a machine. Off-vehicle riders crash in the sleep anim's MObj callback, which calls `Rider_CopyInputToMachine` and derefs a null machine GObj. Using the raw rider API rather than `Rider_CheckAndGiveAbility` keeps the gate and the sleep send hook from re-triggering. |
+| Air Ride | `ApplyAirRideTrap`: calls `Rider_GiveAbility(rd, COPYKIND_SLEEP)` directly on every human Kirby rider that is on a machine. Off-vehicle riders crash in the sleep anim's MObj callback, which calls `Rider_CopyInputToMachine` and derefs a null machine GObj. Using the raw rider API rather than `RiderGObj_CheckAndGiveAbility` keeps the gate and the sleep send hook from re-triggering. |
 | Top Ride | `ApplyTopRideTrap`: picks a random kind from `tr_trap_items[]` and calls `GateTopRideItems_GiveItem`, which - gated on `round_state == 2` - calls `TopRide_KirbyApplyItem` directly on each human Kirby, installing the self-debuff state with no collectible item spawned. |
 
 Most City Trial trap items (`AP_ITKIND_*`, `AP_EVENT_*`) require `Gm_IsInCity`, which is why AR and TR need mode-specific effects instead of the shared `trap_items` list. The CT pool also carries two synthetic traps: `AP_ITEM_1_HP_TRAP`, which damages each human machine down to 1 HP, and `AP_ITEM_DROP_PATCHES_TRAP`, whose handler in `ap_item_handler.c` gates on `Gm_IsInCity` and calls `Patch_DropTrap()` in `patch_item.c` to eject each human rider's equipped stat patches behind the machine.
@@ -83,7 +83,7 @@ When a receive applies, `TrapLink_PerFrame` enqueues a "TrapLink received!" text
 | `Machine_OnTouchItem` | 0x801DB34C | Master item effect handler (0x728 bytes) |
 | Bad patch branch | 0x801DB504 | Entry to bad patch processing (hook point) |
 | `CityItem_IsGoodPatch` | 0x802540A8 | Returns 1 for good patches, 0 for bad/fake |
-| `Rider_CheckAndGiveAbility` | 0x80192650 | Copy ability grant (replaced by `gate_abilities.c`) |
+| `RiderGObj_CheckAndGiveAbility` | 0x80192650 | Copy ability grant (replaced by `gate_abilities.c`) |
 | `Rider_GiveAbility` | 0x801A81A4 | Raw grant; returns 0 if the rider is in an unable state |
 | `TopRideItem_Update` | 0x8034C130 | TR item per-frame update; iterates absorber collisions |
 | TR item pickup | 0x8034C7DC | Pickup confirmed inside `TopRideItem_Update` (hook point) |
@@ -92,7 +92,7 @@ When a receive applies, `TrapLink_PerFrame` enqueues a "TrapLink received!" text
 ## Implementation Notes
 
 - `TrapLink_Send(kind)` is the single entry point for every send trigger. It no-ops unless `traplink_enabled`, on `TRAPLINK_KIND_NONE`, and while the receive guard window is active, then writes the kind into `ap_data->traplink_send` and announces it. `traplink_kind_names[]` holds the same strings the client puts on the wire as `trap_name`. It has no mode gate - hooks only fire in their applicable gameplay contexts.
-- Human-vs-CPU filtering stays at each call site, since the two engines discriminate differently: the 3D hooks use `Ply_CheckIfCPU`, the Top Ride hook uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`.
+- Human-vs-CPU filtering stays at each call site, since the two engines discriminate differently: the 3D hooks use `Ply_GetDescPKind`, the Top Ride hook uses `TopRide_GetPlayerKind(kirby->player_slot) == TR_PKIND_HMN`.
 - Because the toggle is checked inside `TrapLink_Send`, individual hooks do not re-check it. The toggle also gates GObj installation, so the receive proc is not even created while TrapLink is off.
 - `TrapLink_OnBoot()`, called from `main.c`'s `OnBoot`, applies both code patches.
 

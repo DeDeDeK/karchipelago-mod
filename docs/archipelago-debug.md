@@ -76,8 +76,8 @@ navigation.
 
 The handler calls `ClearChecker_SetNewUnlock` (0x8004a054), which `archipelago` has
 `REPLACEFUNC`'d - so the AP check fires and goal evaluation runs exactly as a real completion
-would. The replacement then bails on `Checklist_IsCacheValid`, which is always true in menus, so
-`RecordCheck` ran but no `clear[]` bits were written; the handler writes `is_new`,
+would. The replacement writes only `is_new` (and nothing at all during a LAN session, where
+`Net_IsSessionActive` makes it return after `RecordCheck`), so the handler writes `is_new`,
 `is_unlocked` and `is_visible` itself to reach the same end state.
 
 `ResolveCell` reports which `(source_mode, reward_index)` the cell holds, accounting for

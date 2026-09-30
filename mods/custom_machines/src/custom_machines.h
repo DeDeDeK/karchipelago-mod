@@ -170,6 +170,8 @@ int  CustomMachineCinematic_Start(int machine_kind, int ply);
 int  CustomMachineMount_Queue(int machine_kind, int ply);
 void CustomMachineMount_On3DLoadStart(void);
 void CustomMachineMount_OnFrameStart(void);
+int  CustomMachineMount_GetRespawnKind(int ply);
+void CustomMachineMount_SetRespawnKind(int ply, int machine_kind);
 
 void CustomMachineUiFrames_OnBoot(void);
 // Whether every bank in the archive with this basename grew on its latest load.

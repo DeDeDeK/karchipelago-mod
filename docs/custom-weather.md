@@ -282,9 +282,10 @@ weather still looks alive during the countdown.
 
 An item counts as airborne when `ItemData.is_airborne != 0` - the engine writes 0 at every
 land transition and 1 (or -1, meaning airborne with the ground raycast suppressed) whenever it
-leaves a surface. `ITEM_X35A_GROUNDED` is **not** usable for this: it latches the first time
-the envcoll raycast finds ground beneath the item, which on a sky drop happens on its first
-frame hundreds of units up, and it is never cleared afterwards.
+leaves a surface. `ITEM_X35A_GROUNDED` is **not** usable for this: it is set at spawn for
+point-collision items and latches the first time the envcoll raycast finds ground beneath the
+item, which on a sky drop happens on its first frame hundreds of units up, and it is never
+cleared afterwards.
 
 ## Hail (`hail.c`)
 
@@ -501,7 +502,7 @@ The pool clears and the timer re-seeds on every preset change and CT teardown.
 
 ## Wind-bent trees (`tree.c`)
 
-The global wind can lean the City Trial forest trees. Each forest tree (yakumono `desc_id` 34,
+The global wind can lean the City Trial forest trees. Each forest tree (yakumono `YAKUKIND_TREE`, 34,
 53 instances in CT) renders from its own `JOBJ_SKELETON` joint whose world matrix is rebuilt
 from the joint SRT every frame by `JObj_SetupMtxSub`, so a small tilt written into that
 joint's Euler rotation each frame is honored automatically - no user matrix, no dirty flag, no
@@ -509,7 +510,7 @@ vertex work. Only the visual model is touched; collision is never moved.
 
 The tree joints are enumerated once per stage. `Tree_Enumerate` walks the stage's placed-instance
 pool (`Gr_GetCollRecords`) and keeps records whose `yaku_gobj` owner is one of the tree-family
-yakumono GObjs, gathered by walking the `GAMEPLINK_YAKUMONO` GObj list for `desc_id` 34. The
+yakumono GObjs, gathered by walking the `GAMEPLINK_YAKUMONO` GObj list for `YakumonoData.kind` 34. The
 owner slot is matched by pointer only and never dereferenced (it is meaningless for non-break
 instances), and each kept joint's authored base rotation is cached so the lean is always
 relative to it.
@@ -528,7 +529,7 @@ Trees carry no per-preset config; they are a global menu effect gated on the win
 
 The City Trial volcano erupts a set number of times over the round, each eruption throwing
 volleys of themed copy-ability projectiles out of the crater on ballistic arcs. The projectiles
-are real `GAMEPLINK_PROJECTILE` actors with live hitboxes, so an eruption genuinely threatens
+are real `GAMEPLINK_WEAPON` actors with live hitboxes, so an eruption genuinely threatens
 riders, machines and boxes.
 
 **Scheduling against the round.** `Volcano_Tick` reads `grBoxGeneInfo.match_progress` (0 -> 1
@@ -543,8 +544,8 @@ projectiles every `interval` frames.
 left-and-back of map center in the `+/-1300` X/Z play box. Shots start there jittered by 18 in
 X/Z, each along a random upward cone ray: azimuth uniform over the circle, tilt rolled in
 0.4-1.0 of `VOLC_MAX_TILT` (70 degrees) x the preset's `spread`. Speed is 5.5 x `power` x
-`1 +/- 0.3`. Every shot also rolls a size uniformly over 0.5-3.5 into `desc.velocity_scale`
-which, despite the name, is a size scale driving the model and the hitbox together - so a big
+`1 +/- 0.3`. Every shot also rolls a size uniformly over 0.5-3.5 into `desc.scale`,
+a size scale driving the model and the hitbox together - so a big
 one is genuinely more dangerous. Size and speed roll independently, so a boulder is no slower
 than a pebble.
 
@@ -560,9 +561,9 @@ a near-vertical launch would make those parallel.
 **Ownerless projectiles.** Volcano shots end up with `owner_gobj` NULL, which
 `HitColl_CheckIfSamePlayer` reads as "never the same player" - so the volcano is excluded from
 nobody and threatens everyone, with no damage misattributed. That constrains the usable kinds:
-plain sword stars and plasma C/D dereference the owner inside `Weapon_Create` and also home,
+the small and large spit stars and plasma C/D dereference the owner inside `Weapon_Create` and also home,
 and all three auras re-snap to the owner's hand bone every frame. The themes therefore draw from
-plasma A/B, the two spread shots, bomb, sensor bomb, the charged sword star, and the Fire
+plasma A/B, the two spread shots, bomb, sensor bomb, the charged spit star, and the Fire
 ability's bullet. Bomb and sensor bomb are transitioned to their thrown state in the same call as
 the spawn, before their hand-snapping state-0 slot can run.
 
@@ -572,22 +573,22 @@ Fire bullet is the one kind that cannot be created with a null owner - its `init
 immediately after; nothing in its per-frame slots reads the owner again. It also seeds the fire
 bullet's charge scratch, because the borrowed rider is never holding a charged Fire ability and
 its `init` would otherwise cache a zero there - which the kind later turns into a zero-radius
-hitbox and a zero-scale model on impact. `kind_scratch` word 0 (the hitbox-radius multiplier) gets 1.0,
+hitbox and a zero-scale model on impact. `kind_scratch` word 0 (the knockback multiplier) gets 1.0,
 vanilla's full-charge ceiling, and word 1 gets the shot's rolled size since the kind assigns
-it to `cur_scale` on impact. Every launch guards on `wp_kind_data[kind] != NULL`, since
+it to `scale` on impact. Every launch guards on `wp_kind_data[kind] != NULL`, since
 that table is empty until the first rider is created and `Weapon_Create` does not check
 it.
 
 **Arcs.** Nothing in the projectile pipeline applies gravity, and prio 0 zeroes the accel vector
-every frame, so every shot gets `VolcanoGravity` installed on `proj->user_hook_0` - invoked at
+every frame, so every shot gets `VolcanoGravity` installed on `proj->framestart_callback` - invoked at
 the tail of prio 0, right after the zeroing and before prio 4 integrates. It goes on every kind,
-not just the plasma and sword-star ones whose pre-physics slot is all `blr`: bomb, firecracker
+not just the plasma and spit-star ones whose pre-physics slot is all `blr`: bomb, firecracker
 and sensor bomb only ever *add* the stage air current to accel in their flying state, so a
 hook-written value survives on them and all themes arc identically. Lifetime is overwritten on
 every shot because the per-kind defaults are unusable here - plasma A/B expire in 6-9 frames, and
 bomb and sensor bomb never expire at all. The Fire theme fires the Fire ability's bullet rather
 than the firecracker for the same reason: the firecracker carries its own fuse in kind scratch
-that bursts it mid-flight no matter what `lifetime` says, while fire bullet's state-0 `fn0` is a
+that bursts it mid-flight no matter what `lifetime` says, while fire bullet's state-0 `anim_callback` is a
 stub and it flies until it hits something.
 
 Authored on **Volcanic** (fire, 4 eruptions) and **Storm** (plasma, 2). `LaunchOne` borrows
@@ -607,7 +608,7 @@ wander, model placement and target claiming. `Tornado_OnFrameEnd` runs from the 
 `ModDesc.OnFrameEnd` hook and decides *what the funnel does to the world*: the orbit's position
 writes, the rider push and the camera shake. The split is forced - item physics
 (`CityItem_PhysicsThink`, priority 4), the item ground snap (priority 5),
-`Machine_PhysicsThink` (priority 4) and `PlyCam_Think` (priority 13) all run after the
+`Machine_PhysicsThink` (priority 4) and `PlyCamGObj_Think` (priority 13) all run after the
 priority-1 weather tick, so a position written there is recomputed before render. `OnFrameEnd`
 is the only place those overrides survive.
 
@@ -630,8 +631,7 @@ back to the previous height where the cast finds nothing.
 `Effect_SpawnSync` is called with a NULL parent and **anchor mode 1**, which takes a single
 vararg: a post-spawn callback handed the spawn node. That mode skips the joint-attach path
 entirely, so no follow proc is installed and the model root belongs to the mod. The `efgroup`
-argument asserts on -1 and is borrowed from a live rider (`RiderData+0x440`) - the group the
-inhale itself spawns into.
+argument asserts on -1 and is borrowed from a live rider (`RiderData.efgroup`, +0x43c).
 
 The model is authored **along its local +Z**: narrow mouth at the origin, flaring to radius 8.07
 at `z = 9.95`. Mode 1 applies no orientation, so a raw spawn renders lying flat.
@@ -708,9 +708,9 @@ relocated here.
 
 **Camera shake drives the engine's own per-view shake record** rather than patching the camera
 solve. `CamData.eye_pos` / `interest_pos` are *not* in the render path (the param that reaches
-the COBJ is `CamData.x14`, snapshotted into a stack local inside `PlyCam_Think`), so writing them
+the COBJ is `CamData.x14`, snapshotted into a stack local inside `PlyCamGObj_Think`), so writing them
 does nothing. The record hangs off `PlayerCamData.shake` (+0x74) as a typed `CamShakeRec`, and
-`PlyCam_Think` applies it after building the camera basis, gated on `gate` being positive:
+`PlyCamGObj_Think` applies it after building the camera basis, gated on `gate` being positive:
 
 ```
 eye += right * eye_right * scale_right  +  up * eye_up * scale_up

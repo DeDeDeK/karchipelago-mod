@@ -26,7 +26,7 @@ static float CamStickAxis(float raw)
 }
 
 // Hook body at 0x800cb4dc, past every input gate PlyCam_OnFootThink already cleared.
-// Raising x84_80 is what connects the on-foot camera to the zoom: PlyCam_MachineZoomAdjust
+// Raising zoom_enabled is what connects the on-foot camera to the zoom: PlyCam_MachineZoomAdjust
 // runs for every camera kind and turns these fields into the final eye position. Nothing
 // else on this path writes them, so clearing them is all a toggle-off needs.
 void OnFootZoom_Update(CamData *cam, int pad_index)
@@ -36,13 +36,13 @@ void OnFootZoom_Update(CamData *cam, int pad_index)
 
     if (!ap_menu_settings.onfoot_zoom_enabled || !cam->target || !param)
     {
-        cam->x84_80 = 0;
+        cam->zoom_enabled = 0;
         cam->zoom_amt = 0.0f;
-        cam->x90 = 0.0f;
+        cam->interest_raise = 0.0f;
         return;
     }
 
-    cam->x84_80 = 1;
+    cam->zoom_enabled = 1;
 
     in = CamStickAxis(stc_engine_pads[pad_index].fsubstickY);
     if (in != 0.0f)
@@ -53,7 +53,7 @@ void OnFootZoom_Update(CamData *cam, int pad_index)
     else if (cam->zoom_amt > param->zoom_dist_max)
         cam->zoom_amt = param->zoom_dist_max;
 
-    cam->x90 = (cam->zoom_amt >= 0.0f) ? param->x350 * (cam->zoom_amt / param->zoom_dist_max) : 0.0f;
+    cam->interest_raise = (cam->zoom_amt >= 0.0f) ? param->zoom_interest_raise * (cam->zoom_amt / param->zoom_dist_max) : 0.0f;
 }
 
 CODEPATCH_HOOKCREATE(0x800cb4dc,

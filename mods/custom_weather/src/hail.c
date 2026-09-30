@@ -255,7 +255,7 @@ void Hail_Tick(void)
             continue;
         }
         MachineData *md = (MachineData *)mg->userdata;
-        if (md == NULL || Machine_IsDead(md))
+        if (md == NULL || md->is_dead)
         {
             c->seeded = 0;
             continue;

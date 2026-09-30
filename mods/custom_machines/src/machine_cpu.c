@@ -1,6 +1,6 @@
 // CPU riders read per-machine rows out of DOL tables indexed by kind, and a few of their
 // decisions switch on the kind itself. Every reader reaches the kind through
-// Machine_GetAbsoluteKind, which folds an appended class slot onto some other kind, so each
+// MachineGObj_GetAbsoluteKind, which folds an appended class slot onto some other kind, so each
 // is replaced here: a vanilla machine gets exactly its engine row, a custom machine the CPU
 // rows its descriptor authors.
 
@@ -79,7 +79,7 @@ static int IsKindSlotFilled(GOBJ *machine)
     if (CpuFor(md) != NULL)
         return md->city_spawn_slot < CITY_SPAWN_SLOT_NUM &&
                CityMachineSpawn_GetSlotGObj(md->city_spawn_slot) != NULL;
-    return CityMachineSpawn_GetSlotGObj(Machine_GetAbsoluteKind(machine)) != NULL;
+    return CityMachineSpawn_GetSlotGObj(MachineGObj_GetAbsoluteKind(machine)) != NULL;
 }
 
 static int GetChargeHoldGate(GOBJ *machine, float *a, float *b)
@@ -95,7 +95,7 @@ static int GetChargeHoldGate(GOBJ *machine, float *a, float *b)
         return 1;
     }
 
-    switch (Machine_GetAbsoluteKind(machine))
+    switch (MachineGObj_GetAbsoluteKind(machine))
     {
         case VCKIND_BULK:    *a = *stc_cpu_charge_gate_bulk;    *b = *stc_cpu_charge_gate_low;       return 1;
         case VCKIND_HYDRA:   *a = *stc_cpu_charge_gate_hydra;   *b = *stc_cpu_charge_gate_hydra_low; return 1;
@@ -117,7 +117,7 @@ static int GetChargeReleaseOverride(GOBJ *machine, float *level)
         return 1;
     }
 
-    switch (Machine_GetAbsoluteKind(machine))
+    switch (MachineGObj_GetAbsoluteKind(machine))
     {
         case VCKIND_BULK:  *level = *stc_cpu_charge_release_bulk;  return 1;
         case VCKIND_HYDRA: *level = *stc_cpu_charge_release_hydra; return 1;
@@ -163,7 +163,7 @@ static int StadiumParam(RiderData *rd, int high_jump, float *pitch, float *min_l
     }
 
     CpuStadiumMachineParam *table = high_jump ? stc_cpu_highjump_machine : stc_cpu_airglider_machine;
-    CpuStadiumMachineParam *p = &table[Machine_GetAbsoluteKind(rd->machine_gobj)];
+    CpuStadiumMachineParam *p = &table[MachineGObj_GetAbsoluteKind(rd->machine_gobj)];
     *pitch = p->pitch;
     *min_len = p->min_len;
     return 1;
@@ -188,7 +188,7 @@ static int CachedKind(GOBJ *machine)
     CustomMachineEntry *e = CustomMachines_FindByClassSlot(md->is_bike, md->kind);
 
     if (e == NULL)
-        return Machine_GetAbsoluteKind(machine);
+        return MachineGObj_GetAbsoluteKind(machine);
     if (e->cpu.stick_pitch == CUSTOM_MACHINE_CPU_PITCH_CLIMB)
         return VCKIND_HYDRA;
     if (e->cpu.stick_pitch == CUSTOM_MACHINE_CPU_PITCH_DIVE)
@@ -198,16 +198,16 @@ static int CachedKind(GOBJ *machine)
 
 void CustomMachineCpu_OnBoot(void)
 {
-    CODEPATCH_REPLACEFUNC(Machine_CPUGetSwapScore, GetSwapScore);
-    CODEPATCH_REPLACEFUNC(Machine_CPUCanSwap, CanSwap);
-    CODEPATCH_REPLACEFUNC(Machine_CPUCanBrake, CanBrake);
-    CODEPATCH_REPLACEFUNC(Machine_CPUCanChargeHold, CanChargeHold);
-    CODEPATCH_REPLACEFUNC(Machine_CPUGetChargeRelease, GetChargeRelease);
-    CODEPATCH_REPLACEFUNC(Machine_CPUCanRamCharge, CanRamCharge);
-    CODEPATCH_REPLACEFUNC(Machine_CPUSkipsPassageBranch, SkipsPassageBranch);
-    CODEPATCH_REPLACEFUNC(Machine_CPUIsKindSlotFilled, IsKindSlotFilled);
-    CODEPATCH_REPLACEFUNC(Machine_CPUGetChargeHoldGate, GetChargeHoldGate);
-    CODEPATCH_REPLACEFUNC(Machine_CPUGetChargeReleaseOverride, GetChargeReleaseOverride);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUGetSwapScore, GetSwapScore);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUCanSwap, CanSwap);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUCanBrake, CanBrake);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUCanChargeHold, CanChargeHold);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUGetChargeRelease, GetChargeRelease);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUCanRamCharge, CanRamCharge);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUSkipsPassageBranch, SkipsPassageBranch);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUIsKindSlotFilled, IsKindSlotFilled);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUGetChargeHoldGate, GetChargeHoldGate);
+    CODEPATCH_REPLACEFUNC(MachineGObj_CPUGetChargeReleaseOverride, GetChargeReleaseOverride);
     CODEPATCH_REPLACEFUNC(Rider_CPUGetMachineAlignCosNear, AlignCosNear);
     CODEPATCH_REPLACEFUNC(Rider_CPUGetMachineAlignCosFar, AlignCosFar);
     CODEPATCH_REPLACEFUNC(Rider_CPUGetMachineTurnTolerance, TurnTolerance);

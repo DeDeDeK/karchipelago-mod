@@ -12,7 +12,6 @@
 #include "custom_weather.h"
 #include "weather_fx.h"
 
-#define TREE_DESC_ID     34  // forest trees (weak break family, hitWeakObject)
 #define TREE_MAX         96  // CT ships 53; headroom for the enumeration cache
 #define TREE_MAX_PARENTS 16  // tree-family yakumono GObjs owning the instances
 
@@ -53,7 +52,7 @@ static int Tree_CollectParents(GOBJ **out, int max)
         if (g->entity_class != YAKUMONO_GOBJ_KIND)
             continue;
         YakumonoData *yd = (YakumonoData *)g->userdata;
-        if (yd != NULL && yd->desc_id == TREE_DESC_ID)
+        if (yd != NULL && yd->kind == YAKUKIND_TREE)
             out[n++] = g;
     }
     return n;

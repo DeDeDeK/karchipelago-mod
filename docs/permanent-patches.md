@@ -38,7 +38,7 @@ The dispatch cannot use `Gm_IsInCity()`: that helper is stage-based, true only o
 
 **Free Run is never applied.** It does not load the item-data tables, so the inflated stats would crash `Item_GetItDataPtr` when the game tries to eject patches on damage.
 
-**Top Ride is not reached at all.** It loads through `OnTopRideLoadEnd` (minor `MNRKIND_19`), so `On3DLoadEnd` never fires, and its 2D engine has no `MachineData` or stat system for `Machine_GivePatch` to modify.
+**Top Ride is not reached at all.** It loads through `OnTopRideLoadEnd` (minor `MNRKIND_TOPRIDE`), so `On3DLoadEnd` never fires, and its 2D engine has no `MachineData` or stat system for `Machine_GivePatch` to modify.
 
 Air Ride is applied at every race start. The HUD stat bar does not display there, so the boost is only felt in gameplay.
 

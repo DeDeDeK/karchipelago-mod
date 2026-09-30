@@ -46,7 +46,7 @@ typedef void (*CustomMachineDeathHandler)(int victim, struct DmgLog *dmg_log,
 
 // A per-kind handler. `Init` runs once as a machine of that kind is created, `Think`
 // once per frame for every one of them on the field, each at the end of its class's own.
-// `Anim` also runs once per frame per machine, at the end of Machine_AnimThink once the
+// `Anim` also runs once per frame per machine, at the end of MachineGObj_AnimThink once the
 // ColAnim overlays are applied, so a material written there is what draws.
 typedef void (*CustomMachineHandler)(struct MachineData *md);
 
@@ -107,10 +107,13 @@ typedef struct CustomMachinesAPI
 
     // Put a player straight onto `kind` with no presentation, through the same recreate
     // the cutscene ends in. It happens at the start of the next frame, so it is safe
-    // from inside a collision or item callback, and the player's starting machine
-    // follows it. Returns 0 for a kind past the ceiling or a player with no rider; a
+    // from inside a collision or item callback, and GetRespawnKind reports it
+    // afterward. Returns 0 for a kind past the ceiling or a player with no rider; a
     // mount still owed when a scene loads is dropped.
     int (*MountMachine)(int kind, int ply);
+
+    // The kind of the player's last MountMachine or cutscene mount this scene, or -1.
+    int (*GetRespawnKind)(int ply);
 } CustomMachinesAPI;
 
 // The widened kind space, for a consumer that has to write both a gated and an
@@ -133,6 +136,11 @@ static inline MachineKind CustomMachines_ResolveKind(const CustomMachinesAPI *ap
     if (api != NULL)
         return (MachineKind)api->KindFromClassIndex(is_bike, class_index);
     return MachineKind_FromClassIndex(is_bike, class_index);
+}
+
+static inline int CustomMachines_GetRespawnKind(const CustomMachinesAPI *api, int ply)
+{
+    return api != NULL ? api->GetRespawnKind(ply) : -1;
 }
 
 static inline int CustomMachines_ClassIndexOf(const CustomMachinesAPI *api,

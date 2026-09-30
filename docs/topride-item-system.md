@@ -11,7 +11,7 @@ gain temporary attack/defense powers. It does not use `CityItem_Create`,
 
 **Top Ride has no copy abilities.** It creates neither `MachineData` nor
 `RiderData`, so `copy_kind` and every path that grants an ability
-(`Rider_GiveAbility`, `Rider_GiveRandomAbility`, `randomAbility_giveAbility`) are
+(`Rider_GiveAbility`, `RiderGObj_GiveRandomAbility`, `randomAbility_giveAbility`) are
 unreachable. The closest analogs are the four ability-themed items below (Fire,
 Freeze Fan, Bomb, Walky), each a timed kirby state.
 
@@ -253,10 +253,10 @@ Four items accept **either** of two keys - their own bit in
 
 | TRITEM | Index | CopyKind |
 |--------|-------|----------|
-| TRITEM_FREEZE_FAN | 9 | COPYKIND_FREEZE |
+| TRITEM_FREEZE_FAN | 9 | COPYKIND_ICE |
 | TRITEM_FIRE | 11 | COPYKIND_FIRE |
 | TRITEM_BOMB | 13 | COPYKIND_BOMB |
-| TRITEM_WALKY | 16 | COPYKIND_MIC |
+| TRITEM_WALKY | 16 | COPYKIND_MIKE |
 
 `GateTopRideItems_ApplyMask` walks `ability_items[]` and ORs each unlocked
 ability's item bit into the allowed mask before the AND. The ability key counts

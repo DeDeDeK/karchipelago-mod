@@ -146,14 +146,19 @@ static void Hypernova_PullItem(RiderData *rd, ItemData *id)
     id->flags_x35a &= (u8)~ITEM_X35A_GROUNDED;
 }
 
-// Breakable City Trial props by desc_id (YakumonoData+0x04): 29 star pole, 32 forest pitfall,
-// 33 coral, 34 trees, 35 rocks, 36 volcano rock walls, 37 volcano-base holes, 38 houses.
-static int Hypernova_IsBreakableYaku(int desc)
+// Breakable City Trial props.
+static int Hypernova_IsBreakableYaku(YakuKind kind)
 {
-    switch (desc)
+    switch (kind)
     {
-    case 29: case 32: case 33: case 34:
-    case 35: case 36: case 37: case 38:
+    case YAKUKIND_STARPOLE:
+    case YAKUKIND_BREAKFLOOR:
+    case YAKUKIND_CORAL:
+    case YAKUKIND_TREE:
+    case YAKUKIND_ROCK:
+    case YAKUKIND_BREAKHPCOLLDOOR:
+    case YAKUKIND_BREAKHPCOLLHOLE:
+    case YAKUKIND_BREAKHPCOLLHOUSE:
         return 1;
     default:
         return 0;
@@ -194,7 +199,7 @@ static int Hypernova_IsWeakBreakFamily(GOBJ *yaku_gobj)
     YakumonoData *yd = Yaku_GetData(yaku_gobj);
     if (yd == NULL)
         return 0;
-    return Yaku_GetDescCollFunc(yd->desc_id) == (void *)hitWeakObject;
+    return Yaku_GetDescCollFunc(yd->kind) == (void *)hitWeakObject;
 }
 
 // Resolve the weak break's debris-anchor JObj, mirroring hitWeakObject's own lookup: family
@@ -506,7 +511,7 @@ static int Hypernova_CollectBreakParents(GOBJ **out)
         if (g->entity_class != YAKUMONO_GOBJ_KIND)
             continue;
         YakumonoData *yd = (YakumonoData *)g->userdata;
-        if (yd != NULL && Hypernova_IsBreakableYaku(yd->desc_id))
+        if (yd != NULL && Hypernova_IsBreakableYaku(yd->kind))
             out[n++] = g;
     }
     return n;
@@ -758,9 +763,12 @@ static void Hypernova_PullMachine(RiderData *rd, MachineData *md)
     md->velocity.Z = 0.0f;
 }
 
+// BreakDown runs Machine_KOExplode once MACHINE_MSTATUS_ENDED is set. Starting BreakDown's
+// motion inside Machine_OnKO clears the bit, so this pre-set is overwritten; the machine
+// explodes when that motion ends, ~120 frames later.
 static void Hypernova_KOMachine(MachineData *md)
 {
-    md->x78 |= HYPERNOVA_MACHINE_KO_GATE_BIT;
+    md->mstatus_flags |= MACHINE_MSTATUS_ENDED;
     Machine_OnKO(md);
 }
 

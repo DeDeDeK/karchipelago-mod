@@ -31,7 +31,9 @@ with `Machine_ResetColAnims` (`0x801d633c`) first so none survive into the freez
 the whole game are two sites in `Machine_OnTouchItem` (`0x801db650`, `0x801db738`), which
 suppress piece pickups while a cinematic is up. Nothing else in the engine branches on it,
 so a second concurrent cinematic is not blocked by the engine - it would tear down the
-running one's model GObjs and leave a dangling joint.
+running one's model GObjs and leave a dangling joint. It is not a stadium check either: "in a
+stadium" is `CityTrial_IsInStadium` (`0x8000ad48`) and "on the open City Trial map" is
+`Gm_IsInCity` (`0x8000acb0`).
 
 `GameData+0xa90` is a **different** object and easy to confuse with it: the dramatic pause
 on a piece pickup, built by `LegendaryPiece_CreateHitstop` (`0x8028406c`), ticked by
@@ -59,7 +61,7 @@ but 3. The joint tree comes from `JObj_LoadJoint`, and
 `JObj_AddAnimAll(jobj, NULL, matanim, NULL)` for the material animation, then
 `JObj_ReqAnimAllByFlags(jobj, 0.0f, 21)` and `JObj_SetAllAOBJRateByFlags(1.0f, jobj, 0xffff)`.
 
-Both models are then placed with `gmLanMenu_Scale3DObject(1.0f, jobj, forward, up, pos)`
+Both models are then placed with `JObj_SetFromBasis(1.0f, jobj, forward, up, pos)`
 (`0x80054414`), which stamps an orientation matrix built from the machine's own basis: its
 columns are `cross(forward, up)`, `forward`, `up`, `pos`, so the argument named `forward`
 becomes the model's +Y and the one named `up` becomes its +Z. The cinematic
@@ -74,7 +76,7 @@ stands up the particle render pass for gx_link 26, `Ply_EnterLegendaryAssembly`
 `0x130007` for Hydra.
 
 **Phase 2** calls `LegendaryMachine_AdvanceAssemblyAnims` (`0x80283f24`) once per frame -
-`HSD_JObjAnimAll` on both models plus `frame += step` - until the frame counter reaches the
+`JObj_AnimAll` on both models plus `frame += step` - until the frame counter reaches the
 end frame. Then it destroys the camera with `PlyCam_DestroySlot`, calls
 `Ply_ExitLegendaryAssembly` (`0x8022d71c`), destroys both model GObjs, clears
 `GameData+0xa8c`, sets the countdown to 3 and moves to phase 3.
@@ -206,7 +208,7 @@ The mount is not a call the cinematic makes. It is data-driven, and the cinemati
 it up and cleans up after it.
 
 `Ply_EnterLegendaryAssembly` (`0x8022d6b4`) clears that machine's three collected-piece bits
-in `PlayerData+0x908` and hands the rider GObj to `Rider_EnterLegendaryAssembly`
+in `PlayerData+0x908` and hands the rider GObj to `RiderGObj_EnterLegendaryAssembly`
 (`0x8019248c`), which is Kirby-only. That fires the ability-teardown callbacks and calls
 `RiderState_LegendaryAssemblyEnter` (`0x801bda34`), which:
 
@@ -242,7 +244,7 @@ frame at which the machine swaps, and the swap itself goes through
 There is no Dragoon/Hydra token anywhere in the mount - the two literals are the only
 machine-specific thing about it, which is what makes the path reusable for any machine.
 
-`Ply_ExitLegendaryAssembly` (`0x8022d71c`) and `Rider_ExitLegendaryAssembly` (`0x801924f8`)
+`Ply_ExitLegendaryAssembly` (`0x8022d71c`) and `RiderGObj_ExitLegendaryAssembly` (`0x801924f8`)
 call `RiderState_LegendaryAssemblyExit` (`0x801bdbac`), which restores both links from the
 saved neighbours and calls `Rider_ResolveQueuedAbility` (`0x801a8454`) to settle the rider
 into a normal riding state. The rider GObj survives the recreate, which is why the saved

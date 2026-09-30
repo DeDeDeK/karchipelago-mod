@@ -1,6 +1,6 @@
 # Top Ride System
 
-Top Ride is a 2D mode with its own engine, completely separate from the 3D mode's Rider/Machine/Player system. It does **not** use `Player_Create`, `Rider_Create`, `Machine_Create`, `stc_playerdata`, `RiderData`, or `MachineData` - a Top Ride player is a `TopRideKirby` object with an inline charge component and a polymorphic state handler. The scene loads through **minor 19** (`MNRKIND_19`), not the shared minor 18 (`MNRKIND_3D`), so `On3DLoadEnd` never fires for Top Ride; hoshi's `OnTopRideLoadEnd` mod callback (hooked at 0x80008fac, inside `TopRide_SceneLoad`) is the load notification instead.
+Top Ride is a 2D mode with its own engine, completely separate from the 3D mode's Rider/Machine/Player system. It does **not** use `Player_Create`, `Rider_Create`, `Machine_Create`, `stc_playerdata`, `RiderData`, or `MachineData` - a Top Ride player is a `TopRideKirby` object with an inline charge component and a polymorphic state handler. The scene loads through **minor 19** (`MNRKIND_TOPRIDE`), not the shared minor 18 (`MNRKIND_3D`), so `On3DLoadEnd` never fires for Top Ride; hoshi's `OnTopRideLoadEnd` mod callback (hooked at 0x80008fac, inside `TopRide_SceneLoad`) is the load notification instead.
 
 The structs, enums, accessors and state-transition helpers are declared in `externals/hoshi/include/topride.h`.
 

@@ -387,7 +387,7 @@ void Puddle_Tick(void)
             continue;
         if (md->is_airborne != 0) // grounded states only
             continue;
-        if (Machine_IsDead(md))
+        if (md->is_dead)
             continue;
 
         float x = md->pos.X;

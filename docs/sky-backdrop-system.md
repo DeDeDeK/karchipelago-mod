@@ -214,7 +214,7 @@ only at 0/1/2 and City Trial (9) and diverge elsewhere. `custom_backdrops` keys 
 
 Separate 60-entry table at `*0x805dd8dc = 0x807ea0c8`, stride 0x58, loaded at runtime from
 `Stage.dat` (public symbol `stData`). First dword of each entry is a `gr_kind` that
-resolves into Table A. The field at `+0x30` is the "is City" flag - `Gm_IsGrKindCity`
+resolves into Table A. The field at `+0x30` is the "is City" flag - `Stage_IsCity`
 (0x80262574) asserts unless `0 <= stage_kind < 0x3b`, then returns the dword at
 `stData[stage_kind * 0x58 + 0x30]` verbatim. Despite the name it is indexed by
 `StageKind`, not `gr_kind`.

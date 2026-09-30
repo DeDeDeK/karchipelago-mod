@@ -21,12 +21,12 @@
 
 // CityBlip_Create (0x801226e8) poses one template joint per MachineKind 0..25 on its frame
 // of the blip TexAnim, and CityBlip_GXCallback (0x80122380) instances the template at
-// Machine_GetAbsoluteKind. That fold lands an appended class slot on another kind, and the
+// MachineGObj_GetAbsoluteKind. That fold lands an appended class slot on another kind, and the
 // template array runs straight into the per-player instance joints, so a custom machine's
 // template is built and held here.
 static JOBJ *stc_blip_template[CUSTOM_MACHINE_MAX];
 
-// Replaces the bl Machine_GetAbsoluteKind that indexes the template array.
+// Replaces the bl MachineGObj_GetAbsoluteKind that indexes the template array.
 static JOBJ *BlipTemplate(GOBJ *machine_gobj)
 {
     MachineData *md = machine_gobj->userdata;
@@ -34,7 +34,7 @@ static JOBJ *BlipTemplate(GOBJ *machine_gobj)
 
     if (e != NULL)
         return stc_blip_template[CustomMachines_Index(e)];
-    return Gm_Get3dData()->blip_template[Machine_GetAbsoluteKind(machine_gobj)];
+    return Gm_Get3dData()->blip_template[MachineGObj_GetAbsoluteKind(machine_gobj)];
 }
 
 // CityBlip_Create past its template loop, built the same way. A bank that did not grow

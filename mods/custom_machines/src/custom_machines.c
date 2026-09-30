@@ -461,6 +461,7 @@ static const CustomMachinesAPI stc_api = {
     .GetGenerator = Api_GetGenerator,
     .StartAssembly = CustomMachineCinematic_Start,
     .MountMachine = CustomMachineMount_Queue,
+    .GetRespawnKind = CustomMachineMount_GetRespawnKind,
 };
 
 void CustomMachines_On3DLoadStart(void)

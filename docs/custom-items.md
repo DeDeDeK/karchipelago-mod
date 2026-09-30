@@ -23,13 +23,33 @@ All item structs and accessors are in `externals/hoshi/include/item.h`; the
   positionally by `ItemKind`: `{ attr, unique_attr, model, anim_data, hurt, trigger }`.
   The array lives in `Item.dat` (public `itData`) and is grafted onto
   `itCommonDataAll` (`ItCommon.dat`, public `itCommonDataAll`) at
-  `itCommonDataAll + 0x8` during load. Reached at runtime via
+  `itCommonDataAll + 0x8` during load: `Gm_LoadItCommon` (`0x8024feec`) loads
+  `ItCommon.dat` into `stc_it_common_data` (`r13+0x7F0` = `0x805dd8d0`) and mirrors its
+  `param` member into `stc_item_param`, then `Gm_LoadItem.dat` (`0x8024ff38`) loads
+  `Item.dat` with its `itData` public written straight into
+  `(*stc_it_common_data)->itData`, on stages that load items. Reached at runtime via
   `Item_GetItDataPtr(kind)` (`0x80250038`) = `itCommonDataAll.itData + kind*0x18`.
   There is no per-kind filename indirection - the model for kind N is simply the
   Nth entry's `model->j` pointer into the shared `Item.dat` archive.
 - **`ItemCommonAttr`** - per-kind scale/cull/land-offset/box-color, plus
   `effect_info` (`PatchEffectInfo`, the authoritative stat-grant list and
   BAD/GOOD/FAKE group).
+- **`unique_attr`** - per-kind tail data the kind's init copies into
+  `ItemData.unique_attr`, a 0x38-byte buffer from `CityItem_AllocUniqueAttr`. 53 of
+  the 69 kinds share a one-int template carried over from the box family's init,
+  which nothing reads back; only the three box kinds fill a real layout
+  (`ItemUniqueAttr.box`). A clone inherits its base kind's.
+- **Granting an item directly** - hoshi's `SpawnItemPlayer` (`inline.h`) spawns an
+  item at a player's machine and, for every kind but the fake patches, collects it
+  the same frame through `Machine_OnTouchItem`, whose effect switch (`0x801db550`)
+  applies patches, All Up, copy abilities, food and stat traps in place. A fake
+  patch hurts through `ItemGObj_ProcessFakeItem` -> `Machine_ApplyHurt` ->
+  `HitColl_SetDamageLog`, and that log entry only acts when `HitColl_ActOnCollision`
+  and `Machine_ActOnHitCollision` run in `Machine_UpdateHitColl`; written outside that
+  pass it is cleared by the next `HitColl_Init` first. So fake patches are left at
+  the machine's position for the next frame's collision pass to collect. The item
+  tables must be loaded (`Item_CheckIsLoaded()`); in Air Ride, Free Run and the
+  stadiums `Item_GetItDataPtr` crashes.
 - **Spawn pipeline** - periodic sky/box drops run `CityItemSpawn_Think`
   (`0x800eb108`) -> `CityItemSpawn_GetRandomItemID` (`0x800eb7e4`, weighted) ->
   `CityItem_Create` (`0x8024eef4`). Event/destructible drops run
@@ -135,7 +155,7 @@ a foreign model sits where its own animated joint did. Hydra's piece animation
 squashes its second joint's X and Y between 1.0 and 0.7 on a 30-frame half period,
 which on a replacement model with geometry at that position throbs the whole
 thing. Leave it NULL to inherit; supply a tree mirroring the model's joints to
-replace it. Looping is not the animation's to decide - `CityItem_BindStateAnim`
+replace it. Looping is not the animation's to decide - `ItemGObj_BindStateAnim`
 (`0x80251894`) loops every bound `AObj` when bit 30 of the inherited
 `ItemAnimEntry` flags is set. The state script still comes from the base kind
 either way; it drives the item's hurtbox and effect timing, so dropping it would
@@ -173,7 +193,7 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
    supplies a `mat_anim` / `joint_anim` also gets its own `anim_data`: the base
    kind's slots copied with `mat_anim` nulled or repointed and/or `joint_anim`
    repointed, which is what `CityItem_StateChange` (`0x8024f488`) hands to
-   `CityItem_BindStateAnim` (`0x80251894`). Only `ITKIND_ALLUP` has two anim slots;
+   `ItemGObj_BindStateAnim` (`0x80251894`). Only `ITKIND_ALLUP` has two anim slots;
    every other kind's array holds one, so exactly as many slots as the base kind
    owns are copied.
 2. **Lift the ceiling** - `CityItem_Create`'s `cmpwi r4,69` bound at `0x8024efb4`
@@ -218,7 +238,7 @@ is loaded, before the first `CityItemSpawn` tick. Custom kinds occupy indices
 **Effect and scale overrides.** On pickup, `Machine_OnTouchItem` (`0x801db34c`)
 applies stat grants generically from the instance's `effect_data`
 (`ItemData+0x140`, copied from the kind's `attr->effect_info` by
-`CityItem_CopyCommonAttr`) via `Patch_GetEffectData` (`0x80252e90`), then reads
+`ItemGObj_CopyCommonAttr`) via `ItemGObj_GetEffectData` (`0x80252e90`), then reads
 the instance kind (`ItemData+0x1c`) to drive category-specific reaction/SFX.
 Because the descriptor's `effect_info` override repoints the cloned attribute
 record's `effect_info`, a custom item can grant any combination of stat entries;

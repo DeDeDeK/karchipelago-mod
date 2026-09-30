@@ -45,7 +45,7 @@ The flip side: a non-HP stat tops out at raw `cap - 2`, two below the normalizat
 
 ### Appearance and attribute refresh
 
-Both replacements finish with `Machine_UpdateAppearance`, then `Machine_AdjustAttributes` unless `MachineData.suppress_attr_recalc` is set - the sign bit of the model/variant flag byte at `MachineData+0xc3b`, written by the vehicle's model-setup callback (`vcDataCommon+0x18`) at spawn. Only the transformation star variants set it: Wing Kirby (`VCKIND_WINGKIRBY`) and Compact Star (`VCKIND_COMPACT`), whose derived attributes are fixed rather than patch-driven. Vanilla `Machine_GivePatch` / `Machine_GiveAllUp` skip the recalc for them and the replacements preserve that gate exactly.
+Both replacements finish with `Machine_UpdateAppearance`, then `Machine_AdjustAttributes` unless `MachineData.suppress_attr_recalc` is set - the sign bit of the variant flag byte at `MachineData+0xc3b`, written at spawn by the class's `MachineClassDesc.setup_model` (`stc_machine_class_desc`, `r13-0x6148`, indexed by `is_bike`). Only two machines set it, whose derived attributes are fixed rather than patch-driven: `Machine_Star_SetupModel` (0x801e7ad4) sets it for Wing Kirby (star slot 17, `VCKIND_WINGKIRBY`) and `Machine_Wheel_SetupModel` (0x801f37d4) for Wheel Kirby (bike slot 1, `VCKIND_WHEELKIRBY`). Vanilla `Machine_GivePatch` / `Machine_GiveAllUp` skip the recalc for them and the replacements preserve that gate exactly.
 
 `PatchCap_GiveAllUp` loops all `PATCHKIND_NUM` (9) stats, pre-clamping each individually, then credits the player's all-up counter - but only when the machine is occupied (`md->rider_gobj` non-null; `RiderGObj_GetPly` returning 5 means no rider). It credits the **original** `num`, not the clamped value, matching vanilla: the counter tracks all-ups picked up, not effective stat gain. A capped all-up that produced no stat change still counts toward any checklist check keyed on that counter.
 
@@ -66,10 +66,10 @@ Every consumer of the stat cap goes through `Patch_GetMaxValue`, which is why on
 | `Stat_AddClamped` (tail-called by `Machine_ApplyStatClamped` 0x801e094c) | 0x80194d80 | 1 |
 | `Stat_AddClampedAll` (tail-called by `Machine_ApplyAllStatsClamped` 0x801e096c) | 0x80194e60 | 1 |
 | `PlayerView_Think` (HUD stat-bar denominator) | 0x80116d8c | 9, one per stat |
-| `Machine_GetStatRatio` (per-stat attribute normalizer) | 0x801caa8c | 1 |
+| `Machine_GetStatRatio` (per-stat attribute normalizer, clamped to [-1,1]) | 0x801caa8c | 1 |
 | `Machine_GetStatRatio2` (second normalizer, sibling) | 0x801cabd4 | 1 |
 
-Per-vehicle attribute interpolation runs through the same normalizers. `Machine_AdjustAttributes` (0x801c7278) dispatches two callbacks per machine kind via `(&vcDataCommon_table)[vc_kind]->+0x1c/+0x20`; the +0x1c callback is an attribute memcpy that never touches `patch_max`, while the +0x20 callback is the stat-scaling pass - `Machine_AdjustAttributesStar` (0x801e906c) -> `Machine_ApplyStarStatScaling` (0x801e81e4) for the Warp Star family, `Machine_AdjustAttributesBike` (0x801f4dac) -> `Machine_ApplyBikeStatScaling` (0x801f3d44) for Rex Wheelie. Both end at `Machine_GetStatRatio` / `Machine_GetStatRatio2`, which `bl 0x8000aaf0` unconditionally. So the returned max scales the whole attribute-interpolation curve as well as the HUD fill ratio.
+Per-vehicle attribute interpolation runs through the same normalizers. `Machine_AdjustAttributes` (0x801c7278) dispatches two callbacks per machine class via `stc_machine_class_desc[is_bike]`: `copy_attr` (+0x1c) is an attribute memcpy that never touches `patch_max`, while `adjust_attr` (+0x20) is the stat-scaling pass - `Machine_AdjustAttributesStar` (0x801e906c) -> `Machine_ApplyStarStatScaling` (0x801e81e4) for the star class, `Machine_AdjustAttributesBike` (0x801f4dac) -> `Machine_ApplyBikeStatScaling` (0x801f3d44) for the bike class. Both end at `Machine_GetStatRatio` / `Machine_GetStatRatio2`, which `bl 0x8000aaf0` unconditionally. So the returned max scales the whole attribute-interpolation curve as well as the HUD fill ratio.
 
 ## Hardware Ceiling (`PATCH_STAT_MAX`)
 

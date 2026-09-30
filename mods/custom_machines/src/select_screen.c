@@ -223,7 +223,7 @@ static int CityDefaultAvailable(int ckind)
     default:               return 1;
     }
 
-    if (Checklist_IsCacheValid())
+    if (Net_IsSessionActive())
         return Checklist_CheckCachedUnlock_CityTrial((s8)reward);
     return ClearChecker_CheckUnlocked(GMMODE_CITYTRIAL, (u8)reward);
 }

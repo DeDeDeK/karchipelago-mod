@@ -18,7 +18,7 @@ After the copy, `Machine_AdjustAttributes` dispatches the per-class scaling call
 factors - one keyed on the accel stat ratio, one on the top-speed stat ratio (the latter
 using a per-VCKIND min/max pair). `Machine_ScaleFromRatio` returns exactly `1.0` at ratio
 `0`, and `Machine_GetStatRatio` sums the patch/stat arrays at `MachineData+0x94C`,
-`+0x970`, `+0x994`, `+0x9B8` plus `PlayerData.stat_aux`. **In Air Ride and Top Ride those
+`+0x970`, `+0x994`, `+0x9B8` and `stat_aux` (`+0x9E8`) over `Patch_GetMaxValue`, clamped to `[-1, 1]`. **In Air Ride and Top Ride those
 are all zero**, so the shipped attribute value *is* the machine's top speed there. Only
 City Trial patches move it.
 

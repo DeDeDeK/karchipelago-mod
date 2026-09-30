@@ -224,18 +224,18 @@ static int css_collect_taken(const u8 *kinds, const u8 *colors, int slot,
 static void ct_repaint_player(GameData *gd, int slot)
 {
     u8 pkind = gd->city_select_ply.ply_pkind[slot];
-    s8 anim_kind = (gd->city_select_ply.x1d0 == 2 &&
+    s8 anim_kind = (gd->city_select_ply.mode == 2 &&
                     !(gd->city_select_ply.x1d4 & (1 << slot)) &&
                     pkind == 4)
                        ? 5
                        : (s8)pkind;
 
     CitySelect_UpdatePlayer((s8)slot, anim_kind,
-                            CitySelect_GetColorAnimFrame((s8)gd->city_select_ply.ply_color[slot]));
+                            Gm_GetColorAnimFrame((s8)gd->city_select_ply.ply_color[slot]));
 }
 
 // CitySelect_InputUpdate holds the only site that turns a City Trial panel into a CPU
-// (the x215 3 -> 2 branch), and it reloads ply_color and repaints two instructions
+// (the slot_kind 3 -> 2 branch), and it reloads ply_color and repaints two instructions
 // later, so storing the color is the whole job. Cycling a CPU's color by hand goes
 // through CitySelect_ChangeColor and never reaches here, so a manual pick survives
 // until the panel is switched off and back on.
@@ -249,7 +249,7 @@ void GateColors_OnCityTrialCpuAdded(int slot)
     if (!gd || slot < 0 || slot >= 4)
         return;
 
-    num_taken = css_collect_taken(gd->city_select_ply.x215,
+    num_taken = css_collect_taken(gd->city_select_ply.slot_kind,
                                   gd->city_select_ply.ply_color, slot, 0, taken);
     color = GateColors_RandomUnlockedColorExcept(taken, num_taken);
     gd->city_select_ply.ply_color[slot] = (u8)color;
@@ -305,7 +305,7 @@ void GateColors_OnTopRideLobbyThink(void)
             int color = GateColors_RandomUnlockedColorExcept(taken, num_taken);
 
             gd->topride_select_ply.color[i] = (u8)color;
-            TopRide_UpdatePanel((s8)i, (s8)kind, CitySelect_GetColorAnimFrame((s8)color));
+            TopRide_UpdatePanel((s8)i, (s8)kind, Gm_GetColorAnimFrame((s8)color));
             OSReport("[GateColors] TR lobby: CPU %d took color %d\n", i, color);
         }
         tr_prev_pkind[i] = kind;

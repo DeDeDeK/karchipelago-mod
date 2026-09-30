@@ -73,19 +73,19 @@ Only six majors populate the callback slots; records in `stc_major_scene_desc` a
 
 ## Minor Scenes
 
-A minor's callbacks live in a `MinorSceneDesc` (0x24 bytes; vanilla table `stc_minor_scene_desc` at `0x80495154`): `cb_Load` once on entry, `cb_Exit` once on exit, five per-frame Think callbacks, and the heap kind copied into Preload.
+A minor's callbacks live in a `MinorSceneDesc` (0x24 bytes; vanilla table `stc_minor_scene_desc` at `0x80495154`): `cb_Load` once on entry, `cb_Exit` once on exit, five per-frame Think callbacks, and the `preload_kind` copied into `Preload.kind`.
 
-Each major additionally owns a table of `MinorScene` entries mapping minor IDs to a heap kind, a `minor_prep` (initializes that minor's data) and a `minor_decide` (picks the next minor), plus the `minor_kind` index into the `MinorSceneDesc` array. Two `void *` data slots are shared between minors of the same major, which is how a select screen hands its choices to gameplay. The active major's table is selected at major entry and lives at `0x807e0580` at runtime - a heap-region address, not a stable symbol.
+There is no per-major minor table: a minor is found by scanning the whole `MinorSceneDesc` array for its `idx` (the first byte), whatever the major. The choice of the next minor belongs to the major's `cb_ExitMinor`, which writes `GameData.minor_next` (`+0x7d8`) through `Scene_SetNextMinor`.
 
 ### Minor Scene Lifecycle
 
 `Gm_Minor` (0x80008ad4, 0x324 bytes) handles one minor's lifecycle:
 
-1. Look up the `MinorScene` entry for the current minor
-2. Call `minor_prep()`
+1. Take `minor_next` as the current minor and look up its `MinorSceneDesc`
+2. `Scene_InitHeaps()`, then `SceneChangeTasks` (0x80006540) with the descriptor's Think callbacks
 3. Call `cb_Load()`
 4. Per-frame loop (`loop` @ 0x80006b58 -> `updateFunction` @ 0x800067a4) until `Scene_ExitMinor()` is signalled
-5. On exit: call `cb_Exit()`, then `minor_decide()` to determine the next minor (or major)
+5. On exit: call `cb_Exit()`; `Gm_Major` then runs the major's `cb_ExitMinor` to pick the next minor (or major)
 
 ### Per-Frame Callback Execution Order
 
@@ -93,7 +93,7 @@ Each major additionally owns a table of `MinorScene` entries mapping minor IDs t
 
 ### Top Ride Uses Minor 19
 
-Top Ride gameplay runs as **minor 19** (`MNRKIND_19`), *not* the shared minor 18 (`MNRKIND_3D`) that Air Ride and City Trial (including stadiums) use. It has its own 2D engine and never goes through the 3D-scene instantiation path, so:
+Top Ride gameplay runs as **minor 19** (`MNRKIND_TOPRIDE`), *not* the shared minor 18 (`MNRKIND_3D`) that Air Ride and City Trial (including stadiums) use. It has its own 2D engine and never goes through the 3D-scene instantiation path, so:
 
 - `On3DLoadStart` (0x80014448) and `On3DLoadEnd` (0x80014d3c) **do not fire** for Top Ride.
 - `OnTopRideLoadEnd` (hook at 0x80008fac, inside minor 19's `cb_Load` `TopRide_SceneLoad` at 0x80008df8) is the Top Ride load notification. Any mod that needs to initialize per-round Top Ride state must use it.
@@ -105,9 +105,9 @@ Top Ride gameplay runs as **minor 19** (`MNRKIND_19`), *not* the shared minor 18
 |----------|---------|---------|
 | `Scene_GetCurrentMajor()` | 0x8000aea8 | Returns current `MajorKind` |
 | `Scene_GetCurrentMinor()` | 0x8000aecc | Returns current `MinorKind` |
-| `Scene_SetNextMajor(id)` | 0x800082a0 | Queue next major (call from scene decide) |
+| `Scene_SetNextMajor(id)` | 0x800082a0 | Queue next major (call from `cb_ExitMinor`) |
 | `Scene_ExitMajor()` | 0x80008220 | Trigger major exit (sets `request_major_exit`) |
-| `Scene_SetNextMinor(id)` | 0x800088c8 | Queue next minor (call from scene decide) |
+| `Scene_SetNextMinor(id)` | 0x800088c8 | Queue next minor (call from `cb_ExitMinor`) |
 | `Scene_ExitMinor()` | 0x800064f0 | Trigger minor exit (call from think) |
 | `Scene_SetDirection(dir)` | 0x8000a498 | Store button input for transitions |
 | `Scene_GetDirection()` | 0x8000a474 | Retrieve stored direction |
@@ -115,7 +115,7 @@ Top Ride gameplay runs as **minor 19** (`MNRKIND_19`), *not* the shared minor 18
 | `Scene_GetMinorData()` | 0x80008874 | Get current minor's data pointer |
 | `Scene_InitMinorData()` | 0x80008898 | Initialize minor data |
 
-The transition contract: a **MinorThink** calls `Scene_ExitMinor()` to trigger the decide step; a **SceneDecide** calls either `Scene_SetNextMinor()` to enter another minor, or `Scene_SetNextMajor()` followed by `Scene_ExitMajor()` to enter another major.
+The transition contract: a **MinorThink** calls `Scene_ExitMinor()` to trigger the decide step; the major's **`cb_ExitMinor`** then calls either `Scene_SetNextMinor()` to enter another minor, or `Scene_SetNextMajor()` followed by `Scene_ExitMajor()` to enter another major.
 
 ### Teardown Reclaims Memory Without Running Destructors
 
@@ -145,7 +145,6 @@ still alive - the destructor will not run.
 | `stc_minor_scene_desc` | 0x80495154 | Vanilla minor scene descriptor table |
 | `stc_scene_menu_common` | 0x80558788 | `ScMenuCommon` - shared menu/select screen state (`Gm_GetMenuData()` @ 0x801311e0) |
 | `stc_menu_select` | 0x804962b0 | `ScMenuSelect` - select screen GObj/model data |
-| Runtime minor table | 0x807e0580 | `MinorScene` entries for the active major (runtime, heap-region - not a stable symbol) |
 
 ## Hoshi Scene Extension
 

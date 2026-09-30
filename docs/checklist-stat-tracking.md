@@ -37,7 +37,7 @@ CityTrial_Check*Objectives    --accumulates-->  records block (CityTrial GameCle
                        GameClearData.clear[clear_kind]
 ```
 
-All six CT evaluators share a skeleton: bail unless `Checklist_IsCacheValid()`
+All six CT evaluators share a skeleton: bail unless `Net_IsSessionActive()`
 (`0x8007b650`) returns 0, then loop player slots 0..4, gate on
 `Ply_GetPKind(player)` (`0x8022c858`; `0` = human),
 and call `ClearChecker_SetNewUnlock(2, kind)` (`0x8004a054`) for each met
@@ -62,10 +62,10 @@ Known fields (offsets relative to `base`):
 
 | Offset | Type | Meaning | Getter | Drives |
 |--------|------|---------|--------|--------|
-| `+0x334` | int[11] | Per-`CopyKind` grant counter, bumped by `Rider_RecordCopyAbility` for every grant whatever the source | - | - |
-| `+0x360` | int[6] | Most recent `CopyKind`s granted, oldest first; entry count in the high 5 bits of `+0x378` (low 3 = the three ability-sequence flags `Rider_RecordCopyAbility` tests against the tables at `0x804b4c20`/`0x804b4c38`/`0x804b4c50`) | - | - |
-| `+0x37a` | u16 bits | Copy-Chance ability mask, **MSB-first**: bit `15 - CopyKind`, so byte `+0x37a` bit3 = Bomb and bit5 = Sleep. Written only by `Rider_MarkCopyAbilityObtained` (`0x8022f150`), which only the copy-wheel paths call, so the bit means "the wheel gave it" | `0x8022ed50` (bomb) / `0x8022eda8` (sleep) | 0x46 / 0x47 |
-| `+0x37c` | int[26] | Per-MachineKind change counter; sum = total Air Ride machine changes. Written by `Ply_IncrementGetOnMachineNum` (`0x8022f5bc`) from its one caller `AS_GetOnStar` (`0x801ba190`), and only when `RiderData.respawn_machine_id` differs from the boarded `MachineData.instance_id` - so a swap is per machine *object*, not per kind, and re-boarding the machine the rider last respawned on never counts. Bikes index the array at `kind + 0x13`. | `0x8022f19c` (sums all 26) | 0x06 |
+| `+0x334` | int[11] | Per-`CopyKind` grant counter, bumped by `Ply_RecordCopyAbility` for every grant whatever the source | - | - |
+| `+0x360` | int[6] | Most recent `CopyKind`s granted, oldest first; entry count in the high 5 bits of `+0x378` (low 3 = the three ability-sequence flags `Ply_RecordCopyAbility` tests against the tables at `0x804b4c20`/`0x804b4c38`/`0x804b4c50`) | - | - |
+| `+0x37a` | u16 bits | Copy-Chance ability mask, **MSB-first**: bit `15 - CopyKind`, so byte `+0x37a` bit3 = Bomb and bit5 = Sleep. Written only by `Ply_MarkCopyAbilityObtained` (`0x8022f150`), which only the copy-wheel paths call, so the bit means "the wheel gave it" | `0x8022ed50` (bomb) / `0x8022eda8` (sleep) | 0x46 / 0x47 |
+| `+0x37c` | int[26] | Per-MachineKind change counter; sum = total Air Ride machine changes. Written by `Ply_IncrementGetOnMachineNum` (`0x8022f5bc`) from its one caller `RiderState_GetOnStarEnter` (`0x801ba190`), and only when `RiderData.respawn_machine_id` differs from the boarded `MachineData.instance_id` - so a swap is per machine *object*, not per kind, and re-boarding the machine the rider last respawned on never counts. Bikes index the array at `kind + 0x13`. | `0x8022f19c` (sums all 26) | 0x06 |
 | `+0x4b4` | int | KO-by-cause: CPU machine broken (written by `Ply_AddDeath` on cause byte) | `0x8022f418` | 0x4d |
 | `+0x4b8` | int | KO-by-cause: Firework | `0x8022f46c` | 0x60 |
 | `+0x4bc` | int | KO-by-cause: Gold Spike | `0x8022f4c0` | 0x5f |
@@ -76,7 +76,7 @@ Known fields (offsets relative to `base`):
 | `+0x5f4` | int | Longest airborne streak, 60 fps frames (`+0x5f8` is the current streak) | `0x802315c0` | 0x18 / 0x1C / 0x22 |
 | `+0x604` | int | 20 s round timer: frame countdown seeded to 1200 (`PlData.dat` `plDataCommon`), decremented per live frame. `+0x804` increments only while nonzero. Sibling `+0x608` = 600-frame (10 s) timer (cell 0x49). | - | 0x48 |
 | `+0x60c`, `+0x610` | f32 | Distance components: `+0x60c` = grounded, `+0x610` = airborne (split by `MachineData+0x754`). Summed by `0x80231614`, accumulated into `records+0x14` for the "race over N miles" cells. | `0x80231614` (sums both) | 0x00 / 0x01 |
-| `+0x62b` | u8[20] | **Yakumono-break bucket array**, valid idx `0x15..0x28`. One counter per destructible-object descriptor stat-index. See dedicated section. | `0x8022fccc(player,idx)` | many |
+| `+0x62b` | u8[20] | **Yakumono-break bucket array**, valid idx `0x15..0x28`. One counter per `YakuKind` (`YakumonoData.kind`); `idx` is the kind itself, so this is `game.h`'s `PlayerStats.yakumono_break[kind - 0x15]` at `+0x640`. See dedicated section. | `0x8022fccc(player,idx)` | many |
 | `+0x653` | u8 | Valid flag for the `+0x830` pillar timer (also = yakumono idx 0x28 region). | - | 0x33 |
 | `+0x7ec` | int | Sky rings flown through | `0x80230838` | 0x39 |
 | `+0x804` | int | Items (boxes excluded) picked up while the `+0x604` first-20s guard is set | `0x8022faac` | 0x48 |
@@ -123,7 +123,7 @@ and `0x15` exhaled star, `0x10` Quick Spin, `0x11` Firework, `0x12` Sensor Bomb,
 The enemy-side counterpart, reached only from `0x802022ec`. Args: credited player
 = arg0, the victim's attacker log = arg1, the enemy GObj = arg2. It bumps
 `+0xe0` (enemies defeated), `+0xe4[cause]` (enemy-defeat-by-method) and the
-per-ACTORID defeat counter at `+0x210`, and routes cause `0x0e` into the Tornado
+per-`EnemyKind` defeat counter `enemy_defeat_by_kind` at `+0x210`, and routes cause `0x0e` into the Tornado
 KO counter `+0x7d8` via `0x8022ed18`.
 
 `0x802022ec` sits in `EventActor_ResolveHit` (`0x802021fc`), which runs for every
@@ -131,7 +131,7 @@ hit with knockback on an enemy, so a "defeat" is credited at hit time whatever t
 knockback tier. The credited player comes from the attacker kind: a rider, the
 rider of a machine, or a projectile's owner (exhaled stars included). The same
 function then calls `EventActor_CreditStadiumKO` (`0x802025dc`), which for enemy
-kinds passing `ActorID_CountsAsKO` (`0x802049fc`) bumps the stadium enemy-KO
+kinds passing `Enemy_KindCountsAsKO` (`0x802049fc`) bumps the stadium enemy-KO
 counter (see `GameData+0xA38`). Inhale never reaches it: `Rider_InhaleCaptureScan`
 (`0x8019c63c`) captures by its own overlap scan, and the swallow recorder
 `Ply_RecordEnemySwallow` (`0x80230cec`) writes only the swallow fields (`+0x6a0`,
@@ -402,11 +402,12 @@ ST's jump table is at `0x80497738` (12 x u32, indexed `(city_kind - 7)`).
 This array is **not** the broad event-counter
 set (rings/meteor/waterwheel/etc. live in dedicated int/flag fields above). It is
 a **per-destructible-object break-count bucket array** - one u8 counter per
-yakumono descriptor *stat-index*.
+`YakuKind`.
 
 - **Getter** `0x8022fccc(player, idx)`: `return *(u8*)(base + 0x62b + idx)` for
   `idx in [0x15, 0x28]` (returns 0 outside; asserts non-fatally for `player >= 5`).
-  Index is **not** biased. Absolute struct offsets `0x640..0x653`.
+  The argument is the `YakuKind`, not biased; the byte it reads is
+  `yakumono_break[kind - 0x15]`. Absolute struct offsets `0x640..0x653`.
 - **Incrementer** `0x8022fed8(player, idx)`: `byte[idx]++`, gated by
   `idx in (0x14, 0x29)`, `player != 5`, and `+0x855` bit6 clear. For **idx 0x28
   only** it also records the fastest break time at `+0x830` (drives 0x33).
@@ -414,31 +415,37 @@ yakumono descriptor *stat-index*.
   Cumulative carry lives in the records block, not here.
 - **Producers** are yakumono destroy handlers (`hitWeakObject` /
   `hitStrongObject` / `hitBigStar` / `event_pillar_start` / breakrock/breakhouse,
-  ~30 callers) -> wrapper `GrYaku_IncrementBreakCount` (`0x80105d80`):
-  `idx = GrYakumono_GetDescId(obj)` (`0x800f7a64`, the descriptor stat-index,
+  ~30 callers) -> wrapper `YakumonoGObj_IncrementBreakCount` (`0x80105d80`):
+  `idx = YakumonoGObj_GetKind(obj)` (`0x800f7a64`, `YakumonoData.kind`,
   `*(int*)(*(int*)(obj+0x2c) + 4)`) -> `Ply_IncrementYakumonoBreakCount`.
 
-Because the index comes from the object descriptor, the *meaning of a given
+Because a kind names a prop type rather than one prop, the *meaning of a given
 index is stage/mode-dependent* - the same bucket is reused across stages (e.g.
-idx 0x18 = Sky Sands coral in Air Ride -> AR cell 0x67; idx 0x20 = forest-pitfall
-cover in CT -> 0x3f *and* Frozen Hillside ice platforms in AR -> AR cell 0x66).
+idx 0x20 = `YAKUKIND_BREAKFLOOR` is the forest-pitfall cover in CT -> 0x3f *and*
+the Frozen Hillside ice platforms in AR -> AR cell 0x66).
+
+There are two corals. Sky Sands coral is idx 0x18 = kind 24 (`YAKUKIND_BREAKCORAL`,
+`yakumono_break[3]`, `+0x643`) -> AR cell 0x67. City Trial coral is idx 0x21 = kind
+33 (`YAKUKIND_CORAL`, `yakumono_break[12]`, `+0x64c`), which no checklist cell reads.
 
 ### Index -> meaning (City Trial / Stadium consumers)
 
-| idx | offset | meaning (active stage) | consumer -> clear_kind |
-|-----|--------|------------------------|-----------------------|
-| 0x17 | 0x642 | Destruction Derby rocks | ST, id 9, `sum_present > 1` -> **0x28** |
-| 0x1d | 0x648 | star-pole busts | FNU: `!= 0` -> **0x3a**; `records-0x1 sum > 9` -> **0x3b** |
-| 0x20 | 0x64b | forest-pitfall cover | FNU: `!= 0` -> **0x3f** |
-| 0x22 | 0x64d | forest trees | FNU: `sum_present > 0x34` -> **0x45** |
-| 0x23 | 0x64e | volcano + high-plains rocks | FNU: `sum_present > 0x28` -> **0x41** |
-| 0x25 | 0x650 | volcano-base hole covers | FNU: `sum_present > 2` -> **0x3c** |
-| 0x26 | 0x651 | dilapidated houses | FNU: `sum_present > 0x1d` -> **0x44** |
-| 0x28 | 0x653 | huge pillars | FNU: `records-0x3 sum > 4` -> **0x32**; `!= 0` + timer -> **0x33** |
+| idx | offset | kind (`YAKUKIND_`) | meaning (active stage) | consumer -> clear_kind |
+|-----|--------|--------------------|------------------------|-----------------------|
+| 0x17 | 0x642 | 23 (unnamed, BreakHouse family) | Destruction Derby 1 rocks | ST, id 9, `sum_present > 1` -> **0x28** |
+| 0x1d | 0x648 | `STARPOLE` | star-pole busts | FNU: `!= 0` -> **0x3a**; `records-0x1 sum > 9` -> **0x3b** |
+| 0x20 | 0x64b | `BREAKFLOOR` | forest-pitfall cover | FNU: `!= 0` -> **0x3f** |
+| 0x22 | 0x64d | `TREE` | forest trees | FNU: `sum_present > 0x34` -> **0x45** |
+| 0x23 | 0x64e | `ROCK` | volcano + high-plains rocks | FNU: `sum_present > 0x28` -> **0x41** |
+| 0x25 | 0x650 | `BREAKHPCOLLHOLE` | volcano-base hole covers | FNU: `sum_present > 2` -> **0x3c** |
+| 0x26 | 0x651 | `BREAKHPCOLLHOUSE` | dilapidated houses | FNU: `sum_present > 0x1d` -> **0x44** |
+| 0x28 | 0x653 | `EVENTPILLAR` | huge pillars | FNU: `records-0x3 sum > 4` -> **0x32**; `!= 0` + timer -> **0x33** |
 
-Indices with a producer path but **no checklist consumer** (other stages'
-destructibles or spare): `0x15, 0x16, 0x18*, 0x19, 0x1a, 0x1b, 0x1c, 0x1e, 0x1f,
-0x21, 0x24, 0x27` (*0x18 is consumed in Air Ride, not CT).
+Indices with **no City Trial checklist consumer**: `0x15` (Checker Knights), `0x16` (`BREAKHOUSE`,
+test ground only), `0x18` (`BREAKCORAL`, read by AR cell 0x67), `0x19..0x1b`
+(descriptors no creator uses), `0x1c` (Celestial Valley), `0x1e` (`BREAKFAN`),
+`0x1f` (`BREAKICICLE`), `0x21` (`CORAL`), `0x24` (`BREAKHPCOLLDOOR`), `0x27`
+(Frozen Hillside BreakRock).
 
 ## Vehicle-Bust Bitfield (`+0x4c4`)
 
@@ -541,7 +548,7 @@ Air Ride clear bits are the `clear[]` of the **type-0** `GameClearData` slot
 `ClearChecker_SetNewUnlock(0, kind)` (`0x8004a054`), gated by
 `ClearChecker_GetKindClear` (`0x8004a130`) returning `(flags & 5) == 0`. Unlike
 City Trial's single per-game finalizer, Air Ride runs **three independent entry
-points**, all sharing the gate `Checklist_IsCacheValid()==0 &&
+points**, all sharing the gate `Net_IsSessionActive()==0 &&
 !_D_CheckIfReplay() && _DHud_GetUnkFromPKind()==0 && Scene_GetCurrentMajor()==4`:
 
 | Entry point | Addr | Trigger | Owns |
@@ -626,7 +633,7 @@ for CT, with Air-Ride-specific bits.
 | `+0x654` | u8[13] | rail used-bitmask, one bit per rail id grabbed on any stage (read for Magma) | `0x802300b4` | 0x6e |
 | `+0x661` | u8[63] | zone used-bitmask: dash, dash-gate, jump and super-jump zones touched (read for Magma's boost panels) | `0x80230294` | 0x70 |
 | `+0x6a0` | int | enemies swallowed | `0x802306d4` | 0x0e, 0x04/0x05 |
-| `+0x6a8` | int[ ] | per-ACTORID swallow counter; one enemy = base+T1+T2 tiers (stride 0x18) summed | `0x8023077c` | 0x06-0x09, 0x5f/0x62/0x65 |
+| `+0x6a8` | int[ ] | per-`EnemyKind` swallow counter; one enemy = base+T1+T2 tiers (stride 0x18) summed | `0x8023077c` | 0x06-0x09, 0x5f/0x62/0x65 |
 | `+0x7c8` | int | consecutive garbage-enemy swallows (no copy) | `0x802307e4` | 0x10 |
 | `+0x7d0` | int | enemies swallowed this race | `0x80230728` | 0x5f / 0x62 / 0x65 |
 | `+0x7d4` | int | sword swings this race | `0x8022e390` | 0x1c |
@@ -650,9 +657,10 @@ for CT, with Air-Ride-specific bits.
 | `+0x855` bit7 | bit | finished with Wing | `0x8022e338` | 0x5c |
 
 The yakumono-break array `+0x62b` is shared with City Trial; Air Ride adds two
-consumers: idx 0x18 = Sky Sands coral (single-offset getter `0x8022fd48` reading
-`+0x643`, compared against the live stage spawn-count `0x800f7db0(0x18)`) -> 0x67,
-and idx 0x20 = Frozen Hillside ice platforms -> 0x66.
+consumers: idx 0x18 = Sky Sands coral, kind 24 `YAKUKIND_BREAKCORAL`
+(`Ply_GetAllCoralBrokenFlag` `0x8022fd48` reads `+0x643` = `yakumono_break[3]` and
+compares it against the live stage spawn-count `Gr_GetYakumonoSpawnTotal(0x18)`) -> 0x67,
+and idx 0x20 = Frozen Hillside ice platforms (`YAKUKIND_BREAKFLOOR`) -> 0x66.
 
 Race placement is **not** in the stat struct - it lives in `GameData` byte
 arrays: `GameData+0x848[p]` (finish rank, `0 = 1st`, getter `0x80009534`),
@@ -712,7 +720,7 @@ else is here. "& 1st" = the per-player finish-rank check `GameData+0x848[p]==0`.
 | 0x03 | glide > 1 hour | B-frame | `>= 216000` |
 | 0x04 | defeat > 300 enemies | B-frame | `sum (+0xe0)+(+0x6a0) + records+0x4 >= 300` |
 | 0x05 | defeat > 1000 enemies | B-frame | `>= 1000` |
-| 0x06 | swallow Chilly 3x & 1st | A-finish | `sum_tiers +0x6a8[ACTORID 0x0b] >= 3` & 1st |
+| 0x06 | swallow Chilly 3x & 1st | A-finish | `sum_tiers +0x6a8[EnemyKind 0x0b] >= 3` & 1st |
 | 0x07 | swallow Plasma Wisp 3x & 1st | A-finish | `+0x6a8[0x0d] tiers >= 3` & 1st |
 | 0x08 | swallow Sword Knight 3x & 1st | A-finish | `+0x6a8[0x05] tiers >= 3` & 1st |
 | 0x09 | swallow Wheelie 3x & 1st | A-finish | `+0x6a8[0x08] tiers >= 3` & 1st |

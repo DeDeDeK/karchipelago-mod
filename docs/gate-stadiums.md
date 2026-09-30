@@ -41,13 +41,13 @@ Four functions report stadium availability, and all four are `CODEPATCH_REPLACEF
 | Function | Address | What vanilla does |
 |----------|---------|-------------------|
 | `Gm_StadiumIsDefaultUnlocked` | 0x8000C148 | Jump table of stadiums available by default: 1 for the low Drag Race kinds (0-2), else 0. |
-| `Gm_StadiumIsUnlocked` | 0x8000C17C | Maps kinds 3-22 (the checklist-gated stadiums) through a jump table to clear/reward indices, then consults `Checklist_CheckCachedUnlock_CityTrial` (0x80007E8C, menu open) or `ClearChecker_CheckUnlocked` (0x80049E24, mode 2). Returns 0 outside 3-22. |
+| `Gm_StadiumIsUnlocked` | 0x8000C17C | Maps kinds 3-22 (the checklist-gated stadiums) through a jump table to clear/reward indices, then consults `Checklist_CheckCachedUnlock_CityTrial` (0x80007E8C) while `Net_IsSessionActive` (a LAN session) or `ClearChecker_CheckUnlocked` (0x80049E24, mode 2) otherwise. Returns 0 outside 3-22. |
 | `Gm_StadiumIsAvailable` | 0x8000C228 | Composite check that inlines its **own** copies of both jump tables and calls `Gm_StadiumCheckUnlocked` / the two checklist queries directly. It does not call the two standalone functions. |
-| `Gm_StadiumCheckUnlocked` | 0x80007EE4 | Reads the runtime unlock bitfield: the temporary cache at 0x80536738 while the checklist menu is open, otherwise the live bitfield at 0x80536EE8. Cache writes are discarded on menu close. |
+| `Gm_StadiumCheckUnlocked` | 0x80007EE4 | Reads the runtime unlock bitfield: the LAN-session snapshot `GameData.unlock_cache.stadium_flags_cache` at 0x80536738 while `Net_IsSessionActive`, otherwise the live bitfield at 0x80536EE8. Writes during a session land in the snapshot, not the save. |
 
 All four have to be replaced precisely because `Gm_StadiumIsAvailable` inlines the tables - replacing only the standalone functions would leave its callers reading them. `GateStadiums_IsUnlocked` returns 0 when `ap_save` is NULL, which matters because `Gm_StadiumCheckUnlocked` is called during early game init, before `OnSaveLoaded`.
 
-With those in place, the game's own unlock bitfield at 0x80536EE8 (`stc_stadium_unlocked`) and its checklist cache layer are dead with respect to availability. The save mask is the single source of truth and is read live at every check, so a mid-session change (debug menu, late AP delivery) takes effect immediately with no sync step and no risk of the cache layer shadowing a write. `Gm_StadiumCheckNewLabel` (0x80008038) is deliberately *not* replaced - the checklist UI still consults the vanilla `stc_stadium_new_label` bitfield at 0x80536EEC for the "NEW" badge, which is why the unlock path sets that bit itself.
+With those in place, the game's own unlock bitfield at 0x80536EE8 (`stc_stadium_unlocked`) and its LAN-session cache layer are dead with respect to availability. The save mask is the single source of truth and is read live at every check, so a mid-session change (debug menu, late AP delivery) takes effect immediately with no sync step and no risk of the cache layer shadowing a write. `Gm_StadiumCheckNewLabel` (0x80008038) is deliberately *not* replaced - the checklist UI still consults the vanilla `stc_stadium_new_label` bitfield at 0x80536EEC for the "NEW" badge, which is why the unlock path sets that bit itself.
 
 ## Per-Round Selection
 

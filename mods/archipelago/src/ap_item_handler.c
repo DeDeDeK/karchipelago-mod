@@ -316,7 +316,7 @@ int APItems_HandleItem(uint ap_item_id)
     }
 
     // Top Ride item give items (AP_TOPRIDE_ITEM_GIVE_BASE + TopRideItemKind),
-    // above the MNRKIND_3D gate below since Top Ride uses MNRKIND_19.
+    // above the MNRKIND_3D gate below since Top Ride uses MNRKIND_TOPRIDE.
     // GateTopRideItems_GiveItem returns 0 outside Top Ride, keeping the item
     // queued until the player enters a TR match.
     if (ap_item_id >= AP_TOPRIDE_ITEM_GIVE_BASE &&
@@ -333,7 +333,7 @@ int APItems_HandleItem(uint ap_item_id)
     }
 
     // Copy ability ITKIND items in Top Ride, above the MNRKIND_3D gate that TR
-    // (MNRKIND_19) never satisfies. TR has no RiderData kirbys, so map the ability
+    // (MNRKIND_TOPRIDE) never satisfies. TR has no RiderData kirbys, so map the ability
     // to its TR item analog; abilities with no analog retry in City Trial / Air Ride.
     if (Scene_GetCurrentMajor() == MJRKIND_TOP &&
         ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)

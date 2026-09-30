@@ -214,11 +214,11 @@ static void LaunchOne(void)
     desc.kind = (WeaponKind)kind;
     desc.owner_gobj = donor;
     desc.owner_gobj2 = NULL;
-    desc.position = pos;
+    desc.pos = pos;
     desc.forward = dir;
     desc.up = up;
-    desc.velocity_scale = scale;   // a size scale despite the name
-    desc.velocity = vel;
+    desc.scale = scale;
+    desc.vel = vel;
     desc.type_flag = 1;
     desc.charge = 1.0f;
 
@@ -234,10 +234,10 @@ static void LaunchOne(void)
     // an eruption is excluded from nobody and no damage lands on a player's tally.
     proj->owner_gobj = NULL;
 
-    // Weapon_Create only snapshots desc.velocity at proj+0x88, and the plasma
+    // Weapon_Create only snapshots desc.vel at proj+0x88, and the plasma
     // and sword-star post_inits then derive proj+0x94 from their own muzzle speed.
     // Overwriting it here is what makes the launch speed ours.
-    proj->velocity = vel;
+    proj->vel = vel;
 
     // Bomb and sensor bomb spawn holding on a rider hand that does not exist; their
     // state-0 slot would dereference the missing owner on the very next frame.
@@ -260,7 +260,7 @@ static void LaunchOne(void)
     // the user-hook slots. The per-kind default lifetimes are unusable here: plasma
     // expires in 6 to 9 frames, and bomb and sensor bomb never expire at all.
     proj->lifetime = VOLC_LIFETIME;
-    proj->user_hook_0 = VolcanoGravity;
+    proj->framestart_callback = VolcanoGravity;
 }
 
 // Fold the menu overrides over the latched preset config. Returns 0 when the

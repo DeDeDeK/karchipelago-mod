@@ -12,7 +12,7 @@ Rider state and machine state are separate machines and both have to move. `Ride
 
 ## Accumulating
 
-The charge state's physics function is `MachinePhys_Charge` (0x801ef364). It runs the ordinary movement and collision, then calls `Machine_IncrementCharge` (0x801cc480) only while `charge_is_grounded` (+0xc30 bit 0x40) is set. That gate is what makes charging a grounded-only move; bikes hold the flag set always.
+The charge state's physics function is `MachinePhys_Charge` (0x801ef364). It runs the ordinary movement and collision, then calls `Machine_IncrementCharge` (0x801cc480) only while `charge_is_grounded` (+0xc30 bit 0x40) is set. That gate is what makes charging a grounded-only move on a star, and `Machine_Star_PushChargeUpdate` (0x801ef338) applies the same test. Bikes have no such gate: `Machine_Wheel_PushChargeUpdate` (0x801fa1c8) calls `Machine_IncrementCharge` unconditionally.
 
 `Machine_IncrementCharge` interpolates the rate by how far the machine is turned:
 
@@ -44,7 +44,7 @@ Finally it decrements `charge_full_timer`, and reaching zero there is the auto-d
 
 ## Release and clearing
 
-`AS_StarChargeRelease` (0x801abc64) moves the rider to state 0x2A and copies input to the machine. It applies no boost itself; the machine's state physics spend the meter. On the ground that is the Run and Landing states, which call `Machine_ApplyGroundChargeBoost` (0x801d93a0). On a rail it is RailRun and RailChange, which call `Machine_ApplyChargeBoost` (0x801da3c0). Star and wheel machines share both functions, and each does nothing while `charge_display_value` is 0.
+`RiderState_StarChargeReleaseEnter` (0x801abc64) moves the rider to state 0x2A and copies input to the machine. It applies no boost itself; the machine's state physics spend the meter. On the ground that is the Run and Landing states, which call `Machine_ApplyGroundChargeBoost` (0x801d93a0). On a rail it is RailRun and RailChange, which call `Machine_ApplyChargeBoost` (0x801da3c0). Star and wheel machines share both functions, and each does nothing while `charge_display_value` is 0.
 
 The boost is read from a per-machine table. Both functions call `LerpTable(0.1, charge_display_value, boost_gain)` (0x80062c4c) over the eleven floats at `vcData->attr+0x0a8`, which the attribute memcpy puts at `MachineData+0x508`: entry *n* is the gain at *n*/10 charge, and the sample lerps between neighbours. The result is scaled by `boost_gain_any` (attr `+0x0d8`, 1.0 on every machine) and becomes the boost velocity. Hydra's first eight entries are 0 and its last three are 0.03, which is the whole of its charge requirement; Rocket Star holds 0.01 for ten entries and jumps to 3.3 at full; Wagon Star's are all zero, so it has no charge boost. `charge_deplete_rate` (attr `+0x0a4`) then decides how fast the boost bleeds off - 1.0 on most machines, 0.00012 on Hydra.
 

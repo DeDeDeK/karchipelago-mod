@@ -91,10 +91,10 @@ void CpuAI_NavigateTarget(RiderData *rd)
         return;
 
     Rider_CPURivalSelect(rd);
-    if (cpu->rival_player_idx == 5)
+    if (cpu->rival_ply == 5)
         return;
 
-    Ply_GetPosition(cpu->rival_player_idx, &pos);
+    Ply_GetPosition(cpu->rival_ply, &pos);
     range = CpuAI_Skill(rd, CPU_AI_CHASE_RANGE_MIN, CPU_AI_CHASE_RANGE_SKILL);
     if (VECSquareDistance(&rd->pos, &pos) < range * range)
         cpu->nav_target_pos = pos;
@@ -231,7 +231,7 @@ void CpuAI_AdjustManeuver(RiderData *rd)
         CpuAI_Dodge(rd);
         break;
     case CPU_AI_RECKLESS:
-        CpuAI_Veto(cpu, CPUMAN_DODGE_PROJECTILE, CPUMAN_WIGGLE);
+        CpuAI_Veto(cpu, CPUMAN_DODGE_WEAPON, CPUMAN_WIGGLE);
         CpuAI_Ram(rd);
         break;
     case CPU_AI_AGGRESSIVE:

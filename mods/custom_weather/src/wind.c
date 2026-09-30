@@ -137,7 +137,7 @@ static void Wind_ApplyToMachines(float wx, float wz)
             continue;
         if (md->is_airborne != 1) // grounded -> not gliding
             continue;
-        if (Machine_IsDead(md))
+        if (md->is_dead)
             continue;
 
         float glide = Machine_GetStatRatio(md, MACHINESTAT_GLIDE); // [0,1]

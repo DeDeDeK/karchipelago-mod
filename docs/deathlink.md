@@ -12,18 +12,18 @@ Three hooks detect player deaths, all applied from `DeathLink_OnBoot`:
 
 | Hook addr | Vanilla function | Trigger |
 |-----------|------------------|---------|
-| `0x801a06d0` | `Rider_CheckToDieOnMachine` (0x801a06a8) | HP death - `Machine_IsDead` returned true (machine HP reached zero) |
+| `0x801a06d0` | `Rider_CheckToDieOnMachine` (0x801a06a8) | HP death - `MachineGObj_IsDead` returned true (machine HP reached zero) |
 | `0x801e6540` | `Machine_SetFallDead` (0x801e6520) | Fall death - machine went out of bounds |
 | `0x80331a94` | per-frame TR-stage function at `0x8033158c` | Top Ride sand pit ejected a swallowed kirby |
 
-All three funnel through `DeathLinkSendAllowed(ply)`, which requires `deathlink_enabled` and a clear echo-suppression slot. Each hook then applies its own human-vs-CPU filter, because the two engines discriminate differently: the 3D path (`SendDeathLink`) uses `Ply_CheckIfCPU`, the TR path uses `TopRide_GetPlayerKind == TR_PKIND_HMN`.
+All three funnel through `DeathLinkSendAllowed(ply)`, which requires `deathlink_enabled` and a clear echo-suppression slot. Each hook then applies its own human-vs-CPU filter, because the two engines discriminate differently: the 3D path (`SendDeathLink`) uses `Ply_GetDescPKind`, the TR path uses `TopRide_GetPlayerKind == TR_PKIND_HMN`.
 
 ### Echo suppression
 
 The receive path kills the local player through the same mechanisms the send hooks watch, so its own kills must not bounce back out as a send. This cannot be a guard around the kill call, because the HP-death path is **asynchronous**:
 
 1. `Ply_SetHP(ply, 0)` (0x8022ca38) writes the HP float and forwards to `MachineGObj_SetHP` (0x801c841c). Neither touches the dead flag.
-2. `Machine_IsDead` (0x801c856c) reads `md->is_dead`, set only by `Machine_OnKO` (0x801e568c) once a later machine-think frame observes HP <= 0.
+2. `MachineGObj_IsDead` (0x801c856c) reads `md->is_dead`, set only by `Machine_OnKO` (0x801e568c) once a later machine-think frame observes HP <= 0.
 3. `RiderThink_DmgApply` (0x8018fa20) polls `Rider_CheckToDieOnMachine` on a later frame still, and that is where the send hook sits.
 
 So `deathlink_suppress[5]` is a per-player frame countdown (`DEATHLINK_SUPPRESS_FRAMES` = 60), armed by `SuppressSend(ply)` immediately before each `KillPlayer` call, decremented once per frame by `TickSuppress()` inside both receive procs, and consumed (zeroed) by the first send attempt it blocks. `ClearSuppress()` zeroes it in `DeathLink_On3DLoadEnd` / `DeathLink_OnTopRideLoadEnd` so nothing carries across scenes.
@@ -34,9 +34,9 @@ So `deathlink_suppress[5]` is a per-player frame countdown (`DEATHLINK_SUPPRESS_
 
 The hook at `0x801e6540` is 0x20 bytes past the function entry. The prologue has already saved r31 = md (non-volatile), but the argument registers are still volatile and in active use downstream:
 
-- r4 is needed by the clobbered instruction `stw r4, 0x1b48(r31)` (replayed after the hook)
+- r4 is needed by the clobbered instruction `stw r4, 0x1b48(r31)` (`fall_ground_handle`, replayed after the hook)
 - r5 is needed at `0x801e6548` to copy respawn_pos into the machine data
-- r3 is needed at `0x801e6588` where a per-vehicle-kind vtable function is called via `bctrl`
+- r3 is needed at `0x801e6588` where the machine class's `MachineClassDesc.enter_fall_dead` is called via `bctrl`
 
 The hook's prologue saves r4/r5 to the stack and the epilogue restores all three (r3 from r31, r4/r5 from stack).
 
@@ -60,7 +60,7 @@ The HP-death stadiums run **outside** `Gm_IsInCity` but use CT-style HP-based de
 
 Before zeroing HP, `KillPlayer` copies `md->dmg_log` into a local `DmgLog`, clears its `attacker_ply` (so the death is not attributed to any player), and calls `Ply_AddDeath` for stat tracking. `Ply_SetHP(ply, 0)` then triggers the normal death flow.
 
-The fall-death path passes the checkpoint selected by `md->use_backup_checkpoint`: clear = `respawn_pos`, set = `backup_respawn_pos` (the last-known-good checkpoint saved when the per-frame spline lookup fails). This matches vanilla `Machine_CheckFallDeath`'s OOB-distance path, which also passes ground handle -1 when no dead zone surface is found - the global dead zone system respawns correctly with an invalid handle, and deathlink kills happen mid-track where `Machine_GetGroundHandle` would return -1 anyway.
+The fall-death path passes the checkpoint selected by `md->use_backup_checkpoint`: clear = `respawn_pos`, set = `backup_respawn_pos` (the last-known-good checkpoint saved when the per-frame spline lookup fails). This matches vanilla `Machine_CheckFallDeath`'s OOB-distance path, which also passes ground handle -1 when no dead zone surface is found - the global dead zone system respawns correctly with an invalid handle, and deathlink kills happen mid-track where `mpColl_GetDeadZoneIndex` would return -1 anyway.
 
 The mpColl position (md+0x6F8 at +0x8/+0xC/+0x10) is **not** an alternative here: it stores world-space XYZ, while `Machine_SetFallDead` expects spline parameters, so passing it produces incorrect respawns.
 
@@ -76,17 +76,17 @@ The mpColl position (md+0x6F8 at +0x8/+0xC/+0x10) is **not** an alternative here
 
 Two death zone systems exist. **Local dead zones** are per-boundary: a collision zone record (0x140 bytes, in `GrObj.coll.zone`) whose type field at +0x24 has kind `0x19`. **Global dead zones** are a stage-wide Y-height threshold reached through `GrData` -> +0x20 -> +0x24.
 
-- `Gr_IsValidGroundHandle(handle)` (0x800d1f3c) returns 0 for `0 <= handle < max_handles`, 1 otherwise.
-- `Machine_GetGroundHandle(surface_id)` (0x80247fac) takes an mpColl collision object pointer and searches its entries for a type-0x19 ground zone, returning that handle index or -1.
-- `Machine_CheckFallDeath` (0x801e6464), called per frame from `Machine_EnvCollThink`, reaches `Machine_SetFallDead` two ways: a valid ground handle from the surface, or `calcDistanceFromOOB(md->pos)` under threshold. The second path is the one deathlink imitates.
+- `Gr_IsGroundHandleInvalid(handle)` (0x800d1f3c) returns 0 for `0 <= handle < max_handles` and 1 otherwise, so 0 means the handle is valid.
+- `mpColl_GetDeadZoneIndex(CollData *cd)` (0x80247fac) returns the zone index of the first collision zone the body is in whose kind (+0x24, low 25 bits) is `0x19`, moving zones included, or -1 when none.
+- `Machine_CheckFallDeath` (0x801e6464), called per frame from `Machine_EnvCollThink`, reaches `Machine_SetFallDead` two ways: the machine is inside a kind-`0x19` zone (`mpColl_GetDeadZoneIndex` returns an in-range index, for which `Gr_IsGroundHandleInvalid` returns 0), or `calcDistanceFromOOB(md->pos)` is negative. The second path is the one deathlink imitates.
 
 ## Respawn Flow
 
-`Machine_SetFallDead` (0x801e6520) stashes the ground handle, the three checkpoint floats and a frame-counter timestamp at md+0x1B48..0x1B58. That block survives the fall animation (`Machine_ApplyFallVelocity` only reads it) and drives the respawn:
+`Machine_SetFallDead` (0x801e6520) stashes the ground handle (`fall_ground_handle`, md+0x1B48), the three checkpoint floats (`respawn_spline_params`, +0x1B4C) and `fall_respawn_timer` (+0x1B58, loaded from VcCommon param +0x16c, 300), sets `xc39` bit 0x40, clears bits 0x08/0x04 and runs `MachineClassDesc.enter_fall_dead`; an unridden machine is destroyed instead. That block survives the fall animation (`Machine_ApplyFallVelocity` only reads it) and drives the respawn:
 
-1. The machine enters fall-dead state and plays the death animation.
-2. `Respawner_Update` (0x8000ff78) counts a per-player timer down from 150: camera fade at 90, respawn triggered (and permadeath checked) at 30, cleanup at 0.
-3. `AS_DeadWait` / `Rider_DeadHitGround_Anim` call `Rider_RespawnEnter` (0x801a1d70).
+1. The machine enters fall-dead state and plays the death animation. Each frame the Star and Wheel FallDeath callbacks run `Machine_UpdateFallDead` (0x801e6670). Its `Machine_CheckRespawnRequest` (0x801e66cc) tests the player's respawn request (`Ply_GetRespawnRequest`, PlayerData+0x908 bit 0x20); when it is set, `Machine_RespawnFromFallDead` (0x801e6718) respawns the machine at the local dead zone's respawn point when `fall_ground_handle` is in range, else at `respawn_spline_params`, and clears the request. Otherwise `Machine_UpdateFallDead` counts `fall_respawn_timer` down, and at 0 only stops the machine (`Machine_ResetMotion`, 0x801c8e50) without respawning it.
+2. `Respawner_Update` (0x8000ff78) sees the rider fall-dead (`Ply_CheckIfFallDead`) and counts a per-player timer down from 150: camera fade at 90; at 30 it either marks the player permadead (on foot outside Destruction Derby, or permadeath enabled) or sets the respawn request through `Ply_SetRespawnRequest` (0x8022cc80); fade cleanup at 0. A normal fall death therefore respawns about 120 frames in, and the 300-frame `fall_respawn_timer` only runs out when no request comes.
+3. `AS_DeadWait` / `Rider_DeadHitGround_Anim` call `RiderState_RespawnEnter` (0x801a1d70).
 4. `Rider_RespawnAnim` (0x801a1dec) destroys the old machine and creates a new one via `Machine_Create`.
 5. `Machine_RespawnDispatch` (0x801eb738) dispatches on respawn type. Type 0 (default) restores the mpColl position from the spline data via `Machine_SetMpCollPosition`; type 4 (fall dead) goes to `Machine_FallDeadRespawnEntry` (0x801e4ec4), which reloads the stored md+0x1B48 block.
 6. `Machine_ApplyRespawnPacket` (0x801cc0c4) restores velocity, stats and position onto the new machine.

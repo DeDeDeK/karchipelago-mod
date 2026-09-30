@@ -17,7 +17,7 @@
 // passed through unscaled so the machine lands on its target.
 #define SCALE_TELEPORT_SPEED_MULT 5.0f
 
-// bl CObj_SetEyePosition in PlyCam_Think (0x800b3540), one call after
+// bl CObj_SetEyePosition in PlyCamGObj_Think (0x800b3540), one call after
 // CObj_SetInterest on the same COBJ.
 #define SCALE_PLYCAM_SETEYE_CALL 0x800b3900
 

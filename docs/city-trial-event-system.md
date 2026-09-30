@@ -6,7 +6,7 @@ There are 16 kinds, the `EventKind` enum in `externals/hoshi/include/event.h`, w
 
 ## Data Ownership
 
-`fn_grSetupCityEventData` (0x8010f7c4) loads the archive on every City Trial load and stashes the root at `GrData.event_config`, **regardless** of the City Trial events on/off setting. `CityEvent_Init` (0x800edb88), by contrast, bails without creating the event GOBJ when `Gm_CheckEnemyEnabled` (0x8000a348) returns 0. So with events disabled the config is still resident and readable through `GrData`, but `stc_eventcheck_gobj` (0x805dd6f8, r13+0x618) stays NULL and `EventCheckData.data` never gets set. Anything that wants event *data* without an event *running* must go through `GrData.event_config`.
+`fn_grSetupCityEventData` (0x8010f7c4) loads the archive on every City Trial load and stashes the root at `GrData.event_config`, **regardless** of the City Trial events on/off setting. `CityEvent_Init` (0x800edb88), by contrast, bails without creating the event GOBJ when `Gm_IsEventsEnabled` (0x8000a348) returns 0. So with events disabled the config is still resident and readable through `GrData`, but `stc_eventcheck_gobj` (0x805dd6f8, r13+0x618) stays NULL and `EventCheckData.data` never gets set. Anything that wants event *data* without an event *running* must go through `GrData.event_config`.
 
 `EventCheckData` (200 bytes, `HSD_MemAlloc`'d, stored as the event GOBJ's userdata) is the live state: current state and kind, a frame timer, the next-event delay target, a `prev_kind[]` history ring, a 16-entry occurrence counter at `+0x44`, and a 16-entry reserve queue at `+0x84`. The struct is in `event.h`.
 
@@ -60,7 +60,7 @@ The **reserve queue** (`ev_chk->reserve[]`, 16 entries) is the priority list for
 `stc_event_function` (0x804a5410) is 16 x 0x14 bytes. Each `EventFunction` is `{start, active, end, end2, check}`:
 
 - `start` - once on the state 1 -> 2 transition. Spawns actors, modifies item tables, inits state.
-- `active` - every frame in state 2. Runs the event and is responsible for ending it.
+- `active` - every frame in state 2. Runs the event and is responsible for ending it; a NULL `active` ends the event at once.
 - `end` - every frame in state 3, for gradual cleanup.
 - `end2` - once when `cleanup_delay` expires.
 - `check` - before starting; returning 0 blocks the trigger and queues the kind in reserve.
@@ -116,12 +116,12 @@ The map names the functions after internal event names that differ from the enum
 ## What Each Event Does
 
 - **RUNAMOK** - `event_runAmok_start` calls `Ply_SetRunAmok(ply, duration)` (0x8022d5c8) on every HMN and CPU slot: `PlayerData+0x909` bit 0x40 plus a timed Charge Max on the ridden machine (`Rider_ApplyChargemaxEffect` for a rider on foot). The active function clears the flag with `zz_8022d620_` at the duration.
-- **RAILFIRE** - `event_stationFire_start` creates one yakumono desc 65 (`YAKU_DESC_RAILFIRE`) per event position: `bgm_sky[6]` holds 10 positions, one pair per rail station, 5 stations. The hitbox is static for the whole event, and the active function destroys every desc-65 GObj at the duration. Nothing else creates desc 65. A logged hit from one plays `Ply_PlayRailFireHitSFX` (0x8027aa1c) from `Machine_ActOnHitCollision` (bl at 0x801d741c) or `Rider_ActOnHitCollision` (bl at 0x80196668).
+- **RAILFIRE** - `event_stationFire_start` creates one yakumono of kind 65 (`YAKUKIND_RAILFIRE`) per event position: `bgm_sky[6]` holds 10 positions, one pair per rail station, 5 stations. The hitbox is static for the whole event, and the active function destroys every kind-65 GObj at the duration. Nothing else creates kind 65. A logged hit from one plays `Ply_PlayRailFireHitSFX` (0x8027aa1c) from `Machine_ActOnHitCollision` (bl at 0x801d741c) or `Rider_ActOnHitCollision` (bl at 0x80196668).
 - **SAMEITEM** - sets `CityItemMgr.flags |= CTEVF_SAMEITEMS` and, through `CityEvent_ModifyItemFallDesc(7)`, `grBoxGeneInfo.event_active_flags` bit 4 with `same_item_it_kind` reset to -1. The first box to open rolls the `sameitem` pool and latches the kind; every later box gives it, 2 copies from a medium box and 4 from a large one. Sky drops stay normal.
-- **LIGHTHOUSE** - the lighthouse is permanent stage yakumono desc 68. The event's start stores it at `stc_lighthouse_gobj` (r13+0x670) and turns it on; its two lights are lit in yakumono state 3 and heal what they cover. `CityLighthouse_InBeam` (0x8010d910) is the per-light cone test. At the duration the active function only flags the lighthouse to switch off; the lighthouse's own think then clears the global and calls `CityEvent_EndWithSkyRestore`.
+- **LIGHTHOUSE** - the lighthouse is permanent stage yakumono of kind 68 (`YAKUKIND_LIGHTHOUSE`). The event's start stores it at `stc_lighthouse_gobj` (r13+0x670) and turns it on; its two lights are lit in yakumono state 3 and heal what they cover. `CityLighthouse_InBeam` (0x8010d910) is the per-light cone test. At the duration the active function only flags the lighthouse to switch off; the lighthouse's own think then clears the global and calls `CityEvent_EndWithSkyRestore`.
 - **PREDICTION** - no functions. `stadiumPrediction` rolls `HSD_Randi(5)`: 0 names a random `StadiumKind` (`HSD_Randi(24)`, bl at 0x801279a0), anything else names `Gm_GetCurrentStadiumKind()`. Nothing reads the prediction back, so about 19% of predictions are wrong. It carries weight 200 in every stadium group against 10-60 for the other kinds.
 - **MACHINEFORMATION** - five riderless `Machine_Create` machines fly a straight line between one of seven position pairs (weights 1 x7, 0 x3), hovering at about 10 units/s for 69-131 s. `MachineData.formation_slot` (+0x19) holds each one's slot 0-4, `MACHINE_FORMATION_NONE` otherwise, and `stc_event_formation_slots` (r13+0x790) indexes the GObjs by slot. A bump, hit, boarding or destroy takes a machine out and decrements `stc_event_machineformation_loadnum`. The active function ends the event once that count is 0, never reading the duration.
-- **UFO** - yakumono desc 0x43 flies one of the stage's paths through a five-state script and ends the event itself as it leaves. Each state drops a ring of items with `spawn_type` 9 (`ITSPAWN_UFO`), expiring with the stop; slot 0 is a hardcoded `ITKIND_ALLUP`, the rest come from the UFO event pool. The state table at 0x804a7390 holds the five thinks: `CityUFO_State0Think`, `CityUFO_State1Think`, `spawnUFOItems`, `CityUFO_State3Think` and `CityUFO_State4Think`.
+- **UFO** - yakumono kind 0x43 (`YAKUKIND_UFO`) flies one of the stage's paths through a five-state script and ends the event itself as it leaves. Each state drops a ring of items with `spawn_type` 9 (`ITSPAWN_UFO`), expiring with the stop; slot 0 is a hardcoded `ITKIND_ALLUP`, the rest come from the UFO event pool. The state table at 0x804a7390 holds the five thinks: `CityUFO_State0Think`, `CityUFO_State1Think`, `CityUFO_State2Think`, `CityUFO_State3Think` and `CityUFO_State4Think`.
 - **BOUNCE** - `CityItem_InitLocatorEvent` sets the bounce physics, expires every live item, and switches the city to up to 50 items spawning every 1-5 frames from the normal pools.
 - **FOG** - the sky preset alone.
 - **FAKEPOWERUPS** - `CityItem_InitFakeEvent` (bl at 0x801119e8) at the start, `CityItem_ClearFakeEvent` (0x80111a34) at the end. Fakes are `ITKIND_ACCELFAKE`-`ITKIND_WEIGHTFAKE`, dropped from boxes and the sky at about 59% of patch-type spawns.
@@ -166,7 +166,7 @@ Both resolve the text as `stc_event_sis_id_table[kind]` (0x804a7b98) -> a SIS in
 
 ## Fake Powerups Outside the Event
 
-`CityItem_ProcessFakeItem` (0x802542dc) returns 0 unless the in-game Fake Powerups event is running (`stc_city_item_mgr->fake_event_data != NULL`); its caller `Machine_OnTouchItem` (0x801db34c, call site 0x801db8c0) then skips `bl Machine_ApplyHurt`, so a fake patch touched outside the event does nothing.
+`ItemGObj_ProcessFakeItem` (0x802542dc) returns 0 while `stc_city_item_mgr->fake_event_data` is NULL; its caller `Machine_OnTouchItem` (0x801db34c, call site 0x801db8c0) then skips `bl Machine_ApplyHurt`, so the fake patch does nothing. `CityItem_InitFakeEvent` (0x80254238) sets the pointer when a Fake Powerups event starts and `CityItem_ClearFakeEvent` (0x80254290) clears only the event flag, so it stays set for the rest of the scene; `Item_InitObj` zeroes the manager on every 3D scene load. Fake patches therefore do nothing until the scene's first Fake Powerups event, and keep working after it ends.
 
 Because the archipelago mod spawns `ITKIND_*FAKE` items as traps outside the event, `mods/archipelago/src/fake_patches.c` `REPLACEFUNC`s it. The replacement reads the fake-item data from `gr->gr_data->event_config->bgm_sky[EVKIND_FAKEPOWERUPS].event_data` rather than from `*stc_eventcheck_gobj`, precisely because the event GOBJ is never created when City Trial events are off while the archive is loaded unconditionally. `Event_FakeItems_FillHurtParams` (0x80111a60) then fills the hurt params and the function returns 1.
 
@@ -181,7 +181,7 @@ Thin readers over `EventCheckData` and the config, all in the `0x800ee6xx`-`0x80
 | 0x800ee6ec | `CityEvent_GetLocationIndex` | `bgm_sky[cur_kind].location_idx` |
 | 0x800ee708 | `CityEvent_GetLocationCount` | `bgm_sky[cur_kind].location_count` |
 | 0x800ee724 | `CityEvent_GetLocationIndexForKind` | same, for an explicit kind |
-| 0x800ee73c | `Event_GetInstanceData` | `bgm_sky[EVKIND_FAKEPOWERUPS].event_data` |
+| 0x800ee73c | `CityEvent_GetInstanceData` | `bgm_sky[cur_kind].event_data` |
 | 0x800ee758 | `CityEvent_GetEventDataForKind` | `bgm_sky[kind].event_data` |
 | 0x800ee770 | `CityEvent_GetGObj` | `*stc_eventcheck_gobj` |
 | 0x800ee8c4 | `CityEvent_GetActiveKind` | `cur_kind` while in state 2, else -1 |

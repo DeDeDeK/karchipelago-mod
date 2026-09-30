@@ -16,7 +16,7 @@ mode the star is rideable in - City Trial, its stadiums, Air Ride races and Free
 
 ## Firing
 
-`AS_StarChargeRelease` (`0x801abc64`) is the state entry that spends a machine charge on a boost. It
+`RiderState_StarChargeReleaseEnter` (`0x801abc64`) is the state entry that spends a machine charge on a boost. It
 has exactly two callers:
 
 | Address | Caller | When |
@@ -26,7 +26,7 @@ has exactly two callers:
 
 Both are taken as `CODEPATCH_REPLACECALL`, not as a hook on the function. `CODEPATCH_HOOKCREATE`
 clobbers the link register with its own `bl`, which a function's first instruction cannot survive -
-`AS_StarChargeRelease` reads `mflr r0` at entry+4. Both call sites pass `r3 = RiderData`,
+`RiderState_StarChargeReleaseEnter` reads `mflr r0` at entry+4. Both call sites pass `r3 = RiderData`,
 and the two are the complete caller set, so replacing them is equivalent to hooking the entry.
 
 `AS_StarChargeRelease2` (`0x801ac2c4`) and `AS_StarChargeRelease3` (`0x801ac488`) are unrelated rider
@@ -55,7 +55,7 @@ A kind is two table entries, and neither vanilla table has room for an 18th:
   fills, so the mod stores its `WeaponKindData` pointer there once, at boot.
 
 Nothing else in the engine is indexed by kind: no switch runs on it, and the few
-`Weapon_GetKind` readers compare against fixed vanilla kinds.
+`WeaponGObj_GetKind` readers compare against fixed vanilla kinds.
 
 Every vtable function slot is NULL-checked where it is called, so the kind fills only what it uses:
 
@@ -71,12 +71,12 @@ are left NULL because no state reads `proj+0x104`.
 
 The one state entry carries the attack word `0x103` and four per-frame callbacks:
 
-| fn | Prio | Callback | Job |
-|----|------|----------|-----|
-| fn0 | 1 | `ShotThink` | grow in and shrink out |
-| fn1 | 4 | `ShotSteer` | homing, ahead of integration |
-| fn2 | 5 | `ShotEnvCollide` | environment sweep and the surface rule |
-| fn3 | 6 | `ShotFollowGround` | ground-follow snap, ahead of `Weapon_SyncRootMtx` and the prio-7 HurtData refresh |
+| Slot | Prio | Callback | Job |
+|------|------|----------|-----|
+| `anim_callback` | 1 | `ShotThink` | grow in and shrink out |
+| `phys_callback` | 4 | `ShotSteer` | homing, ahead of integration |
+| `envcoll_callback` | 5 | `ShotEnvCollide` | environment sweep and the surface rule |
+| `post_envcoll_callback` | 6 | `ShotFollowGround` | ground-follow snap, ahead of `Weapon_SyncRootMtx` and the prio-7 HurtData refresh |
 
 The kind data is all static in the mod:
 
@@ -93,7 +93,7 @@ the high half of the command's second word in 1/250 units, 1125 for a 4.5 radius
 knockback are the Plasma ability's. With no animation to bind, `Weapon_AnimThink` still runs the
 script every frame, and nothing moves the sphere joint.
 
-Owner exclusion stays on - `desc.owner_gobj` is the rider GObj, as `spawnPlasmaSpread` (`0x801a9870`)
+Owner exclusion stays on - `desc.owner_gobj` is the rider GObj, as `Rider_SpawnPlasmaSpread` (`0x801a9870`)
 passes - so a shot never hits the player who fired it. Boxes are hit either way:
 `Box_CheckWeaponCollision` (`0x80252334`) does no owner check.
 
@@ -103,13 +103,13 @@ Per-shot state (owner, homing target, ground mode, the trail handle) sits in the
 
 ### Size
 
-`cur_scale` is the shot's only size. `Weapon_SyncRootMtx` scales the root joint by
-`cur_scale * params.model_scale`, the prio-7 HurtData refresh sizes the hitbox by `cur_scale`, and
-the render cull uses `cur_scale * params.cull_scale + 5`. At `cur_scale` 1 the drawn sphere and the
+`scale` is the shot's only size. `Weapon_SyncRootMtx` scales the root joint by
+`scale * params.model_scale`, the prio-7 HurtData refresh sizes the hitbox by `scale`, and
+the render cull uses `scale * params.cull_scale + 5`. At `scale` 1 the drawn sphere and the
 hitbox are both radius 4.5, and they stay equal all the way through the grow and the fade.
 
-The shot is created at `cur_scale` 0.05, passed as `desc.velocity_scale`, which
-`Weapon_InitRuntimeState` copies into `cur_scale`. `ShotThink` grows it to 1 over the first 30
+The shot is created at `scale` 0.05, passed as `desc.scale`, which
+`Weapon_InitRuntimeState` copies into `scale`. `ShotThink` grows it to 1 over the first 30
 frames and takes it back to 0.05 over the last 30. The fade is needed because the kind has no
 despawn of its own, so a shot that simply ran out of life would vanish between two frames. Prio 1
 runs ahead of that frame's lifetime decrement, so a shot with one frame left is already down.
@@ -118,7 +118,7 @@ The ends of the ramp sit at 0.05 rather than 0 because a shot with no extent at 
 one for a frame. They sit that low so the growth reads: the shot recedes from the camera at roughly
 the rate it grows, and the two cancel on screen.
 
-The environment collider does not scale with `cur_scale` and is smaller than the sphere on purpose,
+The environment collider does not scale with `scale` and is smaller than the sphere on purpose,
 so a ground shot clears a curb (below).
 
 ### Model and color
@@ -205,7 +205,7 @@ geometry; it reads the camera's axes and eye from its view matrix.
 
 - **Halo.** An additive, camera-facing disc through the shot's center, radius 1.9 times the shot's,
   bright in the middle and gone at the rim, in the shot's color. The sphere hides its middle, so what
-  shows is a glow around the edge. It follows `cur_scale`, so it grows and fades with the shot.
+  shows is a glow around the edge. It follows the weapon's `scale`, so it grows and fades with the shot.
 - **Trail.** A camera-facing ribbon in the shot's color through its last 12 positions, one a frame,
   sampled by the proc; the head is the live position, so the ribbon always meets the sphere. It is
   three vertices across with alpha only on the center line, so the edges are soft without a

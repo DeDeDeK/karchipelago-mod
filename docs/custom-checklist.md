@@ -39,7 +39,7 @@ and handle the synthetic ones; with no tab registered they are behavior-neutral.
 | Function | Address | Custom-mode behavior |
 |---|---|---|
 | `gmGetClearcheckerTypeP` | `0x800076a0` | serve the registered tab's `GameClearData` for its mode; NULL for unknown modes (no assert) |
-| `Checklist_GetRewardNum` | `0x80049c20` | `0` (custom tabs host no native rewards) - gates every reward loop in the render path off and dodges the `mode>=3` assert. Also `0` for `CITYTRIAL` while a tab build is active, since the build runs under that mode and `Checklist_SetRewardFlagOnUnlocks` would otherwise walk City Trial's reward table onto the tab's cells. Real modes read the vanilla count table `stc_clear_num` (`0x805d51d0`, AR 46 / TR 33 / CT 44) rather than restating it |
+| `Checklist_GetRewardNum` | `0x80049c20` | `0` (custom tabs host no native rewards) - gates every reward loop in the render path off and dodges the `mode>=3` assert. Also `0` for `CITYTRIAL` while a tab build is active, since the build runs under that mode and `Checklist_SetRewardFlagOnUnlocks` would otherwise walk City Trial's reward table onto the tab's cells. Real modes read the vanilla count table `stc_reward_num` (`0x805d51d0`, AR 46 / TR 33 / CT 44) rather than restating it |
 | `Checklist_GetClearKindFromRewardIndex` | `0x80049c84` | `0` (no rewards) - keeps `Checklist_ProcessUnlock`'s first new-unlock scan inert so the cell flip-animation can run, and dodges the assert |
 | `Checklist_MinorThink` | `0x8004a648` | reimplements the tab cycle with custom tabs folded into the ring |
 | `ClearChecker_CheckForNewUnlocks` | `0x8004a1a4` | vanilla result OR any custom tab pending - routes the post-run checklist even when only a custom check went new |
@@ -53,7 +53,7 @@ off the `GameClearData*` and cell geometry).
 
 **One mode-keyed surface is not covered by that count.** `ClearChecker_GetRewardFromClearKind`
 (`0x80049ec4`) - the audio/ending preview lookup, reached when A is pressed on a cell that is
-`is_unlocked` or `is_filler` - bounds the mode itself and indexes `stc_clear_num[mode]` and
+`is_unlocked` or `is_filler` - bounds the mode itself and indexes `stc_reward_num[mode]` and
 `stc_reward_table_ptrs[mode]` directly, without consulting `Checklist_GetRewardNum`, so a
 completed cell on a custom tab would `OSReport` `error Clearchecker Type %d` and `__assert`
 inside it. The framework covers it at the **call site** instead of the entry: a
@@ -243,8 +243,8 @@ must be cheap pure reads of state latched elsewhere.
 
 The framework owns the **entire presentation** - the cell flags, the on-tab-entry
 flip-and-sparkle animation, the post-run popup (below), and the mid-run completion cue
-(`CC_PlayUnlockSfx`, the same `0x10008` SFX vanilla plays for a checkbox, suppressed when
-the unlock cache is valid and sharing the engine's one-frame cooldown via
+(`CC_PlayUnlockSfx`, the same `0x10008` SFX vanilla plays for a checkbox, suppressed while
+`Net_IsSessionActive` as vanilla's is, and sharing the engine's one-frame cooldown via
 `*stc_clearchecker_sfx_last_frame`, so a tab whose `record_complete` also routes through
 `ClearChecker_SetNewUnlock` never double-plays). Every tab gets identical animations and
 sound.
@@ -356,7 +356,7 @@ The tab ring is `AR -> TR -> CT -> tab0 -> tab1 -> ... -> AR`, and a tab switch 
   through). Lets the played mode animate on its own tab first.
 
 A round routes into the played mode's checklist tab only when its `*_MinorExit` finds
-`ClearChecker_CheckForNewUnlocks(mode) != 0` - a cache-stale scan of *that mode's* cells. A
+`ClearChecker_CheckForNewUnlocks(mode) != 0` - a scan of *that mode's* cells for `is_new && !is_unlocked`. A
 custom check lives in the custom tab's block, so on its own it never trips that gate. Two
 REPLACEFUNCs close the loop: `ClearChecker_CheckForNewUnlocks` OR-s in "any custom tab
 pending", and `Scene_SetNextMinor` (the chokepoint where each `*_MinorExit` requests the played
@@ -374,9 +374,9 @@ pending custom tab - the player could never reach the Air Ride, Top Ride or City
 while a custom check was still unviewed. The guard is therefore "the current minor is not
 itself a checklist tab", which only the engine's `*_MinorExit` callers satisfy.
 
-`ClearChecker_CheckForNewUnlocks` honours vanilla's cache-valid short-circuit for the custom
-tabs as well as the real ones: when the unlock cache is valid the engine considers unlocks
-already presented, and answering otherwise would route every mode exit into the checklist
+`ClearChecker_CheckForNewUnlocks` honours vanilla's LAN-session short-circuit for the custom
+tabs as well as the real ones: while `Net_IsSessionActive` the engine reports no new unlocks,
+and answering otherwise would route every mode exit into the checklist
 over a custom cell the player never visits.
 
 ## Files

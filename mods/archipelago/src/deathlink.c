@@ -49,7 +49,7 @@ static void ClearSuppress(void)
 }
 
 // The human-vs-CPU check is mode-specific and stays at the call site
-// (3D: Ply_CheckIfCPU, TR: TopRide_GetPlayerKind).
+// (3D: Ply_GetDescPKind, TR: TopRide_GetPlayerKind).
 static int DeathLinkSendAllowed(int ply)
 {
     if (!ap_menu_settings.deathlink_enabled)
@@ -66,7 +66,7 @@ static void SendDeathLink(int ply, const char *cause)
 {
     if (!DeathLinkSendAllowed(ply))
         return;
-    if (Ply_CheckIfCPU(ply))
+    if (Ply_GetDescPKind(ply))
         return;
 
     OSReport("[DeathLink] Player %d died (%s) - sending\n", ply + 1, cause);

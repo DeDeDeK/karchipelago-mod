@@ -116,8 +116,8 @@ static void UnlockHoveredCell(void)
     }
 
     ClearChecker_SetNewUnlock(mode, k);
-    // SetNewUnlock bails when Checklist_IsCacheValid (always true in menus), so
-    // RecordCheck ran but no clear[] bits were written; set the end state here.
+    // SetNewUnlock raises only is_new (and nothing during a LAN session); a debug
+    // unlock also shows the cell as unlocked.
     GameClearData *cd = gmGetClearcheckerTypeP(mode);
     if (!cd)
         return;
@@ -140,7 +140,7 @@ static void UnlockHoveredCell(void)
 static int InRound(void)
 {
     MinorKind minor = Scene_GetCurrentMinor();
-    if (minor != MNRKIND_3D && minor != MNRKIND_19)
+    if (minor != MNRKIND_3D && minor != MNRKIND_TOPRIDE)
         return 0;
 
     MajorKind major = Scene_GetCurrentMajor();

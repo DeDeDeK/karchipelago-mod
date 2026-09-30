@@ -1,5 +1,5 @@
 // The vehicle particle bank generators a machine brings. Every Ptcl_LoadEfPtclVehicle
-// points psGeneratorDesc[PTCL_BANK_VEHICLE] into the archive it just loaded, so each load
+// points stc_ps_generator_desc[PTCL_BANK_VEHICLE] into the archive it just loaded, so each load
 // the table is copied into one wide enough for every registered machine's generators past
 // the bank's own, and the count raised to match. Ptcl_Alloc (0x8043294c) bounds an id by
 // that count alone, emits nothing for a NULL entry, and hands a generator node the
@@ -20,8 +20,8 @@ static u32 stc_count;
 
 static void InstallGenerators(void)
 {
-    u8 **descs = psGeneratorDesc[PTCL_BANK_VEHICLE];
-    u32 count = psGeneratorCount[PTCL_BANK_VEHICLE];
+    u8 **descs = stc_ps_generator_desc[PTCL_BANK_VEHICLE];
+    u32 count = stc_ps_generator_count[PTCL_BANK_VEHICLE];
 
     if (descs == NULL || descs == stc_table)
         return;
@@ -44,8 +44,8 @@ static void InstallGenerators(void)
     for (u32 i = 0; i < CUSTOM_MACHINE_GENERATOR_BASE; i++)
         stc_table[i] = i < count ? descs[i] : NULL;
 
-    psGeneratorDesc[PTCL_BANK_VEHICLE] = stc_table;
-    psGeneratorCount[PTCL_BANK_VEHICLE] = stc_count;
+    stc_ps_generator_desc[PTCL_BANK_VEHICLE] = stc_table;
+    stc_ps_generator_count[PTCL_BANK_VEHICLE] = stc_count;
 }
 
 // Tail of Ptcl_LoadEfPtclVehicle, where every install path meets with the bank's

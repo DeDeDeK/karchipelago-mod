@@ -122,8 +122,8 @@ typedef struct CustomMachineCpu
     u8 has_charge_hold_gate;    // 0x06
     u8 has_release_level;       // 0x07
     float charge_release;       // 0x08 a charge-holding CPU holds while the gauge is <= this
-    float charge_hold_gate[2];  // 0x0c Machine_CPUGetChargeHoldGate's two outputs, in order
-    float release_level;        // 0x14 Machine_CPUGetChargeReleaseOverride's output
+    float charge_hold_gate[2];  // 0x0c MachineGObj_CPUGetChargeHoldGate's two outputs, in order
+    float release_level;        // 0x14 MachineGObj_CPUGetChargeReleaseOverride's output
     float align_cos_near;       // 0x18 heading dot above which steering needs no correction
     float align_cos_far;        // 0x1c heading dot below which it needs the larger one
     float turn_tolerance;       // 0x20 radians

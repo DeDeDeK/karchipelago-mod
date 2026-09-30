@@ -73,11 +73,11 @@ Triangle ids are cached at full 32 bits and range-checked in exactly one place: 
 
 ## Per-Body Collision (CollData)
 
-`CollData` is the 0x400-byte per-body collision object, declared in `collision.h`. `mpColl_Create` (`0x80245b4c`) takes one from a freelist pool at `0x8056dbc8`, allocates its shape data from a second pool at `0x8056dbf4` and its `mpCollInfo` via `mpColl_AllocCollInfo` (`0x802416cc`), and links it into a global list headed at `r13+0x7E4` (`0x805DD8C4`) that `mpColl_GetFirstCollObj` (`0x802414d4`) walks. `mpColl_Destroy` (`0x80245ed0`) frees the sub-allocations and unlinks.
+`CollData` is the 0x350-byte per-body collision object, declared in `collision.h`. `mpColl_Create` (`0x80245b4c`) takes one from a freelist pool at `0x8056dbc8`, allocates its 0x4c-byte shape data (`CollShapeData`, which points at two more pool objects of 0x16c and 0x30 bytes at `+0x44` / `+0x48`) from a second pool at `0x8056dbf4` and its 0x1e0-byte `mpCollInfo` via `mpColl_AllocCollInfo` (`0x802416cc`), and links it into a global list headed at `r13+0x7E4` (`0x805DD8C4`) that `mpColl_GetFirstCollObj` (`0x802414d4`) walks. `mpColl_Destroy` (`0x80245ed0`) frees the sub-allocations and unlinks.
 
 Only the shape kind `Mp_CollShapeKind_Sphere` exists. The sphere radius is lerped between two endpoints in the shape data by `mpColl_GetSphereRadius` (`0x802415a8`); the collider's own `radius` at `+0x344` is what the yakumono break force is computed from.
 
-Per frame the owner calls `mpColl_Update` (`0x80245f70`) with the new position, direction and extents; it computes `pos_delta = pos - prev_pos` (`+0x14`), which the rest of the system treats as the body's velocity. `mpColl_SetDefaultParams` (`0x802460d4`) then clears `coll_info` and drives `mpColl_UpdateCollision` (`0x802485e0`) for up to 10 pushback substeps.
+Per frame the owner calls `mpColl_Update` (`0x80245f70`) with the new position, direction, extents and the two sphere radii (into `radius` and the shape data's `radius2`); it computes `pos_delta = pos - prev_pos` (`+0x14`), which the rest of the system treats as the body's velocity. `mpColl_ProcessMapColl` (`0x802460d4`) then clears `coll_info` and drives `mpColl_UpdateCollision` (`0x802485e0`) for up to 10 pushback substeps.
 
 `mpCollInfo` (at `CollData+0x44`) holds one `mpCollRec` per substep plus three lists of pointers to the substeps that produced an under / wall / top contact. The useful test is the count: **a body is touching a wall this frame exactly when `wall_rec_num` is non-zero**, and `wall_recs[i]->wall` names the triangle it was stopped by and where. `contact_tri_id` at `+0x1d0` caches the last winning triangle id (`-1` = none).
 
@@ -87,14 +87,18 @@ Owners:
 |---|---|---|
 | Machines | `MachineData+0x6F8` | `Machine_EnvCollThink` (`0x801c65a8`) GObj proc, `Machine_ProcessEnvColl` (`0x801e5108`). Radius source is `MachineData+0x46C`; `Machine_InitialCollisionCheck` (`0x801cc7a4`) seeds it at spawn. |
 | Riders | `RiderData+0x670` | `Rider_EnvColl` (`0x8018f734`) GObj proc, `Rider_EnvColl_Grounded` (`0x801b8ec4`). |
-| Enemies | `EnemyData+0x594` | `EventActor_EnvCollRaycastDown` / `Up` (`0x80204e24` / `0x80204e44`), `EventActor_GroundSnap` (`0x80204fac`), `Enemy_GroundPhysicsVelocity` (`0x80209104`), `Enemy_GroundAttach` (`0x8020a664`). |
+| Enemies | `EnemyData+0x594` | `EventActor_EnvCollRaycastDown` / `Up` (`0x80204e24` / `0x80204e44`), `EventActor_GroundSnap` (`0x80204fac`), `EventActor_GroundPhysicsVelocity` (`0x80209104`), `EventActor_GroundAttach` (`0x8020a664`). |
 | Items | `ItemData+0x1A4`, often NULL | `CityItem_EnvColl` (`0x8024f814`) GObj proc into `Item_GenericEnvColl` (`0x80255438`). |
 
 ### Ground Types
 
 `GrCollTri.kind` bits 4..11 carry the surface's ground type, the tag
-`grGetGroundTypeFromTriangleID` (`0x800cec28`) returns. `Machine_GetGroundHandle`
-(`0x80247fac`) searches for type `0x19`.
+`grGetGroundTypeFromTriangleID` (`0x800cec28`) returns.
+
+`mpColl_GetDeadZoneIndex` (`0x80247fac`) looks up a dead zone, not a ground type:
+it takes the `CollData` and returns the index of the first collision zone the body is
+inside whose kind (zone record `+0x24`, low 25 bits) is 25, moving zones included, or
+-1 when there is none. `Machine_CheckFallDeath` hands that index to `Machine_SetFallDead`.
 
 City Trial's terrain uses type 29 for the sea and type 30 for the two invisible
 barriers that ring the city. Both barriers are one closed loop each, following the
@@ -124,15 +128,15 @@ That split is the lever. Clearing the collidable bit across a record's triangles
 
 ### Breaking a prop
 
-The break is reached only through the record's family `coll_func`, dispatched by `collideWithObject(yaku_gobj, collider, gcp, tri_idx, contact)` (`0x800f5004`), which reads the descriptor for `record->desc_id` and calls it. The handler computes
+The break is reached only through the record's family `coll_func`, dispatched by `collideWithObject(yaku_gobj, collider, gcp, tri_idx, contact)` (`0x800f5004`), which reads the descriptor for the prop's `YakumonoData.kind` and calls it. The handler computes
 
 ```
 force = collider->radius (CollData+0x344) * impactSpeed^2
 ```
 
-and compares it to the prop's HP. `impactSpeed` comes from `grScene_GetImpactSpeed` (`0x800d8edc`), which **normalizes** the collider delta (`CollData+0x14`), scales by `-1.0`, and projects onto the triangle's outward normal, clamping `<= 0` to `0`. So the delta must point *into* the surface to register at all, and **its magnitude is irrelevant** - only the direction and the collider radius scale the force.
+and tests it against the family's break parameter: coral, trees and rocks (`hitWeakObject`) break when it reaches a fixed threshold (`GrYaku_TestImpactBreak`), and doors, holes and houses (`hitStrongObject`) subtract it from their HP and break at 0 (`GrYaku_ApplyImpactDamage`). `impactSpeed` comes from `grScene_GetImpactSpeed` (`0x800d8edc`), which **normalizes** the collider delta (`CollData+0x14`), scales by `-1.0`, and projects onto the triangle's outward normal, clamping `<= 0` to `0`. So the delta must point *into* the surface to register at all, and **its magnitude is irrelevant** - only the direction and the collider radius scale the force.
 
-On `force > HP` the handler runs the full break tail: retires the record's collision, hides or state-swaps the mesh, spawns debris and drop items, plays SFX, credits the break to a player's checklist stat, and moves the prop to its broken state. Calling `collideWithObject` directly with a fabricated `CollData` synthesizes a break with all of those consequences and no real contact - that is exactly what the Hypernova vacuum does.
+On a break the handler runs the full break tail: retires the record's collision, hides or state-swaps the mesh, spawns debris and drop items, plays SFX, credits the break to a player's checklist stat, and moves the prop to its broken state. Calling `collideWithObject` directly with a fabricated `CollData` synthesizes a break with all of those consequences and no real contact - that is exactly what the Hypernova vacuum does.
 
 ## Collision Zones
 
@@ -169,7 +173,7 @@ Items pick one of four strategies, selected by the `coll_kind` field:
 
 ### Lifecycles
 
-A box-spawned item is created with `coll_kind=1`, so `Item_Create` allocates a CollData. Each frame `Item_GenericEnvColl` updates mpColl and checks the three contact slots, running `ItemColl_BounceLand` on floor contact. When the bounce settles it calls `mpColl_Destroy`, NULLs `ItemData.coll_data`, and rewrites `coll_kind` to 3 - after which the item tracks the ground through `ItemColl_HandleLand` alone.
+A box-spawned item is created with `coll_kind=1`, so `CityItem_Create` allocates a CollData. Each frame `Item_GenericEnvColl` updates mpColl and checks the three contact slots, running `ItemColl_BounceLand` on floor contact. When the bounce settles it calls `mpColl_Destroy`, NULLs `ItemData.coll_data`, and rewrites `coll_kind` to 3 - after which the item tracks the ground through `ItemColl_HandleLand` alone.
 
 A sky-spawned or mod-spawned item is created with `coll_kind=3, is_airborne=1`: no CollData is allocated, an initial raycast at spawn finds the ground, and every frame after that takes the point-collision path directly.
 
@@ -191,7 +195,7 @@ Raycast helpers on this path: `Item_Raycast` (`0x802546e4`) walks `Raycast_Groun
 
 `Item_InitDesc` (`0x802509a0`) takes **13 parameters**: 8 GPR (r3-r10), 1 FPR (f1, the scale), and 4 on the stack. The GC EABI does not shadow floats in GPRs, so the float argument does not consume a GPR slot and the last four arguments genuinely go on the stack. Pass all 13 - a short call leaves the stack four with garbage, and garbage in the `coll_kind` slot is the crash above.
 
-The prototype is in `externals/hoshi/include/item.h`. The four stack arguments are, in order, `is_airborne`, `coll_kind`, `x38` and `x3c` (the last two map to `ItemData[0x34]` / `[0x38]` and are `-1` in every vanilla caller).
+The prototype is in `externals/hoshi/include/item.h`. The four stack arguments are, in order, `is_airborne`, `coll_kind`, `spawn_area` and `spawn_coll_kind` (the last two land in `ItemData.spawn_area` / `spawn_coll_kind` at `+0x34` / `+0x38` and are `-1` in every vanilla caller).
 
 | Caller | is_airborne | coll_kind |
 |---|---|---|
@@ -207,7 +211,7 @@ Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &up, &forward, -1, -1,
               1,    // is_airborne: 1 = do the initial ground raycast
               3,    // coll_kind: point collision, no CollData needed
               -1, -1);
-GOBJ *item = Item_Create(&desc);  // NULL if the spawn raycast fails
+GOBJ *item = CityItem_Create(&desc);  // NULL if the spawn raycast fails
 ```
 
 | Scenario | coll_kind | is_airborne |
@@ -228,7 +232,7 @@ CityItem_EnvColl (0x8024f814)            GObj proc callback
       coll_kind == 0: iterative Raycast_Ground (up to 10 steps),
                       store triangle id -> point_coll.raycast_idx,
                       transition coll_kind -> 3
-      coll_kind == 1: mpColl_Update -> mpColl_SetDefaultParams
+      coll_kind == 1: mpColl_Update -> mpColl_ProcessMapColl
                       -> mpColl_UpdateShapeExtents
                       -> CityItem_GetGroundInfo (read the contact slots)
                       wall/ceiling: zero velocity

@@ -203,7 +203,7 @@ static void BreakApBox(ItemData *id)
     if (patch_kind < 0)
         return;
 
-    int count = (id->x40 == 1) ? 2 : (id->x40 == 2) ? 4 : 1;
+    int count = (id->box_size == 1) ? 2 : (id->box_size == 2) ? 4 : 1;
     if (count > AP_BOX_MAX_PATCHES)
         count = AP_BOX_MAX_PATCHES;
     int remaining = ApPatches_Remaining();
@@ -251,7 +251,7 @@ static void BreakApBox(ItemData *id)
     }
 }
 
-// REPLACECALL on the bl in Box_Break. Anything that is not an AP Box is handed
+// REPLACECALL on the bl in ItemGObj_BoxBreak. Anything that is not an AP Box is handed
 // straight to the vanilla outcome.
 static void OutcomeLogic(ItemData *id)
 {
@@ -261,9 +261,9 @@ static void OutcomeLogic(ItemData *id)
         Box_OutcomeLogic(id);
 }
 
-// Box_SpawnImpactEffect picks its burst off the clamped kind, so an AP Box draws
+// ItemGObj_BoxSpawnImpactEffect picks its burst off the clamped kind, so an AP Box draws
 // the vanilla blue pair. Each is recolored into a copy of its generator descriptor
-// that psGeneratorDesc points at for the length of the spawn: Ptcl_Alloc stores
+// that stc_ps_generator_desc points at for the length of the spawn: Ptcl_Alloc stores
 // descriptor + 0x3c in the generator instance, so the burst reads the copy for its
 // whole life while every other box still allocates off the vanilla one.
 #define AP_PTCL_BANK      5     // yakumono
@@ -271,7 +271,7 @@ static void OutcomeLogic(ItemData *id)
 #define AP_PTCL_COLOR     0x3c  // PTCL_OP_COLOR, RGBA operand at +2
 #define AP_PTCL_COLOR2    0x48  // PTCL_OP_COLOR2, RGBA operand at +2
 
-// psInitDataBanks biases psGeneratorDesc[bank] by the bank's base id and stores
+// psInitDataBanks biases stc_ps_generator_desc[bank] by the bank's base id and stores
 // base + n as the count, so both tables are indexed by the whole effect id.
 static const int ap_burst_ef[2] = { 50000, 50001 }; // hit, break
 
@@ -306,10 +306,10 @@ static void BuildBursts(void)
     for (int g = 0; g < 2; g++)
     {
         int ef = ap_burst_ef[g];
-        if ((u32)ef >= psGeneratorCount[AP_PTCL_BANK])
+        if ((u32)ef >= stc_ps_generator_count[AP_PTCL_BANK])
             return;
 
-        const u8 *src = psGeneratorDesc[AP_PTCL_BANK][ef];
+        const u8 *src = stc_ps_generator_desc[AP_PTCL_BANK][ef];
         if (src == NULL || src[AP_PTCL_COLOR] != (PTCL_OP_COLOR | 0xf) ||
             src[AP_PTCL_COLOR2] != (PTCL_OP_COLOR2 | 0xf))
         {
@@ -327,7 +327,7 @@ static void BuildBursts(void)
     ptcl_state = 1;
 }
 
-// REPLACECALL on both bl Box_SpawnImpactEffect sites. An AP Box swaps its
+// REPLACECALL on both bl ItemGObj_BoxSpawnImpactEffect sites. An AP Box swaps its
 // recolored descriptor in for the length of the spawn and takes the next face
 // color, so a box that is hit twice and broken throws three of its own colors.
 static int SpawnImpactEffect(GOBJ *gobj, int is_break)
@@ -336,19 +336,19 @@ static int SpawnImpactEffect(GOBJ *gobj, int is_break)
     int g = is_break ? 1 : 0;
 
     if (!IsApKind(id, box_kind))
-        return Box_SpawnImpactEffect(gobj, is_break);
+        return ItemGObj_BoxSpawnImpactEffect(gobj, is_break);
 
     if (ptcl_state == 0)
         BuildBursts();
     if (ptcl_state != 1)
-        return Box_SpawnImpactEffect(gobj, is_break);
+        return ItemGObj_BoxSpawnImpactEffect(gobj, is_break);
 
-    u8 **slot = &psGeneratorDesc[AP_PTCL_BANK][ap_burst_ef[g]];
+    u8 **slot = &stc_ps_generator_desc[AP_PTCL_BANK][ap_burst_ef[g]];
     u8 *saved = *slot;
     *slot = ptcl_desc[g][ptcl_color];
     ptcl_color = (ptcl_color + 1) % AP_FACE_NUM;
 
-    int ret = Box_SpawnImpactEffect(gobj, is_break);
+    int ret = ItemGObj_BoxSpawnImpactEffect(gobj, is_break);
     *slot = saved;
     return ret;
 }
@@ -406,8 +406,8 @@ static void ResolveItems(void)
 
 void ApPatches_OnBoot(void)
 {
-    CODEPATCH_REPLACECALL(0x80258384, OutcomeLogic);  // bl Box_OutcomeLogic in Box_Break
-    CODEPATCH_REPLACECALL(0x80258344, SpawnImpactEffect);  // bl Box_SpawnImpactEffect in Box_Break
+    CODEPATCH_REPLACECALL(0x80258384, OutcomeLogic);  // bl Box_OutcomeLogic in ItemGObj_BoxBreak
+    CODEPATCH_REPLACECALL(0x80258344, SpawnImpactEffect);  // bl ItemGObj_BoxSpawnImpactEffect in ItemGObj_BoxBreak
     CODEPATCH_REPLACECALL(0x802575f0, SpawnImpactEffect);  // ... and in Box_OnTakeDamage
     CODEPATCH_REPLACECALL(0x800eb20c, DetermineBox);  // bl GrBoxGeneratorDetermine in CityItemSpawn_Think
     CODEPATCH_HOOKAPPLY(0x801db91c);                  // item_collect suppression

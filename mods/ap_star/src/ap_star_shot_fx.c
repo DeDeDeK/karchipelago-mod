@@ -35,8 +35,8 @@ typedef struct ShotFx
 {
     WeaponData *proj;      // NULL once the shot is gone
     Vec3 pt[TRAIL_POINTS];     // ring of past positions, newest at `head`
-    float radius;              // the shot's at cur_scale 1
-    float scale;               // cur_scale, held from the frame the shot went
+    float radius;              // the shot's at scale 1
+    float scale;               // WeaponData.scale, held from the frame the shot went
     u8 used;
     u8 head;
     u8 count;
@@ -70,7 +70,7 @@ static void FxThink(GOBJ *g)
 
         if (fx->proj != NULL)
         {
-            PushPoint(fx, &fx->proj->position);
+            PushPoint(fx, &fx->proj->pos);
             continue;
         }
 
@@ -104,10 +104,10 @@ static void DrawTrail(const ShotFx *fx, const Vec3 *eye)
 
     if (fx->proj != NULL)
     {
-        p[n] = fx->proj->position;
+        p[n] = fx->proj->pos;
         age[n++] = 0;
         base = 1;
-        scale = fx->proj->cur_scale;
+        scale = fx->proj->scale;
     }
     else
     {
@@ -185,8 +185,8 @@ static void DrawHalo(const ShotFx *fx, const Vec3 *right, const Vec3 *up)
 
     if (fx->proj != NULL)
     {
-        c = fx->proj->position;
-        r = fx->radius * fx->proj->cur_scale * HALO_SCALE;
+        c = fx->proj->pos;
+        r = fx->radius * fx->proj->scale * HALO_SCALE;
         a = (float)HALO_ALPHA;
     }
     else if (fx->pop != 0)
@@ -316,9 +316,9 @@ int ApStarShotFx_Attach(WeaponData *proj, GXColor color, float radius)
         fx->used = 1;
         fx->proj = proj;
         fx->radius = radius;
-        fx->scale = proj->cur_scale;
+        fx->scale = proj->scale;
         fx->color = color;
-        PushPoint(fx, &proj->position);
+        PushPoint(fx, &proj->pos);
         stc_fx_num++;
         return i + 1;
     }
@@ -334,8 +334,8 @@ void ApStarShotFx_Detach(int handle)
     if (!fx->used || fx->proj == NULL)
         return;
 
-    fx->scale = fx->proj->cur_scale;
-    PushPoint(fx, &fx->proj->position);
+    fx->scale = fx->proj->scale;
+    PushPoint(fx, &fx->proj->pos);
     fx->proj = NULL;
     fx->stale = 0;
     fx->pop = fx->scale >= POP_MIN_SCALE ? POP_FRAMES : 0;

@@ -95,7 +95,8 @@ Three numbers follow a sound from the call site down to the hardware, and every
 struct on the way carries at least one of them.
 
 - **`sg`, the sound generator.** There are 64, which is the ceiling on concurrent
-  sounds. Allocation status lives in `Audio3D.sg_status`, and `FGMInstanceData`
+  sounds. Allocation status lives in `Audio3D.sg_status` (`+0x2ff`, indexed `sg - 4`;
+  sg 0-3 are reserved and have no entry), and `FGMInstanceData`
   (`+0x3d`), `AudioEmitterData` (`+0x42`) and the VPB all carry the same value.
   It is what links an emitter to the live `FGMInstance`s it started: the game
   walks the active instances and compares `sg` before touching a sound. Two
@@ -274,7 +275,7 @@ which is the same range Nintendo's encoder achieves on this content.
 that reads a bank off disc. It takes a full FST path - callers such as
 `FGM_LoadByEnum` (`0x8005c298`) build `"audio/" + name` themselves - pushes onto
 a 32-deep DVD queue, and starts the transfer when the queue was empty.
-`FGM_SychronousLoad(DoTasks)` (`0x80448220`) spins until the queue drains.
+`FGM_SynchronousLoad(DoTasks)` (`0x80448220`) spins until the queue drains.
 
 A bank arrives in three reads:
 
@@ -330,7 +331,7 @@ is chained rather than open-addressed, the script map is described entirely by
 Everything above adds up to a recipe that replaces no file on disc. Build a
 `.ssm` whose `sound_base` starts at 615, past the last index the vanilla banks
 claim; take a slot from `FGM_GetNextLargestSSMSizeIndex` big enough to hold it;
-`FGM_QueueLoad` its FST path into that slot and `FGM_SychronousLoad`; then widen
+`FGM_QueueLoad` its FST path into that slot and `FGM_SynchronousLoad`; then widen
 the script map, by copying `bank_start_script` and `script_data` into larger
 mod-owned arrays, appending a bank whose scripts play the new indices, and
 repointing all four globals. Every existing FGM id keeps its meaning because the
