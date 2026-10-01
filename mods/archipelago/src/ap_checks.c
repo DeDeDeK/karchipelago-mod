@@ -20,6 +20,10 @@
 // transition, guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
 #define CHECKLIST_UNLOCK_SFX 0x10008
 
+// Every AP tab cell backs an AP location, so the AP row takes the same clear_kind
+// bound as the vanilla rows and no row mask needs holding clear above it.
+_Static_assert(APCK_NUM == CLEAR_KIND_NUM, "the AP tab must fill its grid");
+
 // Set the sent_checks bit in both save and the shared-memory mirror. Returns 1 if
 // newly set. `row` is a ChecklistModeRow() result.
 static inline int SetSentCheck(int row, u8 clear_kind)
@@ -41,11 +45,6 @@ static void RecordCheck(int mode, int clear_kind)
 {
     int row = ChecklistModeRow(mode);
     if (row < 0 || (unsigned)clear_kind >= CLEAR_KIND_NUM)
-        return;
-    // Only the AP tab's first APCK_NUM cells back an AP location, and the filler
-    // cursor can reach the blank ones. Recording those would send a location code
-    // the multiworld has never heard of.
-    if (row == AP_CHECKLIST_ROW && clear_kind >= APCK_NUM)
         return;
     if (!SetSentCheck(row, (u8)clear_kind))
         return;
@@ -158,8 +157,6 @@ void APChecks_ApplyBackfill(void)
                 u8 clear_kind = (u8)(word * 64 + bit);
                 if (clear_kind >= CLEAR_KIND_NUM)
                     continue;
-                if (r == AP_CHECKLIST_ROW && clear_kind >= APCK_NUM)
-                    continue; // blank AP cells back no location, same as RecordCheck
 
                 SetSentCheck(r, clear_kind);
 
@@ -322,20 +319,13 @@ void APChecks_DebugClearAll(void)
 
 void APChecks_DebugForceMarkAll(void)
 {
-    _Static_assert(CLEAR_KIND_NUM > 64 && CLEAR_KIND_NUM <= 128,
+    _Static_assert(CLEAR_KIND_NUM > 64 && CLEAR_KIND_NUM < 128,
                    "clear-kind packing assumes 2 u64 words");
-    _Static_assert(APCK_NUM > 64 && APCK_NUM < 128, "the AP row's masks below assume two words");
-    const u64 lo_mask = ~0ULL;
-    const u64 hi_mask = (CLEAR_KIND_NUM == 128) ? ~0ULL
-                                                 : ((1ULL << (CLEAR_KIND_NUM - 64)) - 1);
-    const u64 ap_hi_mask = (1ULL << (APCK_NUM - 64)) - 1;
+    const u64 hi_mask = (1ULL << (CLEAR_KIND_NUM - 64)) - 1;
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
-        // Only the AP tab's first APCK_NUM cells back a location, and its blank
-        // ones decode into the AP Patch code block, so they must stay clear.
-        int ap = (r == AP_CHECKLIST_ROW);
-        ap_save->sent_checks[r][0] = lo_mask;
-        ap_save->sent_checks[r][1] = ap ? ap_hi_mask : hi_mask;
+        ap_save->sent_checks[r][0] = ~0ULL;
+        ap_save->sent_checks[r][1] = hi_mask;
         ap_data->sent_checks[r][0] = ap_save->sent_checks[r][0];
         ap_data->sent_checks[r][1] = ap_save->sent_checks[r][1];
         ap_save->goal_announced[r] = 1;

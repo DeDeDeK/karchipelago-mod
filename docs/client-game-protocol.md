@@ -75,7 +75,7 @@ Both bitmasks are `CHECKLIST_MODE_NUM` (4) rows: rows 0-2 are Air Ride / Top Rid
 
 | Offset | Type | Field | Writer | Reader | Description |
 |--------|------|-------|--------|--------|-------------|
-| 0x3A8 | u64[8] | `ap_patch_checks`   | Game   | Client        | Bit `i` of word `w` = AP Patch `w * 64 + i` collected, location code `459 + w * 64 + i`. Mirror of `APSave.ap_patch_collected`. |
+| 0x3A8 | u64[8] | `ap_patch_checks`   | Game   | Client        | Bit `i` of word `w` = AP Patch `w * 64 + i` collected, location code `481 + w * 64 + i`. Mirror of `APSave.ap_patch_collected`. |
 | 0x3E8 | u64[8] | `ap_patch_backfill` | Client | Game (clears) | Additive backfill, the same protocol as `client_backfill`. |
 | 0x428 | u32 | `backfill_valid` | Client | Game (clears) | Set to 1 after both backfill arrays are written; the game consumes them, zeroes them, and clears this last. Never write a backfill word while this reads non-zero. |
 

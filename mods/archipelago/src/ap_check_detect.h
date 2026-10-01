@@ -156,6 +156,35 @@ typedef enum APCheckKind
     // the city.
     APCK_AP_STAR_SHOT_KO_CPU,    // 97
 
+    APCK_RIDE_5_MACHINES,        // 98
+    APCK_AIRBORNE_20S,           // 99
+    APCK_EVENT_DYNABLADE_ITEMS,  // 100
+    APCK_PANIC_SPIN_KO,          // 101
+    APCK_WHISPY_WOODS,           // 102
+    APCK_LIGHTHOUSE_TOP,         // 103
+    APCK_UNDER_WATERWHEEL,       // 104
+    APCK_ALL_GRIND_RAILS,        // 105
+    APCK_COPY_6_KINDS,           // 106
+    APCK_EVENT_METEOR_NO_DAMAGE, // 107
+    APCK_MAX_A_STAT,             // 108
+
+    APCK_DD_KO_5_UNHURT,         // 109
+    APCK_VSKD_NO_DAMAGE,         // 110
+    APCK_DRAG_ALL_1ST,           // 111
+
+    // Vanilla asks for a 1st on every Top Ride course but never on every Air Ride one.
+    // The course cells after it are the reverse of a vanilla cell that asks for a
+    // hazard to be taken, or for Beanstalk Park's Ferris wheel to be skipped.
+    APCK_AIRRIDE_ALL_COURSES_1ST, // 112
+    APCK_BEANSTALK_FERRIS_LAPS,   // 113
+    APCK_SANDS_NO_QUICKSAND,      // 114
+    APCK_CHECKER_NO_SPIN_PANELS,  // 115
+    APCK_MAGMA_NO_BOOST_PANELS,   // 116
+
+    APCK_TR_WATER_NO_FALLS,      // 117
+    APCK_TR_LIGHT_NO_RAIL,       // 118
+    APCK_TR_EVERY_ITEM,          // 119
+
     APCK_NUM,
 } APCheckKind;
 
@@ -172,19 +201,23 @@ int APCheckDetect_GetProgress(APCheckProgressKind which);
 void APCheckDetect_DebugSetProgress(APCheckProgressKind which, int value);
 
 // Handed to custom_machines' KO seam once the registry resolves. Counts the Kirbys
-// a human King Dedede has KO'd in Destruction Derby, and latches the bust, sphere
-// shot and VS. King Dedede objectives.
+// a human King Dedede has KO'd in Destruction Derby, marks the victim KO'd, and latches
+// the bust, sphere shot, Panic Spin and VS. King Dedede objectives.
 void APCheckDetect_AddDeath(int victim, struct DmgLog *dmg_log, int machine_kind);
+
+// Marks a human KO'd this round by a path that bypasses the KO seam, for the Destruction
+// Derby objective that asks for none.
+void APCheckDetect_OnKnockedOut(int ply);
 
 // Installs the enemy-defeat and yakumono-break interceptions the Mic and coral
 // objectives read from, the Time Attack / Free Run dispatch wrappers, the City Trial
-// event seams, the machine projectile-hit hook and the Top Ride per-kirby sampler.
-// The rival KO arrives through custom_machines instead.
+// event seams, the machine-bump and machine-damage hooks and the Top Ride per-kirby
+// sampler. The rival KO arrives through custom_machines instead.
 void APCheckDetect_OnBoot(void);
 
 // Attaches the per-frame sampler to every human rider - the City Trial one for a
-// Trial round, the shortcut one on Fantasy Meadows - and rebaselines the per-run
-// counters.
+// Trial round, the fall one in Destruction Derby, the shortcut one on Fantasy Meadows -
+// and rebaselines the per-run counters.
 void APCheckDetect_On3DLoadEnd(void);
 
 // Clears the per-round Top Ride counters. Top Ride loads through its own minor, so

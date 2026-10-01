@@ -10,6 +10,7 @@
 #include "ap_announce.h"
 #include "textbox_api.h"
 #include "ap_colors.h"
+#include "ap_check_detect.h"
 
 #define DEATHLINK_PLY_MAX 5
 
@@ -116,9 +117,10 @@ static void KillPlayer(RiderData *rd, MachineData *md)
     if (hp_death)
     {
         DmgLog dl = md->dmg_log;
-        dl.attacker_ply = 0;
+        dl.attacker_ply = PLY_NUM; // no attacker, so nobody is credited the KO
         Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);
         Ply_SetHP(rd->ply, 0);
+        APCheckDetect_OnKnockedOut(rd->ply);
     }
     else
     {

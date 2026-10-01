@@ -445,7 +445,7 @@ or was never reached comes back next round.
 
 `APData` carries the mirror pair `ap_patch_checks[8]` (game -> client, read-and-diff) and
 `ap_patch_backfill[8]` (client -> game, ORed in and cleared each frame alongside the checklist
-backfill). Bit `i` of word `w` is AP Patch `w * 64 + i`, location code `459 + w * 64 + i`.
+backfill). Bit `i` of word `w` is AP Patch `w * 64 + i`, location code `481 + w * 64 + i`.
 
 One slot option drives the whole feature: `ap_patches` (0-512; 0 leaves both items
 unregistered). The masks are a fixed 512 bits whatever the count is, which is what lets the

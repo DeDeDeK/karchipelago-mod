@@ -1101,8 +1101,8 @@ void ChecklistRewards_DebugClearAll(void)
 }
 
 // Reveal every checkbox on one checklist-mode row. Sets is_visible only - unlock state
-// is left to the AP flow. The AP tab's grid is mostly empty, so it reveals only its own
-// cells.
+// is left to the AP flow. The AP tab goes through the framework, whose grid shuffle
+// would otherwise drop the bits.
 void RevealChecklist(int mode)
 {
     if (mode == AP_CHECKLIST_ROW)

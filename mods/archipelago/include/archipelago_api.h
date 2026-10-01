@@ -685,6 +685,9 @@ typedef enum APCheckProgressKind
     AP_PROGRESS_RACE_COLORS,  // Bit N = an Air Ride race finished as KirbyColor N; 0xFF completes it
     AP_PROGRESS_TR_COLORS,    // Bit N = a Top Ride race finished as KirbyColor N; 0xFF completes it
     AP_PROGRESS_TR_STEER_WINS, // Bit N = TopRideCourse N won on Steer Star; 0x7F completes it
+    AP_PROGRESS_DRAG_WINS,     // Bit N = DRAG RACE N+1 won; 0xF completes it
+    AP_PROGRESS_AR_COURSE_WINS, // Bit per Air Ride course won, Nebula Belt the top one; 0x1FF completes it
+    AP_PROGRESS_TR_ITEMS,      // Bit N = TopRideItemKind N used
     AP_PROGRESS_NUM,
 } APCheckProgressKind;
 

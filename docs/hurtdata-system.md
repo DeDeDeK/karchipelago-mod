@@ -25,9 +25,13 @@ Consequences that matter when hooking:
   `Machine_CheckEventCollision` (`0x801d71ec`) walks the p_link-12 event-actor list, fetches each
   enemy's attack HurtData at `ed+0x410` via `EventActorGObj_GetHurtData` (`0x80204878`), and calls
   `HitColl_CheckCollision` with the machine's HurtData (`MachineData+0x660`) as victim.
-- There is **no `Rider_CheckEventCollision`**. `Rider_UpdateHitColl` (`0x8018f95c`) has no
-  event-actor sub-check and never calls `EventActorGObj_GetHurtData`. **Riders take enemy contact
-  damage through their machine, not directly.**
+- A **mounted** rider takes enemy contact damage through its machine, not directly.
+  `Rider_UpdateHitColl` (`0x8018f95c`) runs its sub-checks only while the rider is off its machine,
+  and one of them, `Rider_CheckEventCollision` (`0x8019649c`), walks the same p_link-12 list with
+  `EventActorGObj_GetHurtData` against the rider's own HurtData. So a rider **on foot** is hit by
+  event actors directly. The damage it takes has no HP to come off: it adds to the rider's running
+  on-foot damage (`RiderData+0x49c`) and to `PlayerStats.onfoot_dmg_total` through
+  `Ply_RecordOnFootDamage` (`0x8022fc60`).
 
 ## Where HurtData Lives
 

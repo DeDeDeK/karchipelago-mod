@@ -715,9 +715,7 @@ void APDebug_ResetProgression(void)
     for (int i = 0; i < PATCHKIND_NUM; i++)
         ap_save->permanent_patches[i] = 0;
 
-    ap_save->checks.allup_collect_total = 0;
-    ap_save->checks.purple_sr1_wins = 0;
-    ap_save->checks.race_color_mask = 0;
+    memset(&ap_save->checks, 0, sizeof(ap_save->checks));
     ap_save->max_stats_ct_achieved = 0;
 
     ap_save->item_received_count = 0;

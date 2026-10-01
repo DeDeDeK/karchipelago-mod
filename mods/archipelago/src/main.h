@@ -61,6 +61,14 @@ extern int ap_regrant_quiet;
 #define AP_RACE_COLOR_MASK_ALL 0xFF
 // One bit per TopRideCourse, all 7 set.
 #define AP_TR_COURSE_MASK_ALL 0x7F
+// One bit per Air Ride course, the eight standard ones and Nebula Belt.
+#define AP_AR_COURSE_NUM      9
+#define AP_AR_COURSE_MASK_ALL ((1 << AP_AR_COURSE_NUM) - 1)
+// One bit per DRAG RACE stadium.
+#define AP_DRAG_MASK_ALL 0xF
+// One bit per TopRideItemKind that spawns, 0-20. Slot 21 never spawns; a give of it
+// records as slot 12, the Party Ball a race hands out.
+#define AP_TR_ITEM_MASK_ALL ((1u << TRITEM_PARTY_BALL) - 1)
 
 // AP Patch locations get their own bitmask, sized so AP_PATCH_MAX packs into
 // whole u64 words.
@@ -142,6 +150,9 @@ typedef struct APCheckProgress
     u8 race_color_mask;      // APCK_AIRRIDE_ALL_COLORS: bit N = an Air Ride race finished as KirbyColor N
     u8 tr_color_mask;        // APCK_TR_ALL_COLORS: bit N = a Top Ride race finished as KirbyColor N
     u8 tr_steer_win_mask;    // APCK_TR_ALL_COURSES_STEER: bit N = TopRideCourse N won on Steer Star
+    u8 drag_win_mask;        // APCK_DRAG_ALL_1ST: bit N = DRAG RACE N+1 won
+    u16 ar_course_win_mask;  // APCK_AIRRIDE_ALL_COURSES_1ST: bit per Air Ride course won
+    u32 tr_item_mask;        // APCK_TR_EVERY_ITEM: bit N = TopRideItemKind N used
 } APCheckProgress;
 
 // Bumped whenever APSave's layout changes, so hoshi discards a stale block instead of

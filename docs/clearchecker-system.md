@@ -611,9 +611,7 @@ trackers. It accepts the AP checklist tab's runtime mode as well, since the AP t
    `is_unlocked` is already set, this is a true transition - call
    `RecordCheck(mode, clear_kind)`. **Transition detection runs regardless of the vanilla
    LAN-session short-circuit** so AP never misses a check.
-2. `RecordCheck()` resolves the row via `ChecklistModeRow` (bailing on `-1`, and on the AP
-   row rejecting `clear_kind >= APCK_NUM` so a spent filler cannot send a location code
-   the multiworld has never heard of), sets the bit in `ap_save->sent_checks` and the
+2. `RecordCheck()` resolves the row via `ChecklistModeRow` (bailing on `-1`), sets the bit in `ap_save->sent_checks` and the
    shared `ap_data->sent_checks` mirror, logs the placement (resolving the cell via
    `ChecklistRewards_ResolveCell` to print `[Check] mode=... clear_kind=... type=... recorded`
    with the source reward type - or a "no local reward placement" line for remote/empty

@@ -25,9 +25,8 @@ int APChecklist_IsRegistered(void);
 // CITYTRIAL while the clear data is already the custom tab's.
 int APChecklist_GetBuildMode(void);
 
-// Make every AP checklist cell that backs an objective visible. Only the cells in
-// ap_checks[] are revealed - the rest of the 120-cell grid has no objective behind
-// it. No-op if the tab is not registered.
+// Make every AP checklist cell visible, latched so it survives the framework's
+// once-per-session grid shuffle. No-op if the tab is not registered.
 void APChecklist_RevealAll(void);
 
 #endif // ARCHIPELAGO_AP_CHECKLIST_H
