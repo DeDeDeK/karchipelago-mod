@@ -730,7 +730,7 @@ holding the slot index. It multiplies the freshly stored
 per-frame drainer finds nothing to hand out), Low x0.5, Default x1, High x1.5, Max x2.
 Humans are seeded `0.0`, so scaling them is a no-op. The loop only runs for a normal City
 Trial load (`Scene_GetCurrentMajor() == 6` and `Gm_GetCityData()[5] == 0`), never the title
-demo, and a change takes effect at the next City Trial start.
+demo.
 
 ### Difficulty tables (`gmGameParams`)
 
@@ -822,8 +822,7 @@ The presets act through three seams:
 | Random | both | one of that menu's presets above Default, rolled per rider | per rolled preset |
 
 Aggressive and Hoarder work through Navigate, so the Air Ride menu does not offer them: on
-a course, a steer target off the racing line would stop the CPU lapping. A menu change
-applies from the next CPU spawn.
+a course, a steer target off the racing line would stop the CPU lapping.
 
 Top Ride is not hooked. `Rider_CPUInit` is never reached in that mode, so the Custom AI
 menu offers presets for City Trial and Air Ride only; giving Top Ride one means adding a

@@ -304,7 +304,7 @@ Three archipelago sources attach to the CSS. `gate_colors.c` takes the three col
 
 ### Main-menu demo rider
 
-The title screen runs a "demo player" setup at `0x8000d300` that configures slot 0's idle rider through a series of `Ply_Set*` calls. Three `li r4, imm` operands choose what is ridden, and `main_menu.c` rewrites all three with `REPLACEINSTRUCTION` on every title entry (the machine registry only resolves after every mod has booted). It prefers the Archipelago Star when that is registered, falling back to Dedede-on-Wagon:
+The title screen runs a "demo player" setup at `0x8000d300` that configures slot 0's idle rider through a series of `Ply_Set*` calls. Three `li r4, imm` operands choose what is ridden. `ap_title.c` rewrites two of them - RiderKind at 0x8000d340 and the class slot at 0x8000d358 - with `REPLACEINSTRUCTION` from its title-load hook at 0x8000d2b4, on every title entry and ahead of those instructions (the machine registry only resolves after every mod has booted). IsBike at 0x8000d34c already encodes `li r4, 0` and is left alone. It prefers the Archipelago Star when that is registered, falling back to Dedede-on-Wagon:
 
 | Address | Vanilla | Sets |
 |---------|---------|------|

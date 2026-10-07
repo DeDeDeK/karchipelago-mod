@@ -1,5 +1,3 @@
-// Registry for drop-in machine archives found in the FST machines/ folder.
-
 #include <string.h>
 
 #include "os.h"
@@ -9,7 +7,6 @@
 #include "rider.h"
 #include "particle.h"
 #include "hoshi/mod.h"
-#include "code_patch/code_patch.h"
 
 #include "fst/fst.h"
 
@@ -23,11 +20,7 @@ static int stc_count;
 static int stc_class_count[2];  // appended slots handed out per class
 static int stc_character_count;
 static int stc_generator_count; // generator ids handed out past CUSTOM_MACHINE_GENERATOR_BASE
-
-static const char *ClassName(int is_bike)
-{
-    return is_bike ? "bike" : "star";
-}
+static int stc_skipped;         // candidates found once the registry was full
 
 int CustomMachines_GetCount(void)
 {
@@ -64,7 +57,7 @@ CustomMachineEntry *CustomMachines_FindByKind(int machine_kind)
 CustomMachineEntry *CustomMachines_FindByClassSlot(int is_bike, int class_slot)
 {
     is_bike = is_bike != 0;
-    if (class_slot < (is_bike ? VCWHEEL_NUM : VCSTAR_NUM))
+    if (class_slot < CustomMachines_VanillaSlotNum(is_bike))
         return NULL;
 
     for (int i = 0; i < stc_count; i++)
@@ -103,7 +96,7 @@ static JOBJ *JointForDesc(JOBJ *jobj, JOBJDesc *desc)
     return NULL;
 }
 
-JOBJ *CustomMachines_GetMachineJoint(MachineData *md, int joint_index)
+static JOBJ *Api_GetMachineJoint(MachineData *md, int joint_index)
 {
     if (md == NULL || joint_index < 0 || md->gobj == NULL || md->vcData == NULL ||
         md->vcData->model == NULL)
@@ -128,40 +121,15 @@ void CustomMachines_CopyStr(char *dst, const char *src, int max)
     dst[i] = '\0';
 }
 
-void CustomMachines_SetImmediate(u32 addr, u32 imm)
-{
-    CODEPATCH_REPLACEINSTRUCTION(addr, (*(u32 *)addr & 0xFFFF0000) | (imm & 0xFFFF));
-}
-
-void CustomMachines_RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
-{
-    u32 addr = (u32)table;
-    u32 lo = addr & 0xFFFF;
-    u32 hi = (addr >> 16) + ((lo & 0x8000) ? 1 : 0); // addi sign-extends its immediate
-
-    CustomMachines_SetImmediate(lis_addr, hi);
-    CustomMachines_SetImmediate(addi_addr, lo);
-}
-
 int CustomMachines_SideCarPath(char *dst, int max, const char *src, const char *ext)
 {
-    int n = 0;
-    int e = 0;
+    int n = strlen(src);
+    int e = strlen(ext);
 
-    while (src[n] != '\0')
-    {
-        if (n + 1 >= max)
-            return 0;
-        dst[n] = src[n];
-        n++;
-    }
-    while (ext[e] != '\0')
-        e++;
-    if (n < e || dst[n - e] != '.')
+    if (n >= max || n < e || src[n - e] != '.')
         return 0;
-    for (int i = 0; i < e; i++)
-        dst[n - e + i] = ext[i];
-    dst[n] = '\0';
+    memcpy(dst, src, n - e);
+    memcpy(dst + n - e, ext, e + 1);
     return 1;
 }
 
@@ -184,35 +152,29 @@ static int Fits(const char *s, int max)
     return s != NULL && strlen(s) < (size_t)max;
 }
 
-static void CountCb(int entrynum, void *args)
-{
-    (void)entrynum;
-    (*(int *)args)++;
-}
-
-// Take one candidate's descriptor into the registry. Returns 1 if it registered.
-static int TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMachineDesc *desc)
+// Take one candidate's descriptor into the registry.
+static void TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMachineDesc *desc)
 {
     if (desc == NULL)
     {
         OSReport("[CustomMachines] %s missing '%s' symbol\n", path, CUSTOM_MACHINE_SYMBOL);
-        return 0;
+        return;
     }
     if (desc->magic != CUSTOM_MACHINE_MAGIC)
     {
         OSReport("[CustomMachines] %s bad magic 0x%08x\n", path, desc->magic);
-        return 0;
+        return;
     }
     if (desc->version != CUSTOM_MACHINE_DESC_VERSION)
     {
         OSReport("[CustomMachines] %s descriptor v%d, expected v%d\n",
                  path, desc->version, CUSTOM_MACHINE_DESC_VERSION);
-        return 0;
+        return;
     }
     if (desc->is_bike != 0 && desc->is_bike != 1)
     {
         OSReport("[CustomMachines] %s is_bike %d names no machine class\n", path, desc->is_bike);
-        return 0;
+        return;
     }
 
     const char *name = desc->name != NULL ? desc->name : FST_GetFilenameFromEntrynum(entrynum);
@@ -220,14 +182,14 @@ static int TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMach
         !Fits(desc->symbol, CUSTOM_MACHINE_NAME_MAX))
     {
         OSReport("[CustomMachines] %s path, name or vcData symbol is missing or too long\n", path);
-        return 0;
+        return;
     }
     // The name is what a consumer binds a machine by, so a second one under it could
     // never be found.
     if (FindKindByName(name) >= 0)
     {
         OSReport("[CustomMachines] %s is named '%s', which is already registered\n", path, name);
-        return 0;
+        return;
     }
 
     vcData *vc = (vcData *)Archive_GetPublicAddress(arc, (char *)desc->symbol);
@@ -237,24 +199,24 @@ static int TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMach
     {
         OSReport("[CustomMachines] %s vcData public '%s' is missing or incomplete\n",
                  path, desc->symbol);
-        return 0;
+        return;
     }
     if (desc->audio_kind < 0 || desc->audio_kind >= VCKIND_NUM ||
         MachineKind_IsBike(desc->audio_kind) != desc->is_bike)
     {
         OSReport("[CustomMachines] %s audio_kind %d is not a %s kind\n",
-                 path, desc->audio_kind, ClassName(desc->is_bike));
-        return 0;
+                 path, desc->audio_kind, CustomMachines_ClassName(desc->is_bike));
+        return;
     }
     if (desc->stat_rows == NULL || desc->cpu == NULL)
     {
         OSReport("[CustomMachines] %s descriptor is missing its stat or CPU rows\n", path);
-        return 0;
+        return;
     }
     if (desc->wants_character && (desc->rider_kind < 0 || desc->rider_kind >= RDKIND_NUM))
     {
         OSReport("[CustomMachines] %s rider_kind %d is not a RiderKind\n", path, desc->rider_kind);
-        return 0;
+        return;
     }
 
     CustomMachineEntry *e = &stc_entries[stc_count];
@@ -264,7 +226,7 @@ static int TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMach
     CustomMachines_CopyStr(e->description, desc->description, CUSTOM_MACHINE_DESCRIPTION_MAX);
     e->machine_kind = VCKIND_NUM + stc_count;
     e->is_bike = desc->is_bike;
-    e->class_slot = (e->is_bike ? VCWHEEL_NUM : VCSTAR_NUM) + stc_class_count[e->is_bike];
+    e->class_slot = CustomMachines_VanillaSlotNum(e->is_bike) + stc_class_count[e->is_bike];
     e->character_kind = desc->wants_character ? CKIND_NUM + stc_character_count++ : -1;
     e->rider_kind = desc->rider_kind;
     e->audio_kind = desc->audio_kind;
@@ -353,16 +315,18 @@ static int TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMach
     stc_class_count[e->is_bike]++;
     stc_count++;
     OSReport("[CustomMachines] %s -> '%s' (kind %d, %s slot %d, character %d)\n",
-             path, e->name, e->machine_kind, ClassName(e->is_bike), e->class_slot,
+             path, e->name, e->machine_kind, CustomMachines_ClassName(e->is_bike), e->class_slot,
              e->character_kind);
-    return 1;
 }
 
 static void IndexCb(int entrynum, void *args)
 {
     (void)args;
     if (stc_count >= CUSTOM_MACHINE_MAX)
+    {
+        stc_skipped++;
         return;
+    }
 
     char *path = FST_GetFilePathFromEntrynum(entrynum);
     if (path == NULL)
@@ -384,21 +348,16 @@ static void IndexCb(int entrynum, void *args)
     HSD_ArenaRelease(mark);
 }
 
-static int Discover(void)
+static void Discover(void)
 {
-    int found = 0;
-    FST_ForEachInFolder((char *)CUSTOM_MACHINE_DROPIN_DIR, (char *)CUSTOM_MACHINE_DROPIN_EXT,
-                        0, CountCb, &found);
-    if (found == 0)
-        return 0;
-
-    if (found > CUSTOM_MACHINE_MAX)
-        OSReport("[CustomMachines] %d files in /%s, past the cap of %d - the rest were skipped\n",
-                 found, CUSTOM_MACHINE_DROPIN_DIR, CUSTOM_MACHINE_MAX);
-
     FST_ForEachInFolder((char *)CUSTOM_MACHINE_DROPIN_DIR, (char *)CUSTOM_MACHINE_DROPIN_EXT,
                         0, IndexCb, NULL);
-    return stc_count;
+
+    if (stc_count == 0)
+        OSReport("[CustomMachines] No machines found in /%s\n", CUSTOM_MACHINE_DROPIN_DIR);
+    if (stc_skipped > 0)
+        OSReport("[CustomMachines] %d file(s) in /%s skipped, the registry holds %d\n",
+                 stc_skipped, CUSTOM_MACHINE_DROPIN_DIR, CUSTOM_MACHINE_MAX);
 }
 
 int CustomMachines_KindFromClassIndex(int is_bike, int class_index)
@@ -417,21 +376,6 @@ int CustomMachines_ClassIndexFromKind(int kind, int *out_is_bike)
     }
     *out_is_bike = MachineKind_IsBike(kind);
     return MachineKind_ClassIndex(kind);
-}
-
-static int Api_SetInitHandler(int kind, CustomMachineHandler fn)
-{
-    return CustomMachineRegistry_SetHandler(CUSTOM_MACHINE_HANDLER_INIT, kind, fn);
-}
-
-static int Api_SetThinkHandler(int kind, CustomMachineHandler fn)
-{
-    return CustomMachineRegistry_SetHandler(CUSTOM_MACHINE_HANDLER_THINK, kind, fn);
-}
-
-static int Api_SetAnimHandler(int kind, CustomMachineHandler fn)
-{
-    return CustomMachineRegistry_SetHandler(CUSTOM_MACHINE_HANDLER_ANIM, kind, fn);
 }
 
 static u8 *Api_GetGenerator(int kind, int index, int *out_size)
@@ -454,10 +398,10 @@ static const CustomMachinesAPI stc_api = {
     .SetAvailabilityFilter = CustomMachineSelectScreen_SetAvailabilityFilter,
     .SetSpawnWeightFilter = CustomMachineSpawn_SetWeightFilter,
     .AddDeathHandler = CustomMachineStats_AddDeathHandler,
-    .SetInitHandler = Api_SetInitHandler,
-    .SetThinkHandler = Api_SetThinkHandler,
-    .SetAnimHandler = Api_SetAnimHandler,
-    .GetMachineJoint = CustomMachines_GetMachineJoint,
+    .SetInitHandler = CustomMachineRegistry_SetInitHandler,
+    .SetThinkHandler = CustomMachineRegistry_SetThinkHandler,
+    .SetAnimHandler = CustomMachineRegistry_SetAnimHandler,
+    .GetMachineJoint = Api_GetMachineJoint,
     .GetGenerator = Api_GetGenerator,
     .StartAssembly = CustomMachineCinematic_Start,
     .MountMachine = CustomMachineMount_Queue,
@@ -467,25 +411,22 @@ static const CustomMachinesAPI stc_api = {
 void CustomMachines_On3DLoadStart(void)
 {
     CustomMachineCinematic_On3DLoadStart();
-    CustomMachineMount_On3DLoadStart();
     CustomMachineStats_On3DLoadStart();
-}
-
-void CustomMachines_OnFrameStart(void)
-{
-    CustomMachineMount_OnFrameStart();
 }
 
 void CustomMachines_OnBoot(void)
 {
-    // Unconditional: the widened select screens and their packing ship whether or not a
-    // machine is found, and the engine's own spawn roll is VCKIND_NUM wide either way.
+    Discover();
+
+    // Installed, and the API exported, with nothing registered: the select screens' packing,
+    // the spawn roll, the KO seam and the legendary cutscenes are what a consumer's filters
+    // and handlers reach.
     CustomMachineSelectScreen_OnBoot();
     CustomMachineSpawn_OnBoot();
+    CustomMachineStats_OnBoot();
+    CustomMachineCinematic_OnBoot();
 
-    if (Discover() == 0)
-        OSReport("[CustomMachines] No machines found in /%s\n", CUSTOM_MACHINE_DROPIN_DIR);
-    else
+    if (stc_count > 0)
     {
         CustomMachineRegistry_OnBoot();
         CustomMachineStatScaling_OnBoot();
@@ -493,15 +434,10 @@ void CustomMachines_OnBoot(void)
         CustomMachineSelectText_OnBoot();
         CustomMachineAudio_OnBoot();
         CustomMachineTrailBank_OnBoot();
-        CustomMachineCinematic_OnBoot();
         CustomMachineHud_OnBoot();
         CustomMachineCpu_OnBoot();
-        CustomMachineStats_OnBoot();
     }
 
-    // After discovery, so each machine's own art side-car is in hand.
     CustomMachineUiFrames_OnBoot();
-
-    // Exported with nothing registered: consumers still need the filters.
     Hoshi_ExportMod((void *)&stc_api);
 }

@@ -16,25 +16,22 @@ mod by display name:
 
 | Name | Archive | Base kind | Authored by |
 |---|---|---|---|
-| `AP Patch` | `mods/archipelago/assets/items/ApPatch.dat` | `ITKIND_OFFENSE` (7) | `scripts/hsd/carve_custom_item.py` |
+| `AP Patch` | `mods/archipelago/assets/items/ApPatch.dat` | `ITKIND_OFFENSE` (7) | `scripts/authoring/make_ap_patch.py` |
 | `AP Box` | `mods/archipelago/assets/items/ApBox.dat` | `ITKIND_BOXBLUE` (0) | `scripts/authoring/make_ap_box.py` |
 
-`make_ap_box.py` takes no arguments and writes its own output path. The patch carve is a
-command line, and this is the one that produced the shipped archive:
-
-```
-uv run --with pillow python scripts/hsd/carve_custom_item.py iso/files/Item.dat 7 \
-    mods/archipelago/assets/items/ApPatch.dat "AP Patch" \
-    --scale 0.9 --no-effect --weight-blue 0 --texture art/ap-patch.png
-```
+Both scripts take no arguments and write their own output path. `make_ap_patch.py` runs
+`scripts/hsd/carve_custom_item.py` on `iso/files/Item.dat` kind 7 with `--scale 0.9 --no-effect
+--weight-blue 0 --texture art/ap-patch.png`.
 
 The names are the handle: `AP_PATCH_ITEM_NAME` / `AP_BOX_ITEM_NAME` in `ap_patches.h` and the
 `CustomItemDesc.name` the authoring scripts write. Changing one without the other silently
 unbinds the item.
 
-The registry import is deferred past `OnBoot` - mod load order follows FST order, so an
-export is not available until its owner has booted - and the two hashes are resolved by
-scanning the registry for those names. `On3DLoadStart` calls `SetEnabled` on both with
+The registry import and the pickup handler's registration happen in `APPatches_OnSaveLoaded`,
+which hoshi runs after every mod's `OnBoot` - mod load order follows FST order, so an export is
+not available until its owner has booted. The two hashes are resolved at `On3DLoadStart` by
+scanning the registry for those names, retried each round until both are found. `On3DLoadStart`
+then calls `SetEnabled` on both with
 `ap_patches > 0 && !Gm_IsAutoDemo() && Gm_IsInCity() && CITYMODE_TRIAL`, which is early enough: the registry
 is written at `CityItemSpawn_Init`'s epilogue and skips a disabled item, so a held-out kind
 never receives an `ItemKind` and no path can spawn it. The two assigned kinds are fetched at
@@ -111,7 +108,7 @@ face's own hue and none of the logo's six, which is what keeps it a watermark ra
 decal.
 
 The blue box's material animation is carved alongside the model, unchanged. Carrying it is what
-`CustomItemDesc.mat_anim` (v6) is for - the base kind's own material animation would swap the
+`CustomItemDesc.mat_anim` is for - the base kind's own material animation would swap the
 vanilla blue texture back in the moment the box spawned, so the descriptor names the carve's
 copy instead. The three crack stages are the base face multiplied by the vanilla box's own
 luminance loss at the same stage, clamped so a crack can only darken. Nothing distinguishes
@@ -160,14 +157,13 @@ arrives through the picker seam below, which overrides the outcome the table alr
 | `0x800eb20c`, the `bl` into `GrBoxGeneratorDetermine` inside `CityItemSpawn_Think` | `REPLACECALL` | On a winning roll, return the AP box's `ItemKind` in place of the color the picker chose |
 | `0x80258384`, the `bl` into `Box_OutcomeLogic` inside `ItemGObj_BoxBreak` | `REPLACECALL` | AP box -> spawn its contents directly; anything else -> forward to vanilla |
 | `0x80258344` and `0x802575f0`, the `bl`s into `ItemGObj_BoxSpawnImpactEffect` inside `ItemGObj_BoxBreak` and `Box_OnTakeDamage` | `REPLACECALL` | AP box -> swap in a recolored particle generator for the length of the spawn |
-| `0x801db91c`, just ahead of the `bl` into `Ply_IncrementItemCollectNum` inside `Machine_OnTouchItem` | conditional hook | Skip the call for the two AP kinds; fall through for everything else |
+| `0x801db91c`, just ahead of the `bl` at `0x801db928` into `Ply_IncrementItemCollectNum` inside `Machine_OnTouchItem` | conditional hook | Skip the call for the two AP kinds; fall through for everything else |
 
 Three of the four have to tell an AP item from a vanilla one, and by the time any runs the
-`custom_items` behavior clamp has already rewritten `ItemData + 0x1c` to the base kind - so the
-kind argument cannot answer it. The instance's `itData` pointer, which the clamp leaves alone,
-can: `custom_items` repoints the engine at a grown `itData` array, so
-`id->itData == &(*stc_it_common_data)->itData[my_kind]` is the whole test, and the mod already
-knows its own two kinds for the round.
+`custom_items` behavior clamp has already rewritten `ItemData.kind` to the base kind - so the
+kind argument cannot answer it. `CustomItemsAPI.GetItemKind` can: it recovers the custom kind
+from the instance's `itData` pointer, which the clamp leaves alone, so comparing its answer with
+the kind `GetAssignedKind` gave for the round is the whole test.
 
 The picker seam is a call-site patch rather than a second `REPLACEFUNC` on
 `GrBoxGeneratorDetermine` because `gate_boxes.c` already owns that function, and because
@@ -182,8 +178,8 @@ it breaks. It picks one of the six yakumono-bank particle effects `50000..50005`
 behavior clamp has already made an AP Box a `BOXBLUE`, so it draws `50000` and `50001` - the
 vanilla blue chunks.
 
-The color is data. A yakumono generator descriptor is 136 bytes: numeric fields up to `+0x3c`,
-then a particle program, and the six box descriptors differ only in a lifetime byte and their
+The color is data. A yakumono generator descriptor (`PtclDesc`) is 136 bytes: numeric fields up to `+0x3c`,
+then a particle program (`PtclDesc.program`), and the six box descriptors differ only in a lifetime byte and their
 color operands. Two of those are `PTCL_OP_COLOR` at `+0x3c` and `PTCL_OP_COLOR2` at `+0x48`,
 each an opcode, a ramp duration and an RGBA quad, holding the box's bright and dark shades.
 
@@ -191,7 +187,7 @@ Rewriting them in place would recolor every blue box on the field, so the mod co
 Once a round it takes both descriptors out of `stc_ps_generator_desc` and writes six recolored copies
 of each, one per AP face color, forcing the tint's hue onto each operand while keeping the
 operand's own value - so the bright primary stays bright and the dark secondary stays dark. The
-seam then points `stc_ps_generator_desc[5][id]` at the copy for the length of the spawn and restores it
+seam then points `stc_ps_generator_desc[PTCL_BANK_YAKUMONO][id]` (bank 5) at the copy for the length of the spawn and restores it
 after. `Ptcl_Alloc` stores `descriptor + 0x3c` in the generator instance, so the burst reads the
 mod's copy for its whole life, while every other box on the field still allocates off the vanilla
 descriptor. The color advances one step per spawn, so a box that is hit twice and broken throws
@@ -206,7 +202,10 @@ where it should logs once and leaves the burst vanilla.
 The collect seam sits at `0x801db91c` rather than on the `bl` itself because the accept path
 has to re-materialize the call's arguments: that instruction is `lwz r4, 28(r21)`, and falling
 through to `0x801db920` re-runs the `mr r3, r26` and `lwz r5, 32(r21)` that follow it. The
-reject path jumps to `0x801db92c`, past the call.
+reject path jumps to `0x801db92c`, past the call. The `bl` at `0x801db928` is itself
+`REPLACECALL`ed by `ap_check_detect.c`: `APCheckDetect_ItemCollect` forwards to
+`Ply_IncrementItemCollectNum` and then samples the pickup for the AP checklist's event
+objectives, so the reject path skips that sampling as well.
 
 ## The spawn
 
@@ -217,10 +216,11 @@ picker, and on a winning roll returns `box_kind` instead of what came back, leav
 and `box_size` the roll wrote in place.
 
 That makes the AP box a fourth outcome of the vanilla box roll rather than a spawn of its own. It
-inherits the fall timer, the position and slot picking and the 8-entry recent-slot ring buffer, and
-the spawn-rate hooks scale it with everything else. The cost is that an AP box displaces the blue, green or red one that tick would
-otherwise have placed. What it does **not** inherit is the field's simultaneous-item cap, which is
-checked upstream of the seam; the section below is what stands in for it.
+inherits the fall timer, the position and slot picking, the 8-entry recent-slot ring buffer and
+the field's simultaneous-item cap, which is checked upstream of the seam, and the spawn-rate hooks
+scale it with everything else. The cost is that an AP box displaces the blue, green or red one
+that tick would otherwise have placed. The cap only binds on a full field, though, which is why
+the section below adds limits of its own.
 
 ### Why a percentage is not enough
 
@@ -249,8 +249,8 @@ boxes land - and an early seed with box and patch gating on is exactly the case 
 else is spawning to fill the field at all. Gating makes the category *more* generous, which is
 backwards.
 
-At 16% with no second limit an unthrottled round pays out ~20 AP boxes and ~38 patches. That is
-the go-mode reading, and it is worst at the start of a seed.
+A share taken against every one of those ~125 box ticks is the most a round can pay out, and an
+empty field is exactly what gating produces - so it is worst at the start of a seed.
 
 ### The two limits
 
@@ -279,8 +279,7 @@ length all behave correctly for free, because they are already correct in the cl
 The floor is what makes the rate stop depending on how much of the game is locked. A fully
 unthrottled round offers ~125 box ticks, which at 12% wants ~15 AP boxes; the floor allows at most
 15 in five minutes. The two land in the same place by construction, so a gated round and an ungated
-one pay out at the same rate - about **15 AP boxes and 23 patches** in a five-minute round, against
-~20 boxes and ~38 patches with the percentage alone.
+one pay out at the same rate - about **15 AP boxes and 23 patches** in a five-minute round.
 
 ### The rate setting
 
@@ -299,10 +298,10 @@ Each row's floor is `300 s / (1.25 * percent)`, which is what keeps the two limi
 same number of boxes - the property the pair is built on. Changing one column without the other
 breaks it: a share above what the floor admits makes gating generous again, and a floor above what
 the share wants makes the setting do nothing on an open field. The ladder doubles the share and
-halves the floor at each step, so a seed's payout is the same shape at every setting.
+halves the floor at each step up to Med, and High takes them to 20% and 720 frames; the product
+holds throughout, so a seed's payout is the same shape at every setting.
 
-The value is read at roll time, so a change takes effect on the next box tick rather than the next
-round. It is player-owned and saved to the memory card with the rest of the menu; no slot option
+It is player-owned and saved to the memory card with the rest of the menu; no slot option
 seeds it, because the seed's location count is already `ap_patches` and this only decides how fast
 that block is worked through.
 
@@ -315,8 +314,8 @@ next load.
 the `ItemGObj_BoxBreak` seam takes an AP box before any pool lookup happens, so the color it carries does
 not matter beyond staying in range. The one case the picker cannot answer is its own `-1`: box
 gating has left no vanilla color eligible, and it wrote neither out-param. No gate ever sees the AP
-box, so it still lands there - `RollBoxSize` re-rolls a size off the stage's chance table with the
-three colors collapsed, and the color is `BOXKIND_BLUE`. Without that, a seed with box gating on
+box, so it still lands there - `GateBoxes_RollSize(-1)` rolls a size off the stage's chance table
+with all three colors' weights summed, and the color is `BOXKIND_BLUE`. Without that, a seed with box gating on
 would make the whole category unobtainable until the first box unlock arrived.
 
 ## Breaking an AP box
@@ -329,8 +328,8 @@ pool roll because its 1 / 2 / 4 count only applies when the rolled kind is a van
 - `CityItem_CanSpawnNMore` before each item, so an AP box respects the field's simultaneous-item
   cap like any other;
 - the scatter, from `stc_item_param`'s `box_spawn_offset_min_h` / `max_h` /
-  `box_spawn_offset_min_v` / `max_v` / `box_spawn_yaw_range`, with the per-slot yaw offsets
-  `{0, 180, 90, -90}` degrees vanilla uses;
+  `box_spawn_offset_min_v` / `max_v` / `box_spawn_yaw_range`, with vanilla's per-slot yaw
+  offsets `{0, 180, 90, -90}` degrees from `stc_box_slot_yaw` (`0x80489f48`);
 - `Box_SpawnContents` per patch, writing each child into `ItemData.child_gobjs[]` and setting the
   child's `parent_gobj`, which is what the rest of `ItemGObj_BoxBreak` walks.
 
@@ -354,7 +353,8 @@ is the same pair a vanilla medium box uses.
 
 ## Collection
 
-A `custom_items` pickup handler matched on the item name. Any collector counts, human or CPU,
+A `custom_items` pickup handler matched on the AP Patch's id hash, which `ResolveItems` looked up
+by display name. Any collector counts, human or CPU,
 which is the point - a solo player's three CPU rivals help clear the category.
 
 The handler claims the **lowest clear bit** in `APSave.ap_patch_collected`, so the block is always
@@ -372,9 +372,10 @@ When no clear bit is left the handler does nothing, silently. Two AP boxes on th
 patch remaining each clamp their count to 1, so a patch with nothing to claim is a normal
 outcome, not an error, and must not log per pickup.
 
-The mask and its mirror move together in four places: the claim, the `OnSaveLoaded` mirror
+The mask and its mirror move together in five places: the claim, the `OnSaveLoaded` mirror
 (without it the client reads zeros after a reboot and re-sends the whole category), the
-`OnFrameStart` backfill, and the debug clear / force-mark pair.
+`OnFrameStart` backfill, the debug clear / force-mark pair, and the trim in
+`APPatches_DebugSetCount`.
 
 ## Isolation
 
@@ -385,13 +386,14 @@ flat billboard model class, the state script, the pickup reaction and the SFX. I
 stat, because the descriptor overrides `effect_info` with a `count = 0` record and
 `Machine_OnTouchItem` applies grants by walking it. Downstream of that: no `Machine_GivePatch`,
 so no patch-cap interaction and no permanent-patch entry; and
-`Rider_TickDropAllUp` builds its candidate list from stats actually held, so an AP Patch can
-never be knocked loose. Offense is the base kind precisely because it is the only one of the
-eight stat patches whose `item_collect[]` slot no checklist cell counts, so nothing depends on it
-staying clean - but the seam below keeps it clean anyway.
+`Rider_SpawnDropPatchSeq` (`0x8019ce50`) builds its candidate list from stats actually held, so an
+AP Patch can never be knocked loose. Offense's `item_collect[]` slot is counted by the Archipelago
+checklist's `APCK_OFFENSE_PATCHES_10` cell, which is one reason the seam below has to keep it
+clean.
 
 **Neither AP kind touches any counter.** The `0x801db91c` seam skips
-`Ply_IncrementItemCollectNum`, the single producer of `PlayerStats.item_collect[]`. So an AP
+`Ply_IncrementItemCollectNum`, the single vanilla producer of `PlayerStats.item_collect[]` (the
+mod's own `PermanentPatch_DoApply` writes the array directly for permanent patches). So an AP
 Patch does not count as an Offense patch, an AP Box break does not count as a blue box or toward
 the vanilla "break N boxes" cells, and neither reaches `Ply_GetItemCollectTotal`, the
 first-20-seconds aggregate at `+0x804` or the Tac aggregate at `+0x808`. Suppressing the totals
@@ -471,17 +473,18 @@ bucketed value a seed between sizes was displayed as.
 **Clear Collected AP Patches** is the inverse of Collect: it clears the save bits, the
 `ap_patch_checks` mirror and the client's pending `ap_patch_backfill` together, then writes the
 card. All three matter. Clearing only the save leaves the mirror to be republished over it at the
-next `ApPatches_OnSaveLoaded`; clearing only the mirror leaves the claim loop still skipping the
+next `APPatches_OnSaveLoaded`; clearing only the mirror leaves the claim loop still skipping the
 index, since that tests the save word; and leaving the backfill alone lets the client's next push
 OR every bit straight back in. Nothing else needs resetting for a drop to re-arm - the remaining
-count is recomputed per call, so a mid-round clear makes the box drop patches again without a
-scene reload.
+count is recomputed per call.
 
 ## Logging
 
 The `[APPatches]` component prints one "Hooks installed" line at boot, one line per claim, one
 per round at arm time with the remaining count, the rate setting's share and its scaled interval
-floor,
-and one at round end with the AP boxes the roll produced - enough to see whether the share is
-landing where it should, and whether the floor or the percentage was the binding limit. Nothing
-per spawn.
+floor, and one at round end with the AP boxes the roll produced - enough to see whether the share
+is landing where it should, and whether the floor or the percentage was the binding limit.
+Nothing per spawn. The failure lines stay out of the per-round stream too: a missing drop-in
+prints only when the registry scan's match count changes, while a round left unarmed with both
+drop-ins found (custom_items handed out no kind) and a burst descriptor that is not the expected
+program each print once per boot.

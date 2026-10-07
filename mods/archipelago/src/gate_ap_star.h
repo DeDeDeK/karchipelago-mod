@@ -1,46 +1,36 @@
 #ifndef GATE_AP_STAR_H
 #define GATE_AP_STAR_H
 
-// The Archipelago gate over the ap_star mod. That mod owns the machine, the six
-// spheres and the assembly, and knows only which spheres are in play; this holds
-// ap_star_piece_unlocked_mask, decides from it which those are, and announces one
-// arriving. `piece` is an APStarPiece throughout.
+// Archipelago's gate over the ap_star mod: owns ap_star_piece_unlocked_mask and announces
+// sphere grants. `piece` is an APStarPiece throughout.
 
-// Import ap_star, bind the star's MachineKind and push the saved mask into it. Run at
-// OnSaveLoaded, the first point past every mod's OnBoot; whatever is missing then
-// stays missing.
+// Imports ap_star, binds the star's MachineKind and pushes the saved mask. Anything still
+// missing then stays missing.
 void GateApStar_Resolve(void);
 
-// Push ap_star_piece_unlocked_mask into the mod's gate. Called on every write to
-// the mask, since ap_star reads its gate at 3D load start and mods run in
-// alphabetical order - ap_star's load-start callback is already past by the time
-// ours runs.
+// Called on every write to the sphere or box mask: ap_star reads its gate at 3D load
+// start, before this mod's callback runs.
 void GateApStar_PushMask(void);
 
-// Mark one sphere unlocked. Returns 1 if applied.
 int GateApStar_UnlockPiece(int piece);
 
-// MachineKind of the Archipelago Star, or -1 while nothing has registered it. This is
-// what binds AP_MACHINE_BIT_AP_STAR to a kind.
+// MachineKind of the Archipelago Star, bound at OnSaveLoaded; -1 before that or while
+// unregistered. Binds AP_MACHINE_BIT_AP_STAR to a kind.
 int GateApStar_MachineKind(void);
 
-// Drop one sphere in front of a player's machine, bypassing the delivery
-// schedule. Returns 0 if the sphere was locked when this scene loaded.
+// Drops one sphere in front of a player's machine. Returns 0 if the sphere was locked as
+// this scene loaded.
 int GateApStar_SpawnPiece(int piece, int ply);
 
-// Add one sphere to every human rider's collected set and announce it, the
-// give-item counterpart to unlocking one. Collects directly rather than spawning
-// a pickup, so it lands whether or not the sphere is in this round's item
-// registry - the way a Hydra or Dragoon part give ignores that part's unlock.
-// Both return an APItemResult: RETRY while no player can take it, and DROP with
-// ap_star absent, since no later round changes that.
+// Adds one sphere to every human rider's collected set, bypassing this round's item
+// registry.
 int GateApStar_GivePiece(int piece);
 
-// Put a human player straight through the assembly, awarding the star without
-// the six spheres.
+// Runs a human through the assembly. Both gives return an APItemResult: RETRY while no
+// player can take it, DROP with ap_star absent.
 int GateApStar_GiveStar(void);
 
-// 1 if this player assembled the star in the round currently loaded.
+// 1 if this player assembled the star in the round loaded now.
 int GateApStar_AssembledThisRound(int ply);
 
 // 1 if a DmgLog.credited_attack names one of the star's sphere shots.

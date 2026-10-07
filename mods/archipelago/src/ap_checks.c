@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "game.h"
 #include "audio.h"
 #include "os.h"
@@ -16,16 +18,10 @@
 #include "ap_colors.h"
 #include "ap_patches.h"
 
-// SFX cue the vanilla ClearChecker_SetNewUnlock plays on a first-this-frame
-// transition, guarded by stc_clearchecker_sfx_last_frame (one-frame cooldown).
-#define CHECKLIST_UNLOCK_SFX 0x10008
-
-// Every AP tab cell backs an AP location, so the AP row takes the same clear_kind
-// bound as the vanilla rows and no row mask needs holding clear above it.
+// Every AP tab cell backs an AP location, so the AP row fills the grid.
 _Static_assert(APCK_NUM == CLEAR_KIND_NUM, "the AP tab must fill its grid");
 
-// Set the sent_checks bit in both save and the shared-memory mirror. Returns 1 if
-// newly set. `row` is a ChecklistModeRow() result.
+// Returns 1 if newly set. row is a ChecklistModeRow() result.
 static inline int SetSentCheck(int row, u8 clear_kind)
 {
     u64 bit = 1ULL << (clear_kind & 63);
@@ -37,10 +33,8 @@ static inline int SetSentCheck(int row, u8 clear_kind)
     return 1;
 }
 
-// Record a check: set the save bit, mirror to shared memory, re-evaluate goal.
-// Idempotent. Deliberately does not write the card - Hoshi_WriteSave rewrites the
-// whole file synchronously and stalls the frame, and checks are recorded mid-run.
-// The bits live in ap_save until the game's own save point flushes them.
+// Doesn't write the card: Hoshi_WriteSave stalls the frame, so the bits wait in ap_save
+// for the game's own save point.
 static void RecordCheck(int mode, int clear_kind)
 {
     int row = ChecklistModeRow(mode);
@@ -54,8 +48,7 @@ static void RecordCheck(int mode, int clear_kind)
     {
         u8 rtype = stc_reward_table_ptrs[src_mode][src_ri].reward_type;
         OSReport("[APChecks] mode=%d clear_kind=%d type=%s (%d) recorded\n",
-                 mode, clear_kind,
-                 Reward_TypeName(rtype), rtype);
+                 mode, clear_kind, Reward_TypeName(rtype), rtype);
     }
     else
     {
@@ -68,70 +61,54 @@ static void RecordCheck(int mode, int clear_kind)
     APGoal_Evaluate();
 }
 
-// Replacement for ClearChecker_SetNewUnlock (0x8004A054), the funnel most gameplay
-// code uses to flag a completed objective. Detect the transition -> RecordCheck,
-// then run the vanilla logic so the UI still works.
-static void APChecks_SetNewUnlockReplacement(int mode, int clear_kind)
+// The shared body of both SetNewUnlock replacements: records a first completion, then
+// stores is_new unless a LAN session is up. Returns 1 when the vanilla store ran on a
+// fresh cell, which is when the loud variant plays its SFX. The AP tab's evaluator
+// records through the loud variant, so ChecklistModeRow admits its mode.
+static int MarkNewUnlock(GameMode mode, u8 clear_kind)
 {
-    // ChecklistModeRow accepts the AP-checklist mode too, not just the 3 real modes:
-    // the AP-checklist evaluator drives completions through here.
-    if (ChecklistModeRow(mode) < 0 || (unsigned)clear_kind >= CLEAR_KIND_NUM)
-        return;
+    if (ChecklistModeRow(mode) < 0 || clear_kind >= CLEAR_KIND_NUM)
+        return 0;
     GameClearData *cd = gmGetClearcheckerTypeP(mode);
     if (!cd)
-        return;
+        return 0;
 
+    // Recorded before the LAN short-circuit so no check is missed.
     int fresh = !cd->clear[clear_kind].is_new && !cd->clear[clear_kind].is_unlocked;
-
-    // Transition detection runs regardless of cache state so AP never misses a check.
     if (fresh)
         RecordCheck(mode, clear_kind);
 
-    // Vanilla short-circuit: during a LAN session the rest is a no-op.
     if (Net_IsSessionActive() != 0)
+        return 0;
+
+    cd->clear[clear_kind].is_new = 1;
+    return fresh;
+}
+
+// Replaces ClearChecker_SetNewUnlock (0x8004a054), the funnel most objectives complete
+// through, and reimplements its body. The SFX plays at most once per frame.
+static void APChecks_SetNewUnlock(GameMode mode, u8 clear_kind)
+{
+    if (!MarkNewUnlock(mode, clear_kind))
         return;
 
-    // Vanilla plays the unlock SFX at most once per frame.
-    if (fresh)
+    int frame = Gm_GetEngineFrames();
+    if (*stc_clearchecker_sfx_last_frame != frame)
     {
-        int frame = Gm_GetEngineFrames();
-        if (*stc_clearchecker_sfx_last_frame != frame)
-        {
-            SFX_PlayFullVolume(CHECKLIST_UNLOCK_SFX);
-            *stc_clearchecker_sfx_last_frame = frame;
-        }
+        SFX_PlayFullVolume(CLEARCHECKER_UNLOCK_SFX);
+        *stc_clearchecker_sfx_last_frame = frame;
     }
-
-    cd->clear[clear_kind].is_new = 1;
 }
 
-// Replacement for ClearChecker_SetNewUnlockSilent (0x80049FCC). Top Ride commits
-// every check through this "silent" variant, not SetNewUnlock, so without this every
-// TR check is dropped. The SFX is omitted because the caller already played it.
-static void APChecks_SetNewUnlockSilentReplacement(int mode, int clear_kind)
+// Replaces ClearChecker_SetNewUnlockSilent (0x80049fcc), which Top Ride commits every
+// check through; its caller has already played the SFX.
+static void APChecks_SetNewUnlockSilent(GameMode mode, u8 clear_kind)
 {
-    if ((unsigned)mode >= GMMODE_NUM || (unsigned)clear_kind >= CLEAR_KIND_NUM)
-        return;
-    GameClearData *cd = gmGetClearcheckerTypeP(mode);
-    if (!cd)
-        return;
-
-    int fresh = !cd->clear[clear_kind].is_new && !cd->clear[clear_kind].is_unlocked;
-
-    // Transition detection runs regardless of cache state so AP never misses a check.
-    if (fresh)
-        RecordCheck(mode, clear_kind);
-
-    // Vanilla short-circuit: during a LAN session the store is skipped.
-    if (Net_IsSessionActive() != 0)
-        return;
-
-    cd->clear[clear_kind].is_new = 1;
+    MarkNewUnlock(mode, clear_kind);
 }
 
-// Apply bits the client wrote into ap_data->client_backfill: sent_checks bit,
-// clear[] is_unlocked/is_visible, optional has_reward, goal re-eval. Called only under
-// ap_data->backfill_valid, so the arrays are whole.
+// Sets the sent_checks bit, reveals and unlocks the cell, and badges a received reward.
+// Called only under ap_data->backfill_valid, so the arrays are whole.
 void APChecks_ApplyBackfill(void)
 {
     int backfilled = 0;
@@ -139,9 +116,7 @@ void APChecks_ApplyBackfill(void)
     {
         for (int word = 0; word < 2; word++)
         {
-            u64 incoming = ap_data->client_backfill[r][word];
-            u64 already  = ap_save->sent_checks[r][word];
-            u64 new_bits = incoming & ~already;
+            u64 new_bits = ap_data->client_backfill[r][word] & ~ap_save->sent_checks[r][word];
             if (!new_bits)
                 continue;
 
@@ -160,7 +135,6 @@ void APChecks_ApplyBackfill(void)
 
                 SetSentCheck(r, clear_kind);
 
-                // is_visible is what the grid renders as revealed.
                 if (cd)
                 {
                     cd->clear[clear_kind].is_unlocked = 1;
@@ -174,7 +148,6 @@ void APChecks_ApplyBackfill(void)
         }
     }
 
-    // Single-writer protocol: the mod consumes, then zeroes.
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
     {
         ap_data->client_backfill[r][0] = 0;
@@ -188,18 +161,16 @@ void APChecks_ApplyBackfill(void)
     }
 }
 
-// Meta auto-unlock handlers (Checklist_ProcessUnlock 0x8017e490): five cells whose
-// clear[] byte vanilla sets via direct `stb`, bypassing SetNewUnlock. Return 0 lets
-// the `stb` run, 1 skips it - skip iff the cell is already is_filler, since the store
-// would wipe a filler byte no other path re-sets. The skip must set is_unlocked
-// itself: the store site's `!is_unlocked` guard otherwise stays true forever, and
-// Checklist_Think re-enters ProcessUnlock every frame with the screen taking no input.
+// Checklist_ProcessUnlock (0x8017e490) sets these five cells by a direct stb, bypassing
+// SetNewUnlock. Returning 1 skips the store on a filler cell, whose byte it would wipe;
+// the skip sets is_unlocked itself, or ProcessUnlock re-enters every frame with the
+// screen taking no input.
 #define META_UNLOCK_HANDLER(name, mode, kind)                            \
     static int name(void)                                                \
     {                                                                    \
         RecordCheck((mode), (kind));                                     \
         GameClearData *cd = gmGetClearcheckerTypeP((mode));              \
-        if (!cd || !cd->clear[(kind)].is_filler)                          \
+        if (!cd || !cd->clear[(kind)].is_filler)                         \
             return 0;                                                    \
         cd->clear[(kind)].is_unlocked = 1;                               \
         return 1;                                                        \
@@ -211,63 +182,43 @@ META_UNLOCK_HANDLER(MetaUnlock_CityTrial100,     GMMODE_CITYTRIAL, CT_CLEAR_FILL
 META_UNLOCK_HANDLER(MetaUnlock_CityTrialDragoon, GMMODE_CITYTRIAL, CT_CLEAR_UNLOCK_DRAGOON)
 META_UNLOCK_HANDLER(MetaUnlock_CityTrialHydra,   GMMODE_CITYTRIAL, CT_CLEAR_UNLOCK_HYDRA)
 
-// Each site is the `li r3, 1` that carries ProcessUnlock's return value, one
-// instruction ahead of the `stb` that sets the clear[] byte. Hooking the `li` rather
-// than the `stb` is what keeps the return value alive: the bl destroys r3, and only
-// the relocated `li` puts it back. The epilogue re-materializes the volatile register
-// the following `stb` stores through (r4 / r0), which the bl also destroys.
-// Accept (return 0): epilogue, relocated `li r3, 1`, then on to the `stb`.
-// Reject (return 1): straight to the function tail, skipping both, returning the
-// handler's own 1 in r3.
+// Each hook replaces the li r3, 1 that carries ProcessUnlock's return value, one ahead of
+// the stb, so the relocated li restores what the bl destroys; the epilogue restores the
+// stb's source (r4 / r0). A skip exits at the function tail with the handler's 1 in r3.
 #define META_SKIP_EXIT 0x8017f394
 
-// AR: Complete 100 checkboxes (clear_kind 0x18). Next insn: stb r4, 148(r30)
+// AR 100 checkboxes (0x18), then stb r4, 148(r30).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017efbc, "", MetaUnlock_AirRide100,       "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// TR: Complete 100 checkboxes (clear_kind 0x77). Next insn: stb r4, 243(r30)
+// TR 100 checkboxes (0x77), then stb r4, 243(r30).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017eff4, "", MetaUnlock_TopRide100,       "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// CT: Complete 100 checkboxes (clear_kind 0x37). Next insn: stb r4, 179(r30)
+// CT 100 checkboxes (0x37), then stb r4, 179(r30).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f02c, "", MetaUnlock_CityTrial100,     "li 4, 1\n\t", 0, META_SKIP_EXIT)
 
-// CT: Unlock Dragoon Parts (clear_kind 0x6D), not the goal cell 0x77. Next insn: stb r0, 233(r30)
+// CT Dragoon parts (0x6D), then stb r0, 233(r30).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f0a8, "", MetaUnlock_CityTrialDragoon, "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
-// CT: Unlock Hydra Parts (clear_kind 0x6E), not the goal cell 0x77. Next insn: stb r0, 234(r30)
+// CT Hydra parts (0x6E), then stb r0, 234(r30).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8017f11c, "", MetaUnlock_CityTrialHydra,   "li 0, 1\n\t", 0, META_SKIP_EXIT)
 
-// Filler-apply hook. The filler-apply path sets clear[k].is_filler directly without
-// calling SetNewUnlock, so the REPLACEFUNC never sees a spent filler.
-static void APChecks_OnFillerApplied(int mode, int clear_kind)
-{
-    RecordCheck(mode, clear_kind);
-}
-
-// Hook site: 0x80180dc4 in Checklist_Think, where r31 = UI state (mode at +0x14) and
-// r18 = clear_kind. Clobbered instruction is `lbz r3, 2(r29)` (start of the
-// checkbox_filler_num decrement); auto re-execution reloads r3 from the non-volatile
-// r29, so no epilogue is needed.
+// The filler-apply path sets is_filler directly, bypassing SetNewUnlock. Hook at 0x80180dc4
+// in Checklist_Think (0x8017f3bc): r31 = UI state (mode at +0x14), r18 = clear_kind. The
+// clobbered lbz r3, 2(r29) starts the checkbox_filler_num decrement and reloads from r29.
 CODEPATCH_HOOKCREATE(
     0x80180dc4,
-    "lbz 3, 20(31)\n\t"   // r3 = mode
-    "mr 4, 18\n\t",        // r4 = clear_kind
-    APChecks_OnFillerApplied,
+    "lbz 3, 20(31)\n\t"
+    "mr 4, 18\n\t",
+    RecordCheck,
     "",
     0
 )
 
 void APChecks_OnSaveLoaded(void)
 {
-    // Mirror into shared memory for the client to read.
-    for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
-    {
-        ap_data->sent_checks[r][0] = ap_save->sent_checks[r][0];
-        ap_data->sent_checks[r][1] = ap_save->sent_checks[r][1];
-    }
-    ap_data->goal_complete = ap_save->goal_complete;
+    memcpy(ap_data->sent_checks, ap_save->sent_checks, sizeof(ap_data->sent_checks));
 
-    // Covers options changing since last boot, or saved checks already satisfying
-    // the active goal.
+    // Publishes the goal state, and latches a goal saved checks already meet.
     APGoal_Evaluate();
 
     OSReport("[APChecks] Loaded sent_checks AR=%d TR=%d CT=%d AP=%d goal=%d\n",
@@ -275,25 +226,20 @@ void APChecks_OnSaveLoaded(void)
              APChecks_PopcountRow(GMMODE_TOPRIDE),
              APChecks_PopcountRow(GMMODE_CITYTRIAL),
              APChecks_PopcountRow(AP_CHECKLIST_ROW),
-             ap_save->goal_complete);
+             ap_data->goal_complete);
 }
 
 void APChecks_OnBoot(void)
 {
-    CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlock, APChecks_SetNewUnlockReplacement);
+    CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlock, APChecks_SetNewUnlock);
+    CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlockSilent, APChecks_SetNewUnlockSilent);
 
-    // Top Ride checklist objectives commit through the "silent" variant, which
-    // bypasses SetNewUnlock entirely - replace it too or every TR check is lost.
-    CODEPATCH_REPLACEFUNC(ClearChecker_SetNewUnlockSilent, APChecks_SetNewUnlockSilentReplacement);
-
-    // Meta auto-unlocks inside Checklist_ProcessUnlock.
-    CODEPATCH_HOOKAPPLY(0x8017efbc);  // AR 100-checklist
-    CODEPATCH_HOOKAPPLY(0x8017eff4);  // TR 100-checklist
-    CODEPATCH_HOOKAPPLY(0x8017f02c);  // CT 100-checklist
-    CODEPATCH_HOOKAPPLY(0x8017f0a8);  // CT Dragoon assembly
-    CODEPATCH_HOOKAPPLY(0x8017f11c);  // CT Hydra assembly
-
-    CODEPATCH_HOOKAPPLY(0x80180dc4);  // Filler-apply: record the check
+    CODEPATCH_HOOKAPPLY(0x8017efbc);
+    CODEPATCH_HOOKAPPLY(0x8017eff4);
+    CODEPATCH_HOOKAPPLY(0x8017f02c);
+    CODEPATCH_HOOKAPPLY(0x8017f0a8);
+    CODEPATCH_HOOKAPPLY(0x8017f11c);
+    CODEPATCH_HOOKAPPLY(0x80180dc4);
     OSReport("[APChecks] Hooks installed\n");
 }
 
@@ -307,14 +253,14 @@ void APChecks_ResetAll(void)
         ap_data->sent_checks[r][1] = 0;
     }
     APGoal_Reset();
-    ApPatches_ResetAll();
 }
 
 void APChecks_DebugClearAll(void)
 {
     APChecks_ResetAll();
+    APPatches_ResetAll();
     Hoshi_WriteSave();
-    OSReport("[APChecks] Debug: cleared all sent_checks and goal_complete\n");
+    OSReport("[APChecks] Debug: cleared every sent check, AP Patch and goal\n");
 }
 
 void APChecks_DebugForceMarkAll(void)
@@ -328,13 +274,9 @@ void APChecks_DebugForceMarkAll(void)
         ap_save->sent_checks[r][1] = hi_mask;
         ap_data->sent_checks[r][0] = ap_save->sent_checks[r][0];
         ap_data->sent_checks[r][1] = ap_save->sent_checks[r][1];
-        ap_save->goal_announced[r] = 1;
     }
-    ap_save->goal_complete = 1;
-    ap_data->goal_complete = 1;
     ap_save->max_stats_ct_achieved = 1;
-    APGoal_Evaluate();  // republish goal_satisfied_mask over the forced checks
-    ApPatches_DebugForceMarkAll();
-    Hoshi_WriteSave();
-    OSReport("[APChecks] Debug: force-marked all sent_checks and goal_complete\n");
+    APPatches_DebugForceMarkAll();
+    APGoal_DebugComplete();
+    OSReport("[APChecks] Debug: force-marked every check, AP Patch and goal\n");
 }

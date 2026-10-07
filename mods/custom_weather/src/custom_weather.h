@@ -392,8 +392,5 @@ void Volcano_Reset(void);
 void Tornado_SetActive(const TornadoDef *def);
 void Tornado_Tick(void);
 void Tornado_Reset(void);
-// The orbit's position writes have to land after the frame's game procs, or item
-// physics, machine physics and the ground snap overwrite them.
-void Tornado_OnFrameEnd(void);
 
 #endif // CUSTOM_WEATHER_H

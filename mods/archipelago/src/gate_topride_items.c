@@ -9,20 +9,27 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// One bit per Top Ride item kind whose blocked spawn has been reported this round.
-// One bit per TRITEM kind already reported, plus one for the out-of-range case.
+// One bit per TRITEM kind whose blocked spawn was reported this round, plus
+// TR_BLOCKED_OUT_OF_RANGE.
 #define TR_BLOCKED_OUT_OF_RANGE 0x80000000u
 static u32 blocked_reported;
 
-// TR items whose copy ability unlock is an alternative key to their own TR unlock.
-static const struct { TopRideItemKind item; CopyKind ability; } ability_items[] = {
-    { TRITEM_FREEZE_FAN, COPYKIND_ICE },
-    { TRITEM_FIRE,       COPYKIND_FIRE },
-    { TRITEM_BOMB,       COPYKIND_BOMB },
-    { TRITEM_WALKY,      COPYKIND_MIKE },
+const TopRideAbilityItem topride_ability_items[TR_ABILITY_ITEM_NUM] = {
+    { TRITEM_FREEZE_FAN, COPYKIND_ICE,  TR_ITEMPOWER_VT_FREEZE_FAN },
+    { TRITEM_FIRE,       COPYKIND_FIRE, TR_ITEMPOWER_VT_FIRE },
+    { TRITEM_BOMB,       COPYKIND_BOMB, TR_ITEMPOWER_VT_BOMB },
+    { TRITEM_WALKY,      COPYKIND_MIKE, TR_ITEMPOWER_VT_WALKY },
 };
 
-static void GateTopRideItems_ApplyMask()
+// The checklist reward each "New Item" unlocks through. TopRideItem_MgrInit (0x8034b5f4)
+// keeps their enabled bits only once that reward is received.
+static const struct { TopRideItemKind item; u8 reward_index; } new_item_rewards[] = {
+    { TRITEM_CHICKIE,   8 },
+    { TRITEM_WHO_PAINT, 9 },
+    { TRITEM_LANTERN,   10 },
+};
+
+static void GateTopRideItems_ApplyMask(void)
 {
     TopRideItemMgr *mgr = *stc_topride_itemmgr;
     if (!mgr)
@@ -30,25 +37,23 @@ static void GateTopRideItems_ApplyMask()
 
     u32 before = mgr->enabled_mask;
 
-    // Fold the ability-derived bits in so either key enables the item, but only while
-    // ability gating is on: an ungated world holds an all-1s ability mask, which would
-    // free the four items outright and leave their TR item unlocks with nothing to do.
+    // Either key enables an ability item, but only while ability gating is on: an ungated
+    // world's all-ones ability mask would free the four outright.
     u32 allowed = ap_save->topride_item_unlocked_mask;
     u16 ability_mask = ap_save->ability_unlocked_mask;
     if (ap_save->options.ability_gating_enabled)
     {
-        for (int i = 0; i < (int)(sizeof(ability_items) / sizeof(ability_items[0])); i++)
+        for (int i = 0; i < TR_ABILITY_ITEM_NUM; i++)
         {
-            if (ability_mask & (1 << ability_items[i].ability))
-                allowed |= (1 << ability_items[i].item);
+            if (ability_mask & (1 << topride_ability_items[i].ability))
+                allowed |= (1 << topride_ability_items[i].item);
         }
     }
 
     mgr->enabled_mask &= allowed;
 
-    // Slot 12 (TRITEM_PARTY_BALL_ALT, KirbyKusdama) is the engine's twin Party Ball
-    // variant. AP exposes only slot 21, so bit 21's state is mirrored onto bit 12;
-    // without this the kusdama variant never spawns.
+    // TRITEM_PARTY_BALL_ALT is the engine's twin Party Ball. Only slot 21 is shipped, so
+    // its state is mirrored onto slot 12.
     if (mgr->enabled_mask & (1 << TRITEM_PARTY_BALL))
         mgr->enabled_mask |= (1 << TRITEM_PARTY_BALL_ALT);
     else
@@ -58,11 +63,11 @@ static void GateTopRideItems_ApplyMask()
     OSReport("[GateTopRideItems] Enabled mask %s -> %s (item %s, ability %s)\n",
              MaskBits(before, TRITEM_NUM), MaskBits(mgr->enabled_mask, TRITEM_NUM),
              MaskBits(ap_save->topride_item_unlocked_mask, TRITEM_NUM),
-             MaskBits(ability_mask, 16));
+             MaskBits(ability_mask, COPYKIND_NUM));
 }
 
-// Hook at 0x802db05c, right after TopRideItem_MgrInit (0x8034b5f4) returns in
-// TopRide_KirbyMgrInit (0x802dafb4).
+// Right after TopRideItem_MgrInit (0x8034b5f4) returns in TopRide_KirbyMgrInit
+// (0x802dafb4).
 CODEPATCH_HOOKCREATE(0x802db05c,
     "",
     GateTopRideItems_ApplyMask,
@@ -70,19 +75,15 @@ CODEPATCH_HOOKCREATE(0x802db05c,
     0
 )
 
-// Hook at entry of TopRideItem_SpawnAtPosition (0x8034bf50). Returns 1 to block the
-// spawn (locked item, mask bit clear), 0 to let it through; the block path returns to
-// the original caller via the function's epilogue blr at 0x8034c12c.
-int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
-                                 Vec3 *pos, Vec3 *orient,
-                                 unsigned int flag1, unsigned int flag2)
+// Entry of TopRideItem_SpawnAtPosition (0x8034bf50). Returns 1 to block the spawn.
+static int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
+                                        Vec3 *pos, Vec3 *orient,
+                                        unsigned int flag1, unsigned int flag2)
 {
     if (!mgr)
         return 0;
-    // TopRideItem_PartyBallUpdate (frame 0xFF) picks via weighted random. With
-    // every TR item locked, sum == 0 and the pick loop falls out at TRITEM_NUM;
-    // letting that through makes TopRideItem_Create read past the descriptor
-    // table at 0x804ea2fc and crash on a garbage model-name pointer.
+    // With every TR item locked the Party Ball picker falls out at TRITEM_NUM, and
+    // TopRideItem_Create would read past its descriptor table (0x804ea2fc).
     if (item_kind < 0 || item_kind >= TRITEM_NUM)
     {
         if (!(blocked_reported & TR_BLOCKED_OUT_OF_RANGE))
@@ -105,14 +106,9 @@ int GateTopRideItems_FilterSpawn(TopRideItemMgr *mgr, int item_kind,
     return 1;
 }
 
-// Saves r3-r8 (the original SpawnAtPosition args) across the bl into the filter, since
-// the return value clobbers r3 and the function immediately derefs it (lwz r3, 4(r3) at
-// 0x8034bf68). Proceed path: restore args + LR + frame, then `b 0x18` over the four
-// block-path instructions and the macro's `bne`, landing on the clobbered
-// `stwu r1, -288(r1)` with r3 = mgr - skipping it would run the whole function on the
-// caller's frame and blr through a smashed LR. Block path: restore LR + frame, set
-// r3 = 1 so the macro branches to the alt addr 0x8034c12c, the bare blr that needs no
-// frame teardown.
+// Saves r3-r8 across the filter, since the function derefs r3 at 0x8034bf68. Proceed:
+// restore them and b 0x18 onto the clobbered stwu r1, -288(r1). Block: r3 = 1 takes the
+// alt exit 0x8034c12c, a bare blr.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     "stwu 1, -48(1)\n\t"
     "mflr 0\n\t"
@@ -144,48 +140,42 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8034bf50,
     0,
     0x8034c12c)
 
-// The Party Ball burst (TopRideItem_PartyBallUpdate, 0x80356dac, frame 0xFF) runs a
-// weighted-random picker over all 22 items with no enabled_mask check, reading each
-// weight via `bl TopRideItem_GetDataByIndex` then `lfs f0, 16(r3)`. Redirecting those
-// two bl's here returns a weight-0 stub for locked kinds.
-static const float locked_item_stub[8] = {0}; // offset +0x10 (index 4) = 0.0
+// TopRideItem_PartyBallUpdate (0x80356dac) weighs all 22 items with no enabled_mask check,
+// through two bl TopRideItem_GetDataByIndex; locked kinds get a zero-weight stub.
+static const TopRideItemData locked_item_stub;
 
-const void *GateTopRideItems_GetDataGated(int kind)
+static const TopRideItemData *GateTopRideItems_GetDataGated(int kind)
 {
     TopRideItemMgr *mgr = *stc_topride_itemmgr;
-    if (mgr && (unsigned)kind < TRITEM_NUM &&
-        !(mgr->enabled_mask & (1u << kind)))
-        return locked_item_stub;
+    if (mgr && (unsigned)kind < TRITEM_NUM && !(mgr->enabled_mask & (1u << kind)))
+        return &locked_item_stub;
     return TopRideItem_GetDataByIndex(kind);
 }
 
-void GateTopRideItems_OnBoot()
+void GateTopRideItems_OnBoot(void)
 {
     CODEPATCH_HOOKAPPLY(0x802db05c);
     CODEPATCH_HOOKAPPLY(0x8034bf50);
     CODEPATCH_REPLACECALL(0x803574a4, GateTopRideItems_GetDataGated); // burst sum loop
     CODEPATCH_REPLACECALL(0x803574d0, GateTopRideItems_GetDataGated); // burst pick loop
-    OSReport("[GateTopRideItems] Top Ride item gating hooks installed\n");
+    OSReport("[GateTopRideItems] Hooks installed\n");
 }
 
-// Chickie / Who? Paint / Lantern are unreachable through the unlock mask alone:
-// TopRideItem_MgrInit (0x8034b5f4) clears enabled-mask bits 20/18/15 unless
-// ClearChecker_CheckUnlocked(GMMODE_TOPRIDE, reward 8/9/10) passes, and ApplyMask only
-// ANDs. Marking the reward received is the only way to enable them - the received bit
-// only, since an is_unlocked / clear[] write would badge the cell and send a spurious
-// check.
+// Only the received bit: an is_unlocked / clear[] write would badge the cell and send a
+// spurious check.
 static void MarkNewItemRewardReceived(TopRideItemKind kind)
 {
-    u8 reward_index;
-    switch (kind)
+    for (int i = 0; i < (int)GetElementsIn(new_item_rewards); i++)
     {
-        case TRITEM_CHICKIE:   reward_index = 8;  break;
-        case TRITEM_WHO_PAINT: reward_index = 9;  break;
-        case TRITEM_LANTERN:   reward_index = 10; break;
-        default: return;
+        if (new_item_rewards[i].item == kind)
+            ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= 1ULL << new_item_rewards[i].reward_index;
     }
+}
 
-    ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= (1ULL << reward_index);
+void GateTopRideItems_MarkNewItemRewardsReceived(void)
+{
+    for (int i = 0; i < (int)GetElementsIn(new_item_rewards); i++)
+        ap_save->received_checklist_rewards[GMMODE_TOPRIDE] |= 1ULL << new_item_rewards[i].reward_index;
 }
 
 int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce)
@@ -214,9 +204,9 @@ int GateTopRideItems_UnlockItem(TopRideItemKind kind, int announce)
 
 int GateTopRideItems_AbilityToItem(CopyKind ability)
 {
-    for (int i = 0; i < (int)(sizeof(ability_items) / sizeof(ability_items[0])); i++)
-        if (ability_items[i].ability == ability)
-            return ability_items[i].item;
+    for (int i = 0; i < TR_ABILITY_ITEM_NUM; i++)
+        if (topride_ability_items[i].ability == ability)
+            return topride_ability_items[i].item;
     return -1;
 }
 
@@ -229,14 +219,11 @@ int GateTopRideItems_GiveItem(TopRideItemKind kind)
     if (!kirby_mgr)
         return 0;
 
-    // TopRide_KirbyApplyItem dereferences kirby+0x7c (held item GObj), which is only
-    // populated once the race is active; round_state == 2 doubles as the "kirby is
-    // fully wired up" gate.
+    // TopRide_KirbyApplyItem derefs the held-item GObj, set only once the race is active.
     if (kirby_mgr->round_state != 2)
         return 0;
 
-    // Deliberately not gated on kirby->standing: the solo modes never rank it, so it
-    // reads 0 for every kirby in Time Attack and Free Run.
+    // Not gated on kirby->standing: the solo modes never rank it.
     int applied = 0;
     for (int i = 0; i < 4; i++)
     {

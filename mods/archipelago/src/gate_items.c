@@ -9,7 +9,6 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// Inverse of ItemKindToUnlockBit, so ItemKind_Names can be reused for display.
 static const ItemKind itunlock_to_itkind[ITUNLOCK_NUM] = {
     [ITUNLOCK_ALLUP]            = ITKIND_ALLUP,
     [ITUNLOCK_SPEEDMAX]         = ITKIND_SPEEDMAX,
@@ -48,112 +47,15 @@ static const char *ItemUnlockName(ItemUnlockKind kind)
     return ItemKind_Names[itunlock_to_itkind[kind]];
 }
 
-// Map non-patch, non-copy ItemKinds to their individual unlock bit.
-// Returns -1 for items not gated by this system.
+// The unlock bit an ItemKind is gated on, or -1 for one this gate doesn't cover.
 static int ItemKindToUnlockBit(u8 it_kind)
 {
-    switch (it_kind)
+    for (int bit = 0; bit < ITUNLOCK_NUM; bit++)
     {
-        case ITKIND_ALLUP:            return ITUNLOCK_ALLUP;
-        case ITKIND_SPEEDMAX:         return ITUNLOCK_SPEEDMAX;
-        case ITKIND_SPEEDMIN:         return ITUNLOCK_SPEEDMIN;
-        case ITKIND_OFFENSEMAX:       return ITUNLOCK_OFFENSEMAX;
-        case ITKIND_DEFENSEMAX:       return ITUNLOCK_DEFENSEMAX;
-        case ITKIND_CHARGEMAX:        return ITUNLOCK_CHARGEMAX;
-        case ITKIND_CHARGENONE:       return ITUNLOCK_CHARGENONE;
-        case ITKIND_CANDY:            return ITUNLOCK_CANDY;
-        case ITKIND_FOODMAXIMTOMATO:  return ITUNLOCK_FOODMAXIMTOMATO;
-        case ITKIND_FOODENERGYDRINK:  return ITUNLOCK_FOODENERGYDRINK;
-        case ITKIND_FOODICECREAM:     return ITUNLOCK_FOODICECREAM;
-        case ITKIND_FOODRICEBALL:     return ITUNLOCK_FOODRICEBALL;
-        case ITKIND_FOODCHICKEN:      return ITUNLOCK_FOODCHICKEN;
-        case ITKIND_FOODCURRY:        return ITUNLOCK_FOODCURRY;
-        case ITKIND_FOODRAMEN:        return ITUNLOCK_FOODRAMEN;
-        case ITKIND_FOODOMELET:       return ITUNLOCK_FOODOMELET;
-        case ITKIND_FOODHAMBURGER:    return ITUNLOCK_FOODHAMBURGER;
-        case ITKIND_FOODSUSHI:        return ITUNLOCK_FOODSUSHI;
-        case ITKIND_FOODHOTDOG:       return ITUNLOCK_FOODHOTDOG;
-        case ITKIND_FOODAPPLE:        return ITUNLOCK_FOODAPPLE;
-        case ITKIND_FIREWORKS:        return ITUNLOCK_FIREWORKS;
-        case ITKIND_PANICSPIN:        return ITUNLOCK_PANICSPIN;
-        case ITKIND_SENSORBOMB:       return ITUNLOCK_SENSORBOMB;
-        case ITKIND_GORDO:            return ITUNLOCK_GORDO;
-        case ITKIND_HYDRA1:           return ITUNLOCK_HYDRA1;
-        case ITKIND_HYDRA2:           return ITUNLOCK_HYDRA2;
-        case ITKIND_HYDRA3:           return ITUNLOCK_HYDRA3;
-        case ITKIND_DRAGOON1:         return ITUNLOCK_DRAGOON1;
-        case ITKIND_DRAGOON2:         return ITUNLOCK_DRAGOON2;
-        case ITKIND_DRAGOON3:         return ITUNLOCK_DRAGOON3;
-        default:                      return -1;
+        if (itunlock_to_itkind[bit] == it_kind)
+            return bit;
     }
-}
-
-// Sized to sit alongside vanilla +1 patch weights, not dominate them; the Max Stats
-// drop bias scales them further.
-#define ALLUP_BOX_POOL_CHANCE      8
-#define ALLUP_CHANCE_DESTRUCTIBLE  16
-#define ALLUP_CHANCE_DYNA          4
-
-// An entry already in the pool keeps its vanilla weight.
-static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, u8 max_entries,
-                             u8 it_kind, u8 weight)
-{
-    for (u8 i = 0; i < *num; i++)
-    {
-        if (kinds[i] == it_kind)
-            return;
-    }
-    if (*num >= max_entries)
-        return;
-    kinds[*num] = it_kind;
-    chances[*num] = weight;
-    *num += 1;
-}
-
-// Under the Max Stats CT goal, make All-Up reachable from every patch source the
-// vanilla tables miss: the three box pools, the Same Item and subsequent pools, and the
-// destructible + Dyna Blade columns (vanilla already covers UFO/Tac/Meteor/Chamber).
-void GateItems_EnsureAllUpInSpawnPools()
-{
-    if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
-        return;
-    if (!(ap_save->item_unlocked_mask & (1U << ITUNLOCK_ALLUP)))
-        return;
-
-    grBoxGeneObj *obj = *stc_grBoxGeneObj;
-    if (obj)
-    {
-        for (int box = 0; box < BOXKIND_NUM; box++)
-        {
-            EnsureItemInPool(
-                obj->item_group_spawn[box].it_kind,
-                obj->item_group_spawn[box].chance,
-                &obj->item_group_spawn[box].num,
-                ITKIND_NUM - 1,
-                ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
-        }
-        EnsureItemInPool(obj->sameitem_it_kind, obj->sameitem_chance,
-                         &obj->sameitem_num, ITKIND_NUM - 1,
-                         ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
-        EnsureItemInPool(obj->subsequent_it_kind, obj->subsequent_chance,
-                         &obj->subsequent_num, 40,
-                         ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
-    }
-
-    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (info && info->item_desc)
-    {
-        for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
-        {
-            if (info->item_desc->event_source_drop[i].it_kind != ITKIND_ALLUP)
-                continue;
-            if (info->item_desc->event_source_drop[i].chance_destructible == 0)
-                info->item_desc->event_source_drop[i].chance_destructible = ALLUP_CHANCE_DESTRUCTIBLE;
-            if (info->item_desc->event_source_drop[i].chance_dyna == 0)
-                info->item_desc->event_source_drop[i].chance_dyna = ALLUP_CHANCE_DYNA;
-            break;
-        }
-    }
+    return -1;
 }
 
 int GateItems_IsItemLocked(u8 it_kind)
@@ -165,8 +67,8 @@ int GateItems_IsItemLocked(u8 it_kind)
 // One bit per unlock index whose locked-spawn skip has been reported this round.
 static u32 stc_locked_reported;
 
-// Disable legendary piece spawns when all pieces of a type are locked, or when the red
-// carrier box they ride has not been unlocked.
+// Disables a legendary's piece spawns when none of its parts is unlocked, or all of them
+// while their red carrier box is locked.
 static void GateItems_FilterLegendaryPieces()
 {
     stc_locked_reported = 0;
@@ -202,7 +104,7 @@ static void GateItems_FilterLegendaryPieces()
     }
 }
 
-// Hook after LegendaryPieces_Init returns in CityItemSpawn_Init.
+// Hook after LegendaryPieces_Init returns in CityItemSpawn_Init (0x800ebf70).
 CODEPATCH_HOOKCREATE(0x800ec284,
     "",
     GateItems_FilterLegendaryPieces,
@@ -210,19 +112,18 @@ CODEPATCH_HOOKCREATE(0x800ec284,
     0
 )
 
-// REPLACECALL'd at the two LegendaryPiece_MarkAsSpawned bl sites in
-// CityItemSpawn_SpawnLegendaryPiece. Skipping the call leaves the box on its default
-// forced_item (-1 = random roll); the caller still advances next_piece_index.
+// Replaces both bl LegendaryPiece_MarkAsSpawned in CityItemSpawn_SpawnLegendaryPiece
+// (0x800ed384). Skipping it leaves the box on its default forced_item (-1, a random roll);
+// the caller still advances next_piece_index.
 static void GateItems_MarkAsSpawnedGated(GOBJ *box, int item_kind)
 {
     int bit = ItemKindToUnlockBit(item_kind);
     if (bit >= 0 && !(ap_save->item_unlocked_mask & (1 << bit)))
     {
-        // The spawner retries a locked piece every cycle, so say it once per piece.
         if (!(stc_locked_reported & (1u << bit)))
         {
             stc_locked_reported |= (1u << bit);
-            OSReport("[GateItems] Legendary piece %d (%s) locked - not spawning\n",
+            OSReport("[GateItems] Legendary piece %d (%s) locked, spawn skipped\n",
                      item_kind, ItemUnlockName(bit));
         }
         return;
@@ -240,18 +141,19 @@ static ItemKind GateItems_UfoRingLeadItem(void)
     return ITKIND_ALLUP;
 }
 
-// li r29, ITKIND_ALLUP in each UFO stop's ring loop, the b past the pool roll after it,
-// and the mr r29, r3 that roll returns through.
+// The li r29, ITKIND_ALLUP in each UFO stop's ring loop. The b after it skips the pool
+// roll and lands on the mr r29, r3 that roll returns through.
 static const u32 ufo_ring_lead_sites[] = {
-    0x8010b268, // CityUFO_State0Think
-    0x8010b958, // CityUFO_State1Think
-    0x8010c0cc, // CityUFO_State2Think
-    0x8010c7a4, // CityUFO_State3Think
-    0x8010ce44, // CityUFO_State4Think
+    0x8010b268, // CityUFO_State0Think (0x8010b024)
+    0x8010b958, // CityUFO_State1Think (0x8010b714)
+    0x8010c0cc, // CityUFO_State2Think (0x8010be88)
+    0x8010c7a4, // CityUFO_State3Think (0x8010c560)
+    0x8010ce44, // CityUFO_State4Think (0x8010cca4)
 };
 
-// Dyna Blade's one hardcoded throw: the All Up she gives up once enough damage lands.
-// A locked All Up gives way to one roll of her regular column.
+// Replaces the bl CityItem_Throw at 0x8021ddf4 in DynaBlade_ThrowItems (0x8021db44), her
+// one hardcoded throw: the All Up she gives up once enough damage lands. A locked All Up
+// gives way to one roll of her regular column.
 static void GateItems_DynaBladeThrowReward(ItemKind kind, int spawn_group, Vec3 *pos, Vec3 *dir,
                                            int flags, f32 elev_angle, f32 speed)
 {
@@ -267,10 +169,10 @@ static void GateItems_DynaBladeThrowReward(ItemKind kind, int spawn_group, Vec3 
 void GateItems_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800ec284);
-    CODEPATCH_REPLACECALL(0x800ed41c, GateItems_MarkAsSpawnedGated); // Dragoon piece bl
-    CODEPATCH_REPLACECALL(0x800ed49c, GateItems_MarkAsSpawnedGated); // Hydra piece bl
+    CODEPATCH_REPLACECALL(0x800ed41c, GateItems_MarkAsSpawnedGated); // Dragoon piece
+    CODEPATCH_REPLACECALL(0x800ed49c, GateItems_MarkAsSpawnedGated); // Hydra piece
 
-    for (int i = 0; i < (int)(sizeof(ufo_ring_lead_sites) / sizeof(ufo_ring_lead_sites[0])); i++)
+    for (int i = 0; i < (int)GetElementsIn(ufo_ring_lead_sites); i++)
     {
         u32 site = ufo_ring_lead_sites[i];
         CODEPATCH_REPLACECALL(site, GateItems_UfoRingLeadItem);
@@ -287,7 +189,7 @@ int GateItems_UnlockItem(ItemUnlockKind kind)
 
     ap_save->item_unlocked_mask |= (1 << kind);
     OSReport("[GateItems] Item %d (%s) unlocked (mask = %s)\n",
-             kind, ItemUnlockName(kind), MaskBits(ap_save->item_unlocked_mask, 32));
+             kind, ItemUnlockName(kind), MaskBits(ap_save->item_unlocked_mask, ITUNLOCK_NUM));
     APAnnounce_Grant("Unlocked Item: ", ItemUnlockName(kind), tb_api->ItemColor, NULL);
     return 1;
 }

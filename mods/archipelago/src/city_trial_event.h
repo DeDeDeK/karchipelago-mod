@@ -3,6 +3,8 @@
 
 #include "event.h"
 
-int Event_GiveItem(EventKind kind);
+// Starts a City Trial event on the city map. Returns 0 while another event runs or the
+// event can't start yet.
+int CTEvent_Give(EventKind kind);
 
 #endif

@@ -12,7 +12,7 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 - `art/` - source assets the authoring scripts read: PNGs for `scripts/authoring/` and `scripts/hsd/`, WAVs for `scripts/audio/`. Kept out of `mods/*/assets/` because nothing on disc reads them and staging them just pads the package.
 - `externals/hoshi/` - the hoshi modding framework (submodule): headers, linker script, symbol map (`GKYE01.map`), framework source.
 - `docs/` - per-system reference docs and data files; one doc per system, found by filename.
-- `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), plus `ghidra/` (type pipeline), `hsd/` (the general `.dat` toolchain - anything that works on any archive), `authoring/` (per-mod asset authors: one script per shipped `.dat`, writing to a fixed path under `mods/<mod>/assets/`), `audio/` (machine sound / SSM toolchain), `devkitpro/` (toolchain build), `utility/` (ISO / DOL / memcard-tile helpers).
+- `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), `review_lint.py` (mechanical review checks over a mod), plus `ghidra/` (type pipeline), `hsd/` (the general `.dat` toolchain - anything that works on any archive), `authoring/` (per-mod asset authors: one script per shipped `.dat`, writing to a fixed path under `mods/<mod>/assets/`), `audio/` (machine sound / SSM toolchain), `devkitpro/` (toolchain build), `utility/` (ISO / DOL helpers).
 - `out/` - build output; `out/Riivolution/` is the deployable package. Do not hand-edit.
 - `iso/` - extracted contents of `kar.iso` - original game assets for inspection.
 
@@ -58,6 +58,7 @@ When reverse engineering game functions and discovering their purpose, **always*
   - `decomp` - Ghidra decompilation as plain C; `ghidra decompile` itself only emits JSON.
   - `rename` - names an unnamed symbol in `GKYE01.map` and `link.ld` at once.
   - `check` - hoshi prototypes missing from `link.ld` or the map, and `link.ld` names whose map row is still `zz_`.
+- **Review lint:** `uv run python scripts/review_lint.py <mod>` (or `--all`) lists mechanical rule hits - non-ASCII, comment banners and file pointers, OSReport prefixes, literal game addresses, raw struct offsets, layout asserts, unreferenced identifiers, unauthored assets. Every hit is a candidate to confirm, not a verdict.
 - **Skills:** `dolphin-memory` (live memory while Dolphin runs), `dat-explore` (HSD `.dat` archives), `ghidra-cli` (decompilation, xrefs, types).
 - **Ghidra constraints:** use the pre-configured project/program only - never `ghidra setup`/`config` or load another binary. Inline `ghidra script python`/`script java` are unavailable in bridge mode, and `script run` needs the copy-and-report plumbing in `scripts/ghidra/sync.py` - drive new `.java` scripts through that rather than rebuilding it.
 
@@ -82,12 +83,13 @@ Keep comments short and minimal - state only what the reader needs, prefer no co
 
 ## Code Style
 
-- C, targeting PowerPC 750 (GameCube CPU). No `-std=` flag is passed, so the toolchain default applies (C23 on the current devkitPPC GCC); `_Static_assert` and designated initializers are used freely.
+- C, targeting PowerPC 750 (GameCube CPU). No `-std=` flag is passed, so the toolchain default applies (C23 on the current devkitPPC GCC); designated initializers are used freely. `_Static_assert` checks that a count fits its storage or that a table covers an enum - never a struct's size or member offsets.
 - Compiled `-O1 -ffreestanding -fno-exceptions`, no libc beyond what hoshi provides.
 - The r13 register (SDA base) is `0x805DD0E0`; game globals in this range are accessed as r13-relative offsets. The r2 register (SDA2 base) is `0x805E6700`; read-only small data (float constants, etc.) are accessed as r2-relative offsets.
 - **Brace style: Allman.** Opening brace on its own line, matching hoshi style. The one exception in practice is a one-line wrapper or menu callback kept on a single line (`settings_menu.c`, `machine_registry.c`).
 - All headers use `#ifndef`/`#define`/`#endif` include guards; no `#pragma once` anywhere. New hoshi game headers use `KAR_H_<NAME>` (roughly half still carry the legacy `MEX_H_<NAME>` from m-ex; `externals/hoshi/include/hoshi/*.h` use `HOSHI<NAME>_H`). Mod headers - including the public API headers on the global include path - use plain name-based guards.
 - Game memory addresses and structures are defined in hoshi headers under `externals/hoshi/include/`. Don't redeclare them in mod code - include the appropriate hoshi header instead.
+- **Colors are `GXColor`** (`gx.h`) - variables, fields, params and constants alike, even when alpha is unused (say so). Not separate `r, g, b` values and not `Vec3`. A packed `u32` built with `RGBA()` is for table or descriptor entries where 0 means "use the default"; unpack it with `GXColor_Unpack`.
 
 **Naming follows the object hierarchy.** Name functions and structs for the level they operate at - a function that modifies `MachineData.stats` uses the `Machine_` prefix, not a generic `Stats_`.
 

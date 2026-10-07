@@ -12,7 +12,7 @@ Three unrelated text paths exist in the binary:
 
 ## Loading
 
-`Text_LoadSisFile(slot, filename, symbol)` (0x8044f800) loads an HSD archive into one of five slots. The archive pointer lands in `stc_sis_archives[5]` (0x8059a848) and the relocated pointer array in `stc_sis_data[5]` (0x8059a85c); both are declared in `text.h`. Within a slot's array, `[0]` is the image data pointer, `[1]` the kerning data pointer, and `[2]` onward the text entries. Different scenes load different files into slots 0-4.
+`Text_LoadSisFile(slot, filename, symbol)` (0x8044f800) loads an HSD archive into one of five slots. The archive pointer lands in `stc_sis_archives[5]` (0x8059a848) and the relocated pointer array in `stc_sis_data[5]` (0x8059a85c); both are declared in `text.h`, the array as a table of `SISEntry` (`u8 *`). `Text_InitPremadeText` (0x8044f8c8) indexes a slot's array directly by premade-text id, so `[0]` (the image data pointer) and `[1]` (the kerning data pointer) take ids 0 and 1, and the text entries start at `[2]`. Different scenes load different files into slots 0-4.
 
 ## Glyph banks
 
@@ -20,7 +20,7 @@ The renderer dispatches per character on the high bits of the 16-bit code.
 
 Codes `0x2000`-`0x3FFF` use the **master Latin bank** baked into `main.dol .data5`: images at `0x8050a040` (256 slots of `0x200` bytes each, I4 32x32, indexed by `(code - 0x2000) & 0xFF`) and kerning at `0x80509dc0` (320 x 2 bytes, `{u8 left_pad, u8 right_edge}`, running up to the image bank). Effective drawn width is `34 - left_pad - right_edge`, which is what `Text_GetStringWidth` in `text.h` reproduces. Vanilla populates roughly 90 slots (digits, A-Z, a-z, 22 scattered symbols up to `0x21xx`); the other ~165 are empty memory that a mod can write its own glyphs into. **All English UI in the game shares this one font.** SIS files carry no Latin glyphs at all.
 
-Codes `0x4000` and up use the **per-SIS bank** taken from the loading slot's `SISData` (`image_data_arr` / `kerning_data_arr`), same `0x200` stride and same 2-byte kerning layout, indexed by `(code - 0x4000) & 0xFF`. Only a few files supply one:
+Codes `0x4000` and up use the **per-SIS bank** taken from entries `[0]` (images) and `[1]` (kerning) of the loading slot's array, same `0x200` stride and same 2-byte kerning layout, indexed by `(code - 0x4000) & 0xFF`. Only a few files supply one:
 
 | SIS file | per-SIS image block | contents |
 |----------|---------------------|----------|
@@ -74,7 +74,9 @@ Every City Trial event string uses one template, which `ComposeSisText` in `mods
 
 ## Character codes
 
-`Text_CharToCommand` in `text.h` maps ASCII to SIS codes: `0x2000 + (c - '0')` for digits, `0x200a + (c - 'A')` for capitals, `0x2024 + (c - 'a')` for lowercase, and a 21-entry symbol table for `space ! " # $ % & ( ) * + , - . / : ; = ? @ _`. Anything else, including the apostrophe, returns -1 and gets dropped by callers such as `ComposeSisText`.
+`Text_CharToCommand` in `text.h` maps ASCII to SIS codes: `0x2000 + (c - '0')` for digits, `0x200a + (c - 'A')` for capitals, `0x2024 + (c - 'a')` for lowercase, and a 21-entry symbol table for `space ! " # $ % & ( ) * + , - . / : ; = ? @ _`. Anything else, including the apostrophe, returns -1.
+
+Mods compose runtime SIS text through two helpers in `text.h`. `Text_WriteSisChar` writes one character - a space as `TEXTCMD_SPACE`, a newline as `TEXTCMD_LINEBREAK`, anything else as its two-byte code - and drops a character `Text_CharToCommand` has no code for. `Text_WriteSisString` writes a whole string the same way. Both stop at the first character that would run past the end the caller gives, so a caller reserves its closing commands by passing an end short of the buffer's.
 
 In pre-composed SIS data, gaps between words are the `0x1a` SPACE opcode, not the `0x20e3` space glyph.
 
@@ -321,7 +323,7 @@ Pre-composed text via `Text_InitPremadeText` dominates the results and checklist
 
 Entries from index 16 up are live, not padding. The prediction event (kind 10) computes `stadium_kind + EVKIND_NUM` (that is, `+16`; at 0x801279a4 / 0x801279b4), writes it back into the event-check struct's kind field at `+0x18`, and reads `table[that_index]` on the next pass. That claims indices 16 through 39, one per `STKIND_NUM`. **Index 40 (`EVKIND_NUM + STKIND_NUM`) is the first slot a mod may take.**
 
-`CustomEvents_InitSis` in `mods/custom_events/src/custom_events.c` uses that: it copies the original 42-entry `stc_sis_data[0]` array into a static extended array, appends one `ComposeSisText`-built buffer per custom event at index 42 and up, repoints `stc_sis_data[0]` at the extended array, and writes `sis_id_table[40 + i] = 42 + i`. The vanilla `stadiumPrediction` path then displays custom text with no further hooking. The mod's `mod_desc` runs it from `.On3DLoadEnd` whenever the loaded stage is `STAGEKIND_CITY1`, so the entries are reinstalled on every City Trial load.
+`CustomEvents_InitSis` in `mods/custom_events/src/custom_events.c` uses that: `Text_ExtendSis` (`text.h`) copies the original 42-entry `stc_sis_data[0]` array into a static extended array and repoints the slot at it, then it appends one `ComposeSisText`-built buffer per custom event at index 42 and up, and writes `sis_id_table[40 + i] = 42 + i`. The vanilla `stadiumPrediction` path then displays custom text with no further hooking. The mod's `mod_desc` runs it from `.On3DLoadEnd` whenever the loaded stage is `STAGEKIND_CITY1`, so the entries are reinstalled on every City Trial load.
 
 ## HSD archive layout
 

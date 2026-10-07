@@ -10,13 +10,11 @@
 #include "obj.h"
 #include "rider.h"
 #include "weapon.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
-
-#define VOLC_PI      3.14159265358979f
-#define VOLC_DEG2RAD (VOLC_PI / 180.0f)
 
 // Crater mouth in City Trial world space.
 #define VOLC_MOUTH_X   -366.19f
@@ -63,7 +61,7 @@ typedef struct ThemeKinds
     int       count;
 } ThemeKinds;
 
-#define THEME_ENTRY(arr) { arr, (int)(sizeof(arr) / sizeof((arr)[0])) }
+#define THEME_ENTRY(arr) { arr, (int)GetElementsIn(arr) }
 
 // Indexed by VolcanoTheme; VOLC_THEME_DEFAULT and VOLC_THEME_CHAOS are resolved
 // before this table is read.
@@ -74,23 +72,12 @@ static const ThemeKinds theme_table[] = {
     THEME_ENTRY(theme_bomb),
     THEME_ENTRY(theme_star),
 };
-#define THEME_TABLE_NUM (int)(sizeof(theme_table) / sizeof(theme_table[0]))
+#define THEME_TABLE_NUM (int)GetElementsIn(theme_table)
 
 static int stc_active = 0;
 
-// The live preset's config (VolcanoDef with the module defaults filled in). Latched
-// by Volcano_SetActive and never written elsewhere, so a menu knob returned to
-// "Preset" resolves back to it.
-static int   stc_def_theme = VOLC_THEME_FIRE;
-static int   stc_def_eruptions = VOLC_DEF_ERUPTIONS;
-static int   stc_def_duration = VOLC_DEF_DURATION;
-static int   stc_def_interval = VOLC_DEF_INTERVAL;
-static int   stc_def_burst = VOLC_DEF_BURST;
-static float stc_def_power = VOLC_DEF_POWER;
-static float stc_def_spread = VOLC_DEF_SPREAD;
-
-// Effective config for this frame: the preset values with the menu overrides folded
-// in. Recomputed every frame so a live menu change lands immediately.
+// The live preset's VolcanoDef with the module defaults and menu overrides folded in,
+// latched by Volcano_SetActive.
 static int   stc_theme = VOLC_THEME_FIRE;
 static int   stc_eruptions = VOLC_DEF_ERUPTIONS;
 static int   stc_duration = VOLC_DEF_DURATION;
@@ -101,7 +88,7 @@ static float stc_spread = VOLC_DEF_SPREAD;
 
 // Round schedule: normalized match progress at which each eruption starts.
 static float stc_schedule[VOLC_MAX_ERUPTIONS];
-static int   stc_scheduled = 0;   // eruption count the schedule was planned for; 0 = unplanned
+static int   stc_planned = 0;
 static int   stc_next = 0;        // next unfired entry in stc_schedule
 static int   stc_frames_left = 0; // remaining frames of the eruption in progress
 static int   stc_volley_cd = 0;
@@ -111,28 +98,28 @@ static int show_index = 0;
 
 static const int count_values[] = {0, 1, 2, 3, 5, 8};
 static char *count_names[] = {"Preset", "1", "2", "3", "5", "8"};
-#define VOLC_COUNT_NUM (int)(sizeof(count_values) / sizeof(count_values[0]))
+#define VOLC_COUNT_NUM (int)GetElementsIn(count_values)
 static int count_index = 0;
 
 static const float duration_factors[] = {1.0f, 0.5f, 1.0f, 1.8f, 3.0f};
 static char *duration_names[] = {"Preset", "Brief", "Normal", "Long", "Sustained"};
-#define VOLC_DURATION_NUM (int)(sizeof(duration_factors) / sizeof(duration_factors[0]))
+#define VOLC_DURATION_NUM (int)GetElementsIn(duration_factors)
 static int duration_index = 0;
 
 // Scales the per-volley projectile count and tightens the gap between volleys.
 static const float density_factors[] = {1.0f, 0.5f, 1.0f, 2.0f, 3.5f};
 static char *density_names[] = {"Preset", "Sparse", "Normal", "Heavy", "Cataclysm"};
-#define VOLC_DENSITY_NUM (int)(sizeof(density_factors) / sizeof(density_factors[0]))
+#define VOLC_DENSITY_NUM (int)GetElementsIn(density_factors)
 static int density_index = 0;
 
 static const float power_factors[] = {1.0f, 0.65f, 1.0f, 1.4f};
 static char *power_names[] = {"Preset", "Weak", "Normal", "Strong"};
-#define VOLC_POWER_NUM (int)(sizeof(power_factors) / sizeof(power_factors[0]))
+#define VOLC_POWER_NUM (int)GetElementsIn(power_factors)
 static int power_index = 0;
 
 // Index 0 is "Preset"; 1..5 line up 1:1 with VolcanoTheme.
 static char *theme_names[] = {"Preset", "Fire", "Plasma", "Bombs", "Stars", "Chaos"};
-#define VOLC_THEME_NUM (int)(sizeof(theme_names) / sizeof(theme_names[0]))
+#define VOLC_THEME_NUM (int)GetElementsIn(theme_names)
 static int theme_index = 0;
 
 // Runs from the projectile's own prio-0 proc, right after that proc zeroes the
@@ -176,9 +163,9 @@ static void LaunchOne(void)
             return;
     }
 
-    float max_tilt = VOLC_MAX_TILT * stc_spread * VOLC_DEG2RAD;
-    float tilt = max_tilt * (VOLC_MIN_TILT_F + (1.0f - VOLC_MIN_TILT_F) * HSD_Randf());
-    float az = HSD_Randf() * 2.0f * VOLC_PI;
+    float max_tilt = MTXDegToRad(VOLC_MAX_TILT * stc_spread);
+    float tilt = max_tilt * Weather_RandRange(VOLC_MIN_TILT_F, 1.0f);
+    float az = HSD_Randf() * 2.0f * M_PI;
     float st = sinf(tilt), ct = cosf(tilt);
 
     float sa = sinf(az), ca = cosf(az);
@@ -263,26 +250,25 @@ static void LaunchOne(void)
     proj->framestart_callback = VolcanoGravity;
 }
 
-// Fold the menu overrides over the latched preset config. Returns 0 when the
-// volcano is dormant this round.
-static int Volcano_ResolveConfig(void)
+void Volcano_SetActive(const VolcanoDef *def)
 {
-    if (!WeatherToggle(show_index, stc_active))
-        return 0;
+    stc_active = WeatherToggle(show_index, def && def->enabled);
 
-    stc_eruptions = (count_index > 0) ? count_values[count_index] : stc_def_eruptions;
-    if (stc_eruptions <= 0)
-        return 0;
+    int def_eruptions = (def && def->eruptions > 0) ? def->eruptions : VOLC_DEF_ERUPTIONS;
+    stc_eruptions = (count_index > 0) ? count_values[count_index] : def_eruptions;
     if (stc_eruptions > VOLC_MAX_ERUPTIONS)
         stc_eruptions = VOLC_MAX_ERUPTIONS;
 
-    stc_duration = (int)(stc_def_duration * duration_factors[duration_index]);
+    int def_duration = (def && def->duration > 0) ? def->duration : VOLC_DEF_DURATION;
+    stc_duration = (int)(def_duration * duration_factors[duration_index]);
     if (stc_duration < 1)
         stc_duration = 1;
 
     float density = density_factors[density_index];
-    stc_burst = (int)(stc_def_burst * density + 0.5f);
-    stc_interval = (int)(stc_def_interval / density);
+    int def_burst = (def && def->burst > 0) ? def->burst : VOLC_DEF_BURST;
+    int def_interval = (def && def->interval > 0) ? def->interval : VOLC_DEF_INTERVAL;
+    stc_burst = (int)(def_burst * density + 0.5f);
+    stc_interval = (int)(def_interval / density);
     if (stc_burst < 1)
         stc_burst = 1;
     if (stc_burst > VOLC_MAX_BURST)
@@ -290,51 +276,32 @@ static int Volcano_ResolveConfig(void)
     if (stc_interval < 2)
         stc_interval = 2;
 
-    stc_power = power_factors[power_index] * stc_def_power;
-    stc_spread = stc_def_spread;
-    stc_theme = (theme_index > 0) ? theme_index : stc_def_theme;
-
-    return 1;
-}
-
-// The menu can force the volcano on over a preset that leaves it off, so the
-// resolved values are latched either way.
-void Volcano_SetActive(const VolcanoDef *def)
-{
-    stc_active = (def && def->enabled) ? 1 : 0;
-
-    stc_def_theme     = (def && def->theme > 0) ? def->theme : VOLC_THEME_FIRE;
-    stc_def_eruptions = (def && def->eruptions > 0) ? def->eruptions : VOLC_DEF_ERUPTIONS;
-    stc_def_duration  = (def && def->duration > 0) ? def->duration : VOLC_DEF_DURATION;
-    stc_def_interval  = (def && def->interval > 0) ? def->interval : VOLC_DEF_INTERVAL;
-    stc_def_burst     = (def && def->burst > 0) ? def->burst : VOLC_DEF_BURST;
-    stc_def_power     = (def && def->power > 0.0f) ? def->power : VOLC_DEF_POWER;
-    stc_def_spread    = (def && def->spread > 0.0f) ? def->spread : VOLC_DEF_SPREAD;
+    float def_power = (def && def->power > 0.0f) ? def->power : VOLC_DEF_POWER;
+    stc_power = power_factors[power_index] * def_power;
+    stc_spread = (def && def->spread > 0.0f) ? def->spread : VOLC_DEF_SPREAD;
+    if (theme_index > 0)
+        stc_theme = theme_index;
+    else
+        stc_theme = (def && def->theme > 0) ? def->theme : VOLC_THEME_FIRE;
 
     // A new preset mid-round reschedules the eruptions it has left.
-    stc_scheduled = 0;
+    stc_planned = 0;
     stc_frames_left = 0;
 }
 
 void Volcano_Tick(void)
 {
-    // Config is resolved before the active test so a forced-On menu value can wake
-    // a preset that ships the volcano dormant.
-    if (!Volcano_ResolveConfig())
-    {
-        stc_frames_left = 0;
+    if (!stc_active)
         return;
-    }
 
     float p = Weather_RoundProgress();
     if (p < 0.0f)
         return;
 
-    // A changed eruption count re-plans the round from the current progress.
-    if (stc_scheduled != stc_eruptions)
+    if (!stc_planned)
     {
         stc_next = Weather_SeedSchedule(stc_schedule, stc_eruptions, p);
-        stc_scheduled = stc_eruptions;
+        stc_planned = 1;
     }
 
     if (stc_frames_left > 0)
@@ -364,7 +331,7 @@ void Volcano_Tick(void)
 void Volcano_Reset(void)
 {
     stc_active = 0;
-    stc_scheduled = 0;
+    stc_planned = 0;
     stc_next = 0;
     stc_frames_left = 0;
     stc_volley_cd = 0;

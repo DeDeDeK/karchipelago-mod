@@ -10,14 +10,15 @@ path is the point - so re-running one regenerates exactly what the build stages.
                      make_ap_star_shot.py     ApStarShot.dat
                      make_ap_star_assembly.py ApStarAssembly.dat
     archipelago      make_ap_box.py           items/ApBox.dat
+                     make_ap_patch.py         items/ApPatch.dat
+                     make_card_tiles.py       ApIcon.dat, ApBanner.dat
                      make_checklist_textures.py  ApChecklistTex.dat
                      make_menu_logo.py        MnTitleKarchi.dat
     custom_machines  make_ui_frames.py        CmUiFrames.dat
+    hypernova        make_miracle_fruit.py    items/MiracleFruit.dat
     custom_weather   make_backdrop_manifest.py    BackdropManifest.dat
                      verify_backdrop_manifest.py  checks it against the donors
 
-The assets a generic tool authors are not here: `mods/archipelago/assets/items/ApPatch.dat`
-and `mods/hypernova/assets/items/MiracleFruit.dat` come from `scripts/hsd/carve_custom_item.py`
-command lines, `machines/VcStarAp.art` from `scripts/hsd/make_machine_art.py`, and
-`ApIcon.dat` / `ApBanner.dat` from `scripts/utility/card_tile.py`.
+The assets a generic tool authors are not here: `machines/VcStarAp.art` comes from
+`scripts/hsd/make_machine_art.py`.
 """

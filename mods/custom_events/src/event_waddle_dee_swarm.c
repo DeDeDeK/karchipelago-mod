@@ -1,9 +1,11 @@
+#include <float.h>
 #include <string.h>
 
 #include "game.h"
 #include "hsd.h"
 #include "obj.h"
 #include "enemy.h"
+#include "inline.h"
 
 #include "event_waddle_dee_swarm.h"
 
@@ -33,7 +35,7 @@ static void WaddleDeeChaseMovement(EnemyData *ed)
     // EventActor_FindNearestPlayer caps detection range; pre-setting a target
     // bypasses that so the swarm can hunt across the whole map. The distance to an
     // empty slot is FLT_MAX.
-    float best_dist = 1e30f;
+    float best_dist = FLT_MAX;
     int best = -1;
     for (int i = 0; i < 4; i++)
     {
@@ -193,9 +195,9 @@ static void WaddleDeeSpawnOne(void)
     if (!s)
         return;
 
-    GOBJ *candidates[5];
+    GOBJ *candidates[PLY_NUM];
     int count = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         GOBJ *rg = Ply_GetRiderGObj(i);
         if (rg && Ply_GetPKind(i) == PKIND_HMN)
@@ -213,7 +215,7 @@ static void WaddleDeeSpawnOne(void)
         {-28.3f,  28.3f}, { 28.3f, -28.3f}, {-28.3f, -28.3f},
         { 40.0f,   0.0f}, {-40.0f,   0.0f}, {  0.0f, -40.0f},
     };
-    int ofs_idx = HSD_Randi(sizeof(offsets) / sizeof(offsets[0]));
+    int ofs_idx = HSD_Randi(GetElementsIn(offsets));
 
     EventActorDesc desc;
     memset(&desc, 0, sizeof(desc));
@@ -233,7 +235,7 @@ static void WaddleDeeSpawnOne(void)
         return;
 
     *s = (SwarmSlot){.gobj = actor, .saved_pos = desc.position};
-    GObj_AddProc(actor, WaddleDeeChaseProc, 10);
+    GObj_AddProc(actor, WaddleDeeChaseProc, ENEMYPRI_DMGAPPLY);
 }
 
 void WaddleDeeSwarm_Start(void)

@@ -18,8 +18,10 @@ so the exports are guaranteed to exist by then:
 |--------|--------------|
 | `archipelago` | Every menu row and pad binding no-ops; `OnFrameStart` returns immediately |
 | `custom_events` | D-Pad Up (Scale Change) is disabled; everything else works |
+| `textbox` | Menu actions post no confirmation line; everything else works |
 
-Text feedback goes through `ArchipelagoAPI.Textbox`, so the mod never imports `textbox` itself.
+Text feedback goes straight to `TextBoxAPI.Enqueue` through `DebugMenu_Notify`, which drops the
+line when `textbox` is absent.
 
 ## Pad bindings
 
@@ -180,12 +182,18 @@ on a live City Trial round, not on the sphere's unlock bit.
 
 - **Auto-Grant on Z Unlock** - the mod's only persisted option, since nothing else re-derives it.
 - **Clear All sent_checks**, **Force-Mark All**, **Trigger goal_complete** - direct manipulation
-  of the sent-check bitmask and the sticky goal bits. Force-Mark sets every backed bit,
-  `goal_complete` and `goal_announced`; it deliberately leaves the AP tab's unbacked cells clear.
+  of the sent-check bitmask and the sticky per-row goal latches. Force-Mark sets every bit of all
+  four rows (every AP tab cell backs a location), `max_stats_ct_achieved` and every AP Patch
+  below `ap_patches`, then latches every row's goal; Clear All sent_checks clears the bits, the
+  collected AP Patches, the goal latches and `max_stats_ct_achieved`. Trigger goal_complete
+  latches every row's goal (`APGoal_DebugComplete`).
 - **Reveal Checklists** - "All Checklists" plus one row per checklist-mode row. Visual only:
   it sets `is_visible` and leaves `is_unlocked` to the normal completion path.
 - **Simulate Location Data**, **Clear All Checklist Data** - fill the location arrays with a
-  random shuffle, or wipe every checkbox flag, sent-check bit and shuffle entry.
+  random shuffle, or wipe every checkbox flag, sent-check bit and shuffle entry. The wipe
+  covers the AP tab's saved board too, and with it the AP objectives' latches and cross-boot
+  counters (`APCheckDetect_ResetProgress`); a cleared board with its objectives still latched
+  would complete and re-send them on the next frame.
 - **AP Patches** (Off / 8 / 64 / 512), **Collect AP Patch** and **Clear Collected AP Patches**.
   The clear wipes the save bits, the wire mirror and the client's pending backfill together -
   leaving the backfill would let the client's next push restore every bit and the patch would
@@ -223,8 +231,8 @@ row's `on_change` on every D-pad tick, auto-repeat included, and goal evaluation
 whole set rather than one row: victory needs one non-`GOAL_NONE` row and every row satisfied. So
 committing each value a row passes through would let a scroll stop momentarily on a kind that
 happens to be satisfied - with three rows on `GOAL_NONE`, which is vacuously satisfied, that is
-one row away - and latch `goal_complete`, which is sticky and which the client reports to the
-server. Applying the set as a unit means only what is on screen is ever evaluated.
+one row away - and raise `goal_complete`, which the client reports to the server as soon as it
+reads it. Applying the set as a unit means only what is on screen is ever evaluated.
 
 Apply also passes the threshold only to the rows actually on `N Squares`, so setting an unrelated
 row's goal does not rewrite its square count, and it evaluates and writes the card once rather
@@ -232,11 +240,12 @@ than once per row.
 
 Two caveats the rows cannot express:
 
-- `goal_complete` is sticky. A new goal on a save that already goaled shows nothing until
-  **Clear All sent_checks** on the Checks page resets it.
-- `GOAL_MAX_STATS_CT` is the one goal armed at round load rather than evaluated continuously:
-  `GoalMaxStatsCT_On3DLoadEnd` attaches its per-rider proc only when the City Trial row already
-  holds that goal, so it takes effect from the next round rather than this one.
+- Each row's goal latches once met. Apply clears the latch of a row whose goal it changes, so
+  that row is judged afresh; a row left alone keeps its latch, and a victory the client has
+  already reported stays reported. **Clear All sent_checks** on the Checks page clears every
+  latch.
+- Goal evaluation waits for the slot options. On a save that has never received them Apply
+  stores the goals but judges nothing, and the first connect overwrites them with the seed's.
 
 ### Slot Options
 
@@ -247,11 +256,15 @@ change without re-rolling a seed:
   `*_gating_enabled` flags. `AP_UNLOCK_AP_STAR_PIECE` has no flag of its own; the spheres follow
   the CT item category.
 - **Patch Cap Min / Max** - the per-stat cap a City Trial run starts at and the ceiling Patch Cap
-  Increase items raise it to. A stored 0 means options were never received, which the mod reads
-  as the `PATCH_STAT_MAX` ceiling, so the rows show 127 in that state. Each row writes only its
-  own bound: the rows offer fixed steps and display the nearest at or below the live value, so a
-  row that wrote both would round the one nobody touched down to its displayed bucket.
+  Increase items raise it to. Each row writes only its own bound: the rows offer fixed steps and
+  display the nearest at or below the live value, so a row that wrote both would round the one
+  nobody touched down to its displayed bucket.
 - **Spawn Rate Floor** - the item spawn rate before any Spawn Rate Up.
+
+The cap and spawn-rate rows only bite on a save that has received its slot options. Before that
+the mod ignores the stored values - the cap sits at `PATCH_STAT_MAX` and the spawn rate at 100% -
+so the rows show the stored 0 as 127 and 100%, and the first connect replaces whatever they
+wrote with the seed's values.
 - **Re-apply** - zero every unlock mask, then re-run the connect-time reveal and ungated pre-fill.
 
 Re-apply exists because the gating flags are read once, at connect, and almost nowhere else -
@@ -294,7 +307,7 @@ objectives latch in `ap_check_detect.c`'s boot-scoped observed set, which has no
 Seven rows, six of them one per `APTextKind`, that post a canned client-authored line into the
 `APData` text mailbox exactly as the Python client does - whole record first, pending flag last.
 That exercises the render path, the per-kind Messages filter, the colour palette and the
-`IsReady` hold across a scene load, none of which has any local trigger otherwise. Each canned
+canvas hold across a scene load, none of which has any local trigger otherwise. Each canned
 line uses the wording and colours the client actually composes, so a rendering difference is a
 real one.
 
@@ -319,13 +332,13 @@ moment, so a flag armed while the link is off sits until a round that has the pr
 
 **Balance** sets the pool to an exact value, and the offered rows bracket the affordability
 check: the cheapest purchase in the spend menu is 200 MJ and the dearest 50000, and the check is
-a strict `<`, so 199/200 and 49999/50000 are the two edges. **Add 1000** and **Drain to Zero**
-are the coarse forms.
+a strict `<`, so 199/200 and 49999/50000 are the two edges. **Add 1000** (`GetEnergyBalance`
+plus 1000 through `DebugSetEnergyBalance`) and **Drain to Zero** are the coarse forms.
 
 The override is a pure balance store. `energy_deposit_total` and `energy_withdraw_total` are
 rising counters the client read-and-diffs, so lowering either would decode as a ~4.29e9 delta;
 nothing here touches them. With a client attached the balance is overwritten on its next poll,
-about once a second, so an exact value only holds with none connected. A drain to 0 can still go
+every 0.1s, so an exact value only holds with none connected. A drain to 0 can still go
 slightly negative later: the withdraw path carries under 1 MJ of fractional remainder that the
 next Auto-Charge frame applies.
 
@@ -335,12 +348,15 @@ safe direction.
 
 ### Report State and Reset Progression
 
-**Report State** logs the whole picture in one block: every unlock mask in binary with its gating
-flag, the effective and received patch cap, the spawn rate floor, permanent patches per stat,
-each row's goal and completed-square count, the sticky goal bits, AP Patch collected and
-remaining, the energy balance and its two counters, and the three check-progress counters.
+**Report State** (`APOptions_DebugReportState`) logs the whole picture in one block: the received
+and queued item counts, every unlock mask in binary with its gating flag, the effective and
+received patch cap with the seed's range, the spawn rate floor, permanent patches per stat, each
+row's goal and completed-square count, `goal_complete` and the per-row goal latches, AP Patch
+collected and remaining, the energy balance and its two counters, and all eight check-progress
+counters.
 
-**Reset Progression** rolls back everything AP receipts accumulate - patch cap count, spawn rate
+**Reset Progression** (`APOptions_DebugResetProgression`) rolls back everything AP receipts
+accumulate - patch cap count, spawn rate
 level, permanent patches, check progress, `max_stats_ct_achieved`, the received-item count and
 the unprocessed queue. Unlock masks are left alone; Slot Options' Re-apply is what rebuilds
 those, and the slot options themselves are left as received: clearing `options_received` while

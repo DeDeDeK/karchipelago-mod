@@ -8,7 +8,7 @@ Holding A while grounded fills a 0.0-1.0 meter; releasing it spends the meter on
 
 `Rider_IASACheck_Charge` (0x801ab624) tests the A button - mask 0x100 in the rider's button word - and enters rider state 0x28 through `AS_StarBeginCharge` (0x801ab688). That calls `Machine_CheckEnterCharge` (0x801ef150), which checks the machine's own input word at +0x66c and hands off to `Machine_EnterCharge` (0x801ef278) to move the machine to state 0xF.
 
-Rider state and machine state are separate machines and both have to move. `Rider_UpdateIsCharge` (0x801c75f4) is what copies the stick and the button into the machine's input words (+0x664 stick, +0x66c buttons), which is why the machine-side check reads its own copy rather than the controller.
+Rider state and machine state are separate machines and both have to move. `Machine_SetInput` (0x801c75f4) is what copies the stick and the button into the machine's input words (+0x664 stick Y, +0x668 stick X, +0x66c buttons), which is why the machine-side check reads its own copy rather than the controller.
 
 ## Accumulating
 
@@ -34,7 +34,7 @@ Three flags in the byte at +0xc32 come out of this function. Bits 0x40 and 0x20 
 
 ## Holding, and the overcharge penalty
 
-`Machine_ChargeUpdate` (0x801ca4c0) runs each frame from `Machine_ChargeThink` (0x801c5fe0) and does three things in order.
+`Machine_ChargeUpdate` (0x801ca4c0) runs each frame from `Machine_FrameStartThink` (0x801c5fe0) and does three things in order.
 
 It clears +0xc32 bits 0x20 and 0x40 first, which is the other half of the arrangement above: those flags are re-set only by an increment, so anything that stops the meter moving stops the charge sound on the same frame.
 
@@ -52,7 +52,7 @@ The boost is read from a per-machine table. Both functions call `LerpTable(0.1, 
 
 `Machine_ClearChargeState` (0x801ca294) zeroes the meter, the display mirror, the full timer and the flags. Eleven-odd sites call it - hit reactions, state transitions, death, being knocked off the machine - and they clear an externally injected meter as readily as an earned one.
 
-Other functions on the path: `AS_StarChargeHold` (0x801ab940) is rider state 0x28's think; `chargeMain` (0x801abad0) is the shared per-frame charge routine those states call, which also tests for dismount; `Rider_UpdateCharge` (0x801cceb8) is the rider-side ground update, re-running the point collision and reading ground type and traction alongside the same velocity/up/forward angle math; `Machine_RotateDuringCharge` (0x801ec5cc) turns the machine in place while it charges; and `Machine_NullCharge` (0x801c8edc), the first call in `Machine_ChargeThink`, zeroes the machine's input words at +0x664, +0x668 and +0x66c.
+Other functions on the path: `AS_StarChargeHold` (0x801ab940) is rider state 0x28's think; `chargeMain` (0x801abad0) is the shared per-frame charge routine those states call, which also tests for dismount; `Rider_UpdateCharge` (0x801cceb8) is the rider-side ground update, re-running the point collision and reading ground type and traction alongside the same velocity/up/forward angle math; `Machine_RotateDuringCharge` (0x801ec5cc) turns the machine in place while it charges; and `Machine_NullCharge` (0x801c8edc), the first call in `Machine_FrameStartThink`, zeroes the machine's input words at +0x664, +0x668 and +0x66c.
 
 ## External writes to `charge_value`
 

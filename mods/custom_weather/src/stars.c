@@ -7,13 +7,11 @@
 #include "stage.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
-
-#define STAR_PI      3.14159265358979f
-#define STAR_DEG2RAD (STAR_PI / 180.0f)
 
 #define STAR_MAX   220  // field capacity; resolved density clamps to this
 #define STAR_SEGS  6    // rim vertices of each soft dot (a coarse circle is plenty)
@@ -112,23 +110,23 @@ static int   show_index = 0;
 
 static const float density_factors[] = {1.0f, 0.5f, 1.0f, 1.7f};
 static char *density_names[] = {"Preset", "Sparse", "Normal", "Dense"};
-#define STAR_DENSITY_NUM ((int)(sizeof(density_factors) / sizeof(density_factors[0])))
+#define STAR_DENSITY_NUM ((int)GetElementsIn(density_factors))
 static int density_index = 0;
 
 static const float twinkle_factors[] = {1.0f, 0.0f, 1.0f, 2.0f};
 static char *twinkle_names[] = {"Preset", "None", "Gentle", "Lively"};
-#define STAR_TWINKLE_NUM ((int)(sizeof(twinkle_factors) / sizeof(twinkle_factors[0])))
+#define STAR_TWINKLE_NUM ((int)GetElementsIn(twinkle_factors))
 static int twinkle_index = 0;
 
 static const float lum_factors[] = {1.0f, 0.6f, 1.0f, 1.4f};
 static char *lum_names[] = {"Preset", "Dim", "Normal", "Bright"};
-#define STAR_LUM_NUM ((int)(sizeof(lum_factors) / sizeof(lum_factors[0])))
+#define STAR_LUM_NUM ((int)GetElementsIn(lum_factors))
 static int lum_index = 0;
 
 // Master scalar over the preset's per-star size spread (resolved var clamped 0..1).
 static const float variance_factors[] = {1.0f, 0.2f, 1.0f, 1.8f};
 static char *variance_names[] = {"Preset", "Uniform", "Normal", "Varied"};
-#define STAR_VARIANCE_NUM ((int)(sizeof(variance_factors) / sizeof(variance_factors[0])))
+#define STAR_VARIANCE_NUM ((int)GetElementsIn(variance_factors))
 static int variance_index = 0;
 
 // Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the base
@@ -136,7 +134,7 @@ static int variance_index = 0;
 static const u32 color_overrides[] = {0, RGBA(255, 255, 255, 255), RGBA(255, 240, 214, 255),
                                       RGBA(210, 224, 255, 255)};
 static char *color_names[] = {"Preset", "White", "Warm", "Cool"};
-#define STAR_COLOR_NUM ((int)(sizeof(color_overrides) / sizeof(color_overrides[0])))
+#define STAR_COLOR_NUM ((int)GetElementsIn(color_overrides))
 static int color_index = 0;
 
 // Random lull range (frames) between meteors, indexed by cadence level. Slots 0
@@ -145,7 +143,7 @@ static int color_index = 0;
 static const int shoot_lull_min[] = {600, 0, 1200, 600, 240};
 static const int shoot_lull_max[] = {1500, 0, 3000, 1500, 600};
 static char *shoot_names[] = {"Preset", "Off", "Rare", "Occasional", "Frequent"};
-#define STAR_SHOOT_NUM ((int)(sizeof(shoot_names) / sizeof(shoot_names[0])))
+#define STAR_SHOOT_NUM ((int)GetElementsIn(shoot_names))
 static int shoot_index = 0;
 
 // Effective cadence level 1..4; Preset (0) resolves to the preset's latched level.
@@ -157,26 +155,26 @@ static int ShootLevel(void)
 // Meteor head/trail size multiplier.
 static const float shoot_size_factors[] = {1.0f, 0.65f, 1.0f, 1.5f};
 static char *shoot_size_names[] = {"Preset", "Small", "Normal", "Large"};
-#define SHOOT_SIZE_NUM ((int)(sizeof(shoot_size_factors) / sizeof(shoot_size_factors[0])))
+#define SHOOT_SIZE_NUM ((int)GetElementsIn(shoot_size_factors))
 static int shoot_size_index = 0;
 
 // Life multiplier: a slower meteor lives longer, crossing its arc more slowly.
 static const float shoot_speed_factors[] = {1.0f, 1.6f, 1.0f, 0.6f};
 static char *shoot_speed_names[] = {"Preset", "Slow", "Normal", "Fast"};
-#define SHOOT_SPEED_NUM ((int)(sizeof(shoot_speed_factors) / sizeof(shoot_speed_factors[0])))
+#define SHOOT_SPEED_NUM ((int)GetElementsIn(shoot_speed_factors))
 static int shoot_speed_index = 0;
 
 // Additive peak-brightness multiplier over SHOOT_BRIGHT.
 static const float shoot_bright_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
 static char *shoot_bright_names[] = {"Preset", "Dim", "Normal", "Bright"};
-#define SHOOT_BRIGHT_NUM ((int)(sizeof(shoot_bright_factors) / sizeof(shoot_bright_factors[0])))
+#define SHOOT_BRIGHT_NUM ((int)GetElementsIn(shoot_bright_factors))
 static int shoot_bright_index = 0;
 
 // Index 0 follows the resolved starfield color; the rest force an RGB.
 static const u32 shoot_color_overrides[] = {0, RGBA(255, 255, 255, 255), RGBA(255, 236, 200, 255),
                                             RGBA(200, 224, 255, 255)};
 static char *shoot_color_names[] = {"Star", "White", "Warm", "Cool"};
-#define SHOOT_COLOR_NUM ((int)(sizeof(shoot_color_overrides) / sizeof(shoot_color_overrides[0])))
+#define SHOOT_COLOR_NUM ((int)GetElementsIn(shoot_color_overrides))
 static int shoot_color_index = 0;
 
 static void Star_GX(GOBJ *g, int pass);
@@ -185,10 +183,10 @@ static void Star_GX(GOBJ *g, int pass);
 // a size scaled by the resolved variance, and a random twinkle.
 static void SeedStar(Star *s, float sin_min, float var)
 {
-    float z = sin_min + HSD_Randf() * (1.0f - sin_min);
+    float z = Weather_RandRange(sin_min, 1.0f);
     float rh = 1.0f - z * z;
     rh = (rh > 0.0f) ? sqrtf(rh) : 0.0f;
-    float az = HSD_Randf() * 2.0f * STAR_PI;
+    float az = HSD_Randf() * 2.0f * M_PI;
     s->dir.X = rh * cosf(az);
     s->dir.Y = z;
     s->dir.Z = rh * sinf(az);
@@ -199,7 +197,7 @@ static void SeedStar(Star *s, float sin_min, float var)
     s->size = stc_base_size * STAR_SIZE_SCALE * scale;
 
     s->bright = Weather_RandRange(STAR_BRIGHT_MIN, 1.0f);
-    s->tw_phase = HSD_Randf() * 2.0f * STAR_PI;
+    s->tw_phase = HSD_Randf() * 2.0f * M_PI;
     s->tw_speed = Weather_RandRange(STAR_TW_SPEED_MIN, STAR_TW_SPEED_MAX);
 }
 
@@ -217,7 +215,7 @@ static void Star_Arm(void)
         want = 0;
     stc_count = want;
 
-    float sin_min = sinf(STAR_MIN_ELEV_DEG * STAR_DEG2RAD);
+    float sin_min = sinf(MTXDegToRad(STAR_MIN_ELEV_DEG));
     for (int i = 0; i < stc_count; i++)
         SeedStar(&stc_stars[i], sin_min, var);
 
@@ -252,14 +250,12 @@ static void Star_GX(GOBJ *g, int pass)
     if (!cam)
         return;
 
-    // Rows 0/1 of the world->view rotation are the billboard basis.
-    float (*m)[4] = cam->view_mtx;
-    Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
-    Vec3 upW = {m[1][0], m[1][1], m[1][2]};
+    Vec3 rightW, upW;
+    COBJ_GetViewAxes(cam, &rightW, &upW);
 
     Vec3 eye;
-    WeatherGX_CameraEye(cam, &eye);
-    float e2 = eye.X * eye.X + eye.Y * eye.Y + eye.Z * eye.Z;
+    COBJ_GetViewEye(cam, &eye);
+    float e2 = VECSquareMag(&eye);
     float maxd = cam->far * STAR_FAR_FRAC;
 
     float tw = stc_twinkle * twinkle_factors[twinkle_index];
@@ -269,7 +265,7 @@ static void Star_GX(GOBJ *g, int pass)
 
     HSD_Fog *fog = Weather_LiveFog();
 
-    WeatherGX_BeginXlu(cam, 1, 0); // additive: dots glow, never darken the sky
+    GX_BeginXlu(cam, 2, GX_BL_ONE); // additive: dots glow, never darken the sky
     if (fog)
         HSD_FogSet(NULL);
 
@@ -290,13 +286,12 @@ static void Star_GX(GOBJ *g, int pass)
         float r = s->size * (dist / WEATHER_DOME_REF_DIST);
 
         GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, STAR_SEGS + 2);
-        WeatherGX_BillboardVert(&P, &rightW, &upW, 0.0f, 0.0f,
-                                stc_color.r, stc_color.g, stc_color.b, A);
+        GX_BillboardVert(&P, &rightW, &upW, 0.0f, 0.0f, stc_color, A);
         for (int sgm = 0; sgm <= STAR_SEGS; sgm++)
         {
-            float ang = 2.0f * STAR_PI * (float)sgm / (float)STAR_SEGS;
-            WeatherGX_BillboardVert(&P, &rightW, &upW, cosf(ang) * r, sinf(ang) * r,
-                                    stc_color.r, stc_color.g, stc_color.b, 0);
+            float ang = 2.0f * M_PI * (float)sgm / (float)STAR_SEGS;
+            GX_BillboardVert(&P, &rightW, &upW, cosf(ang) * r, sinf(ang) * r,
+                             stc_color, 0);
         }
     }
 
@@ -308,9 +303,7 @@ static void Star_GX(GOBJ *g, int pass)
         if (shoot_color_index > 0)
         {
             GXColor ov = GXColor_Unpack(shoot_color_overrides[shoot_color_index]);
-            sc.r = ov.r;
-            sc.g = ov.g;
-            sc.b = ov.b;
+            sc = (GXColor){ov.r, ov.g, ov.b, sc.a};
         }
         float peak = (float)SHOOT_BRIGHT * shoot_bright_factors[shoot_bright_index];
         if (peak > 255.0f)
@@ -367,12 +360,12 @@ static void Star_GX(GOBJ *g, int pass)
             float hr = head_size * (hdist / WEATHER_DOME_REF_DIST);
             u8 HA = (u8)(peak * env);
             GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, STAR_SEGS + 2);
-            WeatherGX_BillboardVert(&HP, &rightW, &upW, 0.0f, 0.0f, sc.r, sc.g, sc.b, HA);
+            GX_BillboardVert(&HP, &rightW, &upW, 0.0f, 0.0f, sc, HA);
             for (int sgm = 0; sgm <= STAR_SEGS; sgm++)
             {
-                float ang = 2.0f * STAR_PI * (float)sgm / (float)STAR_SEGS;
-                WeatherGX_BillboardVert(&HP, &rightW, &upW, cosf(ang) * hr, sinf(ang) * hr,
-                                        sc.r, sc.g, sc.b, 0);
+                float ang = 2.0f * M_PI * (float)sgm / (float)STAR_SEGS;
+                GX_BillboardVert(&HP, &rightW, &upW, cosf(ang) * hr, sinf(ang) * hr,
+                                 sc, 0);
             }
         }
     }
@@ -387,7 +380,7 @@ static int RandLull(void)
     int lvl = ShootLevel();
     if (lvl == 1) // Off falls back to Occasional for the (unused) seed delay
         lvl = 3;
-    return Weather_RandRangeI(shoot_lull_min[lvl], shoot_lull_max[lvl]);
+    return RandomInRange(shoot_lull_min[lvl], shoot_lull_max[lvl]);
 }
 
 // Launch a meteor into a free pool slot: a start direction high in the sky and a
@@ -406,22 +399,17 @@ static void Shoot_Spawn(void)
     if (!sh)
         return; // pool full; skip this launch
 
-    float el = Weather_RandRange(25.0f, 75.0f) * STAR_DEG2RAD;
-    float az = HSD_Randf() * 2.0f * STAR_PI;
+    float el = MTXDegToRad(Weather_RandRange(25.0f, 75.0f));
+    float az = HSD_Randf() * 2.0f * M_PI;
     float ce = cosf(el), se = sinf(el);
     Vec3 d0 = {ce * sinf(az), se, ce * cosf(az)};
 
     // Orthonormal tangent basis to d0 (e1 horizontal, e2 completing it), combined at
     // a random roll, then flipped downward so meteors descend.
-    Vec3 e1 = {-d0.Z, 0.0f, d0.X};
-    float e1len = sqrtf(e1.X * e1.X + e1.Z * e1.Z);
-    if (e1len < 1e-4f)
-        e1len = 1e-4f;
-    e1.X /= e1len; e1.Z /= e1len;
-    Vec3 e2 = {d0.Y * e1.Z - d0.Z * e1.Y,
-               d0.Z * e1.X - d0.X * e1.Z,
-               d0.X * e1.Y - d0.Y * e1.X};
-    float roll = HSD_Randf() * 2.0f * STAR_PI;
+    Vec3 e1, e2;
+    VEC_CrossNormalizeSnap(&d0, &(Vec3){0.0f, 1.0f, 0.0f}, &e1);
+    VECCrossProduct(&d0, &e1, &e2);
+    float roll = HSD_Randf() * 2.0f * M_PI;
     float cr = cosf(roll), sr = sinf(roll);
     Vec3 t = {e1.X * cr + e2.X * sr, e1.Y * cr + e2.Y * sr, e1.Z * cr + e2.Z * sr};
     if (t.Y > 0.0f)
@@ -432,7 +420,7 @@ static void Shoot_Spawn(void)
     sh->d0 = d0;
     sh->t = t;
     sh->arc = Weather_RandRange(SHOOT_ARC_MIN, SHOOT_ARC_MAX);
-    int base_life = Weather_RandRangeI(SHOOT_LIFE_MIN, SHOOT_LIFE_MAX);
+    int base_life = RandomInRange(SHOOT_LIFE_MIN, SHOOT_LIFE_MAX);
     sh->life = (int)(base_life * shoot_speed_factors[shoot_speed_index]);
     if (sh->life < 1)
         sh->life = 1;
@@ -460,7 +448,7 @@ static void Shoot_Tick(void)
             sh->active = 0;
     }
     if (ShootLevel() == 1)
-        return; // Off: let live meteors finish, launch none
+        return; // Off
     if (stc_shoot_timer > 0)
     {
         stc_shoot_timer--;
@@ -484,9 +472,7 @@ void Star_SetActive(const StarDef *def)
     if (color_index > 0)
     {
         GXColor ov = GXColor_Unpack(color_overrides[color_index]);
-        stc_color.r = ov.r;
-        stc_color.g = ov.g;
-        stc_color.b = ov.b;
+        stc_color = (GXColor){ov.r, ov.g, ov.b, stc_color.a};
     }
 
     stc_base_density = (def && def->density > 0) ? def->density : STAR_DEF_DENSITY;

@@ -1,9 +1,3 @@
-// CPU riders read per-machine rows out of DOL tables indexed by kind, and a few of their
-// decisions switch on the kind itself. Every reader reaches the kind through
-// MachineGObj_GetAbsoluteKind, which folds an appended class slot onto some other kind, so each
-// is replaced here: a vanilla machine gets exactly its engine row, a custom machine the CPU
-// rows its descriptor authors.
-
 #include "os.h"
 #include "machine.h"
 #include "rider.h"
@@ -179,7 +173,7 @@ static int HighJumpParam(RiderData *rd, float *pitch, float *min_len)
     return StadiumParam(rd, 1, pitch, min_len);
 }
 
-// Rider_ProcessCPUDistance caches the kind for Rider_CPUEmitSteerStick, which only compares
+// Rider_ProcessCPUDistance (0x8026bbe0) caches the kind for Rider_CPUEmitSteerStick, which only compares
 // it against Hydra, Winged and Jet Star to pick a stick pitch. A custom machine caches
 // whichever of those flies the pitch it authors, and its own MachineKind otherwise.
 static int CachedKind(GOBJ *machine)

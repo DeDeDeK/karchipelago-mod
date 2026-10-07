@@ -4,6 +4,7 @@
 
 #include "ap_star.h"
 #include "ap_star_pieces.h"
+#include "ap_star_ring.h"
 #include "ap_star_shot.h"
 
 // Hoshi's Mod_CopyFromSave overwrites these later if a saved hash exists.
@@ -47,28 +48,23 @@ static void OnBoot(void)
     ApStar_ExportApi();
 }
 
-static void OnSceneChange(void)
+static void OnSaveLoaded(void)
 {
-    ApStar_OnSceneChange();
-    ApStarPieces_OnSceneChange();
-    ApStarShot_OnSceneChange();
+    ApStar_OnSaveLoaded();
+    ApStarPieces_OnSaveLoaded();
 }
 
-static void On3DLoadStart(void)
+static void OnSceneChange(void)
 {
-    ApStarPieces_On3DLoadStart();
+    ApStarPieces_OnSceneChange();
+    ApStarRing_OnSceneChange();
+    ApStarShot_OnSceneChange();
 }
 
 static void On3DLoadEnd(void)
 {
     ApStarPieces_On3DLoadEnd();
     ApStarShot_On3DLoadEnd();
-}
-
-static void OnFrameStart(void)
-{
-    ApStarPieces_OnFrameStart();
-    ApStarShot_OnFrameStart();
 }
 
 ModDesc mod_desc = {
@@ -79,8 +75,8 @@ ModDesc mod_desc = {
     .affects_gameplay = 1,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
+    .OnSaveLoaded = OnSaveLoaded,
     .OnSceneChange = OnSceneChange,
-    .On3DLoadStart = On3DLoadStart,
+    .On3DLoadStart = ApStarPieces_On3DLoadStart,
     .On3DLoadEnd = On3DLoadEnd,
-    .OnFrameStart = OnFrameStart,
 };

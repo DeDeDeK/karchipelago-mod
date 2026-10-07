@@ -1,6 +1,6 @@
 # Kirby Color Gating
 
-Kirby's 8 vanilla colors can be individually locked behind Archipelago unlock items. AP items 880-887 (`AP_COLOR_UNLOCK_BASE` + `KirbyColor`) route through `ap_item_handler.c` to `GateColors_UnlockColor(idx, /*announce=*/1)`, which sets a bit in `APSave.color_unlocked_mask` (a `u8`) and enqueues `"Unlocked Color: <name> Kirby"` with `tb_api->KirbyColors[idx]`. A locked color cannot be cycled to on any character select screen, is never handed to a CPU, and is replaced wherever a mode's init block seeds it.
+Kirby's 8 vanilla colors can be individually locked behind Archipelago unlock items. AP items 880-887 (`AP_COLOR_UNLOCK_BASE` + `KirbyColor`) route through `ap_item_handler.c` to `GateColors_UnlockColor(idx, /*announce=*/1)`, which sets a bit in `APSave.color_unlocked_mask` (a `u8`) and announces `"Unlocked Color: <name> Kirby"` in `tb_api->KirbyColors[idx]` through `APAnnounce_Grant` (shown only with Messages -> Local -> Items on, default Off). A locked color cannot be cycled to on any character select screen, is never handed to a CPU, and is replaced wherever a mode's init block seeds it.
 
 **File:** `mods/archipelago/src/gate_colors.c`.
 
@@ -15,11 +15,11 @@ Kirby's 8 vanilla colors can be individually locked behind Archipelago unlock it
 | 6 | `KIRBYCOLOR_BROWN` | 886 | `AP_COLOR_UNLOCK_BROWN` |
 | 7 | `KIRBYCOLOR_WHITE` | 887 | `AP_COLOR_UNLOCK_WHITE` |
 
-Pink (color 0) is **not** hardcoded as always-unlocked - it is a normal AP unlock item like the others. The apworld is expected to ship Pink Kirby as a starting item, so the empty-mask soft fallback (`first_unlocked_color()` returning 0 when no bits are set) is unreachable in practice.
+Pink (color 0) is **not** hardcoded as always-unlocked - it is a normal AP unlock item like the others. With color gating on, the apworld hands the player one starting color (its "Starting Kirby Color" option, random by default), so the empty-mask soft fallback (`FirstUnlockedColor()` returning 0 when no bits are set) is unreachable in practice.
 
 The vanilla checklist grants colors through the same entry point: `checklist_rewards.c` maps `REWARD_COLOR_GREEN`/`PURPLE`/`BROWN`/`WHITE` (colors 4-7 only) to `GateColors_UnlockColor(..., /*announce=*/0)`, so checklist rewards and AP unlocks share one mask.
 
-The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_COLOR`. When the slot option `color_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` (`main.c`) sets it to all-1s at connect.
+The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_COLOR`. When the slot option `color_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` (`ap_options.c`) sets it to all-1s when the first slot options arrive.
 
 All three modes are covered - Air Ride (Race, Free Run, Time Attack), City Trial, and Top Ride (Start Game, Free Run, Time Attack) - across CSS color cycling, CPU color assignment, and per-mode `color[]` array initialization.
 
@@ -48,39 +48,42 @@ Each mode seeds `color[0..3]` with `{0, 1, 2, 3}` inside a conditional block, so
 - `TopRide_LobbyInit` (0x8002dc9c) then dispatches on `TopRide_GetMode()` (0x8003ea9c, returning `GameData[0x381]`). Mode 0 (Start Game / multiplayer race) goes to `TopRide_RaceInit` (0x8002d0ec), which re-assigns `{0,1,2,3}` unless the `init_flag` at `GameData[0x198]` (`lbz r0,1(r31)` at 0x8002d698) makes it `beq 0x8002d704`; 0x8002d704 (`li r7, 0`) is the convergence.
 - Mode 1 (Free Run) or 2 (Time Attack) goes to `TopRide_SoloInit` (0x8002d9e8), same conditional pattern (`beq 0x8002db8c` at 0x8002db58), single convergence at 0x8002db8c (`li r28, 0`) covering both solo modes.
 
-**City Trial** seeds `city_select_ply.ply_color[4]` (`GameData + 0x221`) with `{0,1,2,3}` at four sites, but none of them is a reliable hook point, so it is validated on CSS load instead. `CitySelect_InitSelectData` (0x80038c40) memsets the 0x8c-byte block and writes `ply_color[i] = i` at 0x80038cb0; it runs from `MainMenu_InitAllVariables`, `Gm_ResetCityTrialData`, `Gm_ResetAllData` and `CityTrial_MajorEnter` (0x8003fc5c, only when `GameData[0x399] != GameData[0x39a]`). The three CSS sub-loaders each carry their own copy - `CitySelect_LoadCityTrial` (0x80039930), `CitySelect_LoadStadium` (0x8003a278) and `CitySelect_LoadMachineSelect` (0x8003ad1c) - and all three are guarded by the same test: the block runs only when the incoming `city_select_ply.mode` (0x1d0) differs from the sub-mode being loaded, so re-entering the same CT sub-mode leaves the previous session's colors untouched.
+**City Trial** seeds `city_select_ply.ply_color[4]` (`GameData + 0x221`) with `{0,1,2,3}` at four sites, but none of them is a reliable hook point, so it is validated on CSS load instead. `CitySelect_InitSelectData` (0x80038c40) memsets the 0x8c-byte block and writes `ply_color[i] = i` at 0x80038cb0; it runs from `MainMenu_InitAllVariables`, `Gm_ResetCityTrialData`, `Gm_ResetAllData` and `CityTrial_MajorEnter` (0x8003fc5c, only when `GameData[0x399] != GameData[0x39a]`). The three CSS sub-loaders each carry their own copy - `CitySelect_LoadCityTrial` (0x80038d6c, seed block at 0x80039930), `CitySelect_LoadStadium` (0x80039e20, at 0x8003a278) and `CitySelect_LoadMachineSelect` (0x8003a904, at 0x8003ad1c) - and all three are guarded by the same test: the block runs only when the incoming `city_select_ply.mode` (0x1d0) differs from the sub-mode being loaded, so re-entering the same CT sub-mode leaves the previous session's colors untouched.
 
 `GateColors_ValidateCityTrialColors()` is therefore called from `main.c::OnPlayerSelectLoad` when the loaded minor is `MNRKIND_CITYPLYSELECT` (10, `scene.h`). hoshi's hook sits at 0x8003b48c in `CitySelect_MinorLoad`, after the sub-loader dispatch, so it clamps whatever the init block left behind. That is the sole CT validation point; there is no `OnMainMenuLoad` or scene-change color call, since AR and TR are covered entirely by their init hooks.
 
 ## Hooks
 
-Nine `CODEPATCH_HOOKCREATE`s, all applied in `GateColors_OnBoot`.
+Twelve `CODEPATCH_HOOKCREATE`s, all applied in `GateColors_OnBoot`.
 
 | Address | Hook body | Purpose |
 |---------|-----------|---------|
-| 0x8002176c | `GateColors_FilterResult` | Air Ride L/R color cycling (`CSS_airRide_colorChanger`, 0x80021654); clobbered `extsb. r0, r3`, r23 = candidate color |
-| 0x8002a510 | `GateColors_FilterResult` | Top Ride L/R color cycling (`CSS_topRide_colorChanger`, 0x8002a400); clobbered `extsb. r0, r0`, r23 = candidate, result returned in r0 |
-| 0x8002f350 | `GateColors_FilterResult` | City Trial L/R color cycling (`CitySelect_ChangeColor`, 0x8002f238); clobbered `extsb. r0, r3`, r30 = candidate |
+| 0x8002176c | `GateColors_IsColorUnlocked` | Air Ride L/R color cycling (`CSS_airRide_colorChanger`, 0x80021654); clobbered `extsb. r0, r3`, r23 = candidate color |
+| 0x8002a510 | `GateColors_IsColorUnlocked` | Top Ride L/R color cycling (`CSS_topRide_colorChanger`, 0x8002a400); clobbered `extsb. r0, r0`, r23 = candidate, result returned in r0 |
+| 0x8002f350 | `GateColors_IsColorUnlocked` | City Trial L/R color cycling (`CitySelect_ChangeColor`, 0x8002f238); clobbered `extsb. r0, r3`, r30 = candidate |
 | 0x800295e8 | `GateColors_ValidateAirRideColors` | AR Race CSS `color[]` init convergence |
 | 0x80029e34 | `GateColors_ValidateAirRideColors` | AR Free Run / Time Attack CSS `color[]` init convergence |
 | 0x8002d06c | `GateColors_ValidateTopRideColors` | TR general data reset convergence |
 | 0x8002d704 | `GateColors_ValidateTopRideColors` | TR Race / Start Game re-assignment convergence |
 | 0x8002db8c | `GateColors_ValidateTopRideColors` | TR Solo (Free Run + Time Attack) re-assignment convergence |
 | 0x800236a8 | `GateColors_SetCpuAirRideColor` | AR CPU-slot color (`stb r0, 69(r29)`, the CPU-slot kind write in `loadCPU`'s per-slot loop, 0x80023600); epilogue restores `li r0, 2` for the re-executed store |
+| 0x80033560 | `GateColors_OnCityTrialCpuAdded` | City Trial CPU-slot color, on the `slot_kind` 3 -> 2 branch in `CitySelect_InputUpdate` (0x80032d34); r25 = slot |
+| 0x8002dca8 | `GateColors_OnTopRideLobbyInit` | Clears the Top Ride `panel_pkind` mirror's seed flag in `TopRide_LobbyInit` (0x8002dc9c) |
+| 0x8002dd40 | `GateColors_OnTopRideLobbyThink` | Top Ride CPU-panel color, diffing `panel_pkind` against the mirror each frame in `TopRide_LobbyThink` (0x8002dd34) |
 
-The three L/R hooks sit at each cycler's convergence point, where all vanilla paths (colors 0-3 hardcoded, 4-7 checklist) merge, so the mask overrides outright.
+The three L/R hooks sit at each cycler's convergence point, where all vanilla paths (colors 0-3 hardcoded, 4-7 checklist) merge, and call `GateColors_IsColorUnlocked(candidate)` directly, so the mask overrides outright.
 
 ## CPU Colors
 
-CPUs get a **random unlocked color** in every mode via `GateColors_RandomUnlockedColorExcept()`. It builds the unlocked set from the mask, drops the colors the other visible slots already show, and `HSD_Randi`-picks from what is left; if every unlocked color is taken it repeats one rather than failing, and an empty mask falls back to 0. Without any of this a CPU would inherit the per-slot `{0,1,2,3}` default - validated to unlocked, but the same every race - and without the exclusion pass several CPUs would land on the same color whenever the unlocked set is small, which vanilla's per-slot seeding never did.
+CPUs get a **random unlocked color** in every mode via `GateColors_RandomForPanel(kinds, colors, slot, human_kind)`, which the three CPU hooks and `GateMachines_FixupTRInit` share. It collects the colors of every other panel that is on screen (kind is the screen's human value or CPU), builds the unlocked set from the mask, drops those colors, and `HSD_Randi`-picks from what is left; if every unlocked color is taken it repeats one rather than failing, and an empty mask falls back to 0. Without any of this a CPU would inherit the per-slot `{0,1,2,3}` default - validated to unlocked, but the same every race - and without the exclusion pass several CPUs would land on the same color whenever the unlocked set is small, which vanilla's per-slot seeding never did.
 
 | Mode | Where | Kind field | Color field |
 |------|-------|-----------|-------------|
 | Air Ride | `GateColors_SetCpuAirRideColor`, hook at 0x800236a8 (r29 = `airride_select_ply` base + slot; color at +0x51). `loadCPU` runs from `CSS_airRide_chooseVehicleInputGrabber`, so this already fires on the select screen, and it walks the slots in order, leaving earlier picks visible to the exclusion pass | `airride_select_ply.slot_kind` (0x14f) | `airride_select_ply.color` (0x15b) |
-| Top Ride | `GateColors_OnTopRideLobbyThink`, hook at 0x8002dd40 in `TopRide_LobbyThink`, plus `GateMachines_FixupTRInit` at both lobby init sites | `topride_select_ply.panel_pkind` (0x1b2) | `topride_select_ply.color` (0x1ba) |
+| Top Ride | `GateColors_OnTopRideLobbyThink`, hook at 0x8002dd40 in `TopRide_LobbyThink`, plus `GateMachines_FixupTRInit` at all three lobby init sites (0x8002d070 in `TopRide_InitSelectData`, 0x8002d748 in `TopRide_RaceInit`, 0x8002dc48 in `TopRide_SoloInit`) | `topride_select_ply.panel_pkind` (0x1b2) | `topride_select_ply.color` (0x1ba) |
 | City Trial | `GateColors_OnCityTrialCpuAdded`, hook at 0x80033560 in `CitySelect_InputUpdate` (r25 = slot) | `city_select_ply.slot_kind` (0x215) | `city_select_ply.ply_color` (0x221) |
 
-Human color picks are never touched - each site fires only on the CPU branch or slot. CPU is kind 2 on all three screens; the value meaning "active human" is 0 on Air Ride and City Trial but 1 on Top Ride, which is what the exclusion pass keys on when deciding whether a panel is on screen.
+Human color picks are never touched - each site fires only on the CPU branch or slot. CPU is kind 2 on all three screens; the value meaning "active human" is 0 on Air Ride and City Trial but 1 on Top Ride, which is why each caller passes its screen's human value to `GateColors_RandomForPanel`.
 
 ### Where each screen is hooked
 
@@ -109,7 +112,7 @@ Storing the color byte does not redraw anything. The engine's own color paths al
 
 | Screen | Call | Arguments |
 |---|---|---|
-| City Trial | `CitySelect_UpdatePlayer` (0x801354d4) | `(slot, ply_pkind[slot], frame)`, substituting anim kind 5 when `mode == 2`, the slot's `x1d4` bit is clear and `ply_pkind` is 4. Only `GateColors_ValidateCityTrialColors` calls this directly - it runs after the screen has painted, so a clamped panel has to be redrawn |
+| City Trial | `CitySelect_UpdatePlayer` (0x801354d4) | `(slot, ply_pkind[slot], frame)`, substituting anim kind 5 when `mode` is `CITYMODE_FREERUN`, the slot has no controller attached (its `active_pad_mask` bit is clear) and `ply_pkind` is 4. Only `GateColors_ValidateCityTrialColors` calls this directly - it runs after the screen has painted, so a clamped panel has to be redrawn |
 | Top Ride | `TopRide_UpdatePanel` (0x80134a0c) | `(panel, panel_pkind[panel], frame)` |
 
 `frame` is `Gm_GetColorAnimFrame(color)` (0x80009630) in both cases - one shared helper despite the City Trial name; `CSS_topRide_colorChanger` calls it too. Both update wrappers bail on a null menu-data pointer, so they are safe to call for a panel that has no visual. The pattern is lifted from `CitySelect_ChangeColor`'s swap branch (0x8002f434-0x8002f498), which recolors the *other* player - the same situation as recoloring a CPU nobody is cycling - and from `CSS_topRide_colorChanger` at 0x8002a5f4.

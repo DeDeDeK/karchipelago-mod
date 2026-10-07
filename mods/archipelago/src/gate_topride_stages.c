@@ -9,9 +9,12 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// The course-select grid has 8 positions: 0-6 = courses, 7 = the random button (the
-// grid-to-course table at 0x805d51a8 is identity for 0-6 and maps 7 to value 8). The
-// random button needs at least one unlocked course.
+// The course-select grid: 0-6 the courses, 7 the random button (the grid-to-course table
+// at 0x805d51a8 maps 7 to 8), which needs at least one unlocked course.
+#define TR_GRID_NUM 8
+
+// A, Start, L and R rising edges, the launch press TopRide_CourseSelectThink tests.
+#define TR_LAUNCH_BUTTONS (PAD_BUTTON_A | PAD_BUTTON_START | PAD_TRIGGER_L | PAD_TRIGGER_R)
 static int GateTopRideStages_IsGridPosSelectable(int pos)
 {
     if (pos >= TOPRIDE_NUM)
@@ -21,17 +24,15 @@ static int GateTopRideStages_IsGridPosSelectable(int pos)
 
 static void GateTopRideStages_AdjustCursorToUnlocked(void)
 {
-    if (!ap_save)
-        return;
     u8 *cursor_ptr = &Gm_GetGameData()->topride_course_select.cursor;
     int pos = *cursor_ptr;
 
     if (GateTopRideStages_IsGridPosSelectable(pos))
         return;
 
-    for (int i = 1; i < 8; i++)
+    for (int i = 1; i < TR_GRID_NUM; i++)
     {
-        int next = (pos + i) % 8;
+        int next = (pos + i) % TR_GRID_NUM;
         if (GateTopRideStages_IsGridPosSelectable(next))
         {
             *cursor_ptr = (u8)next;
@@ -40,19 +41,10 @@ static void GateTopRideStages_AdjustCursorToUnlocked(void)
     }
 }
 
-// Launch gate at 0x8003ca78 (`andi. r0, r7, 0x1160`) in TopRide_CourseSelectThink
-// (0x8003c8bc, minor scene 7). Runs every frame, so it gates feedback on an actual
-// launch press (0x1160 = the A/Start rising-edge mask) instead of buzzing every frame
-// the cursor sits on a locked course. The cursor can only rest on a locked course when
-// ALL courses are locked, since the movement hook then has nowhere selectable to move it.
-//   no launch press, or unlocked course -> 0 (re-run andi, vanilla path)
-//   locked course                       -> buzzer + textbox, 1 (skip launch)
+// It runs every frame, so feedback waits for a launch press. Returns 1 to block the launch.
 static int GateTopRideStages_CourseSelectCanLaunch(u32 launch_buttons)
 {
-    if (!ap_save)
-        return 1;
-
-    if (!(launch_buttons & 0x1160))
+    if (!(launch_buttons & TR_LAUNCH_BUTTONS))
         return 0;
 
     int cursor = Gm_GetGameData()->topride_course_select.cursor;
@@ -67,10 +59,9 @@ static int GateTopRideStages_CourseSelectCanLaunch(u32 launch_buttons)
     return 1;
 }
 
-// The block path (r3 != 0) branches to the D-pad handler at 0x8003cc18, which
-// reads caller-saved r5 (direction bits); the allow path re-runs the clobbered
-// `andi. r0, r7, 0x1160`, so r7 must survive too. The trampoline saves neither,
-// so both are stashed on a scratch frame here.
+// Hook at 0x8003ca78 (andi. r0, r7, 0x1160) in TopRide_CourseSelectThink (0x8003c8bc).
+// Blocking goes to the D-pad handler at 0x8003cc18, which reads r5 (direction bits);
+// allowing re-runs the andi on r7. Both are caller-saved, so both are stashed.
 CODEPATCH_HOOKCONDITIONALCREATE(
     0x8003ca78,
     "stwu 1, -16(1)\n\t"
@@ -85,9 +76,8 @@ CODEPATCH_HOOKCONDITIONALCREATE(
     0x8003cc18
 );
 
-// Cursor-movement convergence at 0x8003cd18 (`lbz r0, 0x2(r31)`), where all D-pad paths
-// meet after writing topride_course_select.cursor. Adjusting the cursor before the
-// clobbered lbz reads it makes the visual update highlight the corrected position.
+// Hook at 0x8003cd18 (lbz r0, 0x2(r31)) in TopRide_CourseSelectThink, where every D-pad
+// path meets after writing the cursor, so the re-run lbz highlights the corrected one.
 CODEPATCH_HOOKCREATE(
     0x8003cd18,
     "",
@@ -96,61 +86,47 @@ CODEPATCH_HOOKCREATE(
     0
 );
 
-// Replaces the vanilla HSD_Randi(7) course picks, which consult only the used-history
-// bitmask. The returned pick is guaranteed unused, so the vanilla re-check after the
-// call never re-rolls.
+// Replaces the vanilla HSD_Randi(7) course picks, which consult only the used history. The
+// pick is always unused, so the vanilla re-check after the call never re-rolls.
 static int GateTopRideStages_RandomPick(int unused)
 {
     (void)unused;
-    if (!ap_save)
-        return 0;
     u16 *used_ptr = &Gm_GetGameData()->topride_course_select.used_history_mask;
     u16 used = *used_ptr;
-    u16 unlock = ap_save->topride_stage_unlocked_mask & 0x7F;
+    u16 unlock = ap_save->topride_stage_unlocked_mask & ((1 << TOPRIDE_NUM) - 1);
 
-    int candidates[TOPRIDE_NUM];
-    int count = 0;
-    for (int i = 0; i < TOPRIDE_NUM; i++)
-    {
-        if ((unlock & (1 << i)) && !(used & (1 << i)))
-            candidates[count++] = i;
-    }
+    int pick = RandomBitInField(unlock & ~used);
 
     // Every unlocked course is used - restart the cycle.
-    if (count == 0)
+    if (pick < 0)
     {
         *used_ptr = used & ~unlock;
-        for (int i = 0; i < TOPRIDE_NUM; i++)
-        {
-            if (unlock & (1 << i))
-                candidates[count++] = i;
-        }
+        pick = RandomBitInField(unlock);
     }
 
-    // No course is unlocked at all. The caller re-rolls until the returned index's
-    // used bit is clear, so course 0 has to be left selectable or it spins forever.
-    if (count == 0)
+    // Nothing unlocked. The caller re-rolls until the pick's used bit is clear, so course 0
+    // is left selectable or it spins forever.
+    if (pick < 0)
     {
         *used_ptr &= ~1;
         return 0;
     }
 
-    int pick = candidates[HSD_Randi(count)];
-    OSReport("[GateTopRideStages] Random pick %d (%s) from %d candidates (unlocked = %s, used = %s)\n",
-             pick, TopRideCourse_Names[pick], count,
+    OSReport("[GateTopRideStages] Picked %d (%s) (unlocked = %s, used = %s)\n",
+             pick, TopRideCourse_Names[pick],
              MaskBits(unlock, TOPRIDE_NUM), MaskBits(used, TOPRIDE_NUM));
     return pick;
 }
 
 void GateTopRideStages_OnBoot()
 {
-    CODEPATCH_HOOKAPPLY(0x8003ca78);  // course select launch gate
-    CODEPATCH_HOOKAPPLY(0x8003cd18);  // course select cursor skip
+    CODEPATCH_HOOKAPPLY(0x8003ca78);
+    CODEPATCH_HOOKAPPLY(0x8003cd18);
 
-    CODEPATCH_REPLACECALL(0x8003c798, GateTopRideStages_RandomPick); // TopRide_CourseSelectRandomInit
-    CODEPATCH_REPLACECALL(0x8003cac0, GateTopRideStages_RandomPick); // A on the random button
+    CODEPATCH_REPLACECALL(0x8003c798, GateTopRideStages_RandomPick); // in TopRide_CourseSelectRandomInit (0x8003c754)
+    CODEPATCH_REPLACECALL(0x8003cac0, GateTopRideStages_RandomPick); // A on the random button, in TopRide_CourseSelectThink
 
-    OSReport("[GateTopRideStages] Top Ride stage gating installed\n");
+    OSReport("[GateTopRideStages] Hooks installed\n");
 }
 
 int GateTopRideStages_UnlockStage(int course)

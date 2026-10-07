@@ -14,7 +14,7 @@ sync is one-way: hoshi is the source of truth, the Ghidra database is the copy.
 Phases, in dependency order:
 
     types    parse the headers into the DataTypeManager (structs/enums/typedefs)
-    names    rename each function whose Ghidra name differs from the map's
+    names    give each function its map name, in the global namespace
     protos   set each documented function's signature by address
     globals  retype and label each fixed-address engine global in the listing
 
@@ -217,11 +217,13 @@ _MANGLED = re.compile(r"[A-Za-z0-9]__(?:[FQ]|\d)")
 
 
 def plan_names(project):
-    """[(addr, ghidra_name, map_name)] for every function Ghidra names differently
-    from GKYE01.map.
+    """([(addr, map_name)], [(addr, ghidra_name, map_name)]) - every function the
+    map names, and the ones Ghidra names differently.
 
-    The map name is the one kar.py resolves, without the trailing `?` or
-    argument notes some rows carry. Rows still `zz_` have no name to give.
+    The map name is the one kar.py resolves, without the trailing `?` some rows
+    carry. Rows still `zz_` have no name to give, and mangled names keep the
+    namespaces Ghidra's demangler gave them. Whether a function sits in the global
+    namespace is only visible from the bridge, so every named function goes over.
     """
     exported = kar.read_link_ld()
     names = {}
@@ -231,27 +233,27 @@ def plan_names(project):
             names[key] = name
 
     known = ghidra_functions(project)
-    plan = []
+    named, renames = [], []
     for addr, name in sorted(names.items()):
         gname = known.get(addr)
-        if gname in (None, name) or name.startswith("zz_") or _MANGLED.search(name):
+        if gname is None or name.startswith("zz_") or _MANGLED.search(name):
             continue
-        plan.append((addr, gname, name))
-    return plan
+        named.append((addr, name))
+        if gname != name:
+            renames.append((addr, gname, name))
+    return named, renames
 
 
 def phase_names(project, dry_run):
-    plan = plan_names(project)
-    print(f"[names] {len(plan)} functions named differently from the map")
+    named, renames = plan_names(project)
+    print(f"[names] {len(renames)} functions named differently from the map")
     if dry_run:
-        for addr, gname, name in plan:
+        for addr, gname, name in renames:
             print(f"  0x{addr}  {gname} -> {name}")
-        return
-    if not plan:
         return
     os.makedirs(CFG_DIR, exist_ok=True)
     with open(NAMES_TSV, "w") as f:
-        f.writelines(f"0x{addr}\t{name}\n" for addr, _gname, name in plan)
+        f.writelines(f"0x{addr}\t{name}\n" for addr, name in named)
     report = run_bridge_script("names", {"data": NAMES_TSV}, project)
     print_report(report, re.compile(r"^\s*FAIL"))
 

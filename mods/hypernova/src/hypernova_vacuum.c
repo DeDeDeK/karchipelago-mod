@@ -314,13 +314,11 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, GrCollRecord *record)
     int   weak  = Hypernova_IsWeakBreakFamily(yaku_gobj);
     JOBJ *jobj  = record->jobj;
     JOBJ *dnode = weak ? Hypernova_WeakDebrisNode(yaku_gobj, record) : NULL;
-    float dsave[12];
+    Mtx   dsave;
     u32   dflags = 0;
     if (dnode != NULL)
     {
-        float *nm = (float *)dnode->rotMtx;
-        for (int i = 0; i < 12; i++)
-            dsave[i] = nm[i];
+        PSMTXCopy(&dnode->rotMtx, &dsave);
         dflags = dnode->flags;
         Mtx_SetTrans(dnode->rotMtx, &contact);
         JObj_SetFlags(dnode, JOBJ_USER_DEFINED_MTX);
@@ -332,9 +330,7 @@ static int Hypernova_BreakInstanceNative(GOBJ *rider_gobj, GrCollRecord *record)
 
     if (dnode != NULL)
     {
-        float *nm = (float *)dnode->rotMtx;
-        for (int i = 0; i < 12; i++)
-            nm[i] = dsave[i];
+        PSMTXCopy(&dsave, &dnode->rotMtx);
         dnode->flags = dflags;
     }
 
@@ -510,7 +506,7 @@ static int Hypernova_CollectBreakParents(GOBJ **out)
     {
         if (g->entity_class != YAKUMONO_GOBJ_KIND)
             continue;
-        YakumonoData *yd = (YakumonoData *)g->userdata;
+        YakumonoData *yd = Yaku_GetData(g);
         if (yd != NULL && Hypernova_IsBreakableYaku(yd->kind))
             out[n++] = g;
     }
@@ -568,10 +564,7 @@ static void Hypernova_ReleaseInstance(int k)
     {
         // The pull only ever overwrote record->world's translation, so its 3x3 still holds the
         // rotation and scale the spin and shrink destroyed on the JObj's copy.
-        float *jm = (float *)jobj->rotMtx;
-        float *cm = (float *)record->world;
-        for (int i = 0; i < 12; i++)
-            jm[i] = cm[i];
+        PSMTXCopy(&record->world, &jobj->rotMtx);
         Mtx_SetTrans(jobj->rotMtx, &hn_claims[k].home);
         if (!(hn_claims[k].jflags & JOBJ_USER_DEFINED_MTX))
             JObj_ClearFlags(jobj, JOBJ_USER_DEFINED_MTX);

@@ -2,7 +2,7 @@
 
 Permanent patches are stat boost items received from AP that persist across City Trial rounds and Air Ride races. Receiving one only writes save data; the accumulated totals are re-applied to every human player's machine at the start of every round or race.
 
-**Files:** `mods/archipelago/src/patch_item.c` / `.h` (receive + apply), `main.h` (`APSave`), `settings_menu.c` / `.h` (per-mode toggles), `ap_item_handler.c` (receive routing), `main.c` (the `On3DLoadEnd` call).
+**Files:** `mods/archipelago/src/permanent_patch.c` / `.h` (receive + apply, logging as `[PermanentPatch]`), `main.h` (`APSave`), `settings_menu.c` / `.h` (per-mode toggles), `ap_item_handler.c` (receive routing), `main.c` (the `On3DLoadEnd` call).
 
 ## AP Items and Save Data
 
@@ -12,7 +12,7 @@ Save state is a single `u8 permanent_patches[PATCHKIND_NUM]` in `APSave`: how ma
 
 ## Receiving
 
-`PermanentPatch_GiveItem(kind)` and `PermanentPatch_GiveAllUp()` increment save data and enqueue a "Received: permanent +1 ..." textbox. No stat is touched at receive time.
+`PermanentPatch_GiveItem(kind)` and `PermanentPatch_GiveAllUp()` increment save data and announce "Received: permanent +1 ..." through `APAnnounce_Grant`, like every other received item - so the line shows only while *Messages -> Local -> Items* is on, which it is not by default. No stat is touched at receive time.
 
 Both sit above the 3D scene gate in `APItems_HandleItem` (`ap_item_handler.c`), so the increment always succeeds and the item is consumed from the queue immediately, whatever scene the player is in. The boost shows up the next time a gated scene loads.
 
@@ -52,7 +52,7 @@ The proc waits for `Gm_GetIntroState() == GMINTRO_END` (0x8000a958) - machines a
 
 ### Interaction with EnergyLink
 
-EnergyLink tracks deltas from `RiderData` stats (rider stats are synced from machine stats by the normal update loop) and does not depend on hook ordering inside `On3DLoadEnd`. Its per-frame proc snapshots a per-player baseline on the first frame after `GMINTRO_END` - the same frame gate `PermanentPatch_PerFrame` uses - by which time rider stats already reflect the permanent patches, so they generate no energy. The direct-apply path in `Patch_GiveItem` calls `EnergyLink_RebaseStats` explicitly for the same reason; `PermanentPatch_DoApply` relies on the baseline snapshot instead.
+EnergyLink tracks deltas from `RiderData` stats (rider stats are synced from machine stats by the normal update loop) and does not depend on hook ordering inside `On3DLoadEnd`. Its per-frame proc snapshots a per-player baseline on the first frame after `GMINTRO_END` - the same frame gate `PermanentPatch_PerFrame` uses - by which time rider stats already reflect the permanent patches, so they generate no energy. The Air Ride direct-apply paths in `PatchItem_Give` and `PatchItem_GiveAllUp` (`patch_item.c`) call `EnergyLink_RebaseStats` explicitly for the same reason; `PermanentPatch_DoApply` relies on the baseline snapshot instead.
 
 ### Checklist credit
 

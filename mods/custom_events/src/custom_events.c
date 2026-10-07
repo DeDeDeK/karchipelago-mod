@@ -6,6 +6,7 @@
 #include "text.h"
 #include "audio.h"
 #include "stage.h"
+#include "inline.h"
 #include "code_patch/code_patch.h"
 #include "hoshi/mod.h"
 
@@ -93,7 +94,7 @@ static int running_idx = -1;
 
 static int sis_id_table[SIS_ID_VANILLA_COUNT + CUSTOM_EVENT_COUNT];
 static u8 custom_sis_text[CUSTOM_EVENT_COUNT][128];
-static void *extended_sis_ptrs[SIS_CITYTRIAL_ENTRY_COUNT + CUSTOM_EVENT_COUNT];
+static SISEntry extended_sis_ptrs[SIS_CITYTRIAL_ENTRY_COUNT + CUSTOM_EVENT_COUNT];
 
 // The lis/addi r3 pairs that load stc_event_sis_id_table, in CityEvent_HudPredictionShow
 // (0x80127624), CityEvent_HudPredictionThink (0x801276c0) and stadiumPrediction (0x80127864).
@@ -107,19 +108,12 @@ static const int sis_id_table_loads[][2] = {
 // game's three readers are repointed at.
 static void RelocateSisIdTable(void)
 {
-    for (int i = 0; i < SIS_ID_VANILLA_COUNT; i++)
-        sis_id_table[i] = stc_event_sis_id_table[i];
+    memcpy(sis_id_table, stc_event_sis_id_table, SIS_ID_VANILLA_COUNT * sizeof(int));
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
         sis_id_table[SIS_ID_VANILLA_COUNT + i] = SIS_CITYTRIAL_ENTRY_COUNT + i;
 
-    u32 addr = (u32)sis_id_table;
-    int lis = 0x3c600000 | (((addr + 0x8000) >> 16) & 0xffff); // lis r3,addr@ha
-    int addi = 0x38630000 | (addr & 0xffff);                    // addi r3,r3,addr@l
-    for (int i = 0; i < (int)(sizeof(sis_id_table_loads) / sizeof(sis_id_table_loads[0])); i++)
-    {
-        CODEPATCH_REPLACEINSTRUCTION(sis_id_table_loads[i][0], lis);
-        CODEPATCH_REPLACEINSTRUCTION(sis_id_table_loads[i][1], addi);
-    }
+    for (int i = 0; i < GetElementsIn(sis_id_table_loads); i++)
+        CODEPATCH_REPLACEADDRESS(sis_id_table_loads[i][0], sis_id_table_loads[i][1], sis_id_table);
 }
 
 static void ComposeSisText(u8 *buf, int size, const char *str)
@@ -135,40 +129,17 @@ static void ComposeSisText(u8 *buf, int size, const char *str)
     };
 
     u8 *p = buf;
-    u8 *glyph_end = buf + size - sizeof(close);
     memcpy(p, open, sizeof(open));
-    p += sizeof(open);
-
-    for (; *str && p + 2 <= glyph_end; str++)
-    {
-        // A space is a command, not a glyph code.
-        if (*str == ' ')
-        {
-            *p++ = TEXTCMD_SPACE;
-            continue;
-        }
-
-        int cmd = Text_CharToCommand(*str);
-        if (cmd == -1)
-            continue;
-        *p++ = (cmd >> 8) & 0xff;
-        *p++ = cmd & 0xff;
-    }
-
+    p = Text_WriteSisString(p + sizeof(open), buf + size - sizeof(close), str);
     memcpy(p, close, sizeof(close));
 }
 
 void CustomEvents_InitSis(void)
 {
     // Every 3D scene reloads slot 0 with SisCitytrial.dat before On3DLoadEnd.
-    void **original = (void **)stc_sis_data[0];
-
-    for (int i = 0; i < SIS_CITYTRIAL_ENTRY_COUNT; i++)
-        extended_sis_ptrs[i] = original[i];
+    Text_ExtendSis(0, extended_sis_ptrs, SIS_CITYTRIAL_ENTRY_COUNT);
     for (int i = 0; i < CUSTOM_EVENT_COUNT; i++)
         extended_sis_ptrs[SIS_CITYTRIAL_ENTRY_COUNT + i] = custom_sis_text[i];
-
-    stc_sis_data[0] = (SISData *)extended_sis_ptrs;
 }
 
 typedef void (*StateHandler)(EventCheckData *);
@@ -242,17 +213,13 @@ static void CustomEvent_State3Wrapper(EventCheckData *ev_chk)
     desc->end2();
     BGM_StopSecondary();
 
-    int delay_min = ev_chk->data->event->delay_min;
-    int delay_max = ev_chk->data->event->delay_max;
-    int delay = delay_min + HSD_Randi(delay_max - delay_min + 1);
-
-    ev_chk->event_time = delay;
+    ev_chk->event_time = RandomInRange(ev_chk->data->event->delay_min, ev_chk->data->event->delay_max);
     ev_chk->state = 0;
     ev_chk->cur_kind = -1;
     ev_chk->timer = 0;
     running_idx = -1;
 
-    OSReport("[CustomEvents] %s ended, next event in %d frames\n", desc->label, delay);
+    OSReport("[CustomEvents] %s ended, next event in %d frames\n", desc->label, ev_chk->event_time);
 }
 
 static int CustomEvent_Do(int kind)

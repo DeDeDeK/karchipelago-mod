@@ -1,6 +1,6 @@
 # Patch Type Gating
 
-Each of the 9 City Trial stat patches can be individually locked behind an Archipelago unlock item; while a patch type is locked none of its ITKIND variants appear in any spawn pool. AP items 780-788 (`AP_PATCH_UNLOCK_BASE` + `PatchKind`) route through `ap_item_handler.c` to `GatePatches_UnlockPatch`, which sets the bit in `APSave.patch_unlocked_mask` and posts a textbox. The mask is exposed to other mods through `ArchipelagoAPI` as `AP_UNLOCK_PATCH`; when the slot option `patch_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` (`main.c`) pre-fills it with all 9 bits at connect and the gate never bites.
+Each of the 9 City Trial stat patches can be individually locked behind an Archipelago unlock item; while a patch type is locked none of its ITKIND variants appear in any spawn pool. AP items 780-788 (`AP_PATCH_UNLOCK_BASE` + `PatchKind`) route through `ap_item_handler.c` to `GatePatches_UnlockPatch`, which sets the bit in `APSave.patch_unlocked_mask` and announces "Unlocked Patch: <name>" through `APAnnounce_Grant` (shown only with Messages -> Local -> Items on, default Off). The mask is exposed to other mods through `ArchipelagoAPI` as `AP_UNLOCK_PATCH`; when the slot option `patch_gating_enabled` is 0, `APOptions_ApplyUngatedCategories` (`ap_options.c`) pre-fills it with all 9 bits when the first slot options arrive and the gate never bites.
 
 **File:** `mods/archipelago/src/gate_patches.c`.
 
@@ -26,14 +26,14 @@ Both are populated at City Trial start by `CityItemSpawn_InitItemFallChances` (0
 
 ## Implementation
 
-This module installs **no hooks of its own**. hoshi allows one hook per address and three gate modules need the same two sites, so `item_spawn_filter.c` owns them and calls each module's filters in a fixed order: All-Up injection, then the box-pool filters (abilities, patches, items), then the event-drop filters in the same order, then the Max Stats drop-weight bias.
+This module installs **no hooks of its own**. Three gate modules need the same two sites, and two `CODEPATCH_HOOKCREATE`s at one address in one mod would both define the global `hook_<addr>` symbol (applying a hook over another one is fine - hoshi relocates the branch already there, chaining the two - but the name is per address). So `item_spawn_filter.c` owns both sites and runs the whole pipeline in a fixed order: All-Up injection, then one box-pool pass and one event-drop pass, each dropping every kind the combined predicate rejects (`GateAbilities_IsItemLocked || GatePatches_IsItemLocked || GateItems_IsItemLocked`).
 
 | Hook address | Hooked function (entry) | Clobbered instruction |
 |-------------|-----------------|----------------------|
 | `0x800eb558` | `CityItemSpawn_InitItemFallChances` (0x800eb374) | `lwz r0, 0x34(r1)` |
 | `0x800ed7f4` | `CityEvent_ModifyItemFallDesc` (0x800ed784) | `mtlr r0` |
 
-Both are function epilogues, so the hook can call C with no arguments. Stadium and Air Ride never run the `CityItemSpawn` init path at all, so `ItemSpawnFilter_On3DLoadEnd()` runs the same chain at scene load instead, guarded by `!Gm_IsInCity() && *stc_grBoxGeneObj`.
+Both are function epilogues, so the hook can call C with no arguments; the 0x800ed7f4 hook saves and restores `r0`, which holds the caller's LR across the call. Stadium and Air Ride never run the `CityItemSpawn` init path at all, so `ItemSpawnFilter_On3DLoadEnd()` runs the same chain at scene load instead, guarded by `!Gm_IsInCity() && *stc_grBoxGeneObj`.
 
 The two pool families are filtered differently, and the difference is load-bearing:
 

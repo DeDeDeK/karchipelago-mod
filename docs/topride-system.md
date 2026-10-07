@@ -81,13 +81,13 @@ Read sites:
 | 0x802db850 | `TopRide_KirbyMgrUpdate` | `!= 0` | Runs the per-Kirby physics + tracking block (incl. `TopRide_KirbyPhysUpdate`) |
 | 0x802db8b0 | `TopRide_KirbyMgrUpdate` | `== 2` | Runs the per-Kirby weighted item-spawn picker |
 | 0x802dc570 | `TopRide_KirbyMgrUpdate` | `== 2` | Calls `TopRideItem_Update` (item lifetime/render tick) |
-| 0x8029c714, 0x8029c7ec | `zz_8029c650_` (session per-frame update) | `== 2` | Gameplay branch |
+| 0x8029c714, 0x8029c7ec | `TopRide_GameModeNormalUpdate` (normal session per-frame update) | `== 2` | Gameplay branch |
 
 Write sites: `zz_8029e334_` writes 1 at 0x8029ec04 when the countdown begins; `zz_8029eda4_` writes 2 at 0x8029efa4 when the countdown ends and the race starts.
 
 ### Implication for mod code
 
-Anything that spawns a TR item or drives a Kirby state from outside the per-frame engine flow (AP item give, traplink, deathlink) must wait for `round_state == 2`. Before that, `state_handler` may be only partially wired, and the item list isn't ticked: spawning during countdown puts the item on the list, but `TopRideItem_Update` doesn't tick it and the item is culled at race start. `GateTopRideItems_GiveItem` (`mods/archipelago/src/gate_topride_items.c`) returns 0 in that window so `APItems_PerFrame` retries the item on the next frame.
+Anything that spawns a TR item or drives a Kirby state from outside the per-frame engine flow (AP item give, traplink, deathlink) must wait for `round_state == 2`. Before that, `state_handler` may be only partially wired, and the item list isn't ticked: spawning during countdown puts the item on the list, but `TopRideItem_Update` doesn't tick it and the item is culled at race start. `GateTopRideItems_GiveItem` (`mods/archipelago/src/gate_topride_items.c`) returns 0 in that window so `APItems_OnFrameStart` retries the item on the next frame.
 
 ### Secondary state bytes
 
@@ -170,7 +170,8 @@ The charge state lives in the inline charge component at kirby+0x80, constructed
 | 0x802d5ec0 | 0xDCC | TopRide_KirbyPhysUpdate | Per-Kirby physics update |
 | 0x802e26dc | 0x1E8 | TopRide_KirbyModelThink | Per-frame model JObj transform (applies `model_scale`) |
 | 0x802db74c | 0xEBC | TopRide_KirbyMgrUpdate | KirbyMgr per-frame (iterates all 4 kirbys) |
-| 0x8029c650 | 0x8D4 | `zz_8029c650_` | Session main update loop (unnamed in the map) |
+| 0x8029c650 | 0x8D4 | TopRide_GameModeNormalUpdate | Per-frame update of the normal session class (every Race, Time Attack and Free Run); calls `TopRide_CheckPerCourseObjectives` per occupied slot at 0x8029cb74 |
+| 0x802ac850 | 0x5C8 | TopRide_GameModeTuningUpdate | The tuning session class's counterpart (`GameSession+0x38 == 4`); calls `TopRide_CheckPerCourseObjectives` at 0x802acd4c |
 | 0x802d8cb4 | 0x5D8 | TopRide_KirbyApplyItem | Applies a `TopRideItemKind` to a kirby |
 | 0x802d9a24 | 0x8 | TopRide_GetChargeMultiplier | Returns 1.0f |
 | 0x802d98f0 | 0x134 | TopRide_GetChargeTierCount | Charge tier count (sets the depletion rate) |

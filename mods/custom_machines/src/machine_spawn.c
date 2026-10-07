@@ -1,11 +1,6 @@
-// The City Trial field spawn roll, replaced because the engine rolls from a chance
-// row in VcCommon.dat with exactly VCKIND_NUM columns and a selection loop no wider.
-// The row seeds the vanilla kinds, each registered machine brings its descriptor's
-// spawn_weight, and a consumer's filter gets the last word. Vanilla's four-deep
-// history exclusion and weighted roll are kept.
-
 #include "os.h"
 #include "hsd.h"
+#include "inline.h"
 #include "game.h"
 #include "machine.h"
 #include "code_patch/code_patch.h"
@@ -52,7 +47,7 @@ static int Select(MachineSpawnData *msd, float match_progress, int stars_only)
 {
     vcDataCommon *common = *stc_vcDataCommon;
     int kind_num = CustomMachines_GetKindCeiling();
-    int history_max = sizeof(msd->prev_machine_kind);
+    int history_max = GetElementsIn(msd->prev_machine_kind);
     float weight[CUSTOM_VCKIND_NUM];
     int table_idx = 0;
     int spawnable = 0;
@@ -114,32 +109,24 @@ static int Select(MachineSpawnData *msd, float match_progress, int stars_only)
     return kind;
 }
 
-static int SelectField(MachineSpawnData *msd, float match_progress)
-{
-    return Select(msd, match_progress, 0);
-}
-
-static int SelectFormation(MachineSpawnData *msd, float match_progress)
-{
-    return Select(msd, match_progress, 1);
-}
-
 // Replace the selection in CityMachineSpawn_DecideAndSpawn (0x801defac). At
 // 0x801df00c r30 = MachineSpawnData* and f1 = match_progress; the result goes to
 // r31, which the vanilla code past the skip target writes to the spawn history and
 // hands to CityMachineSpawn_Create.
 CODEPATCH_HOOKCREATE(0x801df00c,
-    "mr 3, 30\n\t",
-    SelectField,
+    "mr 3, 30\n\t"
+    "li 4, 0\n\t",
+    Select,
     "mr 31, 3\n\t",
     0x801df220
 )
 
 // Machine Formation event spawns, CityMachineSpawn_SpawnFormationStar (0x801df408), with
-// the same registers at its own hook point.
+// the same registers at its own hook point, stars only.
 CODEPATCH_HOOKCREATE(0x801df44c,
-    "mr 3, 30\n\t",
-    SelectFormation,
+    "mr 3, 30\n\t"
+    "li 4, 1\n\t",
+    Select,
     "mr 31, 3\n\t",
     0x801df630
 )
@@ -148,7 +135,7 @@ CODEPATCH_HOOKCREATE(0x801df44c,
 // in the VCKIND_NUM-wide MachineSpawnData.freerun_placed through Machine_EncodeVehicleKind,
 // which answers a custom machine's own MachineKind. A custom kind has no Free Run spot to
 // be re-placed at, so it stays out of the counts. This is CityMachineSpawnGObj_Init's
-// per-player count, r28 the player and r31 the spawn data.
+// (0x801ddee8) per-player count, r28 the player and r31 the spawn data.
 static void CountStartingMachine(int ply, MachineSpawnData *msd)
 {
     int kind = CustomMachines_KindFromClassIndex(Ply_GetMachineIsBike(ply), Ply_GetMachineKind(ply));
@@ -168,8 +155,9 @@ static int IsCustomKind(int kind)
     return kind >= VCKIND_NUM;
 }
 
-// The take and release helpers' Free Run branch, r28 the kind. A custom kind skips to
-// past the count.
+// The Free Run branch of CityMachineSpawn_TakeMachine (0x801decbc) and
+// CityMachineSpawn_ReleaseMachine (0x801ded8c), r28 the kind. A custom kind skips to past
+// the count.
 CODEPATCH_HOOKCONDITIONALCREATE(0x801ded04, "mr 3, 28\n\t", IsCustomKind, "", 0, 0x801ded6c)
 CODEPATCH_HOOKCONDITIONALCREATE(0x801dedd4, "mr 3, 28\n\t", IsCustomKind, "", 0, 0x801dee38)
 
@@ -177,9 +165,15 @@ void CustomMachineSpawn_OnBoot(void)
 {
     CODEPATCH_HOOKAPPLY(0x801df00c);
     CODEPATCH_HOOKAPPLY(0x801df44c);
-    CODEPATCH_HOOKAPPLY(0x801de2ec);
-    CODEPATCH_HOOKAPPLY(0x801ded04);
-    CODEPATCH_HOOKAPPLY(0x801dedd4);
 
-    OSReport("[MachineSpawn] City Trial spawn selection and Free Run counts replaced\n");
+    // Only a registered machine's kind reaches past the Free Run counts.
+    if (CustomMachines_GetCount() > 0)
+    {
+        CODEPATCH_HOOKAPPLY(0x801de2ec);
+        CODEPATCH_HOOKAPPLY(0x801ded04);
+        CODEPATCH_HOOKAPPLY(0x801dedd4);
+    }
+
+    OSReport("[MachineSpawn] City Trial spawn selection replaced, Free Run counts %s\n",
+             CustomMachines_GetCount() > 0 ? "replaced" : "left vanilla");
 }

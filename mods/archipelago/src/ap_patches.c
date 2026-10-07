@@ -1,4 +1,6 @@
+#include <stddef.h>
 #include <string.h>
+#include <limits.h>
 
 #include "game.h"
 #include "os.h"
@@ -16,16 +18,13 @@
 
 #include "main.h"
 #include "ap_item_handler.h"
+#include "gate_boxes.h"
 #include "spawn_rate.h"
 #include "ap_patches.h"
 #include "settings_menu.h"
 
-// The two levers of the AP Box rate, one row per APBOXRATE_ setting. percent is the
-// share of box-category spawn ticks that come up an AP Box; interval is the frame floor
-// between winning rolls, divided by the spawn-rate scale at use so Spawn Rate Up still
-// moves the cadence. Both are needed because the tick count itself is not throttled -
-// the field's item cap is checked before the roll, so a round that gating has emptied
-// offers every tick through.
+// percent: the share of box spawn ticks that become an AP Box. interval: the frame floor
+// between wins, divided by the spawn-rate scale so Spawn Rate Up still moves it.
 static const struct
 {
     int percent;
@@ -43,21 +42,12 @@ static int BoxRate(void)
     return (rate < 0 || rate >= APBOXRATE_NUM) ? APBOXRATE_MEDIUM : rate;
 }
 
-// Patches one AP Box scatters, capping the 1 / 2 / 4 the vanilla size roll gives, so a
-// single large box cannot hand over a run of checks.
+// Caps the vanilla 1 / 2 / 4 size roll, so one large box can't hand over a run of checks.
 #define AP_BOX_MAX_PATCHES 2
 
-// Yaw offset in degrees applied to the nth item out of a breaking box, from the
-// table Box_OutcomeLogic reads at 0x80489f48. A zero offset skips the rotation.
-static const float box_slot_yaw[4] = { 0.0f, 180.0f, 90.0f, -90.0f };
-
-// The constant Box_OutcomeLogic itself uses, kept in place of MTXDegToRad so the
-// scatter below reproduces the vanilla outcome.
-#define BOX_DEG_TO_RAD 0.0174533f
-#define BOX_SINGLE_PITCH 1.5708f // the fixed launch pitch a one-item box uses
+#define BOX_SINGLE_PITCH ((float)M_PI_2) // the fixed launch pitch a one-item box uses
 
 static const CustomItemsAPI *ci_api;
-static int ci_import_tried;
 
 static u32 patch_hash, box_hash; // 0 until the registry has been scanned
 static int items_matched = -1;   // -1 before the first scan, then the match count
@@ -69,7 +59,7 @@ static int round_armed;
 static int boxes_rolled;
 static int box_gate_frames; // match_frames_left must fall to this before the next roll
 
-int ApPatches_CollectedCount(void)
+int APPatches_CollectedCount(void)
 {
     int n = 0;
     for (int w = 0; w < AP_PATCH_WORDS; w++)
@@ -77,25 +67,23 @@ int ApPatches_CollectedCount(void)
     return n;
 }
 
-int ApPatches_GetCount(void)
+int APPatches_GetCount(void)
 {
     int count = (int)ap_save->options.ap_patches;
     return count > AP_PATCH_MAX ? AP_PATCH_MAX : count;
 }
 
-int ApPatches_Remaining(void)
+int APPatches_Remaining(void)
 {
-    int left = ApPatches_GetCount() - ApPatches_CollectedCount();
+    int left = APPatches_GetCount() - APPatches_CollectedCount();
     return left > 0 ? left : 0;
 }
 
-// Claim the lowest clear bit below ap_patches. The patches are interchangeable
-// in logic, so which pickup maps to which index does not matter, only the count.
-// Returning 0 is an ordinary outcome - two AP boxes on the field clamp against the
-// same remaining count - so it stays silent.
+// Claims the lowest clear bit below ap_patches; the patches are interchangeable in logic.
+// A 0 return is ordinary (two boxes clamp against one remaining count), so it is silent.
 static int Claim(void)
 {
-    int count = ApPatches_GetCount();
+    int count = APPatches_GetCount();
 
     for (int i = 0; i < count; i++)
     {
@@ -105,67 +93,28 @@ static int Claim(void)
             continue;
         ap_save->ap_patch_collected[w] |= bit;
         ap_data->ap_patch_checks[w] |= bit;
-        // No card write: Hoshi_WriteSave stalls the frame and this fires mid-round,
-        // so the bits ride in the save block until the game's own save point.
+        // No card write: Hoshi_WriteSave stalls the frame, and this fires mid-round.
         OSReport("[APPatches] AP Patch %d collected (%d of %d)\n",
-                 i + 1, ApPatches_CollectedCount(), count);
+                 i + 1, APPatches_CollectedCount(), count);
         return 1;
     }
     return 0;
 }
 
-// An instance of one of our two kinds. The custom_items behavior clamp has already
-// rewritten ItemData.kind to the base kind by the time any seam runs, so only the
-// itData pointer - which the clamp leaves alone - still names the custom kind.
+// custom_items has rewritten ItemData.kind to the base kind by the time any seam runs.
 static int IsApKind(ItemData *id, int kind)
 {
-    if (id == NULL || kind < 0)
-        return 0;
-    itCommonDataAll *all = *stc_it_common_data;
-    if (all == NULL || all->itData == NULL)
-        return 0;
-    return id->itData == &all->itData[kind];
+    return id != NULL && kind >= 0 && ci_api->GetItemKind(id) == kind;
 }
 
-// Size off the stage's own chance table with the three colors collapsed, for the
-// one case the gated picker leaves unanswered: it found nothing eligible, returned
-// -1 and wrote neither out-param.
-static int RollBoxSize(void)
-{
-    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
-    if (info == NULL || info->item_desc == NULL || info->item_desc->box_spawn_chances == NULL)
-        return 0;
-
-    const u8 *chances = (const u8 *)info->item_desc->box_spawn_chances;
-    int weight[3] = { 0, 0, 0 };
-    int total = 0;
-    for (int i = 0; i < 9; i++)
-    {
-        weight[i % 3] += chances[i];
-        total += chances[i];
-    }
-    if (total == 0)
-        return 0;
-
-    int roll = HSD_Randi(total);
-    for (int size = 0; size < 2; size++)
-    {
-        roll -= weight[size];
-        if (roll < 0)
-            return size;
-    }
-    return 2;
-}
-
-// REPLACECALL on the bl GrBoxGeneratorDetermine at 0x800eb20c, the one call site
-// CityItemSpawn_Think reaches when its tick came up an item box. The picker's return
-// is the box's ItemKind, so an AP box is one more outcome of the vanilla roll, keeping
-// the color, size and fall timer the roll landed on.
+// Replaces the bl GrBoxGeneratorDetermine at 0x800eb20c in CityItemSpawn_Think
+// (0x800eb108). The AP Box is one more outcome of the vanilla roll, keeping the color,
+// size and fall timer it landed on.
 static int DetermineBox(int *box_color, int *box_size)
 {
     int kind = GrBoxGeneratorDetermine(box_color, box_size);
 
-    if (!round_armed || ApPatches_Remaining() <= 0)
+    if (!round_armed || APPatches_Remaining() <= 0)
         return kind;
 
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
@@ -178,21 +127,19 @@ static int DetermineBox(int *box_color, int *box_size)
 
     box_gate_frames = now - (int)((float)ap_box_rate[rate].interval / SpawnRate_GetScale());
 
-    // No gate ever sees the AP box, so it still lands on the tick where box
-    // gating has left no vanilla color eligible - carrying its own color and size.
+    // Box gating never sees the AP Box, so it lands even when no vanilla color is
+    // eligible, on a size off the whole table.
     if (kind < 0)
     {
         *box_color = BOXKIND_BLUE;
-        *box_size = RollBoxSize();
+        *box_size = GateBoxes_RollSize(-1);
     }
 
     boxes_rolled++;
     return box_kind;
 }
 
-// Contents of a broken AP Box. Box_OutcomeLogic caps a custom kind at one item -
-// forced_item by design, the pool roll because its 1 / 2 / 4 count only applies
-// to vanilla patch kinds - so the whole outcome is reproduced here instead.
+// Box_OutcomeLogic caps a custom kind at one item, so the whole outcome is reproduced.
 static void BreakApBox(ItemData *id)
 {
     JOBJ *j = GObj_GetJObjIndex(id->item_gobj, 1);
@@ -203,10 +150,10 @@ static void BreakApBox(ItemData *id)
     if (patch_kind < 0)
         return;
 
-    int count = (id->box_size == 1) ? 2 : (id->box_size == 2) ? 4 : 1;
+    int count = (id->box_size == BOXSIZE_MEDIUM) ? 2 : (id->box_size == BOXSIZE_LARGE) ? 4 : 1;
     if (count > AP_BOX_MAX_PATCHES)
         count = AP_BOX_MAX_PATCHES;
-    int remaining = ApPatches_Remaining();
+    int remaining = APPatches_Remaining();
     if (count > remaining)
         count = remaining;
     if (count <= 0)
@@ -219,13 +166,12 @@ static void BreakApBox(ItemData *id)
             break;
 
         Vec3 dir = id->forward;
-        if (box_slot_yaw[i] != 0.0f)
+        if (stc_box_slot_yaw[i] != 0.0f)
         {
             float spread = (float)HSD_Randi((int)p->box_spawn_yaw_range);
             if (HSD_Randi(2))
                 spread = -spread;
-            Vec3_RotateAboutUnitAxis(&dir, &id->up,
-                                     BOX_DEG_TO_RAD * (spread + box_slot_yaw[i]));
+            Vec3_RotateAboutUnitAxis(&dir, &id->up, MTXDegToRad(spread + stc_box_slot_yaw[i]));
         }
 
         float horiz = p->box_spawn_offset_min_h +
@@ -238,9 +184,9 @@ static void BreakApBox(ItemData *id)
         }
         else
         {
-            float pitch = BOX_DEG_TO_RAD *
-                          (p->box_spawn_offset_min_v +
-                           (float)HSD_Randi((int)(p->box_spawn_offset_max_v - p->box_spawn_offset_min_v)));
+            float pitch = MTXDegToRad(
+                p->box_spawn_offset_min_v +
+                (float)HSD_Randi((int)(p->box_spawn_offset_max_v - p->box_spawn_offset_min_v)));
             child = Box_SpawnContents((ItemKind)patch_kind, 2, &pos, &dir, 1,
                                       horiz, pitch);
         }
@@ -251,8 +197,7 @@ static void BreakApBox(ItemData *id)
     }
 }
 
-// REPLACECALL on the bl in ItemGObj_BoxBreak. Anything that is not an AP Box is handed
-// straight to the vanilla outcome.
+// Replaces the bl Box_OutcomeLogic at 0x80258384 in ItemGObj_BoxBreak (0x802582dc).
 static void OutcomeLogic(ItemData *id)
 {
     if (IsApKind(id, box_kind))
@@ -261,26 +206,24 @@ static void OutcomeLogic(ItemData *id)
         Box_OutcomeLogic(id);
 }
 
-// ItemGObj_BoxSpawnImpactEffect picks its burst off the clamped kind, so an AP Box draws
-// the vanilla blue pair. Each is recolored into a copy of its generator descriptor
-// that stc_ps_generator_desc points at for the length of the spawn: Ptcl_Alloc stores
-// descriptor + 0x3c in the generator instance, so the burst reads the copy for its
-// whole life while every other box still allocates off the vanilla one.
-#define AP_PTCL_BANK      5     // yakumono
-#define AP_PTCL_DESC_SIZE 0x88  // stride of the six box descriptors in the bank
-#define AP_PTCL_COLOR     0x3c  // PTCL_OP_COLOR, RGBA operand at +2
-#define AP_PTCL_COLOR2    0x48  // PTCL_OP_COLOR2, RGBA operand at +2
+// ItemGObj_BoxSpawnImpactEffect picks its burst off the clamped kind. Ptcl_Alloc keeps
+// descriptor + 0x3c in the generator, so pointing stc_ps_generator_desc at a recolored
+// copy for the length of the spawn recolors that burst alone.
+#define AP_PTCL_DESC_SIZE 0x88 // stride of the six box descriptors in the bank
+// Where each burst program's two color opcodes sit, checked before use.
+#define AP_PTCL_COLOR     (offsetof(PtclDesc, program) + 0x0)
+#define AP_PTCL_COLOR2    (offsetof(PtclDesc, program) + 0xc)
 
 // psInitDataBanks biases stc_ps_generator_desc[bank] by the bank's base id and stores
 // base + n as the count, so both tables are indexed by the whole effect id.
 static const int ap_burst_ef[2] = { 50000, 50001 }; // hit, break
 
-// The box's own six faces, matching the atlas its texture is authored from.
+// One color per box face.
 static const u8 ap_face_color[][3] = {
     { 201, 118, 130 }, { 117, 194, 117 }, { 202, 148, 194 },
     { 217, 160, 125 }, { 118, 126, 189 }, { 238, 227, 145 },
 };
-#define AP_FACE_NUM (int)(sizeof(ap_face_color) / sizeof(ap_face_color[0]))
+#define AP_FACE_NUM (int)GetElementsIn(ap_face_color)
 
 static u8 ptcl_desc[2][AP_FACE_NUM][AP_PTCL_DESC_SIZE];
 static int ptcl_state; // 0 not built for this round, 1 ready, -1 unavailable
@@ -297,39 +240,40 @@ static void RecolorOperand(u8 *rgb, const u8 *tint)
         rgb[i] = (u8)((tint[i] * v) / 255);
 }
 
-// One recolored copy of each burst per face color. psInitDataBanks rebuilds the
-// bank tables on every scene load, so the source is re-read each round, and the
-// two opcodes are checked rather than assumed.
+// One recolored copy of each burst per face color, rebuilt each round since
+// psInitDataBanks reloads the banks. The opcodes are checked rather than assumed.
 static void BuildBursts(void)
 {
     ptcl_state = -1;
     for (int g = 0; g < 2; g++)
     {
         int ef = ap_burst_ef[g];
-        if ((u32)ef >= stc_ps_generator_count[AP_PTCL_BANK])
+        if ((u32)ef >= stc_ps_generator_count[PTCL_BANK_YAKUMONO])
             return;
 
-        const u8 *src = stc_ps_generator_desc[AP_PTCL_BANK][ef];
+        const u8 *src = stc_ps_generator_desc[PTCL_BANK_YAKUMONO][ef];
         if (src == NULL || src[AP_PTCL_COLOR] != (PTCL_OP_COLOR | 0xf) ||
             src[AP_PTCL_COLOR2] != (PTCL_OP_COLOR2 | 0xf))
         {
-            OSReport("[APPatches] Box burst %d is not the expected program\n", ef);
+            static int warned;
+            if (!warned)
+                OSReport("[APPatches] Box burst %d is not the expected program\n", ef);
+            warned = 1;
             return;
         }
         for (int c = 0; c < AP_FACE_NUM; c++)
         {
             u8 *dst = ptcl_desc[g][c];
             memcpy(dst, src, AP_PTCL_DESC_SIZE);
-            RecolorOperand(dst + AP_PTCL_COLOR + 2, ap_face_color[c]);
-            RecolorOperand(dst + AP_PTCL_COLOR2 + 2, ap_face_color[c]);
+            RecolorOperand(dst + AP_PTCL_COLOR + PTCL_OP_COLOR_OPERANDS, ap_face_color[c]);
+            RecolorOperand(dst + AP_PTCL_COLOR2 + PTCL_OP_COLOR_OPERANDS, ap_face_color[c]);
         }
     }
     ptcl_state = 1;
 }
 
-// REPLACECALL on both bl ItemGObj_BoxSpawnImpactEffect sites. An AP Box swaps its
-// recolored descriptor in for the length of the spawn and takes the next face
-// color, so a box that is hit twice and broken throws three of its own colors.
+// Replaces both bl ItemGObj_BoxSpawnImpactEffect. An AP Box takes the next face color each
+// time, so a box hit twice and broken throws three of its own colors.
 static int SpawnImpactEffect(GOBJ *gobj, int is_break)
 {
     ItemData *id = gobj != NULL ? (ItemData *)gobj->userdata : NULL;
@@ -343,7 +287,7 @@ static int SpawnImpactEffect(GOBJ *gobj, int is_break)
     if (ptcl_state != 1)
         return ItemGObj_BoxSpawnImpactEffect(gobj, is_break);
 
-    u8 **slot = &stc_ps_generator_desc[AP_PTCL_BANK][ap_burst_ef[g]];
+    u8 **slot = &stc_ps_generator_desc[PTCL_BANK_YAKUMONO][ap_burst_ef[g]];
     u8 *saved = *slot;
     *slot = ptcl_desc[g][ptcl_color];
     ptcl_color = (ptcl_color + 1) % AP_FACE_NUM;
@@ -353,35 +297,30 @@ static int SpawnImpactEffect(GOBJ *gobj, int is_break)
     return ret;
 }
 
-// Ply_IncrementItemCollectNum is the single producer of PlayerStats.item_collect[].
-// Returning 1 skips the call, keeping both AP kinds out of every counter it feeds -
-// the per-kind slot, the lifetime total, and the first-20-seconds and Tac aggregates.
+// Ply_IncrementItemCollectNum is the game's one producer of PlayerStats.item_collect[];
+// returning 1 skips it for both AP kinds, and so every counter it feeds.
 static int SuppressItemCollect(ItemData *id)
 {
     return IsApKind(id, patch_kind) || IsApKind(id, box_kind);
 }
 
-// 0x801db91c in Machine_OnTouchItem: lwz r4, 28(r21) - the call's own kind argument,
-// reloaded from r21
-// (ItemData) on the accept path. Accept falls through to 0x801db920, which
-// re-materializes r3 and r5; reject jumps past the call.
+// Hook at 0x801db91c in Machine_OnTouchItem (0x801db34c): lwz r4, 28(r21) loads the kind
+// for bl Ply_IncrementItemCollectNum (r21 = ItemData). Accept resumes at 0x801db920, which
+// rebuilds r3 and r5; reject skips the call.
 CODEPATCH_HOOKCONDITIONALCREATE(0x801db91c, "mr 3, 21\n\t", SuppressItemCollect, "", 0, 0x801db92c)
 
-static void OnPickup(u32 id_hash, const char *name, int player)
+static void OnPickup(u32 id_hash, int player)
 {
-    (void)name;
-    if (id_hash != patch_hash || patch_hash == 0)
-        return;
-    if (player < 0 || player >= 5)
-        return;
-    Claim();
+    (void)player;
+    if (id_hash == patch_hash && patch_hash != 0)
+        Claim();
 }
 
-// Match both drop-ins to their hashes by display name. Lazy because mod load order
-// follows FST order, so an export is not available until its owner's OnBoot has run.
+// Matches both drop-ins to their hashes by display name, retried each round until both
+// are found.
 static void ResolveItems(void)
 {
-    if (ci_api == NULL || items_matched == 2)
+    if (items_matched == 2)
         return;
 
     for (int i = 0; i < ci_api->GetCount(); i++)
@@ -404,46 +343,34 @@ static void ResolveItems(void)
                  found, patch_hash ? "patch" : "no patch", box_hash ? "box" : "no box");
 }
 
-void ApPatches_OnBoot(void)
+void APPatches_OnBoot(void)
 {
-    CODEPATCH_REPLACECALL(0x80258384, OutcomeLogic);  // bl Box_OutcomeLogic in ItemGObj_BoxBreak
-    CODEPATCH_REPLACECALL(0x80258344, SpawnImpactEffect);  // bl ItemGObj_BoxSpawnImpactEffect in ItemGObj_BoxBreak
-    CODEPATCH_REPLACECALL(0x802575f0, SpawnImpactEffect);  // ... and in Box_OnTakeDamage
-    CODEPATCH_REPLACECALL(0x800eb20c, DetermineBox);  // bl GrBoxGeneratorDetermine in CityItemSpawn_Think
-    CODEPATCH_HOOKAPPLY(0x801db91c);                  // item_collect suppression
+    CODEPATCH_REPLACECALL(0x80258384, OutcomeLogic);
+    CODEPATCH_REPLACECALL(0x80258344, SpawnImpactEffect); // in ItemGObj_BoxBreak (0x802582dc)
+    CODEPATCH_REPLACECALL(0x802575f0, SpawnImpactEffect); // in Box_OnTakeDamage (0x80257158)
+    CODEPATCH_REPLACECALL(0x800eb20c, DetermineBox);
+    CODEPATCH_HOOKAPPLY(0x801db91c);
     OSReport("[APPatches] Hooks installed\n");
 }
 
-void ApPatches_On3DLoadStart(void)
+void APPatches_On3DLoadStart(void)
 {
-    // The kinds are per-scene, and this fires for every 3D scene where On3DLoadEnd
-    // does not (Top Ride), so clearing here is what keeps them from going stale.
+    // Per-scene kinds, cleared here because On3DLoadEnd does not run for Top Ride.
     patch_kind = -1;
     box_kind = -1;
     round_armed = 0;
     boxes_rolled = 0;
-    box_gate_frames = 0x7fffffff; // open, so the round's first roll is not held back
-    ptcl_state = 0; // the bank tables are rebuilt with the scene
+    box_gate_frames = INT_MAX; // open, so the round's first roll is not held back
+    ptcl_state = 0;
 
-    // Tried once: a build without custom_items would warn on every 3D scene.
-    if (!ci_import_tried)
-    {
-        ci_import_tried = 1;
-        ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
-            (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
-        if (ci_api != NULL)
-            ci_api->AddPickupHandler(OnPickup);
-    }
     if (ci_api == NULL)
         return;
 
     ResolveItems();
 
-    // custom_items registers at CityItemSpawn_Init's epilogue and skips a disabled
-    // item, so a held-out kind is never handed an ItemKind and nothing can spawn it.
-    // The attract demo satisfies every other term here, and a CPU collecting a patch
-    // would claim a location, so it is held out at the registry rather than the roll.
-    int on = ApPatches_GetCount() > 0 && !Gm_IsAutoDemo() &&
+    // custom_items registers at CityItemSpawn_Init and skips a disabled item. The attract
+    // demo is held out too: a CPU pickup would claim a location.
+    int on = APPatches_GetCount() > 0 && !Gm_IsAutoDemo() &&
              Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL;
     if (patch_hash != 0)
         ci_api->SetEnabled(patch_hash, on);
@@ -451,43 +378,48 @@ void ApPatches_On3DLoadStart(void)
         ci_api->SetEnabled(box_hash, on);
 }
 
-void ApPatches_On3DLoadEnd(void)
+void APPatches_On3DLoadEnd(void)
 {
-    if (ci_api == NULL || ApPatches_GetCount() == 0)
+    if (ci_api == NULL || APPatches_GetCount() == 0)
         return;
     if (Gm_IsAutoDemo() || !Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
         return;
 
-    // The kinds are handed out at CityItemSpawn_Init, so they are only valid from
-    // here on and only for this scene.
+    // Handed out at CityItemSpawn_Init, so valid from here and for this scene only.
     if (patch_hash != 0)
         patch_kind = ci_api->GetAssignedKind(patch_hash);
     if (box_hash != 0)
         box_kind = ci_api->GetAssignedKind(box_hash);
     if (patch_kind < 0 || box_kind < 0)
     {
-        OSReport("[APPatches] Not armed: patch kind %d, box kind %d\n", patch_kind, box_kind);
+        // A drop-in missing from items/ was already reported by ResolveItems.
+        static int warned;
+        if (patch_hash != 0 && box_hash != 0)
+        {
+            if (!warned)
+                OSReport("[APPatches] Not armed: patch kind %d, box kind %d\n", patch_kind, box_kind);
+            warned = 1;
+        }
         return;
     }
 
     round_armed = 1;
     int rate = BoxRate();
     OSReport("[APPatches] Armed with %d patch(es) left, %d%% of box spawns, %d frame floor\n",
-             ApPatches_Remaining(), ap_box_rate[rate].percent,
+             APPatches_Remaining(), ap_box_rate[rate].percent,
              (int)((float)ap_box_rate[rate].interval / SpawnRate_GetScale()));
 }
 
-void ApPatches_On3DExit(void)
+void APPatches_On3DExit(void)
 {
     if (!round_armed)
         return;
     OSReport("[APPatches] Round over: %d AP box(es) rolled, %d patch(es) left\n",
-             boxes_rolled, ApPatches_Remaining());
+             boxes_rolled, APPatches_Remaining());
     round_armed = 0;
 }
 
-// Called only under ap_data->backfill_valid, so the array is whole.
-void ApPatches_ApplyBackfill(void)
+void APPatches_ApplyBackfill(void)
 {
     int applied = 0;
     for (int w = 0; w < AP_PATCH_WORDS; w++)
@@ -504,19 +436,25 @@ void ApPatches_ApplyBackfill(void)
         OSReport("[APPatches] Backfill applied (%d new patch(es))\n", applied);
 }
 
-void ApPatches_OnSaveLoaded(void)
+void APPatches_OnSaveLoaded(void)
 {
-    for (int w = 0; w < AP_PATCH_WORDS; w++)
-        ap_data->ap_patch_checks[w] = ap_save->ap_patch_collected[w];
+    // Without the mirror the client would read zeros and resend every patch.
+    memcpy(ap_data->ap_patch_checks, ap_save->ap_patch_collected, sizeof(ap_data->ap_patch_checks));
+
+    if (ci_api != NULL)
+        return;
+    ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
+        (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
+    if (ci_api != NULL)
+        ci_api->AddPickupHandler(OnPickup);
+    else
+        OSReport("[APPatches] custom_items missing from this build, AP Patches are off\n");
 }
 
-void ApPatches_ResetAll(void)
+void APPatches_ResetAll(void)
 {
-    for (int w = 0; w < AP_PATCH_WORDS; w++)
-    {
-        ap_save->ap_patch_collected[w] = 0;
-        ap_data->ap_patch_checks[w] = 0;
-    }
+    memset(ap_save->ap_patch_collected, 0, sizeof(ap_save->ap_patch_collected));
+    memset(ap_data->ap_patch_checks, 0, sizeof(ap_data->ap_patch_checks));
 }
 
 // Bits 0..count-1 of word w, for a count that spans the whole array.
@@ -528,9 +466,9 @@ static u64 WordMask(int count, int w)
     return bits > 0 ? (1ULL << bits) - 1 : 0;
 }
 
-void ApPatches_DebugForceMarkAll(void)
+void APPatches_DebugForceMarkAll(void)
 {
-    int count = ApPatches_GetCount();
+    int count = APPatches_GetCount();
     for (int w = 0; w < AP_PATCH_WORDS; w++)
     {
         u64 mask = WordMask(count, w);
@@ -539,7 +477,7 @@ void ApPatches_DebugForceMarkAll(void)
     }
 }
 
-void ApPatches_DebugSetCount(int count)
+void APPatches_DebugSetCount(int count)
 {
     if (count < 0)
         count = 0;
@@ -557,27 +495,24 @@ void ApPatches_DebugSetCount(int count)
     }
 }
 
-int ApPatches_DebugClaim(void)
+int APPatches_DebugClaim(void)
 {
     return Claim();
 }
 
-// The client's backfill is ORed straight back into both arrays on its next push, so
-// a clear that left it alone would be undone and the patch stay unclaimable.
-void ApPatches_DebugClearCollected(void)
+// The pending backfill goes too, or the client's next push would restore the bits.
+void APPatches_DebugClearCollected(void)
 {
-    ApPatches_ResetAll();
-    for (int w = 0; w < AP_PATCH_WORDS; w++)
-        ap_data->ap_patch_backfill[w] = 0;
+    APPatches_ResetAll();
+    memset(ap_data->ap_patch_backfill, 0, sizeof(ap_data->ap_patch_backfill));
     Hoshi_WriteSave();
     OSReport("[APPatches] Debug: cleared every collected bit\n");
 }
 
-int ApPatches_DebugSpawnBox(int ply)
+int APPatches_DebugSpawnBox(int ply)
 {
     if (box_kind < 0)
         return 0;
 
-    // The size roll is carried in so a debug box still opens into two or four.
-    return APItems_SpawnForward(ply, (ItemKind)box_kind, BOXKIND_BLUE, RollBoxSize());
+    return APItems_SpawnForward(ply, (ItemKind)box_kind, BOXKIND_BLUE, GateBoxes_RollSize(-1));
 }

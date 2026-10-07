@@ -1,9 +1,12 @@
+#include <string.h>
+
 #include "os.h"
 #include "game.h"
 #include "hsd.h"
 #include "stage.h"
 #include "obj.h"
 #include "code_patch/code_patch.h"
+#include "inline.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
@@ -122,7 +125,7 @@ static void ListActiveFx(const CustomPresetDef *def)
         "terrain", "ambient", "tint", "rain", "hail", "snow", "lightning",
         "wind", "puddles", "clouds", "moon", "stars", "volcano", "tornado",
     };
-    int on[sizeof(names) / sizeof(names[0])] = {0};
+    int on[GetElementsIn(names)] = {0};
 
     if (def)
     {
@@ -142,26 +145,17 @@ static void ListActiveFx(const CustomPresetDef *def)
         on[13] = def->tornado.enabled;
     }
 
-    int pos = 0;
-    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++)
+    stc_fx_list[0] = '\0';
+    for (int i = 0; i < (int)GetElementsIn(names); i++)
     {
         if (!on[i])
             continue;
-        if (pos)
-        {
-            stc_fx_list[pos++] = ',';
-            stc_fx_list[pos++] = ' ';
-        }
-        for (const char *c = names[i]; *c; c++)
-            stc_fx_list[pos++] = *c;
+        if (stc_fx_list[0])
+            strcat(stc_fx_list, ", ");
+        strcat(stc_fx_list, names[i]);
     }
-    if (pos == 0)
-    {
-        const char *none = "none";
-        while (*none)
-            stc_fx_list[pos++] = *none++;
-    }
-    stc_fx_list[pos] = '\0';
+    if (!stc_fx_list[0])
+        strcpy(stc_fx_list, "none");
 }
 
 void CustomWeatherRuntime_Tick(GrObj *grobj)
@@ -226,8 +220,8 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         ApplyAmbientTint(s_active_def);  // slot table not up yet on the first CT frame
     }
 
-    // Sky_Update leaves HSD_Fog.scale at 1.0, so this field is ours. Written every
-    // frame so a live menu change lands immediately, vanilla presets included.
+    // Sky_Update never writes HSD_Fog.scale, so this field is ours; vanilla presets
+    // take the menu distance too.
     if (fog)
         fog->scale = CustomWeather_GetFogScale();
 

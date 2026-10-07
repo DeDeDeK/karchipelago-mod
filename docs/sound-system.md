@@ -75,10 +75,10 @@ Positional sounds go through an `AudioEmitter` instead - `AudioEmitter_Alloc`
 then `AudioEmitter_Play` - which owns distance attenuation and panning and calls
 `SFX_PlayRaw` underneath.
 
-The script runs a command per audio tick batch in `FGMinstance_UpdateScript`
+The script runs a command per audio tick batch in `FGMInstance_UpdateScript`
 (`0x80441760`). Opcode `0x01` stores its 16-bit operand into
 `FGMInstanceData.sound_index` and raises the "start a voice" flag;
-`FGMInstanceData_AllocPID` (`0x80440cd4`) then reaches `Audio_AllocPID`
+`FGMInstanceData_AllocPID` (`0x80440cd4`) then reaches `Sound_PlayIndex`
 (`0x80448f08`), which is where a sound index becomes an AX voice. It walks the
 chain at `stc_ssm_sound_hash[index & 0x1F]` for a node whose `index` matches,
 feeds each of the node's channels to `AXSetVoiceAddr` / `AXSetVoiceAdpcm` /
@@ -296,7 +296,7 @@ that slot's chunk list, then walks the records: each becomes an `SSMSound` whose
 and which is linked into `stc_ssm_sound_hash[index & 0x1F]`. Finally the slot's
 ARAM cursor advances by `data_size`, so several banks can share a slot.
 
-Slots come from `FGM_GetNextLargestSSMSizeIndex(size)` (`0x80448274`), which
+Slots come from `FGM_AllocSSMSlot(size)` (`0x80448274`), which
 carves the next span of the ARAM sample arena and returns its index, or -1 if
 the arena or the 32 slots are exhausted. `FGM_IndexLargestSSMSize`
 (`0x8005b8d8`) wraps it and also records the size in `Audio3D.largest_ssm_sizes`,
@@ -310,7 +310,7 @@ to `0xA881C0`, leaving `0x17C340` - about 1.48 MiB - for anything added.
 
 | Cap | Value | Enforced at |
 |---|---|---|
-| SSM slots | 32 | `FGM_GetNextLargestSSMSizeIndex` `0x80448274` |
+| SSM slots | 32 | `FGM_AllocSSMSlot` `0x80448274` |
 | ARAM sample arena | 12 MiB, 1.48 MiB free | same, against the limit at `0x805de54c` |
 | Per-slot ARAM | its own span | `FGM_LoadBankCallback` `0x80447ea4` |
 | MRAM audio heap | 512 KB | `AudioHeap_Alloc` `0x804479e0` |
@@ -330,7 +330,7 @@ is chained rather than open-addressed, the script map is described entirely by
 
 Everything above adds up to a recipe that replaces no file on disc. Build a
 `.ssm` whose `sound_base` starts at 615, past the last index the vanilla banks
-claim; take a slot from `FGM_GetNextLargestSSMSizeIndex` big enough to hold it;
+claim; take a slot from `FGM_AllocSSMSlot` big enough to hold it;
 `FGM_QueueLoad` its FST path into that slot and `FGM_SynchronousLoad`; then widen
 the script map, by copying `bank_start_script` and `script_data` into larger
 mod-owned arrays, appending a bank whose scripts play the new indices, and

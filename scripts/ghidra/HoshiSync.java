@@ -3,7 +3,7 @@
 // Three tasks, selected by the `task` key:
 //   parse    run Ghidra's C parser over the body-stripped hoshi headers into the
 //            program's DataTypeManager, then drop orphaned CParser conflicts
-//   names    rename each listed function by address
+//   names    give each listed function its name, in the global namespace
 //   globals  retype + label each fixed-address engine global in the listing
 //
 // Config comes from a properties file rather than script arguments, and results
@@ -47,9 +47,11 @@ import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.mem.Memory;
+import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
+import ghidra.program.model.symbol.SymbolType;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -264,7 +266,9 @@ public class HoshiSync extends GhidraScript {
     }
 
     // Addressed rather than looked up by name, because the names being replaced
-    // are not unique in the program.
+    // are not unique in the program. A function parked in a namespace of its own -
+    // an early map import made one out of each row's trailing note - moves back to
+    // the global one, and the namespace goes once nothing is left in it.
     private String names(Properties cfg) throws Exception {
         String dataPath = cfg.getProperty("data", "").trim();
         if (dataPath.isEmpty()) {
@@ -274,8 +278,10 @@ public class HoshiSync extends GhidraScript {
         rpt("data    : " + dataPath);
 
         FunctionManager fm = currentProgram.getFunctionManager();
+        SymbolTable st = currentProgram.getSymbolTable();
+        Namespace global = currentProgram.getGlobalNamespace();
         List<String> detail = new ArrayList<>();
-        int renamed = 0, failed = 0;
+        int renamed = 0, moved = 0, dropped = 0, failed = 0;
         int tx = currentProgram.startTransaction("Apply map function names");
         try (BufferedReader br = new BufferedReader(new FileReader(dataPath))) {
             String line;
@@ -291,11 +297,28 @@ public class HoshiSync extends GhidraScript {
                     failed++;
                     continue;
                 }
-                String old = fn.getName();
+                String old = fn.getName(true);
+                Namespace ns = fn.getParentNamespace();
+                boolean misplaced = !ns.isGlobal();
+                boolean misnamed = !fn.getName().equals(f[1]);
+                if (!misplaced && !misnamed) {
+                    continue;
+                }
                 try {
-                    fn.setName(f[1], SourceType.USER_DEFINED);
+                    if (misplaced) {
+                        fn.setParentNamespace(global);
+                        moved++;
+                    }
+                    if (misnamed) {
+                        fn.setName(f[1], SourceType.USER_DEFINED);
+                        renamed++;
+                    }
                     detail.add(f[0] + "  " + old + " -> " + f[1]);
-                    renamed++;
+                    Symbol nsSym = ns.getSymbol();
+                    if (misplaced && nsSym.getSymbolType() == SymbolType.NAMESPACE
+                            && !st.getChildren(nsSym).hasNext() && nsSym.delete()) {
+                        dropped++;
+                    }
                 } catch (Exception e) {
                     detail.add("FAIL  " + f[0] + " " + old + " -> " + f[1] + ": "
                             + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -306,7 +329,8 @@ public class HoshiSync extends GhidraScript {
             currentProgram.endTransaction(tx, true);
         }
 
-        String summary = "renamed=" + renamed + " failed=" + failed;
+        String summary = "renamed=" + renamed + " moved=" + moved + " namespaces_dropped="
+                + dropped + " failed=" + failed;
         rpt(summary);
         rpt("");
         rpt("--- renames ---");

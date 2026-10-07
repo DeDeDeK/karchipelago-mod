@@ -28,6 +28,7 @@ mods/ap_star/
     main.c                         ModDesc, hoshi callbacks, settings page
     ap_star.c / .h                 machine binding, sphere colors, API export
     ap_star_palette.c / .h         the platform color cycle and exhaust tint
+    ap_star_ring.c / .h            the pod ring the shot fires from: aim, spend, regrow
     ap_star_shot.c / .h            the charge-release projectile and its projectile kind
     ap_star_shot_fx.c / .h         the shot's glow and trail
     ap_star_pieces.c / .h          sphere gate, delivery, collection, drops, assembly, handler list
@@ -157,7 +158,7 @@ it alone and `MODULATE` shades it, which is why the disc's two stages are built 
 the field is written separately rather than through the archive. The write runs from the machine's
 Anim handler (`CustomMachinesAPI.SetAnimHandler`), at the end of `MachineGObj_AnimThink` after
 `Machine_ColAnimThink` has reapplied the ColAnim overlays, so it is the color that draws. The
-handler is claimed once, when the machine binding settles at the first scene change. Phase advances
+handler is claimed once, when the machine binding is taken at `OnSaveLoaded`. Phase advances
 on the time-base delta, so the period holds through slowdown; the unsigned subtraction carries the
 32-bit tick counter's wrap, every star on the field shares one phase, and a gap of a whole cycle or
 more - no star on the field - resumes where it left off instead of jumping.
@@ -183,18 +184,19 @@ color. The platform and its trail therefore share a hue rather than an exact val
 `custom_machines` assigns appended kinds in FST scan order, so the star's `MachineKind` and
 class slot are whatever the registry handed it that boot. `AP_STAR_MACHINE_NAME`
 ("Archipelago Star") is the `CustomMachineDesc.name` authored into the archive's descriptor,
-and the only thing tying `machines/VcStarAp.dat` to this code - `ApStar_MachineKind()`
-resolves it through `CustomMachinesAPI.FindKindByName`, which discovery keeps unambiguous by
-refusing a second machine under a taken name. The string lives in `ap_star_api.h` and in the
+and the only thing tying `machines/VcStarAp.dat` to this code - `ApStar_OnSaveLoaded` resolves
+it through `CustomMachinesAPI.FindKindByName`, which discovery keeps unambiguous by refusing a
+second machine under a taken name, and `ApStar_MachineKind()` returns the cached answer. The string lives in `ap_star_api.h` and in the
 archive; changing one without the other unbinds the machine, and the code then runs as if the
 archive were absent.
 
-The binding settles at the mod's first `OnSceneChange`, not at `OnBoot`. Mods run in the order
+The binding is taken at the mod's `OnSaveLoaded`, not at `OnBoot`. Mods run in the order
 their `.bin` files sit in the FST, `ap_star` sorts before `custom_machines`, and a mod's export is
-not available until its own `OnBoot` has run - so an `OnBoot` lookup always answers -1. The first
-scene change is past every `OnBoot`, so the import and the name lookup are tried there once and the
-answer is fixed for the run: the kind is cached, the star's class slot resolved, and the Init, Think
-and Anim handler slots claimed. A lookup before that resolves on demand without settling. Without `custom_machines`, or with no machine under the name,
+not available until its own `OnBoot` has run - so an `OnBoot` lookup always answers -1.
+`OnSaveLoaded` is the first callback past every `OnBoot`, so the import and the name lookup run
+there once and the answer is fixed for the run: the kind is cached, the star's class slot
+resolved, and the Init, Think and Anim handler slots claimed. `archipelago` sorts after `ap_star`,
+so its own `OnSaveLoaded` already sees the kind. Without `custom_machines`, or with no machine under the name,
 the mod says so once and every entry point that needs the kind does nothing.
 
 ## The API
@@ -298,9 +300,9 @@ once 856 has arrived; assembling it mounts the player whatever the bit says. Any
 machine `custom_machines` registers has no bit and is left ungated.
 
 **Title screen.** Archipelago also chooses the star as the title screen's idle demo machine,
-in `main_menu.c`. The title scene's demo player is set up in `SceneLoad_TitleScreen` (`0x8000d26c`) from three `li r4`
+in `ap_title.c`. The title scene's demo player is set up in `SceneLoad_TitleScreen` (`0x8000d26c`) from three `li r4`
 operands: `RiderKind` at `0x8000d340`, `is_bike` at `0x8000d34c`, class slot at `0x8000d358`.
-`main_menu.c` rewrites the rider and the class slot on each title entry, since the registry
+`ap_title.c` rewrites the rider and the class slot on each title entry, since the registry
 only resolves after every mod has booted, pointing them at Kirby on the Archipelago Star
 through `GateApStar_MachineKind()` and falling back to King Dedede on the Wagon Star when no
 such machine is registered. The ride must stay star-class: the demo init uses hardcoded
@@ -328,8 +330,8 @@ descriptor asks) takes a select-screen cell. `CUSTOM_MACHINE_MAX` caps the regis
 
 A machine that wants behavior copies this mod's shape: a folder under `mods/`, its archive
 under `assets/machines/`, its companion archives at `assets/` root under a distinctive
-prefix, a `ModDesc` in `src/main.c`, and a lazy `FindKindByName` bind on its own
-descriptor name. Per-machine behavior hangs off `CustomMachinesAPI.SetInitHandler`,
+prefix, a `ModDesc` in `src/main.c`, and a `FindKindByName` bind on its own descriptor
+name at `OnSaveLoaded`. Per-machine behavior hangs off `CustomMachinesAPI.SetInitHandler`,
 `SetThinkHandler` and `SetAnimHandler`, the per-kind handlers a registered machine of either class
 runs. The only
 build registration needed is adding `include/` to the Makefile's `INCLUDES` list, and only if

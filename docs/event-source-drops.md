@@ -2,26 +2,26 @@
 
 `grBoxGeneInfo->item_desc->event_source_drop[]` is the per-stage table that drives item drops from **non-box** sources - Tac, meteor, Dyna Blade, destructible structures, secret chamber, UFO. It is loaded from the stage data file (e.g. `GrCity1.dat`) at scene init; `grBoxGeneInfo` itself lives at `*stc_grBoxGeneInfo` (r13+0x610). Box drops come from a separate table, `grBoxGeneObj`.
 
-Each row is 0x10 bytes: an `ItemKind` followed by six `u16` weight columns, one per drop source (declared inline in `grBoxGeneInfo` in `game.h`). `event_source_drop_num` at `item_desc+0x1c` is the row count.
+Each row is 0x10 bytes: an `ItemKind` followed by six `s16` weight columns, one per drop source (declared inline in `grBoxGeneInfo` in `game.h`). `event_source_drop_num` at `item_desc+0x1c` is the row count. `_CityItem_GetEventItem` (0x800ebe44) reads each weight with `lhax`/`extsh`, so a weight of 0x8000 or more subtracts from the column total instead of adding to it.
 
 | Field | Drop source |
 |---|---|
 | `chance_dyna` | Dyna Blade hits/exits |
 | `chance_tac` | Tac (cat enemy) |
 | `chance_meteor` | Meteor explosion |
-| `chance_destructible` | Generic destructible structures: star pole, event pillar, volcano walls, houses |
+| `chance_destructible` | Generic destructible structures: star pole, event pillars |
 | `chance_chamber` | Secret chamber |
 | `chance_ufo` | UFO |
 
 The star pole and the event pillars share the destructible pool; only Dyna Blade keys off `chance_dyna`. City Trial's HP-coll props (volcano walls, volcano-base holes, houses) do not use this table: their broken-state callback `zz_80109458_` spawns each prop's own item list through `CityEvent_GetRandomItem`.
 
-**The array is indexed positionally by other code, so rows must never be reordered or compacted.** Gating a kind off means zeroing all six of its columns in place - that is what `item_spawn_filter.c` does in one pass, over every row the archipelago mod's combined locked predicate (abilities, patches, individual items) rejects. `custom_items` adds rows by copying the stage's rows into a static array, appending after them, and repointing `item_desc->event_source_drop`/`_num` at the copy (`item_registry.c`); the per-event re-bias overwrites that pointer, so it is re-applied by `CustomItemRegistry_ReinjectPools`.
+**The array is indexed positionally by other code, so rows must never be reordered or compacted.** Gating a kind off means zeroing all six of its columns in place - that is what `item_spawn_filter.c` does in one pass, over every row the archipelago mod's combined locked predicate (abilities, patches, individual items) rejects. `custom_items` adds rows by copying the stage's rows into a static array, appending after them, and repointing `item_desc->event_source_drop`/`_num` at the copy (`item_registry.c`). Nothing in the event start or end paths writes that pointer or count, so the repoint holds for the whole round.
 
 ## Drop Pipeline
 
 `GrYakuBreakRock_DropItems` (0x8010203c) and `GrYakuBreakCoral_DropItems` (0x801040fc) are `on_damage_callback`s at `obj+0x100`; `GrYakuBreakHouse_DropItems` (0x80102794) is a descriptor `coll_func`, and `hitBigStar` (0x80103eb8, the BreakCoral `coll_func`) also drops directly on a force break. All four funnel into `City_SpawnMiscItems` (0x80104db0) with a per-instance drop descriptor.
 
-`City_SpawnMiscItems` picks the emitter from a shape flag at `desc[8]` (`+0x20`): value `1` -> `shootPowerUps?` (directed cone, 0x801058c0), value `0` or lower -> `City_SpawnMiscItemsRing` (omnidirectional, 0x80104e10). Values > 1 hit an assert. (The trailing `?` is part of the map name, marking an unconfirmed signature.)
+`City_SpawnMiscItems` picks the emitter from a shape flag at `desc[8]` (`+0x20`): value `1` -> `City_SpawnMiscItemsCone` (directed cone, 0x801058c0), value `0` or lower -> `City_SpawnMiscItemsRing` (omnidirectional, 0x80104e10). Values > 1 hit an assert.
 
 Both emitters read `drop_source` from `desc[7]` (`+0x1c`). If it is not -1 they pass it to `CityItem_GetEventItem` (0x80254114, a thin wrapper that tail-calls `_CityItem_GetEventItem` at 0x800ebe44), which does the weighted random pick over the source's column in `event_source_drop[]`. If it is -1 the emitter falls back to `CityEvent_GetRandomItem` (0x80252f28), the current event's own pool.
 

@@ -5,12 +5,14 @@
 
 #include "ap_item_handler.h"
 #include "checklist_rewards.h"
+#include "ap_checklist.h"
 #include "kirby_scale.h"
 #include "textbox_api.h"
 #include "ap_colors.h"
 #include "city_trial_event.h"
 #include "ability_item.h"
 #include "patch_item.h"
+#include "permanent_patch.h"
 #include "patch_cap.h"
 #include "gate_events.h"
 #include "gate_abilities.h"
@@ -40,13 +42,11 @@ static void APItems_CheckMailbox(void)
 
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
     {
-        // Leave the item in the mailbox: the client gates its next write on
-        // incoming_item_id == 0, so holding the value is the protocol's
-        // backpressure. Clearing it would lose the item permanently - the client
-        // has advanced past it and item_received_count was never bumped.
+        // Held in the mailbox: the client waits for incoming_item_id == 0, so this is the
+        // protocol's backpressure.
         if (!warned_full)
         {
-            OSReport("[APItems] Unprocessed queue full (%d) - holding item %d in the mailbox\n",
+            OSReport("[APItems] Unprocessed queue full (%d), item %d held in the mailbox\n",
                      MAX_RECEIVED_ITEMS, incoming);
             warned_full = 1;
         }
@@ -57,18 +57,16 @@ static void APItems_CheckMailbox(void)
     uint idx = ap_save->item_received_count;
     ap_save->item_received_count++;
 
-    ap_save->unprocessed_items[ap_save->unprocessed_count] = incoming;
-    ap_save->unprocessed_count++;
+    APItems_Queue(incoming);
 
     ap_data->item_received_index = ap_save->item_received_count;
 
     OSReport("[APItems] AP item ID %d received (index %d)\n", incoming, idx);
 
-    // Clear the mailbox so the client can write the next item
     ap_data->incoming_item_id = 0;
 }
 
-// TextBox color for a directly-received ITKIND item, by category.
+// Textbox color for a directly-received ITKIND item, by category.
 static GXColor ItemReceiveColor(ItemKind k)
 {
     switch (k)
@@ -108,13 +106,18 @@ static void NotifyItemReceived(ItemKind k)
         APAnnounce_Grant("Received: ", ItemKind_Names[k], ItemReceiveColor(k), NULL);
 }
 
-// Distance in machine forward units to push a spawned item ahead of the rider, so
-// it lands in front of them to drive into rather than on top of them.
+// The give handlers return how many players took the item; none means try again later.
+static int Applied(int count)
+{
+    return count ? AP_ITEM_APPLIED : AP_ITEM_RETRY;
+}
+
+// In machine forward units.
 #define AP_SPAWN_FORWARD 10.0f
 
 int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
 {
-    if (ply < 0 || ply >= 5)
+    if (ply < 0 || ply >= PLY_NUM)
         return 0;
     GOBJ *mg = Ply_GetMachineGObj(ply);
     if (!mg)
@@ -126,67 +129,45 @@ int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
     pos.Y = md->pos.Y + AP_SPAWN_FORWARD * md->forward.Y;
     pos.Z = md->pos.Z + AP_SPAWN_FORWARD * md->forward.Z;
 
-    // Mirrors SpawnItemPlayer - the initial raycast from is_airborne=1 settles
-    // the item onto the ground.
+    // Mirrors SpawnItemPlayer: the initial raycast from is_airborne=1 settles the item
+    // onto the ground.
     ItemDesc desc;
     Item_InitDesc(&desc, kind, 1.0f, 0, &pos, &md->up, &md->forward,
                   box_kind, size, 1, 3, -1, -1);
     return CityItem_Create(&desc) != NULL;
 }
 
-// Both return the number of human riders the item actually reached. A rider on
-// foot has no machine to spawn at and both paths skip them, so a give that landed
-// on nobody has to stay queued rather than report itself applied.
+// A box carries its color and a size off the stage's table, which is what its break
+// rolls the contents from.
 static int SpawnBoxHumansForward(ItemKind kind)
 {
+    int color = kind - ITKIND_BOXBLUE;
     int gave = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
         if (Ply_GetPKind(i) == PKIND_HMN)
-            gave += APItems_SpawnForward(i, kind, -1, -1);
+            gave += APItems_SpawnForward(i, kind, color, GateBoxes_RollSize(color));
     return gave;
 }
 
-static int SpawnItemHumansCounted(ItemKind kind)
-{
-    int gave = 0;
-    for (int i = 0; i < 5; i++)
-    {
-        if (Ply_GetPKind(i) != PKIND_HMN || Ply_GetMachineGObj(i) == NULL)
-            continue;
-        SpawnItemPlayer(i, kind);
-        gave++;
-    }
-    return gave;
-}
-
-// Handle an AP item by its raw ID. Returns an APItemResult: APPLIED on success,
-// RETRY if it can't be applied yet (wrong scene, event already active), or DROP
-// if the ID is unrecognized or out of range - so a malformed ID can't wedge the
-// queue and re-log every frame.
 int APItems_HandleItem(uint ap_item_id)
 {
-    // Items that apply immediately with no scene requirement
     switch (ap_item_id)
     {
         case AP_ITEM_CHECKBOX_FILLER_AIRRIDE:
-            Checklist_GrantFiller(GMMODE_AIRRIDE);
-            Checklist_AnnounceFiller(GMMODE_AIRRIDE);
-            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_TOPRIDE:
-            Checklist_GrantFiller(GMMODE_TOPRIDE);
-            Checklist_AnnounceFiller(GMMODE_TOPRIDE);
-            return AP_ITEM_APPLIED;
         case AP_ITEM_CHECKBOX_FILLER_CITYTRIAL:
-            Checklist_GrantFiller(GMMODE_CITYTRIAL);
-            Checklist_AnnounceFiller(GMMODE_CITYTRIAL);
+        {
+            GameMode mode = ap_item_id - AP_ITEM_CHECKBOX_FILLER_AIRRIDE;
+            Checklist_GrantFiller(mode);
+            ChecklistRewards_AnnounceFiller(mode);
             return AP_ITEM_APPLIED;
+        }
         case AP_ITEM_CHECKBOX_FILLER_ARCHIPELAGO:
-            // If the custom_checklist framework never registered the AP tab, drop
-            // the item rather than dereference a NULL clear-data pointer.
-            if (!gmGetClearcheckerTypeP((GameMode)ap_checklist_mode))
+            // Without custom_checklist there is no AP tab to hold the filler.
+            if (!APChecklist_IsRegistered())
                 return AP_ITEM_DROP;
             Checklist_GrantFiller((GameMode)ap_checklist_mode);
-            Checklist_AnnounceFiller((GameMode)ap_checklist_mode);
+            ChecklistRewards_AnnounceFiller((GameMode)ap_checklist_mode);
             return AP_ITEM_APPLIED;
         case AP_ITEM_PATCH_CAP_INCREASE:
             PatchCap_Increment();
@@ -196,313 +177,208 @@ int APItems_HandleItem(uint ap_item_id)
             return AP_ITEM_APPLIED;
     }
 
-    // Above the 3D-only scene gate below because it also applies in Top Ride
-    // (minor 19), which never satisfies that gate. KirbyScale_HandleItem does its
-    // own scene check and returns RETRY until Kirby models exist.
+    // KirbyScale_HandleItem retries until Kirby models exist, Top Ride's included.
     if (ap_item_id == AP_ITEM_BIG_KIRBY || ap_item_id == AP_ITEM_SMALL_KIRBY)
         return KirbyScale_HandleItem(ap_item_id);
 
-    // Checklist rewards (AP_CHECKLIST_REWARD_BASE + mode*50 + reward_index).
-    // Scene-independent - the hook handles all reward checks at runtime.
-    if (ap_item_id >= AP_CHECKLIST_REWARD_BASE && ap_item_id < AP_CHECKLIST_REWARD_BASE + 150)
+    if (ap_item_id >= AP_CHECKLIST_REWARD_BASE &&
+        ap_item_id < AP_CHECKLIST_REWARD_BASE + GMMODE_NUM * AP_CHECKLIST_REWARD_STRIDE)
     {
         u32 offset = ap_item_id - AP_CHECKLIST_REWARD_BASE;
-        GameMode mode = offset / 50;
-        u8 ap_reward_index = offset % 50;
-        // Reward bands are stride-50 but each mode uses fewer (AR 46, TR 33,
-        // CT 44), so IDs in the gaps are not valid rewards.
+        GameMode mode = offset / AP_CHECKLIST_REWARD_STRIDE;
+        u8 ap_reward_index = offset % AP_CHECKLIST_REWARD_STRIDE;
+        // Each mode uses fewer than its stride, so IDs in the gaps are not rewards.
         if (ap_reward_index >= ChecklistRewards_GetRewardCount(mode))
         {
-            OSReport("[APItems] Checklist reward ID %d out of range (mode %d index %d) - dropping\n",
+            OSReport("[APItems] Checklist reward ID %d out of range (mode %d index %d), dropped\n",
                      ap_item_id, mode, ap_reward_index);
             return AP_ITEM_DROP;
         }
-        // The item ID carries the apworld's clear_kind-sorted reward index;
-        // translate to the game reward-table index the grant path expects.
         u8 reward_index = ChecklistRewards_ApToGameIndex(mode, ap_reward_index);
         ChecklistRewards_Grant(mode, reward_index, /*announce=*/1);
         return AP_ITEM_APPLIED;
     }
 
-    // Event unlock items (AP_EVENT_UNLOCK_BASE + EventKind)
     if (ap_item_id >= AP_EVENT_UNLOCK_BASE && ap_item_id < AP_EVENT_UNLOCK_BASE + EVKIND_NUM)
-    {
-        EventKind kind = ap_item_id - AP_EVENT_UNLOCK_BASE;
-        return GateEvents_UnlockEvent(kind);
-    }
+        return GateEvents_UnlockEvent(ap_item_id - AP_EVENT_UNLOCK_BASE);
 
-    // Copy ability unlock items (AP_ABILITY_UNLOCK_BASE + CopyKind)
     if (ap_item_id >= AP_ABILITY_UNLOCK_BASE && ap_item_id < AP_ABILITY_UNLOCK_BASE + COPYKIND_NUM)
-    {
-        CopyKind kind = ap_item_id - AP_ABILITY_UNLOCK_BASE;
-        return GateAbilities_UnlockAbility(kind);
-    }
+        return GateAbilities_UnlockAbility(ap_item_id - AP_ABILITY_UNLOCK_BASE);
 
-    // Base ability unlock items (AP_BASE_ABILITY_UNLOCK_BASE + BaseAbilityKind)
     if (ap_item_id >= AP_BASE_ABILITY_UNLOCK_BASE && ap_item_id < AP_BASE_ABILITY_UNLOCK_BASE + BASEABILITY_NUM)
-    {
-        BaseAbilityKind kind = ap_item_id - AP_BASE_ABILITY_UNLOCK_BASE;
-        return GateBaseAbilities_UnlockAbility(kind);
-    }
+        return GateBaseAbilities_UnlockAbility(ap_item_id - AP_BASE_ABILITY_UNLOCK_BASE);
 
-    // Patch type unlock items (AP_PATCH_UNLOCK_BASE + PatchKind)
     if (ap_item_id >= AP_PATCH_UNLOCK_BASE && ap_item_id < AP_PATCH_UNLOCK_BASE + PATCHKIND_NUM)
-    {
-        PatchKind kind = ap_item_id - AP_PATCH_UNLOCK_BASE;
-        return GatePatches_UnlockPatch(kind);
-    }
+        return GatePatches_UnlockPatch(ap_item_id - AP_PATCH_UNLOCK_BASE);
 
-    // Individual item unlock items (AP_ITEM_UNLOCK_BASE + ItemUnlockKind)
     if (ap_item_id >= AP_ITEM_UNLOCK_BASE && ap_item_id < AP_ITEM_UNLOCK_BASE + ITUNLOCK_NUM)
-    {
-        ItemUnlockKind kind = ap_item_id - AP_ITEM_UNLOCK_BASE;
-        return GateItems_UnlockItem(kind);
-    }
+        return GateItems_UnlockItem(ap_item_id - AP_ITEM_UNLOCK_BASE);
 
-    // Archipelago Star sphere unlock items (AP_STAR_PIECE_UNLOCK_BASE + APStarPiece)
-    if (ap_item_id >= AP_STAR_PIECE_UNLOCK_BASE &&
-        ap_item_id < AP_STAR_PIECE_UNLOCK_BASE + AP_STAR_PIECE_NUM)
-    {
-        int piece = ap_item_id - AP_STAR_PIECE_UNLOCK_BASE;
-        return GateApStar_UnlockPiece(piece);
-    }
+    if (ap_item_id >= AP_STAR_PIECE_UNLOCK_BASE && ap_item_id < AP_STAR_PIECE_UNLOCK_BASE + AP_STAR_PIECE_NUM)
+        return GateApStar_UnlockPiece(ap_item_id - AP_STAR_PIECE_UNLOCK_BASE);
 
-    // Machine unlock items (AP_MACHINE_UNLOCK_BASE + mask bit: 830-854 for the vanilla
-    // machines, 856 for the Archipelago Star). ID 855 is WHEELVSDEDEDE (25), the
-    // stadium CPU-only Dedede machine, which is not exposed and falls through to the
-    // unknown-item path.
+    // VCKIND_WHEELVSDEDEDE (855) is the stadium-only CPU machine and is never shipped.
     if (ap_item_id >= AP_MACHINE_UNLOCK_BASE && ap_item_id < AP_MACHINE_UNLOCK_BASE + AP_MACHINE_BIT_NUM &&
         ap_item_id != AP_MACHINE_UNLOCK_BASE + VCKIND_WHEELVSDEDEDE)
-    {
         return GateMachines_UnlockMachine(ap_item_id - AP_MACHINE_UNLOCK_BASE, /*announce=*/1);
-    }
 
-    // Box type unlock items (AP_BOX_UNLOCK_BASE + BoxKind)
     if (ap_item_id >= AP_BOX_UNLOCK_BASE && ap_item_id < AP_BOX_UNLOCK_BASE + BOXKIND_NUM)
-    {
-        BoxKind kind = ap_item_id - AP_BOX_UNLOCK_BASE;
-        return GateBoxes_UnlockBox(kind);
-    }
+        return GateBoxes_UnlockBox(ap_item_id - AP_BOX_UNLOCK_BASE);
 
-    // Air Ride stage unlock items (AP_STAGE_UNLOCK_AIRRIDE_BASE + stage_kind)
-    if (ap_item_id >= AP_STAGE_UNLOCK_AIRRIDE_BASE &&
-        ap_item_id < AP_STAGE_UNLOCK_AIRRIDE_BASE + AIRRIDE_NUM)
-    {
-        int stage_kind = ap_item_id - AP_STAGE_UNLOCK_AIRRIDE_BASE;
-        return GateAirRideStages_UnlockStage(stage_kind, /*announce=*/1);
-    }
+    if (ap_item_id >= AP_STAGE_UNLOCK_AIRRIDE_BASE && ap_item_id < AP_STAGE_UNLOCK_AIRRIDE_BASE + AIRRIDE_NUM)
+        return GateAirRideStages_UnlockStage(ap_item_id - AP_STAGE_UNLOCK_AIRRIDE_BASE, /*announce=*/1);
 
-    // Kirby color unlock items (AP_COLOR_UNLOCK_BASE + KirbyColor)
     if (ap_item_id >= AP_COLOR_UNLOCK_BASE && ap_item_id < AP_COLOR_UNLOCK_BASE + KIRBYCOLOR_NUM)
-    {
-        int color = ap_item_id - AP_COLOR_UNLOCK_BASE;
-        return GateColors_UnlockColor(color, /*announce=*/1);
-    }
+        return GateColors_UnlockColor(ap_item_id - AP_COLOR_UNLOCK_BASE, /*announce=*/1);
 
-    // Top Ride stage unlock items (AP_STAGE_UNLOCK_TOPRIDE_BASE + course)
-    if (ap_item_id >= AP_STAGE_UNLOCK_TOPRIDE_BASE &&
-        ap_item_id < AP_STAGE_UNLOCK_TOPRIDE_BASE + TOPRIDE_NUM)
-    {
-        int course = ap_item_id - AP_STAGE_UNLOCK_TOPRIDE_BASE;
-        return GateTopRideStages_UnlockStage(course);
-    }
+    if (ap_item_id >= AP_STAGE_UNLOCK_TOPRIDE_BASE && ap_item_id < AP_STAGE_UNLOCK_TOPRIDE_BASE + TOPRIDE_NUM)
+        return GateTopRideStages_UnlockStage(ap_item_id - AP_STAGE_UNLOCK_TOPRIDE_BASE);
 
-    // Top Ride item unlock items (AP_TOPRIDE_ITEM_UNLOCK_BASE + TopRideItemKind)
-    if (ap_item_id >= AP_TOPRIDE_ITEM_UNLOCK_BASE &&
-        ap_item_id < AP_TOPRIDE_ITEM_UNLOCK_BASE + TRITEM_NUM)
-    {
-        TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_UNLOCK_BASE;
-        return GateTopRideItems_UnlockItem(kind, /*announce=*/1);
-    }
+    if (ap_item_id >= AP_TOPRIDE_ITEM_UNLOCK_BASE && ap_item_id < AP_TOPRIDE_ITEM_UNLOCK_BASE + TRITEM_NUM)
+        return GateTopRideItems_UnlockItem(ap_item_id - AP_TOPRIDE_ITEM_UNLOCK_BASE, /*announce=*/1);
 
-    // Top Ride item give items (AP_TOPRIDE_ITEM_GIVE_BASE + TopRideItemKind),
-    // above the MNRKIND_3D gate below since Top Ride uses MNRKIND_TOPRIDE.
-    // GateTopRideItems_GiveItem returns 0 outside Top Ride, keeping the item
-    // queued until the player enters a TR match.
-    if (ap_item_id >= AP_TOPRIDE_ITEM_GIVE_BASE &&
-        ap_item_id < AP_TOPRIDE_ITEM_GIVE_BASE + TRITEM_NUM)
+    // GateTopRideItems_GiveItem refuses outside a running Top Ride race, so the give stays
+    // queued. Announced here rather than in the give, which TrapLink shares.
+    if (ap_item_id >= AP_TOPRIDE_ITEM_GIVE_BASE && ap_item_id < AP_TOPRIDE_ITEM_GIVE_BASE + TRITEM_NUM)
     {
         TopRideItemKind kind = ap_item_id - AP_TOPRIDE_ITEM_GIVE_BASE;
-        // Notify here rather than in the give handler - TrapLink also calls it
-        // and shows its own "TrapLink received!" message.
         int ok = GateTopRideItems_GiveItem(kind);
         if (ok && TopRideItemKind_Names[kind])
             APAnnounce_Grant("Received: TR ", TopRideItemKind_Names[kind],
                              tb_api->TopRideItemColor, NULL);
-        return ok;
+        return Applied(ok);
     }
 
-    // Copy ability ITKIND items in Top Ride, above the MNRKIND_3D gate that TR
-    // (MNRKIND_TOPRIDE) never satisfies. TR has no RiderData kirbys, so map the ability
-    // to its TR item analog; abilities with no analog retry in City Trial / Air Ride.
+    // In Top Ride a copy-ability item gives its TR analog; one with no analog waits for
+    // City Trial or Air Ride.
     if (Scene_GetCurrentMajor() == MJRKIND_TOP &&
         ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
-        ItemKind it_kind = ap_item_id - AP_ITKIND_BASE;
-        CopyKind copy_kind = Ability_ItKindToCopyKind(it_kind);
+        CopyKind copy_kind = Ability_ItKindToCopyKind(ap_item_id - AP_ITKIND_BASE);
         if (copy_kind != COPYKIND_NONE)
         {
             int tr_item = GateTopRideItems_AbilityToItem(copy_kind);
             if (tr_item < 0)
-                return 0; // no Top Ride analog - retry in City Trial / Air Ride
+                return AP_ITEM_RETRY;
             int ok = GateTopRideItems_GiveItem((TopRideItemKind)tr_item);
             if (ok)
                 APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
                                  tb_api->AbilityColors[copy_kind], " ability");
-            return ok;
+            return Applied(ok);
         }
     }
 
-    // Stadium unlock items (AP_STADIUM_UNLOCK_BASE + StadiumKind)
     if (ap_item_id >= AP_STADIUM_UNLOCK_BASE && ap_item_id < AP_STADIUM_UNLOCK_BASE + STKIND_NUM)
-    {
-        StadiumKind kind = ap_item_id - AP_STADIUM_UNLOCK_BASE;
-        return GateStadiums_UnlockStadium(kind, /*announce=*/1);
-    }
+        return GateStadiums_UnlockStadium(ap_item_id - AP_STADIUM_UNLOCK_BASE, /*announce=*/1);
 
-    // Permanent +1 patches (AP_PERM_PATCH_BASE + PatchKind). Save-only - the stat
-    // application happens at the next round start, so this never needs a 3D scene.
+    // Save-only; the stats land at the next round start.
     if (ap_item_id >= AP_PERM_PATCH_BASE && ap_item_id < AP_PERM_PATCH_BASE + PATCHKIND_NUM)
-    {
-        PatchKind kind = ap_item_id - AP_PERM_PATCH_BASE;
-        return PermanentPatch_GiveItem(kind);
-    }
+        return PermanentPatch_GiveItem(ap_item_id - AP_PERM_PATCH_BASE);
 
     if (ap_item_id == AP_ITEM_PERM_PATCH_ALL_UP)
         return PermanentPatch_GiveAllUp();
 
-    // All remaining items require an actual 3D game scene with the intro finished.
-    // Check minor == MNRKIND_3D, not just major: the CSS and other non-gameplay
-    // minors share the major, and intro_state defaults to GMINTRO_END outside 3D.
+    // Everything below needs a 3D round with its intro over. Top Ride runs under its own
+    // minor and never passes this gate, so all it can apply sits above. intro_state reads
+    // GMINTRO_END outside 3D, hence the minor check.
     MajorKind major = Scene_GetCurrentMajor();
-    if (major != MJRKIND_CITY && major != MJRKIND_AIR && major != MJRKIND_TOP)
-        return 0;
+    if (major != MJRKIND_CITY && major != MJRKIND_AIR)
+        return AP_ITEM_RETRY;
     if (Scene_GetCurrentMinor() != MNRKIND_3D)
-        return 0;
+        return AP_ITEM_RETRY;
     if (Gm_GetIntroState() != GMINTRO_END)
-        return 0;
+        return AP_ITEM_RETRY;
 
-    // Copy ability ITKIND items, above the Free Run / stadium gate below. They
-    // grant through the rider API rather than the item spawn pipeline, so the
-    // missing item data tables don't apply. Copy items also bypass the ability
-    // gate - AP grants apply regardless of unlock state.
+    // Copy abilities grant through the rider, so they need no item data tables and bypass
+    // the ability gate.
     if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
         CopyKind copy_kind = Ability_ItKindToCopyKind(ap_item_id - AP_ITKIND_BASE);
         if (copy_kind != COPYKIND_NONE)
-            return Ability_GiveItem(copy_kind);
+            return Applied(Ability_GiveItem(copy_kind));
     }
 
-    // CT Free Run and stadiums don't load item data tables, so any spawn-pipeline
-    // handler below would crash in Item_GetItDataPtr. Queue for a real game mode.
+    // CT Free Run and stadiums load no item data tables, and every spawn below would
+    // crash in Item_GetItDataPtr.
     if (major == MJRKIND_CITY &&
         (Gm_GetCityMode() == CITYMODE_FREERUN || CityTrial_IsInStadium()))
-        return 0;
+        return AP_ITEM_RETRY;
 
-    // City Trial events (AP_EVENT_BASE + EventKind)
     if (ap_item_id >= AP_EVENT_BASE && ap_item_id < AP_EVENT_BASE + EVKIND_NUM)
     {
         EventKind kind = ap_item_id - AP_EVENT_BASE;
-        int ok = Event_GiveItem(kind);
+        int ok = CTEvent_Give(kind);
         if (ok && EventKind_Names[kind])
             APAnnounce_Grant("Received: ", EventKind_Names[kind], tb_api->EventColor, NULL);
-        return ok;
+        return Applied(ok);
     }
 
-    // Direct ITKIND items (AP_ITKIND_BASE + ItemKind), minus the copy items
-    // handled above. "+1" stat patches apply in City Trial and Air Ride;
-    // everything else spawns a real pickup in City Trial only, where the item
-    // data tables are loaded.
+    // "+1" stat patches apply in City Trial and Air Ride; every other item spawns a pickup,
+    // City Trial only.
     if (ap_item_id >= AP_ITKIND_BASE && ap_item_id < AP_ITKIND_BASE + ITKIND_NUM)
     {
         ItemKind it_kind = ap_item_id - AP_ITKIND_BASE;
 
-        // Patch_GiveItem spawns the pickup in CT and applies directly via
-        // Machine_GivePatch in AR. Top Ride has no MachineData, so defer there.
-        PatchKind patch_kind = Patch_ItKindToPatchKind(it_kind);
+        PatchKind patch_kind = PatchItem_ItKindToPatchKind(it_kind);
         if (patch_kind != PATCHKIND_NUM)
         {
-            if (major != MJRKIND_CITY && major != MJRKIND_AIR)
-                return 0;
-            if (!Patch_GiveItem(patch_kind))
+            if (!PatchItem_Give(patch_kind))
                 return AP_ITEM_RETRY;
             NotifyItemReceived(it_kind);
             return AP_ITEM_APPLIED;
         }
 
-        if (Gm_IsInCity())
-        {
-            // Boxes spawn ahead of the rider (to drive into and break) rather
-            // than on top of them; everything else spawns at the rider.
-            int gave = (it_kind <= ITKIND_BOXRED) ? SpawnBoxHumansForward(it_kind)
-                                                  : SpawnItemHumansCounted(it_kind);
-            if (!gave)
-                return AP_ITEM_RETRY;
-            NotifyItemReceived(it_kind);
-            return AP_ITEM_APPLIED;
-        }
-        return 0;
+        if (!Gm_IsInCity())
+            return AP_ITEM_RETRY;
+
+        int gave = (it_kind <= ITKIND_BOXRED) ? SpawnBoxHumansForward(it_kind)
+                                              : SpawnItemHumans(it_kind);
+        if (!gave)
+            return AP_ITEM_RETRY;
+        NotifyItemReceived(it_kind);
+        return AP_ITEM_APPLIED;
     }
 
-    // Drop-patches trap - eject each human rider's stats as physical patches.
     if (ap_item_id == AP_ITEM_DROP_PATCHES_TRAP)
     {
         if (!Gm_IsInCity())
-            return 0;
-        int ok = Patch_DropTrap();
+            return AP_ITEM_RETRY;
+        int ok = PatchItem_DropTrap();
         if (ok)
             APAnnounce_Grant("Received: ", "Drop Patches", APColor_Trap, NULL);
-        return ok;
+        return Applied(ok);
     }
 
-    // Archipelago Star sphere give items (AP_STAR_PIECE_GIVE_BASE + APStarPiece).
-    // Collected straight into the player's set, and announced by the gate, which
-    // owns the sphere names.
-    if (ap_item_id >= AP_STAR_PIECE_GIVE_BASE &&
-        ap_item_id < AP_STAR_PIECE_GIVE_BASE + AP_STAR_PIECE_NUM)
+    // Announced by the gate, which owns the sphere names.
+    if (ap_item_id >= AP_STAR_PIECE_GIVE_BASE && ap_item_id < AP_STAR_PIECE_GIVE_BASE + AP_STAR_PIECE_NUM)
         return GateApStar_GivePiece(ap_item_id - AP_STAR_PIECE_GIVE_BASE);
 
-    // Legendary machine assembly - assembled Dragoon/Hydra via the cinematic
-    if (ap_item_id == AP_ITEM_GIVE_DRAGOON)
+    if (ap_item_id == AP_ITEM_GIVE_DRAGOON || ap_item_id == AP_ITEM_GIVE_HYDRA)
     {
-        int ok = GateMachines_GiveLegendaryMachine(0);
-        if (ok)
-            APAnnounce_Grant("Received: ", "Dragoon", tb_api->MachineColor, NULL);
-        return ok;
-    }
-    if (ap_item_id == AP_ITEM_GIVE_HYDRA)
-    {
-        int ok = GateMachines_GiveLegendaryMachine(1);
-        if (ok)
-            APAnnounce_Grant("Received: ", "Hydra", tb_api->MachineColor, NULL);
-        return ok;
+        int is_dragoon = ap_item_id == AP_ITEM_GIVE_DRAGOON;
+        int result = GateMachines_GiveLegendaryMachine(is_dragoon ? 0 : 1);
+        if (result == AP_ITEM_APPLIED)
+            APAnnounce_Grant("Received: ", is_dragoon ? "Dragoon" : "Hydra", tb_api->MachineColor, NULL);
+        return result;
     }
 
-    // The star's own assembly, awarded without the six spheres.
     if (ap_item_id == AP_ITEM_GIVE_AP_STAR)
         return GateApStar_GiveStar();
 
-    if (ap_item_id == AP_ITEM_ALL_DOWN)
+    if (ap_item_id == AP_ITEM_ALL_DOWN || ap_item_id == AP_ITEM_ALL_UP)
     {
-        int ok = Patch_AllUp_GiveItem(-1);
+        int is_up = ap_item_id == AP_ITEM_ALL_UP;
+        int ok = PatchItem_GiveAllUp(is_up ? 1 : -1);
         if (ok)
-            APAnnounce_Grant("Received: ", "All Down", APColor_Trap, NULL);
-        return ok;
+            APAnnounce_Grant("Received: ", is_up ? "All Up" : "All Down",
+                             is_up ? tb_api->PatchColors[PATCHKIND_CHARGE] : APColor_Trap, NULL);
+        return Applied(ok);
     }
 
-    if (ap_item_id == AP_ITEM_ALL_UP)
-    {
-        int ok = Patch_AllUp_GiveItem(1);
-        if (ok)
-            APAnnounce_Grant("Received: ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
-        return ok;
-    }
-
-    // 1 HP trap - set each human player's HP to 1
     if (ap_item_id == AP_ITEM_1_HP_TRAP)
     {
         int applied = 0;
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < PLY_NUM; i++)
         {
             if (Ply_GetPKind(i) != PKIND_HMN)
                 continue;
@@ -519,15 +395,13 @@ int APItems_HandleItem(uint ap_item_id)
         }
         if (applied)
             APAnnounce_Grant("Received: ", "1 HP", APColor_Trap, NULL);
-        return applied;
+        return Applied(applied);
     }
 
-    OSReport("[APItems] Unknown AP item ID: %d - dropping\n", ap_item_id);
+    OSReport("[APItems] Unknown AP item ID %d, dropped\n", ap_item_id);
     return AP_ITEM_DROP;
 }
 
-// Returns 1 if queued, 0 if the queue is full. For items the mod raises itself
-// (EnergyLink purchases and the like) - the AP mailbox has its own entry point.
 int APItems_Queue(uint ap_item_id)
 {
     if (ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS)
@@ -536,29 +410,19 @@ int APItems_Queue(uint ap_item_id)
     return 1;
 }
 
-// Resolve at most one queued item per frame. Items that can't apply yet are
-// skipped so items behind them still process; only RETRY items stay in the queue.
-static void APItems_PerFrame(GOBJ *g)
+// At most one queued item resolves per frame. RETRY items stay queued without blocking
+// the items behind them.
+void APItems_OnFrameStart(void)
 {
     APItems_CheckMailbox();
 
     for (uint i = 0; i < ap_save->unprocessed_count; i++)
     {
-        uint item_id = ap_save->unprocessed_items[i];
-
-        int result = APItems_HandleItem(item_id);
-
-        if (result == AP_ITEM_RETRY)
+        if (APItems_HandleItem(ap_save->unprocessed_items[i]) == AP_ITEM_RETRY)
             continue;
 
-        // Remove by swapping with the last element.
         ap_save->unprocessed_count--;
         ap_save->unprocessed_items[i] = ap_save->unprocessed_items[ap_save->unprocessed_count];
         break;
     }
-}
-
-void APItems_OnSceneChange()
-{
-    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, APItems_PerFrame, 0, 0, 0, 0);
 }

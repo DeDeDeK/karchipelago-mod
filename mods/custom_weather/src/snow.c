@@ -6,12 +6,11 @@
 #include "hsd.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
-
-#define SNOW_PI  3.14159265358979f
 
 #define SNOW_MAX        1000       // pool capacity; per-preset density clamps to this
 #define SNOW_BOX        1000.0f    // edge of the camera-following volume (cube)
@@ -70,17 +69,17 @@ static int     stc_seeded = 0;
 // Index 0 ("Preset") is the pass-through value on every knob below.
 static const float intensity_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f};
 static char *intensity_names[] = {"Preset", "Off", "Light", "Normal", "Heavy"};
-#define SNOW_INTENSITY_NUM (sizeof(intensity_factors) / sizeof(intensity_factors[0]))
+#define SNOW_INTENSITY_NUM GetElementsIn(intensity_factors)
 static int intensity_index = 0;
 
 static const float fall_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
 static char *fall_names[] = {"Preset", "Slow", "Normal", "Fast"};
-#define SNOW_FALL_NUM (sizeof(fall_factors) / sizeof(fall_factors[0]))
+#define SNOW_FALL_NUM GetElementsIn(fall_factors)
 static int fall_index = 0;
 
 static const float flutter_factors[] = {1.0f, 0.0f, 1.0f, 2.0f};
 static char *flutter_names[] = {"Preset", "None", "Gentle", "Lively"};
-#define SNOW_FLUTTER_NUM (sizeof(flutter_factors) / sizeof(flutter_factors[0]))
+#define SNOW_FLUTTER_NUM GetElementsIn(flutter_factors)
 static int flutter_index = 0;
 
 static int wind_slant_index = 1;
@@ -105,9 +104,9 @@ static void SeedField(void)
         if (scale < 0.3f)
             scale = 0.3f;
         f->size = scale;   // base size folded in at draw time
-        f->phase = HSD_Randf() * 2.0f * SNOW_PI;
-        f->freq = SNOW_TW_SPEED_MIN + HSD_Randf() * (SNOW_TW_SPEED_MAX - SNOW_TW_SPEED_MIN);
-        float az = HSD_Randf() * 2.0f * SNOW_PI;
+        f->phase = HSD_Randf() * 2.0f * M_PI;
+        f->freq = Weather_RandRange(SNOW_TW_SPEED_MIN, SNOW_TW_SPEED_MAX);
+        float az = HSD_Randf() * 2.0f * M_PI;
         f->sway_x = cosf(az);
         f->sway_z = sinf(az);
     }
@@ -128,16 +127,14 @@ static void Snow_GX(GOBJ *g, int pass)
     if (!cam)
         return;
 
-    // Rows 0/1 of the world->view rotation are the billboard basis.
-    float (*m)[4] = cam->view_mtx;
-    Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
-    Vec3 upW = {m[1][0], m[1][1], m[1][2]};
+    Vec3 rightW, upW;
+    COBJ_GetViewAxes(cam, &rightW, &upW);
     Vec3 eye;
-    WeatherGX_CameraEye(cam, &eye);
+    COBJ_GetViewEye(cam, &eye);
 
     float flutter = stc_flutter * flutter_factors[flutter_index];
 
-    WeatherGX_BeginXlu(cam, 0, 0);
+    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
 
     for (int i = 0; i < stc_density; i++)
     {
@@ -161,13 +158,12 @@ static void Snow_GX(GOBJ *g, int pass)
         float r = stc_base_size * f->size;
 
         GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, SNOW_SEGS + 2);
-        WeatherGX_BillboardVert(&P, &rightW, &upW, 0.0f, 0.0f,
-                                stc_color.r, stc_color.g, stc_color.b, stc_color.a);
+        GX_BillboardVert(&P, &rightW, &upW, 0.0f, 0.0f, stc_color, stc_color.a);
         for (int sgm = 0; sgm <= SNOW_SEGS; sgm++)
         {
-            float ang = 2.0f * SNOW_PI * (float)sgm / (float)SNOW_SEGS;
-            WeatherGX_BillboardVert(&P, &rightW, &upW, cosf(ang) * r, sinf(ang) * r,
-                                    stc_color.r, stc_color.g, stc_color.b, 0);
+            float ang = 2.0f * M_PI * (float)sgm / (float)SNOW_SEGS;
+            GX_BillboardVert(&P, &rightW, &upW, cosf(ang) * r, sinf(ang) * r,
+                             stc_color, 0);
         }
     }
 

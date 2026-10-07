@@ -54,7 +54,8 @@ unlock animation has played), `has_reward` (0x08, set by
 | `0x8004a054` | `ClearChecker_SetNewUnlock(mode, ck)` | Sets `is_new` + unlock SFX; the main gameplay funnel |
 | `0x8004a1a4` | `ClearChecker_CheckForNewUnlocks(mode)` | Scans a mode for `is_new && !is_unlocked` |
 | `0x8004a2bc` | `Checklist_InitGridMapping(mode)` | Fills `grid_mapping[CLEAR_KIND_NUM]` - meta cells pre-placed, remainder randomized with `HSD_Randi` |
-| `0x80049d10` | Reward type lookup (unnamed) | Returns `stc_reward_table_ptrs[mode][reward_index].reward_type`. Called from the icon display function at `0x80182178` |
+| `0x80049d10` | `ClearChecker_GetRewardType(mode, reward_index)` | Returns `stc_reward_table_ptrs[mode][reward_index].reward_type`; asserts `mode < 3`. Called from `Checklist_RewardIconProc` at `0x80182178` |
+| `0x80049d98` | `ClearChecker_GetRewardParam(mode, reward_index)` | Returns the entry's `reward_param`; asserts `mode < 3`. Called from `Checklist_RewardIconProc` at `0x8018213c` to decide whether the icon is drawn |
 | `0x80180508` | Audio preview scan | Inside `Checklist_Think`. Scans `stc_audio_preview_tables[current_mode]` for `reward_index`, calls `BGM_Play`, persists song to `MainMenuData.soundtest_bgm_kind` (`GameData+0x4e`). **Hooked** to redirect to the source mode's table for cross-mode music rewards |
 | `0x8017df5c` | `Checklist_SetRewardFlagOnUnlocks()` | Sets `has_reward` on unlocked slots, rebuilds the grid, manages filler counters |
 | `0x8017e490` | `Checklist_ProcessUnlock()` | Called from `Checklist_Think` case 1 on checklist entry. Animates one pending unlock and reveals its neighbours, then writes the 5 meta auto-unlock bytes via direct `stb` instructions that bypass `SetNewUnlock`. Returns 1 while an unlock was processed, 0 once none remain (and then requests a card save) |
@@ -101,9 +102,11 @@ icon animation at `0x80181fc8` and resets a display-state counter to 0; reward -
 different reward jumps the counter straight to 5; reward -> no-reward displays the blank
 text at `0x80181f8c`. The counter increments each frame and the reward text is issued once,
 on state 5, via `Text_InitPremadeText(text, reward_index + 0x7d)` at `0x8018201c`, after
-which state 6 stops it. The reward-type icon comes from a separate function at
-`0x801820b4`, which reads the reward type via `0x80049d10(mode, reward_index)` - the call
-at `0x80182178` is where the mode has to be swapped for a cross-mode reward.
+which state 6 stops it. The reward-type icon comes from a separate function,
+`Checklist_RewardIconProc` (`0x801820b4`), which asks `ClearChecker_GetRewardParam` (`bl` at
+`0x8018213c`) whether to draw the icon at all, then reads the type via
+`ClearChecker_GetRewardType` (`bl` at `0x80182178`). Both take the mode, so both are where a
+cross-mode reward needs the source mode.
 
 ### SIS text indices
 
@@ -198,8 +201,8 @@ Per slot the loop takes `p = 0..4` where `Ply_GetPKind(p) == 0` (human), reads
 `Gm_GetPlayerRaceDistance(p)` (metres), divides by `0.3048` and awards when the result is
 **`>=`** the threshold. `ClearChecker_GetKindClear(GMMODE_AIRRIDE, clear_kind) & 5`
 (`is_new | is_unlocked`) suppresses a repeat before `ClearChecker_SetNewUnlock`. Because it
-reads `GameData` live rather than the latched results block, there is no `xc00[p]` validity
-gate.
+reads `GameData` live rather than the latched results block, there is no `rank_skip[p]`
+validity gate.
 
 ### Unlock-gated settings menus (City Trial rules)
 
@@ -241,8 +244,8 @@ internally and translates at the two AP-client wire boundaries only.
   exposes it; out-of-range inputs pass through unchanged. It reproduces the apworld's
   numbering exactly for all three modes (AR 46 / TR 33 / CT 44 entries).
 - **Boundary 1 - incoming item ID** (`ap_item_handler.c`): `reward_index =
-  (id - AP_CHECKLIST_REWARD_BASE) % 50` is the apworld's clear_kind-sorted index;
-  translate via `ApToGameIndex` before `ChecklistRewards_Grant`.
+  (id - AP_CHECKLIST_REWARD_BASE) % AP_CHECKLIST_REWARD_STRIDE` is the apworld's
+  clear_kind-sorted index; translate via `ApToGameIndex` before `ChecklistRewards_Grant`.
 - **Boundary 2 - `locations[]`** (`ChecklistRewards_ApplyLocations`): the client writes
   `locations[m][ap_ri]`; store into `shuffled_rewards[m][ap_to_game_ri[m][ap_ri]]`. The
   bijection covers `[0, count)` so each game index is written once.
@@ -252,7 +255,8 @@ internally and translates at the two AP-client wire boundaries only.
   "TR Filler 5" -> game index 25 = Ending), and `locations[]` placement would be
   scrambled.
 
-**AP item IDs:** `AP_CHECKLIST_REWARD_BASE (500) + mode*50 + ap_reward_index`.
+**AP item IDs:** `AP_CHECKLIST_REWARD_BASE (500) + mode * AP_CHECKLIST_REWARD_STRIDE (50) +
+ap_reward_index`.
 
 ### Reward table management
 
@@ -324,8 +328,9 @@ only to the dead in-game cache that our gate hooks bypass. Routing:
 - `REWARD_MACHINE_*` (13 values) -> `GateMachines_UnlockMachine(VCKIND_*)`.
 - `REWARD_KING_DEDEDE` -> `VCKIND_WHEELDEDEDE` (the player-facing Dedede;
   `VCKIND_WHEELVSDEDEDE` is the stadium CPU-only machine and has no AP unlock).
-  `REWARD_META_KNIGHT` -> `VCKIND_WINGMETAKNIGHT`. (Character->machine resolution is via
-  `CharacterDesc_GetMachineKind` inside the AR-character availability gate.)
+  `REWARD_META_KNIGHT` -> `VCKIND_WINGMETAKNIGHT`. (The select-screen character gate,
+  `GateMachines_FilterSelectCharacter`, resolves a character to its machine through
+  `CustomMachines_ResolveKind(cm_api, desc->is_bike, desc->machine_kind)`.)
 - `REWARD_DRAGOON` / `REWARD_HYDRA` -> `VCKIND_DRAGOON` / `VCKIND_HYDRA`.
 - `REWARD_COLOR_*` (4 values) -> `GateColors_UnlockColor(KIRBYCOLOR_*)`.
 - `REWARD_ITEM_CHICKIE` / `WHO_PAINT` / `LANTERN` ->
@@ -350,7 +355,9 @@ only to the dead in-game cache that our gate hooks bypass. Routing:
 
 - `AnnounceChecklistReward` is the single announce site - the gate handlers
   `ApplyVanillaRewardUnlock` invokes are passed `announce=0`, so each reward is named
-  exactly once here however it arrives.
+  exactly once here however it arrives. It goes through `APAnnounce_Grant`, so the line
+  shows only with Messages -> Local -> Items on (default Off) and never during a quiet
+  regrant.
 - `stc_checklist_reward_names[mode][reward_index]` is the per-reward display-name table
   (joined from the vanilla reward tables; filler rows are `NULL` and handled before the
   lookup).
@@ -361,9 +368,10 @@ only to the dead in-game cache that our gate hooks bypass. Routing:
   `Received...`: non-gated extras keep a category (`Received Sound Test: <name>`,
   `Received Music:`, `Received Extra Rule:`); single-instance features (Bonus Movie,
   Ending, Pause Power-ups) and the legendary parts carry none (`Received: <name>`).
-- Fillers use `Checklist_AnnounceFiller(mode)`: `Received: Checkbox Filler (<Mode>)`,
+- Fillers use `ChecklistRewards_AnnounceFiller(mode)`: `Received: Checkbox Filler (<Mode>)`,
   shared with the direct AP filler-item path so wording and coloring stay identical. The
-  AP tab's runtime mode has no `ModeColors[]` slot, so it supplies its own name and tint.
+  mode's name and tint come from `APChecklist_RowName` / `APChecklist_RowColor`, which
+  supply the AP tab's own, since its runtime mode has no `ModeColors[]` slot.
 
 ### Checkbox filler grants (AP receipt is the sole authority)
 
@@ -383,7 +391,8 @@ Placement only drives the `has_reward` display badge.
   `has_reward` 0->1 transition" anyway.
 - Direct filler items (`AP_ITEM_CHECKBOX_FILLER_*`, used by the EnergyLink filler-buy and
   the debug filler-give) bypass `Grant` entirely - they call `Checklist_GrantFiller`
-  directly in `ap_item_handler.c` - and are unaffected.
+  directly in `ap_item_handler.c` - and are unaffected. The Archipelago one is dropped when
+  the AP tab never registered, since there is no board to hold it.
 
 ### Unplaced-reward ungating (`checklist_reward_placed_types`)
 
@@ -424,11 +433,14 @@ Cross-mode placements get their `has_reward` from the post-loop hook.
 **Post-reward-loop hook** (HOOKCREATE at `0x8017e07c`):
 `ChecklistRewards_ApplyCrossModeHasReward(current_mode)` iterates
 `cross_mode_slots[row]` and on any checkbox where `(is_unlocked || is_filler) &&
-!has_reward` sets `has_reward = 1` for the display badge. It resolves its row with
-`ChecklistModeRow` and returns early on `-1`, so the AP tab is covered and any other
-custom tab is skipped. It does **not** grant a checkbox filler when the source is a
-`REWARD_FILLER` - that would double-count and credit the wrong mode. Clobbered
-instruction: `lbz r0, 0(r31)` (re-executed in the trampoline epilogue).
+!has_reward` sets `has_reward = 1` for the display badge. A custom tab builds under
+`GMMODE_CITYTRIAL` while its clear data is already the tab's, so while a build is in progress
+it replaces the UI mode with `APChecklist_GetBuildMode()`; otherwise it would pair City
+Trial's slots with the tab's board. It resolves its row with `ChecklistModeRow` and returns
+early on `-1`, so the AP tab is covered and any other custom tab is skipped. It does **not**
+grant a checkbox filler when the source is a `REWARD_FILLER` - that would double-count and
+credit the wrong mode. Clobbered instruction: `lbz r0, 0(r31)` (re-executed in the
+trampoline epilogue).
 
 **Vanilla reward-loop filler grant - neutralized** (REPLACEINSTRUCTION at `0x8017e00c`):
 the vanilla reward loop bumps `checkbox_filler_num`/`checkbox_filler_list_len` for reward
@@ -454,7 +466,7 @@ reward. On "all received" they fall into vanilla's own set-cell logic, which sti
 the `0x8017f0a8`/`0x8017f11c` meta-unlock hooks that send the 0x6D/0x6E check. The
 block is City-Trial-only (mode guard `cmplwi r3,2` at `0x8017f00c`).
 
-**Audio preview hook** (HOOKCONDITIONALCREATE at `0x80180508`):
+**Audio preview hook** (HOOKCREATE at `0x80180508`):
 `ChecklistRewards_AudioPreview(reward_index)` replaces the vanilla per-entry scan that
 walks `stc_audio_preview_tables[current_mode]`. It reads `hover_source_mode` (set by the
 FindRewardForCell hook in `Checklist_UpdateCellInfo` on the prior frame for the hovered
@@ -462,8 +474,8 @@ cell; `0xFF` until one resolves), looks up `reward_index` in the **source** mode
 table, calls `BGM_Play(song_id)`, and persists the song_id to
 `MainMenuData.soundtest_bgm_kind` (`GameData+0x4e`). Reached only when `reward_param ==
 REWARDPARAM_AUDIO`. It always alt-exits to `0x80180560`, past the vanilla scan +
-`BGM_Play` + persist sequence. For same-mode placements `hover.source_mode ==
-current_mode`, so behavior matches vanilla; when `hover.source_mode` is not one of the
+`BGM_Play` + persist sequence. For same-mode placements `hover_source_mode ==
+current_mode`, so behavior matches vanilla; when `hover_source_mode` is not one of the
 three real modes (nothing resolved yet, or a custom tab) the hook alt-exits without
 playing anything. Cross-mode ending previews (`REWARDPARAM_ENDING`) are safe to route
 through the unhooked vanilla path at `0x80180554` - vanilla's "ending preview" only sets
@@ -501,7 +513,8 @@ than mapping it, and treats a malformed value as remote.
 - `u16 shuffled_rewards[GMMODE_NUM][REWARD_COUNT_MAX]` - persisted u16 location encoding
   per reward_index. `0xFFFF` = remote. Sized by game mode, since only real modes own
   reward tables.
-- `u64 received_checklist_rewards[3]` - bit N = reward_index N received for that mode.
+- `u64 received_checklist_rewards[GMMODE_NUM]` - bit N = reward_index N received for that
+  mode.
 
 ### Cross-mode display
 
@@ -524,8 +537,8 @@ cross-mode source rows (sentinel 0) against a real same-mode placement at `clear
   Otherwise: same-mode cells require `has_reward` set; cross-mode cells require
   `is_unlocked || has_reward` (the `is_unlocked` term covers the
   newly-completed-this-session window before the post-loop hook has mirrored has_reward).
-- Snapshots `source_mode` into the static `hover` struct; downstream text/icon/audio hooks
-  read it to pick the correct SIS slot and reward table. It is the one piece that cannot
+- Snapshots `source_mode` into the static `u8 hover_source_mode`; downstream
+  text/icon/audio hooks read it to pick the correct SIS slot and reward table. It is the one piece that cannot
   be recomputed on demand, since it comes from a placement resolve rather than the UI. The
   hovered cell itself is *not* snapshotted - `ChecklistRewards_GetHoveredCell` reads
   `ClearCheckerUI.cursor_col`/`cursor_row` live and reverse-maps through `grid_mapping`.
@@ -534,20 +547,28 @@ cross-mode source rows (sentinel 0) against a real same-mode placement at `clear
   `mr r27, r0` lands the right value.
 
 **Reward text display** (HOOKCREATE at `0x8018201c`):
-`ChecklistRewards_DisplayRewardText(text, reward_index, current_mode)` temporarily sets
-`text->sis_id` to `mode_to_sis_slot[hover.source_mode]`, calls
-`Text_InitPremadeText(text, reward_index + 0x7d)`, then restores `sis_id` to 0. Command
-data comes from the source mode's SIS; glyph rendering uses slot 0's font (all checklist
-SIS files share the same font).
+`ChecklistRewards_DisplayRewardText(Text *text, int reward_index)` temporarily sets
+`text->sis_id` to `mode_to_sis_slot[hover_source_mode]` (slot 0 when `hover_source_mode` is
+not a real mode), calls `Text_InitPremadeText(text, CLEARCHECKER_SIS_REWARD_BASE (0x7d) +
+reward_index)`, then restores `sis_id` to 0. Command data comes from the source mode's SIS;
+glyph rendering uses slot 0's font (all checklist SIS files share the same font).
 
 **Blank text fix** (HOOKCREATE at `0x80181f8c`):
-`ChecklistRewards_SetBlankTextSisId(text, current_mode)` resets `sis_id` to 0 before
-displaying blank text (`0x7c`), in case a previous cross-mode hover left it changed.
+`ChecklistRewards_SetBlankTextSisId(Text *text)` resets `sis_id` to 0 before displaying
+blank text (`CLEARCHECKER_SIS_NO_REWARD`, `0x7c`), in case a previous cross-mode hover left
+it changed.
 
 **Reward type icon** (HOOKCREATE at `0x80182170`): the icon function's reward-type lookup
 must read the *source* mode's table for a cross-mode reward, so the hook replaces the mode
 in r3 with `ChecklistRewards_GetHoverSourceMode()`, skips the vanilla mode load at
-`0x80182174`, and exits to the call at `0x80182178`.
+`0x80182174`, and exits to the `bl ClearChecker_GetRewardType` at `0x80182178`.
+
+**Reward icon gate** (REPLACECALL at `0x8018213c`): the `bl ClearChecker_GetRewardParam`
+earlier in the same function decides whether the icon is drawn, and is passed
+`ClearCheckerUI.mode`, which on a custom tab trips the callee's mode assert.
+`ChecklistRewards_GetHoverRewardParam(mode, reward_index)` returns the `reward_param` from
+`hover_source_mode`'s table instead, or 0 (no icon) when `hover_source_mode` is not a real
+mode.
 
 **Cross-mode objective text:** the objective text shown when hovering still comes from the
 target mode's SIS (it uses `clear_kind + 4` with `sis_id = 0`). That is correct - the
@@ -559,8 +580,10 @@ objective belongs to the target mode's checklist.
 before anything consults them), installs the two `REPLACEFUNC`s and the hooks described
 above, and finishes by clearing `cross_mode_slots`.
 
-`ChecklistRewards_OnSaveInit` runs after `main.c`'s `memset(ap_save, 0)` on fresh-save
-creation and fills `shuffled_rewards[*][*]` with `0xFFFF`. This is required, not cosmetic:
+`ChecklistRewards_OnSaveInit` runs inside `main.c`'s `APSave_Init`, after its
+`memset(ap_save, 0)` and stamp - on every boot from `OnSaveInit` (hoshi's default block,
+before the card is read), and again from `OnSaveLoaded` when a loaded block's stamp does not
+match - and fills `shuffled_rewards[*][*]` with `0xFFFF`. This is required, not cosmetic:
 zero is a legal encoding meaning "Air Ride checkbox 0", so a zeroed array would place every
 reward on the same cell.
 
@@ -578,11 +601,11 @@ and clear_kind against the wire value, and skips the Archipelago row outright wh
 is not registered, which is also what keeps a build without `custom_checklist` from
 reaching vanilla's `mode >= 3` assert.
 
-`ChecklistRewards_ApplyLocations` runs once per client connection, when
-`ap_data->location_data_valid` is set. It copies `ap_data->locations[m][ap_ri]` into
+`ChecklistRewards_ApplyLocations` runs from `OnFrameStart` once per client write of
+`ap_data->location_data_valid`. It copies `ap_data->locations[m][ap_ri]` into
 `ap_save->shuffled_rewards[m][game_ri]`, rebuilds, regrants (rewards received before the
-assignment arrived have to land on their cells), clears `location_data_valid`, and writes
-the card.
+assignment arrived have to land on their cells) and clears `location_data_valid`. It writes
+no card: the client resends the assignment on every connect.
 
 ## Check Detection (Outbound)
 
@@ -605,21 +628,24 @@ sites covering Air Ride / City Trial completion paths plus stadium results and f
 trackers. It accepts the AP checklist tab's runtime mode as well, since the AP tab's
 `record_complete` drives completions through it.
 
-`APChecks_SetNewUnlockReplacement(mode, clear_kind)`:
+`APChecks_SetNewUnlock(GameMode mode, u8 clear_kind)` runs the body it shares with the
+silent replacement, `MarkNewUnlock`, then plays the SFX:
 
-1. Reads the current `clear[mode][clear_kind]` byte. If neither `is_new` nor
-   `is_unlocked` is already set, this is a true transition - call
-   `RecordCheck(mode, clear_kind)`. **Transition detection runs regardless of the vanilla
+1. `MarkNewUnlock` returns early for a mode `ChecklistModeRow` does not map or a
+   `clear_kind >= CLEAR_KIND_NUM`, then reads the current `clear[mode][clear_kind]` byte. If
+   neither `is_new` nor `is_unlocked` is already set, this is a true transition - call
+   `RecordCheck(mode, clear_kind)`. **Transition detection runs before the vanilla
    LAN-session short-circuit** so AP never misses a check.
 2. `RecordCheck()` resolves the row via `ChecklistModeRow` (bailing on `-1`), sets the bit in `ap_save->sent_checks` and the
    shared `ap_data->sent_checks` mirror, logs the placement (resolving the cell via
-   `ChecklistRewards_ResolveCell` to print `[Check] mode=... clear_kind=... type=... recorded`
+   `ChecklistRewards_ResolveCell` to print `[APChecks] mode=... clear_kind=... type=... recorded`
    with the source reward type - or a "no local reward placement" line for remote/empty
-   cells), enqueues the "Check sent" textbox, and calls `APGoal_Evaluate()`. It does **not**
-   write the memory card.
-3. Reimplements the vanilla SetNewUnlock logic: bail while `Net_IsSessionActive`, OOB clamp,
-   play the unlock SFX (`SFX_PlayFullVolume(0x10008)`) guarded by the one-frame cooldown
-   at `*stc_clearchecker_sfx_last_frame`, then set the `is_new` bit.
+   cells), shows "Check recorded" when Messages -> Local -> Checks is on (default Off), and
+   calls `APGoal_Evaluate()`. It does **not** write the memory card.
+3. `MarkNewUnlock` then returns 0 while `Net_IsSessionActive`, else sets the `is_new` bit and
+   returns whether the cell was fresh. On a fresh cell `APChecks_SetNewUnlock` plays the
+   unlock SFX (`SFX_PlayFullVolume(CLEARCHECKER_UNLOCK_SFX)`, `0x10008`) guarded by the
+   one-frame cooldown at `*stc_clearchecker_sfx_last_frame`.
 
 **Companion path: REPLACEFUNC on `ClearChecker_SetNewUnlockSilent` (`0x80049fcc`).** The
 Top Ride checklist evaluator (the cluster of functions at `0x802b7xxx`) does **not** use
@@ -630,18 +656,18 @@ call sites, all Top Ride). Each call site plays its own unlock SFX and prints
 - never added to `sent_checks`, never sent to the server, and TR `GOAL_CHECKLIST_LIST`
 goals (e.g. "Cross the goal 20 or more times!" = TR clear_kind 0, "Compete in more than 10
 multiplayer races!" = TR clear_kind 2) could never complete.
-`APChecks_SetNewUnlockSilentReplacement` mirrors the SetNewUnlock replacement
-(transition detect -> `RecordCheck` -> run the vanilla silent body) but omits the SFX block,
-since the caller already played it. It accepts the three real modes only.
+`APChecks_SetNewUnlockSilent` takes the same `(GameMode, u8)` signature and runs only
+`MarkNewUnlock` (transition detect -> `RecordCheck` -> the vanilla `is_new` store), omitting
+the SFX, since the caller already played it.
 
 **Companion path: filler-apply hook (`CODEPATCH_HOOKCREATE` at `0x80180dc4`).** When the
 player *spends* a checkbox filler, `Checklist_Think` sets `clear[k].is_filler` directly via
 `ori r0,r0,2; stb r0,124(r3)` at `0x80180dbc` and **does not** call
 `ClearChecker_SetNewUnlock` - so neither funnel replacement sees it, and the spent cell
-would never be recorded. `APChecks_OnFillerApplied(mode, clear_kind)` hooks the
-following instruction (`lbz r3,2(r29)`, the start of the `checkbox_filler_num` decrement),
-reads `mode` from `r31+0x14` and `clear_kind` from the non-volatile `r18`, and calls
-`RecordCheck` (idempotent, so repeated firings are harmless). A *separate* filler-related
+would never be recorded. A hook on the following instruction (`lbz r3,2(r29)`, the start of
+the `checkbox_filler_num` decrement) reads `mode` from `r31+0x14` and `clear_kind` from the
+non-volatile `r18` and calls `RecordCheck(mode, clear_kind)` directly (idempotent, so
+repeated firings are harmless). A *separate* filler-related
 `SetNewUnlock` call does exist at `0x8017fae4`, but that is not the spend path this hook
 covers.
 
@@ -651,21 +677,23 @@ covers.
 (`0x8017e490`).** The five meta auto-unlock checkboxes do NOT go through `SetNewUnlock`
 - vanilla sets their `clear[]` byte via direct
 `stb` instructions, which `Checklist_Think` case 1 executes when the checklist is entered.
-The mod hooks each store site directly so detection fires synchronously at the moment
-vanilla commits the unlock, and so the `stb` can be conditionally suppressed when the cell
-has already been filler-completed.
+The mod hooks the instruction just ahead of each store (the `li r3, 1` that carries
+`Checklist_ProcessUnlock`'s return value) so detection fires
+synchronously at the moment vanilla commits the unlock, and so the `stb` can be
+conditionally suppressed when the cell has already been filler-completed.
 
 Each hook has an empty prologue, calls a thin handler that invokes
 `RecordCheck(mode, clear_kind)` with the hardcoded pair, then re-materializes the stored
-value (`li r4,1` or `li r0,1`) in the epilogue so the trampoline's auto-re-execute of the
-clobbered `stb` still lands a 1 after `bl` clobbered the volatile register. `RecordCheck`
-is idempotent, so replays on subsequent `Checklist_ProcessUnlock` invocations are harmless.
+value (`li r4,1` or `li r0,1`) in the epilogue so the `stb` after the hook still stores a 1
+after the `bl` clobbered the volatile register. `RecordCheck` is idempotent, so replays on
+subsequent `Checklist_ProcessUnlock` invocations are harmless.
 
 **The handler return value controls whether vanilla's `stb` runs:**
 
-- **Return 0 (accept)** - the usual path. The clobbered `stb` auto-re-executes (with the
-  epilogue's restored register value), writing `0x01` to `clear[k]`, and control continues
-  to the vanilla display_state update sequence and then the function tail.
+- **Return 0 (accept)** - the usual path. The relocated `li r3, 1` re-executes, then the
+  `stb` runs with the epilogue's restored register value, writing `0x01` to `clear[k]`, and
+  control continues to the vanilla display_state update sequence and then the function
+  tail.
 - **Return 1 (skip)** - taken iff `clear[k].is_filler` is already set at hook entry. The
   handler sets `clear[k].is_unlocked` itself, then control branches directly to
   `0x8017f394` (the function tail), bypassing both the `stb` and the subsequent
@@ -720,8 +748,10 @@ from clear_kind to physical slot via `cd->grid_mapping[]`:
 | `GoalKind` | Protected cells |
 |------------|-----------------|
 | `GOAL_100_CHECKLIST` | that row's "Fill in over 100 Checklist blocks!" cell, from `Fill100ClearKind(row)` - a filler there would satisfy the goal without filling 100 boxes. Nothing to protect on the AP row, which has no such cell (`Fill100ClearKind` returns `0xFF`) |
-| `GOAL_HYDRA_AND_DRAGOON` | (CT only) CT clear_kind `0x77` ("In one match, complete both Dragoon and Hydra!"). On non-CT rows the gate returns 0 |
-| `GOAL_BEAT_KING_DEDEDE`  | (CT only) CT clear_kind `KD_CLEAR_KIND` (`0x2F`). On non-CT rows the gate returns 0 |
+| `GOAL_HYDRA_AND_DRAGOON` | (CT only) CT clear_kind `CT_CLEAR_COMPLETE_DRAGOON_AND_HYDRA` (`0x77`, "In one match, complete both Dragoon and Hydra!"). On non-CT rows the gate returns 0 |
+| `GOAL_BEAT_KING_DEDEDE`  | (CT only) CT clear_kind `CT_CLEAR_STD_VS_DEDEDE_1MIN` (`0x2F`). On non-CT rows the gate returns 0 |
+| `GOAL_ASSEMBLE_AP_STAR` | (AP row only) AP clear_kind `APCK_ASSEMBLE_AP_STAR` (49). On other rows the gate returns 0 |
+| `GOAL_ALL_LEGENDARIES_CT` | (AP row only) AP clear_kind `APCK_ASSEMBLE_ALL_LEGENDARY` (50). On other rows the gate returns 0 |
 | `GOAL_CHECKLIST_LIST` | every clear_kind whose bit is set in `options.goal_checks[row]` (iterated via `__builtin_ctzll` over both u64 words). Per-row - protects exactly the cells the AP slot listed as required. An empty list protects nothing and, in the evaluator, satisfies nothing: a subset test against zero is vacuously true, so a row carrying the kind without a list would otherwise hand out victory outright |
 | `GOAL_N_CHECKLIST` | none - a count threshold, and filler'ing any cell still costs a filler token |
 | `GOAL_MAX_STATS_CT` | none - the goal is a runtime save bit independent of any specific cell |
@@ -736,7 +766,7 @@ checks the AP server already knows about (e.g. a fresh save or a slot takeover).
 
 The array is published behind `ap_data->backfill_valid`: the client fills the words, then
 sets the flag, and `OnFrameStart` runs `APChecks_ApplyBackfill` only while it is set,
-clearing it after both it and `ApPatches_ApplyBackfill` have consumed and zeroed their
+clearing it after both it and `APPatches_ApplyBackfill` have consumed and zeroed their
 arrays. A 64-bit store is not atomic on PPC32, and these words are consume-once - reading
 one half-written would apply the bits that had landed and zero away the rest for good, with
 the client already moved on. The u32 flag cannot itself tear, and clearing it last also
@@ -760,12 +790,14 @@ keeps the client (which waits for zero) from writing into an array mid-consume.
 
 ### Goal evaluation
 
-`APGoal_Evaluate()` runs after every check transition (and on save load). It is sticky - once
-`goal_complete` is set, it never re-evaluates. It loops all `CHECKLIST_MODE_NUM` rows, so
-the AP tab carries a goal like any game mode. The per-row predicate is
-`GoalSatisfied(goal, row, count, n)`:
+`APGoal_Evaluate()` runs after every check transition, after a backfill, on save load and
+once the slot options first arrive. Until `options_received` it is a no-op, since every goal
+would read 0 (`GOAL_100_CHECKLIST`). It loops all `CHECKLIST_MODE_NUM` rows, so the AP tab
+carries a goal like any game mode, and latches each row whose goal is newly met into the
+sticky bitmask `APSave.goal_latched` (bit r = row r). A latched row is not re-evaluated. The
+per-row predicate is `GoalSatisfied(goal, row, count, n)`:
 
-- **`GOAL_NONE`**: vacuously satisfied for that row.
+- **`GOAL_NONE`**: skipped, never latched; it does not block victory.
 - **`GOAL_100_CHECKLIST`**: the row's **"Fill in over 100 Checklist blocks!"** cell is
   checked in `sent_checks[row]` - NOT a popcount. The clear_kind is `Fill100ClearKind(row)`:
   AR `0x18` (`AR_CLEAR_FILL_100_BLOCKS`), TR `0x77` (`TR_CLEAR_FILL_100_BLOCKS`), CT `0x37`
@@ -774,12 +806,12 @@ the AP tab carries a goal like any game mode. The per-row predicate is
   real checkbox the same way `GOAL_HYDRA_AND_DRAGOON`/`GOAL_BEAT_KING_DEDEDE` bind to theirs.
 - **`GOAL_N_CHECKLIST`**: `popcount(sent_checks[row]) >= options.checklist_amount[row]`.
   This is the synthetic count-threshold goal.
-- **`GOAL_HYDRA_AND_DRAGOON`** (CT-anchored): bit `0x77` (`HYDRA_DRAGOON_CLEAR_KIND`) set in
+- **`GOAL_HYDRA_AND_DRAGOON`** (CT-anchored): bit `0x77` (`CT_CLEAR_COMPLETE_DRAGOON_AND_HYDRA`) set in
   `sent_checks[CITYTRIAL]` - the single "In one match, complete both Dragoon and Hydra!"
   gameplay checkbox. This is NOT the two "Unlock Parts on the Checklist" cells (`0x6D`/`0x6E`),
   which are unrelated part-reward markers. The predicate is hardcoded against `CITYTRIAL` -
   evaluating it on a different row still queries the CT word.
-- **`GOAL_BEAT_KING_DEDEDE`** (CT-anchored): bit `0x2F` (`KD_CLEAR_KIND`) set in
+- **`GOAL_BEAT_KING_DEDEDE`** (CT-anchored): bit `0x2F` (`CT_CLEAR_STD_VS_DEDEDE_1MIN`) set in
   `sent_checks[CITYTRIAL]`. Set via `SetNewUnlock(CITYTRIAL, 0x2F)` from
   `CityTrial_CheckStadiumResultObjectives` (`0x8004e998`) when the King Dedede KO time is
   nonzero and `<= 3600` (`0xE10`). At `0x8004eee0` the code calls `Ply_GetKingDededeKOTime`
@@ -788,47 +820,53 @@ the AP tab carries a goal like any game mode. The per-row predicate is
 - **`GOAL_CHECKLIST_LIST`**: `(sent_checks[row] & goal_checks[row]) == goal_checks[row]` on
   both u64 words. `options.goal_checks[CHECKLIST_MODE_NUM][2]` is an AP-supplied per-row
   bitmask of required clear_kinds - every set bit must be checked. This lets the AP slot
-  dictate exact required-checks lists, not just a count threshold.
+  dictate exact required-checks lists, not just a count threshold. An empty list is never
+  satisfied.
 - **`GOAL_MAX_STATS_CT`** (row-independent): `ap_save->max_stats_ct_achieved`, a sticky save
-  bit. Set by a per-rider GOBJ proc in `goal_max_stats_ct.c` when a human player's CT stats
-  all hit the per-slot patch-cap ceiling (`ap_save->options.city_trial_patch_cap_max`, **not**
-  the hard `PATCH_STAT_MAX`) in one trial round. This goal is detected outside the
-  `sent_checks` flow, so `goal_max_stats_ct.c` calls `APGoal_Evaluate()` after
-  flipping the bit.
+  bit. Set by a per-rider GOBJ proc in `goal_max_stats_ct.c` when every one of a human
+  player's stats sits `PatchCap_GetMax()` patches above its start - the slot's
+  `city_trial_patch_cap_max` ceiling, not the cap in force - in one trial round. This goal is
+  detected outside the `sent_checks` flow, so `goal_max_stats_ct.c` calls
+  `APGoal_Evaluate()` after flipping the bit.
+- **`GOAL_ASSEMBLE_AP_STAR`** (AP-anchored): bit `APCK_ASSEMBLE_AP_STAR` (49) set in
+  `sent_checks[AP_CHECKLIST_ROW]`.
+- **`GOAL_ALL_LEGENDARIES_CT`** (AP-anchored): bit `APCK_ASSEMBLE_ALL_LEGENDARY` (50) set in
+  `sent_checks[AP_CHECKLIST_ROW]` - Dragoon, Hydra and the Archipelago Star in one round.
 
-Victory fires only if at least one row has a non-NONE goal AND every row's goal is satisfied.
-When it fires, `ap_save->goal_complete = 1` is set, mirrored to `ap_data->goal_complete`, and
-an aggregate "All Goals complete!" textbox is enqueued.
+Each evaluation republishes the goal state from the latch (`PublishGoals`):
+`ap_data->goal_satisfied_mask = goal_latched & <rows with a goal>`, sticky like the latch, and
+`ap_data->goal_complete` = at least one row has a goal and every such row is latched. Neither
+is a save field; both derive from `goal_latched`.
 
-Short of victory, each row whose goal *just* became satisfied gets a one-shot
-"<Mode> goal complete!" textbox from `AnnounceModeGoal(row)`, latched by
-`ap_save->goal_announced[CHECKLIST_MODE_NUM]`. The AP row supplies its own name and theme
-color, since `ModeColors[]` is sized `GMMODE_NUM`. When victory fires, every non-NONE row is
-marked announced so the final row's per-mode message does not double up with the aggregate
-one.
+When an evaluation completes the set, an aggregate "All Goals complete!" textbox stands in for
+the newly latched rows' own lines. Otherwise each newly latched row gets a "<Row> goal
+complete!" textbox from `AnnounceRowGoal(row)`, named and tinted by `APChecklist_RowName` /
+`APChecklist_RowColor` (the AP row has no `ModeColors[]` slot). Both lines show only with
+Messages -> Local -> Goals on (default On).
 
-`APChecks_ResetAll()` clears `sent_checks`, `goal_announced`, `goal_complete` and
-`max_stats_ct_achieved`; `APChecks_DebugForceMarkAll()` sets all of them.
+`APChecks_ResetAll()` clears `sent_checks` and calls `APGoal_Reset()`, which clears
+`goal_latched` and `max_stats_ct_achieved` and republishes; the debug callers
+(`APChecks_DebugClearAll`, `ChecklistRewards_DebugClearAll`) also reset the AP Patches.
+`APChecks_DebugForceMarkAll()` sets every sent check and `max_stats_ct_achieved`, force-marks
+the AP Patches and latches every row (`APGoal_DebugComplete`).
 
 ### Testing a goal the seed did not ship
 
 `options.goal[row]` is a slot option fixed at connect, so without an override each of the nine
 kinds needs its own seed. `APGoal_DebugSetGoals(goals, amount)` writes all `CHECKLIST_MODE_NUM`
-options, calls `APGoal_Evaluate()` once and saves once; `APGoal_Get(row, &amount)` reads one
+options, clears the latch of every row whose goal changed so it is judged afresh, calls
+`APGoal_Evaluate()` once and saves once; `APGoal_Get(row, &amount)` reads one
 back. `archipelago_debug` drives both from its Goals page, where the rows select and an Apply
 action commits.
 
 It takes the whole set deliberately. Victory is decided over every row at once, and a row on
-`GOAL_NONE` counts as satisfied, so applying rows one at a time can satisfy the set in passing
-and latch `goal_complete` - sticky, and reported to the server - on a value the caller was only
+`GOAL_NONE` does not block it, so applying rows one at a time can complete the set in passing
+and publish `goal_complete` - reported to the server - on a value the caller was only
 scrolling through. `amount` reaches only the rows set to `GOAL_N_CHECKLIST`, so setting an
 unrelated row's goal does not rewrite its threshold.
 
-Two properties decide what a tester sees. `goal_complete` is sticky and short-circuits the
-evaluator, so a new goal on a save that already goaled needs `APChecks_DebugClearAll()` first.
-And `GOAL_MAX_STATS_CT` is the one kind not evaluated from the option directly: its per-rider
-proc is attached in `GoalMaxStatsCT_On3DLoadEnd` only when the City Trial row already holds that
-goal, so setting it mid-round arms nothing until the next round loads.
+A row's latch is sticky: a row left on the goal it already met stays latched until a debug
+clear (`APChecks_DebugClearAll()` or `ChecklistRewards_DebugClearAll()`) resets every latch.
 
 The two engine-driven kinds - `GOAL_HYDRA_AND_DRAGOON` and `GOAL_BEAT_KING_DEDEDE` - only flip
 their clear kind when the vanilla results screen runs, which is what makes the debug mod's
@@ -865,16 +903,17 @@ including from per-frame GOBJ procs - so no detection path writes the card. Inst
 Writing at the *same* instants as the vanilla save is what keeps the two files consistent, and
 it matters here specifically. A check's completion is recorded in two places: `sent_checks` in
 `APSave`, and `is_new`/`is_unlocked` on the cell in `GameClearData`, which rides the vanilla
-save. `SetNewUnlockReplacement` detects a check by the `!is_new && !is_unlocked` transition, so
+save. `MarkNewUnlock` detects a check by the `!is_new && !is_unlocked` transition, so
 if the vanilla file were to persist the unlock while `APSave` rewound, the cell would read as
 already complete and the check could never re-fire from gameplay - recoverable only by client
 backfill, and not at all if the check was earned with no client attached.
 
-The paths that still write immediately are one-shot and outside gameplay: the slot-options copy
-at save load, `ApplyLocations` (once per client connection), the EnergyLink purchase (the pool
-withdrawal reaches the server immediately, so the queued goods must not be able to rewind), and
-the debug menu's check-state commands (clear, force-mark, clear-all-checklist-data). The reveal
-commands and the AP Patch rows write no card.
+Only debug commands write immediately: the check-state commands (clear, force-mark,
+clear-all-checklist-data), the goal commands (set goals, complete), the options re-apply, the
+progression reset and the AP Patch collected-bit clear. The slot-options copy and
+`ApplyLocations` write nothing, since the client resends both on every connect, and the
+EnergyLink purchase waits for the next game save like everything else. The reveal commands
+write no card.
 
 ### Lifecycle (check detection)
 
@@ -883,7 +922,9 @@ above (`0x8017efbc` / `0x8017eff4` / `0x8017f02c` / `0x8017f0a8` / `0x8017f11c` 
 meta stores, `0x80180dc4` for filler-apply). `APGoal_OnBoot` installs the seventh,
 `0x80180a64`, the filler gate, which lives with the goal evaluator it protects.
 
-`APChecks_OnSaveLoaded` mirrors `sent_checks` and `goal_complete` into `ap_data` and
-runs `APGoal_Evaluate` once, so a boot whose already-saved checks satisfy a newly-arrived
-goal completes immediately. `APGoal_Evaluate` is public so save-bit goals detected
-elsewhere (`goal_max_stats_ct.c`) can force a re-evaluation.
+`APChecks_OnSaveLoaded` mirrors `sent_checks` into `ap_data` and runs `APGoal_Evaluate`
+once, which publishes `goal_satisfied_mask` / `goal_complete` from the saved latch and latches
+any goal the saved checks already meet. `APOptions_OnFrameStart` runs it again after the first
+slot-options transfer, so a save whose checks satisfy a newly-arrived goal completes
+immediately. `APGoal_Evaluate` is public so save-bit goals detected elsewhere
+(`goal_max_stats_ct.c`) can force a re-evaluation.

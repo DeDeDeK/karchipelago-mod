@@ -1,9 +1,4 @@
-// Per-machine counters wide enough for the appended MachineKinds. PlayerStats'
-// machine_mount_kind_num and kills_by_machine are int[0x1a] indexed by the engine's
-// absolute-kind fold with no bounds check, so a custom machine's appended slot counts
-// under another kind or, far enough out, writes into the KO-by-cause counters, the
-// vehicle-bust mask and the item tally. Both are relocated here and widened; the
-// vanilla arrays are left to whatever the engine puts in them.
+#include <string.h>
 
 #include "os.h"
 #include "obj.h"
@@ -47,8 +42,8 @@ static int Total(int ply, int stat)
     return sum;
 }
 
-// Replaces the bl at 0x801ba190 in RiderState_GetOnStarEnter, whose r4 is the machine GObj the
-// rider just mounted. The engine's own counter is left unwritten; its only reader
+// Replaces the bl at 0x801ba190 in RiderState_GetOnStarEnter (0x801ba054), whose r4 is the
+// machine GObj the rider just mounted. The engine's own counter is left unwritten; its only reader
 // is replaced below.
 static void CountMachineChange(int ply, GOBJ *machine_gobj)
 {
@@ -77,7 +72,7 @@ void CustomMachineStats_AddDeathHandler(CustomMachineDeathHandler handler)
     OSReport("[MachineStats] Death handler list full\n");
 }
 
-// Replaces the bl at 0x801e1f74 in Machine_GiveDamage. The counting is done here,
+// Replaces the bl at 0x801e1f74 in Machine_GiveDamage (0x801e1ee8). The counting is done here,
 // with the widened kind; the engine still runs for everything else it does on a KO
 // - the KO-by-cause counters, the vehicle-bust mask, the King Dedede frame - but a
 // kind it has no bucket for is swapped out first. This is the game's only call to
@@ -104,15 +99,15 @@ static void AddDeath(int ply, DmgLog *dmg_log, int is_bike, int class_slot)
     }
 }
 
-// Replaces the bl at 0x8004e6a8 in CityTrial_CheckFreeRunObjectives, which unlocks
-// a checklist cell at ten machine changes.
+// Replaces the bl at 0x8004e6a8 in CityTrial_CheckFreeRunObjectives (0x8004e660), which
+// unlocks a checklist cell at ten machine changes.
 static int GetMachineChangeCount(int ply)
 {
     return Total(ply, STAT_CHANGE);
 }
 
-// Replaces the bl at 0x80012470 in Game_Think, which publishes the count as the
-// Destruction Derby score.
+// Replaces the bl at 0x80012470 in Game_Think (0x80011024), which publishes the count as
+// the Destruction Derby score.
 static int GetKONum(int ply)
 {
     return Total(ply, STAT_KILL);
@@ -121,14 +116,7 @@ static int GetKONum(int ply)
 // The engine clears its own arrays in Player_InitAll, which runs just after this.
 void CustomMachineStats_On3DLoadStart(void)
 {
-    for (int p = 0; p < PLY_NUM; p++)
-    {
-        for (int s = 0; s < STAT_NUM; s++)
-        {
-            for (int i = 0; i < CUSTOM_VCKIND_NUM; i++)
-                stc_stats[p][s][i] = 0;
-        }
-    }
+    memset(stc_stats, 0, sizeof(stc_stats));
 }
 
 void CustomMachineStats_OnBoot(void)

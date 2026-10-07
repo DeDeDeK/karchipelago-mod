@@ -8,7 +8,9 @@
 #include "textbox_api.h"
 #include "ap_colors.h"
 #include "ap_item_handler.h"
-#include "energylink.h"
+#include "gate_events.h"
+#include "gate_items.h"
+#include "gate_boxes.h"
 #include "energylink_spend.h"
 
 typedef struct SpendEntry
@@ -17,11 +19,42 @@ typedef struct SpendEntry
     s64 cost;
 } SpendEntry;
 
+static int PartsLocked(ItemKind first)
+{
+    for (int i = 0; i < 3; i++)
+    {
+        if (GateItems_IsItemLocked(first + i))
+            return 1;
+    }
+    return 0;
+}
+
+// Goal pieces ride the red carrier box, so energy needs what the goal's logic needs: the
+// Red Box and the piece's own unlock, or every piece for a whole machine.
+static int IsGoalPieceLocked(APItemId id)
+{
+    int piece_give = id >= AP_STAR_PIECE_GIVE_BASE && id < AP_STAR_PIECE_GIVE_BASE + AP_STAR_PIECE_NUM;
+    int part = id >= AP_ITKIND_HYDRA1 && id <= AP_ITKIND_DRAGOON3;
+    if (!piece_give && !part && id != AP_ITEM_GIVE_AP_STAR && id != AP_ITEM_GIVE_DRAGOON &&
+        id != AP_ITEM_GIVE_HYDRA)
+        return 0;
+
+    if (!GateBoxes_IsUnlocked(BOXKIND_RED))
+        return 1;
+    if (piece_give)
+        return !(ap_save->ap_star_piece_unlocked_mask & (1 << (id - AP_STAR_PIECE_GIVE_BASE)));
+    if (part)
+        return GateItems_IsItemLocked(id - AP_ITKIND_BASE);
+    if (id == AP_ITEM_GIVE_AP_STAR)
+        return ap_save->ap_star_piece_unlocked_mask != (1 << AP_STAR_PIECE_NUM) - 1;
+    return PartsLocked(id == AP_ITEM_GIVE_DRAGOON ? ITKIND_DRAGOON1 : ITKIND_HYDRA1);
+}
+
 static int Buy(OptionDesc *self)
 {
     SpendEntry *entry = self->user_data;
 
-    if (!ap_menu_settings.energylink_enabled)
+    if (!SettingsMenu_EnergyLinkEnabled())
     {
         OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: Energy Link is off\n",
                  self->name, entry->item_id);
@@ -30,18 +63,25 @@ static int Buy(OptionDesc *self)
         return 0;
     }
 
-    // Event-trigger items are gated by the event-unlock mask so energy can't fire
-    // an event out of logic.
+    // Energy can't fire an event the seed hasn't unlocked.
     if (entry->item_id >= AP_EVENT_BASE && entry->item_id < AP_EVENT_BASE + EVKIND_NUM)
     {
         int kind = entry->item_id - AP_EVENT_BASE;
-        if (!(ap_save->event_unlocked_mask & (1 << kind)))
+        if (!GateEvents_IsUnlocked(kind))
         {
             OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: event not unlocked (mask = %s)\n",
                      self->name, entry->item_id, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
             tb_api->EnqueueColoredNoun("Event not unlocked: ", self->name, tb_api->EventColor, NULL);
             return 0;
         }
+    }
+
+    if (IsGoalPieceLocked(entry->item_id))
+    {
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: pieces not unlocked\n",
+                 self->name, entry->item_id);
+        tb_api->EnqueueColoredNoun("Not unlocked: ", self->name, tb_api->ItemColor, NULL);
+        return 0;
     }
 
     if (ap_data->energy_balance < entry->cost)
@@ -53,8 +93,7 @@ static int Buy(OptionDesc *self)
         return 0;
     }
 
-    // Queue it so APItems_PerFrame applies it when the scene/intro gate allows -
-    // the same path as items received from AP.
+    // Applied through the AP item queue, like a received item.
     if (!APItems_Queue(entry->item_id))
     {
         OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: queue full\n",
@@ -63,9 +102,8 @@ static int Buy(OptionDesc *self)
         return 0;
     }
 
-    // The integer cost lands on the withdrawal counter immediately so the client diffs
-    // it on the next poll in any scene - no gameplay frame runs in the menu to drive a
-    // per-frame flush. The balance decrement feeds the UI and the gate above.
+    // The cost lands on the withdraw counter at once, since no gameplay frame runs in the
+    // menu to flush it; the balance decrement feeds the gate above.
     ap_data->energy_withdraw_total += (u32)entry->cost;
     ap_data->energy_balance        -= entry->cost;
 

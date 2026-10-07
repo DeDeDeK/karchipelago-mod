@@ -5,10 +5,7 @@
 #include "stage.h"
 #include "hsd.h"
 #include "obj.h"
-
-// stc_playerdata is 5 records; Ply_GetMachineGObj / Ply_GetRiderGObj bounds-check
-// nothing, so every slot walk uses this.
-#define WEATHER_PLAYER_SLOTS 5
+#include "gx.h"
 
 // Every layer draws on the world camera's gx_link 0, XLU sub-pass.
 #define WEATHER_GX_LINK 0
@@ -28,7 +25,6 @@ extern char *weather_enable_names[];  // {"Disabled", "Enabled"}
 // Symmetric random in [-1, 1).
 float Weather_Randf2(void);
 float Weather_RandRange(float lo, float hi);
-int   Weather_RandRangeI(int lo, int hi);  // inclusive
 
 // Normalized City Trial round progress, 0 (start) .. 1 (end), from the match timer.
 // -1 when there is no live round (menus, match intro).
@@ -62,26 +58,11 @@ int Weather_SeedSchedule(float *out, int n, float p);
 // Advance `d` by `v`, wrapping into [0, box). Requires |v| < box.
 float Weather_WrapStep(float d, float v, float box);
 
-// Uniform pick over the set entries of mask[0..n); -1 when none are set.
-int Weather_PickEnabled(const int *mask, int n);
 void Weather_SetAllEnabled(int *mask, int n, int val);
-
-// Shared GX setup for a weather layer's translucent world pass: flat per-vertex
-// color, alpha blend (additive when `additive`), depth-tested but not
-// depth-writing, no cull, camera view matrix loaded.
-void WeatherGX_BeginXlu(COBJ *cam, int additive, int line_width);
 
 // Create a world-camera GX layer GObj; NULL on failure. `tag` names the layer in
 // the one pool-exhausted warning.
 GOBJ *WeatherGX_EnsureLayer(int entity_class, int p_link, void *cb, const char *tag);
-
-// Camera world position from its view matrix, the rigid world->view transform
-// [R | t]: eye = -R^T * t. One derivation serves every split-screen viewport.
-void WeatherGX_CameraEye(COBJ *cam, Vec3 *out);
-
-// Emit one billboard vertex: P + u*right + v*up, flat color.
-void WeatherGX_BillboardVert(const Vec3 *P, const Vec3 *R, const Vec3 *U,
-                             float u, float v, u8 cr, u8 cg, u8 cb, u8 ca);
 
 // Anchor a unit sky direction at P = eye + dir * dist, with dist the smallest of
 // `want`, `dome_frac` of the eye-to-dome distance, and `maxd`. Returns that dist,

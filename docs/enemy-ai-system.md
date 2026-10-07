@@ -814,8 +814,7 @@ Each preset is three multipliers:
 
 The City Trial selection reaches every enemy that reads the table in a City Trial scene: the
 Kirby Melee stadium pools, and in the city any actor that takes default knockback (TAC and Dyna
-Blade install their own hit reactions and read none of these fields). A menu change takes
-effect on the next 3D scene load.
+Blade install their own hit reactions and read none of these fields).
 
 ### Injecting per-frame logic
 

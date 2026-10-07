@@ -6,6 +6,7 @@
 #include "obj.h"
 #include "hsd.h"
 #include "code_patch/code_patch.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
@@ -45,7 +46,7 @@ static const BackdropDef backdrop_defs[] = {
     { "Zeroyon 4",   "Zeroyon4"   },
     { "Zeroyon 5",   "Zeroyon5"   },
 };
-#define BACKDROP_NUM (sizeof(backdrop_defs) / sizeof(backdrop_defs[0]))
+#define BACKDROP_NUM GetElementsIn(backdrop_defs)
 
 // Per-entry enable toggle, persisted by hoshi menu save (keyed by option name hash).
 static int backdrop_enabled[BACKDROP_NUM] = {
@@ -53,15 +54,14 @@ static int backdrop_enabled[BACKDROP_NUM] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1,
 };
-_Static_assert(sizeof(backdrop_enabled) / sizeof(backdrop_enabled[0]) == BACKDROP_NUM,
+_Static_assert(GetElementsIn(backdrop_enabled) == BACKDROP_NUM,
                "backdrop_enabled init must match BACKDROP_NUM");
 
 // Multiplies the root-joint scale the loader stamps into every backdrop, pushing
 // the whole sky dome out or pulling it in.
 static const float backdrop_distance_factors[] = {1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
 static char *backdrop_distance_names[] = {"100%", "125%", "150%", "175%", "200%"};
-#define BACKDROP_DISTANCE_NUM \
-    ((int)(sizeof(backdrop_distance_factors) / sizeof(backdrop_distance_factors[0])))
+#define BACKDROP_DISTANCE_NUM ((int)GetElementsIn(backdrop_distance_factors))
 static int backdrop_distance_index = 1; // default 125%
 
 // Normalizes the picked backdrop's dome to City Trial's radius. Donors are modelled
@@ -119,12 +119,11 @@ static void *RebuildBackdrop(const BackdropManifestEntry *e)
                      e->donor, e->payload_size + 31);
         return NULL;
     }
-    u8 *base = (u8 *)(((u32)alloc + 31) & ~31);
+    u8 *base = (u8 *)OSRoundUp32B(alloc);
 
     // No range covers the leading pp slot, and the heap hands back dirty memory, so
     // clear it here: everything past word 0 must read as "no model motion".
-    for (u32 i = 0; i < BACKDROP_PP_SLOT / 4; i++)
-        ((u32 *)base)[i] = 0;
+    memset(base, 0, BACKDROP_PP_SLOT);
 
     for (u32 i = 0; i < e->range_num; i++)
     {
@@ -132,7 +131,7 @@ static void *RebuildBackdrop(const BackdropManifestEntry *e)
         *stc_file_read_done = 0;
         File_Read(entrynum, r->donor_off, base + r->dest_off, r->length,
                   0x21, 1, File_ReadDone, NULL);
-        while (File_Wait() == 0)
+        while (File_PollReadDone() == 0)
             ;
     }
 
@@ -154,7 +153,7 @@ static void CustomBackdrop_Override(GrObj *grobj)
 
     backdrop_geom_scale = 1.0f;
 
-    int picked = Weather_PickEnabled(backdrop_enabled, (int)BACKDROP_NUM);
+    int picked = Gm_Roll(backdrop_enabled, (int)BACKDROP_NUM);
     if (picked < 0)
         picked = BACKDROP_VANILLA_INDEX;
 

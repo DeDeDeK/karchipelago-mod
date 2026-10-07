@@ -7,6 +7,7 @@
 #include "stage.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
@@ -268,7 +269,8 @@ static void GenerateBolt(void)
 
 static void DrawBoltPass(COBJ *cam, GXColor col, int width, u8 alpha)
 {
-    WeatherGX_BeginXlu(cam, 1, width); // additive so the core glows
+    GX_BeginXlu(cam, 2, GX_BL_ONE); // additive so the core glows
+    GXSetLineWidth((u8)width, 5);
 
     GXBegin(GX_LINES, GX_VTXFMT0, s_seg_count * 2);
     for (int i = 0; i < s_seg_count; i++)
@@ -359,15 +361,11 @@ static void ApplyScreenFlash(HSD_Fog *fog, float bright)
         fog->start = fog->start * (1.0f - bright);
     }
 
-    u32 efb_base = *stc_global_fog_color;
-    u8 br = (efb_base >> 24) & 0xFF;
-    u8 bg = (efb_base >> 16) & 0xFF;
-    u8 bb = (efb_base >> 8) & 0xFF;
-    u8 ba = efb_base & 0xFF;
-    u8 nr = (u8)(br + (int)((fr - br) * bright));
-    u8 ng = (u8)(bg + (int)((fg - bg) * bright));
-    u8 nb = (u8)(bb + (int)((fb - bb) * bright));
-    *stc_global_fog_color = RGBA(nr, ng, nb, ba);
+    GXColor efb = GXColor_Unpack(*stc_global_fog_color);
+    u8 nr = (u8)(efb.r + (int)((fr - efb.r) * bright));
+    u8 ng = (u8)(efb.g + (int)((fg - efb.g) * bright));
+    u8 nb = (u8)(efb.b + (int)((fb - efb.b) * bright));
+    *stc_global_fog_color = RGBA(nr, ng, nb, efb.a);
 }
 
 // Per-frame strike driver. `fog` is the active HSD_Fog, already written this frame
@@ -419,12 +417,12 @@ void Lightning_Tick(HSD_Fog *fog)
             if (s_strike_len < 1)
                 s_strike_len = 1;
             s_strike_intensity = Weather_RandRange(LTNG_INTENSITY_MIN, 1.0f);
-            s_strike_on = Weather_RandRangeI(LTNG_STROBE_ON_MIN, LTNG_STROBE_ON_MAX);
-            s_strike_gap = Weather_RandRangeI(LTNG_STROBE_GAP_MIN, LTNG_STROBE_GAP_MAX);
+            s_strike_on = RandomInRange(LTNG_STROBE_ON_MIN, LTNG_STROBE_ON_MAX);
+            s_strike_gap = RandomInRange(LTNG_STROBE_GAP_MIN, LTNG_STROBE_GAP_MAX);
             s_strike_floor = Weather_RandRange(LTNG_STROBE_FLOOR_MIN, LTNG_STROBE_FLOOR_MAX);
             s_flash_frames = s_strike_len;
 
-            s_lull_frames = Weather_RandRangeI(stc_min_lull, stc_max_lull);
+            s_lull_frames = RandomInRange(stc_min_lull, stc_max_lull);
             GenerateBolt();
         }
     }

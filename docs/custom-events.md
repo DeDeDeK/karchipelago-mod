@@ -73,7 +73,7 @@ A siren event hands the music between two BGM slots, and all four calls are need
 | State 2 -> 3 | `Gm_FadeInMusic` (0x80062004) | Clears that bit, resumes slot 1, fades it back in over `cleanup_delay`, fades slot 2 out |
 | End of state 3 | `BGM_StopSecondary` (0x800620e8) | Only ends slot 2 |
 
-Skipping `Gm_FadeInMusic` leaves the City Trial music paused at volume 0 for the rest of the round. With the flag still set, `City_PlayHurryBGM` (0x80011e90) also starts the hurry-up track paused.
+Skipping `Gm_FadeInMusic` leaves the City Trial music paused at volume 0 for the rest of the round. With the flag still set, `City_PlayHurryBGM` (0x80061bfc) also starts the hurry-up track paused.
 
 ## Scene Exit
 
@@ -100,12 +100,11 @@ At boot, `ComposeSisText` converts each event's `hud_text` into a 128-byte SIS b
 - SIS treats bytes below 0x20 as commands (`TEXTCMD_*` in `text.h`) and everything else as 2-byte character codes from `Text_CharToCommand`.
 - A literal space is not a character code but `TEXTCMD_SPACE`.
 - The body is wrapped in align-left, fit, kerning, gray color and ~0.70 scale, then closed with the matching pops and a terminator.
-- The glyph loop stops before it would overflow the buffer.
+- The glyphs go through `Text_WriteSisString` (`text.h`), which stops before it would overflow the buffer.
 
 Every 3D scene reloads `stc_sis_data[0]` (0x8059a85c) with SisCitytrial.dat's 42-entry pointer array, in `3D_LoadHUDFile` before `On3DLoadEnd`. So `CustomEvents_InitSis` runs on each City Trial load:
-1. It copies those 42 pointers into `extended_sis_ptrs`.
+1. `Text_ExtendSis` copies those 42 pointers into `extended_sis_ptrs` and points slot 0 at it.
 2. It appends the custom buffers as SIS ids 42 and up.
-3. It points slot 0 at the extended array.
 
 The next scene's reload discards the extended array.
 
@@ -226,7 +225,7 @@ The event globals are declared as `static` address casts in `externals/hoshi/inc
 | `stc_event_function[16]` | 0x804a5410 | Vanilla per-event function table; never index with a custom kind |
 | `stc_event_sis_id_table` | 0x804a7b98 | `int[40]`; its three readers are repointed at a mod copy at boot |
 | `stc_eventcheck_gobj` | 0x805dd6f8 | `GOBJ**` for the event system (r13+0x618) |
-| `stc_sis_data[0]` | 0x8059a85c | `SISData**`; City Trial's SIS pointer array (42 original entries) |
+| `stc_sis_data[0]` | 0x8059a85c | `SISEntry **`; City Trial's SIS pointer array (42 original entries) |
 | `CityEvent_Init` | 0x800edb88 | Creates the event GOBJ, or writes NULL when events are off |
 | `CityEvent_Decide` | 0x800edcf8 | Event selection; its `Gm_Roll` call at 0x800ee098 is the extended-roll hook site |
 | `CityEvent_StateIdle` | 0x800ee270 | State 0; gates on `min_time` frames remaining and `event_time` |

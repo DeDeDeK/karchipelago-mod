@@ -7,6 +7,7 @@
 #include "stage.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "machine.h"
 #include "collision.h"
 #include "hoshi/settings.h"
@@ -31,10 +32,7 @@
 #define HAIL_SKY_PROBE         3000.0f  // fallback cast height when the stage box is unavailable
 
 // Appearance: a short, thick, icy-white chunk that reads as a particle, not a line.
-#define HAIL_COLOR_R        230
-#define HAIL_COLOR_G        240
-#define HAIL_COLOR_B        255
-#define HAIL_COLOR_A        220
+#define HAIL_COLOR          RGBA(230, 240, 255, 220)
 #define HAIL_LINE_WIDTH     18       // 1/6-pixel units (~3px)
 #define HAIL_STREAK         0.25f    // segment length = per-frame velocity * this
 
@@ -66,7 +64,7 @@ static GOBJ *stc_hail_gobj = NULL;
 static int stc_active = 0;
 static int stc_stone_count = HAIL_BASE_STONES;  // active stones per cloud (menu-scaled)
 
-static HailCloud stc_clouds[WEATHER_PLAYER_SLOTS];
+static HailCloud stc_clouds[PLY_NUM];
 
 // Shared per-frame velocity (fall + wind slant). vel_y is negative (downward).
 static float stc_vel_x = 0.0f, stc_vel_y = -HAIL_FALL, stc_vel_z = 0.0f;
@@ -76,7 +74,7 @@ static float stc_vel_x = 0.0f, stc_vel_y = -HAIL_FALL, stc_vel_z = 0.0f;
 // so its slot here is never read; the rest force an amount over every preset.
 static const float hail_factors[] = {0.0f, 0.0f, 0.5f, 1.0f, 1.5f};
 static char *hail_names[] = {"Preset", "Off", "Light", "Normal", "Heavy"};
-#define HAIL_AMOUNT_NUM (sizeof(hail_factors) / sizeof(hail_factors[0]))
+#define HAIL_AMOUNT_NUM GetElementsIn(hail_factors)
 static int hail_index = 0;
 
 // The active preset's hail amount, 0 = off.
@@ -96,7 +94,7 @@ static void SeedCloud(HailCloud *c, const MachineData *md)
     for (int i = 0; i < HAIL_MAX_STONES; i++)
     {
         c->stones[i].pos.X = md->pos.X + Weather_Randf2() * HAIL_BOX_HALF;
-        c->stones[i].pos.Y = md->pos.Y - HAIL_BELOW + HSD_Randf() * (HAIL_TOP + HAIL_BELOW);
+        c->stones[i].pos.Y = Weather_RandRange(md->pos.Y - HAIL_BELOW, md->pos.Y + HAIL_TOP);
         c->stones[i].pos.Z = md->pos.Z + Weather_Randf2() * HAIL_BOX_HALF;
     }
     c->hit_cd = 0;
@@ -153,9 +151,10 @@ static void Hail_GX(GOBJ *g, int pass)
     float sy = stc_vel_y * HAIL_STREAK;
     float sz = stc_vel_z * HAIL_STREAK;
 
-    WeatherGX_BeginXlu(cam, 0, HAIL_LINE_WIDTH);
+    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
+    GXSetLineWidth((u8)HAIL_LINE_WIDTH, 5);
 
-    for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
+    for (int slot = 0; slot < PLY_NUM; slot++)
     {
         HailCloud *c = &stc_clouds[slot];
         if (!c->seeded)
@@ -168,9 +167,9 @@ static void Hail_GX(GOBJ *g, int pass)
             float wy = c->stones[i].pos.Y;
             float wz = c->stones[i].pos.Z;
             GXPosition3f32(wx, wy, wz);
-            GXColor4u8(HAIL_COLOR_R, HAIL_COLOR_G, HAIL_COLOR_B, HAIL_COLOR_A);
+            GXColor1u32(HAIL_COLOR);
             GXPosition3f32(wx + sx, wy + sy, wz + sz);
-            GXColor4u8(HAIL_COLOR_R, HAIL_COLOR_G, HAIL_COLOR_B, HAIL_COLOR_A);
+            GXColor1u32(HAIL_COLOR);
         }
     }
 
@@ -219,7 +218,7 @@ void Hail_Tick(void)
         // Drop every cloud so re-enabling re-seeds over current machine positions.
         if (stc_active)
         {
-            for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
+            for (int slot = 0; slot < PLY_NUM; slot++)
                 stc_clouds[slot].seeded = 0;
             stc_active = 0;
         }
@@ -244,7 +243,7 @@ void Hail_Tick(void)
     stc_vel_y = -HAIL_FALL;
     stc_vel_z = wind.Z;
 
-    for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
+    for (int slot = 0; slot < PLY_NUM; slot++)
     {
         HailCloud *c = &stc_clouds[slot];
 
@@ -285,7 +284,7 @@ void Hail_Reset(void)
     stc_hail_gobj = NULL;
     stc_active = 0;
     stc_preset_amount = 0.0f;
-    for (int slot = 0; slot < WEATHER_PLAYER_SLOTS; slot++)
+    for (int slot = 0; slot < PLY_NUM; slot++)
     {
         stc_clouds[slot].seeded = 0;
         stc_clouds[slot].hit_cd = 0;

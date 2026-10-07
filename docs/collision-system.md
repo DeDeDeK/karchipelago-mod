@@ -86,7 +86,7 @@ Owners:
 | Entity | CollData | Per-frame entry points |
 |---|---|---|
 | Machines | `MachineData+0x6F8` | `Machine_EnvCollThink` (`0x801c65a8`) GObj proc, `Machine_ProcessEnvColl` (`0x801e5108`). Radius source is `MachineData+0x46C`; `Machine_InitialCollisionCheck` (`0x801cc7a4`) seeds it at spawn. |
-| Riders | `RiderData+0x670` | `Rider_EnvColl` (`0x8018f734`) GObj proc, `Rider_EnvColl_Grounded` (`0x801b8ec4`). |
+| Riders | `RiderData+0x670` | `Rider_EnvColl` (`0x8018f734`) GObj proc. |
 | Enemies | `EnemyData+0x594` | `EventActor_EnvCollRaycastDown` / `Up` (`0x80204e24` / `0x80204e44`), `EventActor_GroundSnap` (`0x80204fac`), `EventActor_GroundPhysicsVelocity` (`0x80209104`), `EventActor_GroundAttach` (`0x8020a664`). |
 | Items | `ItemData+0x1A4`, often NULL | `CityItem_EnvColl` (`0x8024f814`) GObj proc into `Item_GenericEnvColl` (`0x80255438`). |
 

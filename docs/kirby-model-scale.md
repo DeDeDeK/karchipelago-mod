@@ -90,10 +90,17 @@ and the merged "big Kirby on a big star" look is acceptable for cosmetic filler.
     Kirby looks already-grown at "GO" - an apparent instant snap. `round_state`
     is the master per-frame physics gate and reaches 2 in solo Time Attack /
     Free Run as well.
-- A per-frame applier (`KirbyScale_On3DLoadEnd` / `KirbyScale_OnTopRideLoadEnd`)
-  re-writes the field each frame so the scale also survives mid-scene model
-  recreation (respawns). It is a no-op until a Big / Small Kirby is received
-  this scene (the target stays neutral, 1.0), so vanilla behavior is untouched.
+- A per-frame applier (`KirbyScale_3DPerFrame` / `KirbyScale_TopRidePerFrame`,
+  each on a bare GObj that `KirbyScale_On3DLoadEnd` / `KirbyScale_OnTopRideLoadEnd`
+  creates) re-writes the field each frame so the scale also survives mid-scene
+  model recreation (respawns). It idles only while the ease is settled at
+  neutral - displayed multiplier and target both 1.0 (`KirbyScale_Idle`) - so
+  vanilla behavior is untouched until a Big / Small Kirby arrives, and an ease
+  back to 1.0 (Big, Big, Small: 1.5, then 2.0 after the clamp, then 1.0) runs
+  to the end rather than stopping at the size last written.
+- **Announced like any received item** - "Received: Big Kirby" / "Small Kirby"
+  through `APAnnounce_Grant`, shown only while *Messages -> Local -> Items* is
+  on (default Off).
 
 ## In-Game Surfaces
 

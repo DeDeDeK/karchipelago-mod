@@ -1,12 +1,9 @@
-// An archive cannot animate this itself: a MatAnim's frame is the machine's state, not
-// elapsed time. The same color is written over the exhaust generators' color operands,
-// so it paints the particles born that frame and leaves those in flight alone.
-
 #include "os.h"
 #include "hsd.h"
 #include "obj.h"
 #include "machine.h"
 #include "particle.h"
+#include "inline.h"
 
 #include "ap_star.h"
 #include "ap_star_palette.h"
@@ -54,11 +51,6 @@ static void Advance(void)
         stc_phase -= 1.0f;
 }
 
-static u8 Mix(u8 from, u8 to, float f)
-{
-    return (u8)((float)from + ((float)to - (float)from) * f);
-}
-
 static void PaletteColor(GXColor *out)
 {
     float walk = stc_phase * (float)APSTARPIECE_NUM;
@@ -69,13 +61,11 @@ static void PaletteColor(GXColor *out)
     // Ease the crossfade so each color holds before it gives way, instead of the
     // whole cycle sitting in the muddy blend between two of them.
     float f = walk - (float)i;
-    f = f * f * (3.0f - 2.0f * f);
+    f = smoothstep(f);
 
-    const GXColor *from = &ap_star_piece_colors[i];
-    const GXColor *to = &ap_star_piece_colors[(i + 1) % APSTARPIECE_NUM];
-    out->r = Mix(from->r, to->r, f);
-    out->g = Mix(from->g, to->g, f);
-    out->b = Mix(from->b, to->b, f);
+    GXColor from = ap_star_piece_colors[i];
+    GXColor to = ap_star_piece_colors[(i + 1) % APSTARPIECE_NUM];
+    GXColor_Lerp(&from, &to, out, f);
     out->a = 0xFF;
 }
 
@@ -158,6 +148,6 @@ void ApStarPalette_Bind(int kind)
     cm_api->SetAnimHandler(kind, OnStarAnim);
     stc_phase_per_tick = 1.0f / (CYCLE_PERIOD * (float)(os_info->bus_clock / 4));
     BindTrail(kind);
-    OSReport("[ApStarPalette] Anim handler installed, %d of %d trail operands tinted\n",
+    OSReport("[ApStarPalette] Anim handler installed, %d of %d trail operands bound\n",
              stc_trail_num, TRAIL_GEN_NUM * TRAIL_RGB_NUM);
 }

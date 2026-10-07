@@ -1,3 +1,6 @@
+#include <float.h>
+#include <string.h>
+
 #include "game.h"
 #include "os.h"
 #include "inline.h"
@@ -22,7 +25,7 @@
 #define GOURMET_SURFACE_HEIGHT      180.0f
 #define GOURMET_ABOVE_SPLINE_HEIGHT 5.0f
 #define GOURMET_UNDERGROUND_Y       44.0f
-#define GOURMET_ANY_Y               1e30f
+#define GOURMET_ANY_Y               FLT_MAX
 #define GOURMET_BIG_ITEM_SCALE      4.0f
 #define GOURMET_ITEM_SCALE          2.0f
 #define GOURMET_ITEM_LIFETIME       30000 // outlasts the event, so a vanished food was eaten
@@ -50,7 +53,7 @@ static const ItemKind food_kinds[] = {
     ITKIND_FOODHOTDOG,
     ITKIND_FOODAPPLE,
 };
-#define NUM_FOOD_KINDS (sizeof(food_kinds) / sizeof(food_kinds[0]))
+#define NUM_FOOD_KINDS GetElementsIn(food_kinds)
 
 static const Vec3 big_food_positions[GOURMET_BIG_COUNT] = {
     { 71.00f, 140.00f, -345.00f },   // tower high
@@ -93,7 +96,7 @@ typedef struct FoodSlot
 static FoodSlot food_slots[GOURMET_MAX_FOOD];
 static int num_food_slots;
 static GOBJ *watcher_gobj;
-static int scores[5];
+static int scores[PLY_NUM];
 
 #define HUD_MAX_PLAYERS     4
 #define HUD_SCALE           8.0f
@@ -134,7 +137,7 @@ static void ScoreHUD_Create(void)
     }
 
     // Ortho camera that renders only the score HUD's GX link.
-    hud_camera_gobj = GOBJ_EZCreator(0, 0, 0,
+    hud_camera_gobj = GOBJ_EZCreator(0, GAMEPLINK_SYS, 0,
                                       0, 0,
                                       HSD_OBJKIND_COBJ, stc_text_cobjdesc,
                                       0, 0,
@@ -142,7 +145,7 @@ static void ScoreHUD_Create(void)
     hud_camera_gobj->cobj_links = (1ULL << GOURMET_HUD_FG_GXLINK);
     CObj_SetOrtho(hud_camera_gobj->hsd_object, 0.0f, -480.0f, 0.0f, 640.0f);
 
-    for (int i = 0; i < 5 && num_score_huds < HUD_MAX_PLAYERS; i++)
+    for (int i = 0; i < PLY_NUM && num_score_huds < HUD_MAX_PLAYERS; i++)
     {
         if (Ply_GetPKind(i) == PKIND_NONE)
             continue;
@@ -183,8 +186,8 @@ static void ScoreHUD_Create(void)
         hud->sign_j = GObj_GetJObjIndex(hud->gauge_gobj, 6);
 
         JObj_SetFlagsAll(hud->bar_j, JOBJ_HIDDEN);
-        hud->sign_j->flags |= JOBJ_HIDDEN;
-        hud->right_j->flags |= JOBJ_HIDDEN;
+        JObj_SetFlags(hud->sign_j, JOBJ_HIDDEN);
+        JObj_SetFlags(hud->right_j, JOBJ_HIDDEN);
         HUD_UpdateElement(hud->left_j, 0);
 
         hud->prev_score = 0;
@@ -195,7 +198,7 @@ static void ScoreHUD_Create(void)
 static void ScoreHUD_Update(void)
 {
     int row = 0;
-    for (int i = 0; i < 5 && row < num_score_huds; i++)
+    for (int i = 0; i < PLY_NUM && row < num_score_huds; i++)
     {
         if (Ply_GetPKind(i) == PKIND_NONE)
             continue;
@@ -210,21 +213,19 @@ static void ScoreHUD_Update(void)
         // as centered.
         if (score >= 10)
         {
-            hud->right_j->flags &= ~JOBJ_HIDDEN;
+            JObj_ClearFlags(hud->right_j, JOBJ_HIDDEN);
             HUD_UpdateElement(hud->right_j, score % 10);
             HUD_UpdateElement(hud->left_j, score / 10);
         }
         else
         {
-            hud->right_j->flags |= JOBJ_HIDDEN;
+            JObj_SetFlags(hud->right_j, JOBJ_HIDDEN);
             HUD_UpdateElement(hud->left_j, score);
         }
 
         // AnimAll can clear these flags, so re-hide on every update.
-        hud->sign_j->flags |= JOBJ_HIDDEN;
-        hud->bar_j->flags |= JOBJ_HIDDEN;
-        for (JOBJ *child = hud->bar_j->child; child; child = child->sibling)
-            child->flags |= JOBJ_HIDDEN;
+        JObj_SetFlags(hud->sign_j, JOBJ_HIDDEN);
+        JObj_SetFlagsAll(hud->bar_j, JOBJ_HIDDEN);
     }
 }
 
@@ -320,17 +321,6 @@ static int PlaceFood(const Vec3 *base, float height, int coll_kind, int is_big)
     return 1;
 }
 
-static void ShuffleVecs(Vec3 *arr, int count)
-{
-    for (int i = count - 1; i > 0; i--)
-    {
-        int j = HSD_Randi(i + 1);
-        Vec3 tmp = arr[i];
-        arr[i] = arr[j];
-        arr[j] = tmp;
-    }
-}
-
 // Spline midpoints within the city radius.
 static int CollectCandidates(Vec3 *out, int max_out)
 {
@@ -358,7 +348,7 @@ static int CollectCandidates(Vec3 *out, int max_out)
 // GOURMET_MIN_SPACING from every food placed so far. Returns the number spawned.
 static int PlaceOnSplines(Vec3 *candidates, int num, int target, float height, int coll_kind, float max_y)
 {
-    ShuffleVecs(candidates, num);
+    RandomShuffle(candidates, num, sizeof(candidates[0]));
 
     int spawned = 0;
     for (int i = 0; i < num && spawned < target; i++)
@@ -382,12 +372,10 @@ static void GourmetRace_SpawnFood(void)
         PlaceFood(&big_food_positions[i], GOURMET_PREPLACED_HEIGHT, 2, 1);
 
     Vec3 preplaced[GOURMET_PREPLACED_COUNT];
-    for (int i = 0; i < GOURMET_PREPLACED_COUNT; i++)
-        preplaced[i] = preplaced_positions[i];
-    ShuffleVecs(preplaced, GOURMET_PREPLACED_COUNT);
+    memcpy(preplaced, preplaced_positions, sizeof(preplaced));
+    RandomShuffle(preplaced, GOURMET_PREPLACED_COUNT, sizeof(preplaced[0]));
 
-    int preplaced_target = GOURMET_PREPLACED_MIN
-        + HSD_Randi(GOURMET_PREPLACED_MAX - GOURMET_PREPLACED_MIN + 1);
+    int preplaced_target = RandomInRange(GOURMET_PREPLACED_MIN, GOURMET_PREPLACED_MAX);
     int spawned = 0;
     for (int i = 0; i < GOURMET_PREPLACED_COUNT && spawned < preplaced_target; i++)
         spawned += PlaceFood(&preplaced[i], GOURMET_PREPLACED_HEIGHT, 2, 0);
@@ -409,18 +397,15 @@ static void GourmetRace_SpawnFood(void)
 static int FindNearestPlayer(const Vec3 *pos)
 {
     int best = -1;
-    float best_dist = 1e18f;
-    for (int i = 0; i < 5; i++)
+    float best_dist = FLT_MAX;
+    for (int i = 0; i < PLY_NUM; i++)
     {
         GOBJ *rg = Ply_GetRiderGObj(i);
         if (!rg)
             continue;
 
         RiderData *rd = rg->userdata;
-        float dx = rd->pos.X - pos->X;
-        float dy = rd->pos.Y - pos->Y;
-        float dz = rd->pos.Z - pos->Z;
-        float dist = dx * dx + dy * dy + dz * dz;
+        float dist = VECSquareDistance(&rd->pos, (Vec3 *)pos);
         if (dist < best_dist)
         {
             best_dist = dist;
@@ -471,8 +456,7 @@ static void GourmetRace_WatcherProc(GOBJ *gobj)
 
 void GourmetRace_Start(void)
 {
-    for (int i = 0; i < 5; i++)
-        scores[i] = 0;
+    memset(scores, 0, sizeof(scores));
 
     GourmetRace_SpawnFood();
 
@@ -503,7 +487,7 @@ void GourmetRace_End2(void)
              scores[0], scores[1], scores[2], scores[3], scores[4]);
 
     int best_score = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (scores[i] > best_score)
             best_score = scores[i];
@@ -512,7 +496,7 @@ void GourmetRace_End2(void)
         return;
 
     int winners = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (scores[i] == best_score)
             winners++;
@@ -520,7 +504,7 @@ void GourmetRace_End2(void)
 
     // A tie halves the prize.
     int allups = winners > 1 ? 1 : 2;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (scores[i] != best_score)
             continue;

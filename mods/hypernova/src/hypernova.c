@@ -5,6 +5,7 @@
 #include "rider.h"
 #include "obj.h"
 #include "effect.h"
+#include "inline.h"
 #include "hoshi/mod.h"
 
 #include "hypernova.h"
@@ -20,20 +21,20 @@ int hypernova_suck_machines = 1;
 int hypernova_selftest      = 0;
 int hypernova_debug_cone    = 0;
 
-static u8  stc_active[5];
-static int stc_timer[5];
+static u8  stc_active[PLY_NUM];
+static int stc_timer[PLY_NUM];
 
 enum { HYPERNOVA_PHASE_IDLE, HYPERNOVA_PHASE_GULP, HYPERNOVA_PHASE_LOOP };
-static u8 stc_inhale_phase[5];
+static u8 stc_inhale_phase[PLY_NUM];
 
 // Init to neutral so an inactive player's model_scale is never written.
-static float stc_scale_current[5] = { HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
+static float stc_scale_current[PLY_NUM] = { HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
                                       HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
                                       HYPERNOVA_SCALE_NEUTRAL };
-static float stc_scale_start[5]   = { HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
+static float stc_scale_start[PLY_NUM]   = { HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
                                       HYPERNOVA_SCALE_NEUTRAL, HYPERNOVA_SCALE_NEUTRAL,
                                       HYPERNOVA_SCALE_NEUTRAL };
-static int   stc_scale_anim[5]    = { HYPERNOVA_SCALE_ANIM_FRAMES, HYPERNOVA_SCALE_ANIM_FRAMES,
+static int   stc_scale_anim[PLY_NUM]    = { HYPERNOVA_SCALE_ANIM_FRAMES, HYPERNOVA_SCALE_ANIM_FRAMES,
                                       HYPERNOVA_SCALE_ANIM_FRAMES, HYPERNOVA_SCALE_ANIM_FRAMES,
                                       HYPERNOVA_SCALE_ANIM_FRAMES };
 
@@ -71,8 +72,8 @@ static float TickScale(int p)
     {
         stc_scale_anim[p]++;
         float t = (float)stc_scale_anim[p] / (float)HYPERNOVA_SCALE_ANIM_FRAMES;
-        t = t * t * (3.0f - 2.0f * t); // smoothstep
-        stc_scale_current[p] = stc_scale_start[p] + (target - stc_scale_start[p]) * t;
+        t = smoothstep(t);
+        stc_scale_current[p] = lerp(stc_scale_start[p], target, t);
     }
     else
     {
@@ -88,7 +89,7 @@ static int StopPlayer(int p)
     if (!stc_active[p])
         return 0;
 
-    // End a running suck here: OnFrameEnd stops visiting this player the moment it goes
+    // End a running suck here: the frame proc stops visiting this player the moment it goes
     // inactive, so DriveInhale's release branch would never run again.
     if (stc_inhale_phase[p] == HYPERNOVA_PHASE_LOOP)
     {
@@ -109,7 +110,7 @@ static int StopPlayer(int p)
 // Scene change: models are recreated at scale 1.0, so snap to neutral with no ease.
 static void ResetState(void)
 {
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         stc_active[i]        = 0;
         stc_timer[i]         = 0;
@@ -120,7 +121,6 @@ static void ResetState(void)
     }
     stc_hue = 0.0f;
     Hypernova_VacuumReset();
-    Hypernova_DebugConeReset();
 }
 
 // Hypernova is mutually exclusive with copy abilities and City Trial power-ups.
@@ -129,16 +129,12 @@ static int PlayerHoldsAbility(RiderData *rd)
     return rd->copy_kind != COPYKIND_NONE || rd->powerup_kind != POWERUPKIND_NONE;
 }
 
-// 0 means "use the menu setting". Option_CopyFromSave restores the saved index without bounding
-// it, so an index from a build with a different option list must not index the table.
+// 0 means "use the menu setting".
 static int ResolveDuration(int duration_frames)
 {
     if (duration_frames > 0)
         return duration_frames;
-    int sel = hypernova_duration_sel;
-    if (sel < 0 || sel >= HYPERNOVA_DURATION_NUM)
-        sel = 0;
-    return hypernova_duration_table[sel];
+    return hypernova_duration_table[hypernova_duration_sel];
 }
 
 // 0 rejected, 1 newly started, 2 refreshed an already-active player.
@@ -148,7 +144,7 @@ static int StartPlayer(int player, int duration_frames)
         return 0;
     if (!InCityTrialGameplay())
         return 0;
-    if (player < 0 || player >= 5)
+    if (player < 0 || player >= PLY_NUM)
         return 0;
     if (Ply_GetPKind(player) != PKIND_HMN)
         return 0;
@@ -157,7 +153,7 @@ static int StartPlayer(int player, int duration_frames)
     if (stc_active[player])
         return 2;
 
-    // Strip any held ability/power-up, or OnFrameEnd's has-ability guard cancels Hypernova
+    // Strip any held ability/power-up, or the frame proc's has-ability guard cancels Hypernova
     // on its first frame.
     GOBJ *rg = Ply_GetRiderGObj(player);
     if (rg != NULL)
@@ -188,7 +184,7 @@ int Hypernova_Activate(int duration_frames)
 {
     int frames = ResolveDuration(duration_frames);
     int n = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
         if (StartPlayer(i, frames) != 0)
             n++;
     if (n > 0)
@@ -199,7 +195,7 @@ int Hypernova_Activate(int duration_frames)
 void Hypernova_Deactivate(void)
 {
     int n = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
         n += StopPlayer(i);
     if (n > 0)
         OSReport("[Hypernova] Deactivated %d player(s)\n", n);
@@ -207,7 +203,7 @@ void Hypernova_Deactivate(void)
 
 int Hypernova_IsActive(void)
 {
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
         if (stc_active[i])
             return 1;
     return 0;
@@ -216,7 +212,7 @@ int Hypernova_IsActive(void)
 int Hypernova_FramesRemaining(void)
 {
     int most = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
         if (stc_active[i] && stc_timer[i] > most)
             most = stc_timer[i];
     return most;
@@ -286,7 +282,7 @@ static int DriveInhale(RiderData *rd, int player, int held)
 }
 
 // Hue (0..1) -> full-saturation/value RGB (0..255).
-static void HueToRgb(float h, u8 *r, u8 *g, u8 *b)
+static GXColor HueToRgb(float h, u8 a)
 {
     float hh = h * 6.0f;
     int   seg = (int)hh;
@@ -295,19 +291,22 @@ static void HueToRgb(float h, u8 *r, u8 *g, u8 *b)
     u8 down = (u8)(255.0f * (1.0f - f));
     switch (seg % 6)
     {
-        case 0:  *r = 255;  *g = up;   *b = 0;    break;
-        case 1:  *r = down; *g = 255;  *b = 0;    break;
-        case 2:  *r = 0;    *g = 255;  *b = up;   break;
-        case 3:  *r = 0;    *g = down; *b = 255;  break;
-        case 4:  *r = up;   *g = 0;    *b = 255;  break;
-        default: *r = 255;  *g = 0;    *b = down; break;
+        case 0:  return (GXColor){255,  up,   0,    a};
+        case 1:  return (GXColor){down, 255,  0,    a};
+        case 2:  return (GXColor){0,    255,  up,   a};
+        case 3:  return (GXColor){0,    down, 255,  a};
+        case 4:  return (GXColor){up,   0,    255,  a};
+        default: return (GXColor){255,  0,    down, a};
     }
 }
 
 // keep=1 -> full color, keep=0 -> white.
-static u8 TowardWhite(u8 v, float keep)
+static GXColor TowardWhite(GXColor c, float keep)
 {
-    return (u8)(255.0f - (255.0f - (float)v) * keep);
+    c.r = (u8)(255.0f - (255.0f - (float)c.r) * keep);
+    c.g = (u8)(255.0f - (255.0f - (float)c.g) * keep);
+    c.b = (u8)(255.0f - (255.0f - (float)c.b) * keep);
+    return c;
 }
 
 // Drive a hue into the rider's body ColAnim overlay. With the anim tick frozen the mod owns
@@ -333,15 +332,13 @@ static void DriveRainbow(RiderData *rd, float hue)
     // would stop drawing the overlay.
     slot->flags |= COLANIM_FLAG_TINT;
 
-    u8 r, g, b;
-    HueToRgb(hue, &r, &g, &b);
-    GXColor col = {r, g, b, HYPERNOVA_RAINBOW_ALPHA};
+    GXColor col = HueToRgb(hue, HYPERNOVA_RAINBOW_ALPHA);
 
     slot->color      = col;
-    slot->color_f[0] = (float)r;
-    slot->color_f[1] = (float)g;
-    slot->color_f[2] = (float)b;
-    slot->color_f[3] = (float)HYPERNOVA_RAINBOW_ALPHA;
+    slot->color_f[0] = (float)col.r;
+    slot->color_f[1] = (float)col.g;
+    slot->color_f[2] = (float)col.b;
+    slot->color_f[3] = (float)col.a;
 
     rd->col_anim.color  = col;
     rd->col_anim.flags |= COLANIM_FLAG_TINT;
@@ -358,16 +355,14 @@ static void StopRainbowPlayer(int player)
     ColAnim_Reset(&rd->col_anim.slot[0]);
 }
 
-static void TintTevColor(GXColor *c, u8 r, u8 g, u8 b)
+static void TintTevColor(GXColor *c, GXColor rgb)
 {
-    c->r = r;
-    c->g = g;
-    c->b = b;
+    *c = (GXColor){rgb.r, rgb.g, rgb.b, c->a};
 }
 
 // Rewrites each TObj's tev constant/tev0/tev1 RGB - value fields MObjSetupTev re-reads every
 // frame. The TExp node tree itself is never touched (clobbering it crashes the walk).
-static void RecolorEffectTree(JOBJ *j, u8 r, u8 g, u8 b)
+static void RecolorEffectTree(JOBJ *j, GXColor rgb)
 {
     while (j != NULL)
     {
@@ -380,20 +375,20 @@ static void RecolorEffectTree(JOBJ *j, u8 r, u8 g, u8 b)
             {
                 if (t->tev == NULL)
                     continue;
-                TintTevColor(&t->tev->constant, r, g, b);
-                TintTevColor(&t->tev->tev0, r, g, b);
-                TintTevColor(&t->tev->tev1, r, g, b);
+                TintTevColor(&t->tev->constant, rgb);
+                TintTevColor(&t->tev->tev0, rgb);
+                TintTevColor(&t->tev->tev1, rgb);
             }
         }
         if (j->child != NULL)
-            RecolorEffectTree(j->child, r, g, b);
+            RecolorEffectTree(j->child, rgb);
         j = j->sibling;
     }
 }
 
 // The spawn discards the handle, so live whirlwinds are found by walking the model-effect
 // bucket and matching the Effect kind.
-static void RecolorWhirlwinds(u8 r, u8 g, u8 b)
+static void RecolorWhirlwinds(GXColor rgb)
 {
     for (GOBJ *g_eff = (*stc_gobj_lookup)[GAMEPLINK_EFFECTMODEL]; g_eff != NULL; g_eff = g_eff->next)
     {
@@ -404,7 +399,7 @@ static void RecolorWhirlwinds(u8 r, u8 g, u8 b)
             continue;
         if (eff->kind != HYPERNOVA_INHALE_EFFECT_ID)
             continue;
-        RecolorEffectTree((JOBJ *)g_eff->hsd_object, r, g, b);
+        RecolorEffectTree((JOBJ *)g_eff->hsd_object, rgb);
     }
 }
 
@@ -420,26 +415,9 @@ void Hypernova_OnSceneChange(void)
     ResetState();
 }
 
-// Runs after the frame's game procs so the vacuum's position overrides win over item
-// physics/ground-snap.
-void Hypernova_OnFrameEnd(void)
+static void Hypernova_Think(GOBJ *g)
 {
     if (!InCityTrialGameplay())
-    {
-        ResetState();
-        return;
-    }
-
-    // Before the enabled and pause early-outs: the cone draws two compile-time constants, so it
-    // is useful with the power-up off and still renders while paused.
-    Hypernova_DebugConeEnsure();
-
-    if (!hypernova_enabled)
-        return;
-
-    // Freeze while paused: the procs this cooperates with (model_scale, ColAnim selector,
-    // effect models) are frozen too.
-    if (Gm_CheckPauseKind(PAUSEKIND_GAME))
         return;
 
     SelfTestPoll();
@@ -447,7 +425,7 @@ void Hypernova_OnFrameEnd(void)
     // End on expiry, or the instant a player gains an ability/power-up - before DriveInhale, so
     // the drive doesn't fight the state the engine already moved the rider into this frame.
     int expired = 0, cancelled = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (!stc_active[i])
             continue;
@@ -466,7 +444,7 @@ void Hypernova_OnFrameEnd(void)
         OSReport("[Hypernova] Cancelled for %d player(s) who gained an ability\n", cancelled);
 
     int any_active = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
         any_active |= stc_active[i];
 
     if (any_active)
@@ -476,7 +454,7 @@ void Hypernova_OnFrameEnd(void)
             stc_hue -= 1.0f;
     }
 
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
@@ -516,11 +494,25 @@ void Hypernova_OnFrameEnd(void)
         float whue = stc_hue + HYPERNOVA_WHIRLWIND_HUE_OFFSET;
         if (whue >= 1.0f)
             whue -= 1.0f;
-        u8 wr, wg, wb;
-        HueToRgb(whue, &wr, &wg, &wb);
-        wr = TowardWhite(wr, HYPERNOVA_WHIRLWIND_TINT);
-        wg = TowardWhite(wg, HYPERNOVA_WHIRLWIND_TINT);
-        wb = TowardWhite(wb, HYPERNOVA_WHIRLWIND_TINT);
-        RecolorWhirlwinds(wr, wg, wb);
+        RecolorWhirlwinds(TowardWhite(HueToRgb(whue, 255), HYPERNOVA_WHIRLWIND_TINT));
     }
+}
+
+// The last priority, so the vacuum's position overrides win over item physics (4), the
+// ground snap (5) and the model-matrix appliers (6). p_link 1 freezes with the match pause
+// and the hitstops, as do the procs this cooperates with (model_scale, ColAnim selector,
+// effect models).
+void Hypernova_On3DLoadEnd(void)
+{
+    if (!Gm_IsInCity())
+        return;
+
+    if (hypernova_enabled)
+    {
+        GOBJ *g = GObj_Create(0, GAMEPLINK_1, 0);
+        GObj_AddProc(g, Hypernova_Think, 23);
+    }
+    // Drawn from compile-time constants, so the cone needs no power-up.
+    if (hypernova_debug_cone && !CityTrial_IsInStadium())
+        Hypernova_DebugConeCreate();
 }

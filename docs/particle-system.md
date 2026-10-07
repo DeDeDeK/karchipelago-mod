@@ -413,7 +413,7 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x8040add4` | `JObjLoad` | creates generators for `JOBJ_PTCL` leaves via the `0x805de268` hook |
 | `0x8040985c` | `JObjUpdateFunc` | anim-track dispatch; the ptcl branches sit at `0x8040a000` |
 | `0x8040f848` | `HSD_JObjDisp` | geometry leaf; skips `JOBJ_PTCL` / `JOBJ_SPLINE` |
-| `0x80233b74` / `0x80233ba0` | `Ptcl_Think` / `Ptcl_Think2` | Effect-module thunks that enter both walks |
+| `0x80233b74` / `0x80233ba0` | `Ptcl_Think` / `Ptcl_CinematicThink` | Effect-module thunks that enter both walks |
 | `0x804324ec` | (generator update pass) | walks `*0x805de370` driving `Ptcl_SyncGenToJObj` |
 | `0x8042a734` | `psInitDataBanks` | fill the per-bank count and descriptor tables |
 | `0x8042a874` | `psRelocDataBanks` | relocate a bank's internal offsets before install |

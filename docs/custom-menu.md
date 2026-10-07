@@ -1,7 +1,7 @@
 # Custom Main Menu
 
-The archipelago mod's `main_menu` subsystem (`mods/archipelago/src/main_menu.c`, booted from
-`main.c`'s `OnBoot` via `MainMenu_OnBoot`) turns the vanilla "KIRBY AIR RIDE" title logo into
+The archipelago mod's `ap_title` subsystem (`mods/archipelago/src/ap_title.c`, booted from
+`main.c`'s `OnBoot` via `APTitle_OnBoot`) turns the vanilla "KIRBY AIR RIDE" title logo into
 the KARchipelago logo. It keeps the vanilla "KIRBY" text and blue swoosh and replaces only the
 "AIR RIDE" subtitle with two pieces loaded from a mod asset - the "AIRRIDE / ARCHIPELAGO"
 subtitle and a six-Kirby cluster - drawn in the title foreground scene. The rest of the title
@@ -9,18 +9,19 @@ screen (background, Kirby, menu options) is untouched.
 
 ## Demo Machine
 
-`MainMenu_SelectDemoMachine` rewrites two of the three `li r4` operands of the idle demo-player
+`APTitle_SelectDemoMachine` rewrites two of the three `li r4` operands of the idle demo-player
 setup inside `SceneLoad_TitleScreen` (`0x8000d26c`) - RiderKind at `0x8000d340` and class slot at
 `0x8000d358`. The third, IsBike at `0x8000d34c`, is left alone: it already encodes `li r4, 0` and
-the selection only ever picks a star-class slot, so patching it wrote back the same word. It asks `GateApStar_MachineKind()` for the Archipelago Star; if that resolves to a
+the selection only ever picks a star-class slot, so patching it would write back the same word. It asks `GateApStar_MachineKind()` for the Archipelago Star; if that resolves to a
 star-class kind the demo becomes Kirby riding it, otherwise it falls back to Dedede on the Wagon
 Star. Showing the Archipelago Star on the title screen is the point: it is the machine the goal
 awards, on display before it is earned.
 
 The demo ride must stay star-class (`is_bike = 0`) - the demo init uses hardcoded star-only state
-ids and a wheel-class machine crashes there. The selection is re-run from the title load hook on
-every title entry, not just at boot, because the machine registry only resolves the AP Star kind
-after every mod has booted.
+ids and a wheel-class machine crashes there. The selection runs from the title load hook at
+`0x8000d2b4`, on every title entry and ahead of the patched instructions, rather than from
+`APTitle_OnBoot`, because the machine registry only resolves the AP Star kind after every mod
+has booted.
 
 ## Version Stamp
 
@@ -29,15 +30,14 @@ translucent black panel.
 
 The string is `KARCHIPELAGO_VERSION` from `mods/archipelago/src/version.h`, a hand-maintained
 literal matching the repo's release tag. It is deliberately separate from `mod_desc.version`,
-which hoshi reads as the save-compatibility number and which tracks
-`APSAVE_VERSION_MAJOR`/`MINOR` - the shape of `APSave` - not the exported
-`ARCHIPELAGO_API_MAJOR`/`MINOR` other mods import against. The same string is printed once at boot as
-`[Main] KARchipelago <version>`.
+which carries `ARCHIPELAGO_API_MAJOR`/`MINOR`: hoshi compares an importer's requested API major
+against it in `Hoshi_ImportMod`, so it moves with the exported API, not with releases. The same
+string is printed once at boot as `[Main] KARchipelago <version>`.
 
 The stamp is a `Text` on hoshi's screen-space canvas (640x480 raw pixels,
 `Hoshi_CreateScreenText`). Its lifetime is bound to the title scene through the two descriptor
-wrappers rather than to a scene-change callback: `MainMenu_TitleThink` creates it and
-`MainMenu_TitleExit` calls `Text_Destroy` and clears the pointer. A `Text` is not reliably
+wrappers rather than to a scene-change callback: `APTitle_Think` creates it and
+`APTitle_Exit` calls `Text_Destroy` and clears the pointer. A `Text` is not reliably
 reclaimed by scene teardown - one created on the title and left alone goes on drawing over
 whatever follows - so the explicit destroy is what keeps it to the title screen. The think also
 guards on `*stc_textcanvas_first`, since hoshi rebuilds the canvas on every scene change and
@@ -64,10 +64,10 @@ bottom edges.
 Two vanilla code sites are hooked (the title minor's `cb_Exit` and `cb_ThinkPreGObjProc` are also
 wrapped through the scene descriptor, covered under Demo Machine Audio):
 
-- **Title file load (`0x8000d2b4`)** - `MainMenu_OnTitleLoad` re-runs the demo-machine selection,
+- **Title file load (`0x8000d2b4`)** - `APTitle_OnTitleLoad` runs the demo-machine selection,
   then calls `Gm_LoadGameFile(&menu_archive, "MnTitleKarchi")`, pulling `MnTitleKarchi.dat` from
   the disc overlay into the title-screen heap. `Gm_LoadGameFile` appends the `.dat` extension.
-- **Title scene create (`0x8017b5d8`)** - `MainMenu_OnTitleCreate`:
+- **Title scene create (`0x8017b5d8`)** - `APTitle_OnTitleCreate`:
   1. Hides the vanilla "AIR RIDE" subtitle (its text and its blue background box), which is
      depth-first joint index `14` of the title foreground scene
      (`Gm_GetMenuData()->ScMenTitleFg_gobj`), via
@@ -115,12 +115,12 @@ and gain another copy on each title visit.
 
 Two wrappers on the title minor's descriptor handle this:
 
-- `cb_ThinkPreGObjProc` -> `MainMenu_TitleThink` zeroes `engine_idle_floor` on the demo kind's
+- `cb_ThinkPreGObjProc` -> `APTitle_Think` zeroes `engine_idle_floor` on the demo kind's
   record, saving the vanilla value once. With the floor at 0 the volume arithmetic is identical
   to the Warp Star's and the loop stays inaudible for the same reason vanilla's does. Nothing
   about the demo machine is special-cased; it simply stops being one of the loud kinds, and a
   kind whose floor is already 0.0 passes through unchanged.
-- `cb_Exit` -> `MainMenu_TitleExit` restores the floor, then walks the machine GObj list stopping
+- `cb_Exit` -> `APTitle_Exit` restores the floor, then walks the machine GObj list stopping
   the surface and engine loops with `FGM_Stop` (`0x8005e7d8`) and calling
   `Machine_FreeAudioEmitter` (`0x801dc618`). The loops still hold FGM instances even at volume 0,
   and the five audio tracks and the `AudioEmitter` live in static `Audio3D` slots the heap reset
@@ -133,9 +133,8 @@ The patch is applied from the think rather than the load hook because `vcLoadCom
 `0x8000d304`, partway through the title `cb_Load` and after the `0x8000d2b4` hook site - the
 record is not resident yet at load time, whereas a machine existing at all proves it is. Applying
 it a frame late is harmless: `Machine_UpdateEngineLoop` re-reads the record every frame, and the
-engine loop is only ever created at volume 0.0 (by that function, not by
-`Machine_PlaySpawnSound` (`0x801dccec`), which starts only the surface loop) and slew-ramped up
-from there, so no audible frame can slip through. Restoring on exit matters because the record is
+engine loop is only ever created at volume 0.0 (at spawn by `Machine_InitAudioLoops`,
+`0x801dccec`) and slew-ramped up from there, so no audible frame can slip through. Restoring on exit matters because the record is
 shared game data - the same kind in City Trial reads the same fields.
 
 `MachineData.xc39` bit 0 (`MACHINE_HITREACT_HOLD`) also silences both loops and looks like a
@@ -143,7 +142,7 @@ tidier lever, but it is a presentation-wide latch rather than an audio mute: it 
 freezes the model animation, hides a `DObj` subgroup in `Machine_GX`, and suppresses the
 machine's persistent and periodic effects, which costs the demo machine its exhaust particles.
 
-`MainMenu_TitleExit` reaches the machines through `(*stc_gobj_lookup)[GAMEPLINK_MACHINE]` followed
+`APTitle_Exit` reaches the machines through `(*stc_gobj_lookup)[GAMEPLINK_MACHINE]` followed
 via `GOBJ.next`. `PlayerData` is not a usable route: the title demo machine is never registered in
 it, so `Ply_GetMachineGObj(0)` returns null for the whole title scene even though the machine
 exists and holds audio tracks.

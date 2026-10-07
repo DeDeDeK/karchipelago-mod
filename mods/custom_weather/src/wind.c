@@ -7,13 +7,11 @@
 #include "obj.h"
 #include "machine.h"
 #include "item.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
-
-#define WIND_PI       3.14159265358979f
-#define WIND_DEG2RAD  (WIND_PI / 180.0f)
 
 // Module defaults, applied when a WindDef field is left 0.
 #define WIND_DEF_SPEED      6.0f    // base wind speed, world units/frame
@@ -51,7 +49,7 @@ static int   stc_head_timer = 0;
 // Index 0 ("Preset") is the pass-through value.
 static const float wind_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *wind_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
-#define WIND_STRENGTH_NUM (sizeof(wind_strength_factors) / sizeof(wind_strength_factors[0]))
+#define WIND_STRENGTH_NUM GetElementsIn(wind_strength_factors)
 static int wind_strength_index = 0;
 
 static int wind_randomize_dir = 0;
@@ -127,7 +125,7 @@ static void Wind_ApplyToItems(float wx, float wz)
 // their glide stat so a Winged Star catches far more wind than a Wheelie Bike.
 static void Wind_ApplyToMachines(float wx, float wz)
 {
-    for (int ply = 0; ply < WEATHER_PLAYER_SLOTS; ply++)
+    for (int ply = 0; ply < PLY_NUM; ply++)
     {
         GOBJ *mg = Ply_GetMachineGObj(ply);
         if (mg == NULL)
@@ -140,9 +138,10 @@ static void Wind_ApplyToMachines(float wx, float wz)
         if (md->is_dead)
             continue;
 
-        float glide = Machine_GetStatRatio(md, MACHINESTAT_GLIDE); // [0,1]
-        float scale = WIND_MACHINE_FACTOR *
-                      (WIND_MACHINE_GLIDE_BASE + (1.0f - WIND_MACHINE_GLIDE_BASE) * glide);
+        // The ratio is [-1,1]; lerp clamps a negative Glide stat to the base share
+        // so it never pushes the machine upwind.
+        float glide = Machine_GetStatRatio(md, MACHINESTAT_GLIDE);
+        float scale = WIND_MACHINE_FACTOR * lerp(WIND_MACHINE_GLIDE_BASE, 1.0f, glide);
         md->velocity.X += wx * scale;
         md->velocity.Z += wz * scale;
     }
@@ -161,7 +160,7 @@ void Wind_Tick(void)
         stc_gust_target = Weather_Randf2();
         stc_gust_timer = WIND_GUST_PERIOD;
     }
-    stc_gust_cur += (stc_gust_target - stc_gust_cur) * WIND_GUST_LERP;
+    stc_gust_cur = lerp(stc_gust_cur, stc_gust_target, WIND_GUST_LERP);
 
     // Ease the heading offset toward a fresh random target, bounded by chaos so
     // calm presets stay near their base direction.
@@ -170,13 +169,13 @@ void Wind_Tick(void)
         stc_head_target = Weather_Randf2() * WIND_HEAD_RANGE * stc_chaos;
         stc_head_timer = WIND_HEAD_PERIOD;
     }
-    stc_head_cur += (stc_head_target - stc_head_cur) * WIND_HEAD_LERP;
+    stc_head_cur = lerp(stc_head_cur, stc_head_target, WIND_HEAD_LERP);
 
     float speed = stc_base_speed * (1.0f + stc_gustiness * stc_gust_cur);
     if (speed < 0.0f)
         speed = 0.0f;
 
-    float rad = (stc_base_heading + stc_head_cur) * WIND_DEG2RAD;
+    float rad = MTXDegToRad(stc_base_heading + stc_head_cur);
     stc_vx = speed * sinf(rad);
     stc_vz = speed * cosf(rad);
 

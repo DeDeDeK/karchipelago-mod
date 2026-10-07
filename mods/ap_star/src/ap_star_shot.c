@@ -8,17 +8,13 @@
 #include "machine.h"
 #include "collision.h"
 #include "weapon.h"
+#include "inline.h"
 #include "code_patch/code_patch.h"
 
 #include "ap_star.h"
+#include "ap_star_ring.h"
 #include "ap_star_shot.h"
 #include "ap_star_shot_fx.h"
-
-#define AP_STAR_POD_NUM   APSTARPIECE_NUM // one per sphere color, in the same order
-#define AP_STAR_POD_JOINT 9 // first pod; the six are consecutive in the archive's joint tree
-
-// Machines tracked at once; past this a machine has no ring, and no shot, until one frees.
-#define AP_STAR_RING_MAX 32
 
 // The shot is a projectile kind of its own, appended after the vanilla ones. Its
 // WeaponKindVTable goes in a relocated copy of the engine's table; its WeaponKindData goes
@@ -52,303 +48,8 @@
 #define HOMING_TURN_RADIUS 240.0f // the arc a turn follows, the same at any speed
 #define HOMING_TURN_MAX    0.07f  // radians a frame
 
-#define POD_SHRINK_FRAMES  10
-#define RING_REGROW_FRAMES 60
-#define RESPREAD_RATE      0.18f // per-frame fraction of the way to the even ring
-#define RESPREAD_SNAP      0.0005f
-
-#define TWO_PI 6.28318531f
-
 // charge_value is clamped to 1.0 as it fills; the margin is for the float.
 #define FULL_CHARGE 0.99f
-
-typedef struct RingState
-{
-    MachineData *md;   // owner, NULL while the slot is free
-    JOBJ *root;        // the model the pods were resolved against
-    JOBJ *pod[AP_STAR_POD_NUM];
-    Vec3 pod_trans[AP_STAR_POD_NUM]; // authored ring positions
-    float pod_rot_y[AP_STAR_POD_NUM];
-    Vec3 pod_scale;    // the authored scale a full-size pod returns to
-    float offset[AP_STAR_POD_NUM];   // current swing around the ring, radians
-    float target[AP_STAR_POD_NUM];
-    u8 alive_mask;
-    u8 spread_mask;    // the alive_mask the targets were solved for
-    u8 shrink[AP_STAR_POD_NUM]; // frames left of a fired pod's collapse
-    u8 regrowing;
-    u8 regrow_timer;
-    u32 frame;         // last stc_frame this machine was seen
-} RingState;
-
-static RingState stc_rings[AP_STAR_RING_MAX];
-static u32 stc_frame;   // counts only frames in which some star ran its Think
-static int stc_thought;
-
-static int stc_star_slot = -1;    // class slot, which is what MachineData.kind holds
-
-static RingState *FindRing(MachineData *md)
-{
-    for (int i = 0; i < AP_STAR_RING_MAX; i++)
-    {
-        if (stc_rings[i].md == md)
-            return &stc_rings[i];
-    }
-    return NULL;
-}
-
-// A slot is reclaimed once its machine has gone a whole frame unseen, so a machine
-// destroyed without warning leaves nothing to clean up. A live slot is never taken:
-// its owner would take another in turn, and the cascade leaves the machines first in
-// the proc list without a ring every frame.
-static RingState *ClaimRing(MachineData *md)
-{
-    RingState *free_slot = NULL;
-    RingState *stale = NULL;
-
-    stc_thought = 1;
-    for (int i = 0; i < AP_STAR_RING_MAX; i++)
-    {
-        RingState *r = &stc_rings[i];
-        if (r->md == md)
-        {
-            r->frame = stc_frame;
-            return r;
-        }
-        if (r->md == NULL)
-        {
-            if (free_slot == NULL)
-                free_slot = r;
-        }
-        else if (stale == NULL && stc_frame - r->frame > 1)
-        {
-            stale = r;
-        }
-    }
-
-    RingState *r = free_slot != NULL ? free_slot : stale;
-    if (r == NULL)
-        return NULL;
-    memset(r, 0, sizeof(*r));
-    r->md = md;
-    r->alive_mask = (1 << AP_STAR_POD_NUM) - 1;
-    r->frame = stc_frame;
-    return r;
-}
-
-// The pods carry no animation tracks, so the authored pose is still readable the
-// first time a fresh model is walked.
-static int ResolvePods(RingState *r, MachineData *md)
-{
-    JOBJ *root = (JOBJ *)md->gobj->hsd_object;
-    if (root != NULL && root == r->root)
-        return 1;
-
-    r->root = NULL;
-    if (root == NULL)
-        return 0;
-
-    for (int i = 0; i < AP_STAR_POD_NUM; i++)
-    {
-        r->pod[i] = cm_api->GetMachineJoint(md, AP_STAR_POD_JOINT + i);
-        if (r->pod[i] == NULL)
-            return 0;
-        r->pod_trans[i] = r->pod[i]->trans;
-        r->pod_rot_y[i] = r->pod[i]->rot.Y;
-        r->offset[i] = 0.0f;
-        r->target[i] = 0.0f;
-    }
-    r->pod_scale = r->pod[0]->scale;
-    r->spread_mask = 0;
-    r->root = root;
-    return 1;
-}
-
-static float WrapTurns(float t)
-{
-    while (t > 0.5f)
-        t -= 1.0f;
-    while (t <= -0.5f)
-        t += 1.0f;
-    return t;
-}
-
-// Even angles for however many pods are left. The ring never stops spinning, so
-// only the transient matters: the phase chosen is the one that moves the pods least.
-static void SolveSpread(RingState *r)
-{
-    int alive[AP_STAR_POD_NUM];
-    int count = 0;
-
-    for (int i = 0; i < AP_STAR_POD_NUM; i++)
-    {
-        if (r->alive_mask & (1 << i))
-            alive[count++] = i;
-    }
-
-    r->spread_mask = r->alive_mask;
-    if (count == 0)
-        return;
-
-    // How far each survivor already sits from an even count-ring, in turns.
-    float residual[AP_STAR_POD_NUM];
-    float drift = 0.0f;
-
-    for (int j = 0; j < count; j++)
-    {
-        residual[j] = (float)alive[j] / (float)AP_STAR_POD_NUM - (float)j / (float)count;
-        drift += WrapTurns(residual[j] - residual[0]);
-    }
-
-    float base = residual[0] + drift / (float)count;
-    for (int j = 0; j < count; j++)
-        r->target[alive[j]] = (base - residual[j]) * TWO_PI;
-}
-
-// Overshoots a little before settling, so the ring snaps back rather than
-// creeping up to size.
-static float GrowCurve(float t)
-{
-    float u = t - 1.0f;
-    return 1.0f + 2.70158f * u * u * u + 1.70158f * u * u;
-}
-
-// Swinging a pod around the ring is a rotation of its authored position about
-// the pivot's Y, and the same delta on its own yaw so it keeps facing outward.
-static void SetPodPose(RingState *r, int i, float f)
-{
-    JOBJ *j = r->pod[i];
-    float d = r->offset[i];
-
-    j->scale.X = r->pod_scale.X * f;
-    j->scale.Y = r->pod_scale.Y * f;
-    j->scale.Z = r->pod_scale.Z * f;
-
-    if (d != 0.0f)
-    {
-        float s = sinf(d);
-        float c = cosf(d);
-        j->trans.X = r->pod_trans[i].X * c + r->pod_trans[i].Z * s;
-        j->trans.Y = r->pod_trans[i].Y;
-        j->trans.Z = r->pod_trans[i].Z * c - r->pod_trans[i].X * s;
-        j->rot.Y = r->pod_rot_y[i] + d;
-    }
-    else
-    {
-        j->trans = r->pod_trans[i];
-        j->rot.Y = r->pod_rot_y[i];
-    }
-
-    JObj_SetMtxDirtySub(j);
-}
-
-// Tail of the star class's per-kind Think slot, once per frame per machine.
-static void OnStarThink(MachineData *md)
-{
-    RingState *r = ClaimRing(md);
-    if (r == NULL || !ResolvePods(r, md))
-        return;
-
-    float grow = 0.0f;
-    if (r->regrowing)
-    {
-        grow = GrowCurve((float)r->regrow_timer / (float)RING_REGROW_FRAMES);
-        if (++r->regrow_timer > RING_REGROW_FRAMES)
-        {
-            r->regrowing = 0;
-            r->alive_mask = (1 << AP_STAR_POD_NUM) - 1;
-        }
-    }
-    else if (r->spread_mask != r->alive_mask)
-    {
-        SolveSpread(r);
-    }
-
-    for (int i = 0; i < AP_STAR_POD_NUM; i++)
-    {
-        float f;
-        if (r->regrowing)
-        {
-            f = grow;
-        }
-        else if (r->alive_mask & (1 << i))
-        {
-            // A spent pod holds where it died while it collapses; only the
-            // survivors slide, easing in so the ring settles rather than snaps.
-            float gap = r->target[i] - r->offset[i];
-            r->offset[i] = (gap < RESPREAD_SNAP && gap > -RESPREAD_SNAP)
-                               ? r->target[i]
-                               : r->offset[i] + gap * RESPREAD_RATE;
-            f = 1.0f;
-        }
-        else if (r->shrink[i] != 0)
-        {
-            f = (float)(--r->shrink[i]) / (float)POD_SHRINK_FRAMES;
-        }
-        else
-        {
-            f = 0.0f;
-        }
-        SetPodPose(r, i, f);
-    }
-}
-
-// Tail of the star class's per-kind Init slot. The next Think rebuilds the ring
-// against whatever model the new machine loaded.
-static void OnStarInit(MachineData *md)
-{
-    RingState *r = FindRing(md);
-    if (r != NULL)
-        r->md = NULL;
-}
-
-// The remaining pod closest to the machine's heading, compared in the horizontal
-// plane so the ring's tilt does not decide it.
-static int NearestPod(RingState *r, MachineData *md)
-{
-    int best = -1;
-    float best_dot = -2.0f;
-    int have_heading = 0;
-
-    Vec3 fwd = { md->forward.X, 0.0f, md->forward.Z };
-    if (VECSquareMag(&fwd) >= 0.0001f)
-    {
-        VECNormalize(&fwd, &fwd);
-        have_heading = 1;
-    }
-
-    // No horizontal heading to pick by, so the lowest-index remaining pod stands in.
-    if (!have_heading)
-    {
-        for (int i = 0; i < AP_STAR_POD_NUM; i++)
-        {
-            if (r->alive_mask & (1 << i))
-                return i;
-        }
-        return -1;
-    }
-
-    for (int i = 0; i < AP_STAR_POD_NUM; i++)
-    {
-        if (!(r->alive_mask & (1 << i)))
-            continue;
-
-        Vec3 p;
-        JObj_GetWorldPosition(r->pod[i], NULL, &p);
-
-        Vec3 d = { p.X - md->pos.X, 0.0f, p.Z - md->pos.Z };
-        if (VECSquareMag(&d) < 0.0001f)
-            continue;
-        VECNormalize(&d, &d);
-
-        float dot = VECDotProduct(&d, &fwd);
-        if (dot > best_dot)
-        {
-            best_dot = dot;
-            best = i;
-        }
-    }
-    return best;
-}
 
 // Per-shot state, in the kind's own scratch, which no shared projectile code touches.
 typedef struct ShotState
@@ -366,6 +67,14 @@ _Static_assert(sizeof(ShotState) <= sizeof(((WeaponData *)0)->kind_scratch),
 static ShotState *ShotStateOf(void *proj)
 {
     return (ShotState *)((WeaponData *)proj)->kind_scratch;
+}
+
+// Down from just above `at` to well below it. 0 over a gap.
+static int ProbeGround(const Vec3 *at, Vec3 *hit)
+{
+    Vec3 from = { at->X, at->Y + SHOT_PROBE_UP, at->Z };
+    Vec3 to = { at->X, at->Y - SHOT_PROBE_DOWN, at->Z };
+    return Raycast_Ground(&from, &to, hit) >= 0;
 }
 
 // Where a player can be hit: their machine while they ride it, else the rider.
@@ -405,10 +114,7 @@ static float Alignment(const Vec3 *pos, const Vec3 *dir, const Vec3 *target, int
     if (d2 > HOMING_RANGE * HOMING_RANGE || d2 < 1.0f)
         return -2.0f;
 
-    float inv = 1.0f / sqrtf(d2);
-    to->X *= inv;
-    to->Y *= inv;
-    to->Z *= inv;
+    VECNormalize(to, to);
     return VECDotProduct(to, (Vec3 *)dir);
 }
 
@@ -423,14 +129,12 @@ static void ShotThink(void *p)
     if (proj->lifetime <= SHOT_FADE_FRAMES)
     {
         float t = (float)(proj->lifetime - 1) / (float)SHOT_FADE_FRAMES;
-        if (t < 0.0f)
-            t = 0.0f;
-        proj->scale = SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t;
+        proj->scale = lerp(SHOT_SEED_SCALE, 1.0f, t);
     }
     else if (proj->frame_counter <= SHOT_GROW_FRAMES)
     {
         float t = (float)proj->frame_counter / (float)SHOT_GROW_FRAMES;
-        proj->scale = SHOT_SEED_SCALE + (1.0f - SHOT_SEED_SCALE) * t;
+        proj->scale = lerp(SHOT_SEED_SCALE, 1.0f, t);
     }
 }
 
@@ -538,11 +242,8 @@ static void ShotFollowGround(void *p)
     if (!ShotStateOf(proj)->grounded)
         return;
 
-    Vec3 from = { proj->pos.X, proj->pos.Y + SHOT_PROBE_UP, proj->pos.Z };
-    Vec3 to = { proj->pos.X, proj->pos.Y - SHOT_PROBE_DOWN, proj->pos.Z };
     Vec3 hit;
-
-    if (Raycast_Ground(&from, &to, &hit) < 0)
+    if (!ProbeGround(&proj->pos, &hit))
         return;
 
     proj->pos.Y = hit.Y + SHOT_HOVER;
@@ -628,36 +329,24 @@ static const WeaponKindVTable *stc_vtables[AP_STAR_SHOT_KIND + 1];
 // Every lis / addi pair that forms the vtable table's address but Weapon_SystemInit's,
 // whose loop runs the vanilla kinds' system_init and has nothing to run for the shot.
 static const u32 stc_vtable_sites[][2] = {
-    { 0x8021f4b4, 0x8021f4c4 }, // Weapon_Create, state table
+    { 0x8021f4b4, 0x8021f4c4 }, // Weapon_Create (0x8021f428), state table
     { 0x8021f64c, 0x8021f650 }, // Weapon_Create, init
     { 0x8021f790, 0x8021f794 }, // Weapon_Create, post_init
-    { 0x8021fde0, 0x8021fde4 }, // Weapon_Proc10_HitReact
-    { 0x8021ff94, 0x8021ff98 }, // Weapon_UserDataDtor
-    { 0x8022036c, 0x80220374 }, // Weapon_Despawn
-    { 0x802205f0, 0x802205f8 }, // Weapon_LoadKindParams
-    { 0x8022065c, 0x80220664 }, // Weapon_ReloadKindParams, load_render_state
+    { 0x8021fde0, 0x8021fde4 }, // Weapon_Proc10_HitReact (0x8021fcd4)
+    { 0x8021ff94, 0x8021ff98 }, // Weapon_UserDataDtor (0x8021ff54)
+    { 0x8022036c, 0x80220374 }, // Weapon_Despawn (0x80220364)
+    { 0x802205f0, 0x802205f8 }, // Weapon_LoadKindParams (0x802205e8)
+    { 0x8022065c, 0x80220664 }, // Weapon_ReloadKindParams (0x80220654), load_render_state
     { 0x802206bc, 0x802206c0 }, // Weapon_ReloadKindParams, reset_render_state
 };
 
-// addi sign-extends its immediate, so the high half carries the borrow.
-static void RepointTable(u32 lis_addr, u32 addi_addr, const void *table)
-{
-    u32 addr = (u32)table;
-    u32 lo = addr & 0xFFFF;
-    u32 hi = ((addr >> 16) + ((lo & 0x8000) ? 1 : 0)) & 0xFFFF;
-
-    CODEPATCH_REPLACEINSTRUCTION(lis_addr, (*(u32 *)lis_addr & 0xFFFF0000) | hi);
-    CODEPATCH_REPLACEINSTRUCTION(addi_addr, (*(u32 *)addi_addr & 0xFFFF0000) | lo);
-}
-
 static void RegisterShotKind(void)
 {
-    for (int k = 0; k < WPKIND_NUM; k++)
-        stc_vtables[k] = wp_kind_vtables[k];
+    memcpy(stc_vtables, wp_kind_vtables, WPKIND_NUM * sizeof(stc_vtables[0]));
     stc_vtables[AP_STAR_SHOT_KIND] = &stc_shot_vtable;
 
-    for (u32 i = 0; i < sizeof(stc_vtable_sites) / sizeof(stc_vtable_sites[0]); i++)
-        RepointTable(stc_vtable_sites[i][0], stc_vtable_sites[i][1], stc_vtables);
+    for (u32 i = 0; i < GetElementsIn(stc_vtable_sites); i++)
+        CODEPATCH_REPLACEADDRESS(stc_vtable_sites[i][0], stc_vtable_sites[i][1], stc_vtables);
 
     wp_kind_data[AP_STAR_SHOT_KIND] = &stc_shot_kind_data;
 }
@@ -684,27 +373,19 @@ static void PaintShot(GOBJ *handle, GXColor diffuse)
     }
 }
 
-static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
+// Returns 0 with no shot made, so the pod stays on the ring.
+static int Fire(RiderData *rd, MachineData *md, int pod, const Vec3 *muzzle)
 {
-    Vec3 muzzle;
-    JObj_GetWorldPosition(r->pod[pod], NULL, &muzzle);
-
-    Vec3 from = { muzzle.X, muzzle.Y + SHOT_PROBE_UP, muzzle.Z };
-    Vec3 to = { muzzle.X, muzzle.Y - SHOT_PROBE_DOWN, muzzle.Z };
     Vec3 ground;
-    int grounded = Raycast_Ground(&from, &to, &ground) >= 0;
+    int grounded = ProbeGround(muzzle, &ground);
 
     Vec3 dir, up;
     if (grounded)
     {
-        dir.X = md->forward.X;
-        dir.Y = 0.0f;
-        dir.Z = md->forward.Z;
-        up.X = 0.0f;
-        up.Y = 1.0f;
-        up.Z = 0.0f;
+        dir = (Vec3){ md->forward.X, 0.0f, md->forward.Z };
+        up = (Vec3){ 0.0f, 1.0f, 0.0f };
         if (VECSquareMag(&dir) < 0.0001f)
-            return;
+            return 0;
         VECNormalize(&dir, &dir);
     }
     else
@@ -717,55 +398,33 @@ static void Fire(RiderData *rd, MachineData *md, RingState *r, int pod)
     float carry = VECDotProduct(&md->velocity, &dir);
     float speed = SHOT_SPEED + (carry > 0.0f ? carry : 0.0f);
 
-    WeaponDesc desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.kind = AP_STAR_SHOT_KIND;
-    desc.owner_gobj = rd->gobj;
-    desc.owner_gobj2 = rd->gobj;
-    desc.pos = muzzle;
-    desc.forward = dir;
-    desc.up = up;
-    desc.scale = SHOT_SEED_SCALE; // scale starts here and ShotThink grows it
-    desc.vel.X = dir.X * speed;
-    desc.vel.Y = dir.Y * speed;
-    desc.vel.Z = dir.Z * speed;
-    desc.type_flag = 1;
-    desc.charge = 1.0f;
-
+    WeaponDesc desc = {
+        .kind = AP_STAR_SHOT_KIND,
+        .owner_gobj = rd->gobj,
+        .owner_gobj2 = rd->gobj,
+        .pos = *muzzle,
+        .forward = dir,
+        .up = up,
+        .scale = SHOT_SEED_SCALE, // scale starts here and ShotThink grows it
+        .vel = { dir.X * speed, dir.Y * speed, dir.Z * speed },
+        .type_flag = 1,
+        .charge = 1.0f,
+    };
     GOBJ *handle = Weapon_Create(&desc);
     if (handle == NULL)
-        return;
+        return 0;
 
     // Written before any of the shot's procs run.
     WeaponData *proj = (WeaponData *)handle->userdata;
     ShotState *st = ShotStateOf(proj);
-    st->owner_ply = (s8)RiderGObj_GetPly(rd->gobj);
+    st->owner_ply = (s8)rd->ply;
     st->target = -1;
     st->grounded = (u8)grounded;
 
     GXColor color = ap_star_piece_colors[pod];
     PaintShot(handle, color);
     st->fx = ApStarShotFx_Attach(proj, color, SHOT_RADIUS);
-
-    r->alive_mask &= (u8)~(1 << pod);
-    if (r->alive_mask == 0)
-    {
-        r->regrowing = 1;
-        r->regrow_timer = 0;
-        // Every pod is at zero scale on this frame, so putting the ring back to
-        // its authored spacing here is invisible.
-        for (int i = 0; i < AP_STAR_POD_NUM; i++)
-        {
-            r->shrink[i] = 0;
-            r->offset[i] = 0.0f;
-            r->target[i] = 0.0f;
-        }
-        r->spread_mask = 0;
-    }
-    else
-    {
-        r->shrink[pod] = POD_SHRINK_FRAMES;
-    }
+    return 1;
 }
 
 static void TryFire(RiderData *rd)
@@ -774,22 +433,14 @@ static void TryFire(RiderData *rd)
         return;
 
     GOBJ *mg = rd->machine_gobj;
-    if (mg == NULL)
+    MachineData *md = mg != NULL ? (MachineData *)mg->userdata : NULL;
+    if (md == NULL || md->charge_value < FULL_CHARGE)
         return;
 
-    MachineData *md = (MachineData *)mg->userdata;
-    if (md == NULL || md->is_bike || md->kind != stc_star_slot)
-        return;
-    if (md->charge_value < FULL_CHARGE)
-        return;
-
-    RingState *r = FindRing(md);
-    if (r == NULL || r->root == NULL || r->regrowing || r->alive_mask == 0)
-        return;
-
-    int pod = NearestPod(r, md);
-    if (pod >= 0)
-        Fire(rd, md, r, pod);
+    Vec3 muzzle;
+    int pod = ApStarRing_AimPod(md, &muzzle);
+    if (pod >= 0 && Fire(rd, md, pod, &muzzle))
+        ApStarRing_Spend(md, pod);
 }
 
 // Both callers of RiderState_StarChargeReleaseEnter (0x801abc64). Call replacements rather than
@@ -803,44 +454,23 @@ static void ApStarShot_ChargeRelease(RiderData *rd)
 void ApStarShot_OnBoot(void)
 {
     RegisterShotKind();
-    CODEPATCH_REPLACECALL(0x801abc44, ApStarShot_ChargeRelease);
-    CODEPATCH_REPLACECALL(0x801abecc, ApStarShot_ChargeRelease);
+    CODEPATCH_REPLACECALL(0x801abc44, ApStarShot_ChargeRelease); // in Rider_IASACheck_ChargeRelease (0x801abc2c)
+    CODEPATCH_REPLACECALL(0x801abecc, ApStarShot_ChargeRelease); // in AS_StarChargeFullThink (0x801abea0)
     ApStarShotFx_OnBoot();
     OSReport("[ApStarShot] Projectile kind %d and charge release hooks installed\n",
              AP_STAR_SHOT_KIND);
 }
 
-// A pause runs no Think, so it does not age every ring at once.
-void ApStarShot_OnFrameStart(void)
-{
-    if (stc_thought)
-    {
-        stc_thought = 0;
-        stc_frame++;
-    }
-}
-
-void ApStarShot_Bind(int kind)
-{
-    int is_bike;
-    stc_star_slot = cm_api->ClassIndexFromKind(kind, &is_bike);
-    cm_api->SetInitHandler(kind, OnStarInit);
-    cm_api->SetThinkHandler(kind, OnStarThink);
-    OSReport("[ApStarShot] Init and Think handlers installed on star slot %d\n", stc_star_slot);
-}
-
-// Every ring's joints, the shot model and the FX GObj belong to the scene heap that
-// was just reset.
+// The shot model and the FX GObj belong to the scene heap that was just reset.
 void ApStarShot_OnSceneChange(void)
 {
-    memset(stc_rings, 0, sizeof(stc_rings));
     stc_shot_model_block.tree = NULL;
     ApStarShotFx_OnSceneChange();
 }
 
 void ApStarShot_On3DLoadEnd(void)
 {
-    if (stc_star_slot < 0)
+    if (ApStar_MachineKind() < 0)
         return;
 
     HSD_Archive *arc = NULL;

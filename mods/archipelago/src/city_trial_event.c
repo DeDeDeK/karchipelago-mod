@@ -3,9 +3,8 @@
 #include "main.h"
 #include "city_trial_event.h"
 
-// Like CityEvent_ForceStart (0x800ee778) but without the reserve queue - the AP item
-// handler retries by returning 0 instead.
-static int Event_Do(EventKind kind)
+// CityEvent_ForceStart (0x800ee778) without its reserve queue; 0 = try again later.
+static int CTEvent_Start(EventKind kind)
 {
     if (!stc_eventcheck_gobj || !*stc_eventcheck_gobj)
         return 0;
@@ -16,8 +15,8 @@ static int Event_Do(EventKind kind)
     if (ev_chk->state != 0)
         return 0;
 
-    // The stage reserves a once-only event's resources for a single run; a second
-    // Restoration Area overflows the collision zone pool (grcoll.c assert).
+    // A once-only event's stage resources cover one run; a second Restoration Area
+    // overflows the collision zone pool.
     if (ev_chk->data->event->param->arr[kind].once_only && ev_chk->occurrence_count[kind])
         return 0;
 
@@ -42,15 +41,11 @@ static int Event_Do(EventKind kind)
     return 1;
 }
 
-int Event_GiveItem(EventKind kind)
+int CTEvent_Give(EventKind kind)
 {
-    if (stGetCurrentStageKind() == STAGEKIND_CITY1)
-    {
-        if (Event_Do(kind))
-        {
-            OSReport("[CTEvent] Event kind %d triggered\n", kind);
-            return 1;
-        }
-    }
-    return 0;
+    if (stGetCurrentStageKind() != STAGEKIND_CITY1 || !CTEvent_Start(kind))
+        return 0;
+
+    OSReport("[CTEvent] Event kind %d triggered\n", kind);
+    return 1;
 }

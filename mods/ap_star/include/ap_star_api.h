@@ -37,8 +37,8 @@ typedef void (*ApStarAssembleFn)(int ply);
 
 typedef struct ApStarAPI
 {
-    // MachineKind the star registered as, or -1. Answers -1 until custom_machines
-    // has booted.
+    // MachineKind the star registered as, or -1. Bound at this mod's OnSaveLoaded, and
+    // -1 before it.
     int (*GetMachineKind)(void);
 
     // Display name of one sphere, which is its archive's CustomItemDesc.name.
@@ -49,7 +49,7 @@ typedef struct ApStarAPI
     // cannot complete. All six are open until a consumer narrows it.
     void (*SetPieceMask)(u32 mask);
 
-    // Run as a player completes a set. Adding a handler already present is a no-op.
+    // Adding a handler already present is a no-op.
     void (*AddAssembleHandler)(ApStarAssembleFn fn);
 
     // 1 if this player assembled the star in the round currently loaded.
@@ -57,7 +57,8 @@ typedef struct ApStarAPI
 
     // Drop one sphere in front of a player's machine, bypassing the delivery
     // schedule. City Trial only; 0 for a sphere with no ItemKind this round, which a
-    // gate closed at load leaves it, or a player with no machine.
+    // gate closed at load leaves it, a player with no machine, or a spawn the engine
+    // refuses (the live-item cap, or a spot it rejects).
     int (*SpawnPiece)(int piece, int ply);
 
     // Add one sphere to a player's set with no pickup, completing the set if it is

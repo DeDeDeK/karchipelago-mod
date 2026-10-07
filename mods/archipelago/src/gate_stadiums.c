@@ -1,6 +1,7 @@
 #include "game.h"
 #include "hsd.h"
 #include "os.h"
+#include "stage.h"
 #include "stadium.h"
 #include "code_patch/code_patch.h"
 
@@ -10,12 +11,11 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// gd->city.prev_stadium_kind[] is sized 5, but vanilla only uses 4 entries for history
-// exclusion.
+// prev_stadium_kind[] holds 5, but vanilla excludes only the last 4.
 #define STADIUM_HISTORY_SIZE 4
 
-// Replaces CityTrial_DecideStadium (0x8003f808), whose fixed-size history exclusion
-// can leave zero candidates when few stadiums are unlocked, reaching HSD_Randi(0).
+// Replaces CityTrial_DecideStadium (0x8003f808), whose fixed-size history exclusion can
+// leave no candidate when few stadiums are unlocked and reach HSD_Randi(0).
 static void GateStadiums_DecideStadium()
 {
     GameData *gd = Gm_GetGameData();
@@ -24,13 +24,7 @@ static void GateStadiums_DecideStadium()
     u8 menu_selection = gd->city.menu_stadium_selection;
 
     // History size is min(unlocked - 1, 4) so at least one stadium stays selectable.
-    int unlocked_count = 0;
-    for (int i = 0; i < STKIND_NUM; i++)
-    {
-        if (mask & (1 << i))
-            unlocked_count++;
-    }
-
+    int unlocked_count = Popcount64(mask & ((1u << STKIND_NUM) - 1));
     int history_size = unlocked_count - 1;
     if (history_size > STADIUM_HISTORY_SIZE)
         history_size = STADIUM_HISTORY_SIZE;
@@ -49,7 +43,7 @@ static void GateStadiums_DecideStadium()
 
         if (menu_selection == 0)
         {
-            // Shuffle mode
+            // Shuffle
             int in_history = 0;
             for (int j = 0; j < history_size; j++)
             {
@@ -64,7 +58,7 @@ static void GateStadiums_DecideStadium()
         }
         else
         {
-            // Specific group mode
+            // One group
             StadiumGroup group = Gm_GetStadiumGroupFromKind(i);
             if (group != menu_selection - 1)
                 continue;
@@ -94,17 +88,9 @@ static void GateStadiums_DecideStadium()
     u8 selected = 0;
     if (weight_total > 0 && num_candidates > 0)
     {
-        int roll = HSD_Randi(weight_total);
-        int cumulative = 0;
-        for (int i = 0; i < num_candidates; i++)
-        {
-            cumulative += candidate_weights[i];
-            if (roll < cumulative)
-            {
-                selected = (u8)candidate_kinds[i];
-                break;
-            }
-        }
+        int idx = Gm_Roll(candidate_weights, num_candidates);
+        if (idx >= 0)
+            selected = (u8)candidate_kinds[idx];
     }
 
     for (int i = STADIUM_HISTORY_SIZE - 1; i > 0; i--)
@@ -118,8 +104,8 @@ static void GateStadiums_DecideStadium()
              unlocked_count, menu_selection);
 }
 
-// Replaces the four vanilla unlock-check functions. ap_save is NULL before OnSaveLoaded
-// runs, but Gm_StadiumCheckUnlocked is called during early init.
+// Replaces the four vanilla unlock checks. Gm_InitData reaches Gm_StadiumCheckUnlocked
+// before OnSaveInit sets ap_save.
 static int GateStadiums_IsUnlocked(StadiumKind kind)
 {
     if (!ap_save || kind < 0 || kind >= STKIND_NUM)
@@ -130,7 +116,7 @@ static int GateStadiums_IsUnlocked(StadiumKind kind)
 void GateStadiums_OnBoot()
 {
     // Gm_StadiumIsAvailable inlines its own copies of the IsDefault and IsUnlocked jump
-    // tables, so all four must be replaced independently.
+    // tables, so all four are replaced.
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsDefaultUnlocked, GateStadiums_IsUnlocked);
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsUnlocked,        GateStadiums_IsUnlocked);
     CODEPATCH_REPLACEFUNC(Gm_StadiumIsAvailable,       GateStadiums_IsUnlocked);
@@ -138,15 +124,13 @@ void GateStadiums_OnBoot()
 
     CODEPATCH_REPLACEFUNC(CityTrial_DecideStadium, GateStadiums_DecideStadium);
 
-    // CityTrial_BuildStadiumList has two side-channels that bypass the unlock-check
-    // replacement. Its phase 1 auto-unlock loop (0x80046e34) badges every locked
-    // stadium "NEW" past a late CT-progress threshold, so its entry blt becomes an
-    // unconditional branch (blt 0x80046e6c -> b 0x80046e6c).
+    // CityTrial_BuildStadiumList (0x80046df0) bypasses the unlock checks twice. Its debug
+    // unlock-all (stc_dblevel >= 3 with R + D-Up held) is skipped outright:
+    // blt 0x80046e6c -> b 0x80046e6c.
     CODEPATCH_REPLACEINSTRUCTION(0x80046e1c, 0x48000050);
 
-    // Its phase 2 checklist fallback re-adds locked stadiums via
-    // Checklist_CheckCachedUnlock_CityTrial / ClearChecker_CheckUnlocked, so the locked
-    // case is retargeted to the next iteration (beq 0x80046f44 -> beq 0x80046fc4).
+    // Its checklist fallback re-adds locked stadiums, so the locked case goes to the next
+    // iteration instead: beq 0x80046f44 -> beq 0x80046fc4.
     CODEPATCH_REPLACEINSTRUCTION(0x80046ef8, 0x418200CC);
 
     OSReport("[GateStadiums] Hooks installed\n");
@@ -158,12 +142,14 @@ int GateStadiums_UnlockStadium(StadiumKind kind, int announce)
         return 0;
 
     ap_save->stadium_unlocked_mask |= (1 << kind);
-    // Gm_StadiumCheckNewLabel is not replaced, so the checklist UI still reads the
-    // vanilla "NEW" bitfield for the badge.
+    if (ap_regrant_quiet)
+        return 1;
+
+    // The "NEW" badge, read through the unreplaced Gm_StadiumCheckNewLabel. A re-grant is
+    // not new.
     *stc_stadium_new_label |= (1 << kind);
-    if (!ap_regrant_quiet)
-        OSReport("[GateStadiums] Stadium %d (%s) unlocked (mask = %s)\n",
-                 kind, StadiumKind_Names[kind], MaskBits(ap_save->stadium_unlocked_mask, STKIND_NUM));
+    OSReport("[GateStadiums] Stadium %d (%s) unlocked (mask = %s)\n",
+             kind, StadiumKind_Names[kind], MaskBits(ap_save->stadium_unlocked_mask, STKIND_NUM));
     if (announce)
         APAnnounce_Grant("Unlocked Stadium: ", StadiumKind_Names[kind], tb_api->StadiumColor, NULL);
     return 1;

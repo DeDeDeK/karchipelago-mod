@@ -60,7 +60,7 @@ GrObj  (gr_kind=9, City Trial)
 | 0x800dbfa8  | `Sky_InitFog`                              | Builds the fog GObj: `GObj_Create(0x1E,1,0)`, `Fog_LoadDesc`, `GObj_AddObject`, `GObj_AddGXLink(Fog_GX, 0, 1)`. Seeds the global EFB clear color at 0x80557484. |
 | 0x800dbf84  | `Fog_GX`                                   | GX callback; one-liner `HSD_FogSetCurrent(gobj->object)`. |
 | 0x800797a8  | `AreaLight_Lerp`                           | Interpolates the AreaLight (lbarealight.c). Asserts validity bits, snap-copies header/colors/direction from target, lerps only if `flags & 0x04`. |
-| 0x80079c04  | `GXColor_Lerp`                             | Linearly interpolates packed RGBA u32 colors by ratio. |
+| 0x80079c04  | `GXColor_Lerp`                             | `(from, to, out, t)`: each channel of `out` is `trunc(from * (1 - t) + to * t)`, alpha included. Packed RGBA8888 u32s share a GXColor's byte order, so the sky lerps them through it. |
 | 0x80079428 | `AreaLight_Create` | Allocates a live AreaLight, registers it in the global registry at `r13[+0x538]`, copies fields from a source `AreaLightData`. Asserts `flags & 0x03 == 0x03`. |
 | 0x800ef618  | `AreaLight_StageInit`                      | Stage-init helper: stack-builds a default `AreaLightData` from the defaults chain and stores the resulting AreaLight at `grobj+0x718`. |
 | 0x800ef864  | `AreaLight_LerpToLive`                     | Adapter called from `Sky_Update`: extracts `grobj+0x718` and dispatches to `AreaLight_Lerp`. |
@@ -80,7 +80,7 @@ GrObj  (gr_kind=9, City Trial)
 | 0x800d5ed4  | `Light_StageInit`                          | Stage-init driver, called from `grLoadStage`. Calls `Light_CreateForStage`, `Light_CreateForStageSecondary`, `Light_CreateAreaLightDefaults` back-to-back. |
 | 0x800d5fd0  | `Light_CreateForStage`                     | Primary GX light chain. Also writes `stc_main_light` (`r13[+0x5fc]`) - the handle the weather mod re-tints. |
 | 0x800d60d8  | `Light_CreateForStageSecondary`            | Secondary GX light chain, built unconditionally on every stage load. |
-| 0x800d6188  | `Light_CreateAreaLightDefaults`            | Loads the third chain (via `grGetStageLight_Kirby`, 0x800cea5c) purely as a default-value source; no GObj, no GX link. Stashes the chain head / first ambient / first infinite at `r13[+0x5F8/+0x5F0/+0x5F4]`. |
+| 0x800d6188  | `Light_CreateAreaLightDefaults`            | Reads the `+0x04` rider chain (via `grGetRiderLights`, 0x800cea5c) as a default-value source; no GObj, no GX link of its own. Stashes the chain head / first ambient / first infinite at `r13[+0x5F8/+0x5F0/+0x5F4]`. |
 | 0x800d61e8  | `Light_GetAreaLightDefaults`               | Returns those three defaults. Writes (0,0,0,0xFF) if there is no chain (menu/CSS scenes). |
 | 0x800d5444  | `Sky_TransitionGlobal(idx)`                | `Sky_BeginTransition` on `*stc_grobj`. The wrapper City Trial events call. |
 | 0x800d546c  | `Sky_RestoreGlobal`                        | Restores the pre-event preset. |
@@ -114,7 +114,8 @@ The facts that matter for working on this system:
   `grobj->gr_data->sky_block->preset_header->{preset_array, preset_count}`. Repointing
   that `{base, count}` pair swaps the whole preset table for the engine.
 - The three stage light chains hang off `gr_data->stage_resource[+0x14]`: `+0x00` primary
-  GX chain, `+0x04` AreaLight-defaults chain (not rendered), `+0x08` secondary GX chain.
+  GX chain, `+0x04` rider chain (lights the riders, and seeds the AreaLight defaults),
+  `+0x08` secondary GX chain.
   Each is a NULL-terminated array of `LightGroup*` (`{LObjDesc *desc, LightAnim *anim}`).
 - `Sky_Init`'s per-stage JOBJ indices come from the sub-block at
   `gr_data->stage_resource[+0x08]`, fields `+0x04` and `+0x08`; the CT `Gm_Roll` weights
@@ -354,14 +355,17 @@ lightid `0x100`). `HSD_LObjSetupInit` (0x803fe4b8) is not pure FIFO:
 
 ### The three stage chains
 
-All three are loaded unconditionally by `Light_StageInit` (0x800d5ed4). Two are
-GX-rendered; the third exists only as a default-value source for the AreaLight.
+All three are loaded unconditionally by `Light_StageInit` (0x800d5ed4), which GX-renders two
+and reads the `+0x04` chain only as a default-value source for the AreaLight. The rider
+system's init (`zz_8018dd14_` -> `zz_801901ec_`) renders that `+0x04` chain as its own light
+GObj.
 
 | Creator | Role | GObj class | gx_link | Chain source | AddProc |
 |---------|------|------------|---------|--------------|---------|
 | `Light_CreateForStage` (0x800d5fd0) | primary GX lights | 1 | 0 | `stage_resource[+0x14][+0x00]` | 0x800d5f3c - per-LOBJ `HSD_LObjAnim` (skips AOBJ flag 0x40000000) + stage scale |
 | `Light_CreateForStageSecondary` (0x800d60d8) | secondary GX lights | 20 | 8 | `stage_resource[+0x14][+0x08]` | 0x800d6094 - `LObj_AnimAll`, no filter |
-| `Light_CreateAreaLightDefaults` (0x800d6188) | AreaLight defaults, not rendered | - | - | `stage_resource[+0x14][+0x04]` | none |
+| `Light_CreateAreaLightDefaults` (0x800d6188) | AreaLight defaults | - | - | `stage_resource[+0x14][+0x04]` | none |
+| `zz_801901ec_` (rider init) | rider lights | 0x13 | 4 | `stage_resource[+0x14][+0x04]` | `zz_8019019c_` - after `LObj_ReqAnimAll` |
 
 `Light_GX` (0x800d5fb0) and the secondary's callback (0x800d60b8) are byte-identical
 thunks to `LObj_GX` (0x8042a22c) - distinct entry points only so each GObj can register its
@@ -520,7 +524,7 @@ from `LOBJ+0x10`/`+0x14` and never consults the registry; the per-LOBJ "update" 
 (`LObjUpdateFunc`, 0x803fdbb0) is an AOBJ animation hook, not a bridge.
 
 Instead the registry is consumed by per-character / per-rider lighting state.
-`AreaLight_RegistryWalk` is called from `Rider_UnkThink` (0x8018e9a8 -> 0x80190340, consumer
+`AreaLight_RegistryWalk` is called from `Rider_PostTransformThink` (0x8018f800 -> 0x80190340, consumer
 at `rider+0x294`, records into `rider+0x318`), from a per-object pose update (0x801d6c00,
 consumer at `obj+0x300`, records into `obj+0x400`), and from `Machine_Create`
 (0x801c5888 -> 0x801d6bd4). The kind-0 worker `AreaLight_InsertSorted` (0x80079a60) inserts
@@ -563,8 +567,9 @@ projection camera from it. CT never invokes it.
   (0x800d1ac4) on a fixed +/-Y segment (`EventActor_UpdateShadow` 0x80200208 builds
   `pos +/- offset*+Y`).
 - **Size fades with height.** Scale = base x `(maxHeight - height) / maxHeight`, culled past
-  `maxHeight`. `SimpleShadow_UpdateSize_` (0x8027b568) writes the scale,
-  `SimpleShadow_UpdatePos_` (0x8027b588) the position; `CityItem_UpdateShadowSizeAndVis`
+  `maxHeight`. `SimpleShadow_SetScale` (0x8027b568) writes the scale,
+  `SimpleShadow_SetForward` (0x8027b588) the in-plane heading axis and `SimpleShadow_SetRay`
+  (0x8027b5a8) the ray origin and ground hit; `CityItem_UpdateShadowSizeAndVis`
   (0x80261aa8) is the item variant.
 - **Render** is `SimpleShadow_GX` (0x8027ae50) walking the manager's list and
   `JObj_DispAll`ing each enabled blob, then restoring fog with `HSD_FogSet(HSD_FogGetCurrent())`. The blob

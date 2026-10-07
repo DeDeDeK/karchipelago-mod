@@ -7,8 +7,9 @@ player ahead of it, and ends on the first surface it meets. The sixth shot empti
 starts all six growing back over a second, during which a full-charge release is an ordinary boost
 with no shot and no cue.
 
-The feature is `mods/ap_star/src/ap_star_shot.c` (the ring, the firing and the projectile kind) and
-`mods/ap_star/src/ap_star_shot_fx.c` (the glow and the trail), behind the **Sphere Shot** toggle in
+The feature is `mods/ap_star/src/ap_star_shot.c` (the firing and the projectile kind),
+`mods/ap_star/src/ap_star_ring.c` (the pods it fires) and `mods/ap_star/src/ap_star_shot_fx.c` (the
+glow and the trail), behind the **Sphere Shot** toggle in
 the Archipelago Star settings menu (default on). It no-ops entirely when the `custom_machines`
 registry is absent or when no machine named `Archipelago Star` is registered. It is live in every 3D
 mode the star is rideable in - City Trial, its stadiums, Air Ride races and Free Run. Top Ride has no
@@ -33,9 +34,12 @@ and the two are the complete caller set, so replacing them is equivalent to hook
 states and are not touched.
 
 The shot is gated on, in order: the menu toggle, this scene's model being loaded, the rider being on
-a machine, that machine being the Archipelago Star (`!md->is_bike && md->kind == star slot`),
-`md->charge_value >= 0.99` - still holding the charge at this point, since the boost is applied by
-the state the release transitions into - and the ring holding at least one pod and not regrowing.
+a machine, `md->charge_value >= 0.99` - still holding the charge at this point, since the boost is
+applied by the state the release transitions into - that machine being the Archipelago Star
+(`!md->is_bike && md->kind == star slot`), and its ring being built and not regrowing. The star check
+is the ring's own: a ring outlives its machine by a frame, so a `MachineData` freed and reused by
+another machine could otherwise still find one. The pod is spent only once its projectile exists, so
+a shot the engine refuses leaves the ring as it was.
 
 ## The projectile kind
 
@@ -225,8 +229,9 @@ whose machine was seen last frame is never taken, even with the table full - its
 another on its own tick, that owner another, and the cascade would strip the machines first in the
 proc list of their rings every frame, so they could never fire. A machine that finds no slot simply
 has no ring and no shot until one frees. "Frame" here counts only frames in which some star ran its
-Think (advanced from `OnFrameStart`), so a pause does not age every ring at once. The whole table is
-cleared at every scene change, where the joints it points at have just been freed with the scene heap.
+Think - the first claim to see a new `HSD_Update.engine_frames` (which `updateFunction` bumps after
+every tick that runs procs) advances it - so a pause does not age every ring at once. The whole table
+is cleared at every scene change, where the joints it points at have just been freed with the scene heap.
 
 Pod joints are indices 9 through 14 of the machine archive's own joint tree, resolved through the
 registry and cached until the machine's model root changes. Scale, translation and Y rotation are
@@ -261,10 +266,11 @@ and the change cannot be seen.
 ## Where the per-machine work runs
 
 The mod claims the machine's per-kind Init and Think handler slots through two `CustomMachinesAPI`
-entries, which on the star class are the engine's own extension tables. It claims them once, at the
-first scene change - past every mod's `OnBoot`, so `custom_machines` has registered the star - along
+entries, which on the star class are the engine's own extension tables. It claims them once, at
+`OnSaveLoaded` - past every mod's `OnBoot`, so `custom_machines` has registered the star - along
 with the star's class slot, which the firing gate compares `md->kind` against. Both are fixed for the
-run from there.
+run from there. This is `ap_star_ring.c`, which owns the ring table and hands the firing code a pod
+to aim (`ApStarRing_AimPod`) and takes it back once the shot is made (`ApStarRing_Spend`).
 
 | Slot | Dispatch tail | Table | Used for |
 |------|---------------|-------|----------|
@@ -287,9 +293,9 @@ a KO's damage log knows a sphere shot made the credited hit from the word's low 
 ## Tuning
 
 The shot's radius, speed, lifetime, grow and fade lengths, seed scale, collider radius, ride height,
-probe reach, the homing delay, range, cone and turn radius, and the ring's collapse, regrow and
-respread rates are named constants at the top of `ap_star_shot.c`; the trail's length, width and
-alpha, and the halo's and flare's sizes, at the top of `ap_star_shot_fx.c`. Range is speed times
+probe reach, and the homing delay, range, cone and turn radius are named constants at the top of
+`ap_star_shot.c`; the ring's collapse, regrow and respread rates at the top of `ap_star_ring.c`; the
+trail's length, width and alpha, and the halo's and flare's sizes, at the top of `ap_star_shot_fx.c`. Range is speed times
 lifetime. The mesh's radius and resolution are constants in `scripts/authoring/make_ap_star_shot.py`;
 changing the radius there means changing `SHOT_MODEL_RADIUS` to match, and changing the joint count
 means changing `AP_STAR_SHOT_JOINTS`, or the walker asserts.

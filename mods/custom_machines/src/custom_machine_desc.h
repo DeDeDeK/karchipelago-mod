@@ -17,7 +17,7 @@
 #define CUSTOM_MACHINE_AUDIO_EXT ".ssm"
 
 // It may drop a second side-car of the same basename holding its UI art -
-// machines/VcStarAp.dat and machines/VcStarAp.art - one image per distinct UI bank
+// machines/VcMine.dat and machines/VcMine.art - one image per distinct UI bank
 // geometry. A machine with no side-car shares the registry's placeholder frame.
 #define CUSTOM_MACHINE_ART_EXT ".art"
 
@@ -73,7 +73,8 @@ typedef enum CustomMachineStatRow
 } CustomMachineStatRow;
 
 // A bike's Top Speed pairs multiply the two top speeds, and its Turn pairs multiply eight
-// fields of the bike class's shared attribute block, named by their offset in it.
+// fields of the machine's live attribute block (MachineData.attr), named by their offset
+// in it.
 typedef enum CustomMachineBikeStatRow
 {
     CUSTOM_MACHINE_BIKE_STAT_ROW_TOP_SPEED_GROUND,

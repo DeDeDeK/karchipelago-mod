@@ -2,6 +2,7 @@
 #include "hsd.h"
 #include "os.h"
 #include "enemy.h"
+#include "inline.h"
 #include "code_patch/code_patch.h"
 
 #include "enemy_ai.h"
@@ -44,11 +45,11 @@ static int stc_vanilla_captured = 0;
 static int EnemyAI_Resolve(int selection)
 {
     if (selection == ENEMY_AI_RANDOM)
-        return ENEMY_AI_DEFAULT + 1 + HSD_Randi(ENEMY_AI_RANDOM - 1);
+        return RandomInRange(ENEMY_AI_DEFAULT + 1, ENEMY_AI_RANDOM - 1);
     return selection;
 }
 
-// Runs on every 3D scene load, so a menu change applies from the next load.
+// Runs on every 3D scene load, so Random rolls per load.
 void EnemyAI_ApplyParams(void)
 {
     EnemyParamTable *t = *stc_enemy_param_table;
@@ -77,7 +78,7 @@ void EnemyAI_ApplyParams(void)
     }
     def = &stc_presets[preset];
 
-    for (i = 0; i < 4; i++)
+    for (i = 0; i < GetElementsIn(t->kb_launch); i++)
         t->kb_launch[i] = stc_vanilla.kb_launch[i] * def->knockback;
     t->detect_range = stc_vanilla.detect_range * def->range;
     t->leash_range = stc_vanilla.leash_range * def->range;

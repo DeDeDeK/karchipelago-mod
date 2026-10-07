@@ -1,8 +1,3 @@
-// The legendary assembly cutscene, driven by a machine's own archive, by standing in at
-// the bl sites where the engine's cinematic decides which archive preloads, which loads,
-// which frees, and which machine the rider mounts. One run at a time, which is the
-// engine's own limit: GameData.legendary_assembly_gobj holds a single controller.
-
 #include "os.h"
 #include "hsd.h"
 #include "obj.h"
@@ -27,15 +22,19 @@ static CustomMachineEntry *stc_running;
 static u16 stc_assembled;
 _Static_assert(ASSEMBLED_CUSTOM_BIT + CUSTOM_MACHINE_MAX <= 16, "stc_assembled holds a bit per cutscene");
 
-// Replaces the bl at 0x80283914 in LegendaryMachine_CreateAssembly, which returns the
-// vsData public of VsDragoon.dat or VsHydra.dat. A machine's archive carries one of
-// the same shape.
+// Replaces the bl at 0x80283914 in LegendaryMachine_CreateAssembly (0x802838a0), which
+// returns the vsData public of VsDragoon.dat or VsHydra.dat. A machine's archive carries
+// one of the same shape. Every run passes here, a vanilla one assembled from pieces too,
+// so its cutscene is marked as spent for StartAssembly.
 static LegendaryAssemblyData *LoadArchive(int machine_index)
 {
     LegendaryAssemblyData *vsdata;
 
     if (stc_running == NULL)
+    {
+        stc_assembled |= (u16)(1 << (machine_index != 0));
         return LegendaryMachine_LoadAssemblyArchive(machine_index);
+    }
 
     lbLoadArchive(&stc_arc, stc_running->cine_file, &vsdata, stc_running->cine_symbol, 0);
     return vsdata;
@@ -89,7 +88,8 @@ static void PreloadArchives(GroundKind gr_kind)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
         if (e->cine_machine_index >= 0)
-            Preload_CreateEntry(5, e->cine_file, 6, 6, 0, 1, 5, 0x20, 0);
+            Preload_CreateEntry(5, e->cine_file, PRELOADHEAPKIND_ALLA, PRELOADHEAPKIND_ALLA, 0, 1,
+                                5, PRELOADFLAG_x20, 0);
     }
 }
 
@@ -181,6 +181,8 @@ void CustomMachineCinematic_OnBoot(void)
 {
     int n = 0;
 
+    CODEPATCH_REPLACECALL(0x80283914, LoadArchive); // bl LegendaryMachine_LoadAssemblyArchive
+
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
         CustomMachineEntry *e = CustomMachines_GetEntry(i);
@@ -196,12 +198,11 @@ void CustomMachineCinematic_OnBoot(void)
         }
         n++;
     }
-    if (n == 0)
-        return;
-
-    CODEPATCH_REPLACECALL(0x80283914, LoadArchive);     // bl LegendaryMachine_LoadAssemblyArchive
-    CODEPATCH_REPLACECALL(0x80283c98, FreeArchive);     // bl LegendaryMachine_FreeAssemblyArchive
-    CODEPATCH_REPLACECALL(0x80283b70, EnterAssembly);   // bl Ply_EnterLegendaryAssembly
-    CODEPATCH_REPLACECALL(0x80262be8, PreloadArchives); // bl LegendaryMachine_PreloadAssemblyArchives
-    OSReport("[MachineCinematic] %d machine(s) with a cutscene, hooks installed\n", n);
+    if (n > 0)
+    {
+        CODEPATCH_REPLACECALL(0x80283c98, FreeArchive);     // bl LegendaryMachine_FreeAssemblyArchive
+        CODEPATCH_REPLACECALL(0x80283b70, EnterAssembly);   // bl Ply_EnterLegendaryAssembly
+        CODEPATCH_REPLACECALL(0x80262be8, PreloadArchives); // bl LegendaryMachine_PreloadAssemblyArchives
+    }
+    OSReport("[MachineCinematic] Hooks installed, %d machine(s) with a cutscene\n", n);
 }

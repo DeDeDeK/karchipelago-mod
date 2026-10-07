@@ -38,72 +38,74 @@ static int TRKirbyIsHuman(TopRideKirby *k)
     return k && TopRide_GetPlayerKind(k->player_slot) == TR_PKIND_HMN;
 }
 
-// Replaces the bl Rider_StartInhale at 0x8019c610 (Rider_TryStartInhale).
-void GateBaseAbilities_StartInhale(RiderData *rd)
+// Replaces the bl Rider_StartInhale at 0x8019c610 in Rider_TryStartInhale (0x8019c5ac).
+static void GateBaseAbilities_StartInhale(RiderData *rd)
 {
     if (IsBaseAbilityLocked(BASEABILITY_INHALE) && RiderIsHuman(rd))
         return;
     Rider_StartInhale(rd);
 }
 
-// Replaces both bl RiderState_QuickSpinEnter sites: 0x801b7ec0 in RiderState_QuickSpinInterrupt
-// and 0x801b7e58 in Rider_TryQuickSpinNeutral. Kirby only - Dedede and Meta Knight have
-// their own enters below.
-void GateBaseAbilities_QuickSpinEnter(float f, RiderData *rd, int dir, int flag)
+// Replaces both bl RiderState_QuickSpinEnter: 0x801b7ec0 in RiderState_QuickSpinInterrupt
+// (0x801b7e80) and 0x801b7e58 in Rider_TryQuickSpinNeutral (0x801b7e0c).
+static void GateBaseAbilities_QuickSpinEnter(float f, RiderData *rd, int dir, int flag)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
         return;
     RiderState_QuickSpinEnter(f, rd, dir, flag);
 }
 
-// Dedede and Meta Knight have their own quick-spin enters, one call site each:
-// RiderState_DededeQuickSpinInterrupt (0x801c05a8) and
+// Dedede's and Meta Knight's own enters, one call each: 0x801c05d4 in
+// RiderState_DededeQuickSpinInterrupt (0x801c05a8) and 0x801c3f6c in
 // RiderState_MetaKnightQuickSpinInterrupt (0x801c3f40).
-void GateBaseAbilities_DededeSpinEnter(RiderData *rd, int dir)
+static void GateBaseAbilities_DededeSpinEnter(RiderData *rd, int dir)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
         return;
     RiderState_DededeQuickSpinEnter(rd, dir);
 }
 
-void GateBaseAbilities_MetaKnightSpinEnter(RiderData *rd, int dir)
+static void GateBaseAbilities_MetaKnightSpinEnter(RiderData *rd, int dir)
 {
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && RiderIsHuman(rd))
         return;
     RiderState_MetaKnightQuickSpinEnter(rd, dir);
 }
 
-// Replaces every bl Machine_IncrementCharge: 0x801ef424 in MachinePhys_Charge, 0x801ef350
-// in Machine_Star_PushChargeUpdate, 0x801fa1d4 in Machine_Wheel_PushChargeUpdate and
-// 0x801fa29c in fn_VehicleStatTableFuncCallbacks_Wheel_RunPush_3.
-void GateBaseAbilities_IncrementCharge(MachineData *md)
+// Replaces every bl Machine_IncrementCharge: 0x801ef424 in MachinePhys_Charge (0x801ef364),
+// 0x801ef350 in Machine_Star_PushChargeUpdate (0x801ef338), 0x801fa1d4 in
+// Machine_Wheel_PushChargeUpdate (0x801fa1c8) and 0x801fa29c in
+// fn_VehicleStatTableFuncCallbacks_Wheel_RunPush_3 (0x801fa1e8).
+static void GateBaseAbilities_IncrementCharge(MachineData *md)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && MachineRiderIsHuman(md))
         return;
     Machine_IncrementCharge(md);
 }
 
-// Explicit-rate charge accumulators. rate stays a named param so the compiler preserves
-// f1 across the human check before forwarding it. AddCharge's one site is 0x801efa6c in
-// fn_VehicleStatTableFuncCallbacks_Star_Fly_3_HandleFlightPhysics.
-void GateBaseAbilities_AddCharge(double rate, MachineData *md)
+// The explicit-rate accumulators; rate is a named parameter so f1 survives the human
+// check. AddCharge's one site is 0x801efa6c in
+// fn_VehicleStatTableFuncCallbacks_Star_Fly_3_HandleFlightPhysics (0x801ef9a0); AddChargeEx's
+// are 0x801eb968 in Machine_Star_RailPushAddCharge (0x801eb95c) and 0x801f5f30 in
+// Machine_Wheel_PushAddCharge (0x801f5f24).
+static void GateBaseAbilities_AddCharge(double rate, MachineData *md)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && MachineRiderIsHuman(md))
         return;
     Machine_AddCharge(rate, md);
 }
 
-void GateBaseAbilities_AddChargeEx(double rate, MachineData *md)
+static void GateBaseAbilities_AddChargeEx(double rate, MachineData *md)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && MachineRiderIsHuman(md))
         return;
     Machine_AddChargeEx(rate, md);
 }
 
-// Conditional-hook body for the inline charge store at 0x802e01b4 (stfs f0,52(r3)) in
-// TopRide_ChargeUpdate: r3 = charge component, f1 = post-add value. Always returns 1 so
-// the hook's alt exit (0x802e01b8) is taken and the original store never re-runs.
-int GateBaseAbilities_TopRideChargeStore(TopRideChargeComponent *comp, float new_value)
+// The inline charge store at 0x802e01b4 (stfs f0, 52(r3)) in TopRide_ChargeUpdate
+// (0x802df900): r3 = the charge component, f1 = the new value. Always takes the alt exit,
+// so the original store never runs.
+static int GateBaseAbilities_TopRideChargeStore(TopRideChargeComponent *comp, float new_value)
 {
     if (IsBaseAbilityLocked(BASEABILITY_CHARGE) && TRKirbyIsHuman((TopRideKirby *)comp->kirby_ptr))
         return 1;
@@ -118,10 +120,9 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x802e01b4,
     0,
     0x802e01b8)
 
-// Replaces the bl TopRide_KirbyHistoryQuery at 0x802d5f90 in TopRide_KirbyPhysUpdate,
-// the stick-flick spin's oscillation query. Returning 0 ("no flick") skips the whole
-// spin block. The query receives &kirby->history (kirby+0x64) in r3.
-int GateBaseAbilities_TopRideQuickSpinQuery(int *history)
+// Replaces the bl TopRide_KirbyHistoryQuery at 0x802d5f90 in TopRide_KirbyPhysUpdate
+// (0x802d5ec0), the stick-flick spin's query. Returning 0 ("no flick") skips the spin.
+static int GateBaseAbilities_TopRideQuickSpinQuery(int *history)
 {
     TopRideKirby *k = (TopRideKirby *)((char *)history - offsetof(TopRideKirby, history));
     if (IsBaseAbilityLocked(BASEABILITY_QUICKSPIN) && TRKirbyIsHuman(k))
@@ -144,8 +145,8 @@ void GateBaseAbilities_OnBoot(void)
     CODEPATCH_REPLACECALL(0x801fa1d4, GateBaseAbilities_IncrementCharge);
     CODEPATCH_REPLACECALL(0x801fa29c, GateBaseAbilities_IncrementCharge);
     CODEPATCH_REPLACECALL(0x801efa6c, GateBaseAbilities_AddCharge);
-    CODEPATCH_REPLACECALL(0x801eb968, GateBaseAbilities_AddChargeEx); // Machine_Star_RailPushAddCharge
-    CODEPATCH_REPLACECALL(0x801f5f30, GateBaseAbilities_AddChargeEx); // Machine_Wheel_PushAddCharge
+    CODEPATCH_REPLACECALL(0x801eb968, GateBaseAbilities_AddChargeEx);
+    CODEPATCH_REPLACECALL(0x801f5f30, GateBaseAbilities_AddChargeEx);
 
     CODEPATCH_HOOKAPPLY(0x802e01b4);
 
@@ -161,6 +162,6 @@ int GateBaseAbilities_UnlockAbility(BaseAbilityKind kind)
     OSReport("[GateBaseAbilities] Base ability %d (%s) unlocked (mask = %s)\n",
              kind, BaseAbility_Names[kind],
              MaskBits(ap_save->base_ability_unlocked_mask, BASEABILITY_NUM));
-    APAnnounce_Grant("Unlock: ", BaseAbility_Names[kind], tb_api->DefaultColor, NULL);
+    APAnnounce_Grant("Unlocked Ability: ", BaseAbility_Names[kind], tb_api->DefaultColor, NULL);
     return 1;
 }

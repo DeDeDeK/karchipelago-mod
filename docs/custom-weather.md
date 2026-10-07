@@ -105,7 +105,7 @@ ground. On a preset change it applies the optional static layers of the active
 Effect ticks then run in a fixed order - lightning, wind, rain, snow, hail, puddles, trees,
 clouds, moon, stars, volcano, tornado - with wind before every layer that reads its vector.
 `event_sky.c` is a sibling module that installs its own boot hook rather than running from
-this tick, and `Tornado_OnFrameEnd` runs from the mod's `ModDesc.OnFrameEnd` instead.
+this tick, and the tornado's `TornadoApply` runs from a late proc of its own.
 
 Every effect module follows the same shape. `X_SetActive(def)` latches the preset's config
 on a preset change, with each 0 numeric field resolving to the module's default. `X_Tick()`
@@ -126,12 +126,15 @@ snow, hail, clouds and trees all read `Wind_GetVector()` each frame.
 
 Shared plumbing is in `weather_fx.c`: the round-progress accessor, the stage-node and
 live-fog lookups, a ground raycast, the OOB-box query, the schedule seeder, the
-enabled-pool picker, the random-range helpers, and the GX layer setup.
-`WeatherGX_BeginXlu(cam, additive, line_width)` sets flat per-vertex color, alpha or
-additive blend, `GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE)` (depth-tested but not
-depth-writing, so stage geometry occludes the layer), `GX_CULL_NONE`, and loads the active
-camera's view matrix as the position matrix so world coordinates work from every
-split-screen viewport. `WeatherGX_EnsureLayer` creates the layer GObj and latches one
+enabled-pool picker, the random-range helpers, and the GX layer creation. Each layer's
+draw opens with hoshi's `GX_BeginXlu(cam, 2, dst)` (`inline.h`): flat per-vertex color,
+alpha (`GX_BL_INVSRCALPHA`) or additive (`GX_BL_ONE`) blend,
+`GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE)` (depth-tested but not depth-writing, so stage
+geometry occludes the layer), `GX_CULL_NONE`, and the camera's view matrix as the position
+matrix so world coordinates work from every split-screen viewport; the line layers set
+their width after it. Billboards take the camera's axes and eye from the same matrix
+(`COBJ_GetViewAxes`, `COBJ_GetViewEye`) and emit through `GX_BillboardVert`.
+`WeatherGX_EnsureLayer` creates the layer GObj and latches one
 pool-exhausted warning across all eight layers. All layers draw on the world camera's
 gx_link 0, XLU sub-pass (`pass == 1`), gx_pri 0.
 
@@ -210,7 +213,7 @@ the flash with no bolt geometry rather than falling back to a guessed position.
 A field of falling translucent line segments drawn *in the stage*, not as a screen overlay:
 immediate-mode GX geometry on the world camera's pass, depth-tested, so buildings and terrain
 occlude the drops behind them. The whole field is one
-`GXBegin(GX_LINES, ..., density*2)` batch after `WeatherGX_BeginXlu`.
+`GXBegin(GX_LINES, ..., density*2)` batch after `GX_BeginXlu`.
 
 **Camera-following toroidal box.** The drops are a fixed pool (cap `RAIN_MAX_DROPS` = 1600)
 of random offsets in a cube of edge `RAIN_BOX` (1000) that re-centers on the camera every
@@ -255,8 +258,8 @@ distant flakes tint toward the world fog. Per-flake size varies +/-0.5 about the
 base, seeded once. Defaults: soft white, 600 flakes, fall 3.0, flutter 1.6, radius 4.0.
 
 Snowstorm authors it as snow; Volcanic reuses the same layer as soot-grey ashfall. The
-**Snow** menu's Intensity and Fall Speed are latched by `Snow_SetActive` (so they apply on
-the next preset change or CT re-entry) while Flutter and Wind Slant are read live.
+**Snow** menu's Intensity, Fall Speed and Flutter scale the preset's values, and Wind Slant
+lets the wind carry the field.
 
 ## Wind (`wind.c`)
 
@@ -272,7 +275,7 @@ frames for gust, 90 for heading) and eased toward each frame (0.04 / 0.02), with
 deviation bounded by 75 degrees x chaos. `WindDef` defaults are 6.0 units/frame at heading 90
 (0 = +Z, 90 = +X), gustiness 0.35, chaos 0.25. Coupling constants: 0.08 of the wind added to
 an airborne item's velocity per frame; 0.012 at full glide for machines, with a 0.40 floor on
-the glide-stat scale.
+the glide-stat scale, which a zero or negative Glide ratio sits on.
 
 **The two physics pushes are held until the round timer starts** (`Weather_RoundProgress()` is
 negative through the intro). Riders are still boarding then and read as airborne, so a push
@@ -464,7 +467,7 @@ Each dot's world radius scales with its final `dist` about 1800, so apparent siz
 Panning sweeps across a world-fixed field with no parallax swim.
 
 A star is a `GX_TRIANGLEFAN` with a bright center and 6 transparent rim vertices,
-camera-facing, drawn after `WeatherGX_BeginXlu(cam, additive=1, 0)`. Additive blend means dots
+camera-facing, drawn after `GX_BeginXlu(cam, 2, GX_BL_ONE)`. Additive blend means dots
 glow, never darken the sky, and draw order against the other translucent layers is irrelevant.
 The draw is bracketed with `HSD_FogSet(NULL)` / restore so distant dots are not washed to the
 fog color.
@@ -475,8 +478,7 @@ of sync; per frame its brightness is multiplied by `1 + tw * 0.7 * sin(time * sp
 with the additive blend clamping the overshoot. Twinkle = None freezes the field.
 
 **Field composition.** The field is scattered once per preset activation by `Star_Arm`, with no
-stage dependency, so Density and Size Variance apply on the next preset change or CT re-entry
-while Twinkle, Luminosity and Color are read live. Count is `density x menu factor` clamped to
+stage dependency. Count is `density x menu factor` clamped to
 `STAR_MAX` (220). `SeedStar` rolls a sky-cap direction (uniform via `z` in
 `[sin(min_elev), 1]`), a size, a base brightness in 0.35-1.0 so some dots are dim, and a
 twinkle phase/speed. A dot's additive alpha is `color.a x luminosity x star.bright x twinkle`,
@@ -536,9 +538,10 @@ riders, machines and boxes.
 over the match, -1 during the intro), so "3 eruptions per game" means exactly 3. `SeedSchedule`
 divides progress into `n` equal slices and rolls one start point inside each
 (`(i + 0.15 + 0.70*rand) / n`), so eruptions spread out but never land on the same beat twice.
-Changing the count mid-round re-plans from the current progress and skips entries already behind
-it, so no eruption replays. An eruption holds for `duration` frames and fires `burst`
-projectiles every `interval` frames.
+`Volcano_SetActive` folds the menu overrides into the preset's config and clears the plan, so a
+preset change mid-round - an event's sky swap and the restore after it - re-plans from the
+current progress and skips entries already behind it, so no eruption replays. An eruption holds
+for `duration` frames and fires `burst` projectiles every `interval` frames.
 
 **Launch geometry.** The crater mouth is `(-366.19, 114.97, -575.42)`, surveyed at the rim -
 left-and-back of map center in the `+/-1300` X/Z play box. Shots start there jittered by 18 in
@@ -604,13 +607,17 @@ same way volcano eruptions are.
 
 **Two entry points, deliberately.** `Tornado_Tick` runs from the weather runtime (inside the
 stage think, GObj proc priority 1) and decides *where the funnel is*: schedule, touchdown,
-wander, model placement and target claiming. `Tornado_OnFrameEnd` runs from the mod's
-`ModDesc.OnFrameEnd` hook and decides *what the funnel does to the world*: the orbit's position
-writes, the rider push and the camera shake. The split is forced - item physics
-(`CityItem_PhysicsThink`, priority 4), the item ground snap (priority 5),
+wander, model placement and target claiming. `TornadoApply` decides *what the funnel does to
+the world*: the orbit's position writes, the rider push and the camera shake. The split is
+forced - item physics (`CityItem_PhysicsThink`, priority 4), the item ground snap (priority 5),
 `Machine_PhysicsThink` (priority 4) and `PlyCamGObj_Think` (priority 13) all run after the
-priority-1 weather tick, so a position written there is recomputed before render. `OnFrameEnd`
-is the only place those overrides survive.
+priority-1 weather tick, so a position written there is recomputed before render.
+`TornadoApply` is the proc of a GObj of its own (class 210) at priority 23, the last one
+`GObj_UpdateAll` runs, so its overrides land after all of them. The GObj is created at the
+stage's first touchdown and freed with the scene heap, so it never runs outside City Trial
+and never walks a claim into a freed scene; `Tornado_Reset` only forgets the handle. It sits
+on p_link 1, which the match pause, match end and the hitstops freeze along with the stage
+tick, so the orbit holds still with everything it moves.
 
 **Path.** The funnel roams a **disc** centered on the OOB box, its radius the shorter half-extent
 x `TORN_PLAY_FRACTION` (0.68) - 884 units on City Trial's `+/-1300` box. Motion is
@@ -777,8 +784,9 @@ Two entries are pool selectors rather than layer overrides. **Weather Presets** 
 multiplier), an Enable-All / Disable-All pair, and one plain Enabled/Disabled toggle per preset,
 backing the `weather_enabled[WEATHER_TOTAL]` array that `CustomWeather_OverrideSky` filters its
 random pick against. **Backdrops** carries the parallel Backdrop Distance scale plus a
-per-backdrop enable set. Both pools share `Weather_PickEnabled`, which picks uniformly among
-the enabled entries and reports "none enabled" so each caller can choose its own fallback.
+per-backdrop enable set. Both pools roll through the game's `Gm_Roll` (0x800db2b8) with the
+enable flags as 0/1 weights, which picks uniformly among the enabled entries and returns -1 when
+none is enabled so each caller can choose its own fallback.
 
 All settings persist via hoshi's keyed menu-save, and `ModDesc.affects_gameplay` is set so
 hoshi backs them up and restores them around a replay.

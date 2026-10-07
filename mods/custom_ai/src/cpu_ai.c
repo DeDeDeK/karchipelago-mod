@@ -2,6 +2,7 @@
 #include "hsd.h"
 #include "item.h"
 #include "os.h"
+#include "inline.h"
 #include "code_patch/code_patch.h"
 
 #include "cpu_ai.h"
@@ -38,12 +39,12 @@ char *cpu_ai_menu_ar_names[CPU_AI_AR_NUM + 1] = {
 };
 
 // Indexed by RiderData.ply, written at every Rider_CPUInit.
-static u8 stc_rider_preset[5];
+static u8 stc_rider_preset[PLY_NUM];
 
 static int CpuAI_Resolve(int selection, int preset_num)
 {
     if (selection == preset_num)
-        return CPU_AI_DEFAULT + 1 + HSD_Randi(preset_num - 1);
+        return RandomInRange(CPU_AI_DEFAULT + 1, preset_num - 1);
     return selection;
 }
 
@@ -52,8 +53,7 @@ static float CpuAI_Skill(RiderData *rd, float min, float skill)
     return min + skill * Rider_CPUDifficultyScale(rd);
 }
 
-// Runs once per rider at init, so Random rolls per rider and a menu change
-// applies from the next spawn.
+// Runs once per rider at init, so Random rolls per rider.
 void CpuAI_AssignPreset(RiderData *rd)
 {
     int preset = CPU_AI_DEFAULT;
@@ -91,7 +91,7 @@ void CpuAI_NavigateTarget(RiderData *rd)
         return;
 
     Rider_CPURivalSelect(rd);
-    if (cpu->rival_ply == 5)
+    if (cpu->rival_ply == PLY_NUM)
         return;
 
     Ply_GetPosition(cpu->rival_ply, &pos);

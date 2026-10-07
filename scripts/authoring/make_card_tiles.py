@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""Convert a PNG into a GameCube memory-card tile (RGB5A3) raw .dat blob.
+# SPDX-License-Identifier: GPL-3.0-only
+"""Author the archipelago mod's memory-card tile, ApIcon.dat and ApBanner.dat.
 
 hoshi's save tile is two standard GX RGB5A3 textures - a 32x32 icon and a 96x32
 banner - emitted as raw big-endian u16 blobs that ship on the disc and are read
@@ -11,9 +11,8 @@ complete).
 The source is scaled to fit inside the tile with its aspect ratio preserved and
 centered on transparency - a wide source simply gets transparent bars.
 
-Run from the repo root:
-    uv run --with pillow python scripts/utility/card_tile.py icon
-    uv run --with pillow python scripts/utility/card_tile.py banner
+Run from the repo root (both tiles, or just `icon` / `banner`):
+    uv run --with pillow python scripts/authoring/make_card_tiles.py
 """
 
 import os
@@ -46,11 +45,7 @@ def fit_centered(img, width, height):
     return canvas
 
 
-def main():
-    which = sys.argv[1] if len(sys.argv) == 2 else None
-    if which not in TILES:
-        sys.exit(f"usage: card_tile.py {{{'|'.join(TILES)}}}")
-
+def write_tile(which):
     src, out, width, height = TILES[which]
     img = Image.open(os.path.join(ART, src)).convert("RGBA")
     data = encode_rgb5a3(fit_centered(img, width, height))
@@ -58,6 +53,15 @@ def main():
     with open(path, "wb") as f:
         f.write(data)
     print(f"Wrote {path} ({width}x{height}, {len(data)} bytes)")
+
+
+def main():
+    which = sys.argv[1:] or list(TILES)
+    for name in which:
+        if name not in TILES:
+            sys.exit(f"usage: make_card_tiles.py [{'|'.join(TILES)}]")
+    for name in which:
+        write_tile(name)
 
 
 if __name__ == "__main__":

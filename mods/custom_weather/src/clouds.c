@@ -7,13 +7,11 @@
 #include "stage.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
-
-#define CLOUD_PI      3.14159265358979f
-#define CLOUD_DEG2RAD (CLOUD_PI / 180.0f)
 
 #define CLOUD_MAX       30   // field capacity; resolved count clamps to this
 #define CLOUD_PUFFS     5    // overlapping spheroids per cloud (fluffy silhouette)
@@ -99,36 +97,36 @@ static float   stc_height_var = CLOUD_DEF_HEIGHT_VAR;
 // Index 0 ("Preset") is the pass-through value on every knob below.
 static const float cover_factors[] = {1.0f, 0.0f, 0.55f, 1.0f, 1.6f};
 static char *cover_names[] = {"Preset", "Off", "Sparse", "Normal", "Dense"};
-#define CLOUD_COVER_NUM ((int)(sizeof(cover_factors) / sizeof(cover_factors[0])))
+#define CLOUD_COVER_NUM ((int)GetElementsIn(cover_factors))
 static int cover_index = 0;
 
 static const float opacity_factors[] = {1.0f, 0.6f, 1.0f, 1.35f};
 static char *opacity_names[] = {"Preset", "Thin", "Normal", "Thick"};
-#define CLOUD_OPACITY_NUM ((int)(sizeof(opacity_factors) / sizeof(opacity_factors[0])))
+#define CLOUD_OPACITY_NUM ((int)GetElementsIn(opacity_factors))
 static int opacity_index = 0;
 
 static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
 static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
-#define CLOUD_SIZE_NUM ((int)(sizeof(size_factors) / sizeof(size_factors[0])))
+#define CLOUD_SIZE_NUM ((int)GetElementsIn(size_factors))
 static int size_index = 0;
 
 // Master scalar over the preset's per-puff variance (resolved var clamped 0..1).
 static const float variance_factors[] = {1.0f, 0.2f, 1.0f, 1.7f};
 static char *variance_names[] = {"Preset", "Uniform", "Normal", "Varied"};
-#define CLOUD_VARIANCE_NUM ((int)(sizeof(variance_factors) / sizeof(variance_factors[0])))
+#define CLOUD_VARIANCE_NUM ((int)GetElementsIn(variance_factors))
 static int variance_index = 0;
 
 // Additive world-unit offset applied to the resolved deck height.
 static const float height_offsets[] = {0.0f, -220.0f, 0.0f, 220.0f};
 static char *height_names[] = {"Preset", "Low", "Normal", "High"};
-#define CLOUD_HEIGHT_NUM ((int)(sizeof(height_offsets) / sizeof(height_offsets[0])))
+#define CLOUD_HEIGHT_NUM ((int)GetElementsIn(height_offsets))
 static int height_index = 0;
 
 // Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the alpha from
 // the preset opacity * the Opacity scalar.
 static const u32 color_overrides[] = {0, RGBA(246, 249, 255, 255), RGBA(150, 160, 175, 255), RGBA(66, 72, 86, 255)};
 static char *color_names[] = {"Preset", "White", "Gray", "Storm"};
-#define CLOUD_COLOR_NUM ((int)(sizeof(color_overrides) / sizeof(color_overrides[0])))
+#define CLOUD_COLOR_NUM ((int)GetElementsIn(color_overrides))
 static int color_index = 0;
 
 static void Cloud_GX(GOBJ *g, int pass);
@@ -145,11 +143,11 @@ static void SeedSphere(void)
     int k = 0;
     for (int i = 0; i <= CLOUD_SPHERE_RINGS; i++)
     {
-        float theta = CLOUD_PI * (float)i / (float)CLOUD_SPHERE_RINGS; // 0..PI, top->bottom
+        float theta = M_PI * (float)i / (float)CLOUD_SPHERE_RINGS; // 0..PI, top->bottom
         float st = sinf(theta), ct = cosf(theta);
         for (int j = 0; j <= CLOUD_SPHERE_SECTORS; j++)
         {
-            float phi = 2.0f * CLOUD_PI * (float)j / (float)CLOUD_SPHERE_SECTORS;
+            float phi = 2.0f * M_PI * (float)j / (float)CLOUD_SPHERE_SECTORS;
             stc_sphere[k].X = st * cosf(phi);
             stc_sphere[k].Y = ct;
             stc_sphere[k].Z = st * sinf(phi);
@@ -165,7 +163,7 @@ static float DeckBaseY(StageNode *sn)
 {
     float base = (stc_pre_height != 0.0f)
                      ? stc_pre_height
-                     : sn->oob_min.Y + CLOUD_DECK_FRACTION * (sn->oob_max.Y - sn->oob_min.Y);
+                     : lerp(sn->oob_min.Y, sn->oob_max.Y, CLOUD_DECK_FRACTION);
     return base + height_offsets[height_index];
 }
 
@@ -192,10 +190,10 @@ static void SeedShape(Cloud *c)
         c->puff[p].off.X = Weather_Randf2() * r * CLOUD_SPREAD_H;
         c->puff[p].off.Z = Weather_Randf2() * r * CLOUD_SPREAD_H;
         c->puff[p].off.Y = Weather_Randf2() * r * CLOUD_SPREAD_V;
-        c->puff[p].r = r * (puff_min + HSD_Randf() * (1.0f - puff_min));
+        c->puff[p].r = r * Weather_RandRange(puff_min, 1.0f);
     }
 
-    c->alpha_scale = 0.82f + HSD_Randf() * 0.18f;
+    c->alpha_scale = Weather_RandRange(0.82f, 1.0f);
 }
 
 // Leaves stc_inited 0 to retry next frame when the stage is not loaded yet.
@@ -265,7 +263,7 @@ static void Cloud_GX(GOBJ *g, int pass)
     float minz = sn->oob_min.Z, maxz = sn->oob_max.Z;
     float opacity = opacity_factors[opacity_index];
 
-    WeatherGX_BeginXlu(cam, 0, 0);
+    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
 
     for (int i = 0; i < stc_count; i++)
     {
@@ -312,12 +310,10 @@ static void Cloud_GX(GOBJ *g, int pass)
                     const Vec3 *n0 = &row0[j];
                     const Vec3 *n1 = &row1[j];
 
-                    float d0 = n0->X * fwd.X + n0->Y * fwd.Y + n0->Z * fwd.Z;
-                    if (d0 < 0.0f) d0 = -d0;
-                    float d1 = n1->X * fwd.X + n1->Y * fwd.Y + n1->Z * fwd.Z;
-                    if (d1 < 0.0f) d1 = -d1;
-                    u8 a0 = (u8)(baseA * (CLOUD_RIM_MIN + (1.0f - CLOUD_RIM_MIN) * d0));
-                    u8 a1 = (u8)(baseA * (CLOUD_RIM_MIN + (1.0f - CLOUD_RIM_MIN) * d1));
+                    float d0 = _fabs(n0->X * fwd.X + n0->Y * fwd.Y + n0->Z * fwd.Z);
+                    float d1 = _fabs(n1->X * fwd.X + n1->Y * fwd.Y + n1->Z * fwd.Z);
+                    u8 a0 = (u8)(baseA * lerp(CLOUD_RIM_MIN, 1.0f, d0));
+                    u8 a1 = (u8)(baseA * lerp(CLOUD_RIM_MIN, 1.0f, d1));
 
                     GXPosition3f32(ox + n0->X * rx, oy + n0->Y * ry, oz + n0->Z * rz);
                     GXColor4u8(stc_color.r, stc_color.g, stc_color.b, a0);
@@ -344,9 +340,7 @@ void Cloud_SetActive(const CloudDef *def)
     if (color_index > 0)
     {
         GXColor ov = GXColor_Unpack(color_overrides[color_index]);
-        stc_color.r = ov.r;
-        stc_color.g = ov.g;
-        stc_color.b = ov.b;
+        stc_color = (GXColor){ov.r, ov.g, ov.b, stc_color.a};
     }
 
     stc_base_count = def->count > 0 ? def->count : CLOUD_DEF_COUNT;
@@ -392,7 +386,7 @@ void Cloud_Tick(void)
     }
     else
     {
-        float rad = CLOUD_CALM_HEADING * CLOUD_DEG2RAD;
+        float rad = MTXDegToRad(CLOUD_CALM_HEADING);
         dirx = sinf(rad);
         dirz = cosf(rad);
         speed = 0.0f;
@@ -473,7 +467,7 @@ MenuDesc clouds_menu = {
         },
         &(OptionDesc){
             .name = "Size",
-            .description = "How large each cloud is (applies to clouds that form after the change)",
+            .description = "How large each cloud is",
             .kind = OPTKIND_VALUE,
             .val = &size_index,
             .value_num = CLOUD_SIZE_NUM,

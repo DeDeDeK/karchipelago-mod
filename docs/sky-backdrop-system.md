@@ -140,7 +140,7 @@ map, so the translated value is precomputed and the runtime only adds the payloa
 `RebuildBackdrop` in `custom_backdrops.c` is the whole runtime: resolve the donor with
 `DVDConvertPathToEntrynum`, `Heap_Alloc` the payload 32-byte aligned, run each range
 through `File_Read` (blocking via `*stc_file_read_done = 0` / `File_ReadDone` /
-`while (File_Wait() == 0);`, the same pattern `File_LoadSync` uses), write the relocations,
+`while (File_PollReadDone() == 0);`, the same pattern `File_LoadSync` uses), write the relocations,
 and stamp the root pointer into word 0 of the leading `0x20`-byte pp slot - which mirrors a
 vanilla stage's `grModel<X>[1]`, so it drops straight into `ModelSection.backdrop`.
 

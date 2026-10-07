@@ -1,6 +1,6 @@
 # Base Ability Gating
 
-Kirby's three fundamental moves - inhale, quick spin, and machine charge - are each gated behind an Archipelago unlock item. Until the item is received the move does nothing; once received it works normally. AP items 771-773 (`AP_BASE_ABILITY_UNLOCK_BASE` + `BaseAbilityKind`) route through `ap_item_handler.c` to `GateBaseAbilities_UnlockAbility`, which sets the bit in `APSave.base_ability_unlocked_mask` and posts a textbox. The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_BASE_ABILITY`; `base_ability_gating_enabled` defaults to 0, which is also what an apworld shipping no base-ability items leaves, so the connect-time pre-fill in `APOptions_ApplyUngatedCategories` (`main.c`) normally sets all three bits and every move behaves as vanilla.
+Kirby's three fundamental moves - inhale, quick spin, and machine charge - are each gated behind an Archipelago unlock item. Until the item is received the move does nothing; once received it works normally. AP items 771-773 (`AP_BASE_ABILITY_UNLOCK_BASE` + `BaseAbilityKind`) route through `ap_item_handler.c` to `GateBaseAbilities_UnlockAbility`, which sets the bit in `APSave.base_ability_unlocked_mask` and announces "Unlocked Ability: <name>" through `APAnnounce_Grant` (shown only with Messages -> Local -> Items on, default Off). The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_BASE_ABILITY`; `base_ability_gating_enabled` defaults to 0, which is also what an apworld shipping no base-ability items leaves, so the pre-fill in `APOptions_ApplyUngatedCategories` (`ap_options.c`), run when the first slot options arrive, normally sets all three bits and every move behaves as vanilla.
 
 `BaseAbilityKind` (`archipelago_api.h`) is an Archipelago-only enum, not a vanilla one: `BASEABILITY_INHALE`, `BASEABILITY_QUICKSPIN`, `BASEABILITY_CHARGE`. Each bit gates both the 3D-mode move (Air Ride / City Trial) and its Top Ride analog, so one unlock enables the move everywhere. This is gating only - no new location checks. Copy abilities are a separate category with its own mask.
 
@@ -23,7 +23,7 @@ That reversibility rules out `CODEPATCH_REPLACEFUNC`, which writes a bare branch
 Kirby, Dedede and Meta Knight are separate rider characters with separate enters, all covered by the one mask bit.
 
 - **Kirby** funnels both entries - the IASA check `RiderState_QuickSpinInterrupt` (0x801b7e80) and the neutral-state entry `Rider_TryQuickSpinNeutral` (0x801b7e0c) - into `RiderState_QuickSpinEnter` (0x801b7ee4).
-- **Dedede / Meta Knight** never touch that function. Their per-character IASA checks call `RiderState_DededeQuickSpinEnter` (0x801c05f8, action-state 0x2c) and `RiderState_MetaKnightQuickSpinEnter` (0x801c3f90, action-state 0x2d), each `void W(RiderData*, int dir)` with a single call site.
+- **Dedede / Meta Knight** never touch that function. Their per-character IASA checks (`RiderState_DededeQuickSpinInterrupt`, `RiderState_MetaKnightQuickSpinInterrupt`) call `RiderState_DededeQuickSpinEnter` (0x801c05f8, action-state 0x2c) and `RiderState_MetaKnightQuickSpinEnter` (0x801c3f90, action-state 0x2d), each `void W(RiderData*, int dir)` with a single call site.
 
 All three share the rotation detector `Rider_CheckQuickSpinInput` (0x80191980). The Tornado copy ability shares that detector too but enters through yet another function gated on `copy_kind == COPYKIND_TORNADO`, so it is untouched by any of these gates.
 
@@ -47,12 +47,12 @@ Thirteen `CODEPATCH_REPLACECALL`s plus one `CODEPATCH_HOOKCONDITIONALCREATE`, al
 |---------|---------------|--------------------|---------|
 | Inhale | `0x8019c610` | `Rider_TryStartInhale` (0x8019c5ac) | `GateBaseAbilities_StartInhale` |
 | Quick spin (Kirby) | `0x801b7ec0`, `0x801b7e58` | `RiderState_QuickSpinInterrupt` (0x801b7e80), `Rider_TryQuickSpinNeutral` (0x801b7e0c) | `GateBaseAbilities_QuickSpinEnter` |
-| Quick spin (Dedede) | `0x801c05d4` | Dedede IASA check | `GateBaseAbilities_DededeSpinEnter` |
-| Quick spin (Meta Knight) | `0x801c3f6c` | Meta Knight IASA check | `GateBaseAbilities_MetaKnightSpinEnter` |
-| Charge (grounded) | `0x801ef424`, `0x801ef350` | `MachinePhys_Charge` (0x801ef364) and its minimal sibling | `GateBaseAbilities_IncrementCharge` |
-| Charge (wheelie) | `0x801fa1d4`, `0x801fa29c` | Wheel/wheelie stat-table callbacks | `GateBaseAbilities_IncrementCharge` |
-| Charge (glide) | `0x801efa6c` | `Star_Fly_3_HandleFlightPhysics` (0x801ef9a0) | `GateBaseAbilities_AddCharge` |
-| Charge (rail / wheelie push) | `0x801eb968`, `0x801f5f30` | Star RailRunPush, Wheel Ready/RailRunPush | `GateBaseAbilities_AddChargeEx` |
+| Quick spin (Dedede) | `0x801c05d4` | `RiderState_DededeQuickSpinInterrupt` (0x801c05a8) | `GateBaseAbilities_DededeSpinEnter` |
+| Quick spin (Meta Knight) | `0x801c3f6c` | `RiderState_MetaKnightQuickSpinInterrupt` (0x801c3f40) | `GateBaseAbilities_MetaKnightSpinEnter` |
+| Charge (grounded) | `0x801ef424`, `0x801ef350` | `MachinePhys_Charge` (0x801ef364), `Machine_Star_PushChargeUpdate` (0x801ef338) | `GateBaseAbilities_IncrementCharge` |
+| Charge (wheelie) | `0x801fa1d4`, `0x801fa29c` | `Machine_Wheel_PushChargeUpdate` (0x801fa1c8), `fn_VehicleStatTableFuncCallbacks_Wheel_RunPush_3` (0x801fa1e8) | `GateBaseAbilities_IncrementCharge` |
+| Charge (glide) | `0x801efa6c` | `fn_VehicleStatTableFuncCallbacks_Star_Fly_3_HandleFlightPhysics` (0x801ef9a0) | `GateBaseAbilities_AddCharge` |
+| Charge (rail / wheelie push) | `0x801eb968`, `0x801f5f30` | `Machine_Star_RailPushAddCharge` (0x801eb95c), `Machine_Wheel_PushAddCharge` (0x801f5f24) | `GateBaseAbilities_AddChargeEx` |
 | Top Ride charge | `0x802e01b4` (conditional hook, alt exit `0x802e01b8`) | `TopRide_ChargeUpdate` (0x802df900) | `GateBaseAbilities_TopRideChargeStore` |
 | Top Ride quick spin | `0x802d5f90` | `TopRide_KirbyPhysUpdate` (0x802d5ec0) | `GateBaseAbilities_TopRideQuickSpinQuery` |
 

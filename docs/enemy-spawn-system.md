@@ -266,7 +266,7 @@ which is 1 for Air Ride courses, 2 for Kirby Melee 1 and 3 for Kirby Melee 2.
 
 `EnemySpawnEntry` is loaded verbatim from the stage `.dat` and only ever read. Its
 `location_index` (+0x00) indexes the stage enemy-position table (`GrObj+0x138`, stride 0x24 of
-three Vec3s), resolved by `loadEnemy_spawnXYLocation` (0x800d0cd4) into the runtime per-position
+three Vec3s), resolved by `grGetEnemyPosition` (0x800d0cd4) into the runtime per-position
 extended data - not back into the entry. `scale` (+0x30) is negated if negative and defaults to
 1.0 if zero; `variant` (+0x34) goes into the descriptor's parent/variant slot.
 
@@ -284,10 +284,11 @@ and `Enemy_SpawnActorMode2` (mode 2); the id/weight arrays are read by `Enemy_Sp
 (modes 1/3) and `Enemy_SpawnerDecideMode2` (mode 2). Lifetime 0 or 1 means "no lifetime";
 above 1 it gets plus/minus random jitter from the range field.
 
-`stc_enemy_spawn_data` is NULL in the City Trial city map (timed or Free Run), in Top Ride, and
-in stadiums that do not use stage-based spawning. The city's event actors (TAC, Dyna Blade,
-Meteor) are loaded by `Enemy_LoadStageEnemies` but never populate it - they come in through the
-event system rather than the spawn-position pool.
+`stc_enemy_spawn_data` is NULL in Top Ride and in stadiums that do not use stage-based spawning.
+In the City Trial city map (timed or Free Run) it is not NULL: `GrCity1`'s `GrData+0x28` holds a
+single all-zero entry, so `spawn_count` is 0, `config` is NULL and nothing spawns from it. The
+city's event actors (TAC, Dyna Blade, Meteor) are loaded by `Enemy_LoadStageEnemies` but never
+use it - they come in through the event system rather than the spawn-position pool.
 
 ### Enemy_SpawnActor (0x800f13a8)
 
@@ -384,7 +385,7 @@ enemy-spawn array. The decision is data-driven, never derived from a stadium or 
 | City Trial, Kirby Melee 2 | GrColosseum5 | Yes | 3 |
 | City Trial, other stadiums | GrZeroyon* / GrSimple* / GrJump* / GrColosseum1,3 / GrDedede1 | No (NULL spawn array) | - |
 | City Trial, open city (timed) | GrCity1 | No - `GrData+0x28` is non-NULL but the selected entry is empty (spawn_count 0), so the spawner is inert | - |
-| City Trial, Free Run | GrCity1 | No - `Enemy_LoadStageEnemies` is skipped entirely | - |
+| City Trial, Free Run | GrCity1 | No - the same empty entry; `Enemy_LoadStageEnemies` also skips loading the enemy assets | - |
 
 Kirby Melee 1 and 2 are the only City Trial events that spawn the regular AI enemy pool. Every
 other City Trial context produces only event actors (TAC, Dyna Blade, Event Gordo, Meteor),
@@ -557,7 +558,7 @@ whose init callbacks walk a path before this setup faults.
 | `Enemy_LoadCommonParams` | 0x801fd580 | Load `Enemy.dat` `emDataAll`, store the table pointer to `*0x805dd878` |
 | `Gm_IsEventsEnabled` | 0x8000a348 | Bit 4 of GameData+0xAA7 - enemies enabled for the current stage/mode |
 | `grGetEnemyposNum` | 0x800d0c88 | Number of enemy spawn positions for the stage |
-| `loadEnemy_spawnXYLocation` | 0x800d0cd4 | Load enemy spawn locations from stage data |
+| `grGetEnemyPosition` | 0x800d0cd4 | Load enemy spawn locations from stage data |
 | `loadEventLocations` | 0x800d11fc | Load event position data |
 | `Enemy_GX` | 0x801fd158 | GXLink render callback, priority 9, render pass 1 |
 | `JObj_SetFromBasis` | 0x80054414 | Sets a JObj world matrix from position, forward/up and scale |

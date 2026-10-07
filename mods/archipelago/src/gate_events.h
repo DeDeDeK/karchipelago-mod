@@ -5,5 +5,6 @@
 
 void GateEvents_OnBoot();
 int GateEvents_UnlockEvent(int kind);
+int GateEvents_IsUnlocked(int kind);
 
 #endif

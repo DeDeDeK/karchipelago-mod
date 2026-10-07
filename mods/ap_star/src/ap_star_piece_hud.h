@@ -9,11 +9,9 @@
 // Forget the icons and the icon archive, which the heap reset freed.
 void ApStarPieceHud_OnSceneChange(void);
 
-// Load the icons and read the row's anchors for a City Trial round.
-void ApStarPieceHud_Load(void);
-
-// Diff a player's collected set into their row. Run from the frame boundary rather than
-// the pickup, so no GObj is created from inside the collision call that collected it.
-void ApStarPieceHud_Update(int ply, u8 mask);
+// Load the icons for a City Trial round and start diffing each player's collected set,
+// `masks[PLY_NUM]`, into their row once a frame. The diff runs from a proc rather than
+// the pickup, so no GObj is created inside the collision call that collected a sphere.
+void ApStarPieceHud_Create(const u8 *masks);
 
 #endif // AP_STAR_PIECE_HUD_H

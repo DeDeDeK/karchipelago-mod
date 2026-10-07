@@ -6,6 +6,7 @@
 #include "hsd.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
@@ -42,14 +43,14 @@ static float   stc_streak = RAIN_DEF_STREAK;
 // Index 0 ("Preset") is the pass-through value on every knob below.
 static const float rain_intensity_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *rain_intensity_names[] = {"Preset", "Off", "Light", "Normal", "Heavy", "Downpour"};
-#define RAIN_INTENSITY_NUM (sizeof(rain_intensity_factors) / sizeof(rain_intensity_factors[0]))
+#define RAIN_INTENSITY_NUM GetElementsIn(rain_intensity_factors)
 static int rain_intensity_index = 0;
 
 // Scales the fall velocity only; streak length tracks velocity, so faster rain
 // also streaks longer.
 static const float rain_fall_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
 static char *rain_fall_names[] = {"Preset", "Slow", "Normal", "Fast"};
-#define RAIN_FALL_NUM (sizeof(rain_fall_factors) / sizeof(rain_fall_factors[0]))
+#define RAIN_FALL_NUM GetElementsIn(rain_fall_factors)
 static int rain_fall_index = 0;
 
 static int rain_wind_slant = 1;
@@ -111,13 +112,14 @@ static void Rain_GX(GOBJ *g, int pass)
         return;
 
     Vec3 eye;
-    WeatherGX_CameraEye(cam, &eye);
+    COBJ_GetViewEye(cam, &eye);
 
     float sx = stc_vel_x * stc_streak;
     float sy = stc_vel_y * stc_streak;
     float sz = stc_vel_z * stc_streak;
 
-    WeatherGX_BeginXlu(cam, 0, stc_line_width);
+    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
+    GXSetLineWidth((u8)stc_line_width, 5);
 
     GXBegin(GX_LINES, GX_VTXFMT0, stc_density * 2);
     for (int i = 0; i < stc_density; i++)

@@ -1,6 +1,6 @@
 # Patch Cap
 
-Patch cap turns vanilla City Trial's fixed stat ceiling (18 patches per stat) into a configurable, optionally progressive per-stat cap. A slot picks a min/max pair: the cap starts at `city_trial_patch_cap_min` and grows one step per `AP_ITEM_PATCH_CAP_INCREASE` received, up to `city_trial_patch_cap_max`.
+Patch cap turns vanilla City Trial's fixed stat ceiling - raw 16 from `gmGameParams.patch_max` (+0x18), which is 18 patches for the eight stats that spawn at -2 and 16 for HP, which spawns at 0 - into a configurable, optionally progressive per-stat cap. A slot picks a min/max pair: the cap starts at `city_trial_patch_cap_min` and grows one step per `AP_ITEM_PATCH_CAP_INCREASE` received, up to `city_trial_patch_cap_max`.
 
 **Files:** `mods/archipelago/src/patch_cap.c` / `.h`, with the save field and both options in `main.h`, the item dispatch in `ap_item_handler.c`, and the boot hook in `main.c`.
 
@@ -8,14 +8,14 @@ Patch cap turns vanilla City Trial's fixed stat ceiling (18 patches per stat) in
 
 | Option | Range | Default | Meaning |
 |--------|-------|---------|---------|
-| `city_trial_patch_cap_min` | 1-18 | 18 | Cap the player starts at. `0` (options not yet received) falls back to the max. |
-| `city_trial_patch_cap_max` | 18-30 | 18 | Cap ceiling, the `GOAL_MAX_STATS_CT` threshold, and the value `Patch_GetMaxValue` reports for HUD/attribute normalization. `0`/unset is treated as `PATCH_STAT_MAX` (127); anything above 127 is clamped to it. |
+| `city_trial_patch_cap_min` | 1-18 | 18 | Cap the player starts at. |
+| `city_trial_patch_cap_max` | 18-30 | 18 | Cap ceiling and the `GOAL_MAX_STATS_CT` threshold. `Patch_GetMaxValue` reports `max - 2`, the non-HP raw ceiling, as the stat clamp and the HUD/attribute normalization range. Anything above 127 resolves to `PATCH_STAT_MAX` (127). |
 
-There is no separate "progressive" toggle: `min == max` is a flat cap with no Patch Cap Increase items in the pool, `min < max` is progressive, and the AP world ships exactly `max - min` increase items. Both options are read at every clamp; nothing is precomputed at connect. The defaults (18/18) reproduce vanilla exactly.
+There is no separate "progressive" toggle: `min == max` is a flat cap with no Patch Cap Increase items in the pool, `min < max` is progressive, and the AP world ships exactly `max - min` increase items. Both options are read at every clamp; nothing is precomputed at connect. Until `ap_save->options_received` is set neither is read at all: `PatchCap_GetMax` and `PatchCap_GetCap` both return 18, vanilla's ceiling, so a save that has never connected plays like vanilla. The defaults (18/18) reproduce vanilla too: 18 patches on the eight non-HP stats, 16 on HP, normalized against raw 16.
 
-Both options are measured in **patches**, not raw stat value. CT stats spawn at `-2`, except HP at `0`, so the raw ceiling is `start + cap` per stat and all nine hold the same number of patches. `PatchCap_GetStatStart(kind)` is the single source of that baseline, shared with the Max Stats goal in `goal_max_stats_ct.c`.
+Both options are measured in **patches**, not raw stat value. CT stats spawn at `-2`, except HP at `0`, so the raw ceiling is `start + cap` per stat and all nine hold the same number of patches, until HP meets the normalization ceiling `max - 2` (below). `PatchCap_GetStatStart(kind)` is the single source of that baseline, and `PatchCap_IsStatAt(values, kind, patches)` tests a stat against a patch count measured from it, or against the raw ceiling when that is lower - HP's case near the slot max. It is the form the Max Stats goal in `goal_max_stats_ct.c` uses.
 
-`patch_cap.h` exports only `PatchCap_OnBoot`, `PatchCap_Increment` and `PatchCap_GetStatStart`. The rest of the file is static, except the three replacement bodies, which are non-`static` only so `CODEPATCH_REPLACEFUNC` can take their address.
+`patch_cap.h` exports `PatchCap_OnBoot`, `PatchCap_Increment`, `PatchCap_GetMax` (the slot ceiling), `PatchCap_GetCap` (the cap in force now), `PatchCap_GetStatStart` and `PatchCap_IsStatAt`. The three replacement bodies are `static`.
 
 ## Hooks
 
@@ -23,15 +23,17 @@ Both options are measured in **patches**, not raw stat value. CT stats spawn at 
 
 | Replaced | Address | Replacement | Purpose |
 |----------|---------|-------------|---------|
-| `Patch_GetMaxValue` | 0x8000aaf0 | `PatchCap_GetMaxValue` | Returns the slot max - the HUD/attribute normalization range |
+| `Patch_GetMaxValue` | 0x8000aaf0 | `PatchCap_GetMaxValue` | Returns `max - 2` - the stat clamp and the HUD/attribute normalization range |
 | `Machine_GivePatch` | 0x801cacf4 | `PatchCap_GivePatch` | Pre-clamp delta to the current cap, apply, update appearance + attributes |
 | `Machine_GiveAllUp` | 0x801cad40 | `PatchCap_GiveAllUp` | Per-stat pre-clamp, apply, credit `Ply_SetAllUpCollected`, update |
 
-`Machine_GivePatchOrCandy` (0x801cb1c0) calls `Machine_GivePatch`, so it is covered transitively.
+`Machine_GivePatch` has two vanilla callers, `Machine_OnTouchItem` (call at 0x801db478) and `zz_801c8210_` (call at 0x801c8220), and both reach the replacement. `Machine_GivePatchOrCandy` (0x801cb1c0) does not call it despite its name - its only give is `Machine_GiveCandy`.
 
-### `PatchCap_GetMaxValue` returns the max, not the current cap
+### `PatchCap_GetMaxValue` returns the ceiling, not the current cap
 
-This is load-bearing. `Patch_GetMaxValue` is the denominator the game uses to *normalize* stats for the HUD bars and the per-vehicle attribute interpolation curve. Returning the per-slot max keeps that curve scaled to the full reachable range no matter how far the cap has grown from `min`; enforcement of "you can't go higher right now" is done separately by the delta clamp against the current effective cap. Because the hook returns the slot max rather than `PATCH_STAT_MAX`, this is not behavior-neutral: a slot with a max below 127 sees its HUD bars and attribute curve normalized to that lower value.
+This is load-bearing. `Patch_GetMaxValue` is both the upper bound of `Stat_AddClamped` and the denominator the game uses to *normalize* stats for the HUD bars and the per-vehicle attribute interpolation curve (`Machine_GetStatRatio`, clamped to [-1, 1]). It returns `PatchCap_GetMax() - 2`, the raw value a non-HP stat reaches at the slot max, floored at 1 so a tiny debug ceiling can never divide by zero or flip the ratio's sign.
+
+A non-HP stat at the slot max therefore reads ratio 1, exactly like a vanilla stat at 18 patches, and the default ceiling of 18 reproduces vanilla's raw 16. HP spawns at 0, so the same bound stops it at `max - 2` patches - two short of the others, as in vanilla. Returning the slot ceiling rather than the current cap keeps the curve fixed while the cap grows from `min`; "you can't go higher right now" is enforced separately by the delta clamp against the current cap. A ceiling above 18 widens the range, so each patch moves the curve proportionally less.
 
 ### Delta clamping
 
@@ -39,9 +41,9 @@ This is load-bearing. `Patch_GetMaxValue` is the denominator the game uses to *n
 
 The `start` offset is what makes the cap count patches rather than raw value. Without it the eight non-HP stats (spawn `-2`) would hold `cap + 2` patches while HP (spawn `0`) holds `cap`.
 
-After pre-clamping, both replacements call `Machine_ApplyStatClamped` (0x801e094c), which tail-calls `Stat_AddClamped` (0x80194d80) for a secondary clamp to `[Patch_GetMinValue, Patch_GetMaxValue]`. Since our raw ceiling `start + cap` is never above `max`, that second clamp is a no-op.
+After pre-clamping, both replacements call `Machine_ApplyStatClamped` (0x801e094c), which tail-calls `Stat_AddClamped` (0x80194d80) for a secondary clamp to `[Patch_GetMinValue, Patch_GetMaxValue]`. For the eight non-HP stats the raw ceiling `start + cap` never exceeds `max - 2`, so that clamp is a no-op. For HP it is the bound that holds it at `max - 2` once the cap climbs past that.
 
-The flip side: a non-HP stat tops out at raw `cap - 2`, two below the normalization range, so a fully-capped non-HP bar reads slightly under full while HP reads full. The shortfall is a fixed 2 raw units, conspicuous only at very low caps.
+At the slot ceiling every bar reads full: the non-HP stats sit at raw `max - 2` after `max` patches, and HP at raw `max - 2` after `max - 2`.
 
 ### Appearance and attribute refresh
 
@@ -51,7 +53,7 @@ Both replacements finish with `Machine_UpdateAppearance`, then `Machine_AdjustAt
 
 ## Increment Flow
 
-`AP_ITEM_PATCH_CAP_INCREASE` is routed in `APItems_HandleItem` (`ap_item_handler.c`) above the 3D scene gate, so it applies in any scene. `PatchCap_Increment()` bumps `ap_save->patch_cap_count`, logs whether the cap actually moved, and enqueues a yellow "Patch cap increased! (cap/max)" textbox. The denominator shown is the slot max, not 18 and not 127.
+`AP_ITEM_PATCH_CAP_INCREASE` is routed in `APItems_HandleItem` (`ap_item_handler.c`) above the 3D scene gate, so it applies in any scene. `PatchCap_Increment()` bumps `ap_save->patch_cap_count` (a `u8`, saturating at 255), logs whether the cap actually moved, and announces "Patch cap increased! (cap/max)" through `APAnnounce_Grant`, like every other received item - so the line shows only while *Messages -> Local -> Items* is on, which it is not by default. The denominator shown is the slot max, not 18 and not 127.
 
 ## Consumer Coverage
 
@@ -65,36 +67,33 @@ Every consumer of the stat cap goes through `Patch_GetMaxValue`, which is why on
 | `Machine_SetStatBlockClamped` | 0x80194f64 | 1 |
 | `Stat_AddClamped` (tail-called by `Machine_ApplyStatClamped` 0x801e094c) | 0x80194d80 | 1 |
 | `Stat_AddClampedAll` (tail-called by `Machine_ApplyAllStatsClamped` 0x801e096c) | 0x80194e60 | 1 |
-| `PlayerView_Think` (HUD stat-bar denominator) | 0x80116d8c | 9, one per stat |
+| `PlyView_HudThink` (HUD stat-bar denominator) | 0x80116d8c | 9, one per stat |
 | `Machine_GetStatRatio` (per-stat attribute normalizer, clamped to [-1,1]) | 0x801caa8c | 1 |
 | `Machine_GetStatRatio2` (second normalizer, sibling) | 0x801cabd4 | 1 |
 
-Per-vehicle attribute interpolation runs through the same normalizers. `Machine_AdjustAttributes` (0x801c7278) dispatches two callbacks per machine class via `stc_machine_class_desc[is_bike]`: `copy_attr` (+0x1c) is an attribute memcpy that never touches `patch_max`, while `adjust_attr` (+0x20) is the stat-scaling pass - `Machine_AdjustAttributesStar` (0x801e906c) -> `Machine_ApplyStarStatScaling` (0x801e81e4) for the star class, `Machine_AdjustAttributesBike` (0x801f4dac) -> `Machine_ApplyBikeStatScaling` (0x801f3d44) for the bike class. Both end at `Machine_GetStatRatio` / `Machine_GetStatRatio2`, which `bl 0x8000aaf0` unconditionally. So the returned max scales the whole attribute-interpolation curve as well as the HUD fill ratio.
+Per-vehicle attribute interpolation runs through the same normalizers. `Machine_AdjustAttributes` (0x801c7278) dispatches two callbacks per machine class via `stc_machine_class_desc[is_bike]`: `copy_attr` (+0x1c) is an attribute memcpy that never touches `patch_max`, while `adjust_attr` (+0x20) is the stat-scaling pass - `Machine_AdjustAttributesStar` (0x801e906c) -> `Machine_ApplyStarStatScaling` (0x801e81e4) for the star class, `Machine_AdjustAttributesBike` (0x801f4dac) -> `Machine_ApplyBikeStatScaling` (0x801f3d44) for the bike class. Both end at `Machine_GetStatRatio` / `Machine_GetStatRatio2`, which `bl 0x8000aaf0` unconditionally. So the returned ceiling scales the whole attribute-interpolation curve as well as the HUD fill ratio.
 
 ## Hardware Ceiling (`PATCH_STAT_MAX`)
 
-`Patch_GetMaxValue` returns via `extsb` (sign-extend low byte) at 0x8000ab08, so 127 is a firm hardware ceiling: 128-255 sign-flip negative and collapse the effective cap to the floor. `PATCH_STAT_MAX` is 127 and `PatchCap_GetMax()` clamps the option to it, so a malformed YAML value can never blow past the limit. `ap_save->permanent_patches[kind]` is `u8` with `< PATCH_STAT_MAX` gates in `patch_item.c`, well within range at 127.
+`Patch_GetMaxValue` returns via `extsb` (sign-extend low byte) at 0x8000ab08, so 127 is a firm hardware ceiling: 128-255 sign-flip negative and collapse the effective cap to the floor. `PATCH_STAT_MAX` is 127 and `PatchCap_GetMax()` resolves anything above it to 127, so a malformed YAML value can never blow past the limit. `ap_save->permanent_patches[kind]` is `u8` with `< PATCH_STAT_MAX` gates in `permanent_patch.c`, well within range at 127.
 
-Two things that are *not* on the `Patch_GetMaxValue` path:
-
-- HUD stat-bar segment dividers, if drawn as discrete ticks rather than continuous fill. The bar fill ratio scales correctly, but visual ticks may still render as 18 segments.
-- `GOAL_MAX_STATS_CT`, which compares patches collected against `city_trial_patch_cap_max` directly in `goal_max_stats_ct.c` - not `PATCH_STAT_MAX`, and not the current effective cap. The goal is "collect the slot's ceiling worth of patches on every stat in one CT run", so a progressive slot must first receive every Patch Cap Increase item to make it reachable. It applies the same `start` offset, so HP needs raw `max` and every other stat raw `max - 2`; testing `value >= max` for all nine would silently cost the non-HP stats two extra patches each.
+`GOAL_MAX_STATS_CT` is not on the `Patch_GetMaxValue` path. `goal_max_stats_ct.c` tests every stat with `PatchCap_IsStatAt` against `PatchCap_GetMax()` patches - the slot ceiling, not the current effective cap. The goal is "collect the slot's ceiling worth of patches on every stat in one CT run", so a progressive slot must first receive every Patch Cap Increase item to make it reachable. Every stat needs raw `max - 2`: the eight non-HP stats reach it after `max` patches from their -2 start, and HP, held by the raw ceiling, after `max - 2`. `PatchCap_IsStatAt` caps its target at that ceiling, which is what lets HP qualify.
 
 ## Known Limitations
 
 **Option name vs. scope.** Both options are named `city_trial_*`, but the hook is mode-agnostic - every `Machine_GivePatch` / `Machine_GiveAllUp` call is clamped, including the Air Ride race-start re-apply of accumulated permanent patches. Benign: Air Ride gameplay does not otherwise raise stats, and the clamped values are still applied.
 
-**Saturation textbox.** Once `min + patch_cap_count >= max`, further increments still enqueue "Patch cap increased! (max/max)" even though nothing moved. The `OSReport` distinguishes the two cases; the textbox does not. Cosmetic only.
-
-**`patch_cap_count` overflow.** The counter is `u8` and wraps at 256. Only `max - min` increments are ever useful and `PatchCap_GetCap()` clamps `min + count` to the max, so a wrap needs an APWorld shipping 256+ cap items - unreachable with the 18-30 max range, but a `patch_cap_count < max` guard in `Increment` would make it unconditionally safe.
+**Saturation announcement.** Once `min + patch_cap_count >= max`, further increments still announce "Patch cap increased! (max/max)" even though nothing moved. The `OSReport` distinguishes the two cases; the announcement does not. Cosmetic only.
 
 ## Debug override
 
 The cap range normally arrives once, with the slot options, and is immutable for the seed.
 `archipelago_debug`'s Slot Options page writes `city_trial_patch_cap_min` and `_max` directly
-through `ArchipelagoAPI.DebugSetPatchCapRange`, so the flat-cap case (`min == max`), the
-one-per-item climb and the `PATCH_STAT_MAX` ceiling can each be exercised on one save.
+through `ArchipelagoAPI.DebugSetPatchCapMin` / `DebugSetPatchCapMax`, one bound per row, so the
+flat-cap case (`min == max`), the one-per-item climb and the `PATCH_STAT_MAX` ceiling can each be
+exercised on one save.
 
-Both rows read back through `GetPatchCapRange`, and a stored 0 - options never received - shows
-as 127, which is what `PatchCap_GetMax` resolves it to. The effective cap, the received Patch Cap
+Both rows read back through `GetPatchCapRange`. The overrides only bite on a save that has
+received its slot options: before that the cap is vanilla's 18 whatever is stored, and the
+rows show the stored 0 as 127. A ceiling of 1 or 2 floors the raw ceiling at 1. The effective cap, the received Patch Cap
 Increase count and the seed range all appear together in that mod's Report State output.

@@ -9,12 +9,11 @@
 #include "gx.h"
 #include "machine.h"
 #include "collision.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
-
-#define PUDDLE_PI  3.14159265358979f
 
 #define PUDDLE_MAX            64      // pool capacity; resolved count clamps to this
 #define PUDDLE_SEGMENTS       22      // rim vertices per disc (triangle fan)
@@ -24,7 +23,7 @@
 #define PUDDLE_OVAL_MIN       0.55f   // shortest oval axis = radius * [this .. 1]
 #define PUDDLE_RIM_ALPHA_NUM  1       // rim alpha = center alpha * NUM/DEN (soft but present edge)
 #define PUDDLE_RIM_ALPHA_DEN  2
-#define PUDDLE_PICK_ATTEMPTS  6       // ground-raycast tries per (re)spawn
+#define WEATHER_PICK_ATTEMPTS  6       // ground-raycast tries per (re)spawn
 #define PUDDLE_ALPHA_EPS      0.01f   // below this opacity a pool neither draws nor drags
 
 // Lifecycle timing in frames: a slot waits dormant, wells up over FADE_IN, holds a
@@ -89,20 +88,19 @@ static float   stc_base_factor = PUDDLE_DEF_FACTOR;
 // the per-preset drag amount (1 - factor); Off removes the slow but still draws.
 static const float slow_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
 static char *slow_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
-#define PUDDLE_SLOW_NUM (sizeof(slow_strength_factors) / sizeof(slow_strength_factors[0]))
+#define PUDDLE_SLOW_NUM GetElementsIn(slow_strength_factors)
 static int slow_strength_index = 0;
 
-// Frequency scales the slot count, applied at the next round's arm.
+// Frequency scales the slot count.
 static const float freq_factors[] = {1.0f, 0.5f, 1.0f, 1.75f};
 static char *freq_names[] = {"Preset", "Few", "Normal", "Many"};
-#define PUDDLE_FREQ_NUM (sizeof(freq_factors) / sizeof(freq_factors[0]))
+#define PUDDLE_FREQ_NUM GetElementsIn(freq_factors)
 static int freq_index = 0;
 
-// Size scales the radius, read at each (re)spawn, so it also affects pools that
-// surface after the change.
+// Size scales the radius.
 static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
 static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
-#define PUDDLE_SIZE_NUM (sizeof(size_factors) / sizeof(size_factors[0]))
+#define PUDDLE_SIZE_NUM GetElementsIn(size_factors)
 static int size_index = 0;
 
 static int puddle_roaming = 1;
@@ -127,7 +125,7 @@ static int PickSpot(Puddle *p)
     if (radius < PUDDLE_MIN_RADIUS)
         radius = PUDDLE_MIN_RADIUS;
 
-    for (int a = 0; a < PUDDLE_PICK_ATTEMPTS; a++)
+    for (int a = 0; a < WEATHER_PICK_ATTEMPTS; a++)
     {
         float x = cx + Weather_Randf2() * hx;
         float z = cz + Weather_Randf2() * hz;
@@ -152,7 +150,7 @@ static int PickSpot(Puddle *p)
         VECCrossProduct(&nrm, &u, &v);          // v = nrm x u, unit & in-plane
 
         // Circular by default; at random, stretch one axis into an oval.
-        float aspect = PUDDLE_OVAL_MIN + HSD_Randf() * (1.0f - PUDDLE_OVAL_MIN);
+        float aspect = Weather_RandRange(PUDDLE_OVAL_MIN, 1.0f);
         float ax = radius;
         float az = radius * aspect;
         if (HSD_Randf() < 0.5f)
@@ -203,7 +201,7 @@ static void StepPuddle(Puddle *p, int roaming)
         {
             p->alpha = 1.0f;
             p->phase = PUD_HELD;
-            p->timer = Weather_RandRangeI(PUDDLE_HOLD_MIN, PUDDLE_HOLD_MAX);
+            p->timer = RandomInRange(PUDDLE_HOLD_MIN, PUDDLE_HOLD_MAX);
         }
         else
         {
@@ -227,7 +225,7 @@ static void StepPuddle(Puddle *p, int roaming)
         {
             p->alpha = 0.0f;
             p->phase = PUD_DORMANT;
-            p->timer = Weather_RandRangeI(PUDDLE_GAP_MIN, PUDDLE_GAP_MAX);
+            p->timer = RandomInRange(PUDDLE_GAP_MIN, PUDDLE_GAP_MAX);
         }
         else
         {
@@ -289,7 +287,7 @@ static void Puddle_GX(GOBJ *g, int pass)
     if (!cam)
         return;
 
-    WeatherGX_BeginXlu(cam, 0, 0);
+    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
 
     for (int i = 0; i < stc_count; i++)
     {
@@ -308,7 +306,7 @@ static void Puddle_GX(GOBJ *g, int pass)
         GXColor4u8(stc_color.r, stc_color.g, stc_color.b, ca);
         for (int s = 0; s <= PUDDLE_SEGMENTS; s++)
         {
-            float ang = (float)s * (2.0f * PUDDLE_PI / (float)PUDDLE_SEGMENTS);
+            float ang = (float)s * (2.0f * M_PI / (float)PUDDLE_SEGMENTS);
             float cu = cosf(ang) * p->rx;
             float cv = sinf(ang) * p->rz;
             float vx = p->center.X + cu * p->u.X + cv * p->v.X;
@@ -377,7 +375,7 @@ void Puddle_Tick(void)
     if (base_amt <= 0.0f || Weather_RoundProgress() < 0.0f)
         return;
 
-    for (int ply = 0; ply < WEATHER_PLAYER_SLOTS; ply++)
+    for (int ply = 0; ply < PLY_NUM; ply++)
     {
         GOBJ *mg = Ply_GetMachineGObj(ply);
         if (mg == NULL)
@@ -454,7 +452,7 @@ MenuDesc puddle_menu = {
         },
         &(OptionDesc){
             .name = "Frequency",
-            .description = "How many puddles the field carries (applies next round)",
+            .description = "How many puddles the field carries",
             .kind = OPTKIND_VALUE,
             .val = &freq_index,
             .value_num = PUDDLE_FREQ_NUM,
@@ -463,7 +461,7 @@ MenuDesc puddle_menu = {
         },
         &(OptionDesc){
             .name = "Size",
-            .description = "How large the puddles are (applies to puddles that form after the change)",
+            .description = "How large the puddles are",
             .kind = OPTKIND_VALUE,
             .val = &size_index,
             .value_num = PUDDLE_SIZE_NUM,

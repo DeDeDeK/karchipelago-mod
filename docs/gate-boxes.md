@@ -1,6 +1,6 @@
 # Box Type Gating
 
-Each City Trial item-box color can be individually locked behind an Archipelago unlock item; a locked color never spawns. AP items 860-862 (`AP_BOX_UNLOCK_BASE` + `BoxKind`: 0 Blue, 1 Green, 2 Red) route through `ap_item_handler.c` to `GateBoxes_UnlockBox`, which sets the bit in `APSave.box_unlocked_mask` and posts a textbox. The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_BOX`; when the slot option `box_gating_enabled` is 0 the connect-time pre-fill in `APOptions_ApplyUngatedCategories` (`main.c`) sets all three bits.
+Each City Trial item-box color can be individually locked behind an Archipelago unlock item; a locked color never spawns. AP items 860-862 (`AP_BOX_UNLOCK_BASE` + `BoxKind`: 0 Blue, 1 Green, 2 Red) route through `ap_item_handler.c` to `GateBoxes_UnlockBox`, which sets the bit in `APSave.box_unlocked_mask` and announces "Unlocked Box: <color>" through `APAnnounce_Grant` (shown only with Messages -> Local -> Items on, default Off). The mask is exposed through `ArchipelagoAPI` as `AP_UNLOCK_BOX`; when the slot option `box_gating_enabled` is 0 the pre-fill in `APOptions_ApplyUngatedCategories` (`ap_options.c`), run when the first slot options arrive, sets all three bits.
 
 On top of the mask, a color is auto-disabled whenever the item gates have emptied its pool, so opening a box always awards something.
 
@@ -8,7 +8,7 @@ On top of the mask, a color is auto-disabled whenever the item gates have emptie
 
 ## Where the ID block ends
 
-The machine unlock block sits directly below at 830-859 and its branch in `ap_item_handler.c` runs **before** the box branch, so its upper bound is clamped to the width of that block rather than following the number of machine kinds `custom_machines` has registered. Without the clamp the fifth registered machine would take ID 860 and Blue would never unlock.
+The machine unlock block sits just below at 830-856 and its branch in `ap_item_handler.c` runs **before** the box branch. Its upper bound is `AP_MACHINE_BIT_NUM` - one bit per vanilla `MachineKind` plus one for the Archipelago Star - not the number of machines `custom_machines` has registered; any other registered machine has no bit and is always available. The machine branch therefore never reaches 860, and Blue's unlock always lands in the box branch.
 
 ## Game System
 
@@ -23,7 +23,7 @@ City Trial decides what to spawn in `CityItemSpawn_Think` (0x800eb108). It first
 
 The category has two sources inside `UpdateAndCheckToSpawn`. `CityItemSpawn_CheckToSpawnLegendaryPiece` (0x800ed2f0) returns **2** when a legendary piece is pending (the part flag is set and the round's progress threshold has passed) or **3** otherwise; when no piece is pending and the spawn cooldown has elapsed, a script-byte table (`DAT_805d617c`) selects **0** (patch) or **1** (box). **The script path never yields 2** - category 2 is reachable only through the legendary-piece subsystem.
 
-Whichever branch runs, the resulting `box_color` is forwarded as the first argument to `PowerUp_SpawnFromSky` (0x800ecdf4) at 0x800eb260, which is what actually places the box.
+Whichever branch runs, `PowerUp_SpawnFromSky` (0x800ecdf4) at 0x800eb260 is what actually places the box. It takes the box's `ItemKind` in r3 (the picker's return saved in r30, or 2 for a carrier) and `box_color` / `box_size` in r4 / r5.
 
 **A large red box is always a carrier.** Red's three entries in City Trial's table are
 `7 / 7 / 0`, so the picker can never select red-large - `selected % 3` only reaches 2 for a
@@ -37,19 +37,21 @@ A carrier is still a real red box, so Red's unlock gates it too - locking Red su
 
 The `BoxHasItems` auto-disable deliberately does **not** extend to carriers: they carry a `forced_item`, so an empty red pool costs them nothing. Breaking a carrier while the red pool is empty is harmless in any case: `CityItemSpawn_GetRandomItemID` walks a zero-length pool, `HSD_Randi(0)` returns 0 without dividing, and the roll falls through to `-1`, which spawns no item.
 
-`GrBoxGeneratorDetermine` (0x800ebc04) reads a 9-entry chance table from `grBoxGeneInfo->item_desc->box_spawn_chances`. It is 3 colors x 3 sizes, color-major (`[blue_small, blue_medium, blue_large, green_*, red_*]`). Vanilla sums the nine, rolls `HSD_Randi(total)`, walks the cumulative distribution to a `selected` index, then writes `selected / 3` to `*box_color` and `selected % 3` to `*box_size`. The table lives in read-only `.dat` data shared across spawn cycles, so it cannot be edited in place - the replacement copies the nine bytes to the stack and zeroes there.
+`GrBoxGeneratorDetermine` (0x800ebc04) reads a 9-entry chance table from `grBoxGeneInfo->item_desc->box_spawn_chances`, typed `u8 [BoxKind][size]` in hoshi: 3 colors x 3 sizes, color-major (`[blue_small, blue_medium, blue_large, green_*, red_*]`). Vanilla sums the nine, rolls `HSD_Randi(total)`, walks the cumulative distribution to a `selected` index, then writes `selected / 3` to `*box_color` and `selected % 3` to `*box_size`. The table lives in read-only `.dat` data shared across spawn cycles, so it cannot be edited in place - the replacement copies the nine bytes to the stack and zeroes there.
 
 ## Implementation
 
-`GateBoxes_IsUnlocked(kind)` is the mask read the piece gates share; it answers 0 before a save is loaded. `GateBoxes_UnlockBox` calls `GateApStar_PushMask()` when Red arrives, and `Unlock_SetMask` does the same for `AP_UNLOCK_BOX`, since `ap_star` reads its sphere gate at 3D load start and never reads the box mask back itself.
+`GateBoxes_IsUnlocked(kind)` is the mask read the piece gates share. It reads `ap_save` with no NULL check: from `OnSaveInit` on that points at hoshi's zeroed default block, so every color reads locked until a save is loaded. `GateBoxes_UnlockBox` calls `GateApStar_PushMask()` when Red arrives, and `APUnlock_SetMask` (`ap_unlock.c`) does the same for `AP_UNLOCK_BOX`, since `ap_star` reads its sphere gate at 3D load start and never reads the box mask back itself.
 
 `GateBoxes_OnBoot()` installs `CODEPATCH_REPLACEFUNC(GrBoxGeneratorDetermine, GateBoxes_DetermineBoxType)`. The replacement runs vanilla's roll over a local copy of the chance table with every ineligible color's three size entries zeroed, and returns `-1` when nothing survives. A color is ineligible if its `box_unlocked_mask` bit is clear **or** `BoxHasItems()` finds no entry with `chance > 0` left in `obj->item_group_spawn[color]`.
+
+`GateBoxes_RollSize(color)` rolls just a size off the same table: the three sizes weighted by that color's row, or by all three rows summed when `color < 0`, and small (0) when there is no table or every weight is 0. It ignores the mask. `ap_item_handler.c` spawns a received or bought item box (AP items 300-302, `ITKIND_BOXBLUE`..`ITKIND_BOXRED`) with its own color and a size rolled for that color, so it breaks into that color's pool for vanilla's 1 / 2 / 4 items by size; the AP Patch box rolls with `-1`.
 
 ### The -1 return is safe, and safer than vanilla
 
 The picker's return is the box's `ItemKind`, which for the three vanilla colors is the color itself. `CityItemSpawn_Think` saves it in r30 and forwards it as `PowerUp_SpawnFromSky`'s `kind` argument, which tests `kind == -1` at entry (0x800ecdfc) and returns immediately, before touching `box_color`/`box_size` - so no box is placed and the unwritten out-params never matter.
 
-The one thing that can still place a box on a `-1` is the AP Patch category, whose seam sits on the `bl` at 0x800eb20c and overrides the picker's return with the AP box's own kind. Box gating never sees that box: no color gate applies to it, and on a `-1` it writes its own color and size before the return reaches the spawn.
+The one thing that can still place a box on a `-1` is the AP Patch category, whose seam sits on the `bl` at 0x800eb20c and overrides the picker's return with the AP box's own kind. Box gating never sees that box: no color gate applies to it, and on a `-1` it writes its own color (Blue) and a size from `GateBoxes_RollSize(-1)` before the return reaches the spawn.
 
 Vanilla has no such exit. With an all-zero chance table its cumulative walk never matches, `selected` falls through to 9, and `box_color` becomes 3. That trips the `box_color < 3` bounds check at 0x800ebda4, which calls `__assert` (0x804284b8) and panics. Returning `-1` masks that crash path on exactly the edge case gating creates.
 

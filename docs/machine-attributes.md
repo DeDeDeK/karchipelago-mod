@@ -36,7 +36,7 @@ completely:
    `vcAttributes` field `k` lands at `md + 0x460 + k`. `hp_max` is `+0x4cc`,
    `top_speed_ground` is `+0x4f0`, `top_speed_air` is `+0x5ac`;
 2. dispatch through the class's `MachineClassDesc` (`stc_machine_class_desc`, `r13-0x6148`,
-   indexed by `is_bike`): `copy_attr` (`+0x1c`) is `Machine_CopyCommonAttributes`
+   indexed by `is_bike`): `copy_attr` (`+0x1c`) is `Machine_Star_CopyAttributes`
    (`0x801e812c`) for stars, which refills `md->attr` - the class block from
    `vcDataKindStar.attr`, the handling half from `md->vcData->handling_attr`, so handling
    field `k` lands at `md->attr + 0xac + k` - and `adjust_attr` (`+0x20`) is
@@ -132,7 +132,7 @@ how a machine feels. `air_grip` (`+0x150`) is the same thing off the ground.
 
 **Yaw.** `Machine_RotateDuringCharge` (`0x801ec5cc`) is the grounded steer for every driving
 state, not only the charge - `Star_RunPushForward_3`, `Star_Landing_3`, `MachinePhys_Charge`
-and `CompactStar_PhysicsThink` all call it. It computes
+and `Machine_Star_RunPhys` all call it. It computes
 
 ```
 turn = -stick * lerp(handling.turn_rate_rest, handling.turn_rate_top,

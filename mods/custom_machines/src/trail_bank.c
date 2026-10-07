@@ -1,11 +1,3 @@
-// The vehicle particle bank generators a machine brings. Every Ptcl_LoadEfPtclVehicle
-// points stc_ps_generator_desc[PTCL_BANK_VEHICLE] into the archive it just loaded, so each load
-// the table is copied into one wide enough for every registered machine's generators past
-// the bank's own, and the count raised to match. Ptcl_Alloc (0x8043294c) bounds an id by
-// that count alone, emits nothing for a NULL entry, and hands a generator node the
-// descriptor's program pointer once, at creation, which the registry's copies satisfy by
-// outliving every scene.
-
 #include "os.h"
 #include "particle.h"
 #include "code_patch/code_patch.h"
@@ -48,8 +40,8 @@ static void InstallGenerators(void)
     stc_ps_generator_count[PTCL_BANK_VEHICLE] = stc_count;
 }
 
-// Tail of Ptcl_LoadEfPtclVehicle, where every install path meets with the bank's
-// descriptor table already in place.
+// Tail of Ptcl_LoadEfPtclVehicle (0x80235394), where every install path meets with the
+// bank's descriptor table already in place.
 CODEPATCH_HOOKCREATE(0x802354bc,
     "",
     InstallGenerators,

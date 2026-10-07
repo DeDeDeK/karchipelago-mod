@@ -1,8 +1,7 @@
-#include <string.h>
-
 #include "game.h"
 #include "hsd.h"
 #include "os.h"
+#include "stage.h"
 #include "code_patch/code_patch.h"
 
 #include "main.h"
@@ -12,8 +11,10 @@
 #include "textbox_api.h"
 #include "ap_announce.h"
 
-// The ability / patch / item filters zero entries in this pool, so a box color can end
-// up empty even when its bit in box_unlocked_mask is set.
+#define BOX_SIZE_NUM 3
+
+// The ability / patch / item filters zero entries in this pool, so a box color can end up
+// empty even with its bit in box_unlocked_mask set.
 static int BoxHasItems(grBoxGeneObj *obj, int box)
 {
     for (int i = 0; i < obj->item_group_spawn[box].num; i++)
@@ -24,51 +25,60 @@ static int BoxHasItems(grBoxGeneObj *obj, int box)
     return 0;
 }
 
-// Replaces GrBoxGeneratorDetermine (0x800ebc04). Returns the box's ItemKind, which is
-// the picked color for the three vanilla box kinds, or -1 when nothing is eligible -
+int GateBoxes_RollSize(int color)
+{
+    grBoxGeneInfo *info = *stc_grBoxGeneInfo;
+    if (!info || !info->item_desc || !info->item_desc->box_spawn_chances)
+        return 0;
+
+    int weight[BOX_SIZE_NUM] = { 0 };
+    int total = 0;
+    for (int c = 0; c < BOXKIND_NUM; c++)
+    {
+        if (color >= 0 && c != color)
+            continue;
+        for (int size = 0; size < BOX_SIZE_NUM; size++)
+        {
+            weight[size] += info->item_desc->box_spawn_chances[c][size];
+            total += info->item_desc->box_spawn_chances[c][size];
+        }
+    }
+    if (total == 0)
+        return 0;
+
+    return Gm_Roll(weight, BOX_SIZE_NUM);
+}
+
+// Replaces GrBoxGeneratorDetermine (0x800ebc04). Returns the box's ItemKind, which is the
+// picked color for the three vanilla kinds, or -1 when nothing is eligible -
 // PowerUp_SpawnFromSky treats -1 as "place no box".
-int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
+static int GateBoxes_DetermineBoxType(int *box_color, int *box_size)
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
     if (!info || !info->item_desc || !info->item_desc->box_spawn_chances || !obj)
         return -1;
 
-    u8 chances[9];
-    memcpy(chances, info->item_desc->box_spawn_chances, 9);
-
-    u8 mask = ap_save->box_unlocked_mask;
+    int total = 0;
+    int weight[BOXKIND_NUM][BOX_SIZE_NUM];
     for (int color = 0; color < BOXKIND_NUM; color++)
     {
-        if ((mask & (1 << color)) && BoxHasItems(obj, color))
-            continue;
-        chances[color * 3 + 0] = 0;
-        chances[color * 3 + 1] = 0;
-        chances[color * 3 + 2] = 0;
+        int eligible = GateBoxes_IsUnlocked(color) && BoxHasItems(obj, color);
+        for (int size = 0; size < BOX_SIZE_NUM; size++)
+        {
+            weight[color][size] = eligible ? info->item_desc->box_spawn_chances[color][size] : 0;
+            total += weight[color][size];
+        }
     }
-
-    int total = 0;
-    for (int i = 0; i < 9; i++)
-        total += chances[i];
 
     if (total == 0)
         return -1;
 
-    int roll = HSD_Randi(total);
-    int cumulative = 0;
-    int selected = 0;
-    for (int i = 0; i < 9; i++)
-    {
-        cumulative += chances[i];
-        if (roll < cumulative)
-        {
-            selected = i;
-            break;
-        }
-    }
-
-    *box_color = selected / 3;
-    *box_size = selected % 3;
+    int idx = Gm_Roll(&weight[0][0], BOXKIND_NUM * BOX_SIZE_NUM);
+    if (idx < 0)
+        return -1;
+    *box_color = idx / BOX_SIZE_NUM;
+    *box_size = idx % BOX_SIZE_NUM;
     return *box_color;
 }
 
@@ -92,10 +102,10 @@ int GateBoxes_UnlockBox(BoxKind kind)
 
     ap_save->box_unlocked_mask |= (1 << kind);
     OSReport("[GateBoxes] Box %d (%s) unlocked (mask = %s)\n",
-             kind, BoxKind_Names[kind], MaskBits(ap_save->box_unlocked_mask, 8));
+             kind, BoxKind_Names[kind], MaskBits(ap_save->box_unlocked_mask, BOXKIND_NUM));
     APAnnounce_Grant("Unlocked Box: ", BoxKind_Names[kind], tb_api->BoxColors[kind], NULL);
 
-    // Red carries the sphere deliveries, whose gate ap_star reads at 3D load start.
+    // Red boxes carry the AP Star spheres.
     if (kind == BOXKIND_RED)
         GateApStar_PushMask();
     return 1;

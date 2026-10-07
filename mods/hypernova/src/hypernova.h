@@ -9,12 +9,12 @@
 #define HYPERNOVA_SCALE_NEUTRAL     1.0f
 #define HYPERNOVA_SCALE_ANIM_FRAMES 30      // ~0.5s ease @ 60fps
 
-// Suction cone: reach in world units, half-angle as its cosine (0.8660254 = cos(30deg)).
+// Suction cone: reach in world units, and the 30deg half-angle as its cosine.
 #define HYPERNOVA_RANGE             175.0f
-#define HYPERNOVA_HALF_ANGLE_COS    0.8660254f
+#define HYPERNOVA_HALF_ANGLE_COS    ((float)(M_SQRT3 / 2))
 
 // tan(30deg), for the debug cone's base radius; keep in sync with the cosine.
-#define HYPERNOVA_HALF_ANGLE_TAN    0.5773503f
+#define HYPERNOVA_HALF_ANGLE_TAN    ((float)(M_SQRT3 / 3))
 
 // Pull step shared by items, yakumono and machines: max(SPEED*dist, MIN) units/frame.
 #define HYPERNOVA_PULL_SPEED        0.030f
@@ -89,7 +89,7 @@ extern int hypernova_selftest;      // press D-Pad Up on port 1 in CT
 extern int hypernova_debug_cone;
 
 void Hypernova_OnBoot(void);
-void Hypernova_OnFrameEnd(void);
+void Hypernova_On3DLoadEnd(void);
 void Hypernova_OnSceneChange(void);
 
 int  Hypernova_Activate(int duration_frames);                   // all human players
@@ -117,9 +117,7 @@ void Hypernova_VacuumFinishClaimedPlayer(int player);
 // Drop all claims without touching the targets (scene change / leaving City Trial).
 void Hypernova_VacuumReset(void);
 
-// Lazily install the cone-visualizer render GObj (no-op if the toggle is off or it exists).
-void Hypernova_DebugConeEnsure(void);
-// Forget the cached overlay GObj (the engine frees it on scene teardown).
-void Hypernova_DebugConeReset(void);
+// Install the cone-visualizer render GObj; the engine frees it with the scene.
+void Hypernova_DebugConeCreate(void);
 
 #endif // HYPERNOVA_H

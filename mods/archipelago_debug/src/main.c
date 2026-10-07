@@ -9,6 +9,7 @@
 #include "debug_menu.h"
 
 const ArchipelagoAPI *ap_api = 0;
+const TextBoxAPI *tb_api = 0;
 static const CustomEventsAPI *ce_api = 0;
 
 // Which Archipelago Star sphere the next R + D-Pad Down drops. Per round.
@@ -24,6 +25,9 @@ static void TryImportApi(void)
         ce_api = (const CustomEventsAPI *)Hoshi_ImportMod(
             (char *)CUSTOM_EVENTS_MOD_NAME,
             CUSTOM_EVENTS_API_MAJOR, CUSTOM_EVENTS_API_MINOR);
+    if (!tb_api)
+        tb_api = (const TextBoxAPI *)Hoshi_ImportMod(
+            (char *)TEXTBOX_MOD_NAME, TEXTBOX_API_MAJOR, TEXTBOX_API_MINOR);
 }
 
 static void OnSaveLoaded(void)
@@ -36,15 +40,10 @@ static void OnSaveLoaded(void)
     }
     if (!ce_api)
         OSReport("[ApDebug] custom_events API unavailable, Scale Change trigger disabled\n");
+    if (!tb_api)
+        OSReport("[ApDebug] textbox API unavailable, debug actions post no messages\n");
     DebugMenu_RefreshState();
     OSReport("[ApDebug] API imported, debug menu ready\n");
-}
-
-// The toggle rows read their category mask through a cached array, so re-derive it
-// before a scene that can put the settings menu on screen.
-static void OnSceneChange(void)
-{
-    DebugMenu_RefreshState();
 }
 
 static void On3DLoadEnd(void)
@@ -238,7 +237,8 @@ ModDesc mod_desc = {
     .affects_gameplay = 1,
     .option_desc = &DebugMod_RootOption,
     .OnSaveLoaded = OnSaveLoaded,
-    .OnSceneChange = OnSceneChange,
+    // The toggle rows read cached masks, so re-derive them before a scene can show the menu.
+    .OnSceneChange = DebugMenu_RefreshState,
     .On3DLoadEnd = On3DLoadEnd,
     .OnFrameStart = OnFrameStart,
 };

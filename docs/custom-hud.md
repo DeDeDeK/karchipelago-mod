@@ -32,20 +32,20 @@ Two adjacent variants, `HUD_CreateMiscGObj2` (0x8011487c) and `HUD_CreateMiscGOb
 
 | Function | Address | Notes |
 |----------|---------|-------|
-| `HUD_CreateElement(int ply, JOBJDesc *j)` | 0x80114ba4 | `GObj_Create(27,26,0)` + `GObj_AddGXLink(g, HUD_GXLink, 21, 1)` |
-| `HUD_AddElementData(GOBJ *g, HUDKind kind, int ply, int ply2)` | 0x80114e24 | |
+| `HUD_CreateElement(int view, JOBJDesc *j)` | 0x80114ba4 | `GObj_Create(27,26,0)` + `GObj_AddGXLink(g, HUD_GXLink, 21, 1)`; with more than one viewport up, moves the root to the viewport's screen-region offset |
+| `HUD_AddElementData(GOBJ *g, HUDKind kind, int ply, int view)` | 0x80114e24 | |
 | `HUD_UpdateElement(JOBJ *j, int frame)` | 0x8011503c | sets the JObj animation frame |
 | `HUD_GXLink(GOBJ *g, int pass)` | 0x80114f1c | per-player viewport/scissor + visibility GX callback |
 | `JObj_GX(GOBJ *g, int pass)` | 0x8042a258 | unconditional JObj render |
 | `JObj_SetAllMOBJFlags` | 0x80052fb8 | |
 | `CObj_SetOrtho(COBJ *c, float top, float bottom, float left, float right)` | 0x80402f08 | |
 | `Text_CreateCanvas` | 0x8044f674 | |
-| `CityHUD_CreateStatChart(int ply, int ply2)` | 0x80128bb8 | |
-| `CityHUD_CreateStatBar(int ply, int ply2, int stat_kind)` | 0x80129154 | |
+| `CityHUD_CreateStatChart(int ply, int view)` | 0x80128bb8 | |
+| `CityHUD_CreateStatBar(int ply, int view, int stat_kind)` | 0x80129154 | |
 
 Also in `link.ld`: `CObjThink_Common` (0x8042a29c), `CObj_RenderGXLinks` (0x8042a0b4), `GObj_GetJObjIndex` (0x80055af0), `JObj_SetMtxDirtySub` (0x8040d92c), `JObj_GetWorldPosition` (0x80053f34), `Gm_GetPlyViewNum` (0x800092b4), `Gm_GetIfAllCityArchive` (0x80112050), `Gm_GetIfAllScreenArchive` (0x80112058), `Gm_Get3dData` (0x80112044).
 
-**Not in `link.ld`** - call these through a raw pointer cast: `HUD_CreateMiscGObj` (0x801147dc, map name has a trailing `?`), `HUD_SetVisible` (0x80114eec), `HUD_SetInvisible` (0x80114f04), `CityHUD_DestroyAllStatCharts` (0x801294a8), `3DHud_RenderIfVisible` (0x8011500c), `3DHud_CreateIndicatorGObjCustomGX` (0x801149a0), `JObj_AddSetAnim0_SetFrameAndRate` (0x80114d9c).
+**Not in `link.ld`** - call these through a raw pointer cast: `HUD_CreateMiscGObj` (0x801147dc), `HUD_SetVisible` (0x80114eec), `HUD_SetInvisible` (0x80114f04), `CityHUD_DestroyAllStatCharts` (0x801294a8), `3DHud_RenderIfVisible` (0x8011500c), `3DHud_CreateIndicatorGObjCustomGX` (0x801149a0), `JObj_AddSetAnim0_SetFrameAndRate` (0x80114d9c).
 
 Symbols starting with a digit (`3DHud_*`) are present in `GKYE01.map` but `scripts/kar.py sym` will not resolve them by name or address; grep the map directly for those.
 
@@ -65,7 +65,7 @@ Symbols starting with a digit (`3DHud_*`) are present in `GKYE01.map` but `scrip
 1. `HSD_ObjAlloc` a `HUDElementData`, then `memset(p, 0, 0xe4)` - the struct is 228 bytes
 2. `GObj_AddUserData(gobj, 27, destructor = 0x801151e8, p)`
 3. stores `kind` (arg 2) as a full int at +0x4
-4. packs arg 3 into the 4-bit `ply` field of byte +0x8 (mask 0xf0) and arg 4 into the 2-bit `ply2` field (mask 0x0c)
+4. packs arg 3 into the 4-bit `ply` field of byte +0x8 (mask 0xf0) and arg 4 into the 2-bit `view` field (mask 0x0c)
 5. sets `is_visible` to 1
 
 Step 5 is the one that makes anything appear. `HUD_SetVisible` (0x80114eec) and `HUD_SetInvisible` (0x80114f04) toggle the bit afterwards.
@@ -249,7 +249,7 @@ Stadium elements, 9 symbols each. Suffix `1`/`2`/`4`.
 
 ## City Trial Stat Bar Internals
 
-`CityHUD_CreateStatChart(ply, ply2)` (0x80128bb8):
+`CityHUD_CreateStatChart(ply, view)` (0x80128bb8):
 
 1. Picks the background model by player count (`Gm_GetPlyViewNum` -> 1/2/4P slot) from `Game3dData` and loads it with `HUD_CreateMiscGObj(jobj, 0x1b, 0x15, 1)` - `p_link` 27 (`PAUSEHUD`), `gx_link` 21, `gx_pri` 1
 2. Attaches `HUDElementData` via `HUD_AddElementData(..., kind = HUDKIND_CITYSTATBG)`; the GObj's `entity_class` is still 27
@@ -257,7 +257,7 @@ Stadium elements, 9 symbols each. Suffix `1`/`2`/`4`.
 4. Stores those 9 `Vec3`s in the background's `HUDElementData` starting at +0x14
 5. Adds a per-frame proc at priority 20; the bars themselves are created separately, one per stat kind 0-8
 
-`CityHUD_CreateStatBar(ply, ply2, stat_kind)` (0x80129154):
+`CityHUD_CreateStatBar(ply, view, stat_kind)` (0x80129154):
 
 1. Loads the gauge from IfAll1c (`ScInfPausegaugect_scene_models`) with the same `HUD_CreateMiscGObj` parameters
 2. Attaches `HUDElementData` via `HUD_AddElementData(..., kind = HUDKIND_CITYSTATBAR)` and stores `stat_kind` at +0x14

@@ -12,9 +12,9 @@ Three hooks detect player deaths, all applied from `DeathLink_OnBoot`:
 
 | Hook addr | Vanilla function | Trigger |
 |-----------|------------------|---------|
-| `0x801a06d0` | `Rider_CheckToDieOnMachine` (0x801a06a8) | HP death - `MachineGObj_IsDead` returned true (machine HP reached zero) |
+| `0x801a06d0` | `Rider_CheckToDieOnMachine` (0x801a06a8) | HP death - `Rider_IsMachineDead` (0x801943e4, over `MachineGObj_IsDead`) returned true (machine HP reached zero) |
 | `0x801e6540` | `Machine_SetFallDead` (0x801e6520) | Fall death - machine went out of bounds |
-| `0x80331a94` | per-frame TR-stage function at `0x8033158c` | Top Ride sand pit ejected a swallowed kirby |
+| `0x80331a94` | `TopRideSandPit_Update` (0x80331564) | Top Ride sand pit ejected a swallowed kirby |
 
 All three funnel through `DeathLinkSendAllowed(ply)`, which requires `deathlink_enabled` and a clear echo-suppression slot. Each hook then applies its own human-vs-CPU filter, because the two engines discriminate differently: the 3D path (`SendDeathLink`) uses `Ply_GetDescPKind`, the TR path uses `TopRide_GetPlayerKind == TR_PKIND_HMN`.
 
@@ -58,7 +58,7 @@ The hook's prologue saves r4/r5 to the stack and the epilogue restores all three
 
 The HP-death stadiums run **outside** `Gm_IsInCity` but use CT-style HP-based death; routing them through the fall-death path instead would no-op or misbehave, since they have no out-of-bounds spline to respawn to.
 
-Before zeroing HP, `KillPlayer` copies `md->dmg_log` into a local `DmgLog`, clears its `attacker_ply` (so the death is not attributed to any player), and calls `Ply_AddDeath` for stat tracking. `Ply_SetHP(ply, 0)` then triggers the normal death flow.
+Before zeroing HP, `KillPlayer` copies `md->dmg_log` into a local `DmgLog`, sets its `attacker_ply` to `PLY_NUM` (so no player is credited the KO), and calls `Ply_AddDeath` (0x8022f648) for stat tracking. `Ply_AddDeath` tallies by vanilla machine kind, so for a machine `custom_machines` registered (one resolving past `VCKIND_NUM`) it is handed the class slot of `VCKIND_WHEELVSDEDEDE` instead, the same scapegoat `custom_machines`' own KO seam uses; the machine's own slot would index past the per-kind table. `Ply_SetHP(ply, 0)` then triggers the normal death flow, and `APCheckDetect_OnKnockedOut` marks the player KO'd for the round, since this direct `Ply_AddDeath` call bypasses the KO callback the AP checklist objectives otherwise hear it through.
 
 The fall-death path passes the checkpoint selected by `md->use_backup_checkpoint`: clear = `respawn_pos`, set = `backup_respawn_pos` (the last-known-good checkpoint saved when the per-frame spline lookup fails). This matches vanilla `Machine_CheckFallDeath`'s OOB-distance path, which also passes ground handle -1 when no dead zone surface is found - the global dead zone system respawns correctly with an invalid handle, and deathlink kills happen mid-track where `mpColl_GetDeadZoneIndex` would return -1 anyway.
 
@@ -86,7 +86,7 @@ Two death zone systems exist. **Local dead zones** are per-boundary: a collision
 
 1. The machine enters fall-dead state and plays the death animation. Each frame the Star and Wheel FallDeath callbacks run `Machine_UpdateFallDead` (0x801e6670). Its `Machine_CheckRespawnRequest` (0x801e66cc) tests the player's respawn request (`Ply_GetRespawnRequest`, PlayerData+0x908 bit 0x20); when it is set, `Machine_RespawnFromFallDead` (0x801e6718) respawns the machine at the local dead zone's respawn point when `fall_ground_handle` is in range, else at `respawn_spline_params`, and clears the request. Otherwise `Machine_UpdateFallDead` counts `fall_respawn_timer` down, and at 0 only stops the machine (`Machine_ResetMotion`, 0x801c8e50) without respawning it.
 2. `Respawner_Update` (0x8000ff78) sees the rider fall-dead (`Ply_CheckIfFallDead`) and counts a per-player timer down from 150: camera fade at 90; at 30 it either marks the player permadead (on foot outside Destruction Derby, or permadeath enabled) or sets the respawn request through `Ply_SetRespawnRequest` (0x8022cc80); fade cleanup at 0. A normal fall death therefore respawns about 120 frames in, and the 300-frame `fall_respawn_timer` only runs out when no request comes.
-3. `AS_DeadWait` / `Rider_DeadHitGround_Anim` call `RiderState_RespawnEnter` (0x801a1d70).
+3. `Rider_DeadHitGround_Anim` calls `RiderState_RespawnEnter` (0x801a1d70); `RiderState_GetOffDownWaitEnter` does too, but only in Destruction Derby while `RiderData+0x826` bit 0x02 is clear.
 4. `Rider_RespawnAnim` (0x801a1dec) destroys the old machine and creates a new one via `Machine_Create`.
 5. `Machine_RespawnDispatch` (0x801eb738) dispatches on respawn type. Type 0 (default) restores the mpColl position from the spline data via `Machine_SetMpCollPosition`; type 4 (fall dead) goes to `Machine_FallDeadRespawnEntry` (0x801e4ec4), which reloads the stored md+0x1B48 block.
 6. `Machine_ApplyRespawnPacket` (0x801cc0c4) restores velocity, stats and position onto the new machine.
@@ -99,12 +99,12 @@ Checkpoint density varies by course, so on sparse courses a deathlink fall-death
 
 The sand-pit enemy on the SAND course is the death proxy: `DeathLink_OnTopRideSandPit(kirby)` sets `deathlink_send = 1` when the pit spits a swallowed human kirby back out. It checks `deathlink_enabled`, a clear echo-suppression slot, `TR_PKIND_HMN`, and `round_state == 2`. The pit's eject is a discrete event, not a per-frame tick, so no rising-edge gate is needed.
 
-The hook site `0x80331a94` is inside the per-frame TR-stage function at `0x8033158c` that loops all 4 kirby slots and dispatches the eject knockback; kirby is in r31. The clobbered instruction is `lwz r12, 0xd0(r12)` - vt+0xD0 is the `KirbyDoodlebugOut` wrapper. The other vt+0xD0 call site (`0x802e2804`, the Doodlebug item) is deliberately **not** hooked. The epilogue rebuilds r3 (=kirby), r4 (=stack+0x90), r5 (=stack+0x84), r6 (=30), r7 (=60) and r12 from r31 / r1 / immediates so the imminent vtable `bctrl` still has its arguments.
+The hook site `0x80331a94` is inside `TopRideSandPit_Update` (0x80331564), which loops all 4 kirby slots and dispatches the eject knockback; kirby is in r31. The clobbered instruction is `lwz r12, 0xd0(r12)` - vt+0xD0 is the `KirbyDoodlebugOut` wrapper. The other vt+0xD0 call site (`0x802e2804`, the Doodlebug item) is deliberately **not** hooked. The epilogue rebuilds r3 (=kirby), r4 (=stack+0x90), r5 (=stack+0x84), r6 (=30), r7 (=60) and r12 from r31 / r1 / immediates so the imminent vtable `bctrl` still has its arguments.
 
 ### Why no other TR scenery or damage path
 
-- **KirbyBurn (lava / fire tiles)** - `BurnAreaTickAll` (`zz_803218dc_`) calls `KirbyBurnMethod` once per kirby per frame, and KirbyBurn's own per-frame tick transitions back to Normal between frames. Neither a vtable-equality gate nor a state-ID gate suppresses the resulting spam; only a per-kirby frame-counter rising edge would, which is not worth it for lava alone.
-- **KirbySpin / KirbySandSpin / KirbyWhirlpool** (spin-class effectors at `0x802e7570 / 0x802e7750 / 0x802e79a4`) - none fire for the in-game sand pit, which ejects via `KirbyDoodlebugOut` instead.
+- **KirbyBurn (lava / fire tiles)** - the burn-area tick `zz_803218dc_` calls `TopRide_KirbyBurnMethod` (0x802d55c0) once per kirby per frame, and KirbyBurn's own per-frame tick transitions back to Normal between frames. Neither a vtable-equality gate nor a state-ID gate suppresses the resulting spam; only a per-kirby frame-counter rising edge would, which is not worth it for lava alone.
+- **KirbySpin / KirbySandSpin / KirbyWhirlpool** (spin-class effectors `TopRide_KirbySpinEffector`, `zz_802e75b4_` and `zz_802e794c_`, whose state calls sit at `0x802e7570 / 0x802e7750 / 0x802e79a4`) - none fire for the in-game sand pit, which ejects via `KirbyDoodlebugOut` instead.
 - **KirbyCrush** (heavy machine landing on a kirby) is kirby-vs-machine, not terrain.
 - **KirbyFreeze** in TR is item-derived (the Freeze projectile), not a stage hazard.
 - **KirbyPress** has both terrain-effector and physics-internal entry paths; neither is unambiguously scenery.

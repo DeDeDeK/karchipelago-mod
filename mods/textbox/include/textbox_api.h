@@ -5,7 +5,7 @@
 
 #define TEXTBOX_MOD_NAME "textbox"
 
-#define TEXTBOX_API_MAJOR 2
+#define TEXTBOX_API_MAJOR 3
 #define TEXTBOX_API_MINOR 0
 
 // Maximum colored runs per message.
@@ -19,7 +19,7 @@ typedef struct TextSegment
 } TextSegment;
 
 // Exported via Hoshi_ExportMod; every Enqueue* returns 1 on success, 0 if the message was dropped
-// (textbox disabled, bad or empty segment count, no screen canvas yet, or the Text failed to build).
+// (textbox disabled, bad or empty segment count, or no screen canvas yet).
 typedef struct TextBoxAPI
 {
     // printf-style single segment in DefaultColor.
@@ -34,9 +34,6 @@ typedef struct TextBoxAPI
     // EnqueueColoredNoun with a printf-style suffix.
     int (*EnqueueColoredNounFmt)(const char *prefix, const char *noun, GXColor noun_color,
                                  const char *suffix_format, ...);
-
-    // 1 when an Enqueue* would be accepted: the textbox is on and a screen canvas exists.
-    int (*IsReady)(void);
 
     // Palette for the game's own nouns; RGB only, alpha is owned by the fade.
     GXColor DefaultColor;

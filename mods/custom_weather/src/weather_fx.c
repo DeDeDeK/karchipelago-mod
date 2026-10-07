@@ -5,6 +5,7 @@
 #include "game.h"
 #include "stage.h"
 #include "collision.h"
+#include "inline.h"
 
 #include "weather_fx.h"
 
@@ -19,14 +20,7 @@ float Weather_Randf2(void)
 
 float Weather_RandRange(float lo, float hi)
 {
-    return lo + (hi - lo) * HSD_Randf();
-}
-
-int Weather_RandRangeI(int lo, int hi)
-{
-    if (hi <= lo)
-        return lo;
-    return lo + HSD_Randi(hi - lo + 1);
+    return lerp(lo, hi, HSD_Randf());
 }
 
 float Weather_RoundProgress(void)
@@ -78,10 +72,10 @@ void Weather_PlayBox(StageNode *sn, float *cx, float *cz, float *hx, float *hz)
 
 GOBJ *Weather_FindDonorRider(void)
 {
-    for (int i = 0; i < WEATHER_PLAYER_SLOTS; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
-        GOBJ *rg = stc_playerdata[i].rider_gobj;
-        if (stc_playerdata[i].player_kind == PKIND_NONE || !rg || !rg->userdata)
+        GOBJ *rg = Ply_GetRiderGObj(i);
+        if (Ply_GetPKind(i) == PKIND_NONE || !rg || !rg->userdata)
             continue;
         return rg;
     }
@@ -109,53 +103,10 @@ float Weather_WrapStep(float d, float v, float box)
     return d;
 }
 
-int Weather_PickEnabled(const int *mask, int n)
-{
-    int count = 0;
-    for (int i = 0; i < n; i++)
-    {
-        if (mask[i])
-            count++;
-    }
-    if (count == 0)
-        return -1;
-
-    int pick = HSD_Randi(count);
-    for (int i = 0; i < n; i++)
-    {
-        if (!mask[i])
-            continue;
-        if (pick == 0)
-            return i;
-        pick--;
-    }
-    return -1;
-}
-
 void Weather_SetAllEnabled(int *mask, int n, int val)
 {
     for (int i = 0; i < n; i++)
         mask[i] = val;
-}
-
-void WeatherGX_BeginXlu(COBJ *cam, int additive, int line_width)
-{
-    HSD_StateInitDirect(GX_VTXFMT0, 2);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-    GXSetNumTexGens(0);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA,
-                   additive ? GX_BL_ONE : GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE);
-    GXSetCullMode(GX_CULL_NONE);
-    if (line_width > 0)
-        GXSetLineWidth((u8)line_width, 5);
-    GXLoadPosMtxImm(&cam->view_mtx, GX_PNMTX0);
 }
 
 // Callers cache the NULL and retry every frame, so the warning latches; pool
@@ -176,24 +127,6 @@ GOBJ *WeatherGX_EnsureLayer(int entity_class, int p_link, void *cb, const char *
     }
     GObj_AddGXLink(g, cb, WEATHER_GX_LINK, WEATHER_GX_PRI);
     return g;
-}
-
-void WeatherGX_CameraEye(COBJ *cam, Vec3 *out)
-{
-    float (*m)[4] = cam->view_mtx;
-    float tx = m[0][3], ty = m[1][3], tz = m[2][3];
-    out->X = -(m[0][0] * tx + m[1][0] * ty + m[2][0] * tz);
-    out->Y = -(m[0][1] * tx + m[1][1] * ty + m[2][1] * tz);
-    out->Z = -(m[0][2] * tx + m[1][2] * ty + m[2][2] * tz);
-}
-
-void WeatherGX_BillboardVert(const Vec3 *P, const Vec3 *R, const Vec3 *U,
-                             float u, float v, u8 cr, u8 cg, u8 cb, u8 ca)
-{
-    GXPosition3f32(P->X + u * R->X + v * U->X,
-                   P->Y + u * R->Y + v * U->Y,
-                   P->Z + u * R->Z + v * U->Z);
-    GXColor4u8(cr, cg, cb, ca);
 }
 
 float WeatherGX_PlaceOnDome(const Vec3 *dir, const Vec3 *eye, float e2,

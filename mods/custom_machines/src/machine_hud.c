@@ -1,8 +1,4 @@
-// Where the engine draws or places a machine by its kind outside the machine itself: the
-// City Trial field blip and how high it rides, the stadium HUD's machine icon, and how far
-// the stat radar screen lowers the machine model. Each reads a vanilla per-kind table with
-// no bound, so a registered machine is answered from its registry index and descriptor.
-// Custom machine n shows frame 20 + n in both HUD art banks.
+#include <string.h>
 
 #include "os.h"
 #include "obj.h"
@@ -17,7 +13,6 @@
 #define BLIP_ARCHIVE        "IfAll2c"
 
 #define PPC_MR_R22_R3 0x7c761b78 // mr r22, r3
-#define PPC_NOP       0x60000000
 
 // CityBlip_Create (0x801226e8) poses one template joint per MachineKind 0..25 on its frame
 // of the blip TexAnim, and CityBlip_GXCallback (0x80122380) instances the template at
@@ -26,7 +21,7 @@
 // template is built and held here.
 static JOBJ *stc_blip_template[CUSTOM_MACHINE_MAX];
 
-// Replaces the bl MachineGObj_GetAbsoluteKind that indexes the template array.
+// Replaces the bl MachineGObj_GetAbsoluteKind at 0x80122414 that indexes the template array.
 static JOBJ *BlipTemplate(GOBJ *machine_gobj)
 {
     MachineData *md = machine_gobj->userdata;
@@ -45,8 +40,7 @@ static void BuildCustomBlips(void)
 {
     JOBJSet *set = Gm_Get3dData()->blip_scene_models[0];
 
-    for (int i = 0; i < CUSTOM_MACHINE_MAX; i++)
-        stc_blip_template[i] = NULL;
+    memset(stc_blip_template, 0, sizeof(stc_blip_template));
     if (!CustomMachineUiFrames_IsGrown(BLIP_ARCHIVE))
         return;
 
@@ -62,7 +56,7 @@ static void BuildCustomBlips(void)
 }
 CODEPATCH_HOOKCREATE(0x80122840, "", BuildCustomBlips, "", 0)
 
-// CityBlip_Destroy's tail, once the vanilla templates and every instance are gone.
+// CityBlip_Destroy's (0x80122a6c) tail, once the vanilla templates and every instance are gone.
 static void FreeCustomBlips(void)
 {
     for (int n = 0; n < CUSTOM_MACHINE_MAX; n++)

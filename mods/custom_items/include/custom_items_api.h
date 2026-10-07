@@ -2,15 +2,16 @@
 #define CUSTOM_ITEMS_API_H
 
 #include "datatypes.h"
+#include "structs.h"
 
 // New City Trial item kinds loaded from .dat archives in the FST items/ folder.
 
 #define CUSTOM_ITEMS_MOD_NAME  "custom_items"
-#define CUSTOM_ITEMS_API_MAJOR 3
+#define CUSTOM_ITEMS_API_MAJOR 4
 #define CUSTOM_ITEMS_API_MINOR 0
 
 // Invoked when a rider collects a custom item; `player` is the 0..4 slot.
-typedef void (*CustomItemPickupFn)(u32 id_hash, const char *name, int player);
+typedef void (*CustomItemPickupFn)(u32 id_hash, int player);
 
 // Published via Hoshi_ExportMod. Items are addressed by their id hash (derived
 // from the .dat's FST path), stable across reboots and folder reordering.
@@ -36,6 +37,10 @@ typedef struct CustomItemsAPI
     // Subscribe a pickup handler; every registered handler runs on each pickup.
     // A no-op if already present or the table is full.
     void (*AddPickupHandler)(CustomItemPickupFn handler);
+
+    // The item's ItemKind, custom kinds included. ItemData.kind holds a custom
+    // item's base kind, so it cannot tell one from the other.
+    int (*GetItemKind)(ItemData *item);
 } CustomItemsAPI;
 
 #endif // CUSTOM_ITEMS_API_H

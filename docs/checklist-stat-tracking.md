@@ -65,7 +65,7 @@ Known fields (offsets relative to `base`):
 | `+0x334` | int[11] | Per-`CopyKind` grant counter, bumped by `Ply_RecordCopyAbility` for every grant whatever the source | - | - |
 | `+0x360` | int[6] | Most recent `CopyKind`s granted, oldest first; entry count in the high 5 bits of `+0x378` (low 3 = the three ability-sequence flags `Ply_RecordCopyAbility` tests against the tables at `0x804b4c20`/`0x804b4c38`/`0x804b4c50`) | - | - |
 | `+0x37a` | u16 bits | Copy-Chance ability mask, **MSB-first**: bit `15 - CopyKind`, so byte `+0x37a` bit3 = Bomb and bit5 = Sleep. Written only by `Ply_MarkCopyAbilityObtained` (`0x8022f150`), which only the copy-wheel paths call, so the bit means "the wheel gave it" | `0x8022ed50` (bomb) / `0x8022eda8` (sleep) | 0x46 / 0x47 |
-| `+0x37c` | int[26] | Per-MachineKind change counter; sum = total Air Ride machine changes. Written by `Ply_IncrementGetOnMachineNum` (`0x8022f5bc`) from its one caller `RiderState_GetOnStarEnter` (`0x801ba190`), and only when `RiderData.respawn_machine_id` differs from the boarded `MachineData.instance_id` - so a swap is per machine *object*, not per kind, and re-boarding the machine the rider last respawned on never counts. Bikes index the array at `kind + 0x13`. | `0x8022f19c` (sums all 26) | 0x06 |
+| `+0x37c` | int[26] | Per-MachineKind change counter; sum = total Air Ride machine changes. Written by `Ply_IncrementGetOnMachineNum` (`0x8022f5bc`) from its one call site, `0x801ba190` in `RiderState_GetOnStarEnter` (`0x801ba054`), and only when `RiderData.respawn_machine_id` differs from the boarded `MachineData.instance_id` - so a swap is per machine *object*, not per kind, and re-boarding the machine the rider last respawned on never counts. Bikes index the array at `kind + 0x13`. | `0x8022f19c` (sums all 26) | 0x06 |
 | `+0x4b4` | int | KO-by-cause: CPU machine broken (written by `Ply_AddDeath` on cause byte) | `0x8022f418` | 0x4d |
 | `+0x4b8` | int | KO-by-cause: Firework | `0x8022f46c` | 0x60 |
 | `+0x4bc` | int | KO-by-cause: Gold Spike | `0x8022f4c0` | 0x5f |
@@ -164,7 +164,13 @@ function feeds: not the per-kind slot, not `Ply_GetItemCollectTotal`, not the
 first-20-seconds aggregate at `+0x804`, and not the Tac aggregate at `+0x808`.
 Without it an AP Patch would count as an Offense patch and an AP Box break as a
 blue box, letting one location category farm another's cells. Every other item,
-custom kinds included, takes the vanilla path unchanged.
+custom kinds included, reaches the vanilla counters unchanged.
+
+The `bl` itself is repointed too (`CODEPATCH_REPLACECALL`, `ap_check_detect.c`):
+`APCheckDetect_ItemCollect` calls `Ply_IncrementItemCollectNum` with the same arguments,
+then, for a human in a City Trial round, counts the pickup toward the AP checklist's
+event and Dyna Blade boxes. Box breaks (kinds 0-2) reach the vanilla counter but none of
+the AP counts.
 
 The only other writer is the mod's permanent-patch apply (`PermanentPatch_DoApply`),
 which adds each stat's round-start rise straight into the per-kind slot on the City
@@ -185,8 +191,8 @@ and the all-up legendary drop when a collected Hydra/Dragoon piece is thrown.
 The `3..0x43` lower bound in `Ply_GetItemCollectTotal` is *why* the "pick up N
 items" checklist counts patches/abilities/food/etc. but never boxes.
 
-**ItemKind indices used by checklist cells** (in addition to the patch list in
-`How CheckForNewUnlocks consumes them`): `0x27` = Maxim Tomato (-> 0x61),
+**ItemKind indices used by checklist cells** (besides the patch kinds the per-patch
+cells read): `0x27` = Maxim Tomato (-> 0x61),
 `0x28` = Energy Drink (-> 0x62), `0x30` = sushi (-> 0x6b), `0x31` = hot dog (-> 0x6c).
 
 ## City Trial Evaluators
@@ -201,9 +207,8 @@ items" checklist counts patches/abilities/food/etc. but never boxes.
 | `0x8004f03c` | `CityTrial_CheckStadiumKOObjectives` | 0x23-0x27, 0x2B, 0x2C, 0x51, 0x53, 0x55, 0x57, 0x59, 0x5B |
 | `0x8017e490` | `Checklist_ProcessUnlock` (meta) | 0x37, 0x6d, 0x6e, each set by a direct `stb` rather than through `SetNewUnlock` |
 
-> **`CityTrial_CheckStadiumKOObjectives` handles single-game Destruction
-> Derby / Kirby Melee KO-count cells** - not the "Single Race" stadium or any
-> lap/time cell, despite where it sits in the table. It switches on
+> **`CityTrial_CheckStadiumKOObjectives` handles the single-game Destruction
+> Derby / Kirby Melee KO-count cells.** It switches on
 > `GameData+0xa94` (14 = Destruction Derby, 13 = Kirby Melee) then
 > `GameData+0x5ad` (specific stadium id: DD1..DD5 = 9..13, KM1/KM2 = 7/8).
 
@@ -215,7 +220,7 @@ accumulator block (see below); `+0xNN` = per-player stat offset; `byte[idx]` =
 yakumono array `+0x62b+idx`; `collect[k]` = item array `+0x4c8[k]`. Evaluator
 codes: **FNU** = CheckForNewUnlocks, **FR** = CheckFreeRun, **SP** =
 CheckStadiumPlayed, **SS** = CheckStadiumScore, **ST** = CheckStadiumResult,
-**SR** = CheckSingleRace (KO), **PU** = Checklist_ProcessUnlock.
+**KO** = CheckStadiumKO, **PU** = Checklist_ProcessUnlock.
 
 | ck | Objective | Eval | Condition |
 |----|-----------|------|-----------|
@@ -254,16 +259,16 @@ CheckStadiumPlayed, **SS** = CheckStadiumScore, **ST** = CheckStadiumResult,
 | 0x20 | Air Glider > 660 ft | ST | `>= 660.0` |
 | 0x21 | Air Glider > 1300 ft | ST | `>= 1300.0` |
 | 0x22 | Air Glider airborne > 30 s | ST | `+0x5f4 >= 1800` |
-| 0x23 | DD1 KO rivals 5x | SR | `GameData+0xA38[p] >= 5` (id 9) |
-| 0x24 | DD2 KO rivals 5x | SR | `>= 5` (id 10) |
-| 0x25 | DD3 KO rivals 5x | SR | `>= 5` (id 11; no 10x cell) |
-| 0x26 | DD4 KO rivals 5x | SR | `>= 5` (id 12) |
-| 0x27 | DD5 KO rivals 5x | SR | `>= 5` (id 13) |
+| 0x23 | DD1 KO rivals 5x | KO | `GameData+0xA38[p] >= 5` (id 9) |
+| 0x24 | DD2 KO rivals 5x | KO | `>= 5` (id 10) |
+| 0x25 | DD3 KO rivals 5x | KO | `>= 5` (id 11; no 10x cell) |
+| 0x26 | DD4 KO rivals 5x | KO | `>= 5` (id 12) |
+| 0x27 | DD5 KO rivals 5x | KO | `>= 5` (id 13) |
 | 0x28 | DD1 bust all rocks | ST | `sum_present byte[0x17] >= 2` (id 9) |
 | 0x29 | DD (all) KO enemies 50x | ST | `records+0xa` (u16) `>= 50` |
 | 0x2A | DD (all) KO enemies 150x | ST | `records+0xa >= 150` |
-| 0x2B | Melee1 KO 50x | SR | `GameData+0xA38[p] >= 50` (id 7) |
-| 0x2C | Melee2 KO 30x | SR | `>= 30` (id 8) |
+| 0x2B | Melee1 KO 50x | KO | `GameData+0xA38[p] >= 50` (id 7) |
+| 0x2C | Melee2 KO 30x | KO | `>= 30` (id 8) |
 | 0x2D | Melee (all) KO 500x | ST | `records+0xc` (u16) `>= 500` |
 | 0x2E | Melee (all) KO 1500x | ST | `records+0xc >= 1500` |
 | 0x2F | KO King Dedede < 1 min | ST | `+0x848 != 0 && <= 3600` |
@@ -300,17 +305,17 @@ CheckStadiumPlayed, **SS** = CheckStadiumScore, **ST** = CheckStadiumResult,
 | 0x4e | damage all 3 CPU rivals | FNU | distinct-rivals-damaged (`0x80231cec`) `>= 3` |
 | 0x4f | 50+ items in one game | FNU | `Ply_GetItemCollectTotal(p) >= 50` |
 | 0x50 | 10+ Boost patches | FNU | `collect[3] >= 10` |
-| 0x51 | DD1 KO a rival 10x | SR | `GameData+0xA38[p] >= 10` (id 9) |
+| 0x51 | DD1 KO a rival 10x | KO | `GameData+0xA38[p] >= 10` (id 9) |
 | 0x52 | 10+ Top Speed patches | FNU | `collect[5] >= 10` |
-| 0x53 | DD2 KO a rival 10x | SR | `>= 10` (id 10) |
+| 0x53 | DD2 KO a rival 10x | KO | `>= 10` (id 10) |
 | 0x54 | 10+ Turn patches | FNU | `collect[0xb] >= 10` |
-| 0x55 | DD4 KO a rival 10x | SR | `>= 10` (id 12) |
+| 0x55 | DD4 KO a rival 10x | KO | `>= 10` (id 12) |
 | 0x56 | 10+ Charge patches | FNU | `collect[0xf] >= 10` |
-| 0x57 | DD5 KO a rival 10x | SR | `>= 10` (id 13) |
+| 0x57 | DD5 KO a rival 10x | KO | `>= 10` (id 13) |
 | 0x58 | 10+ Weight patches | FNU | `collect[0x11] >= 10` |
-| 0x59 | Melee1 KO 75x by self | SR | `GameData+0xA38[p] >= 75` (id 7) |
+| 0x59 | Melee1 KO 75x by self | KO | `GameData+0xA38[p] >= 75` (id 7) |
 | 0x5a | 10+ Defense patches | FNU | `collect[9] >= 10` |
-| 0x5b | Melee2 KO 40x by self | SR | `>= 40` (id 8) |
+| 0x5b | Melee2 KO 40x by self | KO | `>= 40` (id 8) |
 | 0x5c | 10+ Glide patches | FNU | `collect[0xd] >= 10` |
 | 0x5d | 30+ Glide patches (cumulative) | FNU | `records+0x3` (sum_human `collect[0xd]`) `>= 30` |
 | 0x5e | Sensor Bomb KO 3x | FNU | `records+0x0` (sum_human `+0x4c0`) `>= 3` |
@@ -471,7 +476,7 @@ table[i].field0 && Ply_GetMachineKind(killer) == table[i].field1` it sets bit
 | (9) | 6 | (unread) | Hydra (0x04) | Dragoon (0x08) |
 
 Table entries 8/9 (Dragoon<->Hydra mutual busts) are written but **never read** by
-the getter (idx only 0..7) - likely vestigial. **Legendary-machine assembly** is
+the getter (idx only 0..7). **Legendary-machine assembly** is
 a *separate* mechanism: `+0x84d` bit2 (Dragoon) / bit3 (Hydra), written by
 `Ply_MarkLegendaryMachineAssembled` (`0x80231198`), which drives cell 0x77.
 
@@ -548,14 +553,15 @@ Air Ride clear bits are the `clear[]` of the **type-0** `GameClearData` slot
 `ClearChecker_SetNewUnlock(0, kind)` (`0x8004a054`), gated by
 `ClearChecker_GetKindClear` (`0x8004a130`) returning `(flags & 5) == 0`. Unlike
 City Trial's single per-game finalizer, Air Ride runs **three independent entry
-points**, all sharing the gate `Net_IsSessionActive()==0 &&
-!_D_CheckIfReplay() && _DHud_GetUnkFromPKind()==0 && Scene_GetCurrentMajor()==4`:
+points**, all sharing the gate `Net_IsSessionActive()==0 && !Gm_IsReplay() &&
+!Gm_IsTitleMajor() && Scene_GetCurrentMajor()==4` (the per-frame one also bails while
+`0x8000a97c` returns nonzero):
 
 | Entry point | Addr | Trigger | Owns |
 |---|---|---|---|
 | `AirRide_CheckObjectivesPerFrame` | `0x8004a7f0` | every frame from `Game_Think` | per-frame / cumulative cells (Table B) |
 | `AirRide_CheckRaceFinishObjectives` | `0x8004aa58` | race finish, via `MinorExit_AirRideMachineSelect` | race-finish cells (Table A) + writes the cumulative accumulators + the distance cells |
-| `AirRide_DispatchFreeRunObjectives` / `AirRide_DispatchRaceTimeAttackObjectives` | `0x8004a90c` / `0x8004a994` | per-lap from `AirRide_OnFinishRace` (free-run) / `race3D_isFinished` (race) | the per-stage time/lap/distance evaluators |
+| `AirRide_DispatchFreeRunObjectives` / `AirRide_DispatchRaceTimeAttackObjectives` | `0x8004a90c` / `0x8004a994` | per-lap from `AirRide_OnLapComplete` (free-run) / `race3D_isFinished` (race) | the per-stage time/lap/distance evaluators |
 
 **Sub-mode discriminant** `Gm_GetAirRideMode()` (`0x8003d5f0`, `GameData+0x35d`,
 enum `AIRRIDEMODE_*`) selects which per-stage evaluator runs:
@@ -687,11 +693,11 @@ group 0 -> `AirRide_TrackMinLapSpeed`, group 7 -> `0x80231700` (the Beanstalk Fe
 tracker) - with group 9 handled by a separate `bl 0x8023177c`. So the watcher only runs
 on Fantasy Meadows in the first place. Four early-outs above the dispatch suppress it
 entirely for that frame (leaving bit4 as it stands): `Gm_GetIntroState()` not in {0, 4},
-`0x8022d434` (`RiderData+0x826` bit5) set, `Ply_CheckIfFallDead?` (`RiderData+0x823`
-bit2) set, or `0x8000a97c` non-zero.
+`0x8022d434` (`RiderData+0x826` bit5) set, `Ply_CheckIfFallDead` (`0x8022cc30`, `RiderData+0x823`
+& 0x08) set, or `0x8000a97c` non-zero.
 
 What it measures is `MachineData.world_velocity` (`+0x354`) - the machine's *measured*
-per-frame displacement, computed by `Machine_ShadowThink` (`0x801c69f0`) as
+per-frame displacement, computed by `Machine_EndFrameThink` (`0x801c69f0`) as
 `pos (0x3e8) - prev_pos (0x3f4)`, not the commanded velocity at `+0x324`. Collisions,
 wall scrapes and slope drag are therefore already folded in. The watcher takes
 `VECMag` of that vector, divides by the mile/km constant `1.609344` (double at
@@ -853,7 +859,7 @@ Three evaluator functions cover all 120 cells, all gated by
 
 | Evaluator | Addr | Trigger | Owns |
 |---|---|---|---|
-| `TopRide_CheckPerCourseObjectives` | `0x802b88f4` | per-frame, `TopRide_FielderUpdate` / `TopRide_CheckForNewUnlocks` (`0x802ac850`) | per-course objective cells + Time-Attack cells |
+| `TopRide_CheckPerCourseObjectives` | `0x802b88f4` | per-frame for every occupied slot, from `TopRide_GameModeNormalUpdate` (`0x8029c650`) and `TopRide_GameModeTuningUpdate` (`0x802ac850`) | per-course objective cells + Time-Attack cells |
 | `TopRide_CheckPerCourseObjectives_B` | `0x802b7dac` | same | per-course "100 laps" + Free-Run lap cells + several cumulative cells |
 | `TopRide_CheckSessionFinalizeObjectives` | `0x802b777c` | end of session, `Singleton_GlobalDestructor` | cross-session cumulative counters + the "5 s faster than #2" cells |
 

@@ -28,11 +28,6 @@ static void OnBoot(void)
     EventSky_OnBoot();
 }
 
-static void OnFrameEnd(void)
-{
-    Tornado_OnFrameEnd();
-}
-
 static MenuDesc top_menu = {
     .option_num = 14,
     .options = {
@@ -133,5 +128,4 @@ ModDesc mod_desc = {
     .affects_gameplay = 1,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
-    .OnFrameEnd = OnFrameEnd,
 };

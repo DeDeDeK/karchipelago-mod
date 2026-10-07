@@ -14,6 +14,12 @@
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
 
+static void DebugMenu_Notify(const char *msg)
+{
+    if (tb_api)
+        tb_api->Enqueue("%s", msg);
+}
+
 static int machine_state[AP_MACHINE_BIT_NUM];
 static int ability_state[COPYKIND_NUM];
 static int event_state[EVKIND_NUM];
@@ -37,15 +43,21 @@ static int ap_patch_count_state;
 // must not replay a bucketed value back over a seed that sits between rows.
 static int ap_patch_count_synced = -1;
 
-// Nearest row at or below the live count, so a seed's own value shows as the
-// closest offered size rather than snapping the option back to Off.
+// Nearest offered row at or below a live value, so a seed between rows shows as the
+// closest size rather than snapping the option to its first entry.
+static int NearestRow(const int *map, int num, int live)
+{
+    int row = 0;
+    for (int i = 1; i < num; i++)
+        if (live >= map[i])
+            row = i;
+    return row;
+}
+
 static void RefreshApPatchCount(void)
 {
     int n = ap_api ? ap_api->GetApPatchCount() : 0;
-    ap_patch_count_state = 0;
-    for (int i = 1; i < (int)(sizeof(ap_patch_count_map) / sizeof(ap_patch_count_map[0])); i++)
-        if (n >= ap_patch_count_map[i])
-            ap_patch_count_state = i;
+    ap_patch_count_state = NearestRow(ap_patch_count_map, GetElementsIn(ap_patch_count_map), n);
     ap_patch_count_synced = ap_patch_count_state;
 }
 
@@ -139,7 +151,7 @@ static void RefreshStateFromMasks(void)
         for (int i = 0; i < n; i++) arr[i] = 1; \
         synced_mask[cat] = m; \
         OSReport("[ApDebug] Unlocked all " label ": " #cat " = %s\n", MaskBits(m, n)); \
-        ap_api->Textbox("All " label " unlocked"); \
+        DebugMenu_Notify("All " label " unlocked"); \
         return 1; \
     } \
     static int prefix##LockAll(OptionDesc *self) { \
@@ -150,7 +162,7 @@ static void RefreshStateFromMasks(void)
         for (int i = 0; i < n; i++) arr[i] = 0; \
         synced_mask[cat] = 0; \
         OSReport("[ApDebug] Locked all " label ": " #cat " = %s\n", MaskBits(0, n)); \
-        ap_api->Textbox("All " label " locked"); \
+        DebugMenu_Notify("All " label " locked"); \
         return 1; \
     }
 
@@ -476,13 +488,12 @@ void DebugMenu_GiveRandomModeItem(MajorKind major)
     {
         // Only copy abilities are honored outside CT; every other ITKIND no-ops
         // behind the Gm_IsInCity gate.
-        picked = AP_ITKIND_COPYBOMB + HSD_Randi(AP_ITKIND_COPYMIKE - AP_ITKIND_COPYBOMB + 1);
+        picked = RandomInRange(AP_ITKIND_COPYBOMB, AP_ITKIND_COPYMIKE);
         mode_name = "AR";
     }
     else if (major == MJRKIND_TOP)
     {
-        picked = AP_TOPRIDE_ITEM_GIVE_BASE +
-                 HSD_Randi(AP_TOPRIDE_ITEM_GIVE_PARTY_BALL - AP_TOPRIDE_ITEM_GIVE_BASE + 1);
+        picked = RandomInRange(AP_TOPRIDE_ITEM_GIVE_BASE, AP_TOPRIDE_ITEM_GIVE_PARTY_BALL);
         mode_name = "TR";
     }
     else
@@ -500,9 +511,9 @@ static int GiveEnergy1000(OptionDesc *self)
 {
     (void)self;
     if (!ap_api) return 1;
-    ap_api->AddEnergy(1000.0f);
+    ap_api->DebugSetEnergyBalance(ap_api->GetEnergyBalance() + 1000);
     OSReport("[ApDebug] Added 1000 energy\n");
-    ap_api->Textbox("Added 1000 energy");
+    DebugMenu_Notify("Added 1000 energy");
     return 1;
 }
 
@@ -559,7 +570,7 @@ static int CheckDbgClearAll(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugClearAllSentChecks();
-    ap_api->Textbox("Cleared all sent_checks");
+    DebugMenu_Notify("Cleared all sent_checks");
     return 1;
 }
 
@@ -568,7 +579,7 @@ static int CheckDbgForceMarkAll(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugForceMarkAllChecks();
-    ap_api->Textbox("Force-marked all sent_checks");
+    DebugMenu_Notify("Force-marked all sent_checks");
     return 1;
 }
 
@@ -579,7 +590,7 @@ static void OnApPatchCountChange(int v)
     ap_patch_count_synced = v;
     int n = ap_patch_count_map[v];
     ap_api->DebugSetApPatchCount(n);
-    OSReport("[ApDebug] ap_patches = %d, registers on the next round load\n", n);
+    OSReport("[ApDebug] ap_patches = %d\n", n);
 }
 
 static int ApPatchDbgCollect(OptionDesc *self)
@@ -587,9 +598,9 @@ static int ApPatchDbgCollect(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     if (ap_api->DebugCollectApPatch())
-        ap_api->Textbox("Collected an AP Patch");
+        DebugMenu_Notify("Collected an AP Patch");
     else
-        ap_api->Textbox("No AP Patch left to collect");
+        DebugMenu_Notify("No AP Patch left to collect");
     return 1;
 }
 
@@ -598,7 +609,7 @@ static int CheckDbgTriggerGoal(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugTriggerGoalComplete();
-    ap_api->Textbox("Goal triggered");
+    DebugMenu_Notify("Goal triggered");
     return 1;
 }
 
@@ -607,7 +618,7 @@ static int CheckDbgRevealAll(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugRevealAllChecklists();
-    ap_api->Textbox("All checklists revealed");
+    DebugMenu_Notify("All checklists revealed");
     return 1;
 }
 
@@ -615,7 +626,7 @@ static int RevealChecklistRow(int row, const char *msg)
 {
     if (!ap_api) return 1;
     ap_api->DebugRevealChecklist(row);
-    ap_api->Textbox(msg);
+    DebugMenu_Notify(msg);
     return 1;
 }
 
@@ -648,7 +659,7 @@ static int CheckDbgSimulateLocationData(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugSimulateLocationData();
-    ap_api->Textbox("Simulated location data applied");
+    DebugMenu_Notify("Simulated location data applied");
     return 1;
 }
 
@@ -657,7 +668,7 @@ static int CheckDbgClearAllChecklistData(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugClearAllChecklistData();
-    ap_api->Textbox("Cleared all checklist data");
+    DebugMenu_Notify("Cleared all checklist data");
     return 1;
 }
 
@@ -694,17 +705,6 @@ static char *goal_amount_values[] = {"1", "5", "10", "25", "50", "100", "120"};
 static const int goal_amount_map[] = {1, 5, 10, 25, 50, 100, 120};
 static int goal_amount_state;
 
-// Nearest offered row at or below a live value, so a seed between rows shows as the
-// closest size rather than snapping the option to its first entry.
-static int NearestRow(const int *map, int num, int live)
-{
-    int row = 0;
-    for (int i = 1; i < num; i++)
-        if (live >= map[i])
-            row = i;
-    return row;
-}
-
 // The amount is one row for four goals, so it follows the first row actually on the
 // count goal; with none there it keeps whatever it was left at.
 static void RefreshGoals(void)
@@ -735,7 +735,7 @@ static int GoalDbgApply(OptionDesc *self)
     ap_api->DebugSetGoals(goal_state, goal_amount_map[goal_amount_state]);
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
         OSReport("[ApDebug] %s goal = %s\n", checklist_row_names[r], goal_values[goal_state[r]]);
-    ap_api->Textbox("Goals applied");
+    DebugMenu_Notify("Goals applied");
     return 1;
 }
 
@@ -836,7 +836,7 @@ static int SlotOptDbgReapply(OptionDesc *self)
     ap_api->DebugReapplySlotOptions();
     RefreshStateFromMasks();
     OSReport("[ApDebug] Re-applied slot options over a cleared mask set\n");
-    ap_api->Textbox("Slot options re-applied");
+    DebugMenu_Notify("Slot options re-applied");
     return 1;
 }
 
@@ -1024,7 +1024,7 @@ static int LinkDbgDeathlink(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugTriggerDeathlinkReceive();
     OSReport("[ApDebug] Armed deathlink_receive\n");
-    ap_api->Textbox("DeathLink armed");
+    DebugMenu_Notify("DeathLink armed");
     return 1;
 }
 
@@ -1034,7 +1034,7 @@ static int LinkDbgTraplink(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugTriggerTraplinkReceive();
     OSReport("[ApDebug] Armed traplink_receive\n");
-    ap_api->Textbox("TrapLink armed");
+    DebugMenu_Notify("TrapLink armed");
     return 1;
 }
 
@@ -1045,7 +1045,7 @@ static int EnergyDbgDrain(OptionDesc *self)
     ap_api->DebugSetEnergyBalance(0);
     RefreshEnergy();
     OSReport("[ApDebug] Energy balance drained to 0\n");
-    ap_api->Textbox("Energy drained");
+    DebugMenu_Notify("Energy drained");
     return 1;
 }
 
@@ -1054,7 +1054,7 @@ static int ApPatchDbgClearCollected(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugClearApPatchCollected();
-    ap_api->Textbox("Cleared collected AP Patches");
+    DebugMenu_Notify("Cleared collected AP Patches");
     return 1;
 }
 
@@ -1063,7 +1063,7 @@ static int StateDbgReport(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugReportState();
-    ap_api->Textbox("AP state written to the console");
+    DebugMenu_Notify("AP state written to the console");
     return 1;
 }
 
@@ -1073,7 +1073,7 @@ static int StateDbgResetProgression(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugResetProgression();
     RefreshCheckProgress();
-    ap_api->Textbox("Progression reset");
+    DebugMenu_Notify("Progression reset");
     return 1;
 }
 
@@ -1629,17 +1629,8 @@ static MenuDesc checks_menu = {
         A("Trigger goal_complete",   "Set only goal_complete (sent_checks unchanged)", CheckDbgTriggerGoal),
         S("Reveal Checklists",       "Make checkboxes visible (visual only)",       reveal_menu),
         A("Simulate Location Data",  "Fill location arrays with a random shuffle",  CheckDbgSimulateLocationData),
-        A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, and location shuffle", CheckDbgClearAllChecklistData),
-        &(OptionDesc){
-            .name = "AP Patches",
-            .description = "Override the seed's AP Patch location count; the drop-ins register at the next round load.",
-            .kind = OPTKIND_VALUE,
-            .no_save = 1,
-            .val = &ap_patch_count_state,
-            .value_num = 4,
-            .value_names = ap_patch_count_values,
-            .on_change = OnApPatchCountChange,
-        },
+        A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, AP objective progress and location shuffle", CheckDbgClearAllChecklistData),
+        V("AP Patches",              "Override the seed's AP Patch location count", ap_patch_count_state, ap_patch_count_values, OnApPatchCountChange),
         A("Collect AP Patch",        "Claim the lowest unclaimed AP Patch",         ApPatchDbgCollect),
         A("Clear Collected AP Patches", "Clear every collected bit, so they can be claimed again", ApPatchDbgClearCollected),
     },
@@ -1735,7 +1726,7 @@ static MenuDesc messages_menu = {
 static MenuDesc links_menu = {
     .option_num = 2,
     .options = {
-        A("Arm DeathLink", "Set deathlink_receive; it lands at the next round", LinkDbgDeathlink),
+        A("Arm DeathLink", "Set deathlink_receive", LinkDbgDeathlink),
         A("Arm TrapLink",  "Set traplink_receive; the mode picks the trap",     LinkDbgTraplink),
     },
 };

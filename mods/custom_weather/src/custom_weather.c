@@ -5,6 +5,7 @@
 #include "hsd.h"
 #include "stage.h"
 #include "code_patch/code_patch.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
@@ -390,7 +391,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
     },
 };
 
-_Static_assert(sizeof(custom_defs) / sizeof(custom_defs[0]) == WEATHER_CUSTOM_NUM,
+_Static_assert(GetElementsIn(custom_defs) == WEATHER_CUSTOM_NUM,
                "custom_defs must carry one entry per custom preset");
 
 const CustomPresetDef *CustomWeather_GetPresetDef(int weather_kind)
@@ -410,7 +411,7 @@ static const char *preset_names[WEATHER_TOTAL] = {
     "Tornado",
 };
 
-_Static_assert(sizeof(preset_names) / sizeof(preset_names[0]) == WEATHER_TOTAL,
+_Static_assert(GetElementsIn(preset_names) == WEATHER_TOTAL,
                "preset_names must carry one name per preset");
 
 const char *CustomWeather_GetPresetName(int weather_kind)
@@ -429,14 +430,14 @@ static int weather_enabled[WEATHER_TOTAL] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1,
 };
-_Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_TOTAL,
+_Static_assert(GetElementsIn(weather_enabled) == WEATHER_TOTAL,
                "weather_enabled init must match WEATHER_TOTAL");
 
 // Written into HSD_Fog.scale. HSD_FogSet emits GXSetFog(..., end * scale, ...), so
 // <1 pulls the fog wall in and >1 pushes it out.
 static const float fog_distance_factors[] = {1.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
 static char *fog_distance_names[] = {"Preset", "50%", "75%", "100%", "125%", "150%", "200%"};
-#define FOG_DISTANCE_NUM (sizeof(fog_distance_factors) / sizeof(fog_distance_factors[0]))
+#define FOG_DISTANCE_NUM GetElementsIn(fog_distance_factors)
 static int fog_distance_index = 0;
 
 float CustomWeather_GetFogScale(void)
@@ -499,7 +500,7 @@ static void CustomWeather_OverrideSky(GrObj *grobj)
 {
     CustomWeather_ExtendPresetArray(grobj);
 
-    int preset = Weather_PickEnabled(weather_enabled, WEATHER_TOTAL);
+    int preset = Gm_Roll(weather_enabled, WEATHER_TOTAL);
     if (preset < 0)
         preset = WEATHER_DAY;
 

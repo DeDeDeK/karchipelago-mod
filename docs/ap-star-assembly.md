@@ -230,8 +230,8 @@ three parts hands over Hydra.
 
 ## Collection
 
-`custom_items` fires the mod's pickup handler from its hook on `Machine_OnTouchItem`,
-naming the item and the collecting player. The handler ORs a bit into a per-player
+`custom_items` fires the mod's pickup handler from `Machine_OnTouchItem` once a touch
+collects the sphere, passing the item's id hash and the collecting player. The handler ORs a bit into a per-player
 six-bit mask held in the mod rather than in the player data, where `Ply_GetHydraPieceMask`
 (`0x8022cce8`) and `Ply_GetDragoonPieceMask` (`0x8022cdac`) read the vanilla sets' three-bit
 masks. The mask is cleared at every scene change, so each round starts from an
@@ -289,7 +289,10 @@ no piece is held, and putting spheres in the quota is exactly what makes it reac
 `Ply_DecrementItemCollectNum` (`0x8022fb58`) guards `ply < 5` and `kind != -1` but neither
 end of the array - a sphere's kind would write past the struct. The pickup counted the
 clamped base kind (`ITKIND_HYDRA1`, the Hydra Part X slot), so the drop takes it back off
-the same slot.
+the same slot. A sphere handed over through `CollectPiece` was never counted, so its drop
+takes that slot, and the first-20-seconds item total at `+0x804` if the round is that young,
+one below what was picked up; no checklist cell reads the slot, and the total only matters
+for a give and a drop both landing in a round's first 20 seconds.
 
 **The mask.** Both vanilla branches XOR a piece mask by `1 << (kind - 0x37)` or
 `1 << (kind - 0x3a)`, which a sphere kind runs off the end of. The conditional hook clears
@@ -308,27 +311,41 @@ anchor of its half, so a slot says how many pieces are held rather than which. N
 is drawn for a piece the player does not have.
 
 The Archipelago row is a second row of the same shape rather than a share of that one,
-because all six of its anchors are already spoken for. Anchor positions are read
-straight off the position model's `JOBJDesc` - the anchors are children of the root with
-no rotation and unit scale, so a world position is the sum of two translations - and the
-AP row is that set shifted 3.4 HUD units down. Reading the descriptor rather than an
-instance means the AP row needs no position-model element of its own, and it picks up
-the per-player-count spacing (2.5 / 2.4 / 2.1 units) for free.
+because all six of its anchors are already spoken for. It needs no position model of its
+own: an icon goes where vanilla would put one on the same anchor - the anchor joint's world
+position in the viewport's own instance of the vanilla position model,
+`Game3dData.legendary_hud_gobj[view]` - shifted 3.4 HUD units down. The instance rather
+than the descriptor is what carries the viewport: `HUD_CreateElement` (`0x80114ba4`) moves
+an element's root to a per-viewport offset whenever more than one viewport is up, so a
+position read off the descriptor would land every split-screen row at the single-screen
+spot. The instance also carries the per-player-count spacing (2.5 / 2.4 / 2.1 units). Vanilla
+builds it in `3D_InitMapAndPrompt` (`0x80113150`), which `SceneLoad_3D` runs before the 3D
+load-end callbacks, so it is always there by the time a sphere can arrive.
+
+Vanilla builds a row only for a viewport that is on (`Gm_IsViewOn`, checked at
+`0x80113ed8`), so only a player with a screen has one. The AP row does the same: a CPU's
+spheres are tracked in the mask but drawn nowhere, rather than over a human's row.
 
 An icon is created exactly the way a vanilla one is: `HUD_CreateElement` on the
-collecting player, relinked to `GAMEPLINK_PAUSEHUD` with `GObj_SetPLink`, given element
-data of `HUDKIND_LEGENDARYPIECE` (59), and positioned at its anchor. The vanilla tracker diffs the piece
+collecting player's viewport - its first argument is the viewport, not the player -
+relinked to `GAMEPLINK_PAUSEHUD` with `GObj_SetPLink`, given element data of
+`HUDKIND_LEGENDARYPIECE` (59) with the player and the viewport, and positioned at its
+anchor. The vanilla tracker diffs the piece
 mask against a cached copy once a frame rather than reacting to the pickup; this does the
-same, so no GObj is created from inside the collision call that collected the sphere.
+same, so no GObj is created from inside the collision call that collected the sphere. The
+diff runs from a proc-only GObj created with the row, on p_link 0, which neither the match
+pause nor a pickup hitstop freezes, so a sphere given during either shows at once.
+
 The diff runs both ways: a dropped sphere clears its bit, its icon is destroyed and the
 icons behind it slide left onto the freed anchors, so the row never shows a color the
 player no longer holds and collecting that color again cannot put a second icon of it on
 the row.
+
 Icons are destroyed on assembly, which is also when the vanilla mount clears its own masks
 and the vanilla icons vanish.
 
 The row is built for every City Trial round, whatever the gate says: the icon archive
-loads and the anchors are read before the delivery schedule is rolled, because a sphere
+loads and the tracker's proc starts before the delivery schedule is rolled, because a sphere
 given through `CollectPiece` lands whether or not any sphere is in play that round.
 
 The art is `mods/ap_star/assets/ApPieceIcons.dat`, one alpha-cut textured quad per
@@ -354,8 +371,8 @@ star gets the same 28-frame lead-in, world freeze, HUD drop, rider pose, scripte
 in on six streaks where Hydra has three parts on three.
 
 This mod's whole share is one call, on the frame a player completes the set:
-`ApStar_StartAssembly(ply)`, which resolves the star's `MachineKind` and hands it to the
-registry. It returns 0 when the cinematic could not run - no machine registered, one already
+`CustomMachinesAPI.StartAssembly` with the star's `MachineKind`, bound at `OnSaveLoaded`. It
+returns 0 when the cinematic could not run - no machine registered, one already
 up, the star's cutscene already run once this round, or a rider the vanilla assembly state does
 not cover, since `RiderGObj_EnterLegendaryAssembly` (`0x8019248c`) is Kirby-only and the cinematic
 would play and hand back no machine - and this mod then gives the plain mount and the completion
@@ -374,9 +391,8 @@ since its class slot is whatever the registry handed the machine this boot, and 
 star as the player's respawn kind (`CustomMachinesAPI.GetRespawnKind`), which `archipelago`'s
 respawn hook reads first so a later respawn keeps it.
 
-`ApStar_Mount` is the fallback for the cases the cinematic cannot cover, and the mount is the
-registry's there too: it hands the star to `CustomMachinesAPI.MountMachine`, which fires that
-same recreate with no presentation around it. The registry runs it at the next frame
+The fallback for the cases the cinematic cannot cover is the registry's mount too:
+`CustomMachinesAPI.MountMachine` fires that same recreate with no presentation around it. The registry runs it at the next frame
 boundary, since collection lands inside `Machine_OnTouchItem` and the recreate would tear
 down the machine that call is running on; with a cinematic the mount comes out of its own
 proc instead, which is already past that call.
@@ -489,10 +505,10 @@ Red Box while boxes are gated.
 Archipelago Star all assembled by one player in one round. Its three inputs are per-round -
 `PlayerStats.flags_84d` bits `0x04` and `0x08`, which `Ply_MarkLegendaryMachineAssembled`
 (`0x80231198`) sets and which are zeroed with the rest of `PlayerStats` on scene load, plus
-the star's own assembly mask, cleared at the same point. It is polled from
-`APCheckDetect_OnFrameStart` in `mods/archipelago/src/ap_check_detect.c` rather than the
-per-rider sampler the other City Trial objectives use, because the mount rebuilds the rider
-that sampler hangs off.
+the star's own assembly mask, cleared at the same point. It is read by the City Trial
+per-rider sampler in `mods/archipelago/src/ap_check_detect.c`, like the other City Trial
+objectives: the mount recreates only the machine, so the rider GObj the sampler hangs off
+survives it.
 
 Two `APGoalKind` values are backed by these cells: `GOAL_ASSEMBLE_AP_STAR` reads the
 `APCK_ASSEMBLE_AP_STAR` bit and `GOAL_ALL_LEGENDARIES_CT` reads

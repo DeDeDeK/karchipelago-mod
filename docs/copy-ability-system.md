@@ -68,10 +68,10 @@ While the rider is in the ability action-state, `abilityTimerBranchToAbilityCoun
 Teardown is layered; the drop path calls the top and each layer calls the next:
 
 1. **Per-ability revert** - e.g. `Fire_LoseAbility_Exit` (0x801af330), `abilityTimer_Sword_revertModel` (0x801afc70), `abilityTimer_Bomb_remove` (0x801b13ec). Frees ability-specific state (active projectiles, attached models) and calls the model revert.
-2. **`revertKirbyModel`** (0x801a7d70) - frees the ability JObj (+0x8fc) and its heap alloc (+0x904) and nulls both, calls the teardown core, then zeroes the ability callback fields +0x92c, +0x930, +0x934, +0x938, +0x7fc, +0x7e8 and +0x7ec.
+2. **`Rider_RevertCopyAbility`** (0x801a7d70) - frees the ability JObj (+0x8fc) and its heap alloc (+0x904) and nulls both, calls the teardown core, then zeroes the ability callback fields +0x92c, +0x930, +0x934, +0x938, +0x7fc, +0x7e8 and +0x7ec.
 3. **`Rider_TeardownCopyAbility`** (0x801a810c) - the core: sets `copy_kind` = -1, spawns the "ability lost" poof effect (`Effect_SpawnSync` 0x80236c40, effect id `0x3a990`), plays the loss SFX, and applies the fade ColAnim (`0x2c`).
 
-`Rider_AbilityRemoveModel` (0x80191554) is the universal front door: if `copy_kind` or `powerup_kind` is set it invokes the installed teardown slots (+0x7f8 then +0x7fc), so it handles every ability, and `Rider_GiveAbility` runs it before every grant. The teardowns end in `revertKirbyModel`, which removes the hat, clears `cb_ability_remove` and runs `Rider_TeardownCopyAbility`. It does **not** play the spit-out animation.
+`Rider_AbilityRemoveModel` (0x80191554) is the universal front door: if `copy_kind` or `powerup_kind` is set it invokes the installed teardown slots (+0x7f8 then +0x7fc), so it handles every ability, and `Rider_GiveAbility` runs it before every grant. The teardowns end in `Rider_RevertCopyAbility`, which removes the hat, clears `cb_ability_remove` and runs `Rider_TeardownCopyAbility`. It does **not** play the spit-out animation.
 
 `RiderState_LoseAbilityEnter` (0x801b0adc) is only the spit-out animation: it `RiderStateChange`s to action-state `0x68`. It performs no teardown, so on its own the ability is not lost - every engine caller runs a revert first.
 

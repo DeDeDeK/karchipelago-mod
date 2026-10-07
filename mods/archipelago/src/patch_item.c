@@ -1,17 +1,14 @@
 #include "game.h"
 #include "inline.h"
-#include "patch_item.h"
-#include "main.h"
-#include "settings_menu.h"
-#include "textbox_api.h"
 #include "item.h"
 #include "machine.h"
 #include "os.h"
-#include "energylink.h"
-#include "ap_announce.h"
 
-// PatchKind to the matching "+1" ITKIND.
-static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
+#include "main.h"
+#include "patch_item.h"
+#include "energylink.h"
+
+static const ItemKind patch_itkinds[PATCHKIND_NUM] = {
     [PATCHKIND_WEIGHT]   = ITKIND_WEIGHT,
     [PATCHKIND_ACCEL]    = ITKIND_ACCEL,
     [PATCHKIND_TOPSPEED] = ITKIND_TOPSPEED,
@@ -23,26 +20,27 @@ static const ItemKind stc_patch_itkinds[PATCHKIND_NUM] = {
     [PATCHKIND_HP]       = ITKIND_HP,
 };
 
-// Returns PATCHKIND_NUM for any ItemKind that is not one of the nine stat "+1"
-// patches (down/max/fake variants, All Up, food, boxes, copy abilities, etc.).
-PatchKind Patch_ItKindToPatchKind(ItemKind it_kind)
+ItemKind PatchItem_PatchKindToItKind(PatchKind kind)
+{
+    return patch_itkinds[kind];
+}
+
+PatchKind PatchItem_ItKindToPatchKind(ItemKind it_kind)
 {
     for (int k = 0; k < PATCHKIND_NUM; k++)
-        if (stc_patch_itkinds[k] == it_kind)
+        if (patch_itkinds[k] == it_kind)
             return (PatchKind)k;
     return PATCHKIND_NUM;
 }
 
-// Give one PatchKind to every human rider on a machine. In City Trial this goes
-// through the item pickup pipeline so the player sees the normal "+1 stat" visual.
-// Air Ride has no item data tables loaded (SpawnItem would crash), so it falls
-// back to Machine_GivePatch.
-int Patch_GiveItem(PatchKind kind)
+// City Trial spawns the pickup, for the normal +1 visual. Air Ride has no item data tables
+// (SpawnItem would crash), so it calls Machine_GivePatch.
+int PatchItem_Give(PatchKind kind)
 {
     int use_item_spawn = Gm_IsInCity();
     int applied = 0;
 
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
@@ -52,13 +50,11 @@ int Patch_GiveItem(PatchKind kind)
 
         if (use_item_spawn)
         {
-            SpawnItemPlayer(i, stc_patch_itkinds[kind]);
+            SpawnItemPlayer(i, patch_itkinds[kind]);
         }
         else
         {
-            MachineData *md = mg->userdata;
-            Machine_GivePatch(md, kind, 1);
-            // Rebase so the stat change doesn't refund energy into the pool.
+            Machine_GivePatch(mg->userdata, kind, 1);
             EnergyLink_RebaseStats(i);
         }
         applied++;
@@ -70,14 +66,12 @@ int Patch_GiveItem(PatchKind kind)
     return applied;
 }
 
-// Same City Trial / Air Ride split as Patch_GiveItem. Returns 1 if at least one
-// player got the apply: Top Ride has no MachineData so every iteration skips, and
-// AP_ITEM_ALL_DOWN must defer rather than be consumed there.
-int Patch_AllUp_GiveItem(int num)
+// The same City Trial / Air Ride split as PatchItem_Give.
+int PatchItem_GiveAllUp(int num)
 {
     int use_item_spawn = (num > 0) && Gm_IsInCity();
     int applied = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
@@ -92,8 +86,7 @@ int Patch_AllUp_GiveItem(int num)
         }
         else
         {
-            MachineData *md = mg->userdata;
-            Machine_GiveAllUp(md, num);
+            Machine_GiveAllUp(mg->userdata, num);
             EnergyLink_RebaseStats(i);
         }
         applied++;
@@ -105,13 +98,10 @@ int Patch_AllUp_GiveItem(int num)
     return applied;
 }
 
-// Eject each human rider's current stats as physical patches behind the machine.
-// Caller must guarantee item data is loaded - the open City Trial phase only;
-// elsewhere Rider_DropPatches crashes trying to spawn the patch items.
-int Patch_DropTrap()
+int PatchItem_DropTrap(void)
 {
     int dropped = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
@@ -119,162 +109,11 @@ int Patch_DropTrap()
         if (!rg)
             continue;
         RiderData *rd = rg->userdata;
-        int drop_mode = HSD_Randi(3);
-        Rider_DropPatches(rd, rd->stats.values, drop_mode);
+        Rider_DropPatches(rd, rd->stats.values, HSD_Randi(3));
         dropped++;
     }
 
     if (dropped)
         OSReport("[PatchItem] Drop-patches trap applied to %d player(s)\n", dropped);
     return dropped;
-}
-
-// Record a permanent +1 patch in save data. Stat application is deferred to the
-// next round start - applying here too would double up against the carry-over of
-// stats into stadium loads and against the round-start re-apply.
-int PermanentPatch_GiveItem(PatchKind kind)
-{
-    if (ap_save->permanent_patches[kind] < PATCH_STAT_MAX)
-        ap_save->permanent_patches[kind]++;
-
-    OSReport("[PatchItem] Permanent %s patch received (total %d)\n",
-             PatchKind_Names[kind], ap_save->permanent_patches[kind]);
-    APAnnounce_Grant("Received: permanent +1 ", PatchKind_Names[kind], tb_api->PatchColors[kind], NULL);
-    return 1;
-}
-
-// Stat application is deferred to the next round start, as with the single-stat
-// permanent patch.
-int PermanentPatch_GiveAllUp()
-{
-    for (int i = 0; i < PATCHKIND_NUM; i++)
-    {
-        if (ap_save->permanent_patches[i] < PATCH_STAT_MAX)
-            ap_save->permanent_patches[i]++;
-    }
-
-    OSReport("[PatchItem] Permanent all-up received\n");
-    APAnnounce_Grant("Received: permanent +1 ", "All Up", tb_api->PatchColors[PATCHKIND_CHARGE], NULL);
-    return 1;
-}
-
-static int permanent_patches_applied;
-
-// Apply accumulated permanent patches to all human players, consolidating into
-// all-ups where possible to reduce the number of calls.
-static void PermanentPatch_DoApply()
-{
-    u8 min_patches = ap_save->permanent_patches[0];
-    for (int i = 1; i < PATCHKIND_NUM; i++)
-    {
-        if (ap_save->permanent_patches[i] < min_patches)
-            min_patches = ap_save->permanent_patches[i];
-    }
-
-    int total = 0;
-    for (int i = 0; i < PATCHKIND_NUM; i++)
-        total += ap_save->permanent_patches[i];
-
-    OSReport("[PatchItem] Applying permanent patches (all-up: %d, total: %d): "
-             "Weight=%d Boost=%d TopSpd=%d Turn=%d Charge=%d Glide=%d Offense=%d Defense=%d HP=%d\n",
-             min_patches, total,
-             ap_save->permanent_patches[PATCHKIND_WEIGHT],
-             ap_save->permanent_patches[PATCHKIND_ACCEL],
-             ap_save->permanent_patches[PATCHKIND_TOPSPEED],
-             ap_save->permanent_patches[PATCHKIND_TURN],
-             ap_save->permanent_patches[PATCHKIND_CHARGE],
-             ap_save->permanent_patches[PATCHKIND_GLIDE],
-             ap_save->permanent_patches[PATCHKIND_OFFENSE],
-             ap_save->permanent_patches[PATCHKIND_DEFENSE],
-             ap_save->permanent_patches[PATCHKIND_HP]);
-
-    // Only the City Trial map counts as one game for the "10+ X Patches" cells.
-    int credit = Gm_IsInCity();
-
-    for (int p = 0; p < 5; p++)
-    {
-        if (Ply_GetPKind(p) != PKIND_HMN)
-            continue;
-        GOBJ *mg = Ply_GetMachineGObj(p);
-        if (!mg)
-            continue;
-        MachineData *md = mg->userdata;
-
-        float before[PATCHKIND_NUM];
-        for (int i = 0; i < PATCHKIND_NUM; i++)
-            before[i] = md->stats.values[i];
-
-        if (min_patches > 0)
-            Machine_GiveAllUp(md, min_patches);
-
-        for (int i = 0; i < PATCHKIND_NUM; i++)
-        {
-            int remainder = ap_save->permanent_patches[i] - min_patches;
-            if (remainder > 0)
-                Machine_GivePatch(md, i, remainder);
-        }
-
-        // Machine_GivePatch skips the pickup counter, so credit what landed past
-        // the patch cap as collected. Written directly rather than through
-        // Ply_IncrementItemCollectNum, which would also feed the first-20-seconds
-        // aggregate.
-        if (credit)
-        {
-            PlayerStats *st = Ply_GetStats(p);
-            for (int i = 0; i < PATCHKIND_NUM; i++)
-            {
-                int got = (int)(md->stats.values[i] - before[i] + 0.5f);
-                if (got > 0)
-                    st->item_collect[stc_patch_itkinds[i]] += got;
-            }
-        }
-    }
-}
-
-static void PermanentPatch_PerFrame(GOBJ *g)
-{
-    if (permanent_patches_applied)
-        return;
-    if (Gm_GetIntroState() != GMINTRO_END)
-        return;
-
-    permanent_patches_applied = 1;
-    PermanentPatch_DoApply();
-}
-
-// Gm_IsInCity() is stage-based (only true on the CT main map, stage_kind 9/52)
-// and excludes stadiums, so dispatch off the CT major + city_mode instead. Free
-// Run never loads item data tables, so inflated stats from perm patches would
-// crash Item_GetItDataPtr on damage-driven patch ejection. A Trial's closing
-// stadium carries the city machine's stats over, patches included, so applying
-// there would double them.
-static int PermanentPatch_ShouldApply(void)
-{
-    if (Scene_GetCurrentMajor() == MJRKIND_CITY)
-    {
-        CityMode cm = Gm_GetCityMode();
-        if (cm == CITYMODE_FREERUN)
-            return 0;
-        if (cm == CITYMODE_STADIUM)
-            return ap_menu_settings.ct_stadium_permanent_patches_enabled;
-        if (CityTrial_IsInStadium())
-            return 0;
-        return ap_menu_settings.ct_permanent_patches_enabled;
-    }
-    return ap_menu_settings.ar_permanent_patches_enabled;
-}
-
-void PermanentPatch_On3DLoadEnd()
-{
-    if (!PermanentPatch_ShouldApply())
-        return;
-
-    int total = 0;
-    for (int i = 0; i < PATCHKIND_NUM; i++)
-        total += ap_save->permanent_patches[i];
-    if (total == 0)
-        return;
-
-    permanent_patches_applied = 0;
-    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, PermanentPatch_PerFrame, 0, 0, 0, 0);
 }

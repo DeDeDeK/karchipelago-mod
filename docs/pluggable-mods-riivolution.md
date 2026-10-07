@@ -131,13 +131,13 @@ never faults on its own. Whether that is survivable depends on the consumer:
 - `archipelago` dereferences the textbox API at ~90 call sites with no NULL check at any of
   them, and most of those pass a palette color as an argument that is evaluated before the
   caller's own message-enabled gate runs, so guarding each site is not practical. Instead
-  `tb_api` starts at a stub in `mods/archipelago/src/main.c` whose `Enqueue*` return 0, whose
-  `IsReady` returns 0 and whose palettes are zeroed; a failed import leaves it there, so
+  `tb_api` starts at a stub in `mods/archipelago/src/main.c` whose `Enqueue*` return 0 and whose
+  palettes are zeroed; a failed import leaves it there, so
   "Archipelago on, Textbox off" drops notifications rather than faulting.
 - Its other imports degrade cleanly: `custom_machines` (`AP_ResolveCustomMachines` in
   `mods/archipelago/src/main.c`) leaves machines ungated, and `ap_star`
   (`GateApStar_Resolve` in `mods/archipelago/src/gate_ap_star.c`) simply installs no assemble
-  handler. `archipelago_debug` guards its two imports - `archipelago` and `custom_events` - with a plain NULL check at each use, and routes its own text through `ArchipelagoAPI.Textbox` rather than importing textbox.
+  handler. `archipelago_debug` guards its three imports - `archipelago`, `custom_events` and `textbox` - with a plain NULL check at each use.
 
 **Assets travel with their mod, not core.** `ApIcon.dat` belongs to the `archipelago` patch,
 `ApStarShot.dat` to `ap_star`. Since each mod's `assets/` folder already stages its own files,

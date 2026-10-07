@@ -8,8 +8,6 @@
 #include "gate_items.h"
 #include "goal_max_stats_ct.h"
 
-// Each gate owns one item category and reports only on kinds in it, so a kind no gate
-// covers is never locked.
 static int IsItemLocked(u8 it_kind)
 {
     return GateAbilities_IsItemLocked(it_kind)
@@ -17,7 +15,7 @@ static int IsItemLocked(u8 it_kind)
         || GateItems_IsItemLocked(it_kind);
 }
 
-// Stable compaction: drop locked kinds, keeping the survivors in order with their weights.
+// Stable compaction: survivors keep their order and weights.
 static void FilterBoxPool(u8 *kinds, u8 *chances, u8 *pool_num)
 {
     u8 num = *pool_num;
@@ -56,8 +54,8 @@ static void FilterBoxPools(void)
     FilterBoxPool(obj->subsequent_it_kind, obj->subsequent_chance, &obj->subsequent_num);
 }
 
-// event_source_drop has no count to compact, so a row is removed by zeroing every
-// source column _CityItem_GetEventItem weighs.
+// event_source_drop has no count to compact, so a row is removed by zeroing every source
+// column _CityItem_GetEventItem weighs.
 static void FilterEventDrops(void)
 {
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
@@ -79,21 +77,16 @@ static void FilterEventDrops(void)
     }
 }
 
-// Runs from hooks after the game populates the item spawn tables.
 static void FilterAllSpawnTables(void)
 {
     // Before the filters, so injected entries pass through them too.
-    GateItems_EnsureAllUpInSpawnPools();
+    GoalMaxStatsCT_EnsureAllUpInPools();
 
     FilterBoxPools();
     FilterEventDrops();
-
-    // After the filters, so the multiplier isn't spent on entries that are about to be
-    // removed or zeroed.
-    GoalMaxStatsCT_ApplyDropBias();
 }
 
-// End of CityItemSpawn_InitItemFallChances. Clobbered: lwz r0, 0x34(r1)
+// End of CityItemSpawn_InitItemFallChances (0x800eb374). Clobbered: lwz r0, 0x34(r1).
 CODEPATCH_HOOKCREATE(0x800eb558,
     "",
     FilterAllSpawnTables,
@@ -101,11 +94,8 @@ CODEPATCH_HOOKCREATE(0x800eb558,
     0
 )
 
-// mtlr r0 in the epilogue of CityEvent_ModifyItemFallDesc, one instruction past the
-// 0x800ed7f0 exit custom_items hooks to re-append its own pool entries. Hooking here
-// rather than there makes the filter run after that re-append whatever order the two
-// mods boot in; hoshi chains same-address hooks last-applied-first. r0 holds the
-// caller's LR, which the bl destroys, so the prologue carries it across.
+// mtlr r0 in the epilogue of CityEvent_ModifyItemFallDesc (0x800ed784). r0 holds the
+// caller's LR across the bl.
 CODEPATCH_HOOKCREATE(0x800ed7f4,
     "stwu 1, -16(1)\n\t"
     "stw 0, 8(1)\n\t",
@@ -119,16 +109,17 @@ void ItemSpawnFilter_OnBoot()
 {
     CODEPATCH_HOOKAPPLY(0x800eb558);
     CODEPATCH_HOOKAPPLY(0x800ed7f4);
+    OSReport("[SpawnFilter] Hooks installed\n");
 }
 
+// Stadiums and Air Ride never run the CityItemSpawn init path, so neither hook fires
+// there.
 void ItemSpawnFilter_On3DLoadEnd()
 {
-    // Stadium and Air Ride never run the CityItemSpawn init path, so neither hook
-    // above fires there.
     if (!Gm_IsInCity() && *stc_grBoxGeneObj)
     {
-        OSReport("[SpawnFilter] Filtering spawn tables for non-CT mode (GrKind=%d)\n",
-                 Gr_GetCurrentGrKind());
         FilterAllSpawnTables();
+        OSReport("[SpawnFilter] Filtered spawn tables for non-CT mode (GrKind=%d)\n",
+                 Gr_GetCurrentGrKind());
     }
 }

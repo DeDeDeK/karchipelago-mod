@@ -7,13 +7,11 @@
 #include "stage.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
-
-#define MOON_PI      3.14159265358979f
-#define MOON_DEG2RAD (MOON_PI / 180.0f)
 
 // Anchored along the sky direction from the camera eye, so there is no parallax
 // swim and apparent elevation is consistent.
@@ -71,25 +69,25 @@ static int   show_index = 0;
 
 static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
 static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
-#define MOON_SIZE_NUM ((int)(sizeof(size_factors) / sizeof(size_factors[0])))
+#define MOON_SIZE_NUM ((int)GetElementsIn(size_factors))
 static int size_index = 0;
 
 static const float bright_factors[] = {1.0f, 0.6f, 1.0f, 1.3f};
 static char *bright_names[] = {"Preset", "Dim", "Normal", "Bright"};
-#define MOON_BRIGHT_NUM ((int)(sizeof(bright_factors) / sizeof(bright_factors[0])))
+#define MOON_BRIGHT_NUM ((int)GetElementsIn(bright_factors))
 static int bright_index = 0;
 
 // Index 0 = Preset; 1..8 map to the MoonPhase enum in order.
 static char *phase_names[] = {"Preset", "Full", "Waxing Crescent", "First Quarter",
                               "Waxing Gibbous", "Waning Gibbous", "Last Quarter",
                               "Waning Crescent", "New"};
-#define MOON_PHASE_NUM ((int)(sizeof(phase_names) / sizeof(phase_names[0])))
+#define MOON_PHASE_NUM ((int)GetElementsIn(phase_names))
 static int phase_index = 0;
 
 // Peak-elevation override in degrees.
 static const float arc_degs[] = {0.0f, 15.0f, 26.0f, 42.0f, 62.0f};
 static char *arc_names[] = {"Preset", "Low", "Mid", "High", "Overhead"};
-#define MOON_ARC_NUM ((int)(sizeof(arc_degs) / sizeof(arc_degs[0])))
+#define MOON_ARC_NUM ((int)GetElementsIn(arc_degs))
 static int arc_index = 0;
 
 // Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the alpha from
@@ -97,7 +95,7 @@ static int arc_index = 0;
 static const u32 color_overrides[] = {0, RGBA(242, 244, 250, 255), RGBA(210, 214, 224, 255),
                                       RGBA(150, 175, 230, 255), RGBA(240, 214, 158, 255)};
 static char *color_names[] = {"Preset", "White", "Silver", "Blue", "Amber"};
-#define MOON_COLOR_NUM ((int)(sizeof(color_overrides) / sizeof(color_overrides[0])))
+#define MOON_COLOR_NUM ((int)GetElementsIn(color_overrides))
 static int color_index = 0;
 
 static int   light_index = 0;
@@ -112,8 +110,8 @@ static void MoonDirection(Vec3 *out)
     float p = Weather_RoundProgress();
     if (p < 0.0f)
         p = 0.0f;
-    float el = stc_arc * sinf(p * MOON_PI) * MOON_DEG2RAD;
-    float az = (stc_bearing + 180.0f * p) * MOON_DEG2RAD;
+    float el = MTXDegToRad(stc_arc * sinf(p * M_PI));
+    float az = MTXDegToRad(stc_bearing + 180.0f * p);
     float ce = cosf(el), se = sinf(el);
     out->X = ce * sinf(az);
     out->Y = se;
@@ -183,7 +181,7 @@ static int CraterFits(float cu, float cv, float crad, float r, float k, int side
         return 0;
     for (int s = 0; s < MOON_CRATER_SEGS; s++)
     {
-        float a = 2.0f * MOON_PI * (float)s / (float)MOON_CRATER_SEGS;
+        float a = 2.0f * M_PI * (float)s / (float)MOON_CRATER_SEGS;
         float pu = cu + cosf(a) * crad;
         float pv = cv + sinf(a) * crad;
         float uL, uR;
@@ -200,11 +198,11 @@ static void SeedCraters(void)
         return;
     for (int i = 0; i < MOON_CRATERS; i++)
     {
-        float ang = HSD_Randf() * 2.0f * MOON_PI;
+        float ang = HSD_Randf() * 2.0f * M_PI;
         float rad = sqrtf(HSD_Randf()) * 0.62f; // uniform over the inner disc
         stc_crater[i].X = cosf(ang) * rad;
         stc_crater[i].Y = sinf(ang) * rad;
-        stc_crater[i].Z = 0.08f + HSD_Randf() * 0.10f;
+        stc_crater[i].Z = Weather_RandRange(0.08f, 0.18f);
     }
     stc_crater_seeded = 1;
 }
@@ -235,14 +233,12 @@ static void Moon_GX(GOBJ *g, int pass)
     int side;
     PhaseParams(phase, &k, &side);
 
-    // Rows 0/1 of the world->view rotation are the billboard basis.
-    float (*m)[4] = cam->view_mtx;
-    Vec3 rightW = {m[0][0], m[0][1], m[0][2]};
-    Vec3 upW = {m[1][0], m[1][1], m[1][2]};
+    Vec3 rightW, upW;
+    COBJ_GetViewAxes(cam, &rightW, &upW);
 
     Vec3 eye;
-    WeatherGX_CameraEye(cam, &eye);
-    float e2 = eye.X * eye.X + eye.Y * eye.Y + eye.Z * eye.Z;
+    COBJ_GetViewEye(cam, &eye);
+    float e2 = VECSquareMag(&eye);
 
     Vec3 P;
     float dist = WeatherGX_PlaceOnDome(&dir, &eye, e2, MOON_MAX_DIST, MOON_DOME_FRAC,
@@ -258,11 +254,11 @@ static void Moon_GX(GOBJ *g, int pass)
     int rr = (int)(stc_color.r * bf); if (rr > 255) rr = 255;
     int gg = (int)(stc_color.g * bf); if (gg > 255) gg = 255;
     int bb = (int)(stc_color.b * bf); if (bb > 255) bb = 255;
-    u8 dR = (u8)rr, dG = (u8)gg, dB = (u8)bb, dA = stc_color.a;
+    GXColor dc = {(u8)rr, (u8)gg, (u8)bb, stc_color.a};
 
     HSD_Fog *fog = Weather_LiveFog();
 
-    WeatherGX_BeginXlu(cam, 0, 0);
+    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
     if (fog)
         HSD_FogSet(NULL);
 
@@ -282,19 +278,18 @@ static void Moon_GX(GOBJ *g, int pass)
         for (int c = 0; c <= MOON_COLS; c++)
         {
             float f = (float)c / (float)MOON_COLS;
-            float u0 = uL0 + (uR0 - uL0) * f;
-            float u1 = uL1 + (uR1 - uL1) * f;
-            u8 a0 = (u8)(dA * MoonRimFade(u0, v0, r));
-            u8 a1 = (u8)(dA * MoonRimFade(u1, v1, r));
-            WeatherGX_BillboardVert(&P, &rightW, &upW, u0, v0, dR, dG, dB, a0);
-            WeatherGX_BillboardVert(&P, &rightW, &upW, u1, v1, dR, dG, dB, a1);
+            float u0 = lerp(uL0, uR0, f);
+            float u1 = lerp(uL1, uR1, f);
+            u8 a0 = (u8)(dc.a * MoonRimFade(u0, v0, r));
+            u8 a1 = (u8)(dc.a * MoonRimFade(u1, v1, r));
+            GX_BillboardVert(&P, &rightW, &upW, u0, v0, dc, a0);
+            GX_BillboardVert(&P, &rightW, &upW, u1, v1, dc, a1);
         }
     }
 
-    u8 kR = (u8)(dR * MOON_CRATER_SHADE);
-    u8 kG = (u8)(dG * MOON_CRATER_SHADE);
-    u8 kB = (u8)(dB * MOON_CRATER_SHADE);
-    u8 kA = (dA < MOON_CRATER_ALPHA) ? dA : MOON_CRATER_ALPHA;
+    GXColor kc = {(u8)(dc.r * MOON_CRATER_SHADE), (u8)(dc.g * MOON_CRATER_SHADE),
+                  (u8)(dc.b * MOON_CRATER_SHADE), 0};
+    u8 ka = (dc.a < MOON_CRATER_ALPHA) ? dc.a : MOON_CRATER_ALPHA;
     for (int i = 0; i < MOON_CRATERS; i++)
     {
         float cu = stc_crater[i].X * r;
@@ -304,12 +299,12 @@ static void Moon_GX(GOBJ *g, int pass)
             continue;
 
         GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, MOON_CRATER_SEGS + 2);
-        WeatherGX_BillboardVert(&P, &rightW, &upW, cu, cv, kR, kG, kB, kA);
+        GX_BillboardVert(&P, &rightW, &upW, cu, cv, kc, ka);
         for (int s = 0; s <= MOON_CRATER_SEGS; s++)
         {
-            float a = 2.0f * MOON_PI * (float)s / (float)MOON_CRATER_SEGS;
-            WeatherGX_BillboardVert(&P, &rightW, &upW, cu + cosf(a) * crad,
-                                    cv + sinf(a) * crad, kR, kG, kB, kA);
+            float a = 2.0f * M_PI * (float)s / (float)MOON_CRATER_SEGS;
+            GX_BillboardVert(&P, &rightW, &upW, cu + cosf(a) * crad,
+                             cv + sinf(a) * crad, kc, ka);
         }
     }
 
@@ -471,9 +466,7 @@ void Moon_SetActive(const MoonDef *def)
     if (color_index > 0)
     {
         GXColor ov = GXColor_Unpack(color_overrides[color_index]);
-        stc_color.r = ov.r;
-        stc_color.g = ov.g;
-        stc_color.b = ov.b;
+        stc_color = (GXColor){ov.r, ov.g, ov.b, stc_color.a};
     }
 
     stc_size = (def && def->size > 0.0f) ? def->size : MOON_DEF_SIZE;

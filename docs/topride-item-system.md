@@ -258,7 +258,7 @@ Four items accept **either** of two keys - their own bit in
 | TRITEM_BOMB | 13 | COPYKIND_BOMB |
 | TRITEM_WALKY | 16 | COPYKIND_MIKE |
 
-`GateTopRideItems_ApplyMask` walks `ability_items[]` and ORs each unlocked
+`GateTopRideItems_ApplyMask` walks `topride_ability_items[]` and ORs each unlocked
 ability's item bit into the allowed mask before the AND. The ability key counts
 only while `ap_save->options.ability_gating_enabled` is set: an ability-ungated
 world carries an all-1s `ability_unlocked_mask`, which would free all four items
@@ -280,4 +280,4 @@ never sends a separate slot-12 unlock.
 |----------|------|
 | `GateTopRideItems_UnlockItem(kind, announce)` | Sets bit `kind` in `ap_save->topride_item_unlocked_mask`, and for Chickie / Who? Paint / Lantern also marks TR reward index 8 / 9 / 10 received, the only route to those three; optionally enqueues an "Unlocked Item: ..." textbox. Returns 0 for out-of-range kind. |
 | `GateTopRideItems_GiveItem(kind)` | Direct apply (no flying pickup). Requires the TR `KirbyMgr` (`*stc_topride_kirbymgr`) and `round_state == 2`; iterates the 4 slots, and for each human (`TopRide_GetPlayerKind(slot) == TR_PKIND_HMN`) calls `TopRide_KirbyApplyItem(k, kind)`. Returns 1 if applied to >=1 kirby, else 0 (caller retries). Used by the AP TR-item-give path and TrapLink-TR receive. Deliberately does **not** gate on `kirby->standing`, which the solo modes never rank. |
-| `GateTopRideItems_AbilityToItem(ability)` | Maps a `CopyKind` to its TR-item analog via `ability_items[]` (Freeze->Freeze Fan, Fire->Fire, Bomb->Bomb, Mic->Walky); returns -1 if none. |
+| `GateTopRideItems_AbilityToItem(ability)` | Maps a `CopyKind` to its TR-item analog via `topride_ability_items[]` (Freeze->Freeze Fan, Fire->Fire, Bomb->Bomb, Mic->Walky); returns -1 if none. |

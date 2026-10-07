@@ -31,8 +31,8 @@ overheat are shared - seventeen of the nineteen stars name the same
 `SFX_wstar_charge*_lp` trio, the Rocket Star has its own
 (`SFX_rocket_charge*_lp`, on a 0.10 / 0.30 split rather than 0.33 / 0.66), and
 the Wagon Star leaves all three at -1. Boost is the emptiest slot in vanilla:
-twelve stars name a full trio, three fill it partly (Hydra and Bulk each name
-one tier, Swerve two), and Slick, Wagon and the two wing riders leave all three
+twelve stars name a full trio, three fill it partly (Bulk names one tier, Hydra
+and Swerve two), and Slick, Wagon and the two wing riders leave all three
 at -1 and release silently.
 
 The star slots and the sample family each names:
@@ -60,7 +60,7 @@ The star slots and the sample family each names:
 
 `Machine_UpdateAudioEmitter` (`0x801dce60`) is the machine's voice for one
 frame. It runs the surface loop, then the engine loop, then the charge loop, the
-ground rumble and the wind loop, then `Machine_GroundSFXThink` and
+ground rumble and the wind loop, then `Machine_UpdateSkidLoop` and
 `AudioEmitter_SetPosition`. Everything positional goes through the machine's own
 `AudioEmitter` at `+0x844`; `Machine_PlaySFX` (`0x801dd17c`) is the wrapper that
 starts one script on it and returns an instance handle.
@@ -76,7 +76,7 @@ Six loop handles live in `MachineData`, each `-1` when silent:
 | `+0x898` | wind |
 | `+0x8a0` | machine rumble |
 
-`Machine_PlaySpawnSound` (`0x801dccec`) clears them as a machine spawns and
+`Machine_InitAudioLoops` (`0x801dccec`) clears them as a machine spawns and
 starts the surface and engine loops at volume 0.0.
 
 ### Engine loop
@@ -159,7 +159,7 @@ else if (charge_value <  charge_loop_split[1])  charge_loop_sfx[1]
 else                                            charge_loop_sfx[2]
 ```
 
-`charge_loop_split` is `{0.33, 0.66}` on every star but the Wagon Star, which
+`charge_loop_split` is `{0.33, 0.66}` on every star but the Rocket Star, which
 steps early at `{0.10, 0.30}`. The chosen id is remembered at `+0x88c`; crossing
 a split stops the running instance and starts the next one from its head, which
 is why the three vanilla samples are written to hand off - each is a rising
@@ -182,13 +182,13 @@ meter at the moment it is let go, on track2 (`+0x84c`) at full volume:
 
 ```
 if (charge_value <  boost_thresh_min)  nothing              // 0.05
-else if (charge_value >= boost_thresh_l) boost_sfx_l        // 0.80, 0.90 on Warp and Hydra
-else if (charge_value >= boost_thresh_m) boost_sfx_m        // 0.60
+else if (charge_value >= boost_thresh_l) boost_sfx_l        // 0.80; 0.90 on Warp and Flight, 1.0 on Rocket
+else if (charge_value >= boost_thresh_m) boost_sfx_m        // 0.60; 0.68 on Hydra, 0.90 on Rocket
 else                                     boost_sfx_s
 ```
 
 A kind whose tier is -1 releases silently at that tier, which is all three on
-Slick and Jet.
+Slick, Wagon and the two wing riders.
 
 ### Rumble, wind and the one shots
 

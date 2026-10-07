@@ -265,10 +265,9 @@ A fourth, `0x80262be8` in `Preload_AllCityFiles`, warms a replacement archive al
 two vanilla ones. Two more are optional: the SFX calls at `0x80283b8c` and `0x80283ba4`, and
 the sky preset picked in phase 3.
 
-`mods/custom_machines/src/machine_cinematic.c` takes the first three with
-`CODEPATCH_REPLACECALL` and dispatches on a latch naming whichever registered machine started
-the run; with the latch clear the vanilla pair plays untouched. `machine_preload.c` owns the
-fourth.
+`mods/custom_machines/src/machine_cinematic.c` takes all four with `CODEPATCH_REPLACECALL`
+and dispatches on a latch naming whichever registered machine started the run; with the
+latch clear the vanilla pair plays untouched.
 
 Called with `machine_index = 1` behind a caller-side flag, everything else runs untouched -
 the freeze, the HUD hide, the rider pose, the camera, the 150-frame timing, the audio

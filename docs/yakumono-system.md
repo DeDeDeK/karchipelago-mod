@@ -223,7 +223,7 @@ KAR has a generic "where does object N of category C go" system. Every category 
 | 5 | vehicles | `grGetVehicleposNum` `0x800d12f0` | `0x800d133c` |
 | 6 | vehicle areas | `grGetVehicleAreaposNum` `0x800d16c4` | `0x800d171c` |
 | 7 | global-dead | `grGetGlobalDeadPosNum` `0x800e5318` | `0x800e5340` |
-| 8 | yakumono | `grGetYakumonoposNum` `0x800d1434` | `loadYakumonoLocations` `0x800d145c` |
+| 8 | yakumono | `grGetYakumonoposNum` `0x800d1434` | `grGetYakumonoPosition` `0x800d145c` |
 
 The yakumono count comes from `grdata->pos_node` (GrData+0x20) `->[+0x2C]->[+0x8]`, a distinct field from `coll_node` (GrData+0x18) which feeds the collision instance pool. Each category caches its record-array base in a different `GrObj` slot (start at +0x134, yakumono at +0x15c).
 
@@ -273,7 +273,7 @@ The gate points at a drop descriptor:
 |---:|---|---|
 | +0x14 | `Vec3` | Initial item velocity |
 | +0x1c | `int` | Drop source enum 0..12 (3 = destructible); -1 falls back to `CityEvent_GetRandomItem` |
-| +0x20 | `int` | Shape: 0 = `City_SpawnMiscItemsRing` (`0x80104e10`, omnidirectional), 1 = `shootPowerUps` (`0x801058c0`, directed cone) |
+| +0x20 | `int` | Shape: 0 = `City_SpawnMiscItemsRing` (`0x80104e10`, omnidirectional), 1 = `City_SpawnMiscItemsCone` (`0x801058c0`, directed cone) |
 | +0x28 | `Vec3` | Spawn position offsets |
 | +0x38 | `int` | Rock family only: switch case 0..7 selecting the drop pattern |
 

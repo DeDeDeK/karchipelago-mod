@@ -15,11 +15,11 @@
 #include "ap_announce.h"
 #include "gate_ap_star.h"
 #include "ap_star_api.h"
+#include "ap_item_handler.h"
 
-// Machines that don't naturally spawn in CT: Top Ride stars, transformation forms,
-// and the Meta Knight / Dedede character forms. All have a 0 base spawn chance, so
-// without exclusion the unlocked-but-zero-chance fallback below would leak them
-// onto the City Trial field.
+// Kinds with a 0 base City Trial spawn chance that must never take the zero-chance
+// fallback weight: the Top Ride stars, the transformation forms and the characters' own
+// machines.
 #define CT_SPAWN_EXCLUDED_MASK     \
     ((1u << VCKIND_FREE)         | \
      (1u << VCKIND_STEER)        | \
@@ -30,10 +30,8 @@
      (1u << VCKIND_WHEELDEDEDE)  | \
      (1u << VCKIND_WHEELVSDEDEDE))
 
-// Weight handed to an unlocked machine the vanilla table gives 0 chance, so it can
-// still appear on the field. Only these four vanilla kinds reach it - every other
-// VCKIND either carries a real weight in all three table windows or sits in
-// CT_SPAWN_EXCLUDED_MASK. Set well under the per-machine weights the table does carry.
+// Weight for an unlocked kind the vanilla table gives 0 chance (Compact, Flight, Hydra,
+// Dragoon), well under the weights the table does carry.
 static float ZeroChanceSpawnWeight(int vckind)
 {
     switch (vckind)
@@ -44,8 +42,7 @@ static float ZeroChanceSpawnWeight(int vckind)
     }
 }
 
-// The unlock mask bit a MachineKind is gated on, or -1 for a registered machine other
-// than the Archipelago Star, which has no unlock item and is never gated.
+// Unlock mask bit a MachineKind is gated on, or -1 for an ungated registered machine.
 static int GateBit(int kind)
 {
     if (kind >= 0 && kind < VCKIND_NUM)
@@ -66,19 +63,18 @@ static int IsKindUnlocked(int kind)
 
 static int IsCKindUnlocked(CharacterKind ckind)
 {
-    if (ckind < 0 || ckind >= CharacterKind_Num())
+    if (ckind < 0 || ckind >= CustomMachines_CharacterKindNum(cm_api))
         return 0;
     CharacterDesc *desc = Character_GetDesc(ckind);
     if (!desc)
         return 0;
-    MachineKind vckind = MachineKind_Resolve(desc->is_bike, desc->machine_kind);
+    MachineKind vckind = CustomMachines_ResolveKind(cm_api, desc->is_bike, desc->machine_kind);
     return IsKindUnlocked(vckind);
 }
 
-// First unlocked City-Trial-spawnable MachineKind, or VCKIND_COMPACT as fallback.
 static MachineKind GetFirstUnlockedCTMachine()
 {
-    for (int i = 0; i < MachineKind_Num(); i++)
+    for (int i = 0; i < CustomMachines_KindNum(cm_api); i++)
     {
         if (i < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << i)))
             continue;
@@ -88,14 +84,12 @@ static MachineKind GetFirstUnlockedCTMachine()
     return VCKIND_COMPACT;
 }
 
-// Random unlocked Kirby-rider CharacterKind for a City Trial starting machine.
-// Excludes CKIND_DEDEDE / CKIND_METAKNIGHT: vanilla's HUD loader skips their
-// rider-specific 3D HUD assets in Base CT, so picking them for the free-roam Trial
-// start NULL-derefs 3DHud_CreateSpeedometerInner during scene init.
+// Skips Dedede and Meta Knight: Base City Trial loads no HUD assets for their riders, and
+// 3DHud_CreateSpeedometerInner NULL-derefs.
 static CharacterKind RandomUnlockedKirbyCKind(void)
 {
     int unlocked_count = 0;
-    for (int ckind = 0; ckind < CharacterKind_Num(); ckind++)
+    for (int ckind = 0; ckind < CustomMachines_CharacterKindNum(cm_api); ckind++)
     {
         if (ckind == CKIND_DEDEDE || ckind == CKIND_METAKNIGHT)
             continue;
@@ -107,7 +101,7 @@ static CharacterKind RandomUnlockedKirbyCKind(void)
         return CKIND_COMPACT;
 
     int pick = HSD_Randi(unlocked_count);
-    for (int ckind = 0; ckind < CharacterKind_Num(); ckind++)
+    for (int ckind = 0; ckind < CustomMachines_CharacterKindNum(cm_api); ckind++)
     {
         if (ckind == CKIND_DEDEDE || ckind == CKIND_METAKNIGHT)
             continue;
@@ -117,8 +111,6 @@ static CharacterKind RandomUnlockedKirbyCKind(void)
     return CKIND_COMPACT;
 }
 
-// TR's lobby "Control Type" row (Free Star = 0, Steer Star = 1) maps 1:1 to
-// MachineKind, so one machine_unlocked_mask covers Air Ride, City Trial, and Top Ride.
 static int IsTRMachineUnlocked(TopRideMachineKind tr)
 {
     MachineKind vckind = TOPRIDE_MACHINE_TO_VCKIND(tr);
@@ -147,46 +139,32 @@ static TopRideMachineKind GetRandomUnlockedTRMachine()
     return unlocked[HSD_Randi(count)];
 }
 
-// Post-init fixup for the three TR lobby init paths, each of whose per-slot loop
-// writes panel_machine[slot] = 0 (Free Star) unconditionally. All three hook sites
-// sit past their loop, so panel_pkind is filled by the time this runs: at
-// InitSelectData every panel reads CPU, at SoloInit every panel but the active one.
+// Each TR lobby init writes panel_machine[] = 0 in its per-slot loop. The hooks sit past
+// it, with panel_pkind filled: every panel reads CPU at InitSelectData, every one but the
+// active one at SoloInit.
 static void GateMachines_FixupTRInit(void)
 {
     GameData *gd = Gm_GetGameData();
-    if (!gd)
-        return;
-
     u8 *pkind   = gd->topride_select_ply.panel_pkind;
-    u8 *color   = gd->topride_select_ply.color;
     u8 *machine = gd->topride_select_ply.panel_machine;
     TopRideMachineKind first = GetFirstUnlockedTRMachine();
 
     for (int i = 0; i < 4; i++)
     {
-        if (pkind[i] != 2) // not a CPU panel
+        if (pkind[i] != TR_PANEL_CPU)
         {
             machine[i] = (u8)first;
             continue;
         }
 
-        // panel_pkind: 1 = HMN, 2 = CPU. Only the visible panels' colors are
-        // worth avoiding.
-        u8 taken[4];
-        int num_taken = 0;
-        for (int j = 0; j < 4; j++)
-        {
-            if (j != i && (pkind[j] == 1 || pkind[j] == 2))
-                taken[num_taken++] = color[j];
-        }
         machine[i] = (u8)GetRandomUnlockedTRMachine();
-        color[i] = (u8)GateColors_RandomUnlockedColorExcept(taken, num_taken);
+        gd->topride_select_ply.color[i] =
+            (u8)GateColors_RandomForPanel(pkind, gd->topride_select_ply.color, i, TR_PANEL_HMN);
     }
 }
 
-// Hook at 0x8002d070 in TopRide_InitSelectData, just after the per-slot init loop
-// (0x8002d06c is already hooked). The three following `stb r3, {6,2,3}(r31)`
-// lobby-flag clears rely on r3 = 0, which the C call wipes.
+// Hook at 0x8002d070 in TopRide_InitSelectData (0x8002cfd8), past the per-slot loop. The
+// three following stb r3 lobby-flag clears need r3 = 0.
 CODEPATCH_HOOKCREATE(0x8002d070,
     "",
     GateMachines_FixupTRInit,
@@ -194,10 +172,8 @@ CODEPATCH_HOOKCREATE(0x8002d070,
     0
 )
 
-// Race-init counterpart. TopRide_RaceInit (0x8002d6c4) re-zeros all four
-// panel_machine slots. Hook at 0x8002d748 (`bl Gm_GetGameData`), past the panel_pkind
-// CPU-fill loop whose caller-saved iterator r7 rules out landing earlier; the
-// re-executed bl restores r3 = GameData*, so no epilogue is needed.
+// Hook at 0x8002d748 (bl Gm_GetGameData) in TopRide_RaceInit (0x8002d0ec), past the CPU-fill
+// loop whose iterator r7 is caller-saved. The re-executed bl restores r3.
 CODEPATCH_HOOKCREATE(0x8002d748,
     "",
     GateMachines_FixupTRInit,
@@ -205,22 +181,27 @@ CODEPATCH_HOOKCREATE(0x8002d748,
     0
 )
 
-// L/R cycler gate for the lobby "Control Type" row: the vanilla 0..1 clamp, minus
-// writes onto a locked machine. Both lobby flavors (race TopRide_CSS_PanelThink
-// 0x8002b8a8 and solo TopRide_SoloPanelThink 0x8002ca80) carry identical cyclers,
-// so one gate serves both hook sites. panel_base[0x2f] = panel_machine[panel];
-// input_bits = direction-edge bits (0x80002 = RIGHT, 0x40001 = LEFT).
-static int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
+// Direction edges the lobby cyclers test: stick or D-pad.
+#define TR_CYCLE_RIGHT (PAD_BUTTON_RIGHT | PAD_BUTTON_DPAD_RIGHT)
+#define TR_CYCLE_LEFT  (PAD_BUTTON_LEFT | PAD_BUTTON_DPAD_LEFT)
+
+// The lobby "Control Type" L/R cycler: the vanilla 0..1 clamp, minus a move onto a locked
+// machine. The race and solo lobbies carry identical cyclers. slot_base is
+// &topride_select_ply.x197 plus the panel's slot. Returns 1 when the machine changed.
+static int GateMachines_CycleTRMachine(u8 *slot_base, u32 input_bits)
 {
-    u8 current = panel_base[0x2f];
+    GameData *gd = Gm_GetGameData();
+    int slot = slot_base - &gd->topride_select_ply.x197;
+    u8 *machine = &gd->topride_select_ply.panel_machine[slot];
+    u8 current = *machine;
     u8 new_val = current;
 
-    if ((input_bits & 0x80002) != 0)
+    if (input_bits & TR_CYCLE_RIGHT)
     {
         if (current < (TR_MACHINE_NUM - 1) && IsTRMachineUnlocked(current + 1))
             new_val = current + 1;
     }
-    else if ((input_bits & 0x40001) != 0)
+    else if (input_bits & TR_CYCLE_LEFT)
     {
         if (current > 0 && IsTRMachineUnlocked(current - 1))
             new_val = current - 1;
@@ -229,13 +210,13 @@ static int GateMachines_CycleTRMachine(u8 *panel_base, u32 input_bits)
     if (new_val == current)
         return 0;
 
-    panel_base[0x2f] = new_val;
+    *machine = new_val;
     return 1;
 }
 
-// Race-lobby cycler hook at 0x8002be44 in TopRide_CSS_PanelThink, replacing the
-// cycler+compare block (..0x8002be94). r26 = panel base, r29 = direction-edge bits.
-//   r3 == 0 -> 0x8002c054 (function end); r3 != 0 -> 0x8002be98 (SFX + UI update)
+// Hook at 0x8002be44 in TopRide_CSS_PanelThink (0x8002b8a8), replacing the cycler through
+// 0x8002be94. r26 = slot base, r29 = edge bits. Unchanged -> 0x8002c054 (function end);
+// changed -> 0x8002be98 (SFX and UI update).
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002be44,
     "mr 3, 26\n\t"
     "mr 4, 29\n\t",
@@ -245,11 +226,9 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002be44,
     0x8002be98
 )
 
-// Solo-lobby (Free Run / Time Attack) cycler hook at 0x8002cb98 in
-// TopRide_SoloPanelThink, replacing the cycler+compare through the beq at 0x8002cbec.
-// r30 = panel base, r26 = direction-edge bits, both callee-saved so the downstream
-// SFX/UI block finds them intact.
-//   r3 == 0 -> 0x8002cc18 (function end); r3 != 0 -> 0x8002cbf0 (SFX + UI update)
+// Hook at 0x8002cb98 in TopRide_SoloPanelThink (0x8002ca80), replacing the cycler through
+// the beq at 0x8002cbec. r30 = slot base, r26 = edge bits, both callee-saved for the SFX
+// and UI block.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002cb98,
     "mr 3, 30\n\t"
     "mr 4, 26\n\t",
@@ -259,11 +238,8 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002cb98,
     0x8002cbf0
 )
 
-// Solo-mode counterpart. TopRide_SoloInit (0x8002d9e8) hardcodes all four
-// panel_machine slots to 0 at 0x8002db70, bypassing InitSelectData. Hook at
-// 0x8002dc48, the first instruction past the per-slot loop - 0x8002db90 is that
-// loop's back-edge target, so hooking there ran the fixup once per slot. The
-// clobbered `stb r0, 6(r31)` and the two stores after it all want r0 = 0.
+// Hook at 0x8002dc48 in TopRide_SoloInit (0x8002d9e8), past the per-slot loop that zeroes
+// panel_machine. The clobbered stb r0, 6(r31) and the two stores after it need r0 = 0.
 CODEPATCH_HOOKCREATE(0x8002dc48,
     "",
     GateMachines_FixupTRInit,
@@ -271,10 +247,8 @@ CODEPATCH_HOOKCREATE(0x8002dc48,
     0
 )
 
-// Start-match gate for the TR lobby: with both Free and Steer locked the panel still
-// defaults to Free, so Start would launch a machine the player doesn't own. Both hook
-// sites reach this only on the Start rising edge, so the buzzer fires once per press.
-// Returns 0 = allow start, 1 = block start.
+// Blocks a TR start while Free and Steer are both locked; returns 1 to block. Both sites
+// run on the Start rising edge only.
 static int GateMachines_TRLobbyCanStart(void)
 {
     if (ap_save->machine_unlocked_mask & TR_MACHINE_BITS)
@@ -285,12 +259,9 @@ static int GateMachines_TRLobbyCanStart(void)
     return 1;
 }
 
-// Hook at 0x8002c52c in TopRide_PreGameThink, first instruction of the race
-// "start match" body (vanilla `bl` menu-confirm sound).
-//   r3 == 0 -> run clobbered bl (play sound), fall through to commit+launch
-//   r3 != 0 -> jump to 0x8002c878 (next-slot iterator, skip start)
-// The gate is non-leaf, so the prologue stashes the caller-saved r4/r5 that the loop
-// continuation at 0x8002c878 needs.
+// Hook at 0x8002c52c in TopRide_PreGameThink (0x8002c06c), the race start body; the
+// clobbered bl plays the confirm sound. Blocking goes to 0x8002c878, the next-slot
+// iterator, which needs the caller-saved r4 / r5 the prologue stashes.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002c52c,
     "stwu 1, -16(1)\n\t"
     "stw 4, 8(1)\n\t"
@@ -303,54 +274,47 @@ CODEPATCH_HOOKCONDITIONALCREATE(0x8002c52c,
     0x8002c878
 )
 
-// Hook at 0x8002cc80 in TopRide_OnCourseSelect, the solo (Free Run / Time Attack)
-// "start match" body; the clobbered instruction is the same `bl` menu-confirm SFX.
-//   r3 == 0 -> run clobbered bl (play sound), fall through to commit+launch
-//   r3 != 0 -> jump to 0x8002cddc (epilogue, skip start)
+// Hook at 0x8002cc80 in TopRide_OnCourseSelect (0x8002cc30), the solo (Free Run / Time
+// Attack) start body; the clobbered instruction is bl Gm_PlayPauseSFX. Blocking goes to
+// 0x8002cddc, the no-Start path, which tests the held-button word in r3 for a B hold, so
+// the epilogue reloads it from the pad entry r30 points 8 bytes past.
 CODEPATCH_HOOKCONDITIONALCREATE(0x8002cc80,
     "",
     GateMachines_TRLobbyCanStart,
-    "",
+    "lwz 3, -8(30)\n\t",
     0,
     0x8002cddc
 )
 
-// Answers the per-kind candidate test inside CityMachineSpawn_PickFreeRunKind
-// (0x801de41c), Free Run's "place one of every machine" picker. Vanilla routes only
-// kinds 4 and 8 here, to a checklist query AP never writes, and takes every other
-// kind unconditionally; the widened branch below sends all 26 through, so the city
-// holds one of each unlocked machine instead of the whole roster. A kind the vanilla
-// per-kind spawn table already rules out never reaches the call.
-int GateMachines_CheckFreeRunKindUnlocked(MachineKind kind)
+// Replaces the per-kind checklist query in CityMachineSpawn_PickFreeRunKind (0x801de41c),
+// Free Run's one-of-every-machine picker; the beq widened at 0x801de518 routes every kind
+// here.
+static int GateMachines_CheckFreeRunKindUnlocked(MachineKind kind)
 {
-    if (kind < 0 || kind >= MachineKind_Num())
+    if (kind < 0 || kind >= CustomMachines_KindNum(cm_api))
         return 0;
     return IsKindUnlocked(kind);
 }
 
-// Weight filter handed to custom_machines, which owns the City Trial field spawn
-// roll. `default_weight` is VcCommon.dat's chance for a vanilla kind in the window
-// being rolled, and the descriptor's spawn_weight for a registered one.
+// City Trial field spawn weight. default_weight is the vanilla table's chance, or a
+// registered machine's descriptor spawn_weight.
 float GateMachines_SpawnWeight(int kind, float default_weight)
 {
-    if (kind < 0 || kind >= MachineKind_Num())
+    if (kind < 0 || kind >= CustomMachines_KindNum(cm_api))
         return 0.0f;
     if (kind < VCKIND_NUM && (CT_SPAWN_EXCLUDED_MASK & (1u << kind)))
         return 0.0f;
     if (!IsKindUnlocked(kind))
         return 0.0f;
 
-    // A registered machine brings its own weight and takes no fallback: a descriptor
-    // asking for 0 keeps it off the field however the mask reads.
+    // Registered machines take no fallback; a descriptor weight of 0 keeps one off the field.
     if (kind >= VCKIND_NUM || default_weight > 0.0f)
         return default_weight;
     return ZeroChanceSpawnWeight(kind);
 }
 
-// Availability filter handed to custom_machines, which owns both select screens'
-// packing. The mask is the only rule here, so the engine's own checklist answer in
-// `default_available` is discarded - including for appended characters, which are
-// unconditional there but gated like anything else once AP hands them out.
+// The unlock mask replaces the engine's select-screen checklist answer, appended
+// characters included.
 int GateMachines_FilterSelectCharacter(int ckind, int default_available)
 {
     (void)default_available;
@@ -366,15 +330,14 @@ void GateMachines_On3DLoadEnd(void)
     {
         stc_start_kind[ply] = -1;
         if (Ply_GetRiderGObj(ply) != NULL)
-            stc_start_kind[ply] = MachineKind_Resolve(Ply_GetMachineIsBike(ply),
+            stc_start_kind[ply] = CustomMachines_ResolveKind(cm_api, Ply_GetMachineIsBike(ply),
                                                       Ply_GetMachineKind(ply));
     }
 }
 
-// Replaces the respawn machine assignment in Rider_ResetStartingMachine, which
-// hardcodes VCKIND_COMPACT. A custom_machines mount wins over the machine the player
-// spawned on.
-void GateMachines_ResetStartingMachine(RiderData *rd)
+// Replaces Rider_ResetStartingMachine's hardcoded VCKIND_COMPACT respawn. A custom_machines
+// mount wins over the machine the player spawned on.
+static void GateMachines_ResetStartingMachine(RiderData *rd)
 {
     u8 ply = rd->ply;
     int kind = CustomMachines_GetRespawnKind(cm_api, ply);
@@ -387,28 +350,22 @@ void GateMachines_ResetStartingMachine(RiderData *rd)
     if (kind < 0 || !IsKindUnlocked(vckind))
         vckind = GetFirstUnlockedCTMachine();
 
-    class_index = MachineKind_ClassIndexOf(vckind, &is_bike);
+    class_index = CustomMachines_ClassIndexOf(cm_api, vckind, &is_bike);
     Ply_SetMachineIsBike(ply, is_bike);
     Ply_SetMachineKind(ply, class_index);
 }
 
-// Finalize the City Trial starting machine at the convergence point of
-// CitySelect_InitPlayerMachines (0x8002dea0), where the Trial and Stadium / Free Run
-// branches merge. Fires once per slot.
-//   slot_kind[slot]: 0 = human, 2 = CPU, else inactive.
-//   mode: 0 = Trial (no machine grid), nonzero = Stadium / Free Run, which pick their
-//   machine on the grid and are left alone.
-void GateMachines_FinalizeCTMachine(int slot)
+// Once per human or CPU slot. Stadium and Free Run pick on the machine grid and are left
+// alone.
+static void GateMachines_FinalizeCTMachine(int slot)
 {
     GameData *gd = Gm_GetGameData();
-    if (!gd)
-        return;
 
     u8 kind = gd->city_select_ply.slot_kind[slot];
-    if (kind != 0 && kind != 2)
-        return; // inactive slot
+    if (kind != SELECTSLOT_HMN && kind != SELECTSLOT_CPU)
+        return;
 
-    if (gd->city_select_ply.mode != 0)
+    if (gd->city_select_ply.mode != CITYMODE_TRIAL)
         return;
 
     CharacterKind ck;
@@ -419,9 +376,9 @@ void GateMachines_FinalizeCTMachine(int slot)
     gd->city_select_ply.ply_icon_ckind[slot] = (u8)ck;
 }
 
-// Hook at the convergence point 0x8002dea0 (`lbz r3, 97(r28)`) in
-// CitySelect_InitPlayerMachines. r26 = slot index. Skip target 0 re-executes the
-// clobbered lbz, reloading the ckind just written for the Character_GetDesc lookup.
+// Hook at 0x8002dea0 (lbz r3, 97(r28)) in CitySelect_InitPlayerMachines (0x8002ddd8),
+// where the Trial and Stadium / Free Run branches merge. r26 = slot. The re-run lbz
+// reloads the ckind just written.
 CODEPATCH_HOOKCREATE(0x8002dea0,
     "mr 3, 26\n\t",
     GateMachines_FinalizeCTMachine,
@@ -429,8 +386,8 @@ CODEPATCH_HOOKCREATE(0x8002dea0,
     0
 )
 
-// Hook at 0x801952c8 in Rider_ResetStartingMachine. r31 = RiderData*; replaces the
-// two Ply_Set calls (is_bike=0, machine_kind=COMPACT). Skip to 0x801952e0 (epilogue).
+// Hook at 0x801952c8 in Rider_ResetStartingMachine (0x80195288), r31 = RiderData. Replaces
+// its two Ply_Set calls, exiting at the 0x801952e0 epilogue.
 CODEPATCH_HOOKCREATE(0x801952c8,
     "mr 3, 31\n\t",
     GateMachines_ResetStartingMachine,
@@ -438,17 +395,13 @@ CODEPATCH_HOOKCREATE(0x801952c8,
     0x801952e0
 )
 
-// Replaces TitleScreen_CheckMachineUnlocked (0x8000c364), the unlock query for the
-// title-screen attract demo's random machine picker (TitleScreen_SelectRandomMachine,
-// 0x8000daa0). It does NOT run for CPUs in real Air Ride races, which draw from the
-// gated character list in loadCPU.
-int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
+// Replaces TitleScreen_CheckMachineUnlocked (0x8000c364), the attract demo's machine-pick
+// query. machine_class = CharacterDesc.is_bike, machine_id the class-relative slot.
+static int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
 {
-    // machine_class = CharacterDesc.is_bike, machine_id = CharacterDesc.machine_kind,
-    // a class-relative slot rather than the VCKIND.
-    int vckind = MachineKind_Resolve(machine_class, machine_id);
+    int vckind = CustomMachines_ResolveKind(cm_api, machine_class, machine_id);
 
-    if (vckind < 0 || vckind >= MachineKind_Num())
+    if (vckind < 0 || vckind >= CustomMachines_KindNum(cm_api))
         return 0;
 
     return IsKindUnlocked(vckind);
@@ -456,26 +409,22 @@ int GateMachines_CheckTitleDemoMachineUnlocked(s8 machine_class, s8 machine_id)
 
 void GateMachines_OnBoot()
 {
-    // Free Run's picker asks the checklist whether the legendaries are unlocked. Widening
-    // the `beq` that guards that call into an unconditional branch puts every kind through
-    // it, so the mask decides Free Run's city roster the way it decides the field's.
     CODEPATCH_REPLACECALL(0x801de528, GateMachines_CheckFreeRunKindUnlocked);
     CODEPATCH_REPLACEINSTRUCTION(0x801de518, 0x4800000c); // b 0x801de524
 
     CODEPATCH_REPLACEFUNC(TitleScreen_CheckMachineUnlocked, GateMachines_CheckTitleDemoMachineUnlocked);
 
-    CODEPATCH_HOOKAPPLY(0x8002dea0);  // CT starting-machine finalize
-    CODEPATCH_HOOKAPPLY(0x801952c8);  // CT respawn machine validation
+    CODEPATCH_HOOKAPPLY(0x8002dea0);
+    CODEPATCH_HOOKAPPLY(0x801952c8);
 
-    // The TR race and solo (Free Run / Time Attack) lobbies are separate code paths,
-    // each with its own init, cycler, and start-match handler.
-    CODEPATCH_HOOKAPPLY(0x8002d070);  // TopRide_InitSelectData post-loop fixup (main-menu reset)
-    CODEPATCH_HOOKAPPLY(0x8002d748);  // TopRide_RaceInit post-reset fixup (TR Main Game)
-    CODEPATCH_HOOKAPPLY(0x8002dc48);  // TopRide_SoloInit post-zero fixup (Free Run / Time Attack)
-    CODEPATCH_HOOKAPPLY(0x8002be44);  // TopRide_CSS_PanelThink L/R cycler (race lobby)
-    CODEPATCH_HOOKAPPLY(0x8002cb98);  // TopRide_SoloPanelThink L/R cycler (Free Run / Time Attack)
-    CODEPATCH_HOOKAPPLY(0x8002c52c);  // TopRide_PreGameThink start-match gate (race)
-    CODEPATCH_HOOKAPPLY(0x8002cc80);  // TopRide_OnCourseSelect start-match gate (solo)
+    // The TR race and solo lobbies each have their own init, cycler and start handler.
+    CODEPATCH_HOOKAPPLY(0x8002d070);
+    CODEPATCH_HOOKAPPLY(0x8002d748);
+    CODEPATCH_HOOKAPPLY(0x8002dc48);
+    CODEPATCH_HOOKAPPLY(0x8002be44);
+    CODEPATCH_HOOKAPPLY(0x8002cb98);
+    CODEPATCH_HOOKAPPLY(0x8002c52c);
+    CODEPATCH_HOOKAPPLY(0x8002cc80);
 
     OSReport("[GateMachines] Hooks installed\n");
 }
@@ -494,8 +443,7 @@ int GateMachines_UnlockMachine(int bit, int announce)
                  MaskBits(ap_save->machine_unlocked_mask, AP_MACHINE_BIT_NUM));
     if (announce)
     {
-        // VCKIND_WHEELDEDEDE / VCKIND_WINGMETAKNIGHT are the player-facing King Dedede
-        // / Meta Knight unlocks, announced to match the checklist reward path.
+        // These bits are the King Dedede / Meta Knight character unlocks.
         const char *prefix = "Unlocked Machine: ";
         if (bit == VCKIND_WHEELDEDEDE)
         {
@@ -512,27 +460,23 @@ int GateMachines_UnlockMachine(int bit, int announce)
     return 1;
 }
 
-// Give a player the assembled legendary machine via the cutscene. machine_index:
-// 0 = Dragoon, 1 = Hydra. Returns 1 if started (consume the item), 0 if it can't
-// run yet (keep queued and retry).
-//
-// custom_machines owns the cutscene and every condition on it - City Trial only, a
-// Kirby rider, one run at a time, and each vanilla legendary at most once per scene
-// because the engine frees its piece archive on the way out. The engine holds a
-// single cutscene, so this lands on the first human it can rather than every one.
+// machine_index 0 = Dragoon, 1 = Hydra. custom_machines owns the cutscene and refuses it
+// while it can't run, which keeps the item queued; the engine holds one cutscene, so it
+// lands on the first human that can take it.
 int GateMachines_GiveLegendaryMachine(int machine_index)
 {
     MachineKind kind = (machine_index == 0) ? VCKIND_DRAGOON : VCKIND_HYDRA;
 
+    // No later round changes a build without custom_machines.
     if (!cm_api)
-        return 0;
+        return AP_ITEM_DROP;
 
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
         if (cm_api->StartAssembly(kind, i))
-            return 1;
+            return AP_ITEM_APPLIED;
     }
-    return 0;
+    return AP_ITEM_RETRY;
 }

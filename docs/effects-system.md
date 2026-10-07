@@ -47,9 +47,8 @@ Groups 37 and up (the event-actor and machine-hit IDs at `0x5a592`-`0x5a5b9`) ar
 ## Spawning
 
 `Effect_SpawnSync` (`0x80236c40`) is the universal entry point, declared in
-`externals/hoshi/include/effect.h`. It is one `0x4ba4`-byte function running to `0x8023b7e4`; the
-map's `Effect_SpawnSync_mid` at `0x8023af88` is a label inside its per-ID `switch`, not a second
-entry point. It returns a 64-bit handle in `{r3, r4}`, which `ItemData.effect_id` keeps whole;
+`externals/hoshi/include/effect.h`. It is one `0x4ba4`-byte function running to `0x8023b7e4`. It
+returns a 64-bit handle in `{r3, r4}`, which `ItemData.effect_id` keeps whole;
 `effect.h` declares only the low word, which is enough to test for failure (0).
 
 The third argument is the **EfGroup**, not an owner pointer, and the fourth is an **anchor mode**,
@@ -64,7 +63,7 @@ What the call does, in order:
   object at all. The parent is only stored into the spawn node at `node+0x08`.
 - **Global suppress gate.** If `*(u32*)0x805DD8B8` (`r13 + 2008`) is nonzero the call returns
   `{0,0}` immediately; effects are globally suppressed during pause and non-gameplay scenes.
-- **Create gate.** `Effect_CheckToCreate` (`0x802410d4`) is a split-screen dedup (`Gm_GetPlyViewNum`
+- **Create gate.** `Effect_CheckSplitScreenAllowed` (`0x802410d4`) is a split-screen dedup (`Gm_GetPlyViewNum`
   plus two ID globals at `0x805D7328` / `0x805D732C`) that returns 1 in 1P. A 0 returns `{0,0}`.
 - **Anchor resolve.** The resolver at `0x80240284(mode, va_list*, desc, ply)` zero-fills a 52-byte
   placement descriptor and `va_arg`s mode-specific arguments into it. It fills the descriptor
@@ -128,7 +127,7 @@ next `GObj_Create` hands the same GObj out again and the failure surfaces far aw
 
 ```
 assertion "gobj->user_data_kind == HSD_GOBJ_USER_DATA_NONE" failed in gobjuserdata.c on line 40
-  GObj_AddUserData <- UnkGOBJ_Create (0x800e7108) <- ... <- Machine_HitThink
+  GObj_AddUserData <- UnkGOBJ_Create (0x800e7108) <- ... <- Machine_PostTransformThink
 ```
 
 in whichever unrelated system happened to allocate next. To retire a mode-1 effect, **hide the model
@@ -187,7 +186,7 @@ at `0x8023e6bc` (installed from `0x8023e570`).
 
 The generator update pass at `0x804324ec` is often mistaken for an effect updater. It is not: it
 walks the generator list at `*0x805de370`, calls `Ptcl_SyncGenToJObj`, and belongs entirely to the
-point-particle path reached through `Ptcl_Think` (`0x80233b74`) and `Ptcl_Think2` (`0x80233ba0`). It
+point-particle path reached through `Ptcl_Think` (`0x80233b74`) and `Ptcl_CinematicThink` (`0x80233ba0`). It
 never touches model effects.
 
 **Position-follow-joint is done by the effect module itself**, not by the spawner. The proc at
@@ -402,9 +401,8 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x80233908` | `Effect_Init` | boot init |
 | `0x802332c4` | `Effect_InitObjAllocs` | build `stc_effect_mgr` |
 | `0x80236c40` | `Effect_SpawnSync` | universal effect spawn (decimal ID) |
-| `0x8023af88` | `Effect_SpawnSync_mid` | mid-function label inside `Effect_SpawnSync`, not an entry point |
 | `0x80240284` | (anchor resolver) | fills the 52-byte placement descriptor from the varargs |
-| `0x802410d4` | `Effect_CheckToCreate` | scene/mode spawn gate |
+| `0x802410d4` | `Effect_CheckSplitScreenAllowed` | scene/mode spawn gate |
 | `0x8023475c` | (spawn list-node alloc) | allocates the handle/owner node |
 | `0x80234a8c` | (per-node kill) | `GObj_Destroy(node+0x5c)`; reached from the efgroup kill |
 | `0x80236358` | (efgroup kill) | sweeps the 32 node buckets, matching `node+0x1c` |
@@ -425,7 +423,7 @@ Names in parentheses are descriptive labels for addresses the symbol map leaves 
 | `0x8042a734` | `psInitDataBanks` | populate `stc_ef_global` from a bank's `_ptcl`/`_ref`/`_form` symbols |
 | `0x8042a874` | `psRelocDataBanks` | file-offset to pointer fixup for a loaded bank |
 | `0x8042abe8` | (sibling bank installer) | shares `psInitDataBanks`' panic strings |
-| `0x80233b74` / `0x80233ba0` | `Ptcl_Think` / `Ptcl_Think2` | point-particle updater thunks (pool masks 0 / `0xFFFD0000`) |
+| `0x80233b74` / `0x80233ba0` | `Ptcl_Think` / `Ptcl_CinematicThink` | point-particle updater thunks (pool masks 0 / `0xFFFD0000`) |
 | `0x804324ec` | (generator update pass) | walks `*0x805de370` driving `Ptcl_SyncGenToJObj`; not a model-effect updater |
 | `0x8042a258` | `JObj_GX` | reads `GObj+0x28`, feeds `JObj_DispAll` |
 | `0x8040a7b8` | `JObj_DispAll` | recursive JObj tree render |

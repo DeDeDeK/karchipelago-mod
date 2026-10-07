@@ -1,27 +1,19 @@
 #include "game.h"
 #include "os.h"
 #include "hoshi/mod.h"
+#include "inline.h"
 
 #include "main.h"
 #include "ap_checklist.h"
 #include "ap_check_detect.h"
 #include "custom_checklist_api.h"
 
-// Imported custom_checklist API. Resolved in APChecklist_Register rather than at
-// OnBoot, since the framework mod boots after us (alphabetical order).
 static const CustomChecklistAPI *cc_api = NULL;
 
-// Every cell answers with the same predicate - a pure read of latched state, keyed by the
-// row's own clear_kind. All sampling happens in the detection hooks.
+// Every cell reads latched state through APCheckDetect_IsSet.
 #define AP_CHECK(ck, label) { (ck), (label), APCheckDetect_IsSet }
 
-// clear_kind order is the wire contract with APLocation in the apworld (the AP location
-// code is 361 + clear_kind), and each label is its location's name minus the leading
-// "Archipelago: ", which the apworld restates by hand. The framework accepts glyphs only
-// while under byte 157 (2 bytes per character, 1 per space or break) and silently
-// truncates the rest; the longest label here spends 138 including its terminator. Each
-// "\n" is a placed line break - the framework's fallback split balances on width and
-// would part a stadium name from its number.
+// Each label is its AP location's name minus the leading "Archipelago: ".
 static const CustomCheck ap_checks[] = {
     AP_CHECK(APCK_CASTLE_FLOWER,   "City Trial: Visit the flower\non top of Castle Hall on foot!"),
     AP_CHECK(APCK_BREAK_ALL_CORAL, "City Trial: Break all\nthe coral in one game!"),
@@ -68,29 +60,18 @@ static const CustomCheck ap_checks[] = {
     AP_CHECK(APCK_AIRRIDE_1ST_METAKNIGHT, "Air Ride: Finish in 1st place\nas Meta Knight!"),
     AP_CHECK(APCK_AIRRIDE_1ST_DEDEDE,     "Air Ride: Finish in 1st place\nas King Dedede!"),
 
-    // Vanilla ships no cell for Nebula Belt at all, so these have no shape to match.
-    // The course has no enemies, breakables, rails or animated props, which is why
-    // they are all about racing and flying it.
     AP_CHECK(APCK_NEBULA_1ST,         "Air Ride: NEBULA BELT\nFinish in 1st place!"),
     AP_CHECK(APCK_NEBULA_DIST_2MIN,   "Air Ride: NEBULA BELT\nRace over 5,500 feet in 2 minutes!"),
     AP_CHECK(APCK_NEBULA_2LAP_TIME,   "Air Ride: NEBULA BELT\nFinish 2 laps in under 02:30:00!"),
     AP_CHECK(APCK_NEBULA_1ST_SCOOTER, "Air Ride: NEBULA BELT Finish in\n1st place on Wheelie Scooter!"),
     AP_CHECK(APCK_NEBULA_AIRBORNE,    "Air Ride: NEBULA BELT Fly 10 seconds\non Dragoon, Flight or Winged Star!"),
 
-    // The first restates the 10-KO cell DD 1/2/4/5 have and 3 does not, verbatim and
-    // with vanilla's own line break.
     AP_CHECK(APCK_DD3_KO_10,          "Stadium: DESTRUCTION DERBY 3\nIn one game, KO a rival 10 times or more!"),
     AP_CHECK(APCK_DD_DEDEDE_KO_KIRBY, "Stadium: DESTRUCTION DERBY (All)\nAs King Dedede, KO 10 Kirbys in one game!"),
 
-    // Mic is the only CopyKind vanilla never writes a cell for. The first restates
-    // the Bomb and Sleep Copy Chance cells verbatim, break included; the second
-    // takes the "(All)" heading vanilla gives a cell any stadium in a group
-    // satisfies, and is scoped to the two melee stadiums.
     AP_CHECK(APCK_MIC_COPY_CHANCE,    "City Trial: Get the Mic ability\nfrom the Copy Chance Wheel!"),
     AP_CHECK(APCK_MIC_ENEMY_KOS,      "Stadium: KIRBY MELEE (All) In one game,\nKO 10 enemies as Mic Kirby!"),
 
-    // Vanilla's two box cells count every color together over the whole save, so
-    // these take the "In one game" shape of its other counting cells instead.
     AP_CHECK(APCK_BOX_BLUE_20,        "City Trial: In one game,\nbreak 20 or more blue boxes!"),
     AP_CHECK(APCK_BOX_GREEN_10,       "City Trial: In one game,\nbreak 10 or more green boxes!"),
     AP_CHECK(APCK_BOX_RED_10,         "City Trial: In one game,\nbreak 10 or more red boxes!"),
@@ -100,10 +81,8 @@ static const CustomCheck ap_checks[] = {
     AP_CHECK(APCK_ASSEMBLE_AP_STAR,   "City Trial: Collect all 6 spheres\nand assemble the Archipelago Star!"),
     AP_CHECK(APCK_ASSEMBLE_ALL_LEGENDARY, "City Trial: In one game, assemble\nDragoon, Hydra and Archipelago Star!"),
 
-    // Restates vanilla's per-stat patch cell for the one stat it never counts.
     AP_CHECK(APCK_OFFENSE_PATCHES_10, "City Trial: In one game,\nget 10 or more Offense Patches!"),
 
-    // Vanilla's own Time Attack and Free Run wording, prefixes included.
     AP_CHECK(APCK_NEBULA_2LAP_FAST,   "Air Ride: NEBULA BELT\nFinish 2 laps in under 02:06:00!"),
     AP_CHECK(APCK_NEBULA_TA,          "Time Attack: NEBULA BELT\nFinish in under 03:35:00!"),
     AP_CHECK(APCK_NEBULA_TA_FAST,     "Time Attack: NEBULA BELT\nFinish in under 03:10:00!"),
@@ -118,7 +97,6 @@ static const CustomCheck ap_checks[] = {
     AP_CHECK(APCK_FROZEN_TA_WHEELIE,  "Time Attack: FROZEN HILLSIDE Finish\nin under 03:00:00 on Wheelie Bike!"),
     AP_CHECK(APCK_SANDS_TA_FLIGHT,    "Time Attack: SKY SANDS Finish in\nunder 02:50:00 on Flight Warp Star!"),
 
-    // Each worded after the event's own announcement.
     AP_CHECK(APCK_EVENT_RUNAMOK_DIST,     "City Trial: While energy tanks run\namok, travel over 1,000 feet!"),
     AP_CHECK(APCK_EVENT_RAILFIRE_ALL,     "City Trial: Catch fire at all 5 rail\nstations while they burn!"),
     AP_CHECK(APCK_EVENT_SAMEITEM_20,      "City Trial: When the boxes all hold\nthe same item, get 20 of it!"),
@@ -141,9 +119,6 @@ static const CustomCheck ap_checks[] = {
     AP_CHECK(APCK_MELEE_DEDEDE_KO_30,  "Stadium: KIRBY MELEE (All) In one game,\nKO 30 enemies as King Dedede!"),
     AP_CHECK(APCK_VSKD_METAKNIGHT_KO,  "Stadium: VS. KING DEDEDE\nKO King Dedede as Meta Knight!"),
 
-    // Vanilla's Top Ride cells carry no mode prefix, so these add one. The two Time
-    // Attack rows and the Free Run row keep vanilla's own prefix, which the course
-    // names already set apart from Air Ride's.
     AP_CHECK(APCK_TR_FREEZE_FAN_3,      "Top Ride: Freeze 3 or more rivals\nusing one Freeze Fan item!"),
     AP_CHECK(APCK_TR_FIRE_NO_BURN,      "Top Ride: FIRE Take 1st place\nwithout getting burned!"),
     AP_CHECK(APCK_TR_SAND_NO_ANTDOOM,   "Top Ride: SAND Take 1st place\nwithout dropping into Ant Doom!"),
@@ -189,45 +164,36 @@ static const CustomCheck ap_checks[] = {
     AP_CHECK(APCK_TR_EVERY_ITEM,          "Top Ride: Use every kind\nof item at least once!"),
 };
 
-#define AP_CHECK_NUM ((int)(sizeof(ap_checks) / sizeof(ap_checks[0])))
+#define AP_CHECK_NUM ((int)GetElementsIn(ap_checks))
 
-// A missing entry would leave an AP location with no way to complete it, stranding
-// any progression item fill places on it.
 _Static_assert(AP_CHECK_NUM == APCK_NUM, "ap_checks[] must cover every APCheckKind");
 
-// Already recorded as sent this save? The framework range-checks clear_kind first.
+// Called only with clear_kinds from ap_checks[], which Register validated.
 static int APChecklist_IsRecorded(int clear_kind)
 {
-    return (ap_save->sent_checks[AP_CHECKLIST_ROW][clear_kind >> 6] >> (clear_kind & 63)) & 1ULL;
+    return SENT_CHECK_BIT(AP_CHECKLIST_ROW, clear_kind);
 }
 
-// Record a completed AP check. The ClearChecker_SetNewUnlock REPLACEFUNC in
-// ap_checks intercepts ap_checklist_mode and sets the AP row's sent_checks
-// bit, fires the "Check sent" textbox and re-evaluates goals. The framework seeds
-// the cell's is_new/is_visible afterward, so the animation runs on the next entry.
+// Routed through ClearChecker_SetNewUnlock, whose replacement records the AP row's sent
+// bit.
 static void APChecklist_RecordComplete(int clear_kind)
 {
     ClearChecker_SetNewUnlock((GameMode)ap_checklist_mode, (u8)clear_kind);
 }
 
-// The framework's evaluator no-ops until this returns nonzero. game_ready is set at
-// the end of OnSaveLoaded, once the textbox API has resolved.
 static int APChecklist_IsReady(void)
 {
-    return ap_data && ap_data->game_ready;
+    return ap_data->game_ready;
 }
 
-// Tab art: an HSD archive staged to the FST root, exporting the banner watermark
-// and tab-emblem image descriptors.
+// Tab art: an archive exporting the banner watermark and tab-emblem images.
 #define AP_TEX_FILE      "ApChecklistTex"
 #define AP_BANNER_SYMBOL "apBannerImg"
 #define AP_EMBLEM_SYMBOL "apEmblemImg"
 
 static const CustomChecklistDesc ap_desc = {
     .name = AP_CHECKLIST_NAME,
-    .theme_r = AP_THEME_R,
-    .theme_g = AP_THEME_G,
-    .theme_b = AP_THEME_B,
+    .theme = AP_THEME_COLOR,
     .tex_file = AP_TEX_FILE,
     .banner_symbol = AP_BANNER_SYMBOL,
     .emblem_symbol = AP_EMBLEM_SYMBOL,
@@ -240,12 +206,11 @@ static const CustomChecklistDesc ap_desc = {
 
 int APChecklist_GetBuildMode(void)
 {
-    return cc_api && cc_api->GetBuildMode ? cc_api->GetBuildMode() : -1;
+    return cc_api ? cc_api->GetBuildMode() : -1;
 }
 
-// Set only once custom_checklist has accepted the tab, so callers can tell a live tab
-// from ap_checklist_mode's GMMODE_NUM default - the framework hands out that same mode
-// when the AP tab registers first.
+// ap_checklist_mode's GMMODE_NUM default is also the mode the framework hands the first
+// tab it registers, so it can't tell a live tab by itself.
 static int ap_tab_registered = 0;
 
 int APChecklist_IsRegistered(void)
@@ -258,8 +223,6 @@ void APChecklist_RevealAll(void)
     if (!ap_tab_registered)
         return;
 
-    // Through the framework rather than by writing is_visible here: it latches the tab
-    // open for the session, so a reveal that lands before the grid shuffle survives it.
     cc_api->RevealAll(ap_checklist_mode);
 }
 
@@ -272,20 +235,40 @@ void APChecklist_Register(void)
         (char *)CUSTOM_CHECKLIST_MOD_NAME, CUSTOM_CHECKLIST_API_MAJOR, CUSTOM_CHECKLIST_API_MINOR);
     if (!cc_api)
     {
-        OSReport("[APChecklist] custom_checklist API not available - AP tab disabled\n");
+        OSReport("[APChecklist] custom_checklist missing from this build, AP tab disabled\n");
         return;
     }
 
     int mode = cc_api->Register(&ap_desc);
     if (mode < 0)
     {
-        OSReport("[APChecklist] Registration rejected (rc %d) - AP tab disabled\n", mode);
+        OSReport("[APChecklist] Registration rejected (rc %d), AP tab disabled\n", mode);
         return;
     }
-    // The framework appends to the next free slot; ChecklistModeRow maps whatever it
-    // assigned to the fixed AP_CHECKLIST_ROW, so registration order does not matter.
     ap_checklist_mode = mode;
     ap_tab_registered = 1;
 
     OSReport("[APChecklist] Registered AP tab (mode %d, %d custom checks)\n", mode, AP_CHECK_NUM);
+}
+
+const char *APChecklist_RowName(int row)
+{
+    static const char *const names[CHECKLIST_MODE_NUM] = {
+        [GMMODE_AIRRIDE]   = "Air Ride",
+        [GMMODE_TOPRIDE]   = "Top Ride",
+        [GMMODE_CITYTRIAL] = "City Trial",
+        [AP_CHECKLIST_ROW] = AP_CHECKLIST_NAME,
+    };
+    return (unsigned)row < CHECKLIST_MODE_NUM ? names[row] : "Checklist";
+}
+
+// ModeColors[] is sized GMMODE_NUM, so the AP row carries its own tint.
+GXColor APChecklist_RowColor(int row)
+{
+    static const GXColor ap_theme = AP_THEME_COLOR;
+    if (row == AP_CHECKLIST_ROW)
+        return ap_theme;
+    if ((unsigned)row < GMMODE_NUM)
+        return tb_api->ModeColors[row];
+    return tb_api->DefaultColor;
 }

@@ -18,9 +18,8 @@ static u32 stc_item_hash;
 static int stc_bind_warned;
 
 // Grants Hypernova to the player who collected the Miracle Fruit, and to nobody else.
-static void OnCustomItemPickup(u32 id_hash, const char *name, int player)
+static void OnCustomItemPickup(u32 id_hash, int player)
 {
-    (void)name;
     if (id_hash == stc_item_hash)
         Hypernova_ActivatePlayer(player, 0);
 }
@@ -89,15 +88,7 @@ static void On3DLoadStart(void)
                                hypernova_enabled && !Gm_IsAutoDemo() && Gm_IsInCity());
 }
 
-// Turning it off mid-round would otherwise strand live players: OnFrameEnd stops running, so
-// their scale, rainbow priority pin and claims would all freeze until the next scene.
-static void OnChangeEnabled(int val)
-{
-    if (!val)
-        Hypernova_Deactivate();
-    OSReport("[Hypernova] %s\n", val ? "Enabled" : "Disabled");
-}
-
+static void OnChangeEnabled(int val) { OSReport("[Hypernova] %s\n", val ? "Enabled" : "Disabled"); }
 static void OnChangeDuration(int val) { OSReport("[Hypernova] Duration %s\n", stc_duration_names[val]); }
 static void OnChangeSuckProps(int val) { OSReport("[Hypernova] Suck props %s\n", val ? "enabled" : "disabled"); }
 static void OnChangeSuckMachines(int val) { OSReport("[Hypernova] Suck machines %s\n", val ? "enabled" : "disabled"); }
@@ -183,5 +174,5 @@ ModDesc mod_desc = {
     .OnBoot = Hypernova_OnBoot,
     .OnSceneChange = OnSceneChange,
     .On3DLoadStart = On3DLoadStart,
-    .OnFrameEnd = Hypernova_OnFrameEnd,
+    .On3DLoadEnd = Hypernova_On3DLoadEnd,
 };

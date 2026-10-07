@@ -4,14 +4,14 @@ const GXColor TextBox_DefaultColor = {255, 255, 255, 255}; // white
 
 const GXColor TextBox_AbilityColors[COPYKIND_NUM] = {
     [COPYKIND_FIRE]    = {255, 60,  10,  255}, // red-orange
-    [COPYKIND_TIRE]   = {145, 145, 145, 255}, // dark grey
+    [COPYKIND_TIRE]    = {145, 145, 145, 255}, // dark grey
     [COPYKIND_SLEEP]   = {255, 180, 220, 255}, // soft pink
     [COPYKIND_SWORD]   = {115, 185, 40,  255}, // dark green
     [COPYKIND_BOMB]    = {120, 120, 130, 255}, // gunmetal
     [COPYKIND_PLASMA]  = {65,  215, 165, 255}, // cyan
     [COPYKIND_NEEDLE]  = {215, 205, 25,  255}, // muted yellow
-    [COPYKIND_MIKE]     = {175, 50,  0,   255}, // dark red
-    [COPYKIND_ICE]  = {0,   100, 255, 255}, // blue
+    [COPYKIND_MIKE]    = {175, 50,  0,   255}, // dark red
+    [COPYKIND_ICE]     = {0,   100, 255, 255}, // blue
     [COPYKIND_TORNADO] = {130, 180, 255, 255}, // light blue
     [COPYKIND_BIRD]    = {220, 0,   220, 255}, // light magenta
 };

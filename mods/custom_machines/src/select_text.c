@@ -1,8 +1,4 @@
-// Machine name and description text on both select screens. Each screen turns a
-// CharacterKind into a pair of SIS text indices through two 20-entry tables with no
-// spare entry, so all four are relocated widened and each appended character gets a
-// name and a description entry composed here. A machine with no description still
-// gets one, empty: the screen draws neither text unless both indices are valid.
+#include <string.h>
 
 #include "os.h"
 #include "hsd.h"
@@ -20,53 +16,34 @@
 // Air Ride then City Trial, name then description: the lis / addi pair that forms each
 // index table inside the one function that reads it.
 static const u32 stc_index_table_sites[2][2][2] = {
-    { { 0x80153d58, 0x80153d68 }, { 0x80153d5c, 0x80153d6c } }, // AirRideSelect_SetMachineText
-    { { 0x8015e76c, 0x8015e77c }, { 0x8015e770, 0x8015e780 } }, // CitySelect_SetMachineText
+    { { 0x80153d58, 0x80153d68 }, { 0x80153d5c, 0x80153d6c } }, // AirRideSelect_SetMachineText (0x80153d2c)
+    { { 0x8015e76c, 0x8015e77c }, { 0x8015e770, 0x8015e780 } }, // CitySelect_SetMachineText (0x8015e740)
 };
 
 // Entries are read as a word and sign-extended from their low byte, so a text
 // index has to fit a signed char and -1 means "draw nothing".
 static u32 stc_text_index[2][2][CUSTOM_CKIND_NUM + 1];
 
-static void *stc_sis_ptrs[SIS_SELPLY_ENTRY_NUM + CUSTOM_MACHINE_MAX * 2];
+static SISEntry stc_sis_ptrs[SIS_SELPLY_ENTRY_NUM + CUSTOM_MACHINE_MAX * 2];
 static u8 stc_sis_name_text[CUSTOM_MACHINE_MAX][SIS_NAME_TEXT_MAX];
 static u8 stc_sis_description_text[CUSTOM_MACHINE_MAX][SIS_DESCRIPTION_TEXT_MAX];
 
-// Glyphs of `str` into `p`, stopping short of `end`. Characters the master font
-// has no code for are dropped, as they are everywhere else the game composes text.
-static u8 *WriteGlyphs(u8 *p, u8 *end, const char *str, int upper)
-{
-    for (int i = 0; str[i] != '\0' && p < end; i++)
-    {
-        char c = str[i];
-
-        if (c == ' ')
-        {
-            *p++ = TEXTCMD_SPACE;
-            continue;
-        }
-        if (c == '\n')
-        {
-            *p++ = TEXTCMD_LINEBREAK;
-            continue;
-        }
-        if (upper && c >= 'a' && c <= 'z')
-            c -= 'a' - 'A';
-
-        int cmd = Text_CharToCommand(c);
-        if (cmd == -1)
-            continue;
-        *p++ = (u8)(cmd >> 8);
-        *p++ = (u8)cmd;
-    }
-    return p;
-}
+// Closing commands both entries end on.
+#define SIS_CLOSE_LEN 7
 
 // A machine name, styled as the vanilla name entries are and upper-cased because
 // every one of them is.
 static void ComposeName(u8 *buf, const char *name)
 {
+    char upper[CUSTOM_MACHINE_NAME_MAX];
     u8 *p = buf;
+
+    CustomMachines_CopyStr(upper, name, sizeof(upper));
+    for (char *c = upper; *c != '\0'; c++)
+    {
+        if (*c >= 'a' && *c <= 'z')
+            *c -= 'a' - 'A';
+    }
 
     *p++ = TEXTCMD_ALIGNCENTER;
     *p++ = TEXTCMD_FIT;
@@ -74,7 +51,7 @@ static void ComposeName(u8 *buf, const char *name)
     *p++ = TEXTCMD_COLOR; *p++ = 0x00; *p++ = 0x00; *p++ = 0x00;              // black
     *p++ = TEXTCMD_SCALE; *p++ = 0x00; *p++ = 0x80; *p++ = 0x00; *p++ = 0x80; // 0.5
 
-    p = WriteGlyphs(p, buf + SIS_NAME_TEXT_MAX - 9, name, 1);
+    p = Text_WriteSisString(p, buf + SIS_NAME_TEXT_MAX - SIS_CLOSE_LEN, upper);
 
     *p++ = TEXTCMD_LINEBREAK;
     *p++ = TEXTCMD_COLOREND;
@@ -98,7 +75,7 @@ static void ComposeDescription(u8 *buf, const char *description)
     *p++ = TEXTCMD_COLOR; *p++ = 0x30; *p++ = 0x30; *p++ = 0x30;              // gray
     *p++ = TEXTCMD_SCALE; *p++ = 0x00; *p++ = 0x8c; *p++ = 0x00; *p++ = 0x8c; // 0.55
 
-    p = WriteGlyphs(p, buf + SIS_DESCRIPTION_TEXT_MAX - 9, description, 0);
+    p = Text_WriteSisString(p, buf + SIS_DESCRIPTION_TEXT_MAX - SIS_CLOSE_LEN, description);
 
     *p++ = TEXTCMD_LINEBREAK;
     *p++ = TEXTCMD_COLOREND;
@@ -114,19 +91,11 @@ static void ComposeDescription(u8 *buf, const char *description)
 // load of either screen's SIS file.
 static void ExtendSis(void)
 {
-    void **loaded = (void **)stc_sis_data[0];
-
-    if (loaded == NULL || loaded == stc_sis_ptrs)
-        return;
-
-    for (int i = 0; i < SIS_SELPLY_ENTRY_NUM; i++)
-        stc_sis_ptrs[i] = loaded[i];
-
-    stc_sis_data[0] = (SISData *)stc_sis_ptrs;
+    Text_ExtendSis(0, stc_sis_ptrs, SIS_SELPLY_ENTRY_NUM);
 }
 
-// Epilogues of AirRideSelect_LoadSisFile and CitySelect_LoadSisFile, past the
-// Text_LoadSisFile that fills the slot.
+// Epilogues of AirRideSelect_LoadSisFile (0x8013bacc) and CitySelect_LoadSisFile
+// (0x8013c4a8), past the Text_LoadSisFile that fills the slot.
 CODEPATCH_HOOKCREATE(0x8013baf0,
     "",
     ExtendSis,
@@ -171,14 +140,13 @@ void CustomMachineSelectText_OnBoot(void)
         {
             u32 *dst = stc_text_index[screen][which];
 
-            for (int i = 0; i < CKIND_NUM; i++)
-                dst[i] = vanilla[screen][which][i];
+            memcpy(dst, vanilla[screen][which], CKIND_NUM * sizeof(u32));
             for (int i = 0; i < appended; i++)
                 dst[CKIND_NUM + i] = (u32)(SIS_SELPLY_ENTRY_NUM + i * 2 + which);
             for (int i = CKIND_NUM + appended; i <= CUSTOM_CKIND_NUM; i++)
                 dst[i] = (u32)-1;
 
-            CustomMachines_RepointTable(stc_index_table_sites[screen][which][0],
+            CODEPATCH_REPLACEADDRESS(stc_index_table_sites[screen][which][0],
                                         stc_index_table_sites[screen][which][1], dst);
         }
     }

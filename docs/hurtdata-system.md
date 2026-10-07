@@ -176,8 +176,9 @@ attacker+0x08 and `regions` from attacker+0x0C).
 1. Iterate the attacker's regions (stride 0xC8). For each active region, check the victim mask
    against `1 << victim.kind`, the filter byte against the victim's vulnerability class, and the
    region's victim list.
-2. Iterate the victim's sub-regions (stride 0x44) and run `Hit_CheckOverlap`, a sphere-vs-sphere
-   test, for each pair.
+2. Iterate the victim's sub-regions (stride 0x44) and run `Hit_CheckOverlap` for each pair: a swept-sphere
+   test (`Hit_CapsuleSweptSphereOverlap` for capsule-flagged volumes) behind a relative-speed gate
+   (`params.x28`, -1 = off).
 3. On overlap, call `HitColl_SetDamageLog` with the attacker's **region entry** as the damage source.
 
 ### HitColl_SetDamageLog (0x8018cf94)
@@ -266,14 +267,14 @@ NULL**.
 
 Neither does `Machine_EnterHitReaction(md)` (`0x801e05bc`). It does nothing unless the machine
 holds an event formation slot (`formation_slot != 5`). Then it restores the default model scale,
-releases the slot, calls `HurtData_UpdateVulnState`, and runs `Machine_RegisterHitReaction`
+releases the slot, calls `HurtData_UpdateVulnState`, and runs `Machine_ClaimSpawnSlot`
 (`0x801e0158`) and `Machine_OnEnterHitReaction` (`0x801e0e28`).
 
 `Machine_DmgApply` (`0x801c6834`) is where a logged hit lands: when `kb_mag != 0` it passes
 `dmg_taken` to `Machine_GiveDamage`, then `Machine_DispatchHitReaction(md, hit)` (`0x801e2620`),
-with `hit` at `HurtData.hitcoll_log_idx`. That calls `0x801e2324` (mapped as `Machine_EnterDeath`,
-but it sets up the reaction, not a death). It stores the
-attacker's hurt type at +0x1ba4 and a duration from `kb_mag`, with a 0-2 strength tier at +0x1bb0.
+with `hit` at `HurtData.hitcoll_log_idx`. That calls `Machine_SetupHitReaction` (`0x801e2324`),
+which stores the attacker's hurt type at +0x1ba4 and a duration from `kb_mag`, with a 0-2
+strength tier at +0x1bb0.
 The dispatcher then enters one of sub-states 4-11 through the table at `0x804b0e70`, indexed by
 hurt type. None of the reaction actions carries a hitbox.
 

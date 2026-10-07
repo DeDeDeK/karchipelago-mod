@@ -20,7 +20,8 @@ Three things are rewritten on top of the carve:
     and once as an edge.
 
 All box and event weights are zero, so the AP Box never enters a spawn pool. The
-archipelago mod spawns it on its own timer.
+archipelago mod adds it to the city's box roll itself, as a fourth outcome beside
+the three colors, keeping the color, size and fall timer the roll landed on.
 
 Run from the repo root:
     uv run --with pillow python scripts/authoring/make_ap_box.py

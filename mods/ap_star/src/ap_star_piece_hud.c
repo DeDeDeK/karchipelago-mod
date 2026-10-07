@@ -4,6 +4,7 @@
 #include "os.h"
 #include "obj.h"
 #include "hud.h"
+#include "inline.h"
 
 #include "ap_star.h"
 #include "ap_star_piece_hud.h"
@@ -13,8 +14,7 @@
 #define AP_PIECE_HUD_ROW_DY -3.4f
 
 static JOBJSet **icon_sets;
-static Vec3 anchor_pos[APSTARPIECE_NUM];
-static int anchors_valid;
+static const u8 *collected; // each player's set, one bit per APStarPieceKind
 
 static struct
 {
@@ -24,62 +24,54 @@ static struct
     u8 shown_mask;
 } piece_hud[PLY_NUM];
 
-// The six anchors are children of the root with no rotation and unit scale, so a
-// world position is the sum of two translations. Reading the descriptor rather than
-// an instance keeps the AP row from needing a position-model element of its own.
-static void ReadAnchors(void)
-{
-    Game3dData *g3d = Gm_Get3dData();
-    if (g3d == NULL || g3d->legendary_hud_pos == NULL || g3d->legendary_hud_pos[0] == NULL)
-        return;
-
-    JOBJDesc *root = g3d->legendary_hud_pos[0]->jobj;
-    if (root == NULL)
-        return;
-
-    JOBJDesc *anchor = root->child;
-    for (int i = 0; i < APSTARPIECE_NUM; i++)
-    {
-        if (anchor == NULL)
-            return;
-        anchor_pos[i].X = root->position.X + anchor->position.X;
-        anchor_pos[i].Y = root->position.Y + anchor->position.Y + AP_PIECE_HUD_ROW_DY;
-        anchor_pos[i].Z = root->position.Z + anchor->position.Z;
-        anchor = anchor->next;
-    }
-    anchors_valid = 1;
-}
-
+// The viewport a player's HUD draws in, or -1 for a player with none, which every CPU is.
 static int ViewForPly(int ply)
 {
     Game3dData *g3d = Gm_Get3dData();
-    if (g3d == NULL)
-        return 0;
     for (int v = 0; v < 4; v++)
     {
-        if (g3d->plyview_lookup[v] == (s8)ply)
+        if (g3d->plyview_lookup[v] == ply)
             return v;
     }
-    return 0;
+    return -1;
 }
 
-static void ShowPieceIcon(int ply, int piece)
+// Where vanilla would put an icon on that anchor of the viewport's own row, shifted down
+// onto the AP row. The row's instance carries HUD_CreateElement's per-viewport offset.
+static int AnchorPos(int view, int slot, Vec3 *out)
+{
+    GOBJ *row = Gm_Get3dData()->legendary_hud_gobj[view];
+    if (row == NULL)
+        return 0;
+    JOBJ *anchor = GObj_GetJObjIndex(row, slot + 1);
+    if (anchor == NULL)
+        return 0;
+
+    JObj_GetWorldPosition(anchor, NULL, out);
+    out->Y += AP_PIECE_HUD_ROW_DY;
+    return 1;
+}
+
+static void PlaceIcon(GOBJ *g, const Vec3 *pos)
+{
+    JOBJ *j = g->hsd_object;
+    j->trans = *pos;
+    JObj_SetMtxDirtySub(j);
+}
+
+static void ShowPieceIcon(int ply, int view, int piece)
 {
     int slot = piece_hud[ply].count;
-    if (slot >= APSTARPIECE_NUM || piece_hud[ply].icon[slot] != NULL)
-        return;
-    if (icon_sets[piece] == NULL || icon_sets[piece]->jobj == NULL)
+    Vec3 pos;
+    if (icon_sets[piece] == NULL || icon_sets[piece]->jobj == NULL || !AnchorPos(view, slot, &pos))
         return;
 
-    GOBJ *g = HUD_CreateElement(ply, icon_sets[piece]->jobj);
+    GOBJ *g = HUD_CreateElement(view, icon_sets[piece]->jobj);
     if (g == NULL)
         return;
     GObj_SetPLink(g, GAMEPLINK_PAUSEHUD, 0);
-    HUD_AddElementData(g, HUDKIND_LEGENDARYPIECE, ply, ViewForPly(ply));
-
-    JOBJ *j = g->hsd_object;
-    j->trans = anchor_pos[slot];
-    JObj_SetMtxDirtySub(j);
+    HUD_AddElementData(g, HUDKIND_LEGENDARYPIECE, ply, view);
+    PlaceIcon(g, &pos);
 
     piece_hud[ply].icon[slot] = g;
     piece_hud[ply].piece[slot] = (u8)piece;
@@ -87,54 +79,35 @@ static void ShowPieceIcon(int ply, int piece)
 }
 
 // The icons behind a removed one slide left, so the row keeps collection order.
-static void RemovePieceIcon(int ply, int slot)
+static void RemovePieceIcon(int ply, int view, int slot)
 {
-    if (piece_hud[ply].icon[slot] != NULL)
-        GObj_Destroy(piece_hud[ply].icon[slot]);
+    GObj_Destroy(piece_hud[ply].icon[slot]);
 
     for (int i = slot; i + 1 < piece_hud[ply].count; i++)
     {
-        GOBJ *g = piece_hud[ply].icon[i + 1];
-        piece_hud[ply].icon[i] = g;
+        piece_hud[ply].icon[i] = piece_hud[ply].icon[i + 1];
         piece_hud[ply].piece[i] = piece_hud[ply].piece[i + 1];
-        if (g == NULL)
-            continue;
 
-        JOBJ *j = g->hsd_object;
-        j->trans = anchor_pos[i];
-        JObj_SetMtxDirtySub(j);
+        Vec3 pos;
+        if (AnchorPos(view, i, &pos))
+            PlaceIcon(piece_hud[ply].icon[i], &pos);
     }
     piece_hud[ply].count--;
     piece_hud[ply].icon[piece_hud[ply].count] = NULL;
 }
 
-static void ClearPieceIcons(int ply)
+static void UpdateRow(int ply, u8 mask)
 {
-    for (int i = 0; i < APSTARPIECE_NUM; i++)
-    {
-        if (piece_hud[ply].icon[i] != NULL)
-            GObj_Destroy(piece_hud[ply].icon[i]);
-        piece_hud[ply].icon[i] = NULL;
-    }
-    piece_hud[ply].count = 0;
-    piece_hud[ply].shown_mask = 0;
-}
+    u8 shown = piece_hud[ply].shown_mask;
+    if (mask == shown)
+        return;
+    piece_hud[ply].shown_mask = mask;
 
-void ApStarPieceHud_Update(int ply, u8 mask)
-{
-    if (mask == piece_hud[ply].shown_mask)
+    // Vanilla builds its row only for a player with a viewport, so this does the same.
+    int view = ViewForPly(ply);
+    if (view < 0)
         return;
 
-    if (mask == 0)
-    {
-        ClearPieceIcons(ply);
-        return;
-    }
-    if (!anchors_valid || icon_sets == NULL)
-    {
-        piece_hud[ply].shown_mask = mask;
-        return;
-    }
     // A dropped sphere clears its bit, so the diff runs both ways: an icon left
     // standing would be shown twice if that color were collected again.
     for (int s = 0; s < piece_hud[ply].count;)
@@ -142,37 +115,48 @@ void ApStarPieceHud_Update(int ply, u8 mask)
         if (mask & (1 << piece_hud[ply].piece[s]))
             s++;
         else
-            RemovePieceIcon(ply, s);
+            RemovePieceIcon(ply, view, s);
     }
     for (int p = 0; p < APSTARPIECE_NUM; p++)
     {
-        u8 bit = (u8)(1 << p);
-        if ((mask & bit) && !(piece_hud[ply].shown_mask & bit))
-            ShowPieceIcon(ply, p);
+        if (mask & ~shown & (1 << p))
+            ShowPieceIcon(ply, view, p);
     }
-    piece_hud[ply].shown_mask = mask;
+}
+
+static void HudThink(GOBJ *g)
+{
+    for (int ply = 0; ply < PLY_NUM; ply++)
+        UpdateRow(ply, collected[ply]);
 }
 
 void ApStarPieceHud_OnSceneChange(void)
 {
     memset(piece_hud, 0, sizeof(piece_hud));
     icon_sets = NULL;
-    anchors_valid = 0;
 }
 
-void ApStarPieceHud_Load(void)
+void ApStarPieceHud_Create(const u8 *masks)
 {
     HSD_Archive *icons = NULL;
     Gm_LoadGameFile(&icons, "ApPieceIcons");
     if (icons != NULL)
         icon_sets = Archive_GetPublicAddress(icons, "apPieceIcons_scene_models");
-    ReadAnchors();
 
     // A tracker that cannot build fails the same way every round, so it says so once.
     static int unavailable_reported;
-    if ((icon_sets == NULL || !anchors_valid) && !unavailable_reported)
+    if (icon_sets == NULL)
     {
-        unavailable_reported = 1;
-        OSReport("[ApStarPieceHud] Sphere tracker unavailable\n");
+        if (!unavailable_reported)
+        {
+            unavailable_reported = 1;
+            OSReport("[ApStarPieceHud] ApPieceIcons.dat has no apPieceIcons_scene_models, "
+                     "sphere tracker is off\n");
+        }
+        return;
     }
+
+    collected = masks;
+    // p_link 0 runs through the match pause and the hitstops, so a given sphere shows at once.
+    GOBJ_EZCreator(0, GAMEPLINK_SYS, 0, 0, 0, HSD_OBJKIND_NONE, 0, HudThink, 0, 0, 0, 0);
 }

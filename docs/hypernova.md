@@ -54,7 +54,7 @@ or to everyone at once:
   `hypernova_duration_sel`.
 - Only human slots (`PKIND_HMN`) can be activated.
 
-Each frame while `timer > 0` (`Hypernova_OnFrameEnd`, which runs after the frame's game procs
+Each frame while `timer > 0` (`Hypernova_Think`, which runs after the frame's game procs
 so the vacuum's position overrides win over item physics and ground-snap):
 
 1. Expire or cancel: decrement the timer, and end the player immediately if they now hold a
@@ -63,9 +63,13 @@ so the vacuum's position overrides win over item physics and ground-snap):
 3. Drive the inhale gesture; when it reports an active suck, run that player's cone scan.
 4. Advance every claimed item / prop / machine, then recolor the live whirlwinds.
 
-The whole tick is skipped while `Gm_CheckPauseKind(PAUSEKIND_GAME)` is set, because everything
-it cooperates with (the model-scale applier, the ColAnim selector, effect models) is frozen
-too. The debug cone is installed before that early-out so it still renders while paused.
+`Hypernova_Think` is the proc of a GObj `Hypernova_On3DLoadEnd` creates on the City Trial
+map when **Enabled** is on, at priority 23 - the last one `GObj_UpdateAll` runs - on p_link 1.
+That link freezes with the match pause, match end and the hitstops, as does everything the
+tick cooperates with (the model-scale applier, the ColAnim selector, effect models), so
+Hypernova holds still with them.
+The GObj is freed with the scene heap and `OnSceneChange` resets the state, so nothing runs or
+carries over outside City Trial.
 
 The trigger button is **B** (`HYPERNOVA_TRIGGER_BUTTON`), not `A` - `A` is the boost/charge
 button and would conflict with normal machine control. The trigger only counts while
@@ -73,8 +77,7 @@ button and would conflict with normal machine control. The trigger only counts w
 being off-machine reads as a release (it ends any running suck and skips the vacuum).
 
 Leaving City Trial or changing scene calls `ResetState`, which snaps every player to neutral
-scale (models are recreated at 1.0 anyway), drops all claims (`Hypernova_VacuumReset`), and
-forgets the debug-cone GObj.
+scale (models are recreated at 1.0 anyway) and drops all claims (`Hypernova_VacuumReset`).
 
 When one player's Hypernova ends, `Hypernova_VacuumFinishClaimedPlayer` breaks that player's
 in-flight props (sending home any that will not break), releases their item claims back to
@@ -90,9 +93,9 @@ Six options under "Hypernova" (`main.c`), each with an `on_change` that logs the
 CT to give every human Hypernova; default off), and **Debug Cone** (default off). The two
 debug options are `no_save`, so they never reach the memory-card block.
 
-Turning **Enabled** off calls `Hypernova_Deactivate`. Without that, `Hypernova_OnFrameEnd`'s
-early-out would strand any live player with a 2x model, a pinned ColAnim priority suppressing
-their hurt flashes, and frozen claims until the next scene change.
+Options only change in the main menu, so every round sees fixed values. `On3DLoadEnd` reads
+**Enabled** and **Debug Cone** once to decide which GObjs to create; `StartPlayer` still checks
+**Enabled** because API callers can reach it with no frame GObj running.
 
 ### Copy Abilities and Power-Ups End Hypernova
 
@@ -110,7 +113,7 @@ applied to Hypernova both ways:
   `RiderState_LoseAbilityEnter` (`0x801b0adc`) for the spit-out to neutral. Without this strip
   the guard below would read the pre-existing state and cancel Hypernova on its first frame.
 - **While active**, the frame the rider *gains* a copy ability or power-up (`PlayerHoldsAbility`),
-  `Hypernova_OnFrameEnd` ends Hypernova for that player. This runs **before `DriveInhale`** -
+  `Hypernova_Think` ends Hypernova for that player. This runs **before `DriveInhale`** -
   the grant has already moved the rider into the ability/power-up action-state during the
   frame's game procs, so ending here stops the inhale drive from stomping the new state on the
   next frame. The giant + rainbow + vacuum tear down cleanly while the new ability takes over.
@@ -134,7 +137,7 @@ deactivate, writing the field directly each frame. A settled, inactive player's 
 left alone entirely so the mod never fights other scale writers.
 
 **Do not also bump `x2c8` for the 2x look** - the model uses the product, so raising both
-compounds to 4x. `x2c8` is also the vanilla inhale's range knob (`HurtVolume_OverlapTest`
+compounds to 4x. `x2c8` is also the vanilla inhale's range knob (`Hit_CheckRegionOverlap`
 `0x80189784` scales the mouth sphere by it), but that sphere is only tested against EventActor
 candidates, of which City Trial has none, so widening it buys nothing. The vacuum's reach is an
 independent mod constant.
@@ -390,7 +393,7 @@ dies self-heals out of the claim set and a dangling pointer is never dereference
 **Pull.** `Hypernova_PullMachine` writes `MachineData.pos` with the shared step.
 `Machine_PhysicsThink` (`0x801c6368`, proc priority 4) integrates `pos += accel + velocity +
 ...` every frame, so the pull zeroes `accel` (`+0x318`) and `velocity` each frame to keep the
-position override from being fought. The write lands in `OnFrameEnd`, after the machine's procs,
+position override from being fought. The write lands in `Hypernova_Think`, after the machine's procs,
 and is picked up by the next frame's `Machine_ApplyModelMatrix` (`0x801c9074`, priority 6).
 Machines are not shrunk - a full-size machine erupting on a 2x Kirby reads better - and their
 break radius (`HYPERNOVA_MACHINE_BREAK_RADIUS`, 45.0) is wider than the yakumono one so the
@@ -442,7 +445,7 @@ enemies:
 2. **The predicate admits EventActors only.** `EventActorGObj_IsInhalable` (`0x802041c8`) rejects
    GObj classes `0xE` / `0x26` / `0x3E` (rider/player/projectile) and then requires the
    candidate to pass the EventActor test.
-3. **The overlap test reads an EventActor volume.** `HurtVolume_OverlapTest` (`0x80189784`)
+3. **The overlap test reads an EventActor volume.** `Hit_CheckRegionOverlap` (`0x80189784`)
    compares the rider's mouth volume (`RiderData+0x828`) against the candidate's `hit_region` at
    `EnemyData+0x45c`, which items/yakumono do not have.
 4. **Capture is EventActor-specific.** `EventActor_OnCapture` (`0x802038c4`) puts the actor into
@@ -530,7 +533,7 @@ has simply **left its START state**:
 `HYPERNOVA_INHALE_TIMER_HOLD` must be `>= 2` (one decrement lands before the next write) and
 only matters if the unreliable countdown is honored at all.
 
-Gaining a copy ability or power-up needs no handling here: `OnFrameEnd` ends that player's
+Gaining a copy ability or power-up needs no handling here: `Hypernova_Think` ends that player's
 Hypernova (phase IDLE, `stc_active` cleared) *before* `DriveInhale` runs, so the drive is never
 called for a rider mid-handoff and never fights the pickup animation.
 
@@ -653,12 +656,11 @@ The in-place recolor gives color but no scale or shape control over the swirl.
 
 A debug-only overlay (`hypernova_debug.c`, "Debug Cone" menu toggle, off by default) draws a
 lightly opaque red cone in world space showing the suction region's reach and angle against the
-real items and props in front of the rider. It is decoupled from the power-up: in City Trial
-gameplay, whenever the toggle is on and a human rider has a usable forward vector (the same
-`>= 0.01` guard the vacuum uses), the cone is drawn - neither an active Hypernova nor even the
-**Enabled** option is required. `Hypernova_DebugConeEnsure` runs ahead of both the
-`hypernova_enabled` and the pause early-outs in `Hypernova_OnFrameEnd` for exactly that reason,
-which is also why the cone keeps rendering while the game is paused.
+real items and props in front of the rider. It is decoupled from the power-up: on the City
+Trial map (not in stadiums), with the toggle on, the cone is drawn for every human rider with a
+usable forward vector (the same `>= 0.01` guard the vacuum uses) - neither an active Hypernova
+nor even the **Enabled** option is required. The cone is a GX link, not a proc, so it keeps
+rendering while the game is paused.
 
 **Same inputs as the suction**, so what you see is what gets vacuumed: apex = `RiderData.pos`,
 axis = normalized `RiderData.forward`, reach = `HYPERNOVA_RANGE`, half-angle from
@@ -686,11 +688,9 @@ blends over already-rendered opaque world geometry; the render loop invokes the 
 per pass (0 = OPA, 1 = XLU, 2 = additional).
 
 **Lifecycle.** A standalone render GObj (`GObj_Create` + `GObj_AddGXLink`, no proc/model)
-carries the GX callback. It is created lazily once per City Trial session (from `OnFrameEnd`)
-and persists; the callback is a no-op while the toggle is off. World GObjs are freed by the
-engine on scene teardown, so the mod only caches the handle to avoid recreating it and forgets
-it (never destroys it) on the scene/leave-CT reset path - a manual destroy would risk a double
-free. Tuning constants live in `hypernova.h` (`HYPERNOVA_DEBUG_CONE_RGBA`, `..._CONE_SEGS`,
+carries the GX callback. `Hypernova_On3DLoadEnd` creates it with the scene when the toggle is
+on, so it draws from the intro onward; the engine frees it with the scene, and the mod keeps no
+handle to it. Tuning constants live in `hypernova.h` (`HYPERNOVA_DEBUG_CONE_RGBA`, `..._CONE_SEGS`,
 `..._GX_LINK`).
 
 ## Authoring the Miracle Fruit
@@ -698,14 +698,11 @@ free. Tuning constants live in `hypernova.h` (`HYPERNOVA_DEBUG_CONE_RGBA`, `..._
 The archive is a `custom_items` descriptor carved out of the vanilla item table: the Bomb copy
 panel's model (kind 28) carrying `art/miracle-fruit.png` as its texture, cloning the Maxim
 Tomato's behavior (kind 39) so it reads as food. Equal weight in all three box pools, plus Tac
-and destructible drops. This is the command that produced the shipped archive:
+and destructible drops. `scripts/authoring/make_miracle_fruit.py` runs that carve through
+`scripts/hsd/carve_custom_item.py` and writes the shipped archive:
 
 ```
-uv run --with pillow python scripts/hsd/carve_custom_item.py iso/files/Item.dat 28 \
-    mods/hypernova/assets/items/MiracleFruit.dat "Miracle Fruit" \
-    --base-kind 39 --texture art/miracle-fruit.png \
-    --weight-blue 40 --weight-green 40 --weight-red 40 \
-    --ev-tac 40 --ev-destructible 40
+uv run --with pillow python scripts/authoring/make_miracle_fruit.py
 ```
 
 The descriptor's `name` is the handle `main.c` binds by, so changing one without the other

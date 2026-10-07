@@ -3,11 +3,9 @@
 #include "obj.h"
 #include "rider.h"
 #include "gx.h"
+#include "inline.h"
 
 #include "hypernova.h"
-
-// Cached only to avoid recreating it every frame; never dereferenced (the engine owns it).
-static GOBJ *stc_cone_gobj = NULL;
 
 // Base-circle rim as unit (cos, sin) pairs, seeded once so the per-frame draw does no trig.
 static Vec2 stc_cone_unit[HYPERNOVA_DEBUG_CONE_SEGS];
@@ -17,8 +15,7 @@ static void ConeBasis(Vec3 *aim, Vec3 *u, Vec3 *v)
 {
     // Reference axis not parallel to aim: world up, unless aim is near-vertical (then world X).
     Vec3 ref = {0.0f, 1.0f, 0.0f};
-    float ay = aim->Y < 0.0f ? -aim->Y : aim->Y;
-    if (ay > 0.99f)
+    if (_fabs(aim->Y) > 0.99f)
     {
         ref.X = 1.0f;
         ref.Y = 0.0f;
@@ -51,20 +48,7 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
     }
 
     // Z-write off and cull-none so the cone reads as a see-through volume.
-    HSD_StateInitDirect(GX_VTXFMT0, 4);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-    GXSetNumTexGens(0);
-    GXSetNumChans(1);
-    // Channel 0 takes alpha from the vertex, or the translucency never reaches the blender.
-    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE);
-    GXSetCullMode(GX_CULL_NONE);
-    GXLoadPosMtxImm(&COBJ_GetCurrent()->view_mtx, GX_PNMTX0);
+    GX_BeginXlu(COBJ_GetCurrent(), 4, GX_BL_INVSRCALPHA);
 
     int segs = HYPERNOVA_DEBUG_CONE_SEGS;
     GXBegin(GX_TRIANGLES, GX_VTXFMT0, segs * 6);
@@ -97,12 +81,10 @@ static void Hypernova_DebugConeGX(GOBJ *g, int pass)
 {
     if (pass != 1)
         return;
-    if (!hypernova_debug_cone)
-        return;
 
     GXColor col = GXColor_Unpack(HYPERNOVA_DEBUG_CONE_RGBA);
 
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
@@ -119,29 +101,17 @@ static void Hypernova_DebugConeGX(GOBJ *g, int pass)
     }
 }
 
-void Hypernova_DebugConeEnsure(void)
+void Hypernova_DebugConeCreate(void)
 {
-    if (!hypernova_debug_cone)
-        return;
-    if (stc_cone_gobj != NULL)
-        return;
-
     GOBJ *g = GObj_Create(HYPERNOVA_DEBUG_GOBJ_CLASS, HYPERNOVA_DEBUG_GOBJ_PLINK, 0);
     if (g == NULL)
         return;
     for (int i = 0; i < HYPERNOVA_DEBUG_CONE_SEGS; i++)
     {
-        float a = (6.28318531f * i) / HYPERNOVA_DEBUG_CONE_SEGS;
+        float a = (2.0f * M_PI * i) / HYPERNOVA_DEBUG_CONE_SEGS;
         stc_cone_unit[i].X = cosf(a);
         stc_cone_unit[i].Y = sinf(a);
     }
 
     GObj_AddGXLink(g, Hypernova_DebugConeGX, HYPERNOVA_DEBUG_GX_LINK, HYPERNOVA_DEBUG_GX_PRI);
-    stc_cone_gobj = g;
-}
-
-void Hypernova_DebugConeReset(void)
-{
-    // The engine frees every world GObj on scene teardown; destroying it here would double-free.
-    stc_cone_gobj = NULL;
 }

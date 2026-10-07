@@ -38,7 +38,7 @@ bit alone changes nothing on screen.
 axis passes through a deadzone of 0.4 with a linear ramp over the remaining 0.6. X drives
 `rotation_amt`; Y accumulates into `zoom_amt` at `cmMainParamCommon.zoom_speed` per frame, then
 clamps to `zoom_dist_min .. zoom_dist_max` and derives `interest_raise` as
-`zoom_interest_raise * (zoom_amt / zoom_dist_max)`. The live values are `zoom_speed 0.2`, `zoom_dist_min -2.0`,
+`zoom_interest_raise * (zoom_amt / zoom_dist_max)`, or 0 while `zoom_amt` is negative. The live values are `zoom_speed 0.2`, `zoom_dist_min -2.0`,
 `zoom_dist_max 8.4`, `zoom_interest_raise 4.0`. It also raises `zoom_enabled` whenever `CamData.target` exists, which
 is the only thing that enables the `PlyCam_MachineZoomAdjust` path.
 
@@ -53,8 +53,9 @@ change, so nothing leaks in from the machine camera on dismount either.
 
 One `CODEPATCH_HOOKCREATE` at `0x800cb4dc`, the `b` that ends `PlyCam_OnFootThink`'s C-Stick X
 branch. Placing it there means every gate the function already applied still holds - rail
-transition pending, the camera-locked flag on `PlayerCamData+0xc`, and the HUD takeover check -
-so the zoom is live exactly when the rotation is. `r29` still holds the `CamData` and `r30` the
+transition pending, the camera-locked flag on `PlayerCamData+0xc`, and the `Gm_IsTitleMajor`
+(`0x8000af5c`) test at `0x800cb450` that keeps the title's attract demo off the pad - so the zoom
+is live exactly when the rotation is. `r29` still holds the `CamData` and `r30` the
 controller index; `r3` holds the function's `0` return, which the epilogue restores because the
 call clobbers it.
 
@@ -62,8 +63,11 @@ The hook body reproduces `cameraControlThink`'s Y-axis half against the same
 `cmMainParamCommon`, so the on-foot zoom range, speed and interest raise are the machine
 camera's. `PlyCam_MachineZoomAdjust` needs no patch - raising `zoom_enabled` is what connects it.
 
-With the toggle off the body clears `zoom_enabled`, `zoom_amt` and `interest_raise` instead. Nothing else on the
-on-foot path writes them, so a mid-round toggle-off snaps straight back to vanilla framing.
+With the toggle off the body returns without touching the camera. The toggle only changes in
+the main-menu settings scene, so it holds for a whole round, and `PlyCam_SwitchKind` clears
+`zoom_enabled` on the way into kind 6 with nothing on the on-foot path raising it again - the
+camera keeps vanilla framing. A missing `target` or param returns the same way;
+`PlyCam_MachineZoomAdjust` skips a camera with no `target` regardless.
 
 ## Scope
 
@@ -80,5 +84,5 @@ usual, and each dismount starts from the default on-foot framing.
 ## Menu
 
 `ap_menu_settings.onfoot_zoom_enabled` (`APMenuSettings`), an On/Off toggle in the Archipelago
-Settings menu. Default **Off** (vanilla behavior); the player opts in. Changes are logged via
+Settings menu. Default **On**; turning it off restores vanilla behavior. Changes are logged via
 `OnToggleOnFootZoom`.

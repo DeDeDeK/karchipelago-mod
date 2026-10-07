@@ -26,7 +26,7 @@ Those six gate what the client writes. The lines the mod composes itself sit und
 | Kind | Default | Content |
 |------|---------|---------|
 | `APLOCAL_CHECK` | Off | `Check recorded`, as a checkbox is recorded |
-| `APLOCAL_ITEM` | Off | `Unlocked Machine: Warp Star`, `Received: Sleep` - a grant being applied |
+| `APLOCAL_ITEM` | Off | `Unlocked Machine: Warp Star`, `Received: Sleep ability` - a grant being applied |
 | `APLOCAL_GOAL` | On | `Air Ride goal complete!`, `All Goals complete!` |
 | `APLOCAL_LINK` | Off | `DeathLink sent!`, `TrapLink received!` - a link firing or landing here |
 
@@ -50,7 +50,7 @@ A check line is worded like the server's own ItemSend, naming this slot as the f
 
 Hints are reworded rather than relayed verbatim. The server only sends a hint to the two slots it concerns - the player receiving the item and the player whose world holds it - so exactly one of those is always this slot, and Archipelago's full phrasing spends most of one screen line restating it. The hint status becomes both the color and a word inside the `Hint:` prefix, which leaves the room the location name needs.
 
-Goal, release, collect and chat lines arrive from the server as a single uncolored run of text; the client strips the `(Team #N)` stamp and colors the line by kind.
+Goal, release, collect and chat lines arrive from the server as a single uncolored run of text; the client strips the `(Team #N)` stamp and colors the line by the server's message type: Goal green, Release and Collect yellow, ServerChat orange, player Chat the default.
 
 Link lines name the direction and the other player, and carry the trap name the Bounce was tagged with - the outgoing one KAR chose, or whatever the sending world called its own. The incoming name is shown but not acted on: the mod rolls a local trap regardless. A DeathLink Bounce carries a free-text cause as well, which is dropped - it restates the source name in a sentence that would cost most of a screen line.
 
@@ -90,9 +90,9 @@ Two sides narrate the same events. The mod knows an item is being applied and a 
 
 The decision is the toggle and nothing else. The mod does not try to work out whether a client is attached, or whether one narrated any particular item.
 
-Every grant announce goes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`) rather than calling the text box itself. That is deliberate: the toggle is a property of the whole category, and a new unlock handler that copies its neighbour gets it without anyone remembering a guard. Announces that carry something the AP item name does not - `Patch cap increased (50%)`, `Spawn rate increased (60%)` - are the exception and call the text box directly, which is what marks them as exceptional. So does every non-AP path: EnergyLink purchases, in-game pickups, gate prompts. The boot regrant suppresses the same category through the same funnel, via `ap_regrant_quiet`.
+Every grant announce goes through `APAnnounce_Grant` / `APAnnounce_GrantSegments` (`ap_announce.c`) rather than calling the text box itself - including the ones that carry something the AP item name does not, `Patch cap increased! (19/30)` and `Spawn rate increased (110%)`. That is deliberate: the toggle is a property of the whole category, and a new unlock handler that copies its neighbour gets it without anyone remembering a guard. Only the non-AP paths print with no toggle at all: EnergyLink purchases and gate prompts. The boot regrant suppresses the same category through the same funnel, via `ap_regrant_quiet`.
 
-The check and goal lines have one call site each, in `ap_checks.c`, so they test `APAnnounce_LocalEnabled` directly instead of routing through a funnel of their own. So do the link lines, which sit at the send and receive points in `deathlink.c` and `traplink.c`.
+The check line has one call site, in `ap_checks.c`, and the goal lines two, in `ap_goal.c` (a row's own line and the `All Goals complete!` line that stands in for the last one), so they test `APAnnounce_LocalEnabled` directly instead of routing through a funnel of their own. So do the link lines, which sit at the send and receive points in `deathlink.c` and `traplink.c`.
 
 ## Client Status
 
@@ -102,7 +102,7 @@ That leaves the connect and disconnect lines to the client, which knows both mom
 
 ## Transport
 
-One 256-byte record in `APData` plus a pending flag, the same mailbox handshake the item channel uses: the client writes the body, then sets the flag; the mod renders and clears it. The mod holds a pending message while the text box has no screen canvas, so a scene load backpressures the client instead of losing the message.
+One 256-byte record in `APData` plus a pending flag, the same mailbox handshake the item channel uses: the client writes the body, then sets the flag; the mod renders and clears it. The mod holds a pending message only while no screen canvas exists (`*stc_textcanvas_first` is NULL, as during a scene load), so a scene load backpressures the client instead of losing the message. With the textbox mod disabled or absent from the build the message is consumed and dropped, so the mailbox never wedges.
 
 That caps delivery at one message per client poll, roughly 10 a second. The text box shows at most 8 at a time and holds each for several seconds, so it retires messages far slower than that, and a shared ring would only move the backlog from the client into game memory. The client queues composed messages in an unbounded deque instead and writes one per poll, keeping all Dolphin access in its poll loop. Nothing is collapsed or dropped on the way in: a burst of checks queues one line each and drains at the poll's own pace. Goaling a world releases every check this slot placed at once, which is the case the queue is sized for - the records are 256 bytes each and the client has the memory.
 
@@ -110,11 +110,12 @@ That caps delivery at one message per client poll, roughly 10 a second. The text
 
 `APText_DebugSend(kind)` composes one canned line per `APTextKind` into the mailbox the way the
 client does - the whole 256-byte record first, `text_pending` last - so the render path, the
-per-kind Messages filter, the colour table and the `IsReady` hold across a scene load all behave
-exactly as they do in a live session. `archipelago_debug` exposes them as its Messages page.
+per-kind Messages filter, the colour table and the hold across a scene load all behave exactly
+as they do in a live session. `archipelago_debug` exposes them as its Messages page.
 
-Each canned line carries the wording and colours the client actually composes for that kind, so a
-difference on screen is a real difference rather than an artifact of the test. A seventh entry,
+Each canned line carries the wording and colours the client composes for that kind: the connect
+line's name in green, player chat in the default colour, and a priority hint's
+`Hint (priority): ` prefix in plum, the colour Archipelago gives that hint status. A seventh entry,
 `APText_DebugSendOverlong`, fills all eight runs and overruns the three rendered lines: that is
 the only local way to see the wrap and the trailing `..` truncation, which otherwise need a real
 seed with a long player or item name in it.

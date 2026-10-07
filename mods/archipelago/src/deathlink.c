@@ -12,16 +12,12 @@
 #include "ap_colors.h"
 #include "ap_check_detect.h"
 
-#define DEATHLINK_PLY_MAX 5
-
-// A countdown, not a guard around the kill call: the HP-death path is asynchronous,
-// so the send hook trips frames after Ply_SetHP. Far short of the 150-frame respawn
-// timer, so it cannot swallow a genuine death.
+// A countdown rather than a guard around the kill: the HP death lands frames after
+// Ply_SetHP. Far short of the 150-frame respawn timer, so it can't swallow a real death.
 #define DEATHLINK_SUPPRESS_FRAMES 60
 
-static u8 deathlink_suppress[DEATHLINK_PLY_MAX];
+static u8 deathlink_suppress[PLY_NUM];
 
-// Behind Messages -> Local -> Links, off by default.
 static void Announce(const char *suffix)
 {
     if (APAnnounce_LocalEnabled(APLOCAL_LINK))
@@ -30,13 +26,13 @@ static void Announce(const char *suffix)
 
 static void SuppressSend(int ply)
 {
-    if ((u32)ply < DEATHLINK_PLY_MAX)
+    if ((u32)ply < PLY_NUM)
         deathlink_suppress[ply] = DEATHLINK_SUPPRESS_FRAMES;
 }
 
 static void TickSuppress(void)
 {
-    for (int i = 0; i < DEATHLINK_PLY_MAX; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (deathlink_suppress[i])
             deathlink_suppress[i]--;
@@ -45,17 +41,15 @@ static void TickSuppress(void)
 
 static void ClearSuppress(void)
 {
-    for (int i = 0; i < DEATHLINK_PLY_MAX; i++)
-        deathlink_suppress[i] = 0;
+    memset(deathlink_suppress, 0, sizeof(deathlink_suppress));
 }
 
-// The human-vs-CPU check is mode-specific and stays at the call site
-// (3D: Ply_GetDescPKind, TR: TopRide_GetPlayerKind).
+// The human check stays with the caller: Top Ride has its own player kinds.
 static int DeathLinkSendAllowed(int ply)
 {
     if (!ap_menu_settings.deathlink_enabled)
         return 0;
-    if ((u32)ply < DEATHLINK_PLY_MAX && deathlink_suppress[ply])
+    if ((u32)ply < PLY_NUM && deathlink_suppress[ply])
     {
         deathlink_suppress[ply] = 0;
         return 0;
@@ -67,26 +61,24 @@ static void SendDeathLink(int ply, const char *cause)
 {
     if (!DeathLinkSendAllowed(ply))
         return;
-    if (Ply_GetDescPKind(ply))
+    if (Ply_GetDescPKind(ply) != PKIND_HMN)
         return;
 
-    OSReport("[DeathLink] Player %d died (%s) - sending\n", ply + 1, cause);
+    OSReport("[DeathLink] Player %d died (%s), sent\n", ply + 1, cause);
     ap_data->deathlink_send = 1;
     Announce(" sent!");
 }
 
-// Hook inside Rider_CheckToDieOnMachine (0x801a06a8) at 0x801a06d0, where
-// Rider_IsMachineDead returned true. Fall deaths use a different bit in md->x0C35
-// and do not reach here.
+// Hook at 0x801a06d0 in Rider_CheckToDieOnMachine (0x801a06a8), where Rider_IsMachineDead
+// returned true. Fall deaths set is_fall_dead instead and don't reach here.
 static void DeathLink_OnHpDeath(RiderData *rd)
 {
     SendDeathLink(rd->ply, "HP");
 }
 CODEPATCH_HOOKCREATE(0x801a06d0, "mr 3, 31\n\t", DeathLink_OnHpDeath, "", 0)
 
-// Hook at 0x801e6540, inside Machine_SetFallDead (0x801e6520), where a machine falls
-// out of bounds. r31 = MachineData*, rider_gobj known non-null.
-// Clobbered: stw r4, 0x1b48(r31)
+// Hook at 0x801e6540 in Machine_SetFallDead (0x801e6520), where a machine falls out of
+// bounds. r31 = MachineData, rider_gobj non-null. Clobbered: stw r4, 0x1b48(r31).
 static void DeathLink_OnFallDeath(MachineData *md)
 {
     SendDeathLink(Machine_GetRiderPly(md), "fall");
@@ -103,9 +95,8 @@ CODEPATCH_HOOKCREATE(0x801e6540,
     "addi 1, 1, 16\n\t",
     0)
 
-// Kill a player via HP death (City Trial / Destruction Derby / VS King Dedede /
-// Melee) or fall death (Air Ride / Top Ride). The HP-death stadiums use CT-style
-// HP death; fall death there misbehaves (no out-of-bounds respawn spline).
+// HP death in City Trial and the HP stadiums, where a fall death has no out-of-bounds
+// respawn spline; a fall death everywhere else.
 static void KillPlayer(RiderData *rd, MachineData *md)
 {
     StadiumKind stadium = Gm_GetCurrentStadiumKind();
@@ -117,16 +108,22 @@ static void KillPlayer(RiderData *rd, MachineData *md)
     if (hp_death)
     {
         DmgLog dl = md->dmg_log;
-        dl.attacker_ply = PLY_NUM; // no attacker, so nobody is credited the KO
-        Ply_AddDeath(rd->ply, &dl, md->is_bike, md->kind);
+        dl.attacker_ply = PLY_NUM; // nobody is credited the KO
+
+        // Ply_AddDeath tallies by vanilla kind, and a registered machine's slot would index
+        // past its table; custom_machines' own KO seam swaps in the same kind.
+        int is_bike = md->is_bike;
+        int class_slot = md->kind;
+        if (CustomMachines_ResolveKind(cm_api, is_bike, class_slot) >= VCKIND_NUM)
+            class_slot = CustomMachines_ClassIndexOf(cm_api, VCKIND_WHEELVSDEDEDE, &is_bike);
+        Ply_AddDeath(rd->ply, &dl, is_bike, class_slot);
         Ply_SetHP(rd->ply, 0);
         APCheckDetect_OnKnockedOut(rd->ply);
     }
     else
     {
-        // respawn_pos holds the checkpoint spline params; backup_respawn_pos
-        // covers a failed lookup. -1 ground_handle matches vanilla's
-        // no-dead-zone-surface case.
+        // backup_respawn_pos covers a failed checkpoint lookup; a -1 ground handle is
+        // vanilla's no-dead-zone-surface case.
         float *pos = md->use_backup_checkpoint ? md->backup_respawn_pos : md->respawn_pos;
         Machine_SetFallDead(md, -1, pos);
     }
@@ -143,7 +140,7 @@ static void DeathLink_PerFrame(GOBJ *g)
         return;
 
     int killed = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
@@ -166,8 +163,7 @@ static void DeathLink_PerFrame(GOBJ *g)
         killed++;
     }
 
-    // Nothing killable this frame (every human on foot, or none in the round):
-    // leave the flag set and retry rather than swallowing the death.
+    // Nobody killable this frame: the flag stays set for a later one.
     if (!killed)
         return;
 
@@ -180,13 +176,12 @@ void DeathLink_On3DLoadEnd()
 {
     ClearSuppress();
     OSReport("[DeathLink] Active\n");
-    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_PerFrame, 0, 0, 0, 0);
+    GOBJ_EZCreator(0, GAMEPLINK_SYS, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_PerFrame, 0, 0, 0, 0);
 }
 
-// Top Ride send hook for the SAND-course sand-pit enemy, which swallows a kirby
-// and spits it out via the KirbyDoodlebugOut wrapper (vt+0xD0). This call site
-// catches only the sand-pit eject, not Doodlebug-item ejection (same wrapper at
-// 0x802e2804). The site is in TopRideSandPit_Update (0x80331564); r31 = kirby.
+// Hook at 0x80331a94, the sand-pit eject call (KirbyDoodlebugOut, vt+0xD0) in
+// TopRideSandPit_Update (0x80331564); r31 = kirby. Doodlebug-item ejects share the wrapper
+// at 0x802e2804 and are not caught.
 static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
 {
     if (!DeathLinkSendAllowed(kirby->player_slot))
@@ -197,7 +192,7 @@ static void DeathLink_OnTopRideSandPit(TopRideKirby *kirby)
     if (!mgr || mgr->round_state != 2)
         return;
 
-    OSReport("[DeathLink] Player %d died (TR sand pit) - sending\n",
+    OSReport("[DeathLink] Player %d died (TR sand pit), sent\n",
              kirby->player_slot + 1);
     ap_data->deathlink_send = 1;
     Announce(" sent!");
@@ -213,9 +208,8 @@ CODEPATCH_HOOKCREATE(0x80331a94,
     "lwz 12, 0(31)\n\t",
     0)
 
-// TR has no HP/fall-death system, so the receive picks one damage-class state and
-// applies it to every human kirby. SpeedDown is reserved for traplink;
-// Burn/Spin/Crush/Strike/Explode/Elec are excluded.
+// Top Ride has no HP or fall death, so a receive puts every human kirby in one stun state.
+// Speed Down is TrapLink's.
 typedef void (*KirbyStateFn)(TopRideKirby *);
 static const KirbyStateFn deathlink_states[] = {
     TopRide_KirbyPress,
@@ -229,7 +223,7 @@ static const char *const deathlink_state_names[] = {
     "Numb",
     "Confuse",
 };
-#define DEATHLINK_STATE_COUNT (sizeof(deathlink_states) / sizeof(deathlink_states[0]))
+#define DEATHLINK_STATE_COUNT GetElementsIn(deathlink_states)
 
 static void DeathLink_TopRidePerFrame(GOBJ *g)
 {
@@ -256,8 +250,7 @@ static void DeathLink_TopRidePerFrame(GOBJ *g)
 
         SuppressSend(kirby->player_slot);
 
-        // Zeroed on both sides of apply() so the state is a static stun: the pre-zero
-        // pre-empts setters that scale velocity, the post-zero those that overwrite it.
+        // Zeroed on both sides: some setters scale velocity, others overwrite it.
         Vec3 *vel = &kirby->charge.velocity;
         vel->X = vel->Y = vel->Z = 0.0f;
         apply(kirby);
@@ -278,13 +271,13 @@ void DeathLink_OnTopRideLoadEnd()
 {
     ClearSuppress();
     OSReport("[DeathLink] Active (Top Ride)\n");
-    GOBJ_EZCreator(0, 0, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_TopRidePerFrame, 0, 0, 0, 0);
+    GOBJ_EZCreator(0, GAMEPLINK_SYS, 0, 0, 0, HSD_OBJKIND_NONE, 0, DeathLink_TopRidePerFrame, 0, 0, 0, 0);
 }
 
 void DeathLink_OnBoot()
 {
-    CODEPATCH_HOOKAPPLY(0x801a06d0); // HP death
-    CODEPATCH_HOOKAPPLY(0x801e6540); // Fall death
-    CODEPATCH_HOOKAPPLY(0x80331a94); // TR sand pit
+    CODEPATCH_HOOKAPPLY(0x801a06d0);
+    CODEPATCH_HOOKAPPLY(0x801e6540);
+    CODEPATCH_HOOKAPPLY(0x80331a94);
     OSReport("[DeathLink] Hooks installed\n");
 }

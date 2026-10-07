@@ -1,9 +1,8 @@
 #ifndef TRAPLINK_H
 #define TRAPLINK_H
 
-// Kind of trap that triggered an outgoing TrapLink send, written into
-// ap_data->traplink_send as the value itself: 0 = no pending send, non-zero =
-// send pending. The client maps the kind to the trap_name in the outgoing Bounce.
+// Written to ap_data->traplink_send; 0 = nothing pending. The client maps it to the
+// Bounce's trap_name.
 typedef enum
 {
     TRAPLINK_KIND_NONE       = 0,

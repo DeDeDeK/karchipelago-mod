@@ -1,5 +1,4 @@
-// Widens both machine classes - the star class past its 19 slots and the bike class
-// past its 7 - so registered machines load archives of their own.
+#include <string.h>
 
 #include "os.h"
 #include "hsd.h"
@@ -14,6 +13,9 @@ static char *stc_names[2][CUSTOM_VCSTAR_NUM * 2];
 // Replaces stc_vcDataLookup. The bike row is as wide as the star row so both are
 // indexed the same way.
 static vcData *stc_vc_lookup[2][CUSTOM_VCSTAR_NUM];
+
+#define HANDLER_INIT  0
+#define HANDLER_THINK 1
 
 // The lis / addi pair forming each star handler table inside the one function that
 // reads it: Machine_Star_Init (0x801e7f3c), then Machine_Star_Think (0x801eacbc).
@@ -33,19 +35,29 @@ static CustomMachineHandler stc_bike_handlers[2][CUSTOM_VCWHEEL_NUM];
 // last call.
 static CustomMachineHandler stc_anim_handlers[CUSTOM_MACHINE_MAX];
 
-int CustomMachineRegistry_SetHandler(CustomMachineHandlerSlot slot, int machine_kind,
-                                     CustomMachineHandler fn)
+static int SetClassHandler(int slot, int machine_kind, CustomMachineHandler fn)
 {
     CustomMachineEntry *e = CustomMachines_FindByKind(machine_kind);
     if (e == NULL)
         return 0;
 
-    if (slot == CUSTOM_MACHINE_HANDLER_ANIM)
-        stc_anim_handlers[CustomMachines_Index(e)] = fn;
-    else if (e->is_bike)
+    if (e->is_bike)
         stc_bike_handlers[slot][e->class_slot] = fn;
     else
         stc_star_handlers[slot][e->class_slot] = fn;
+    return 1;
+}
+
+int CustomMachineRegistry_SetInitHandler(int machine_kind, CustomMachineHandler fn) { return SetClassHandler(HANDLER_INIT, machine_kind, fn); }
+int CustomMachineRegistry_SetThinkHandler(int machine_kind, CustomMachineHandler fn) { return SetClassHandler(HANDLER_THINK, machine_kind, fn); }
+
+int CustomMachineRegistry_SetAnimHandler(int machine_kind, CustomMachineHandler fn)
+{
+    CustomMachineEntry *e = CustomMachines_FindByKind(machine_kind);
+    if (e == NULL)
+        return 0;
+
+    stc_anim_handlers[CustomMachines_Index(e)] = fn;
     return 1;
 }
 
@@ -60,7 +72,7 @@ static void AnimThinkTail(MachineData *md)
         stc_anim_handlers[CustomMachines_Index(e)](md);
 }
 
-static void RunBikeHandler(CustomMachineHandlerSlot slot, MachineData *md)
+static void RunBikeHandler(int slot, MachineData *md)
 {
     if (md->kind < CUSTOM_VCWHEEL_NUM && stc_bike_handlers[slot][md->kind] != NULL)
         stc_bike_handlers[slot][md->kind](md);
@@ -68,16 +80,16 @@ static void RunBikeHandler(CustomMachineHandlerSlot slot, MachineData *md)
 
 static void WheelInitTail(MachineData *md)
 {
-    RunBikeHandler(CUSTOM_MACHINE_HANDLER_INIT, md);
+    RunBikeHandler(HANDLER_INIT, md);
 }
 
 static void WheelThinkTail(MachineData *md)
 {
-    RunBikeHandler(CUSTOM_MACHINE_HANDLER_THINK, md);
+    RunBikeHandler(HANDLER_THINK, md);
 }
 
-// r31 holds the machine through Machine_Wheel_Init's epilogue, r29 through
-// Machine_Wheel_Think's.
+// r31 holds the machine through Machine_Wheel_Init's (0x801f3b54) epilogue, r29 through
+// Machine_Wheel_Think's (0x801f5390).
 CODEPATCH_HOOKCREATE(0x801f3c70, "mr 3, 31\n\t", WheelInitTail, "", 0)
 CODEPATCH_HOOKCREATE(0x801f597c, "mr 3, 29\n\t", WheelThinkTail, "", 0)
 
@@ -86,7 +98,7 @@ CODEPATCH_HOOKCREATE(0x801f597c, "mr 3, 29\n\t", WheelThinkTail, "", 0)
 // appended bike can sit at 8 or 17. An appended slot is compared as one matching none.
 static int StuckCheckSlot(MachineData *md)
 {
-    return md->kind >= (md->is_bike ? VCWHEEL_NUM : VCSTAR_NUM) ? 0xFF : md->kind;
+    return md->kind >= CustomMachines_VanillaSlotNum(md->is_bike) ? 0xFF : md->kind;
 }
 
 // The first compare, with r29 the machine and r0 the slot just loaded. All three
@@ -98,8 +110,7 @@ static void InitLookup(void)
 {
     for (int is_bike = 0; is_bike < 2; is_bike++)
     {
-        for (int i = 0; i < CUSTOM_VCSTAR_NUM; i++)
-            stc_vc_lookup[is_bike][i] = NULL;
+        memset(stc_vc_lookup[is_bike], 0, sizeof(stc_vc_lookup[is_bike]));
         stc_vcDataKindStar[is_bike] = NULL;
     }
 }
@@ -118,8 +129,7 @@ static void InstallParticleIds(int is_bike, int class_index)
 
     int num;
     int *slots = CustomMachines_ParticleSlots(is_bike, vc->anim, &num);
-    for (int i = 0; i < num; i++)
-        slots[i] = e->particle[i];
+    memcpy(slots, e->particle, num * sizeof(int));
 }
 
 // Replaces Vehile_LoadFile (0x801c6d74). lbLoadArchive resolves each archive's
@@ -163,7 +173,7 @@ static int EncodeKind(int is_bike, int class_index)
 }
 
 // Queues every registered machine's archive alongside the ones Machine_PreloadAll
-// walks its 26-entry enable table for. Hooked at the branch out of that loop, so
+// (0x801c8cec) walks its 26-entry enable table for. Hooked at the branch out of that loop, so
 // it runs once and only on the City Trial path that preloads every machine.
 static void PreloadCustomMachines(void)
 {
@@ -183,8 +193,8 @@ CODEPATCH_HOOKCREATE(0x801c8d8c,
 // caller-saved registers the surrounding code still needs (r0, r4, r5) untouched.
 static void PatchLookupBase(void)
 {
-    CustomMachines_RepointTable(0x801c4fd0, 0x801c4fe8, stc_vc_lookup);
-    CustomMachines_SetImmediate(0x801c5034, CUSTOM_VCSTAR_NUM * 4); // mulli r7, r7, N
+    CODEPATCH_REPLACEADDRESS(0x801c4fd0, 0x801c4fe8, stc_vc_lookup);
+    CODEPATCH_REPLACEIMMEDIATE(0x801c5034, CUSTOM_VCSTAR_NUM * 4); // mulli r7, r7, N
 }
 
 void CustomMachineRegistry_OnBoot(void)
@@ -192,10 +202,9 @@ void CustomMachineRegistry_OnBoot(void)
     for (int is_bike = 0; is_bike < 2; is_bike++)
     {
         char **vanilla = stc_vcNameTable[is_bike];
-        int n = is_bike ? VCWHEEL_NUM : VCSTAR_NUM;
 
-        for (int i = 0; i < n * 2; i++)
-            stc_names[is_bike][i] = vanilla[i];
+        memcpy(stc_names[is_bike], vanilla,
+               CustomMachines_VanillaSlotNum(is_bike) * 2 * sizeof(vanilla[0]));
     }
     for (int i = 0; i < CustomMachines_GetCount(); i++)
     {
@@ -212,10 +221,10 @@ void CustomMachineRegistry_OnBoot(void)
     };
     for (int t = 0; t < 2; t++)
     {
-        for (int i = 0; i < VCSTAR_NUM; i++)
-            stc_star_handlers[t][i] = vanilla_handlers[t][i];
+        memcpy(stc_star_handlers[t], vanilla_handlers[t],
+               VCSTAR_NUM * sizeof(stc_star_handlers[t][0]));
 
-        CustomMachines_RepointTable(stc_star_handler_sites[t][0], stc_star_handler_sites[t][1],
+        CODEPATCH_REPLACEADDRESS(stc_star_handler_sites[t][0], stc_star_handler_sites[t][1],
                                     stc_star_handlers[t]);
     }
 

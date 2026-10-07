@@ -19,7 +19,7 @@
             ],
             "defines": ["HW_DOL", "_DEBUG", "_UNICODE", "WIN32", "ARM7", "ARM9"],
             "compilerPath": "${workspaceFolder}/externals/devkitpro/devkitPPC/bin/powerpc-eabi-gcc",
-            "cStandard": "c11",
+            "cStandard": "gnu23",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-gcc-arm",
             "compilerArgs": [

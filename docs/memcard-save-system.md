@@ -90,18 +90,27 @@ from some other source, which is why every gate toggle in `archipelago_debug` ca
 
 ## Mod save versioning
 
-`ModDesc.version.major` is the number hoshi compares when it restores a backed-up mod save
-(`_Hoshi_RestoreModSave`, which copies `user_data` back only while the backup's major is no
-higher than the installed mod's). That backup set is built from the mods whose
-`ModDesc.affects_gameplay` is 1, so a mod that leaves the flag at 0 is never backed up and its
-`version.major` is never read at all. `archipelago`, `custom_machines` and `ap_star` all set it.
+`ModDesc.version.major` is read in two places. `Hoshi_ImportMod` compares it against the major
+an importing mod asks for and asserts when the importer was built against an older one, so a mod
+that exports an API sets its version to that API's (`archipelago` uses
+`ARCHIPELAGO_API_MAJOR`/`MINOR`). And `_Hoshi_RestoreModSave`, restoring a backed-up mod save,
+copies `user_data` back only while the backup's major is no higher than the installed mod's.
+That backup set is built from the mods whose `ModDesc.affects_gameplay` is 1; every mod here but
+`textbox` and `custom_checklist` sets it.
 
-In `archipelago` the pair tracks `APSave`'s layout through `APSAVE_VERSION_MAJOR` /
-`APSAVE_VERSION_MINOR` in `main.h`, deliberately **not** `ARCHIPELAGO_API_MAJOR`/`MINOR`: the
-exported API and the save struct change for unrelated reasons, and tying them meant an API-only
-change discarded a good save while an `APSave` field added without an API change kept a stale
-one. Bump the major whenever `APSave` changes shape. Note that a same-size reorder of `APSave`
-is caught by neither the major nor `KARPlusSave_VerifySize`, which only compares sizes.
+Neither is a save-layout check. hoshi matches a mod's block on the card by a hash of the mod name
+and by size only, and `KARPlusSave_VerifySize` answers a size change by resizing in place, which
+keeps the old bytes. A mod whose save struct can change shape guards it itself. `archipelago`'s
+`APSave` opens with `u32 stamp`: `OnSaveInit`, which runs every boot on hoshi's default block
+before the card is read, writes `APSAVE_STAMP` (`main.h`) into it, and `OnSaveLoaded`
+reinitializes the whole block when the card's copy carries any other stamp. The stamp is the
+first field so a resize cannot move it. Change `APSAVE_STAMP` whenever `APSave` changes shape,
+including a same-size reorder that no size check would notice.
+
+The stamp is a guard, not a migration. A save belongs to one seed and one build, and a new seed
+or a new version needs a new save. A stamp mismatch only keeps a forgotten one from being read as
+data: `APSave` restarts from defaults, while the vanilla save's checklist progress and Checkbox
+Filler tokens stay, so a client resending from item 0 grants those tokens again.
 
 ### When the hoshi file is written
 
@@ -129,11 +138,11 @@ on-card file.
 `KARPlusSave_Write` starts by calling `Mod_CopyAllToSave`, which walks every mod's
 `OptionDesc` tree and copies each option's live value into its `MenuSave` row. Menu option
 values otherwise live only in the mod's own RAM, so a mod that changes one in code - the
-archipelago mod applies the slot's DeathLink / EnergyLink / TrapLink toggles at connect -
-would see it persist only if the player happened to open and close the settings menu, which
-used to be the sole caller. Doing the copy inside the write means every `Hoshi_WriteSave`
-caller persists the option changes it made. It is cheap and idempotent: the write is already
-hash-gated, so a copy that changes nothing still costs no card I/O.
+archipelago mod seeds the slot's DeathLink / EnergyLink / TrapLink settings on a save's first
+connect - would otherwise see it persist only if the player happened to open and close the
+settings menu. Doing the copy inside the write means every `Hoshi_WriteSave` caller, and every
+vanilla save point, persists the option changes made since. It is cheap and idempotent: the
+write is already hash-gated, so a copy that changes nothing still costs no card I/O.
 
 The hooks go on the call sites, not on `Memcard_ReqSave`'s entry. `_CodePatch_HookApply`
 injects a bare `bl` to the hook function with no register or LR save (that is what the
@@ -144,10 +153,11 @@ would spill the clobbered LR and `blr` back into the injection, re-entering the 
 forever - a hang, not a crash.
 
 A mod may still call `Hoshi_WriteSave` directly, but the synchronous card write is long
-enough to be felt, so it is reserved for one-shot events like applying slot data on connect
-or a debug reset - never a repeatable player action. An EnergyLink purchase, for instance,
-accepts that a power-off between the withdrawal and the next vanilla save loses the goods
-while the pool withdrawal still reaches the server.
+enough to be felt, so it is reserved for one-shot events like a debug reset - never a
+repeatable player action. `archipelago` writes nothing on connect: the client resends the slot
+options and location assignment every connection, so both ride the next vanilla save. An
+EnergyLink purchase, likewise, accepts that a power-off between the withdrawal and the next
+vanilla save loses the goods while the pool withdrawal still reaches the server.
 
 ### The tile (icon + banner API)
 

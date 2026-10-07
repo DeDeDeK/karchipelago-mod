@@ -3,14 +3,10 @@
 #include "textbox_api.h"
 #include "ap_announce.h"
 
-// Give a copy ability to every human Kirby rider via the raw rider API. The AP
-// copy-ability path for City Trial and Air Ride - no ITKIND_COPY* item is spawned,
-// so it needs no item data tables and works in stadiums and Free Run. Top Ride maps
-// abilities to their TR item analog instead.
-int Ability_GiveItem(CopyKind copy_kind)
+int Ability_GiveHumans(CopyKind copy_kind)
 {
     int applied = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
@@ -18,23 +14,27 @@ int Ability_GiveItem(CopyKind copy_kind)
         if (!rg)
             continue;
         RiderData *rd = rg->userdata;
-        if (!rd || rd->kind != RDKIND_KIRBY)
+        if (rd->kind != RDKIND_KIRBY)
             continue;
-        // Off-vehicle riders crash inside the new ability's anim callbacks,
-        // which deref rd->machine_gobj (e.g. sleep -> Rider_CopyInputToMachine).
+        // On foot, the new ability's anim callbacks deref rd->machine_gobj (sleep's
+        // Rider_CopyInputToMachine) and crash.
         if (!Rider_IsOnMachine(rd))
             continue;
         Rider_GiveAbility(rd, copy_kind);
         applied++;
     }
+    return applied;
+}
 
+int Ability_GiveItem(CopyKind copy_kind)
+{
+    int applied = Ability_GiveHumans(copy_kind);
     if (applied)
     {
         OSReport("[AbilityItem] Gave the %s ability to %d player(s)\n",
                  CopyKind_Names[copy_kind], applied);
-        if (CopyKind_Names[copy_kind])
-            APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
-                             tb_api->AbilityColors[copy_kind], " ability");
+        APAnnounce_Grant("Received: ", CopyKind_Names[copy_kind],
+                         tb_api->AbilityColors[copy_kind], " ability");
     }
     return applied;
 }

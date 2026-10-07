@@ -14,7 +14,7 @@
 #include "hoshi/screen_cam.h"
 
 #include "main.h"
-#include "main_menu.h"
+#include "ap_title.h"
 #include "version.h"
 #include "gate_ap_star.h"
 
@@ -25,26 +25,22 @@ static float demo_idle_floor = 0.0f;
 static int demo_idle_floor_saved = 0;
 static Text *version_text = 0;
 
-// The demo ride, as a star-class slot. Resolves to the Archipelago Star once
-// custom_machines has registered it, which is the point: the title screen shows the
-// machine the goal awards, before it is earned.
+// The demo ride as a star-class slot; the Archipelago Star once it is registered.
 static int demo_star_slot = VCKIND_WAGON;
 static int demo_rider = RDKIND_DEDEDE;
 
-// SceneLoad_TitleScreen (0x8000d26c) picks the idle slot-0 rider's ride through three
-// `li r4` operands: RiderKind at 0x8000d340, IsBike at 0x8000d34c, class slot at
-// 0x8000d358. Only the two that vary are patched - is_bike stays the 0 already
-// encoded there, because the demo init uses hardcoded star-only state ids and a
-// wheel-class machine crashes it. Re-applied per title entry because the registry
-// only resolves after every mod boots.
-static void MainMenu_SelectDemoMachine(void)
+// SceneLoad_TitleScreen (0x8000d26c) sets the demo ride through li r4 operands: RiderKind
+// at 0x8000d340, class slot at 0x8000d358. IsBike at 0x8000d34c stays 0: the demo init uses
+// star-only state ids, and a wheel crashes it. Re-applied per title entry, since the
+// registry resolves after every mod boots.
+static void APTitle_SelectDemoMachine(void)
 {
     int kind = GateApStar_MachineKind();
 
     if (kind >= 0)
     {
         int is_bike;
-        int slot = MachineKind_ClassIndexOf((MachineKind)kind, &is_bike);
+        int slot = CustomMachines_ClassIndexOf(cm_api, (MachineKind)kind, &is_bike);
         if (!is_bike)
         {
             demo_star_slot = slot;
@@ -56,23 +52,21 @@ static void MainMenu_SelectDemoMachine(void)
     CODEPATCH_REPLACEINSTRUCTION(0x8000d358, 0x38800000 | demo_star_slot); // li r4, demo_star_slot
 }
 
-// Title file load (0x8000d2b4). Gm_LoadGameFile appends ".dat" and reads it from the
-// disc overlay.
-void MainMenu_OnTitleLoad(void)
+// Hook at 0x8000d2b4 in SceneLoad_TitleScreen, ahead of the demo-ride operands it patches.
+static void APTitle_OnTitleLoad(void)
 {
-    MainMenu_SelectDemoMachine();
+    APTitle_SelectDemoMachine();
     Gm_LoadGameFile(&menu_archive, "MnTitleKarchi");
 }
-CODEPATCH_HOOKCREATE(0x8000d2b4, "", MainMenu_OnTitleLoad, "", 0)
+CODEPATCH_HOOKCREATE(0x8000d2b4, "", APTitle_OnTitleLoad, "", 0)
 
-// The vanilla "AIR RIDE" subtitle (text + blue box) is foreground joint 14 in
-// GObj_GetJObjIndex depth-first order; JObj_SetFlagsAll hides its whole subtree.
+// The vanilla "AIR RIDE" subtitle (text and blue box), foreground joint 14 in
+// GObj_GetJObjIndex's depth-first order.
 #define VANILLA_SUBTITLE_JOINT 14
 
-// Title scene create (0x8017b5d8). MenuElement_AddData allocates the element userdata
-// the render callback derefs and sets its is_visible flag - a static model needs no
-// proc, but the userdata must exist.
-void MainMenu_OnTitleCreate(void)
+// MenuElement_AddData allocates the userdata the render callback derefs; a static model
+// needs no proc, but the userdata must exist.
+static void APTitle_OnTitleCreate(void)
 {
     GOBJ *fg;
     JOBJSet **set;
@@ -88,24 +82,17 @@ void MainMenu_OnTitleCreate(void)
     element = MenuElement_Create(set[0]->jobj);
     MenuElement_AddData(element, 99);
 }
-// In TitleScreen_CreateForegroundElements (0x8017b4c0), after both title element
-// GObjs exist.
-CODEPATCH_HOOKCREATE(0x8017b5d8, "", MainMenu_OnTitleCreate, "", 0)
+// Hook at 0x8017b5d8 in TitleScreen_CreateForegroundElements (0x8017b4c0), after both
+// title element GObjs exist.
+CODEPATCH_HOOKCREATE(0x8017b5d8, "", APTitle_OnTitleCreate, "", 0)
 
-// The title demo machine is never registered in PlayerData, so it is reached through the
-// machine GObj list.
-static GOBJ *MainMenu_GetMachines(void)
+// The demo machine is never registered in PlayerData.
+static GOBJ *APTitle_GetMachines(void)
 {
     return (*stc_gobj_lookup)[GAMEPLINK_MACHINE];
 }
 
-// The Wagon Star's engine loop holds an idle volume floor of 20.0, which clamps to full
-// volume, so the demo machine hums constantly where the vanilla Warp Star is silent.
-// Zeroing the floor makes its volume arithmetic identical to the Warp Star's.
-// Machine_UpdateEngineLoop re-reads the record every frame, and the loop is only ever
-// created at volume 0.0 and ramped up from there, so this never lets an audible frame
-// through. Kinds whose floor is already 0.0 pass through unchanged.
-static MachineAudioParams *MainMenu_GetDemoAudioParams(void)
+static MachineAudioParams *APTitle_GetDemoAudioParams(void)
 {
     if (*stc_machineAudioParams == 0 || (*stc_machineAudioParams)->params[0] == 0)
         return 0;
@@ -113,14 +100,14 @@ static MachineAudioParams *MainMenu_GetDemoAudioParams(void)
     return &(*stc_machineAudioParams)->params[0][demo_star_slot];
 }
 
-// Bottom-right version stamp on the title screen. Created from the title's think and destroyed
-// from its cb_Exit, so it lives exactly as long as the scene does - a Text is not reliably
-// reclaimed by scene teardown, and one left behind draws over whatever comes next.
+// Bottom-right version stamp, created from the title's think and destroyed from its cb_Exit:
+// scene teardown does not reliably reclaim a Text, and one left behind draws over the next
+// scene.
 #define VERSION_MARGIN   12.0f
 #define VERSION_SCALE    0.30f
 #define VERSION_PAD      12.0f
 
-static void MainMenu_CreateVersionText(void)
+static void APTitle_CreateVersionText(void)
 {
     Text *t = Hoshi_CreateScreenText();
 
@@ -147,14 +134,16 @@ static void MainMenu_CreateVersionText(void)
     version_text = t;
 }
 
-// Title minor cb_ThinkPreGObjProc, wrapped around the vanilla one. vcLoadCommon runs partway
-// through the title cb_Load, so the record is only guaranteed resident once the scene is
-// running; the demo machine existing at all proves it is.
-static void MainMenu_TitleThink(void)
+// Title minor cb_ThinkPreGObjProc wrapper. The audio record loads partway through cb_Load
+// (vcLoadCommon), so it is read once the scene runs.
+static void APTitle_Think(void)
 {
+    // The Wagon Star's idle floor (20.0) clamps to full volume, so the demo hums where the
+    // Warp Star is silent; 0.0 matches the Warp Star. Its engine loop starts at volume 0.0,
+    // so no audible frame gets through.
     if (!demo_idle_floor_saved)
     {
-        MachineAudioParams *params = MainMenu_GetDemoAudioParams();
+        MachineAudioParams *params = APTitle_GetDemoAudioParams();
 
         if (params != 0)
         {
@@ -164,13 +153,12 @@ static void MainMenu_TitleThink(void)
         }
     }
 
-    // The boot cinematic runs inside this same minor, with the title foreground scene absent -
-    // its gobj is what separates the title proper from the cinematic. hoshi rebuilds the screen
-    // canvas on scene change, and Text_CreateText faults on an empty canvas list.
+    // The boot cinematic shares this minor without the title foreground. Text_CreateText
+    // faults on an empty canvas list, which hoshi rebuilds on scene change.
     if (Gm_GetMenuData()->ScMenTitleFg_gobj != 0)
     {
         if (version_text == 0 && *stc_textcanvas_first != 0)
-            MainMenu_CreateVersionText();
+            APTitle_CreateVersionText();
     }
     else if (version_text != 0)
     {
@@ -181,15 +169,13 @@ static void MainMenu_TitleThink(void)
     title_think_vanilla();
 }
 
-// Title minor cb_Exit, wrapped around the vanilla one. The record is shared game data, so it
-// goes back before any other scene reads it. Scene teardown then reclaims the demo machine as
-// raw memory without running Machine_Destroy, leaving its two silent loops holding FGM
-// instances and its tracks and emitter holding static Audio3D slots; vanilla leaks all of
-// these, and this is the last point at which the machine is still alive enough to return them.
-static void MainMenu_TitleExit(void *data)
+// Title minor cb_Exit wrapper. Restores the shared audio record, and returns the demo
+// machine's FGM loops and Audio3D slots, which vanilla leaks: teardown skips
+// Machine_Destroy.
+static void APTitle_Exit(void *data)
 {
-    GOBJ *gobj = MainMenu_GetMachines();
-    MachineAudioParams *params = MainMenu_GetDemoAudioParams();
+    GOBJ *gobj = APTitle_GetMachines();
+    MachineAudioParams *params = APTitle_GetDemoAudioParams();
 
     if (version_text != 0)
     {
@@ -223,20 +209,18 @@ static void MainMenu_TitleExit(void *data)
     title_exit_vanilla(data);
 }
 
-void MainMenu_OnBoot(void)
+void APTitle_OnBoot(void)
 {
     MinorSceneDesc *minor_descs = Hoshi_GetMinorScenes();
 
     title_exit_vanilla = minor_descs[MNRKIND_TITLESCREEN].cb_Exit;
-    minor_descs[MNRKIND_TITLESCREEN].cb_Exit = MainMenu_TitleExit;
+    minor_descs[MNRKIND_TITLESCREEN].cb_Exit = APTitle_Exit;
 
     title_think_vanilla = minor_descs[MNRKIND_TITLESCREEN].cb_ThinkPreGObjProc;
-    minor_descs[MNRKIND_TITLESCREEN].cb_ThinkPreGObjProc = MainMenu_TitleThink;
-
-    MainMenu_SelectDemoMachine();
+    minor_descs[MNRKIND_TITLESCREEN].cb_ThinkPreGObjProc = APTitle_Think;
 
     CODEPATCH_HOOKAPPLY(0x8000d2b4);
     CODEPATCH_HOOKAPPLY(0x8017b5d8);
 
-    OSReport("[MainMenu] Hooks installed\n");
+    OSReport("[APTitle] Hooks installed\n");
 }

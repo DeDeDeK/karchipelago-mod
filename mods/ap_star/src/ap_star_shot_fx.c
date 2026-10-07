@@ -6,7 +6,9 @@
 #include "gx.h"
 #include "game.h"
 #include "weapon.h"
+#include "inline.h"
 
+#include "ap_star.h"
 #include "ap_star_shot_fx.h"
 
 #define FX_MAX 24 // shots and draining tails drawn at once
@@ -29,7 +31,7 @@
 
 // p_link 1 freezes with the pause and the hitstop, as the projectiles do.
 #define FX_PLINK   GAMEPLINK_1
-#define FX_GX_LINK 0 // the world camera's, which the stage and machines draw on
+#define FX_GX_LINK 0 // one the world camera draws
 
 typedef struct ShotFx
 {
@@ -86,10 +88,10 @@ static void FxThink(GOBJ *g)
     }
 }
 
-static void Vert(const Vec3 *p, float ox, float oy, float oz, const ShotFx *fx, u8 a)
+static void Vert(const Vec3 *p, float ox, float oy, float oz, GXColor rgb, u8 a)
 {
     GXPosition3f32(p->X + ox, p->Y + oy, p->Z + oz);
-    GXColor4u8(fx->color.r, fx->color.g, fx->color.b, a);
+    GXColor4u8(rgb.r, rgb.g, rgb.b, a);
 }
 
 // A camera-facing ribbon, three vertices across so the edges can fade to nothing
@@ -136,13 +138,10 @@ static void DrawTrail(const ShotFx *fx, const Vec3 *eye)
 
         float f = 1.0f - (float)age[i] / (float)TRAIL_POINTS;
         float w = fx->radius * scale * TRAIL_WIDTH * (1.0f - TRAIL_TAPER * (1.0f - f));
-        float m2 = VECSquareMag(&s);
-        if (m2 > 0.000001f)
+        if (VECSquareMag(&s) > 0.000001f)
         {
-            float k = w / sqrtf(m2);
-            s.X *= k;
-            s.Y *= k;
-            s.Z *= k;
+            VECNormalize(&s, &s);
+            VECScale(&s, &s, w);
         }
         else
         {
@@ -156,23 +155,21 @@ static void DrawTrail(const ShotFx *fx, const Vec3 *eye)
     GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, (u16)(n * 2));
     for (int i = 0; i < n; i++)
     {
-        Vert(&p[i], -side[i].X, -side[i].Y, -side[i].Z, fx, 0);
-        Vert(&p[i], 0.0f, 0.0f, 0.0f, fx, alpha[i]);
+        Vert(&p[i], -side[i].X, -side[i].Y, -side[i].Z, fx->color, 0);
+        Vert(&p[i], 0.0f, 0.0f, 0.0f, fx->color, alpha[i]);
     }
     GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, (u16)(n * 2));
     for (int i = 0; i < n; i++)
     {
-        Vert(&p[i], 0.0f, 0.0f, 0.0f, fx, alpha[i]);
-        Vert(&p[i], side[i].X, side[i].Y, side[i].Z, fx, 0);
+        Vert(&p[i], 0.0f, 0.0f, 0.0f, fx->color, alpha[i]);
+        Vert(&p[i], side[i].X, side[i].Y, side[i].Z, fx->color, 0);
     }
 }
 
 static void RingVert(const Vec3 *c, const Vec3 *right, const Vec3 *up, int k, float r,
-                     const ShotFx *fx, u8 a)
+                     GXColor rgb, u8 a)
 {
-    float u = stc_circle[k][0] * r;
-    float v = stc_circle[k][1] * r;
-    Vert(c, right->X * u + up->X * v, right->Y * u + up->Y * v, right->Z * u + up->Z * v, fx, a);
+    GX_BillboardVert(c, right, up, stc_circle[k][0] * r, stc_circle[k][1] * r, rgb, a);
 }
 
 // A camera-facing disc through the shot's center, bright in the middle and gone at
@@ -206,34 +203,16 @@ static void DrawHalo(const ShotFx *fx, const Vec3 *right, const Vec3 *up)
     float rc = r * HALO_CORE;
 
     GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, HALO_SEGS + 2);
-    Vert(&c, 0.0f, 0.0f, 0.0f, fx, a0);
+    Vert(&c, 0.0f, 0.0f, 0.0f, fx->color, a0);
     for (int k = 0; k <= HALO_SEGS; k++)
-        RingVert(&c, right, up, k, rc, fx, a1);
+        RingVert(&c, right, up, k, rc, fx->color, a1);
 
     GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, (HALO_SEGS + 1) * 2);
     for (int k = 0; k <= HALO_SEGS; k++)
     {
-        RingVert(&c, right, up, k, rc, fx, a1);
-        RingVert(&c, right, up, k, r, fx, 0);
+        RingVert(&c, right, up, k, rc, fx->color, a1);
+        RingVert(&c, right, up, k, r, fx->color, 0);
     }
-}
-
-// Depth-tested so the world hides it, but not depth-writing, with color and alpha
-// taken straight from each vertex.
-static void BeginXlu(COBJ *cam)
-{
-    HSD_StateInitDirect(GX_VTXFMT0, 2);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-    GXSetNumTexGens(0);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetChanCtrl(GX_ALPHA0, GX_DISABLE, Vertex, Vertex, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetZMode(GX_ENABLE, GX_LEQUAL, GX_DISABLE);
-    GXSetCullMode(GX_CULL_NONE);
-    GXLoadPosMtxImm(&cam->view_mtx, GX_PNMTX0);
 }
 
 // Runs once per camera, so every split-screen viewport faces its own ribbons and halos.
@@ -248,20 +227,11 @@ static void FxGX(GOBJ *g, int pass)
     if (cam == NULL)
         return;
 
-    // The view matrix is the rigid world->view [R | t]: its rows are the camera's axes
-    // and the eye is -R^T t.
-    float (*m)[4] = cam->view_mtx;
-    Vec3 right = { m[0][0], m[0][1], m[0][2] };
-    Vec3 up = { m[1][0], m[1][1], m[1][2] };
-    Vec3 eye = {
-        -(m[0][0] * m[0][3] + m[1][0] * m[1][3] + m[2][0] * m[2][3]),
-        -(m[0][1] * m[0][3] + m[1][1] * m[1][3] + m[2][1] * m[2][3]),
-        -(m[0][2] * m[0][3] + m[1][2] * m[1][3] + m[2][2] * m[2][3]),
-    };
+    Vec3 right, up, eye;
+    COBJ_GetViewAxes(cam, &right, &up);
+    COBJ_GetViewEye(cam, &eye);
 
-    BeginXlu(cam);
-
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
     for (int i = 0; i < FX_MAX; i++)
     {
         if (stc_fx[i].used)
@@ -292,7 +262,7 @@ static int EnsureGObj(void)
         if (!failure_reported)
         {
             failure_reported = 1;
-            OSReport("[ApStarShotFx] GObj pool exhausted, shots draw without a trail\n");
+            OSReport("[ApStarShotFx] GObj pool exhausted, shots draw without glow or trail\n");
         }
         return 0;
     }
@@ -327,13 +297,10 @@ int ApStarShotFx_Attach(WeaponData *proj, GXColor color, float radius)
 
 void ApStarShotFx_Detach(int handle)
 {
-    if (handle <= 0 || handle > FX_MAX)
+    if (handle == 0)
         return;
 
     ShotFx *fx = &stc_fx[handle - 1];
-    if (!fx->used || fx->proj == NULL)
-        return;
-
     fx->scale = fx->proj->scale;
     PushPoint(fx, &fx->proj->pos);
     fx->proj = NULL;
@@ -345,7 +312,7 @@ void ApStarShotFx_OnBoot(void)
 {
     for (int k = 0; k <= HALO_SEGS; k++)
     {
-        float t = 6.28318531f * (float)k / (float)HALO_SEGS;
+        float t = 2.0f * M_PI * (float)k / (float)HALO_SEGS;
         stc_circle[k][0] = cosf(t);
         stc_circle[k][1] = sinf(t);
     }

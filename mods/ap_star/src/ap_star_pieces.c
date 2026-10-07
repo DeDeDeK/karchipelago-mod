@@ -33,8 +33,6 @@ static const u8 piece_progress_range[APSTARPIECE_NUM][2] = {
     { 10, 20 }, { 20, 32 }, { 32, 45 }, { 45, 58 }, { 58, 70 }, { 70, 85 },
 };
 
-#define AP_STAR_PIECE_ALL ((1u << APSTARPIECE_NUM) - 1)
-
 #define AP_STAR_HANDLER_MAX 4
 
 static const CustomItemsAPI *ci_api;
@@ -46,6 +44,7 @@ static u32 piece_hash[APSTARPIECE_NUM]; // 0 for a sphere with no archive
 static int piece_kind[APSTARPIECE_NUM] = { -1, -1, -1, -1, -1, -1 }; // this round's ItemKind
 
 static int round_live;         // a City Trial round, attract demo excluded, is loaded
+static u8 armed_mask;          // spheres with an ItemKind this round
 static u8 piece_mask[PLY_NUM]; // per-player collected spheres
 static u8 assembled_mask;      // per-player assembly this round
 
@@ -140,13 +139,16 @@ static void Assemble(int ply)
     assembled_mask |= (u8)(1 << ply);
     piece_mask[ply] = 0;
 
-    // The cinematic owns the mount and the completion sounds; with none, both are owed
-    // here. Rung 4 is the pair of sounds a machine completes on, not a fourth piece.
-    // Re-mounting a player already riding the star costs them their patches, as vanilla
-    // does on a duplicate Hydra set.
-    if (!ApStar_StartAssembly(ply))
+    // The cinematic, which custom_machines owns, brings the mount and the completion
+    // sounds; with none, both are owed here. Rung 4 is the pair of sounds a machine
+    // completes on, not a fourth piece. Re-mounting a player already riding the star
+    // costs them their patches, as vanilla does on a duplicate Hydra set.
+    int kind = ApStar_MachineKind();
+    if (kind < 0 || !cm_api->StartAssembly(kind, ply))
     {
-        if (!ApStar_Mount(ply))
+        if (kind >= 0)
+            cm_api->MountMachine(kind, ply);
+        else
             OSReport("[ApStarPieces] Player %d not mounted: no %s registered\n",
                      ply + 1, AP_STAR_MACHINE_NAME);
         Ply_OnLegendaryPieceCollect(ply, 4);
@@ -178,9 +180,8 @@ static void Collect(int player, int slot)
     Ply_OnLegendaryPieceCollect(player, (count + 1) / 2);
 }
 
-static void OnPickup(u32 id_hash, const char *name, int player)
+static void OnPickup(u32 id_hash, int player)
 {
-    (void)name;
     int slot = PieceSlotForHash(id_hash);
     if (slot >= 0)
         Collect(player, slot);
@@ -198,13 +199,7 @@ static void OnPickup(u32 id_hash, const char *name, int player)
 // set so the quota never drains.
 static u8 DroppableSpheres(int ply)
 {
-    u8 mask = 0;
-    for (int i = 0; i < APSTARPIECE_NUM; i++)
-    {
-        if ((piece_mask[ply] & (1 << i)) && piece_kind[i] >= 0)
-            mask |= (u8)(1 << i);
-    }
-    return mask;
+    return piece_mask[ply] & armed_mask;
 }
 
 static int SphereSlotForKind(int kind)
@@ -252,15 +247,7 @@ static int PickDropKind(int kind, RiderData *rd)
     if (HSD_Randi(vanilla + spheres) < vanilla)
         return kind;
 
-    int pick = HSD_Randi(spheres);
-    for (int i = 0; i < APSTARPIECE_NUM; i++)
-    {
-        if (!(mask & (1 << i)))
-            continue;
-        if (pick-- == 0)
-            return piece_kind[i];
-    }
-    return kind;
+    return piece_kind[RandomBitInField(mask)];
 }
 
 // REPLACECALL on the bl Ply_DecrementItemCollectNum in Rider_TickDropAllUp (0x8019d55c).
@@ -324,7 +311,7 @@ static int CheckToSpawn(float progress)
 
 // REPLACECALL on the bl in CityItemSpawn_Think (0x800eb108), which has just spawned the
 // red carrier box. Writing forced_item is all it takes to make that box hold a piece.
-static void SpawnPiece(GOBJ *box, int area, int p3)
+static void FillCarrier(GOBJ *box, int area, int p3)
 {
     if (!sched.req_spawn)
     {
@@ -333,9 +320,6 @@ static void SpawnPiece(GOBJ *box, int area, int p3)
     }
 
     sched.req_spawn = 0;
-    if (sched.next >= sched.num)
-        return;
-
     int piece = sched.order[sched.next];
     int kind = piece_kind[piece];
     LegendaryPiece_MarkAsSpawned(box, kind);
@@ -348,7 +332,7 @@ static void SpawnPiece(GOBJ *box, int area, int p3)
 void ApStarPieces_OnBoot(void)
 {
     CODEPATCH_REPLACECALL(0x800ea7e0, CheckToSpawn);  // bl CityItemSpawn_CheckToSpawnLegendaryPiece
-    CODEPATCH_REPLACECALL(0x800eb27c, SpawnPiece);    // bl CityItemSpawn_SpawnLegendaryPiece
+    CODEPATCH_REPLACECALL(0x800eb27c, FillCarrier);   // bl CityItemSpawn_SpawnLegendaryPiece
     CODEPATCH_REPLACECALL(0x8019d4bc, DropQuotaDragoon);      // bl Ply_GetDragoonCollection in Rider_DropPatches
     CODEPATCH_REPLACECALL(0x8019d8d4, DropDecrementCollect);  // bl Ply_DecrementItemCollectNum in Rider_TickDropAllUp
     CODEPATCH_HOOKAPPLY(0x8019d868);  // sphere into the drop candidate roll
@@ -356,22 +340,20 @@ void ApStarPieces_OnBoot(void)
     OSReport("[ApStarPieces] Spawn and drop hooks installed\n");
 }
 
+// custom_items boots after this mod, so the import waits for OnSaveLoaded, past every
+// mod's OnBoot.
+void ApStarPieces_OnSaveLoaded(void)
+{
+    ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
+        (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
+    if (ci_api == NULL)
+        return;
+    ci_api->AddPickupHandler(OnPickup);
+    ResolvePieces();
+}
+
 void ApStarPieces_On3DLoadStart(void)
 {
-    // Tried once, past every mod's OnBoot: a build without custom_items would warn on
-    // every 3D scene.
-    static int tried;
-    if (!tried)
-    {
-        tried = 1;
-        ci_api = (const CustomItemsAPI *)Hoshi_ImportMod(
-            (char *)CUSTOM_ITEMS_MOD_NAME, CUSTOM_ITEMS_API_MAJOR, CUSTOM_ITEMS_API_MINOR);
-        if (ci_api != NULL)
-        {
-            ci_api->AddPickupHandler(OnPickup);
-            ResolvePieces();
-        }
-    }
     if (ci_api == NULL)
         return;
 
@@ -391,11 +373,11 @@ void ApStarPieces_On3DLoadStart(void)
 void ApStarPieces_OnSceneChange(void)
 {
     round_live = 0;
+    armed_mask = 0;
     memset(piece_mask, 0, sizeof(piece_mask));
     assembled_mask = 0;
     memset(&sched, 0, sizeof(sched));
-    for (int i = 0; i < APSTARPIECE_NUM; i++)
-        piece_kind[i] = -1;
+    memset(piece_kind, -1, sizeof(piece_kind));
     ApStarPieceHud_OnSceneChange();
 }
 
@@ -406,7 +388,7 @@ void ApStarPieces_On3DLoadEnd(void)
 
     // Built whether or not a sphere is armed: CollectPiece lands one regardless of the gate.
     round_live = 1;
-    ApStarPieceHud_Load();
+    ApStarPieceHud_Create(piece_mask);
     if (ci_api == NULL)
         return;
 
@@ -420,7 +402,10 @@ void ApStarPieces_On3DLoadEnd(void)
             continue;
         piece_kind[i] = ci_api->GetAssignedKind(piece_hash[i]);
         if (piece_kind[i] >= 0)
+        {
+            armed_mask |= (u8)(1 << i);
             sched.order[num++] = (u8)i;
+        }
     }
     sched.num = (u8)num;
     if (num == 0)
@@ -430,27 +415,14 @@ void ApStarPieces_On3DLoadEnd(void)
     }
 
     // Shuffle, as vanilla rotates which of a machine's three parts comes first.
-    for (int i = num - 1; i > 0; i--)
-    {
-        int j = HSD_Randi(i + 1);
-        u8 t = sched.order[i];
-        sched.order[i] = sched.order[j];
-        sched.order[j] = t;
-    }
+    RandomShuffle(sched.order, num, sizeof(sched.order[0]));
     for (int i = 0; i < num; i++)
     {
-        int lo = piece_progress_range[i][0];
-        int hi = piece_progress_range[i][1];
-        sched.progress[i] = 0.01f * (float)(lo + HSD_Randi(hi - lo));
+        int pct = RandomInRange(piece_progress_range[i][0], piece_progress_range[i][1] - 1);
+        sched.progress[i] = 0.01f * (float)pct;
     }
     OSReport("[ApStarPieces] %d of %d spheres armed, first at %d%% of the round\n",
              num, APSTARPIECE_NUM, (int)(sched.progress[0] * 100.0f));
-}
-
-void ApStarPieces_OnFrameStart(void)
-{
-    for (int ply = 0; ply < PLY_NUM; ply++)
-        ApStarPieceHud_Update(ply, piece_mask[ply]);
 }
 
 // Far enough ahead that the rider drives into the sphere rather than spawning on it.
@@ -486,7 +458,12 @@ int ApStarPieces_SpawnPiece(int piece, int ply)
     ItemDesc desc;
     Item_InitDesc(&desc, (ItemKind)kind, 1.0f, 0, &pos, &md->up, &md->forward,
                   -1, -1, 1, 3, -1, -1);
-    CityItem_Create(&desc);
+    if (CityItem_Create(&desc) == NULL)
+    {
+        OSReport("[ApStarPieces] %s for player %d not spawned: item cap or spot rejected\n",
+                 piece_names[piece], ply + 1);
+        return 0;
+    }
     OSReport("[ApStarPieces] Spawned %s for player %d (kind %d)\n",
              piece_names[piece], ply + 1, kind);
     return 1;

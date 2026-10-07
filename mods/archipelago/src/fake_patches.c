@@ -1,17 +1,14 @@
 #include "event.h"
+#include "os.h"
 #include "item.h"
 #include "stage.h"
 #include "code_patch/code_patch.h"
 
 #include "fake_patches.h"
 
-// Replacement for ItemGObj_ProcessFakeItem (0x802542dc). Vanilla no-ops the fake
-// patch while CityItemMgr.fake_event_data is NULL, which holds until the scene's
-// first Fake Powerups event starts (the event's end leaves it set). AP traps spawn
-// ITKIND_*FAKE items without that event, so read the fake-data table from the
-// loaded event archive directly. It comes from GrData.event_config rather than
-// *stc_eventcheck_gobj because the event GOBJ is absent when CT events are
-// disabled while the archive, loaded every CT load, still has the table.
+// Replaces ItemGObj_ProcessFakeItem (0x802542dc), which no-ops until the scene's first
+// Fake Powerups event, so AP trap fakes work without one. The table comes from
+// GrData.event_config, loaded even with City Trial events off.
 static int ProcessFakeItem(GOBJ *item_gobj, void *hurt_params)
 {
     GrObj *gr = stc_grobj ? *stc_grobj : 0;
@@ -32,4 +29,5 @@ static int ProcessFakeItem(GOBJ *item_gobj, void *hurt_params)
 void FakePatches_OnBoot()
 {
     CODEPATCH_REPLACEFUNC(ItemGObj_ProcessFakeItem, ProcessFakeItem);
+    OSReport("[FakePatches] Hooks installed\n");
 }

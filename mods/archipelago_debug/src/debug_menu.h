@@ -3,9 +3,11 @@
 
 #include "hoshi/settings.h"
 #include "archipelago_api.h"
+#include "textbox_api.h"
 
 // NULL until imported.
 extern const ArchipelagoAPI *ap_api;
+extern const TextBoxAPI *tb_api;
 
 extern OptionDesc DebugMod_RootOption;
 

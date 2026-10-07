@@ -4,6 +4,7 @@
 #include "rider.h"
 #include "collision.h"
 #include "obj.h"
+#include "inline.h"
 #include "code_patch/code_patch.h"
 
 #include "event_scale_change.h"
@@ -42,9 +43,9 @@ static void ScaleChange_CObjSetEyePosition(COBJ *cobj, Vec3 *eye)
     {
         Vec3 interest = cobj->interest->pos;
         Vec3 scaled;
-        scaled.X = interest.X + (eye->X - interest.X) * cur_factor;
-        scaled.Y = interest.Y + (eye->Y - interest.Y) * cur_factor;
-        scaled.Z = interest.Z + (eye->Z - interest.Z) * cur_factor;
+        scaled.X = lerp(interest.X, eye->X, cur_factor);
+        scaled.Y = lerp(interest.Y, eye->Y, cur_factor);
+        scaled.Z = lerp(interest.Z, eye->Z, cur_factor);
         CObj_SetEyePosition(cobj, &scaled);
         return;
     }

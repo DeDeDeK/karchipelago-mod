@@ -7,6 +7,7 @@
 #include "obj.h"
 #include "stage.h"
 #include "yakumono.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
@@ -39,7 +40,7 @@ static int   tree_enabled = 1;
 
 static const float tree_strength_factors[] = {1.0f, 0.6f, 1.0f, 1.6f};
 static char *tree_strength_names[] = {"Preset", "Subtle", "Normal", "Strong"};
-#define TREE_STRENGTH_NUM ((int)(sizeof(tree_strength_factors) / sizeof(tree_strength_factors[0])))
+#define TREE_STRENGTH_NUM ((int)GetElementsIn(tree_strength_factors))
 static int tree_strength_index = 0;
 
 // Collect the forest-tree yakumono GObjs into `out`, returning the count.
@@ -51,7 +52,7 @@ static int Tree_CollectParents(GOBJ **out, int max)
     {
         if (g->entity_class != YAKUMONO_GOBJ_KIND)
             continue;
-        YakumonoData *yd = (YakumonoData *)g->userdata;
+        YakumonoData *yd = Yaku_GetData(g);
         if (yd != NULL && yd->kind == YAKUKIND_TREE)
             out[n++] = g;
     }

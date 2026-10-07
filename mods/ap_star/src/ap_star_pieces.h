@@ -10,6 +10,9 @@
 // Install the spawn and drop patches.
 void ApStarPieces_OnBoot(void);
 
+// Import custom_items, subscribe to its pickups and match the six sphere archives.
+void ApStarPieces_OnSaveLoaded(void);
+
 // Enable or hold back each sphere item for the round about to load. Must run before
 // CityItemSpawn_Init registers the custom items, so it hangs off the load start.
 void ApStarPieces_On3DLoadStart(void);
@@ -19,9 +22,6 @@ void ApStarPieces_OnSceneChange(void);
 
 // Resolve this round's sphere kinds and roll its delivery schedule.
 void ApStarPieces_On3DLoadEnd(void);
-
-// Diff each player's collected set into their tracker row.
-void ApStarPieces_OnFrameStart(void);
 
 // CustomItemDesc.name of one sphere.
 const char *ApStarPieces_GetName(int piece);

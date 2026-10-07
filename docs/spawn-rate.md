@@ -2,11 +2,11 @@
 
 `AP_ITEM_SPAWN_RATE_UP` is a progressive AP filler that scales how often items spawn during gameplay. `SpawnRate_GetScale()` in `mods/archipelago/src/spawn_rate.c` returns `min_pct/100 + level * 0.1`, capped at 3.0 (`SPAWN_RATE_SCALE_MAX`), where `min_pct` is the AP slot option `spawn_rate_min` and `level` is `ap_save->spawn_rate_level`, the count of items received. That one scale drives three independent behaviors: the City Trial spawn timer, the City Trial simultaneous-item cap, and the Top Ride per-frame spawn probability.
 
-Supporting files: `main.h` (save byte + item enum + slot option), `ap_item_handler.c` (dispatch), `archipelago_debug/src/debug_menu.c` (give action).
+Supporting files: `main.h` (save byte + slot option), `archipelago_api.h` (item enum), `ap_item_handler.c` (dispatch), `archipelago_debug/src/debug_menu.c` (give action).
 
 ## Scale
 
-`spawn_rate_min` is a percentage in `APSlotOptions`, written once when the AP client sends options at handshake. The AP world's range is 10-100, so a slot can start **below** vanilla: at `min_pct = 10` items spawn a tenth as often and Spawn Rate Up items climb back toward (and past) vanilla. Sub-vanilla suppression is a deliberate option, not a degenerate case. `SpawnRate_GetScale` treats 0 (options not yet received) as 100 and floors anything nonzero below 10 at 10, because the scale is used as a **divisor** in both the CT timer and the TR probability hooks.
+`spawn_rate_min` is a percentage in `APSlotOptions`, copied into the save on the client's first options write. The AP world's range is 10-100, so a slot can start **below** vanilla: at `min_pct = 10` items spawn a tenth as often and Spawn Rate Up items climb back toward (and past) vanilla. Sub-vanilla suppression is a deliberate option, not a degenerate case. Until `ap_save->options_received` is set `SpawnRate_GetScale` returns 1.0 and ignores both the option and the level; after that it floors any `min_pct` below 10 at 10, because the scale is used as a **divisor** in both the CT timer and the TR probability hooks.
 
 `ap_save->spawn_rate_level` is one byte, saturated at 255 in `SpawnRate_Increment` and zeroed by `OnSaveInit`'s `memset`.
 
@@ -70,9 +70,9 @@ A `REPLACECALL` redirects the `bl` to `SpawnRate_ScaledRandf`, which returns `HS
 
 ## Increment
 
-`APItems_HandleItem` routes `AP_ITEM_SPAWN_RATE_UP` to `SpawnRate_Increment()` above the 3D scene gate, so it applies in any scene. The increment saturates the save byte, logs the new level, and enqueues a textbox reading "Spawn rate increased (X%)" with the noun in `ItemColor`.
+`APItems_HandleItem` routes `AP_ITEM_SPAWN_RATE_UP` to `SpawnRate_Increment()` above the 3D scene gate, so it applies in any scene. The increment saturates the save byte, logs the new level, and announces "Spawn rate increased (X%)" with the noun in `ItemColor` through `APAnnounce_Grant`, like every other received item - so the line shows only while *Messages -> Local -> Items* is on, which it is not by default.
 
-`X` is `SpawnRate_GetScale() * 100` - the absolute effective rate, not the delta from vanilla. With a non-vanilla floor of 200%, the first item lands at 210%, and showing "(210%)" is clearer than "+10%" because the player sees where they actually are. The number also stops moving once the cap is hit, which honestly reflects the in-game state.
+`X` is `SpawnRate_GetScale() * 100` - the absolute effective rate, not the delta from vanilla. From a 50% floor the first item lands at 60%, and showing "(60%)" is clearer than "+10%" because the player sees where they actually are. The number also stops moving once the cap is hit, which honestly reflects the in-game state.
 
 ## Cross-Mode Coverage
 
@@ -83,13 +83,13 @@ A `REPLACECALL` redirects the `bl` to `SpawnRate_ScaledRandf`, which returns `HS
 | Air Ride - items | No | items are stage-placed, not dynamically spawned - no rate knob exists |
 | Air Ride / City Trial - enemies | No | proximity-driven per spawn slot, not timer- or probability-driven; scaling them would need a separate item |
 
-Receiving Spawn Rate Up while playing Air Ride therefore has no observable effect, though the textbox still fires. Acceptable, since the item is most useful in CT/TR and an AR-only player should not see it in their pool.
+Receiving Spawn Rate Up while playing Air Ride therefore has no observable effect beyond its announcement. Acceptable, since the item is most useful in CT/TR and an AR-only player should not see it in their pool.
 
 A single `SpawnRate_GetScale()` drives both CT and TR from one `spawn_rate_min` and one counter. Pushing CT harder while leaving TR alone would mean splitting the level into two save fields and the option into two slot options.
 
 ## grBoxGeneInfo Counters
 
-`grBoxGeneInfo + 0x20` (`cur_num_items` in `game.h`) is a running count of live items, not the cap - despite a name like `cur_max_items` being the tempting read. `CityItemSpawn_IncrementNum` (0x800ec57c) and `CityItemSpawn_DecrementNum` (0x800ec670) move it as items spawn and die. The actual cap lives in `ItemFallDesc.item_max`. The adjacent `+0x24` (`total_spawn_count`) is a lifetime-only counter written on positive deltas in `IncrementNum`; `+0x28` (`total_num`) is touched by neither.
+`grBoxGeneInfo + 0x20` (`cur_num_items` in `game.h`) is a running count of live items, not the cap. `CityItemSpawn_IncrementNum` (0x800ec57c) and `CityItemSpawn_DecrementNum` (0x800ec670) move it as items spawn and die. The actual cap lives in `ItemFallDesc.item_max`. The adjacent `+0x24` (`total_spawn_count`) is a lifetime-only counter written on positive deltas in `IncrementNum`; `+0x28` (`total_num`) is touched by neither.
 
 ## GObj Pool Ceiling
 
@@ -100,5 +100,6 @@ Items are GObj-allocated by `CityItem_Create` (0x8024eef4) from a heap-allocated
 `spawn_rate_min` is a slot option fixed at connect. `archipelago_debug`'s Slot Options page
 writes it through `ArchipelagoAPI.DebugSetSpawnRateMin` (25 / 50 / 75 / 100 percent) and reads it
 back through `GetSpawnRateMin`, so the floor and the per-item climb above it can be exercised
-without re-rolling a seed. A stored 0 means options were never received, which `SpawnRate_GetScale`
-already treats as 100, and the row displays it that way.
+without re-rolling a seed. The override only bites on a save that has received its slot options:
+before that `SpawnRate_GetScale` stays at 1.0 whatever is stored, and the row displays the stored
+0 as 100%.

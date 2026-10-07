@@ -100,5 +100,5 @@ is likewise available to all riders, human and CPU).
 ## Menu
 
 `ap_menu_settings.air_quick_spin_enabled` (`APMenuSettings`), an On/Off toggle in the
-Archipelago Settings menu. Default **Off** (vanilla behavior); the player opts in. Changes are
+Archipelago Settings menu. Default **On**; turning it off restores vanilla behavior. Changes are
 logged via `OnToggleAirQuickSpin`.

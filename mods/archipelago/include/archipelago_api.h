@@ -3,9 +3,10 @@
 
 #include "game.h"
 
-// Bump major on breaking changes, minor on additions.
-#define ARCHIPELAGO_API_MAJOR 4
-#define ARCHIPELAGO_API_MINOR 2
+// Bump major on breaking changes, minor on additions. hoshi reads these as the mod's
+// version when an importer asks for it.
+#define ARCHIPELAGO_API_MAJOR 6
+#define ARCHIPELAGO_API_MINOR 0
 
 // Hoshi mod name for Hoshi_ImportMod() lookups.
 #define ARCHIPELAGO_MOD_NAME "KARchipelago"
@@ -14,8 +15,7 @@
 #define CHECKLIST_MODE_NUM (GMMODE_NUM + 1)
 #define AP_CHECKLIST_ROW   GMMODE_NUM
 
-// Width of the AP Patch location bitmask on the wire. The apworld's own option
-// range stops well short of it.
+// Width of the AP Patch location bitmask on the wire.
 #define AP_PATCH_MAX 512
 
 // AP item IDs - must match the IDs defined in the APWorld Python code.
@@ -169,140 +169,138 @@ typedef enum APItemId
     AP_STADIUM_UNLOCK_SINGLERACE9,         // STKIND_SINGLERACE9
     AP_STADIUM_UNLOCK_VSKINGDEDEDE,        // STKIND_VSKINGDEDEDE
 
-    // Checklist rewards (500-649, encoded as base + mode*50 + reward_index)
+    // Checklist rewards: AP_CHECKLIST_REWARD_BASE + mode * AP_CHECKLIST_REWARD_STRIDE +
+    // reward_index, the index in the apworld's clear_kind-sorted order.
     AP_CHECKLIST_REWARD_BASE = 500,
 
     // Air Ride rewards (500-545, mode 0, indices 0-45)
-    AP_CHECKLIST_REWARD_AIRRIDE_BASE = 500,
-    AP_REWARD_AR_COURSE_NEBULA_BELT = 500,             // New Course: Nebula Belt
-    AP_REWARD_AR_MUSIC_NEBULA,                         // Music: Nebula
-    AP_REWARD_AR_METAKNIGHT,                           // META KNIGHT: Available on normal courses
-    AP_REWARD_AR_BONUS_MOVIE,                          // Bonus Movie: Special machine intros
-    AP_REWARD_AR_DEDEDE,                               // KING DEDEDE: Available on normal courses
-    AP_REWARD_AR_COLOR_GREEN,                          // Green Kirby
-    AP_REWARD_AR_MACHINE_WAGON_STAR,                   // New Machine: WAGON STAR
-    AP_REWARD_AR_SOUND_MAGMA_FLOWS,                    // Sound Test: MAGMA FLOWS
-    AP_REWARD_AR_FILLER_1,                             // Check off an empty box of your choice!
-    AP_REWARD_AR_MACHINE_REX_WHEELIE,                  // New Machine: REX WHEELIE
-    AP_REWARD_AR_COLOR_PURPLE,                         // Purple Kirby
-    AP_REWARD_AR_MACHINE_SLICK_STAR,                   // New Machine: SLICK STAR
-    AP_REWARD_AR_ENDING,                               // Ending
-    AP_REWARD_AR_COLOR_WHITE,                          // White Kirby
-    AP_REWARD_AR_MACHINE_SWERVE_STAR,                  // New Machine: SWERVE STAR
-    AP_REWARD_AR_MACHINE_SHADOW_STAR,                  // New Machine: SHADOW STAR
-    AP_REWARD_AR_MACHINE_JET_STAR,                     // New Machine: JET STAR
-    AP_REWARD_AR_MUSIC_HILLSIDE,                       // Music: Hillside
-    AP_REWARD_AR_SOUND_CHECKER_KNIGHTS,                // Sound Test: CHECKER KNIGHTS
-    AP_REWARD_AR_MUSIC_MEADOWS,                        // Music: Meadows
-    AP_REWARD_AR_MACHINE_BULK_STAR,                    // New Machine: BULK STAR
-    AP_REWARD_AR_SOUND_SKY_SANDS,                      // Sound Test: SKY SANDS
-    AP_REWARD_AR_MACHINE_FORMULA_STAR,                 // New Machine: FORMULA STAR
-    AP_REWARD_AR_MUSIC_MAGMA,                          // Music: Magma
-    AP_REWARD_AR_MUSIC_BEANSTALK,                      // Music: Beanstalk
-    AP_REWARD_AR_SOUND_MACHINE_PASSAGE,                // Sound Test: MACHINE PASSAGE
-    AP_REWARD_AR_SOUND_FANTASY_MEADOWS,                // Sound Test: FANTASY MEADOWS
-    AP_REWARD_AR_SOUND_CELESTIAL_VALLEY,               // Sound Test: CELESTIAL VALLEY
-    AP_REWARD_AR_COLOR_BROWN,                          // Brown Kirby
-    AP_REWARD_AR_SOUND_FROZEN_HILLSIDE,                // Sound Test: FROZEN HILLSIDE
-    AP_REWARD_AR_SOUND_BEANSTALK_PARK,                 // Sound Test: BEANSTALK PARK
-    AP_REWARD_AR_MACHINE_ROCKET_STAR,                  // New Machine: ROCKET STAR
-    AP_REWARD_AR_SOUND_RESULTS_SCREEN,                 // Sound Test: Results Screen
-    AP_REWARD_AR_MACHINE_WHEELIE_BIKE,                 // New Machine: WHEELIE BIKE
-    AP_REWARD_AR_MACHINE_WHEELIE_SCOOTER,              // New Machine: WHEELIE SCOOTER
-    AP_REWARD_AR_MACHINE_WINGED_STAR,                  // New Machine: WINGED STAR
-    AP_REWARD_AR_FILLER_2,                             // Check off an empty box of your choice!
-    AP_REWARD_AR_MUSIC_CHECKER,                        // Music: Checker
-    AP_REWARD_AR_FILLER_3,                             // Check off an empty box of your choice!
-    AP_REWARD_AR_MUSIC_SKY_SANDS,                      // Music: Sky Sands
-    AP_REWARD_AR_MUSIC_MACHINE,                        // Music: Machine
-    AP_REWARD_AR_MACHINE_TURBO_STAR,                   // New Machine: TURBO STAR
-    AP_REWARD_AR_FILLER_4,                             // Check off an empty box of your choice!
-    AP_REWARD_AR_MUSIC_CELESTIAL,                      // Music: Celestial
-    AP_REWARD_AR_FILLER_5,                             // Check off an empty box of your choice!
-    AP_REWARD_AR_SOUND_NEBULA_BELT,                    // Sound Test: NEBULA BELT
+    AP_REWARD_AR_COURSE_NEBULA_BELT = 500,
+    AP_REWARD_AR_MUSIC_NEBULA,
+    AP_REWARD_AR_METAKNIGHT,
+    AP_REWARD_AR_BONUS_MOVIE,
+    AP_REWARD_AR_DEDEDE,
+    AP_REWARD_AR_COLOR_GREEN,
+    AP_REWARD_AR_MACHINE_WAGON_STAR,
+    AP_REWARD_AR_SOUND_MAGMA_FLOWS,
+    AP_REWARD_AR_FILLER_1,
+    AP_REWARD_AR_MACHINE_REX_WHEELIE,
+    AP_REWARD_AR_COLOR_PURPLE,
+    AP_REWARD_AR_MACHINE_SLICK_STAR,
+    AP_REWARD_AR_ENDING,
+    AP_REWARD_AR_COLOR_WHITE,
+    AP_REWARD_AR_MACHINE_SWERVE_STAR,
+    AP_REWARD_AR_MACHINE_SHADOW_STAR,
+    AP_REWARD_AR_MACHINE_JET_STAR,
+    AP_REWARD_AR_MUSIC_HILLSIDE,
+    AP_REWARD_AR_SOUND_CHECKER_KNIGHTS,
+    AP_REWARD_AR_MUSIC_MEADOWS,
+    AP_REWARD_AR_MACHINE_BULK_STAR,
+    AP_REWARD_AR_SOUND_SKY_SANDS,
+    AP_REWARD_AR_MACHINE_FORMULA_STAR,
+    AP_REWARD_AR_MUSIC_MAGMA,
+    AP_REWARD_AR_MUSIC_BEANSTALK,
+    AP_REWARD_AR_SOUND_MACHINE_PASSAGE,
+    AP_REWARD_AR_SOUND_FANTASY_MEADOWS,
+    AP_REWARD_AR_SOUND_CELESTIAL_VALLEY,
+    AP_REWARD_AR_COLOR_BROWN,
+    AP_REWARD_AR_SOUND_FROZEN_HILLSIDE,
+    AP_REWARD_AR_SOUND_BEANSTALK_PARK,
+    AP_REWARD_AR_MACHINE_ROCKET_STAR,
+    AP_REWARD_AR_SOUND_RESULTS_SCREEN,
+    AP_REWARD_AR_MACHINE_WHEELIE_BIKE,
+    AP_REWARD_AR_MACHINE_WHEELIE_SCOOTER,
+    AP_REWARD_AR_MACHINE_WINGED_STAR,
+    AP_REWARD_AR_FILLER_2,
+    AP_REWARD_AR_MUSIC_CHECKER,
+    AP_REWARD_AR_FILLER_3,
+    AP_REWARD_AR_MUSIC_SKY_SANDS,
+    AP_REWARD_AR_MUSIC_MACHINE,
+    AP_REWARD_AR_MACHINE_TURBO_STAR,
+    AP_REWARD_AR_FILLER_4,
+    AP_REWARD_AR_MUSIC_CELESTIAL,
+    AP_REWARD_AR_FILLER_5,
+    AP_REWARD_AR_SOUND_NEBULA_BELT,
 
     // Top Ride rewards (550-582, mode 1, indices 0-32)
-    AP_CHECKLIST_REWARD_TOPRIDE_BASE = 550,
-    AP_REWARD_TR_COLOR_GREEN = 550,                    // Green Kirby
-    AP_REWARD_TR_COLOR_PURPLE,                         // Purple Kirby
-    AP_REWARD_TR_RULE_DIAGONAL_CAMERA,                 // Extra Rule: Diagonal Camera Angle
-    AP_REWARD_TR_RULE_MYSTERY_ITEM_SET,                // Extra Rule: Mystery Item Set
-    AP_REWARD_TR_ITEM_LANTERN,                         // New Item: Lantern
-    AP_REWARD_TR_ITEM_WHO_PAINT,                       // New Item: Who? Paint
-    AP_REWARD_TR_FILLER_1,                             // Check off an empty box of your choice!
-    AP_REWARD_TR_ITEM_CHICKIE,                         // New Item: Chickie
-    AP_REWARD_TR_SOUND_GRASS,                          // Sound Test: GRASS
-    AP_REWARD_TR_MUSIC_GRASS,                          // Music: Grass
-    AP_REWARD_TR_SOUND_SAND,                           // Sound Test: SAND
-    AP_REWARD_TR_FILLER_2,                             // Check off an empty box of your choice!
-    AP_REWARD_TR_COLOR_BROWN,                          // Brown Kirby
-    AP_REWARD_TR_SOUND_SKY,                            // Sound Test: SKY
-    AP_REWARD_TR_SOUND_FIRE,                           // Sound Test: FIRE
-    AP_REWARD_TR_FILLER_3,                             // Check off an empty box of your choice!
-    AP_REWARD_TR_MUSIC_FIRE,                           // Music: Fire
-    AP_REWARD_TR_SOUND_WATER,                          // Sound Test: WATER
-    AP_REWARD_TR_RULE_DEVICE_QUANTITY,                 // Extra Rule: Device Quantity
-    AP_REWARD_TR_MUSIC_WATER,                          // Music: Water
-    AP_REWARD_TR_SOUND_LIGHT,                          // Sound Test: LIGHT
-    AP_REWARD_TR_FILLER_4,                             // Check off an empty box of your choice!
-    AP_REWARD_TR_MUSIC_METAL,                          // Music: Metal
-    AP_REWARD_TR_SOUND_METAL,                          // Sound Test: METAL
-    AP_REWARD_TR_COLOR_WHITE,                          // White Kirby
-    AP_REWARD_TR_FILLER_5,                             // Check off an empty box of your choice!
-    AP_REWARD_TR_MUSIC_SAND,                           // Music: Sand
-    AP_REWARD_TR_MUSIC_LIGHT,                          // Music: Light
-    AP_REWARD_TR_RULE_ATTACK_ITEM_SET,                 // Extra Rule: Attack Item Set
-    AP_REWARD_TR_SOUND_RESULTS_SCREEN,                 // Sound Test: Results Screen
-    AP_REWARD_TR_MUSIC_SKY,                            // Music: Sky
-    AP_REWARD_TR_RULE_SIDE_CAMERA,                     // Extra Rule: Side Camera Angle
-    AP_REWARD_TR_ENDING,                               // Ending
+    AP_REWARD_TR_COLOR_GREEN = 550,
+    AP_REWARD_TR_COLOR_PURPLE,
+    AP_REWARD_TR_RULE_DIAGONAL_CAMERA,
+    AP_REWARD_TR_RULE_MYSTERY_ITEM_SET,
+    AP_REWARD_TR_ITEM_LANTERN,
+    AP_REWARD_TR_ITEM_WHO_PAINT,
+    AP_REWARD_TR_FILLER_1,
+    AP_REWARD_TR_ITEM_CHICKIE,
+    AP_REWARD_TR_SOUND_GRASS,
+    AP_REWARD_TR_MUSIC_GRASS,
+    AP_REWARD_TR_SOUND_SAND,
+    AP_REWARD_TR_FILLER_2,
+    AP_REWARD_TR_COLOR_BROWN,
+    AP_REWARD_TR_SOUND_SKY,
+    AP_REWARD_TR_SOUND_FIRE,
+    AP_REWARD_TR_FILLER_3,
+    AP_REWARD_TR_MUSIC_FIRE,
+    AP_REWARD_TR_SOUND_WATER,
+    AP_REWARD_TR_RULE_DEVICE_QUANTITY,
+    AP_REWARD_TR_MUSIC_WATER,
+    AP_REWARD_TR_SOUND_LIGHT,
+    AP_REWARD_TR_FILLER_4,
+    AP_REWARD_TR_MUSIC_METAL,
+    AP_REWARD_TR_SOUND_METAL,
+    AP_REWARD_TR_COLOR_WHITE,
+    AP_REWARD_TR_FILLER_5,
+    AP_REWARD_TR_MUSIC_SAND,
+    AP_REWARD_TR_MUSIC_LIGHT,
+    AP_REWARD_TR_RULE_ATTACK_ITEM_SET,
+    AP_REWARD_TR_SOUND_RESULTS_SCREEN,
+    AP_REWARD_TR_MUSIC_SKY,
+    AP_REWARD_TR_RULE_SIDE_CAMERA,
+    AP_REWARD_TR_ENDING,
 
     // City Trial rewards (600-643, mode 2, indices 0-43)
-    AP_CHECKLIST_REWARD_CITYTRIAL_BASE = 600,
-    AP_REWARD_CT_FILLER_1 = 600,                       // Check off an empty box of your choice!
-    AP_REWARD_CT_SOUND_ITEM_BOUNCE,                    // Sound Test: Item bounce
-    AP_REWARD_CT_BONUS_PAUSE_POWERUPS,                 // Bonus: Pause screen power-ups
-    AP_REWARD_CT_MUSIC_CITY,                           // Music: City
-    AP_REWARD_CT_SOUND_LEGENDARY_MACHINE,              // Sound Test: Legendary Air Ride Machine
-    AP_REWARD_CT_SOUND_DENSE_FOG,                      // Sound Test: dense fog today
-    AP_REWARD_CT_METAKNIGHT_FREERUN,                   // Meta Knight: Select in free run mode
-    AP_REWARD_CT_SOUND_CITY_TRIAL,                     // Sound Test: City Trial
-    AP_REWARD_CT_FILLER_2,                             // Check off an empty box of your choice!
-    AP_REWARD_CT_STADIUM_SINGLERACE_NEBULA,            // New Stadium: Single Race (Nebula Belt)
-    AP_REWARD_CT_SOUND_ROWDY_CHARGE_TANK,              // Sound Test: rowdy charge tank
-    AP_REWARD_CT_STADIUM_DRAG_RACE_4,                  // New Stadium: Drag Race 4
-    AP_REWARD_CT_SOUND_DRAG_RACE,                      // Sound Test: Drag Race
-    AP_REWARD_CT_DRAGOON_PART_A,                       // Dragoon Part A
-    AP_REWARD_CT_SOUND_TARGET_FLIGHT,                  // Sound Test: Target Flight
-    AP_REWARD_CT_DRAGOON_PART_C,                       // Dragoon Part C
-    AP_REWARD_CT_SOUND_AIR_GLIDER,                     // Sound Test: Air Glider
-    AP_REWARD_CT_STADIUM_DESTRUCTION_4,                // New Stadium: Destruction Derby 4
-    AP_REWARD_CT_FILLER_3,                             // Check off an empty box of your choice!
-    AP_REWARD_CT_HYDRA_PART_Y,                         // Hydra Part Y
-    AP_REWARD_CT_SOUND_WHATS_IN_THE_BOX,               // Sound Test: What's in the box?
-    AP_REWARD_CT_HYDRA_PART_Z,                         // Hydra Part Z
-    AP_REWARD_CT_DEDEDE_FREERUN,                       // King Dedede: Select in free run mode
-    AP_REWARD_CT_SOUND_DYNA_BLADE_INTRO,               // Sound Test: Dyna Blade Intro
-    AP_REWARD_CT_FILLER_4,                             // Check off an empty box of your choice!
-    AP_REWARD_CT_SOUND_HUGE_PILLAR,                    // Sound Test: Huge Pillar
-    AP_REWARD_CT_SOUND_TAC_CHALLENGE,                  // Sound Test: Tac Challenge
-    AP_REWARD_CT_SOUND_FLYING_METEOR,                  // Sound Test: Flying Meteor
-    AP_REWARD_CT_ENDING,                               // Ending
-    AP_REWARD_CT_DRAGOON_PART_B,                       // Dragoon Part B
-    AP_REWARD_CT_FILLER_5,                             // Check off an empty box of your choice!
-    AP_REWARD_CT_HYDRA_PART_X,                         // Hydra Part X
-    AP_REWARD_CT_COLOR_PURPLE,                         // Purple Kirby
-    AP_REWARD_CT_STADIUM_DESTRUCTION_3,                // New Stadium: Destruction Derby 3
-    AP_REWARD_CT_STADIUM_DESTRUCTION_5,                // New Stadium: Destruction Derby 5
-    AP_REWARD_CT_STADIUM_KIRBY_MELEE_2,                // New Stadium: Kirby Melee 2
-    AP_REWARD_CT_SOUND_KIRBY_MELEE,                    // Sound Test: Kirby Melee
-    AP_REWARD_CT_COLOR_GREEN,                          // Green Kirby
-    AP_REWARD_CT_COLOR_BROWN,                          // Brown Kirby
-    AP_REWARD_CT_DRAGOON_FREERUN,                      // Dragoon: Select in Free Run mode
-    AP_REWARD_CT_HYDRA_FREERUN,                        // Hydra: Select in Free Run mode
-    AP_REWARD_CT_SOUND_LIGHTHOUSE,                     // Sound Test: The Lighthouse Light Burns
-    AP_REWARD_CT_SOUND_STATION_FIRE,                   // Sound Test: Station Fire
-    AP_REWARD_CT_COLOR_WHITE,                          // White Kirby
+    AP_REWARD_CT_FILLER_1 = 600,
+    AP_REWARD_CT_SOUND_ITEM_BOUNCE,
+    AP_REWARD_CT_BONUS_PAUSE_POWERUPS,
+    AP_REWARD_CT_MUSIC_CITY,
+    AP_REWARD_CT_SOUND_LEGENDARY_MACHINE,
+    AP_REWARD_CT_SOUND_DENSE_FOG,
+    AP_REWARD_CT_METAKNIGHT_FREERUN,
+    AP_REWARD_CT_SOUND_CITY_TRIAL,
+    AP_REWARD_CT_FILLER_2,
+    AP_REWARD_CT_STADIUM_SINGLERACE_NEBULA,
+    AP_REWARD_CT_SOUND_ROWDY_CHARGE_TANK,
+    AP_REWARD_CT_STADIUM_DRAG_RACE_4,
+    AP_REWARD_CT_SOUND_DRAG_RACE,
+    AP_REWARD_CT_DRAGOON_PART_A,
+    AP_REWARD_CT_SOUND_TARGET_FLIGHT,
+    AP_REWARD_CT_DRAGOON_PART_C,
+    AP_REWARD_CT_SOUND_AIR_GLIDER,
+    AP_REWARD_CT_STADIUM_DESTRUCTION_4,
+    AP_REWARD_CT_FILLER_3,
+    AP_REWARD_CT_HYDRA_PART_Y,
+    AP_REWARD_CT_SOUND_WHATS_IN_THE_BOX,
+    AP_REWARD_CT_HYDRA_PART_Z,
+    AP_REWARD_CT_DEDEDE_FREERUN,
+    AP_REWARD_CT_SOUND_DYNA_BLADE_INTRO,
+    AP_REWARD_CT_FILLER_4,
+    AP_REWARD_CT_SOUND_HUGE_PILLAR,
+    AP_REWARD_CT_SOUND_TAC_CHALLENGE,
+    AP_REWARD_CT_SOUND_FLYING_METEOR,
+    AP_REWARD_CT_ENDING,
+    AP_REWARD_CT_DRAGOON_PART_B,
+    AP_REWARD_CT_FILLER_5,
+    AP_REWARD_CT_HYDRA_PART_X,
+    AP_REWARD_CT_COLOR_PURPLE,
+    AP_REWARD_CT_STADIUM_DESTRUCTION_3,
+    AP_REWARD_CT_STADIUM_DESTRUCTION_5,
+    AP_REWARD_CT_STADIUM_KIRBY_MELEE_2,
+    AP_REWARD_CT_SOUND_KIRBY_MELEE,
+    AP_REWARD_CT_COLOR_GREEN,
+    AP_REWARD_CT_COLOR_BROWN,
+    AP_REWARD_CT_DRAGOON_FREERUN,
+    AP_REWARD_CT_HYDRA_FREERUN,
+    AP_REWARD_CT_SOUND_LIGHTHOUSE,
+    AP_REWARD_CT_SOUND_STATION_FIRE,
+    AP_REWARD_CT_COLOR_WHITE,
 
     // Event unlock items (700-715, aligned to EventKind)
     AP_EVENT_UNLOCK_BASE = 700,
@@ -337,8 +335,7 @@ typedef enum APItemId
     AP_ABILITY_UNLOCK_TORNADO,             // COPYKIND_TORNADO
     AP_ABILITY_UNLOCK_BIRD,                // COPYKIND_BIRD
 
-    // Base ability unlock items (771-773, aligned to BaseAbilityKind). Kirby's
-    // fundamental moves are dead until their unlock is received.
+    // Base ability unlock items (771-773, aligned to BaseAbilityKind)
     AP_BASE_ABILITY_UNLOCK_BASE = 771,
     AP_BASE_ABILITY_UNLOCK_INHALE = 771,   // BASEABILITY_INHALE
     AP_BASE_ABILITY_UNLOCK_QUICKSPIN,      // BASEABILITY_QUICKSPIN
@@ -389,11 +386,8 @@ typedef enum APItemId
     AP_ITEM_UNLOCK_DRAGOON2,               // ITUNLOCK_DRAGOON2
     AP_ITEM_UNLOCK_DRAGOON3,               // ITUNLOCK_DRAGOON3
 
-    // Archipelago Star sphere unlock items (820-825, in APStarPiece order).
-    // Their own mask rather than a bit in item_unlocked_mask, which ITUNLOCK_NUM
-    // has all but filled. Separate from AP_MACHINE_UNLOCK_ARCHIPELAGO_STAR: the
-    // spheres gate the assembly, the machine item gates the assembled star
-    // spawning loose in the city, the same split Hydra and Dragoon have.
+    // Archipelago Star sphere unlock items (820-825, APStarPiece order). The spheres
+    // gate the assembly; AP_MACHINE_UNLOCK_AP_STAR gates the star spawning loose.
     AP_STAR_PIECE_UNLOCK_BASE = 820,
     AP_STAR_PIECE_UNLOCK_ROSE = 820,
     AP_STAR_PIECE_UNLOCK_GREEN,
@@ -402,15 +396,9 @@ typedef enum APItemId
     AP_STAR_PIECE_UNLOCK_BLUE,
     AP_STAR_PIECE_UNLOCK_YELLOW,
 
-    // Machine unlock items (830-856, aligned to the machine unlock mask's bits:
-    // MachineKind for the vanilla machines, then the Archipelago Star).
-    // VCKIND_WHEELVSDEDEDE (would be 855) is not exposed: it is the Vs. King
-    // Dedede stadium's CPU-only machine and no game code reads its unlock bit.
-    // The ids stay aligned to MachineKind, so three of them name a machine the
-    // AP world ships no item for and whose unlock bit therefore never clears:
-    // WINGKIRBY (847) and WHEELKIRBY (850) are copy-ability states, and
-    // WHEELNORMAL (849) is the enemy form whose rideable counterpart is
-    // WHEELIEBIKE (851).
+    // Machine unlock items (830-856): MachineKind order, then the Archipelago Star. 855
+    // (WHEELVSDEDEDE) is stadium CPU-only and has no item; WINGKIRBY, WHEELNORMAL and
+    // WHEELKIRBY (847, 849, 850) are never shipped either.
     AP_MACHINE_UNLOCK_BASE = 830,
     AP_MACHINE_UNLOCK_WARP = 830,          // VCKIND_WARP
     AP_MACHINE_UNLOCK_COMPACT,             // VCKIND_COMPACT
@@ -436,7 +424,7 @@ typedef enum APItemId
     AP_MACHINE_UNLOCK_WHEELIEBIKE,         // VCKIND_WHEELIEBIKE
     AP_MACHINE_UNLOCK_REXWHEELIE,          // VCKIND_REXWHEELIE
     AP_MACHINE_UNLOCK_WHEELIESCOOTER,      // VCKIND_WHEELIESCOOTER
-    AP_MACHINE_UNLOCK_WHEELDEDEDE,         // VCKIND_WHEELDEDEDE - player-facing Dedede (Free Run / Stadium CSS)
+    AP_MACHINE_UNLOCK_WHEELDEDEDE,         // VCKIND_WHEELDEDEDE
     AP_MACHINE_UNLOCK_AP_STAR = 856,       // the Archipelago Star, at whatever MachineKind it registered as
 
     // Box type unlock items (860-862, aligned to BoxKind)
@@ -478,10 +466,8 @@ typedef enum APItemId
     AP_STAGE_UNLOCK_WATER,                 // TOPRIDE_WATER
     AP_STAGE_UNLOCK_METAL,                 // TOPRIDE_METAL
 
-    // Top Ride item unlock items (900-921, aligned to TopRideItemKind).
-    // PARTY_BALL_ALT (912) and PARTY_BALL (921) are both engine Party Ball
-    // variants. AP exposes only slot 21; the mod mirrors bit 21's unlock onto
-    // bit 12 so both spawn together, and AP never sends 912 directly.
+    // Top Ride item unlock items (900-921, aligned to TopRideItemKind). Bit 21's unlock
+    // is mirrored onto bit 12, the twin Party Ball.
     AP_TOPRIDE_ITEM_UNLOCK_BASE = 900,
     AP_TOPRIDE_ITEM_UNLOCK_HAMMER = 900,        // TRITEM_HAMMER
     AP_TOPRIDE_ITEM_UNLOCK_BIG_CAKE,            // TRITEM_BIG_CAKE
@@ -495,7 +481,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_FREEZE_FAN,          // TRITEM_FREEZE_FAN
     AP_TOPRIDE_ITEM_UNLOCK_MISSILE,             // TRITEM_MISSILE
     AP_TOPRIDE_ITEM_UNLOCK_FIRE,                // TRITEM_FIRE
-    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL_ALT,      // TRITEM_PARTY_BALL_ALT - kusdama variant, not sent by AP
+    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL_ALT,      // TRITEM_PARTY_BALL_ALT, not sent by AP
     AP_TOPRIDE_ITEM_UNLOCK_BOMB,                // TRITEM_BOMB
     AP_TOPRIDE_ITEM_UNLOCK_STEP_BOOM,           // TRITEM_STEP_BOOM
     AP_TOPRIDE_ITEM_UNLOCK_LANTERN,             // TRITEM_LANTERN
@@ -504,10 +490,10 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_UNLOCK_WHO_PAINT,           // TRITEM_WHO_PAINT
     AP_TOPRIDE_ITEM_UNLOCK_SMOKESCREEN,         // TRITEM_SMOKESCREEN
     AP_TOPRIDE_ITEM_UNLOCK_CHICKIE,             // TRITEM_CHICKIE
-    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL,          // TRITEM_PARTY_BALL - ushiroyurerun variant; canonical Party Ball AP unlock
+    AP_TOPRIDE_ITEM_UNLOCK_PARTY_BALL,          // TRITEM_PARTY_BALL
 
-    // Top Ride item give items (950-971, aligned to TopRideItemKind). Only
-    // effective in a Top Ride scene.
+    // Top Ride item give items (950-971, aligned to TopRideItemKind), applied in a Top
+    // Ride race.
     AP_TOPRIDE_ITEM_GIVE_BASE = 950,
     AP_TOPRIDE_ITEM_GIVE_HAMMER = 950,          // TRITEM_HAMMER
     AP_TOPRIDE_ITEM_GIVE_BIG_CAKE,              // TRITEM_BIG_CAKE
@@ -521,7 +507,7 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_FREEZE_FAN,            // TRITEM_FREEZE_FAN
     AP_TOPRIDE_ITEM_GIVE_MISSILE,               // TRITEM_MISSILE
     AP_TOPRIDE_ITEM_GIVE_FIRE,                  // TRITEM_FIRE
-    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT,        // TRITEM_PARTY_BALL_ALT - kusdama variant, not sent by AP
+    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL_ALT,        // TRITEM_PARTY_BALL_ALT, not sent by AP
     AP_TOPRIDE_ITEM_GIVE_BOMB,                  // TRITEM_BOMB
     AP_TOPRIDE_ITEM_GIVE_STEP_BOOM,             // TRITEM_STEP_BOOM
     AP_TOPRIDE_ITEM_GIVE_LANTERN,               // TRITEM_LANTERN
@@ -530,18 +516,15 @@ typedef enum APItemId
     AP_TOPRIDE_ITEM_GIVE_WHO_PAINT,             // TRITEM_WHO_PAINT
     AP_TOPRIDE_ITEM_GIVE_SMOKESCREEN,           // TRITEM_SMOKESCREEN
     AP_TOPRIDE_ITEM_GIVE_CHICKIE,               // TRITEM_CHICKIE
-    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL,            // TRITEM_PARTY_BALL - ushiroyurerun variant; canonical Party Ball AP give
+    AP_TOPRIDE_ITEM_GIVE_PARTY_BALL,            // TRITEM_PARTY_BALL
 
-    // Cosmetic all-mode filler (972-973). Not unlocks and not gated, so they
-    // carry no game-enum alignment.
-    AP_ITEM_BIG_KIRBY = 972,                    // grow Kirby's model
-    AP_ITEM_SMALL_KIRBY,                        // shrink Kirby's model
+    // Cosmetic filler for every mode (972-973).
+    AP_ITEM_BIG_KIRBY = 972,
+    AP_ITEM_SMALL_KIRBY,
 
-    // Archipelago Star sphere give items (980-985, in APStarPiece order). Add the
-    // sphere to every human rider's collected set, the way the 300-band ITKIND
-    // gives hand over a Hydra or Dragoon part. Collected directly rather than
-    // spawned as a pickup, so a sphere lands whether or not its unlock has
-    // arrived; it retries while no rider is in a City Trial round to take it.
+    // Archipelago Star sphere give items (980-985, APStarPiece order). Collected straight
+    // into every human rider's set whether or not the sphere is unlocked; retried until
+    // a City Trial round is up.
     AP_STAR_PIECE_GIVE_BASE = 980,
     AP_STAR_PIECE_GIVE_ROSE = 980,
     AP_STAR_PIECE_GIVE_GREEN,
@@ -552,8 +535,9 @@ typedef enum APItemId
 
 } APItemId;
 
-// Archipelago-defined unlock kinds whose bit indices live in the masks below but
-// are not part of any vanilla game enum.
+#define AP_CHECKLIST_REWARD_STRIDE 50
+
+// Bits of the AP_UNLOCK_ITEM mask. Not a vanilla enum.
 typedef enum ItemUnlockKind
 {
     ITUNLOCK_ALLUP,
@@ -589,9 +573,7 @@ typedef enum ItemUnlockKind
     ITUNLOCK_NUM,
 } ItemUnlockKind;
 
-// Archipelago-defined base-ability kinds - Kirby's fundamental moves gated
-// behind AP items. Not a vanilla game enum; index N = bit N in
-// base_ability_unlocked_mask.
+// Bits of the AP_UNLOCK_BASE_ABILITY mask: Kirby's fundamental moves. Not a vanilla enum.
 typedef enum BaseAbilityKind
 {
     BASEABILITY_INHALE,
@@ -600,13 +582,12 @@ typedef enum BaseAbilityKind
     BASEABILITY_NUM,
 } BaseAbilityKind;
 
-// Categories for the unlock-mask getter/setter pair below, one per bitmask field
-// on archipelago's per-mod save. Masks narrower than 32 bits return zero-extended;
-// SetUnlockMask truncates back to the underlying width.
+// One per unlock mask. Narrower masks read zero-extended; SetUnlockMask truncates to the
+// mask's width.
 typedef enum APUnlockCategory
 {
     AP_UNLOCK_MACHINE,         // u32 - VCKIND_*, then AP_MACHINE_BIT_AP_STAR
-    AP_UNLOCK_ABILITY,       // u16 - COPYKIND_*
+    AP_UNLOCK_ABILITY,         // u16 - COPYKIND_*
     AP_UNLOCK_EVENT,           // u32 - EVKIND_*
     AP_UNLOCK_PATCH,           // u16 - PATCHKIND_*
     AP_UNLOCK_ITEM,            // u32 - ITUNLOCK_*
@@ -616,21 +597,18 @@ typedef enum APUnlockCategory
     AP_UNLOCK_TOPRIDE_ITEM,    // u32 - TRITEM_*
     AP_UNLOCK_COLOR,           // u8  - KIRBYCOLOR_*
     AP_UNLOCK_STADIUM,         // u32 - STKIND_*
-    AP_UNLOCK_BASE_ABILITY,    // u8  - BaseAbilityKind (inhale / quick spin / charge)
+    AP_UNLOCK_BASE_ABILITY,    // u8  - BaseAbilityKind
     AP_UNLOCK_AP_STAR_PIECE,   // u8  - APStarPiece
     AP_UNLOCK_NUM,
 } APUnlockCategory;
 
-// The machine unlock mask's bits: one per vanilla MachineKind, then the Archipelago
-// Star. Any other registered custom machine has no bit and no item, and is always
-// available.
+// The machine mask: one bit per vanilla MachineKind, then the Archipelago Star. Any other
+// registered machine has no bit and is always available.
 #define AP_MACHINE_BIT_AP_STAR (AP_MACHINE_UNLOCK_AP_STAR - AP_MACHINE_UNLOCK_BASE)
 #define AP_MACHINE_BIT_NUM     (AP_MACHINE_BIT_AP_STAR + 1)
 
-// Which sphere of the Archipelago Star's set a sphere unlock item addresses, in
-// the order the AP_STAR_PIECE_UNLOCK_* item IDs above are assigned. The ap_star
-// mod owns the spheres and numbers its own the same way; the two orders are a
-// contract, because a sphere unlock item is applied by index.
+// Must match the ap_star mod's sphere order and the AP_STAR_PIECE_UNLOCK_* IDs; unlocks
+// apply by index.
 typedef enum APStarPiece
 {
     AP_STAR_PIECE_ROSE,
@@ -642,14 +620,12 @@ typedef enum APStarPiece
     AP_STAR_PIECE_NUM,
 } APStarPiece;
 
-// Absolute clamp ceiling for per-stat patch totals, and so for the City Trial patch
-// cap range. Patch_GetMaxValue returns through extsb, so anything above 127
-// sign-extends negative.
+// Per-stat patch ceiling: Patch_GetMaxValue (0x8000aaf0) returns through extsb, so above
+// 127 goes negative.
 #define PATCH_STAT_MAX 127
 
-// What a client text message is about. Each kind has its own Settings menu toggle;
-// the mod filters on render and the client reads the toggle mask so it can skip
-// composing at all.
+// What a client text message is about. Each kind has a Settings toggle, which the client
+// reads too.
 typedef enum APTextKind
 {
     APTEXT_KIND_CHECK = 0, // a location this slot completed was sent
@@ -661,23 +637,21 @@ typedef enum APTextKind
     APTEXT_KIND_NUM,
 } APTextKind;
 
-// What a checklist-mode row's goal is, one per row of APSlotOptions.goal. The AP
-// world orders them the same way and ships GOAL_NONE last.
+// A checklist-mode row's goal, in the apworld's order.
 typedef enum APGoalKind
 {
     GOAL_100_CHECKLIST = 0,     // Complete 100 checklist squares
     GOAL_N_CHECKLIST,           // Complete N checklist squares
     GOAL_CHECKLIST_LIST,        // Complete all checkboxes specified in goal_checks[mode]
-    GOAL_HYDRA_AND_DRAGOON,     // City Trial only: assemble both legendary machines
-    GOAL_BEAT_KING_DEDEDE,      // City Trial only: defeat King Dedede in stadium
-    GOAL_MAX_STATS_CT,          // City Trial only: hit the cap ceiling on every stat in one run
-    GOAL_ASSEMBLE_AP_STAR,      // City Trial only: assemble the Archipelago Star
-    GOAL_ALL_LEGENDARIES_CT,    // City Trial only: assemble all three legendary machines in one run
-    GOAL_NONE,                  // No goal for this mode - always last, the AP world orders it last too
+    GOAL_HYDRA_AND_DRAGOON,     // City Trial row: assemble both legendary machines
+    GOAL_BEAT_KING_DEDEDE,      // City Trial row: defeat King Dedede in his stadium
+    GOAL_MAX_STATS_CT,          // City Trial row: hit the cap ceiling on every stat in one run
+    GOAL_ASSEMBLE_AP_STAR,      // Archipelago row: assemble the Archipelago Star
+    GOAL_ALL_LEGENDARIES_CT,    // Archipelago row: assemble all three legendaries in one run
+    GOAL_NONE,                  // No goal for this row
 } APGoalKind;
 
-// The AP checklist objectives whose predicate counts across sessions, so their
-// progress lives in the save rather than in a per-round observation.
+// AP checklist objectives whose progress spans sessions.
 typedef enum APCheckProgressKind
 {
     AP_PROGRESS_ALLUP_TOTAL,  // All Ups a human collected in City Trial; 5 completes the check
@@ -686,7 +660,7 @@ typedef enum APCheckProgressKind
     AP_PROGRESS_TR_COLORS,    // Bit N = a Top Ride race finished as KirbyColor N; 0xFF completes it
     AP_PROGRESS_TR_STEER_WINS, // Bit N = TopRideCourse N won on Steer Star; 0x7F completes it
     AP_PROGRESS_DRAG_WINS,     // Bit N = DRAG RACE N+1 won; 0xF completes it
-    AP_PROGRESS_AR_COURSE_WINS, // Bit per Air Ride course won, Nebula Belt the top one; 0x1FF completes it
+    AP_PROGRESS_AR_COURSE_WINS, // Bit N = AirRideCourse N won; 0x1FF completes it
     AP_PROGRESS_TR_ITEMS,      // Bit N = TopRideItemKind N used
     AP_PROGRESS_NUM,
 } APCheckProgressKind;
@@ -698,114 +672,86 @@ typedef struct ArchipelagoAPI
     u32  (*GetUnlockMask)(APUnlockCategory cat);
     void (*SetUnlockMask)(APUnlockCategory cat, u32 mask);
 
-    // Queue an item for normal AP-receipt processing. Returns 1 if queued,
-    // 0 if the queue is full.
+    // Queue an item for normal AP-receipt processing. Returns 1 if queued, 0 if the queue
+    // is full.
     int  (*QueueItem)(int ap_item_id);
 
-    // Add to the EnergyLink balance.
-    void (*AddEnergy)(float amount);
-
-    // Grant a checklist reward by source mode + reward_index. Sets the
-    // AP-received bit and applies the reward to its target cell, which may be
-    // in a different mode for cross-mode placements.
+    // Grant a checklist reward by game reward-table index, announced.
     void (*GrantReward)(GameMode mode, u8 reward_index);
 
-    // Identify the checklist cell under the cursor. Returns 1 if the cursor is on
-    // a grid cell (writes mode/clear_kind), 0 if no checklist screen is up or the
-    // cursor is off the grid.
+    // Checklist cell under the cursor; 0 when no checklist is up or the cursor is off the
+    // grid.
     int  (*GetHoveredCell)(u8 *out_mode, u8 *out_clear_kind);
 
-    // Resolve which (source_mode, reward_index) is placed at this checklist cell,
-    // accounting for cross-mode shuffling. Returns 1 if a placement exists
-    // locally, 0 if remote.
+    // The (source mode, reward_index) placed at a cell, cross-mode aware. 0 if the cell
+    // hosts none.
     int  (*ResolveCell)(u8 mode, u8 clear_kind,
                         u8 *out_src_mode, u8 *out_src_ri);
 
-    // Number of reward rows for the given mode. Out-of-range returns 0.
+    // Number of reward rows for a mode; 0 out of range.
     int  (*GetRewardCount)(GameMode mode);
 
-    // Encoded placement for (mode, reward_index): high byte = target mode, low
-    // byte = target clear_kind, 0xFFFF = remote. Out-of-range returns 0xFFFF.
+    // (target row << 8) | clear_kind for (mode, reward_index); 0xFFFF = remote or out of
+    // range.
     u16  (*GetShuffledReward)(GameMode mode, u8 reward_index);
 
-    // Player-visible textbox feedback ("All abilities unlocked").
-    void (*Textbox)(const char *msg);
-
-    // Debug-only operations, touching internal AP state (clearchecker flags,
-    // sticky goal bits, wire side-channel fields) that doesn't decompose into
-    // clean primitives.
-
-    // Reveal every checkbox in every mode (visual-only).
     void (*DebugRevealAllChecklists)(void);
 
-    // Fill location_data arrays with a random shuffle, for test builds with no
-    // AP server connected.
+    // A random APData.locations shuffle, applied at once (no AP server needed).
     void (*DebugSimulateLocationData)(void);
 
-    // Wipe every checkbox flag, sent_checks bit, and shuffled-rewards entry.
+    // Fresh-boot checklist state: checkbox flags, sent checks, AP Patches, goals, received
+    // rewards and the location assignment all cleared.
     void (*DebugClearAllChecklistData)(void);
 
     void (*DebugClearAllSentChecks)(void);
     void (*DebugForceMarkAllChecks)(void);
     void (*DebugTriggerGoalComplete)(void);
 
-    // Simulate an AP client side-channel write, for testing the receive path.
+    // Simulate the client's DeathLink write.
     void (*DebugTriggerDeathlinkReceive)(void);
 
-    // Reveal every checkbox on one checklist-mode row (visual-only). Rows 0..2 are
-    // the vanilla GameModes; row 3 is the AP tab.
+    // One checklist-mode row (AP_CHECKLIST_ROW = the AP tab), visual only.
     void (*DebugRevealChecklist)(int mode);
 
-    // Drop one Archipelago Star sphere in front of a player's machine,
-    // bypassing the delivery schedule. `piece` is an APStarPiece. Returns 0 if
-    // the sphere was locked when this scene loaded, since it has no ItemKind then.
+    // Drop one Archipelago Star sphere in front of a player's machine. `piece` is an
+    // APStarPiece. Returns 0 if the sphere was locked as this scene loaded.
     int (*DebugSpawnApStarPiece)(int piece, int ply);
 
-    // Drop one AP Box in front of a player's machine, and claim the
-    // lowest unclaimed AP Patch outright. Both return 0 when the AP Patch
-    // category is off, or when the drop-ins were not registered as this scene
-    // loaded, since they have no ItemKind then.
+    // DebugSpawnApBox drops an AP Box in front of a player's machine, 0 when the
+    // drop-ins weren't registered as this scene loaded. DebugCollectApPatch claims the
+    // lowest unclaimed patch, 0 when none is left.
     int (*DebugSpawnApBox)(int ply);
     int (*DebugCollectApPatch)(void);
 
-    // The seed's AP Patch location count, and a debug override of it.
-    // The drop-ins are held out of the item registry while the count is 0, so the
-    // override is what lets a build with no such seed exercise the category; it
-    // takes effect at the next round load.
+    // The seed's AP Patch count and a debug override, effective at the next round load.
+    // At 0 the drop-ins stay out of the item registry.
     int (*GetApPatchCount)(void);
     void (*DebugSetApPatchCount)(int count);
 
-    // Clear every collected AP Patch bit, in the save and in the wire mirror, and
-    // drop the client's pending backfill so it cannot restore them. The lowest
-    // patch becomes claimable again without a round reload.
+    // Clear every collected AP Patch bit, in the save, the wire mirror and the client's
+    // pending backfill.
     void (*DebugClearApPatchCollected)(void);
 
-    // Simulate the client's TrapLink side-channel write. Which trap lands is chosen
-    // by the mode that receives it, not by the caller. The per-frame receive proc
-    // only exists while the Trap Link setting was on as the scene loaded.
+    // Simulate the client's TrapLink write; the receiving mode picks the trap. Needs Trap
+    // Link on as the scene loaded.
     void (*DebugTriggerTraplinkReceive)(void);
 
-    // Post a canned client-authored text line of the given APTextKind, or one that
-    // fills all 8 colored runs and overflows the three rendered lines. Both return
-    // 0 if an earlier message is still waiting on the textbox.
+    // Post a canned client-authored line of the given APTextKind, or one that fills all
+    // 8 runs and overflows the three rendered lines. 0 while a message is still pending.
     int (*DebugSendText)(int kind);
     int (*DebugSendOverlongText)(void);
 
-    // The goal for one checklist-mode row, and a debug override of it. `amount` is
-    // the square count GOAL_N_CHECKLIST needs and is ignored by every other kind;
-    // out_amount may be null. Setting a goal re-evaluates immediately, but
-    // GOAL_MAX_STATS_CT arms its rider proc at round load, so it only takes effect
-    // from the next round.
+    // One row's goal; `out_amount` (nullable) gets GOAL_N_CHECKLIST's count.
     int (*GetGoal)(int row, int *out_amount);
 
-    // Override all CHECKLIST_MODE_NUM goals at once and re-evaluate. It is one call
-    // because victory is decided over the whole set, so applying rows one at a time
-    // can satisfy every row in passing and latch a goal the caller never asked for.
-    // `amount` reaches only the rows set to GOAL_N_CHECKLIST.
+    // Override every row's goal at once (per-row writes could latch victory in passing)
+    // and re-evaluate. `amount` applies to GOAL_N_CHECKLIST rows; GOAL_MAX_STATS_CT takes
+    // effect next round.
     void (*DebugSetGoals)(const int *goals, int amount);
 
-    // Per-category access gating, mirroring the slot option the seed shipped.
-    // AP_UNLOCK_AP_STAR_PIECE has no flag of its own and reads as gated.
+    // Per-category gating, as the seed shipped it. AP_UNLOCK_AP_STAR_PIECE follows
+    // the item category's flag.
     int (*GetGating)(APUnlockCategory cat);
     void (*DebugSetGating)(APUnlockCategory cat, int enabled);
 
@@ -816,29 +762,23 @@ typedef struct ArchipelagoAPI
     void (*DebugSetPatchCapMax)(int max);
     void (*DebugSetSpawnRateMin)(int percent);
 
-    // Zero every unlock mask and re-run the connect-time pre-fill from the current
-    // slot options, the way a fresh connect would. Needed because the pre-fill only
-    // ever sets bits, so turning a category's gating back on is otherwise invisible.
+    // Zero every unlock mask and re-run the connect-time pre-fill, which only sets bits.
     void (*DebugReapplySlotOptions)(void);
 
     // Cross-session AP checklist progress counters.
     int (*GetCheckProgress)(APCheckProgressKind which);
     void (*DebugSetCheckProgress)(APCheckProgressKind which, int value);
 
-    // The EnergyLink balance in whole MJ, and a debug override of it. The override
-    // is a pure balance store: the deposit and withdraw totals the client diffs are
-    // rising counters and are never moved. A connected client overwrites the balance
-    // on its next poll.
+    // The Energy Link balance in whole MJ, and a debug override of the balance alone (not
+    // the deposit / withdraw counters). A connected client overwrites it on its next poll.
     s64 (*GetEnergyBalance)(void);
     void (*DebugSetEnergyBalance)(s64 mj);
 
-    // Log the whole AP save and wire state to the console.
+    // Log the AP save and wire state.
     void (*DebugReportState)(void);
 
-    // Reset everything AP receipts accumulate - patch cap, spawn rate, permanent
-    // patches, cross-session check progress and the item queue. Unlock masks are left
-    // alone; DebugReapplySlotOptions is what rebuilds those, and the slot options
-    // themselves are left as received.
+    // Reset patch cap, spawn rate, permanent patches, check progress, the Max Stats latch
+    // and the item queue. Unlock masks and slot options stay.
     void (*DebugResetProgression)(void);
 } ArchipelagoAPI;
 

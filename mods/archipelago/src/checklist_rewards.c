@@ -11,6 +11,7 @@
 #include "checklist_rewards.h"
 #include "ap_checks.h"
 #include "ap_checklist.h"
+#include "ap_check_detect.h"
 #include "gate_machines.h"
 #include "gate_colors.h"
 #include "gate_airride_stages.h"
@@ -19,21 +20,19 @@
 #include "textbox_api.h"
 #include "ap_colors.h"
 #include "ap_announce.h"
+#include "ap_patches.h"
 
 static const int reward_counts[GMMODE_NUM] = {
-    [GMMODE_AIRRIDE]   = REWARD_COUNT_AIRRIDE,
-    [GMMODE_TOPRIDE]   = REWARD_COUNT_TOPRIDE,
-    [GMMODE_CITYTRIAL] = REWARD_COUNT_CITYTRIAL,
+    [GMMODE_AIRRIDE]   = AIRRIDE_REWARD_NUM,
+    [GMMODE_TOPRIDE]   = TOPRIDE_REWARD_NUM,
+    [GMMODE_CITYTRIAL] = CITYTRIAL_REWARD_NUM,
 };
 
-// ap_to_game_ri[mode][ap_reward_index] = game reward-table index. The apworld numbers
-// rewards in clear_kind-sorted order; the game's table is in a different ROM-defined
-// order that all mod machinery keys on. Translation happens only at the AP-client
-// wire boundaries.
+// AP reward_index (the apworld's clear_kind-sorted order) -> game reward-table index,
+// which every other path keys on. Translated only at the client wire boundary.
 static u8 ap_to_game_ri[GMMODE_NUM][REWARD_COUNT_MAX];
 
-// Must run before RebuildRewardTablesFromShuffle overwrites the clear_kind field
-// with placement/sentinel values.
+// Before RebuildRewardTablesFromShuffle overwrites the native clear_kinds.
 static void BuildRewardIndexMaps(void)
 {
     for (int mode = 0; mode < GMMODE_NUM; mode++)
@@ -53,13 +52,10 @@ static void BuildRewardIndexMaps(void)
                     lo = b;
             u8 t = order[a]; order[a] = order[lo]; order[lo] = t;
         }
-        for (int ap_ri = 0; ap_ri < count; ap_ri++)
-            ap_to_game_ri[mode][ap_ri] = order[ap_ri];
+        memcpy(ap_to_game_ri[mode], order, count * sizeof(order[0]));
     }
 }
 
-// Out-of-range inputs pass through unchanged - callers range-check against
-// ChecklistRewards_GetRewardCount first.
 u8 ChecklistRewards_ApToGameIndex(GameMode mode, u8 ap_reward_index)
 {
     if ((unsigned)mode >= GMMODE_NUM || ap_reward_index >= reward_counts[mode])
@@ -67,25 +63,21 @@ u8 ChecklistRewards_ApToGameIndex(GameMode mode, u8 ap_reward_index)
     return ap_to_game_ri[mode][ap_reward_index];
 }
 
-// For each (target_mode, clear_kind), which reward from another mode is placed
-// there. source_mode == 0xFF means none.
+// The reward from another mode placed at a (row, clear_kind); source_mode 0xFF = none.
 typedef struct CrossModeSlot
 {
     u8 source_mode;
     u8 source_reward_index;
 } CrossModeSlot;
 
-// Row AP_CHECKLIST_ROW is the AP checklist tab: it awards no native rewards, so every
-// reward it hosts is a cross-mode placement and lives only here.
+// Indexed by checklist-mode row. The AP tab has no native rewards, so all its placements
+// live here.
 static CrossModeSlot cross_mode_slots[CHECKLIST_MODE_NUM][CLEAR_KIND_NUM];
 
-// The mode whose reward table the text/icon/audio hooks should read for the hovered
-// cell - it differs from the displayed mode for a cross-mode placement, so it can only
-// come from a resolve. Snapshotted by the FindRewardForCell hook; 0xFF = unresolved.
+// Source mode of the hovered cell's reward, for the text, icon and audio hooks. Set by
+// ChecklistRewards_FindRewardForCell; 0xFF = unresolved.
 static u8 hover_source_mode = 0xFF;
 
-// Returns 0 when no checklist screen is up or the cursor is off the grid (unplaced,
-// or in the checkbox-filler list).
 int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind)
 {
     GOBJ *gobj = Gm_GetMenuData()->clearchecker.bg_gobj;
@@ -112,8 +104,7 @@ int ChecklistRewards_GetHoveredCell(u8 *out_mode, u8 *out_clear_kind)
     return 0;
 }
 
-// Checks cross_mode_slots first, then matches the full u16 shuffled encoding, which
-// avoids the clear_kind=0 sentinel aliasing a clear_kind scan would hit.
+// Matches the full u16 encoding; a clear_kind scan would alias the 0 sentinel.
 int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
                                  u8 *out_source_mode, u8 *out_source_reward_index)
 {
@@ -129,8 +120,6 @@ int ChecklistRewards_ResolveCell(u8 mode, u8 clear_kind,
         return 1;
     }
 
-    // The same-mode scan below reads the mode's own reward table. The AP tab has
-    // none, so any reward it hosts is cross-mode and was already resolved above.
     if (row >= GMMODE_NUM)
         return 0;
 
@@ -162,28 +151,25 @@ static void ClearCrossModeSlots(void)
             cross_mode_slots[r][k].source_mode = 0xFF;
 }
 
-// Returns 1 iff the reward has a local placement in its OWN mode's checklist. Every
-// vanilla-facing read of RewardEntry.clear_kind must gate on this - cross-mode source
-// rows store the 0 sentinel there and must never read the source mode's clear[0].
+// Every vanilla-facing read of RewardEntry.clear_kind gates on this: remote and
+// cross-mode rows hold the 0 sentinel there.
 static int IsSameModeLocalPlacement(u8 mode, u8 reward_index)
 {
     u16 loc = ap_save->shuffled_rewards[mode][reward_index];
     return loc != 0xFFFF && (u8)(loc >> 8) == mode;
 }
 
-// Replacement for ClearChecker_CheckUnlocked (0x80049E24). AP delivery is the sole
-// authority - no has_reward fallback, since has_reward is also raised by in-game
-// completion and would unlock cosmetic rewards before the AP server delivers them.
-int ChecklistRewards_CheckUnlocked(GameMode mode, u8 reward_index)
+// Replaces ClearChecker_CheckUnlocked (0x80049e24). AP receipt only: has_reward is also
+// raised by in-game completion, which would unlock a reward before the server sends it.
+static int ChecklistRewards_CheckUnlocked(GameMode mode, u8 reward_index)
 {
     return (ap_save->received_checklist_rewards[mode] & (1ULL << reward_index)) != 0;
 }
 
-// Replacement for ClearChecker_GetRewardFromClearKind (0x80049EC4), whose sole caller
-// is the audio/ending preview path in Checklist_Think (0x801804dc). Resolves via
-// shuffled_rewards instead of a RewardEntry.clear_kind scan, which would alias the
-// cross-mode/remote clear_kind=0 sentinel and return the wrong row.
-void ChecklistRewards_GetRewardFromClearKind(GameMode mode, u8 clear_kind,
+// Replaces ClearChecker_GetRewardFromClearKind (0x80049ec4), called from the audio and
+// ending preview in Checklist_Think at 0x801804dc. Resolves through ResolveCell, since a
+// clear_kind scan hits the 0 sentinel.
+static void ChecklistRewards_GetRewardFromClearKind(GameMode mode, u8 clear_kind,
                                              u8 *out_reward_index,
                                              u8 *out_reward_param)
 {
@@ -194,7 +180,7 @@ void ChecklistRewards_GetRewardFromClearKind(GameMode mode, u8 clear_kind,
     }
 
     GameClearData *cd = gmGetClearcheckerTypeP(mode);
-    // Vanilla early-exit: scan only runs when the cell is unlocked or filler'd.
+    // Vanilla scans only an unlocked or filler'd cell.
     if (!cd || !(cd->clear[clear_kind].is_unlocked || cd->clear[clear_kind].is_filler))
     {
         *out_reward_index = 0xFF;
@@ -213,8 +199,7 @@ void ChecklistRewards_GetRewardFromClearKind(GameMode mode, u8 clear_kind,
 }
 
 // City Trial REWARD_STADIUM reward_index -> StadiumKind. reward_param is 0 for every
-// REWARD_STADIUM entry, so the target has to be re-derived from the mapping hardcoded
-// in vanilla's Checklist_ProcessUnlock (0x8017e490).
+// REWARD_STADIUM entry; this mirrors the mapping in Checklist_ProcessUnlock (0x8017e490).
 static int CtRewardIndexToStadium(u8 reward_index)
 {
     switch (reward_index)
@@ -229,9 +214,8 @@ static int CtRewardIndexToStadium(u8 reward_index)
     }
 }
 
-// Route a vanilla checklist reward into the mod's gate masks, so the gate bit flips
-// whether the reward arrived as an AP item or by earning the checkbox. Without it,
-// gated rewards write only to the dead in-game cache the gate hooks bypass.
+// Routes a received checklist reward into the gate masks; the gate hooks bypass the
+// in-game unlock cache.
 static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_type)
 {
     switch (reward_type)
@@ -263,10 +247,8 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
         case REWARD_MACHINE_JET_STAR:        GateMachines_UnlockMachine(VCKIND_JET, 0);            break;
         case REWARD_MACHINE_REX_WHEELIE:     GateMachines_UnlockMachine(VCKIND_REXWHEELIE, 0);     break;
 
-        // The AR-character availability gate resolves a character through
-        // CharacterDesc_GetMachineKind, so unlocking the machine unlocks the
-        // character. WHEELDEDEDE is the player-facing Dedede; WHEELVSDEDEDE is
-        // stadium CPU-only and has no AP unlock.
+        // A character gates on its machine. WHEELDEDEDE is the player-facing Dedede;
+        // WHEELVSDEDEDE is stadium CPU-only.
         case REWARD_KING_DEDEDE:
             GateMachines_UnlockMachine(VCKIND_WHEELDEDEDE, 0);
             break;
@@ -282,58 +264,30 @@ static void ApplyVanillaRewardUnlock(GameMode mode, u8 reward_index, u8 reward_t
         case REWARD_COLOR_BROWN:  GateColors_UnlockColor(KIRBYCOLOR_BROWN, 0);  break;
         case REWARD_COLOR_WHITE:  GateColors_UnlockColor(KIRBYCOLOR_WHITE, 0);  break;
 
-        // TR "New Item" rewards: TopRide_OnCourseSelect reads the checklist
-        // has_reward for indices 8/9/10 to drive ItemMgr.enabled_mask bits 20/18/15.
         case REWARD_ITEM_CHICKIE:   GateTopRideItems_UnlockItem(TRITEM_CHICKIE, 0);   break;
         case REWARD_ITEM_WHO_PAINT: GateTopRideItems_UnlockItem(TRITEM_WHO_PAINT, 0); break;
         case REWARD_ITEM_LANTERN:   GateTopRideItems_UnlockItem(TRITEM_LANTERN, 0);   break;
 
+        // No gate mask; DRAGOON_PART_* / HYDRA_PART_* are checklist-only markers.
         default:
-            // Left to vanilla: fillers, bonus movie, extra rule, sound test, music,
-            // ending, pause power-ups, and DRAGOON_PART_*/HYDRA_PART_* (checklist-
-            // internal "all parts" markers, not the in-round piece-spawn gates).
             break;
     }
 }
 
-// "Received: Checkbox Filler (<Mode>)", shared by the direct AP filler-item path and
-// the checklist-reward filler path so the wording is identical either way.
-void Checklist_AnnounceFiller(GameMode mode)
+void ChecklistRewards_AnnounceFiller(GameMode mode)
 {
-    const char *mode_name;
-    GXColor mode_color;
-    // ModeColors[] is sized GMMODE_NUM, so the AP tab's framework-assigned mode
-    // (>= GMMODE_NUM) carries its own name and tint.
-    if ((int)mode == ap_checklist_mode)
-    {
-        static const GXColor ap_theme = {AP_THEME_R, AP_THEME_G, AP_THEME_B, 255};
-        mode_name = AP_CHECKLIST_NAME;
-        mode_color = ap_theme;
-    }
-    else
-    {
-        switch (mode)
-        {
-            case GMMODE_AIRRIDE:   mode_name = "Air Ride";   mode_color = tb_api->ModeColors[GMMODE_AIRRIDE];   break;
-            case GMMODE_TOPRIDE:   mode_name = "Top Ride";   mode_color = tb_api->ModeColors[GMMODE_TOPRIDE];   break;
-            case GMMODE_CITYTRIAL: mode_name = "City Trial"; mode_color = tb_api->ModeColors[GMMODE_CITYTRIAL]; break;
-            default:               mode_name = "Checklist";  mode_color = tb_api->DefaultColor;                 break;
-        }
-    }
-
+    int row = ChecklistModeRow(mode);
     TextSegment segs[5] = {
-        {"Received: ",      tb_api->DefaultColor},
-        {"Checkbox Filler", APColor_Filler},
-        {" (",              tb_api->DefaultColor},
-        {mode_name,         mode_color},
-        {")",               tb_api->DefaultColor},
+        {"Received: ",                 tb_api->DefaultColor},
+        {"Checkbox Filler",            APColor_Filler},
+        {" (",                         tb_api->DefaultColor},
+        {APChecklist_RowName(row),     APChecklist_RowColor(row)},
+        {")",                          tb_api->DefaultColor},
     };
     APAnnounce_GrantSegments(segs, 5);
 }
 
-// Display names for the textbox noun shown when a checklist reward is granted - the
-// single source of truth, including gated categories (their gate handlers run
-// announce=0 for checklist grants). Filler slots are NULL and handled before lookup.
+// Textbox noun per reward; NULL for fillers, which announce separately.
 static const char *const stc_checklist_reward_names[GMMODE_NUM][REWARD_COUNT_MAX] = {
     [GMMODE_AIRRIDE] = {
         // 0-4 Fillers
@@ -408,9 +362,6 @@ static const char *ChecklistRewardName(GameMode mode, u8 reward_index)
     return stc_checklist_reward_names[mode][reward_index];
 }
 
-// Textbox prefix + noun color, keyed by reward type. Gate-unlock categories read
-// "Unlocked <category>: <name>" in their gate handler's noun color; everything else
-// reads "Received..." (extras keep a category, single-instance features don't).
 static void ChecklistRewardStyle(u8 reward_type, const char **out_prefix, GXColor *out_color)
 {
     *out_prefix = "Received: ";
@@ -455,19 +406,18 @@ static void ChecklistRewardStyle(u8 reward_type, const char **out_prefix, GXColo
     }
 }
 
-// The single announce site - the gate handlers ApplyVanillaRewardUnlock invokes run
-// announce=0.
+// The one announce site: the gate unlockers ApplyVanillaRewardUnlock calls run silent.
 static void AnnounceChecklistReward(GameMode mode, u8 reward_index, u8 reward_type)
 {
     if (reward_type == REWARD_FILLER)
     {
-        Checklist_AnnounceFiller(mode);
+        ChecklistRewards_AnnounceFiller(mode);
         return;
     }
 
     const char *name = ChecklistRewardName(mode, reward_index);
     if (!name)
-        return; // A non-filler with no display name is unexpected - stay silent.
+        return;
 
     const char *prefix;
     GXColor color;
@@ -475,14 +425,11 @@ static void AnnounceChecklistReward(GameMode mode, u8 reward_index, u8 reward_ty
     APAnnounce_Grant(prefix, name, color, NULL);
 }
 
-// Raise has_reward on the checklist cell a reward is placed on, for its display
-// badge. is_unlocked means "player completed this in gameplay" and belongs to the
-// check-detection path, so only the badge is written here. The encoded target is a
-// checklist-mode ROW; the AP tab's runtime mode is whatever custom_checklist assigned
-// it, and its clear data does not exist until the tab registers.
+// Sets the badge (has_reward) on the reward's cell; is_unlocked belongs to check
+// detection. The target is a checklist-mode row, and the AP tab's clear data exists only
+// once it registers.
 static void MarkRewardCell(GameMode mode, u8 reward_index)
 {
-    // shuffled u16 = (target_row << 8) | target_clear_kind, 0xFFFF = remote.
     u16 loc = ap_save->shuffled_rewards[mode][reward_index];
     if (loc == 0xFFFF)
         return;
@@ -500,9 +447,8 @@ static void MarkRewardCell(GameMode mode, u8 reward_index)
     cd->clear[clear_kind].has_reward = 1;
 }
 
-// Grant a checklist reward received from the AP server. The unlock_cache at
-// GameData+0xD50 is rebuilt by Checklist_BuildUnlockBitfields via the REPLACEFUNC'd
-// ClearChecker_CheckUnlocked, so it picks up the new bit without a write here.
+// No unlock_cache write: Checklist_BuildUnlockBitfields (0x80007af0) rebuilds it through
+// ChecklistRewards_CheckUnlocked.
 void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
 {
     if ((unsigned)mode >= GMMODE_NUM || reward_index >= reward_counts[mode])
@@ -514,8 +460,7 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
 
     ap_save->received_checklist_rewards[mode] |= (1ULL << reward_index);
 
-    // reward_type survives cross-mode / shuffle remapping (only clear_kind is
-    // overwritten), so this lookup is always valid.
+    // The shuffle remaps only clear_kind, so reward_type is always valid.
     u8 reward_type = stc_reward_table_ptrs[mode][reward_index].reward_type;
     if (!ap_regrant_quiet)
         OSReport("[ChecklistRewards] Granted mode=%d ri=%d type=%s (%d)\n",
@@ -526,17 +471,14 @@ void ChecklistRewards_Grant(GameMode mode, u8 reward_index, int announce)
 
     MarkRewardCell(mode, reward_index);
 
-    // A FILLER reward grants one filler token to the reward's OWN mode, on a real
-    // receipt only: the replay path (announce=0) must not re-grant, as
-    // checkbox_filler_num lives in GameClearData and persists across boots. This is
-    // the sole grant site - vanilla's reward-loop grant is neutralized at 0x8017e00c.
+    // Real receipts only: checkbox_filler_num persists in GameClearData, so a re-grant
+    // must not bump it. Vanilla's reward-loop grant is branched over at 0x8017e00c.
     if (reward_type == REWARD_FILLER && announce)
         Checklist_GrantFiller(mode);
 }
 
-// Reward types with no gate mask of their own - their unlocked state lives entirely
-// in received_checklist_rewards. These are the non-progression rewards the AP world
-// may place as items, one `checklist_rewards` category at a time.
+// Reward types with no gate mask, which the AP world places per `checklist_rewards`
+// category.
 static int IsPlaceableRewardType(u8 reward_type)
 {
     switch (reward_type)
@@ -554,11 +496,7 @@ static int IsPlaceableRewardType(u8 reward_type)
     }
 }
 
-// Mark every reward the AP world did not place as received at connect, so the content is
-// available from the start and its box is freed for an ordinary AP item. Placement is
-// tracked per (mode, reward type), so a mode the seed disabled - whose rewards are never
-// placed - is unlocked outright. Not routed through Grant - no textbox, and no
-// filler-token bump for REWARD_FILLER.
+// Bypasses Grant: no textbox and no filler token.
 void ChecklistRewards_GrantUnplaced(u32 placed_types)
 {
     int total = 0;
@@ -580,18 +518,16 @@ void ChecklistRewards_GrantUnplaced(u32 placed_types)
              total, MaskBits(placed_types, GMMODE_NUM * CHECKLIST_REWARD_MODE_BITS));
 }
 
-// Filter for the reward loop in Checklist_SetRewardFlagOnUnlocks (0x8017DF5C).
-// Returns 1 to skip every reward that isn't a same-mode local placement - remote and
-// cross-mode-source rows carry the clear_kind=0 sentinel, which would spuriously set
-// has_reward on clear[mode][0]. ApplyCrossModeHasReward covers the cross-mode ones.
-int ChecklistRewards_ShouldSkipReward(GameMode mode, u8 reward_index)
+// Reward-loop filter in Checklist_SetRewardFlagOnUnlocks (0x8017df5c): skips remote and
+// cross-mode rows, whose 0 sentinel would set has_reward on clear[0].
+// ChecklistRewards_ApplyCrossModeHasReward covers the cross-mode ones.
+static int ChecklistRewards_ShouldSkipReward(GameMode mode, u8 reward_index)
 {
     return !IsSameModeLocalPlacement((u8)mode, reward_index);
 }
 
-// Hook at 0x8017dfd8: top of the reward loop body. Clobbered instruction
-// `lbz r3, 0x14(r30)` loads mode from the checklist UI struct. Return 0: re-execute
-// it and continue the loop body. Return 1: skip to the next iteration at 0x8017e064.
+// Top of the loop body; clobbers lbz r3, 0x14(r30) (the UI mode). Nonzero skips to the
+// next iteration at 0x8017e064.
 CODEPATCH_HOOKCONDITIONALCREATE(
     0x8017dfd8,
     "lbz 3, 0x14(30)\n\t"
@@ -602,17 +538,16 @@ CODEPATCH_HOOKCONDITIONALCREATE(
     0x8017e064
 )
 
-// Checklist audio preview, replacing the vanilla scan of
-// audio_table_ptrs[current_mode]. Selects the table via hover_source_mode so a
-// cross-mode music reward reads its source mode's table.
-static int ChecklistRewards_AudioPreview(u8 reward_index)
+// Replaces the vanilla audio-preview scan, reading the source mode's
+// stc_audio_preview_tables entry so a cross-mode music reward plays its own song.
+static void ChecklistRewards_AudioPreview(u8 reward_index)
 {
     if (hover_source_mode >= GMMODE_NUM)
-        return 1;  // alt-exit (skip)
+        return;
 
     u8 *table = stc_audio_preview_tables[hover_source_mode];
     if (!table)
-        return 1;
+        return;
 
     for (int i = 0; table[i * 2] != 0xFF; i++)
     {
@@ -620,35 +555,30 @@ static int ChecklistRewards_AudioPreview(u8 reward_index)
             continue;
         s8 song_id = (s8)table[i * 2 + 1];
         BGM_Play((u8)song_id);
-        GameData *gd = Gm_GetGameData();
-        if (gd)
-            gd->main_menu.soundtest_bgm_kind = song_id;
+        Gm_GetGameData()->main_menu.soundtest_bgm_kind = song_id;
         break;
     }
-    return 1;  // always alt-exit past the vanilla scan
 }
 
-// Hook at 0x80180508 in Checklist_Think, reached only when reward_param ==
-// REWARDPARAM_AUDIO, with r4 = reward_index (set by the GetRewardFromClearKind call
-// at 0x801804dc). Always alt-exits to 0x80180560, past the vanilla scan, BGM_Play
-// call and persist helper.
-CODEPATCH_HOOKCONDITIONALCREATE(
+// Hook at 0x80180508 in Checklist_Think (0x8017f3bc), on the REWARDPARAM_AUDIO path with
+// r4 = reward_index. Exits to 0x80180560, past the vanilla scan, BGM_Play and persist
+// helper; the relocated mr r3, r18 is dead there.
+CODEPATCH_HOOKCREATE(
     0x80180508,
-    "clrlwi 3, 4, 24\n\t",  // reward_index -> r3 (arg 1)
+    "clrlwi 3, 4, 24\n\t",
     ChecklistRewards_AudioPreview,
     "",
-    0,
     0x80180560
 )
 
 static const char *sis_filenames[GMMODE_NUM] = {
-    "SisClrChk3D.dat",  // GMMODE_AIRRIDE
-    "SisClrChk2D.dat",  // GMMODE_TOPRIDE
-    "SisClrChkCT.dat",  // GMMODE_CITYTRIAL
+    [GMMODE_AIRRIDE]   = "SisClrChk3D.dat",
+    [GMMODE_TOPRIDE]   = "SisClrChk2D.dat",
+    [GMMODE_CITYTRIAL] = "SisClrChkCT.dat",
 };
 
-// GameMode -> SIS slot index. Slot 0 is always the current mode, so vanilla code with
-// its default sis_id=0 works; the other two modes get slots 1-2.
+// GameMode -> SIS slot. Slot 0 is always the current mode, so vanilla code on its default
+// sis_id of 0 works; the other two modes take slots 1-2.
 static u8 mode_to_sis_slot[GMMODE_NUM];
 
 static void LoadAllChecklistSIS(u8 current_mode)
@@ -667,20 +597,19 @@ static void LoadAllChecklistSIS(u8 current_mode)
     }
 }
 
-// Hook at 0x801823c4: convergence point after the mode-specific SIS load in checklist
-// init (0x801822f4), whose 3 Text_LoadSisFile calls are NOPed. r23 = current checklist
-// mode; clobbered instruction is `lwz r3, 0x0ecc(r30)`.
+// Hook at 0x801823c4 in Checklist_Init (0x801822f4), after its NOPed per-mode SIS loads.
+// r23 = the checklist mode; clobbers lwz r3, 0x0ecc(r30).
 CODEPATCH_HOOKCREATE(
     0x801823c4,
-    "clrlwi 3, 23, 24\n\t",  // r3 = mode (from r23)
+    "clrlwi 3, 23, 24\n\t",
     LoadAllChecklistSIS,
     "",
     0
 )
 
-// Replaces the vanilla reward_index reverse-lookup scan in Checklist_UpdateCellInfo,
-// which would alias cross-mode sentinel rows against clear_kind=0. Also snapshots the
-// hovered cell's source mode. Returns reward_index + 1 if a reward is visible, else -1.
+// Replaces the reward_index scan in Checklist_UpdateCellInfo, which would alias the 0
+// sentinel, and snapshots hover_source_mode. Returns reward_index + 1 if a reward is
+// visible, else -1.
 static int ChecklistRewards_FindRewardForCell(u8 current_mode, u8 clear_kind)
 {
     u8 src_mode, src_ri;
@@ -691,13 +620,11 @@ static int ChecklistRewards_FindRewardForCell(u8 current_mode, u8 clear_kind)
     }
     hover_source_mode = src_mode;
 
-    // A received reward shows regardless of local unlock state.
     if (ap_save->received_checklist_rewards[src_mode] & (1ULL << src_ri))
         return (int)src_ri + 1;
 
-    // Not received yet, so fall back to local cell state. Cross-mode also shows on
-    // is_unlocked, covering a cell completed this session before the post-loop hook
-    // mirrors has_reward.
+    // Cross-mode also shows on is_unlocked: the post-loop hook may not have mirrored
+    // has_reward yet.
     GameClearData *cd = gmGetClearcheckerTypeP(current_mode);
     if (!cd)
         return -1;
@@ -707,9 +634,9 @@ static int ChecklistRewards_FindRewardForCell(u8 current_mode, u8 clear_kind)
     return visible ? (int)src_ri + 1 : -1;
 }
 
-// Hook at 0x80181ee4, clobbering `li r25, 0`. Args: r3 = mode (r30+0x14),
-// r4 = clear_kind (r26). The epilogue turns the returned reward_index + 1 (or -1)
-// into r0, then exits to 0x80181f5c where vanilla does `mr r27, r0`.
+// Hook at 0x80181ee4 in Checklist_UpdateCellInfo (0x80181d70), clobbering li r25, 0.
+// r3 = mode, r4 = clear_kind (r26). The epilogue turns the result into r0 and exits to
+// 0x80181f5c, where vanilla does mr r27, r0.
 CODEPATCH_HOOKCREATE(
     0x80181ee4,
     "lbz 3, 0x14(30)\n\t"
@@ -717,70 +644,70 @@ CODEPATCH_HOOKCREATE(
     ChecklistRewards_FindRewardForCell,
     "cmpwi 3, 0\n\t"
     "blt 0f\n\t"
-    "addi 0, 3, -1\n\t"  // r0 = reward_index (undo the +1)
+    "addi 0, 3, -1\n\t"
     "b 1f\n\t"
     "0:\n\t"
-    "li 0, -1\n\t"       // r0 = -1 (no visible reward)
+    "li 0, -1\n\t"
     "1:\n\t",
-    0x80181f5c           // alt exit: skip past vanilla loop + unlock check
+    0x80181f5c
 )
 
-// Reward text display in Checklist_UpdateCellInfo, replacing the vanilla
-// lwz/addi/bl Text_InitPremadeText sequence (text_index = reward_index + 0x7D).
+// Reads the text from the source mode's SIS slot, then restores slot 0 so Text_GX renders
+// with its glyph data (every checklist SIS file shares a font).
 static void ChecklistRewards_DisplayRewardText(Text *text, int reward_index)
 {
-    // Read the command data from the source mode's slot, then restore slot 0 so
-    // Text_GX renders with its glyph data (all checklist SIS files share a font).
     text->sis_id = hover_source_mode < GMMODE_NUM ? mode_to_sis_slot[hover_source_mode] : 0;
-    Text_InitPremadeText(text, reward_index + 0x7D);
+    Text_InitPremadeText(text, CLEARCHECKER_SIS_REWARD_BASE + reward_index);
     text->sis_id = 0;
 }
 
+// Hook at 0x8018201c in Checklist_UpdateCellInfo (0x80181d70), replacing the vanilla
+// lwz / addi / bl Text_InitPremadeText; r29 + 0x0c = the text, r27 = reward_index.
 CODEPATCH_HOOKCREATE(
     0x8018201c,
-    "lwz 3, 0x0c(29)\n\t"   // text object -> r3
-    "mr 4, 27\n\t",          // reward_index -> r4
+    "lwz 3, 0x0c(29)\n\t"
+    "mr 4, 27\n\t",
     ChecklistRewards_DisplayRewardText,
     "",
-    0x80182028               // skip past the vanilla lwz + addi + bl sequence
+    0x80182028
 )
 
-// Blank text path: a prior cross-mode hover may have left sis_id pointing at the
-// source mode's slot.
+// A prior cross-mode hover may have left sis_id on the source mode's slot.
 static void ChecklistRewards_SetBlankTextSisId(Text *text)
 {
-    text->sis_id = 0; // Slot 0 is always the current mode
-    Text_InitPremadeText(text, 0x7C);
+    text->sis_id = 0;
+    Text_InitPremadeText(text, CLEARCHECKER_SIS_NO_REWARD);
 }
 
+// Hook at 0x80181f8c in Checklist_UpdateCellInfo (0x80181d70), replacing its blank-text
+// lwz / li / bl.
 CODEPATCH_HOOKCREATE(
     0x80181f8c,
-    "lwz 3, 0x0c(29)\n\t",  // text object -> r3
+    "lwz 3, 0x0c(29)\n\t",
     ChecklistRewards_SetBlankTextSisId,
     "",
-    0x80181f98               // skip past vanilla lwz + li + bl
+    0x80181f98
 )
 
-// Reward type icon lookup in Checklist_RewardIconProc (0x801820b4). Vanilla reads reward_type
-// from stc_reward_table_ptrs[current_mode][reward_index], but for a cross-mode reward
-// the reward_index belongs to the source mode; returning it in r3 points the lookup
-// at the right table.
 static u8 ChecklistRewards_GetHoverSourceMode(void)
 {
     return hover_source_mode;
 }
 
+// Hook at 0x80182170 in Checklist_RewardIconProc (0x801820b4): hands the following bl
+// ClearChecker_GetRewardType the source mode, since a cross-mode reward_index indexes
+// that mode's table. Exits past the vanilla mode load at 0x80182174.
 CODEPATCH_HOOKCREATE(
     0x80182170,
     "",
     ChecklistRewards_GetHoverSourceMode,
     "",
-    0x80182178                  // skip vanilla mode load at 0x80182174, go straight to bl
+    0x80182178
 )
 
-// The reward_param lookup that decides whether the icon is drawn at all, one call
-// earlier in the same function. It is passed ClearCheckerUI.mode, which on a custom
-// tab is past City Trial and trips the callee's own mode assert.
+// Replaces the bl ClearChecker_GetRewardParam at 0x8018213c in the same function, which
+// decides whether the icon is drawn. It is passed ClearCheckerUI.mode, which on a custom
+// tab trips the callee's mode assert.
 static u8 ChecklistRewards_GetHoverRewardParam(GameMode mode, u8 reward_index)
 {
     if (hover_source_mode >= GMMODE_NUM)
@@ -788,20 +715,17 @@ static u8 ChecklistRewards_GetHoverRewardParam(GameMode mode, u8 reward_index)
     return stc_reward_table_ptrs[hover_source_mode][reward_index].reward_param;
 }
 
-// Mirror has_reward onto cross-mode reward checkboxes for their display badge:
-// vanilla's reward loop only iterates the current mode's table and ShouldSkipReward
-// drops cross-mode placements. The filler token is granted at AP receipt instead.
+// Mirrors has_reward onto cross-mode cells: the vanilla loop covers only this mode's
+// table, and ShouldSkipReward drops cross-mode rows.
 static void ChecklistRewards_ApplyCrossModeHasReward(u8 current_mode)
 {
-    // A custom tab's build runs under GMMODE_CITYTRIAL while gmGetClearcheckerTypeP
-    // already serves the tab's block, so the UI mode would pair City Trial's slots
-    // with the AP board.
+    // A custom tab builds under GMMODE_CITYTRIAL while the clear data is already the
+    // tab's, so the UI mode would pair City Trial's slots with its board.
     int build_mode = APChecklist_GetBuildMode();
     if (build_mode >= 0)
         current_mode = (u8)build_mode;
 
-    // Includes the AP tab, which hosts cross-mode rewards like any other mode. Any
-    // other custom tab has no row and is skipped.
+    // Custom tabs other than the AP tab have no row.
     int row = ChecklistModeRow(current_mode);
     if (row < 0)
         return;
@@ -815,7 +739,7 @@ static void ChecklistRewards_ApplyCrossModeHasReward(u8 current_mode)
         if (slot->source_mode == 0xFF)
             continue;
         if (cd->clear[ck].has_reward)
-            continue;  // Already processed on a prior pass.
+            continue;
         if (!(cd->clear[ck].is_unlocked || cd->clear[ck].is_filler))
             continue;
 
@@ -823,28 +747,19 @@ static void ChecklistRewards_ApplyCrossModeHasReward(u8 current_mode)
     }
 }
 
-// Hook at 0x8017e07c, where the reward loop in Checklist_SetRewardFlagOnUnlocks falls
-// through on exit. Clobbered instruction: lbz r0, 0(r31).
+// The reward-loop exit in Checklist_SetRewardFlagOnUnlocks (0x8017df5c); clobbers
+// lbz r0, 0(r31).
 CODEPATCH_HOOKCREATE(
     0x8017e07c,
-    "lbz 3, 0x14(30)\n\t",  // current_mode -> r3
+    "lbz 3, 0x14(30)\n\t",
     ChecklistRewards_ApplyCrossModeHasReward,
     "",
     0
 )
 
-// Legendary-machine part assembly (Checklist_ProcessUnlock, 0x8017e490, City Trial
-// only). Vanilla decides "all 3 parts collected" (mark cell 0x6D Dragoon / 0x6E Hydra)
-// by ANDing the part cells' has_reward bits, which breaks under shuffle because
-// cross-mode/remote parts hit the clear_kind=0 sentinel. These hooks key off
-// received_checklist_rewards instead, then fall into vanilla's set-cell logic.
-#define CT_RI_DRAGOON_PART_A 27
-#define CT_RI_DRAGOON_PART_B 28
-#define CT_RI_DRAGOON_PART_C 29
-#define CT_RI_HYDRA_PART_X   31
-#define CT_RI_HYDRA_PART_Y   32
-#define CT_RI_HYDRA_PART_Z   33
-
+// Checklist_ProcessUnlock (0x8017e490) marks cells 0x6D / 0x6E once all three Dragoon /
+// Hydra parts are in, by the part cells' has_reward, which hits the 0 sentinel under
+// shuffle. These read received_checklist_rewards instead.
 static int AllCtRewardsReceived(u8 a, u8 b, u8 c)
 {
     u64 need = (1ULL << a) | (1ULL << b) | (1ULL << c);
@@ -853,40 +768,36 @@ static int AllCtRewardsReceived(u8 a, u8 b, u8 c)
 
 static int Legendary_DragoonPartsReceived(void)
 {
-    return AllCtRewardsReceived(CT_RI_DRAGOON_PART_A, CT_RI_DRAGOON_PART_B, CT_RI_DRAGOON_PART_C);
+    return AllCtRewardsReceived(CT_REWARD_DRAGOON_PART_A, CT_REWARD_DRAGOON_PART_B, CT_REWARD_DRAGOON_PART_C);
 }
 
 static int Legendary_HydraPartsReceived(void)
 {
-    return AllCtRewardsReceived(CT_RI_HYDRA_PART_X, CT_RI_HYDRA_PART_Y, CT_RI_HYDRA_PART_Z);
+    return AllCtRewardsReceived(CT_REWARD_HYDRA_PART_X, CT_REWARD_HYDRA_PART_Y, CT_REWARD_HYDRA_PART_Z);
 }
 
-// Hook at 0x8017f044 (top of the Dragoon part-collection check; clobbered insn
-// `li r4,28`). Nonzero branches to vanilla's set-clear[0x6D] logic at 0x8017f098;
-// 0 branches to the Hydra check at 0x8017f0b4, skipping the has_reward reads.
+// Top of the Dragoon parts check; clobbers li r4, 28.
 CODEPATCH_HOOKCONDITIONALCREATE(
     0x8017f044,
     "",
     Legendary_DragoonPartsReceived,
     "",
-    0x8017f0b4,   // not all received -> Hydra check
-    0x8017f098    // all received     -> vanilla set-clear[0x6D]
+    0x8017f0b4,   // not all received: on to the Hydra check
+    0x8017f098    // all received: vanilla's set-clear[0x6D]
 )
 
-// Hook at 0x8017f0b4 (top of the Hydra part-collection check; clobbered insn
-// `lbz r3,20(r31)`). Nonzero branches to vanilla's set-clear[0x6E] logic at
-// 0x8017f10c; 0 branches past it to 0x8017f128.
+// Top of the Hydra parts check; clobbers lbz r3, 20(r31).
 CODEPATCH_HOOKCONDITIONALCREATE(
     0x8017f0b4,
     "",
     Legendary_HydraPartsReceived,
     "",
-    0x8017f128,   // not all received -> continue past Hydra
-    0x8017f10c    // all received     -> vanilla set-clear[0x6E]
+    0x8017f128,   // not all received: past the Hydra check
+    0x8017f10c    // all received: vanilla's set-clear[0x6E]
 )
 
-// Re-mark the checklist slots of every already-received reward, after a save restore
-// or a new location assignment.
+// Quietly re-grants every received reward: re-marks its cell and re-applies its gate
+// unlock.
 static void RegrantAllReceivedRewards(void)
 {
     int total = 0;
@@ -905,13 +816,11 @@ static void RegrantAllReceivedRewards(void)
     }
     ap_regrant_quiet = 0;
 
-    OSReport("[ChecklistRewards] Re-applied %d reward(s) from save\n", total);
+    OSReport("[ChecklistRewards] Re-applied %d received reward(s)\n", total);
 }
 
-
-// Allocate writable copies of the per-mode reward tables and redirect
-// stc_reward_table_ptrs at them, which become the canonical handles. Must be called
-// from OnBoot so the allocations persist for the entire runtime.
+// Writable copies, since the shuffle rewrites clear_kind, allocated at boot so they
+// outlive every scene.
 static void AllocateRewardTables(void)
 {
     for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++)
@@ -921,13 +830,10 @@ static void AllocateRewardTables(void)
         memcpy(copy, stc_reward_table_ptrs[mode], size);
         stc_reward_table_ptrs[mode] = copy;
     }
-    // While the copies still hold native clear_kinds - RebuildRewardTablesFromShuffle
-    // clobbers them.
     BuildRewardIndexMaps();
 }
 
-// Rebuild stc_reward_table_ptrs[mode][i].clear_kind and cross_mode_slots. Call after
-// any change to shuffled_rewards.
+// Call after any change to shuffled_rewards.
 static void RebuildRewardTablesFromShuffle(void)
 {
     ClearCrossModeSlots();
@@ -940,22 +846,18 @@ static void RebuildRewardTablesFromShuffle(void)
             u16 loc = ap_save->shuffled_rewards[source_mode][i];
             if (loc == 0xFFFF)
             {
-                // Remote - no local slot. The clear_kind=0 sentinel is safe because
-                // every vanilla read is gated on shuffled_rewards != 0xFFFF.
+                // Remote: the 0 sentinel, which every vanilla read gates out.
                 stc_reward_table_ptrs[source_mode][i].clear_kind = 0;
                 continue;
             }
 
-            // The wire encodes the target as a checklist-mode ROW, not a runtime mode:
-            // the client writes KARData.GameMode, whose ARCHIPELAGO member is
-            // AP_CHECKLIST_ROW by definition. So no ChecklistModeRow() here - just a
-            // bounds check, since the value comes off the wire.
+            // The wire target is a checklist-mode row, not a runtime mode, so it only
+            // needs a bounds check.
             u8 target_row = (u8)(loc >> 8);
             u8 clear_kind = (u8)(loc & 0xFF);
 
             if (target_row >= CHECKLIST_MODE_NUM || clear_kind >= CLEAR_KIND_NUM)
             {
-                // Malformed wire value; treat as remote rather than indexing OOB.
                 stc_reward_table_ptrs[source_mode][i].clear_kind = 0;
                 continue;
             }
@@ -966,9 +868,6 @@ static void RebuildRewardTablesFromShuffle(void)
             }
             else
             {
-                // Sentinel in the source table, real placement in cross_mode_slots.
-                // The target may be the AP tab - the AP world shuffles rewards onto
-                // AP boxes like any other mode.
                 stc_reward_table_ptrs[source_mode][i].clear_kind = 0;
                 cross_mode_slots[target_row][clear_kind].source_mode = (u8)source_mode;
                 cross_mode_slots[target_row][clear_kind].source_reward_index = (u8)i;
@@ -993,74 +892,63 @@ u16 ChecklistRewards_GetShuffledReward(GameMode mode, u8 reward_index)
     return ap_save->shuffled_rewards[mode][reward_index];
 }
 
-// Debug: stand in for the AP client sending location data - a random shuffle
-// (~1/3 same-mode, ~1/3 cross-mode, ~1/3 remote), applied immediately.
 void ChecklistRewards_DebugSimulateLocationData(void)
 {
+    int same[GMMODE_NUM] = {0, 0, 0};
+    int cross[GMMODE_NUM] = {0, 0, 0};
     u8 pools[GMMODE_NUM][CLEAR_KIND_NUM];
     int pool_idxs[GMMODE_NUM] = {0, 0, 0};
     for (int m = 0; m < GMMODE_NUM; m++)
     {
         for (int i = 0; i < CLEAR_KIND_NUM; i++)
             pools[m][i] = (u8)i;
-        for (int i = CLEAR_KIND_NUM - 1; i > 0; i--)
-        {
-            int j = HSD_Randi(i + 1);
-            u8 tmp = pools[m][i];
-            pools[m][i] = pools[m][j];
-            pools[m][j] = tmp;
-        }
+        RandomShuffle(pools[m], CLEAR_KIND_NUM, sizeof(pools[m][0]));
     }
 
     for (int mode = 0; mode < GMMODE_NUM; mode++)
     {
-        int count = reward_counts[mode];
-        int local_count = 0, cross_count = 0;
-
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < reward_counts[mode]; i++)
         {
             int roll = HSD_Randi(3);
-            if (roll == 0 && pool_idxs[mode] < CLEAR_KIND_NUM)
+            int target = (roll == 1) ? (mode + 1 + HSD_Randi(2)) % GMMODE_NUM : mode;
+            if (roll < 2 && pool_idxs[target] < CLEAR_KIND_NUM)
             {
-                // Reward stays in its own checklist
-                u8 ck = pools[mode][pool_idxs[mode]++];
-                ap_data->locations[mode][i] = ((u16)mode << 8) | ck;
-                local_count++;
-            }
-            else if (roll == 1)
-            {
-                // Reward placed in a different mode's checklist
-                int target = (mode + 1 + HSD_Randi(2)) % GMMODE_NUM;
-                if (pool_idxs[target] < CLEAR_KIND_NUM)
-                {
-                    u8 ck = pools[target][pool_idxs[target]++];
-                    ap_data->locations[mode][i] = ((u16)target << 8) | ck;
-                    cross_count++;
-                }
+                u8 ck = pools[target][pool_idxs[target]++];
+                ap_data->locations[mode][i] = ((u16)target << 8) | ck;
+                if (target == mode)
+                    same[mode]++;
                 else
-                {
-                    ap_data->locations[mode][i] = 0xFFFF;
-                }
+                    cross[mode]++;
             }
             else
             {
-                // Remote
                 ap_data->locations[mode][i] = 0xFFFF;
             }
         }
-        OSReport("[ChecklistRewards] Debug: mode %d - %d same, %d cross, %d remote\n",
-                 mode, local_count, cross_count,
-                 count - local_count - cross_count);
     }
 
     ap_data->location_data_valid = 1;
-    OSReport("[ChecklistRewards] Debug: simulated location data written\n");
+    OSReport("[ChecklistRewards] Debug: simulated location data (same/cross/remote "
+             "AR %d/%d/%d, TR %d/%d/%d, CT %d/%d/%d)\n",
+             same[0], cross[0], reward_counts[0] - same[0] - cross[0],
+             same[1], cross[1], reward_counts[1] - same[1] - cross[1],
+             same[2], cross[2], reward_counts[2] - same[2] - cross[2]);
 
     ChecklistRewards_ApplyLocations();
 }
 
-// Full checklist reset for debugging - back to fresh-boot state with no location
-// assignment and no progress. grid_mapping is left alone.
+// grid_mapping is left alone.
+static void ClearBoard(GameClearData *cd)
+{
+    if (!cd)
+        return;
+    cd->new_unlock_flag = 0;
+    cd->display_state = 0;
+    cd->checkbox_filler_num = 0;
+    cd->checkbox_filler_list_len = 0;
+    memset(cd->clear, 0, sizeof(cd->clear));
+}
+
 void ChecklistRewards_DebugClearAll(void)
 {
     for (int mode = GMMODE_AIRRIDE; mode < GMMODE_NUM; mode++)
@@ -1069,41 +957,31 @@ void ChecklistRewards_DebugClearAll(void)
     ClearCrossModeSlots();
     hover_source_mode = 0xFF;
 
-    for (int m = 0; m < GMMODE_NUM; m++)
-        ap_save->received_checklist_rewards[m] = 0;
+    memset(ap_save->received_checklist_rewards, 0, sizeof(ap_save->received_checklist_rewards));
     for (int m = 0; m < GMMODE_NUM; m++)
         for (int i = 0; i < reward_counts[m]; i++)
             ap_save->shuffled_rewards[m][i] = 0xFFFF;
     APChecks_ResetAll();
+    APPatches_ResetAll();
 
-    // ResetAll already cleared the sent_checks / goal mirrors.
     for (int m = 0; m < GMMODE_NUM; m++)
         for (int i = 0; i < reward_counts[m]; i++)
             ap_data->locations[m][i] = 0xFFFF;
     ap_data->location_data_valid = 0;
 
-    // The unlock_cache at GameData+0xD50 is left alone - Checklist_BuildUnlockBitfields
-    // rebuilds it from the now-empty received_checklist_rewards on its next run.
+    // unlock_cache rebuilds from received_checklist_rewards on its own.
     for (int m = 0; m < GMMODE_NUM; m++)
-    {
-        GameClearData *cd = gmGetClearcheckerTypeP((GameMode)m);
-        if (!cd)
-            continue;
-        cd->new_unlock_flag = 0;
-        cd->display_state = 0;
-        cd->checkbox_filler_num = 0;
-        cd->checkbox_filler_list_len = 0;
-        memset(cd->clear, 0, sizeof(cd->clear));
-    }
+        ClearBoard(gmGetClearcheckerTypeP((GameMode)m));
+    if (APChecklist_IsRegistered())
+        ClearBoard(gmGetClearcheckerTypeP((GameMode)ap_checklist_mode));
+    APCheckDetect_ResetProgress();
 
     Hoshi_WriteSave();
-    OSReport("[ChecklistRewards] Debug: cleared all checklist data (flags, sent_checks, rewards, shuffle)\n");
+    OSReport("[ChecklistRewards] Debug: cleared all checklist data (flags, sent_checks, rewards, shuffle, AP progress)\n");
 }
 
-// Reveal every checkbox on one checklist-mode row. Sets is_visible only - unlock state
-// is left to the AP flow. The AP tab goes through the framework, whose grid shuffle
-// would otherwise drop the bits.
-void RevealChecklist(int mode)
+// The AP tab reveals only the cells backed by a check.
+void ChecklistRewards_Reveal(int mode)
 {
     if (mode == AP_CHECKLIST_ROW)
     {
@@ -1120,10 +998,10 @@ void RevealChecklist(int mode)
         clear_data->clear[i].is_visible = 1;
 }
 
-void RevealAllChecklists(void)
+void ChecklistRewards_RevealAll(void)
 {
     for (int mode = 0; mode < CHECKLIST_MODE_NUM; mode++)
-        RevealChecklist(mode);
+        ChecklistRewards_Reveal(mode);
 
     OSReport("[ChecklistRewards] Debug: revealed all squares (%d rows x %d)\n",
              CHECKLIST_MODE_NUM, CLEAR_KIND_NUM);
@@ -1135,45 +1013,38 @@ void ChecklistRewards_OnBoot()
 
     CODEPATCH_REPLACEFUNC(ClearChecker_CheckUnlocked, ChecklistRewards_CheckUnlocked);
     CODEPATCH_REPLACEFUNC(ClearChecker_GetRewardFromClearKind, ChecklistRewards_GetRewardFromClearKind);
-    CODEPATCH_HOOKAPPLY(0x8017dfd8);  // Skip remote rewards in SetRewardFlagOnUnlocks
-    CODEPATCH_HOOKAPPLY(0x8017e07c);  // Post-reward-loop: apply cross-mode has_reward
-    CODEPATCH_HOOKAPPLY(0x80180508);  // Cross-mode audio preview (source mode's audio table)
+    CODEPATCH_HOOKAPPLY(0x8017dfd8);
+    CODEPATCH_HOOKAPPLY(0x8017e07c);
+    CODEPATCH_HOOKAPPLY(0x80180508);
 
-    // Neutralize vanilla's reward-loop filler grant: replace `li r0,5` at 0x8017e00c
-    // with `b 0x8017e064` (0x48000058) to skip the grant block (which bumps
-    // checkbox_filler_num for the {0,1,2,3,4} filler rows) while leaving the preceding
-    // has_reward store intact. Filler tokens are granted solely at AP receipt in Grant.
+    // Branches over vanilla's reward-loop filler grant in Checklist_SetRewardFlagOnUnlocks
+    // (li r0, 5 -> b 0x8017e064), keeping the has_reward store before it; tokens come only
+    // from ChecklistRewards_Grant.
     CODEPATCH_REPLACEINSTRUCTION(0x8017e00c, 0x48000058);
 
-    CODEPATCH_HOOKAPPLY(0x8017f044);  // Dragoon parts -> cell 0x6D
-    CODEPATCH_HOOKAPPLY(0x8017f0b4);  // Hydra parts -> cell 0x6E
+    CODEPATCH_HOOKAPPLY(0x8017f044);
+    CODEPATCH_HOOKAPPLY(0x8017f0b4);
 
-    // Multi-SIS loading in Checklist_Init (0x801822f4): NOP the 3 original per-mode
-    // Text_LoadSisFile calls, and hook the convergence point to load all 3 SIS files.
-    CODEPATCH_REPLACEINSTRUCTION(0x80182378, 0x60000000); // NOP: AR bl Text_LoadSisFile
-    CODEPATCH_REPLACEINSTRUCTION(0x8018238c, 0x60000000); // NOP: TR bl Text_LoadSisFile
-    CODEPATCH_REPLACEINSTRUCTION(0x801823a0, 0x60000000); // NOP: CT bl Text_LoadSisFile
-    CODEPATCH_HOOKAPPLY(0x801823c4);  // Load all 3 SIS files
+    // The per-mode SIS loads in Checklist_Init, replaced by the 0x801823c4 hook.
+    CODEPATCH_REPLACEINSTRUCTION(0x80182378, PPC_NOP); // AR bl Text_LoadSisFile
+    CODEPATCH_REPLACEINSTRUCTION(0x8018238c, PPC_NOP); // TR bl Text_LoadSisFile
+    CODEPATCH_REPLACEINSTRUCTION(0x801823a0, PPC_NOP); // CT bl Text_LoadSisFile
+    CODEPATCH_HOOKAPPLY(0x801823c4);
 
-    // Checklist_UpdateCellInfo hooks for cross-mode reward display
-    CODEPATCH_HOOKAPPLY(0x80181ee4);  // Cross-mode reward lookup
-    CODEPATCH_HOOKAPPLY(0x8018201c);  // Cross-mode reward text display
-    CODEPATCH_HOOKAPPLY(0x80181f8c);  // Blank text sis_id fix
-    CODEPATCH_HOOKAPPLY(0x80182170);  // Cross-mode reward type icon
+    CODEPATCH_HOOKAPPLY(0x80181ee4);
+    CODEPATCH_HOOKAPPLY(0x8018201c);
+    CODEPATCH_HOOKAPPLY(0x80181f8c);
+    CODEPATCH_HOOKAPPLY(0x80182170);
     CODEPATCH_REPLACECALL(0x8018213c, ChecklistRewards_GetHoverRewardParam);
     OSReport("[ChecklistRewards] Reward tables reallocated, hooks installed\n");
 
     ClearCrossModeSlots();
 }
 
-// 0xFFFF is the "no local placement" sentinel. Zero would alias a valid (mode=AR,
-// clear_kind=0) placement, so the shuffle arrays need an explicit fill after the
-// top-level memset of ap_save.
+// 0xFFFF = no local placement; 0 would alias (Air Ride, clear_kind 0).
 void ChecklistRewards_OnSaveInit(void)
 {
-    for (int m = 0; m < GMMODE_NUM; m++)
-        for (int i = 0; i < REWARD_COUNT_MAX; i++)
-            ap_save->shuffled_rewards[m][i] = 0xFFFF;
+    memset(ap_save->shuffled_rewards, 0xFF, sizeof(ap_save->shuffled_rewards));
 }
 
 void ChecklistRewards_OnSaveLoaded(void)
@@ -1182,13 +1053,10 @@ void ChecklistRewards_OnSaveLoaded(void)
     RegrantAllReceivedRewards();
 }
 
-// Apply the AP location assignment written by the Python client to APData. Grants are
-// re-applied so rewards received before the assignment arrived land on their cells.
+// Re-grants, so rewards received before the assignment land on their cells.
 void ChecklistRewards_ApplyLocations()
 {
-    // The client writes locations[m][] indexed by AP (clear_kind-sorted) reward_index;
-    // shuffled_rewards is keyed by game reward-table index. ap_to_game_ri is a
-    // bijection over [0, count), so every game index in range is written once.
+    // locations[] is in AP reward_index order, shuffled_rewards in game order.
     for (int m = 0; m < GMMODE_NUM; m++)
     {
         int count = reward_counts[m];
@@ -1199,7 +1067,7 @@ void ChecklistRewards_ApplyLocations()
     RebuildRewardTablesFromShuffle();
     RegrantAllReceivedRewards();
 
+    // No card write: the client resends the assignment on every connect.
     ap_data->location_data_valid = 0;
-    Hoshi_WriteSave();
-    OSReport("[ChecklistRewards] AP location assignment applied to checklist reward tables\n");
+    OSReport("[ChecklistRewards] AP location assignment applied\n");
 }

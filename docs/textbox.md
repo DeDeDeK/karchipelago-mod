@@ -7,12 +7,12 @@ On-screen notification system (`mods/textbox/`). Queued, color-segmented message
 | Hook | Function | Role |
 |------|----------|------|
 | `mod_desc.OnBoot` | `OnBoot` (`main.c`) | Fills the API palette fields, `Hoshi_ExportMod`s the struct, applies the TR post-render hook |
-| `mod_desc.OnSceneChange` | `TextBox_OnSceneChange` | Rebuilds every queued message's `Text` and creates the per-frame GObj |
-| `mod_desc.option_desc` | `ModSettings` | "Text Box" settings menu |
+| `mod_desc.OnSceneChange` | `TextBox_OnSceneChange` | Rebuilds every queued message's `Text` and, if any are queued, creates the per-frame GObj |
+| `mod_desc.option_desc` | `TextBox_ModSettings` | "Text Box" settings menu |
 
 ## Public API
 
-`TextBoxAPI` (`mods/textbox/include/textbox_api.h`) is exported via `Hoshi_ExportMod` and imported by other mods with `Hoshi_ImportMod(TEXTBOX_MOD_NAME)`. Every `Enqueue*` returns 1 on success and 0 if the message was dropped (textbox disabled, bad or empty segment count, no screen canvas yet, or the `Text` failed to build).
+`TextBoxAPI` (`mods/textbox/include/textbox_api.h`) is exported via `Hoshi_ExportMod` and imported by other mods with `Hoshi_ImportMod(TEXTBOX_MOD_NAME)`. Every `Enqueue*` returns 1 on success and 0 if the message was dropped (textbox disabled, bad or empty segment count, or no screen canvas yet).
 
 | Member | Purpose |
 |--------|---------|
@@ -20,7 +20,6 @@ On-screen notification system (`mods/textbox/`). Queued, color-segmented message
 | `EnqueueSegments(segs, n)` | 1..`TEXTBOX_MAX_SEGMENTS` (8) segments with per-segment colors |
 | `EnqueueColoredNoun(prefix, noun, color, suffix)` | Only the noun colored; NULL/empty prefix or suffix allowed |
 | `EnqueueColoredNounFmt(prefix, noun, color, suffix_fmt, ...)` | As above with a printf-style suffix |
-| `IsReady()` | 1 when an `Enqueue*` would be accepted - the textbox is on and a screen canvas exists |
 | `DefaultColor`, `MachineColor`, `EventColor`, `StadiumColor`, `StageColor`, `TopRideItemColor`, `ItemColor` | Named category colors |
 | `AbilityColors[COPYKIND_NUM]`, `KirbyColors[KIRBYCOLOR_NUM]`, `ModeColors[GMMODE_NUM]`, `PatchColors[PATCHKIND_NUM]`, `BoxColors[BOXKIND_NUM]` | Indexed palettes |
 
@@ -30,19 +29,17 @@ The palette names only things the game itself has - machines, events, stadiums, 
 
 Segment text is **copied** at enqueue, so callers may pass stack buffers. The copy is one `TEXTBOX_MESSAGE_TEXT_SIZE` (248 byte) blob per queued message holding the segments' NUL-terminated strings back to back - a per-message budget rather than a per-segment one, since that is what a producer actually spends. A segment that overruns the blob is truncated at the byte that does not fit, and the segments after it are dropped.
 
-`IsReady` exists for producers with their own queue: the archipelago mod renders client-authored messages out of a shared-memory mailbox, and polling `IsReady` lets it hold one during a scene transition instead of enqueuing into a missing canvas and losing the message.
-
 ## Canvas and Layout
 
 The canvas is the hoshi ortho screen camera (created by `ScreenCam_Create` inside hoshi's `Hook_SceneChange`). `Text_GX` (`0x804516e4`) projects every text canvas with x spanning 0..640 rightward and y spanning 0..-480, negating each vertex's y, so `Text.trans` is measured in raw pixels right of the canvas left edge and down from its top - `TEXT_CANVAS_W` / `TEXT_CANVAS_H` in hoshi's `text.h`. Messages are allocated with `Hoshi_CreateScreenText`. `TEXTBOX_MARGIN` (10px) keeps the stack off the edges.
 
-`TextBoxQueue_RepositionAll` reflows the whole stack against the chosen corner. It reads the settings live, so a Position/Spacing change reflows what is already on screen instead of waiting for the next message:
+`TextBoxQueue_RepositionAll` reflows the whole stack against the chosen corner. The stack stays on screen in the main menu, where the options change, so the Position and Spacing callbacks reflow it:
 
 - **Top corners** stack newest at the top, older flowing down; **bottom corners** stack newest at the bottom, older flowing up.
 - **Right corners** right-align each message individually against the right edge (per-message width, since each message can differ).
 - Line advance is the rendered text height (`aspect.Y * viewport_scale.Y`) plus an optional fractional gap from the Spacing setting - so Tight always lays messages flush regardless of font size, and Normal/Wide scale their gap with the font.
 
-`trans` is the top-left of each message's bounding box; bottom corners shift up by `line_h` so the message's bottom edge sits at the anchor edge.
+`trans` is the top-left of each message's bounding box; bottom corners shift up by the rendered text height so the message's bottom edge sits at the anchor edge, and the spacing gap only ever falls between messages.
 
 ## Multi-Segment Colored-Noun Rendering
 
@@ -54,12 +51,12 @@ A single message is one `Text` GObj laid out as **subtexts flowing left to right
 - One subtext is bounded by the input limit of `Text_ConvertASCIIToShiftJIS` (0x8044fb0c), which both `Text_SetText` and `Text_AddSubtext` route through: it stops reading after 128 bytes, so sanitized text is capped at `TEXTBOX_RUN_BYTES` (127). Its output is no limit: hoshi redirects it to a static buffer sized for the worst case, so a letter's 3 output bytes (a `TEXTCMD_POSPUSHEND` plus its 2-byte code) never overrun anything. `TextBox_SetRun` scales its request by the overshoot until the run fits, returning how many characters actually landed. Every caller works from that return value - measuring text the engine silently dropped would report a fit for a run that never rendered.
 - Wrapping prefers the last space that fits, including when the break came from one of the converter limits above rather than the line width. A single word wider than a whole line splits mid-word, which is also what guarantees the walk always advances. A wrapped line never starts with a space.
 - A subtext carries its segment's color in an opcode emitted at `Text_AddSubtext` time, so one opened for a segment is never filled by the next one - a segment that strips to nothing closes it out instead of handing it over.
-- Text past the last line is replaced by `TEXTBOX_TRUNC_MARK` (`..`), fitted with room reserved for the marker itself.
+- Text past the last line is replaced by `TEXTBOX_TRUNC_MARK` (`..`). On the last line, a run with more text after it - later in its segment or in a later segment - must leave room for the marker: a run that fits whole and still leaves that room is placed normally and the next segment continues on the line, otherwise the run is refitted with the marker's width reserved and gets the marker appended. The run that ends the message can use the full width.
 - **Nothing is ever scaled down to fit.** `viewport_scale` is exactly the chosen font size, so the Font Size setting means readability and nothing else.
 - `t->aspect` is set to the whole block's bounding box (widest line, `line_height * line_count`) so the `viewport_color` background rect (and any future scissor) encloses every line.
-- `t->trans` is left at the origin as a placeholder - `TextBoxQueue_RepositionAll` runs before the next render and is the single source of truth for on-screen position.
+- `t->trans` is left at the origin `Text_CreateText` gives it - `TextBoxQueue_RepositionAll` runs before the next render and is the single source of truth for on-screen position.
 
-With Colored Names off, `TextBox_EnqueueSegments` rewrites every segment's color to `TextBox_DefaultColor` in a local copy, leaving the caller's array untouched.
+With Colored Names off, `TextBox_EnqueueSegments` stores every segment's color as `TextBox_DefaultColor`, leaving the caller's array untouched.
 
 ## Alpha / Fade Model
 
@@ -71,30 +68,31 @@ The background quad alpha (`viewport_color.a`) is independent: it sits at the co
 
 `TextBoxQueue` is a ring buffer of `TEXTBOX_QUEUE_SIZE` = 9 with one slot reserved to distinguish empty from full - capacity 8, matching the highest "Max On Screen" setting. A message's `lifetime` field is seeded to 200, doubling as its peak text alpha and its fade countdown.
 
-`TextBox_PerFrame` (a GObj created each scene change) runs the whole lifecycle:
+`TextBox_PerFrame` runs the whole lifecycle on a p_link 0 GObj, so the stack keeps fading through the match pause. The GObj exists only while a message is queued: an enqueue creates it when the scene has none, `TextBox_OnSceneChange` recreates it when messages carried over, and it destroys itself on the first frame it finds the queue empty (`GObj_Destroy` on the GObj `GObj_UpdateAll` is running only flags it, and the free happens after the proc returns). Each frame it:
 
-1. Mirror every queued message's engine-side `temp.reveal_count` into `chars_revealed` (each `Text` is paced independently, so the whole queue is snapshotted, not just the oldest).
-2. Drop the oldest message outright if it has no `Text` - a scene-change rebuild that failed has nothing to reveal or fade, and leaving it at the head would hold every message behind it forever.
-3. Hold everything while the oldest message is still typing (`typewriter_dwell != 0` and `reveal_count < chars_total`).
-4. Otherwise advance a shared frame counter. Past the Display Time threshold, decrement the oldest message's `lifetime` and push it into alpha each frame; at zero, dequeue (which `Text_Destroy`s it) and reset the counter.
+1. Mirrors every queued message's engine-side `temp.reveal_count` into `chars_revealed` (each `Text` is paced independently, so the whole queue is snapshotted, not just the oldest).
+2. Holds everything while the oldest message is still typing (`typewriter_dwell != 0` and `reveal_count < chars_total`).
+3. Otherwise advances a shared frame counter. Past the Display Time threshold, it decrements the oldest message's `lifetime` and pushes it into alpha each frame; at zero, it dequeues (which `Text_Destroy`s it).
 
-Enqueuing when the queue is already at the "Max On Screen" cap drops oldest messages until the new one fits, and lowering the cap from the menu trims the stack immediately through `TextBoxQueue_TrimToCap` rather than waiting for the next message. Turning the textbox off retires the whole stack through `TextBoxQueue_Flush`. The frame counter is shared by the queue and resets on every removal, so the Display Time setting paces removals rather than bounding any one message's time on screen.
+Enqueuing when the queue is already at the "Max On Screen" cap drops oldest messages until the new one fits. The stack persists into the main menu, where the options change, so lowering the cap trims it and turning the textbox off retires all of it from their `on_change` callbacks. The frame counter is shared by the queue and `TextBox_Dequeue` resets it on every removal, so the Display Time setting paces removals rather than bounding any one message's time on screen.
 
 `Sis_CountGlyphs` derives `chars_total` by walking the SIS opcode stream from `text->text_start` to its inline `0x00` TERMINATE, counting the 2-byte character codes (`>= 0x20`), which is everything the engine's reveal counter advances on. Nothing here emits the 1-byte `0x1a` SPACE opcode: `Text_Sanitize` turns a space into code `0x8140` and the game's converter maps it to a glyph like any other. This is necessary because `Text_AddSubtext` / `Text_SetText` never write `text->text_end`. The walk is capped at 4096 bytes as a runaway guard.
 
 ## Typewriter Seeding
 
-`TextBox_ApplyTypewriter` arms the engine's built-in per-glyph reveal (the renderer reveals one glyph every `temp.char_delay` frames on its own - no per-frame work mod-side). It writes `temp.char_delay`/`temp.space_delay` **directly** and leaves `char_delay_init`/`space_delay_init` alone: the engine only copies the `*_init` seeds across on a `0x01`/`0x02` SUBTEXT opcode (the sole write is in `Text_GX` at `0x80451cec`), and `Text_AddSubtext` buffers are delimited by `0x07` POS headers with no `0x01`/`0x02` in them, so the copy never fires and writing the `*_init` fields would do nothing at all. The renderer reloads the live `temp` fields into working registers at the top of each render (`0x80451c34`) and never clears them, so one write at enqueue persists.
+`TextBox_BuildText` arms the engine's built-in per-glyph reveal (the renderer reveals one glyph every `temp.char_delay` frames on its own - no per-frame work mod-side). It writes `temp.char_delay`/`temp.space_delay` **directly** and leaves `char_delay_init`/`space_delay_init` alone: the engine only copies the `*_init` seeds across on a `0x01`/`0x02` SUBTEXT opcode (the sole write is in `Text_GX` at `0x80451cec`), and `Text_AddSubtext` buffers are delimited by `0x07` POS headers with no `0x01`/`0x02` in them, so the copy never fires and writing the `*_init` fields would do nothing at all. The renderer reloads the live `temp` fields into working registers at the top of each render (`0x80451c34`) and never clears them, so one write at enqueue persists.
 
 Reveal resumes from `chars_revealed` (mirrored from the engine's `temp.reveal_count` every frame), with `text_end` left `NULL` so the engine re-derives the reveal frontier from `reveal_count`. This is what lets a message survive the scene-change rebuild below without re-typing.
 
-The dwell is sampled **at enqueue** into `typewriter_dwell`, so retuning the setting mid-reveal cannot change a message already on screen. A dwell of 0 is the Off setting and reveals the whole message at once, so the setting needs no separate enable flag.
+The dwell is sampled **at enqueue** into `typewriter_dwell`, along with the font scale and background target, so a rebuild draws the message the way it first appeared. A dwell of 0 is the Off setting and reveals the whole message at once, so the setting needs no separate enable flag.
 
 ## Scene-Change Rebuild and Persistence
 
-`Text` pointers are invalidated when the scene changes, but messages should persist visually across the transition. The queue stores **the message's text blob + `chars_revealed`**, not just the live `Text*`. Both the first render and the rebuild go through `TextBox_MessageSegments`, which points a `TextSegment` array at that stored blob, so a message can never draw differently the second time. `TextBox_OnSceneChange` walks the queue, rebuilds each message's `Text` via `TextBox_CreateSegmented`, re-snapshots `chars_total` (`Sis_CountGlyphs`), re-arms the typewriter (resuming from `chars_revealed`), and repositions - so a finished message stays fully shown and a mid-reveal one picks up where it was. It then creates the per-frame `TextBox_PerFrame` GObj.
+`Text` pointers are invalidated when the scene changes, but messages should persist visually across the transition. The queue stores **the message's text blob + `chars_revealed`**, not just the live `Text*`. Both the first build and the rebuild go through `TextBox_BuildText`, which points a `TextSegment` array at that stored blob, so a message can never draw differently the second time. `TextBox_OnSceneChange` walks the queue, rebuilds each message's `Text` via `TextBox_CreateSegmented`, re-snapshots `chars_total` (`Sis_CountGlyphs`), re-arms the typewriter (resuming from `chars_revealed`), and repositions - so a finished message stays fully shown and a mid-reveal one picks up where it was. It then creates the per-frame `TextBox_PerFrame` GObj if anything is queued.
 
-The rebuild runs against a heap that `Scene_InitHeaps` has just re-created at a fixed 18432 bytes (`Text_CreateHeap`, `0x8044f5b4`), before the incoming scene allocates any text of its own. Each message costs 160 bytes for the `Text` plus 16 for its cell plus an opcode buffer that `Text_AddSubtext` grows in 128-byte steps, so a full stack of 8 runs a few kilobytes - well inside the heap, and no more than the same 8 messages held in the scene being left. Running the heap dry is not a dropped message: `TextHeap_Alloc` (`0x8044edec`) `OSPanic`s with `sislib.c` "Memory Empty".
+Hoshi runs mods' `OnSceneChange` in mod order after creating the new screen canvas, so between the heap reset and `TextBox_OnSceneChange` the canvas check passes while every queued `Text*` still points into the freed heap. An enqueue from another mod's `OnSceneChange` would evict through those pointers and corrupt the new heap, so producers must not enqueue from there.
+
+The rebuild runs against a heap that `Scene_InitHeaps` has just re-created at a fixed 18432 bytes (`Text_CreateHeap`, `0x8044f5b4`), before the incoming scene allocates any text of its own. Each message costs 160 bytes for the `Text` plus 16 for its cell plus an opcode buffer that `Text_AddSubtext` grows in 128-byte steps, so a full stack of 8 runs a few kilobytes - well inside the heap, and no more than the same 8 messages held in the scene being left. Building a `Text` cannot fail softly: `TextHeap_Alloc` (`0x8044edec`) `OSPanic`s with `sislib.c` "Memory Empty" when the heap runs dry, and `Text_CreateText` (`0x8044fa70`) writes through its new `Text` before returning, so it never returns NULL. A queued message therefore always has a `Text`, and nothing checks for one.
 
 ### Pre-first-scene canvas-NULL guard
 
@@ -102,7 +100,7 @@ Hoshi creates the screen canvas in `Hook_SceneChange`. A caller that enqueues **
 
 ## Settings
 
-Bound to `textbox_settings` (mod-owned storage, not `APSave`). Each option's stored value is an index into a preset table in `textbox.c`; out-of-range indices fall back to that option's own default.
+Bound to `textbox_settings` in `textbox.c`, beside the menu. Each option's stored value is an index into a preset table, and each option's `value_num` is that table's length.
 
 | Option | Values | Default | Effect |
 |--------|--------|---------|--------|
@@ -118,4 +116,4 @@ Bound to `textbox_settings` (mod-owned storage, not `APSave`). Each option's sto
 
 ## Top Ride Re-Render
 
-Top Ride's post-render callback calls `TopRide_CustomRenderer` (`0x80286d7c`), which reaches a second `HSD_StartRender` pass through `TopRide_RenderScene` (`0x802c5520`) that overwrites the EFB and wipes screen-canvas overlays every frame. `TextBox_TopRideReRender`, hooked at `0x80009084` (the instruction right after the `bl TopRide_CustomRenderer` inside `TopRide_PostRenderCallback`, `0x80009074`), walks the `stc_textcanvas_first` list and re-issues `CObjThink_Common` on each canvas's `cam_gobj` to redraw on top. Any mod with a Top Ride HUD or text overlay needs the same treatment.
+Top Ride's post-render callback calls `TopRide_CustomRenderer` (`0x80286d7c`), which reaches a second `HSD_StartRender` pass through `TopRide_RenderScene` (`0x802c5520`) that overwrites the EFB and wipes screen-canvas overlays every frame. `TextBox_TopRideReRender` (`main.c`), hooked at `0x80009084` (the instruction right after the `bl TopRide_CustomRenderer` inside `TopRide_PostRenderCallback`, `0x80009074`), walks the `stc_textcanvas_first` list and re-issues `CObjThink_Common` on each canvas's `cam_gobj` to redraw on top. Any mod with a Top Ride HUD or text overlay needs the same treatment.

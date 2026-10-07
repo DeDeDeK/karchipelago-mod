@@ -457,8 +457,12 @@ def cmd_rename(args):
         sys.exit(f"0x{addr:08x} is not in the map")
 
     old = _MAP_NAME.match(m.group(5).strip())
-    if not old.group(1).startswith("zz_") and not args.force:
+    # A note starting with `?` marks the name as a guess, which a rename settles.
+    note = old.group(2).strip()
+    guessed = note.startswith("?")
+    if not old.group(1).startswith("zz_") and not guessed and not args.force:
         sys.exit(f"0x{addr:08x} is already named {old.group(1)}; pass --force")
+    note = note.lstrip("?").strip()
 
     syms = SymbolMap()
     clash = syms.by_name.get(args.name)
@@ -469,8 +473,8 @@ def cmd_rename(args):
         sys.exit(f"{args.name} already names 0x{ld[args.name]:08x} in link.ld")
 
     lines[i] = " ".join(m.group(1, 2, 3, 4) + (args.name,))
-    if old.group(2).strip():
-        lines[i] += f" {old.group(2).strip()}"
+    if note:
+        lines[i] += f" {note}"
     with open(MAP, "w") as f:
         f.write("\n".join(lines))
     print(f"map: 0x{addr:08x} {old.group(1)} -> {args.name}")
@@ -480,11 +484,20 @@ def cmd_rename(args):
         return
     with open(LINK_LD) as f:
         ldlines = f.read().split("\n")
-    close = max(j for j, line in enumerate(ldlines) if line.strip() == "}")
-    ldlines.insert(close, f"  {args.name} = 0x{addr:08x};")
+    entry = f"  {args.name} = 0x{addr:08x};"
+    prev = old.group(1)
+    if ld.get(prev) == addr:
+        j = next(
+            j for j, line in enumerate(ldlines) if re.match(rf"\s*{prev}\s*=", line)
+        )
+        ldlines[j] = entry
+        print(f"link.ld: {prev} -> {args.name}")
+    else:
+        close = max(j for j, line in enumerate(ldlines) if line.strip() == "}")
+        ldlines.insert(close, entry)
+        print(f"link.ld: added {args.name} = 0x{addr:08x}")
     with open(LINK_LD, "w") as f:
         f.write("\n".join(ldlines))
-    print(f"link.ld: added {args.name} = 0x{addr:08x}")
 
 
 def cmd_check(args):
