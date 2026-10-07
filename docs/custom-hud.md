@@ -18,7 +18,7 @@ A HUD element GObj carries:
 | proc | per-frame animation/position callback, priority 20 |
 | `gx_cb` | one of the `3DHud_*` render wrappers, or plain `JObj_GX` |
 
-`HUD_CreateMiscGObj` (0x801147dc) is the engine's internal creator, signature `(JOBJDesc *jobjdesc, int p_link, int gx_link, int gx_pri)`. It runs, in order:
+`HUD_CreateMiscElement` (0x801147dc) is the engine's internal creator, signature `(JOBJDesc *jobjdesc, int p_link, int gx_link, int gx_pri)`. It runs, in order:
 
 1. `GObj_Create(27, p_link, 0)` - `entity_class` is the literal 27
 2. `JObj_LoadJoint(jobjdesc)` (0x8040afe8) builds the JObj tree
@@ -26,13 +26,13 @@ A HUD element GObj carries:
 4. `GObj_AddGXLink(gobj, 3DHud_RenderIfVisible, gx_link, gx_pri)` - installs the visibility-gated callback at 0x8011500c
 5. `JObj_SetAllMOBJFlags(jobj, 0x28000000)` (0x80052fb8) - material flags
 
-Two adjacent variants, `HUD_CreateMiscGObj2` (0x8011487c) and `HUD_CreateMiscGObj3` (0x80114904), have the same shape with different fixed parameters.
+Two adjacent variants, `HUD_CreateMiscElement2` (0x8011487c) and `HUD_CreateMiscElement3` (0x80114904), have the same shape with different fixed parameters.
 
 ## Functions
 
 | Function | Address | Notes |
 |----------|---------|-------|
-| `HUD_CreateElement(int view, JOBJDesc *j)` | 0x80114ba4 | `GObj_Create(27,26,0)` + `GObj_AddGXLink(g, HUD_GXLink, 21, 1)`; with more than one viewport up, moves the root to the viewport's screen-region offset |
+| `HUD_CreatePlyElement(int view, JOBJDesc *j)` | 0x80114ba4 | `GObj_Create(27,26,0)` + `GObj_AddGXLink(g, HUD_GXLink, 21, 1)`; with more than one viewport up, moves the root to the viewport's screen-region offset |
 | `HUD_AddElementData(GOBJ *g, HUDKind kind, int ply, int view)` | 0x80114e24 | |
 | `HUD_UpdateElement(JOBJ *j, int frame)` | 0x8011503c | sets the JObj animation frame |
 | `HUD_GXLink(GOBJ *g, int pass)` | 0x80114f1c | per-player viewport/scissor + visibility GX callback |
@@ -43,9 +43,9 @@ Two adjacent variants, `HUD_CreateMiscGObj2` (0x8011487c) and `HUD_CreateMiscGOb
 | `CityHUD_CreateStatChart(int ply, int view)` | 0x80128bb8 | |
 | `CityHUD_CreateStatBar(int ply, int view, int stat_kind)` | 0x80129154 | |
 
-Also in `link.ld`: `CObjThink_Common` (0x8042a29c), `CObj_RenderGXLinks` (0x8042a0b4), `GObj_GetJObjIndex` (0x80055af0), `JObj_SetMtxDirtySub` (0x8040d92c), `JObj_GetWorldPosition` (0x80053f34), `Gm_GetPlyViewNum` (0x800092b4), `Gm_GetIfAllCityArchive` (0x80112050), `Gm_GetIfAllScreenArchive` (0x80112058), `Gm_Get3dData` (0x80112044).
+Also in `link.ld`: `HUD_CreateMiscElement` (0x801147dc), `HUD_CreateTimeUp` (0x80114178), `HUD_CreateFinish` (0x801142fc), `CObjThink_Common` (0x8042a29c), `CObj_RenderGXLinks` (0x8042a0b4), `GObj_GetJObjIndex` (0x80055af0), `JObj_SetMtxDirtySub` (0x8040d92c), `JObj_GetWorldPosition` (0x80053f34), `Gm_GetPlyViewNum` (0x800092b4), `Gm_GetIfAllCityArchive` (0x80112050), `Gm_GetIfAllScreenArchive` (0x80112058), `Gm_Get3dData` (0x80112044).
 
-**Not in `link.ld`** - call these through a raw pointer cast: `HUD_CreateMiscGObj` (0x801147dc), `HUD_SetVisible` (0x80114eec), `HUD_SetInvisible` (0x80114f04), `CityHUD_DestroyAllStatCharts` (0x801294a8), `3DHud_RenderIfVisible` (0x8011500c), `3DHud_CreateIndicatorGObjCustomGX` (0x801149a0), `JObj_AddSetAnim0_SetFrameAndRate` (0x80114d9c).
+**Not in `link.ld`** - call these through a raw pointer cast: `HUD_SetVisible` (0x80114eec), `HUD_SetInvisible` (0x80114f04), `CityHUD_DestroyAllStatCharts` (0x801294a8), `3DHud_RenderIfVisible` (0x8011500c), `3DHud_CreateIndicatorGObjCustomGX` (0x801149a0), `JObj_AddSetAnim0_SetFrameAndRate` (0x80114d9c).
 
 Symbols starting with a digit (`3DHud_*`) are present in `GKYE01.map` but `scripts/kar.py sym` will not resolve them by name or address; grep the map directly for those.
 
@@ -90,8 +90,8 @@ Render loop:
 | Callback | Address | Used By | Behavior |
 |----------|---------|---------|----------|
 | `JObj_GX` | 0x8042a258 | `JObj_LoadSet_SetPri`, general | Unconditional: loads `gobj->hsd_object` as a JObj and renders it |
-| `3DHud_RenderIfVisible` | 0x8011500c | `HUD_CreateMiscGObj` | Checks `is_visible`; if set, calls `JObj_GX` passing the **userdata** as the JObj arg |
-| `HUD_GXLink` | 0x80114f1c | `HUD_CreateElement` | Checks `is_visible`, sets the per-player `GXSetScissor` viewport, calls `JObj_GX`, restores the full scissor |
+| `3DHud_RenderIfVisible` | 0x8011500c | `HUD_CreateMiscElement` | Checks `is_visible`; if set, calls `JObj_GX` passing the **userdata** as the JObj arg |
+| `HUD_GXLink` | 0x80114f1c | `HUD_CreatePlyElement` | Checks `is_visible`, sets the per-player `GXSetScissor` viewport, calls `JObj_GX`, restores the full scissor |
 
 All three end in `JObj_GX`. The wrappers add visibility gating and viewport management; using `JObj_GX` directly bypasses both, so the object renders unconditionally in whatever viewport the camera set.
 
@@ -102,11 +102,11 @@ All three end in `JObj_GX`. The wrappers add visibility gating and viewport mana
 | 18 | `GAMEGX_HUDORTHO` | Player numbers, icons, per-player HUD (`3DHud_CreateIndicatorGObjCustomGX`) |
 | 19 | `GAMEGX_HUDMAP` | Minimap |
 | 20 | `GAMEGX_HUDMAPDOTS` | Minimap dots |
-| 21 | `GAMEGX_HUD` | Timer, stat bars, misc HUD (`HUD_CreateMiscGObj`, `HUD_CreateElement`) |
+| 21 | `GAMEGX_HUD` | Timer, stat bars, misc HUD (`HUD_CreateMiscElement`, `HUD_CreatePlyElement`) |
 
 All four have active cameras during City Trial gameplay.
 
-Link 18 is the safest existing link for custom elements loaded with `JObj_LoadSet_SetPri` / `JObj_GX`, since the game's own elements on that link already use custom GX callbacks rather than the `is_visible`-checking wrappers. Everything on link 21 comes through `HUD_CreateMiscGObj` and its wrapper, so a custom element there must either attach `HUD_AddElementData` or use `JObj_GX` directly.
+Link 18 is the safest existing link for custom elements loaded with `JObj_LoadSet_SetPri` / `JObj_GX`, since the game's own elements on that link already use custom GX callbacks rather than the `is_visible`-checking wrappers. Everything on link 21 comes through `HUD_CreateMiscElement` and its wrapper, so a custom element there must either attach `HUD_AddElementData` or use `JObj_GX` directly.
 
 ### JOBJ_HIDDEN From Model Descriptors
 
@@ -132,7 +132,7 @@ Flags: `JOBJ_HIDDEN` = `1 << 4` (0x10), `JOBJ_OPA` = `1 << 18`, `JOBJ_XLU` = `1 
 2. Fetch a model by public symbol: `JOBJSet **sets = Archive_GetPublicAddress(*arch, "ScInfPausegaugect_scene_models");`
 3. Create the GObj, either through the engine's creator (which installs `3DHud_RenderIfVisible`, so nothing draws until `HUD_AddElementData` or `HUD_SetVisible` sets `is_visible`):
    ```c
-   GOBJ *gobj = HUD_CreateMiscGObj_(sets[0]->jobj, GAMEPLINK_HUD, GAMEGX_HUD, 1);
+   GOBJ *gobj = HUD_CreateMiscElement(sets[0]->jobj, GAMEPLINK_HUD, GAMEGX_HUD, 1);
    GObj_AddProc(gobj, MyUpdateCallback, 20);
    ```
    or through the hoshi helper `JObj_LoadSet_SetPri(is_hidden, set, anim_id, start_frame, p_link, gx_link, is_add_anim, proc, proc_pri)`, which uses plain `JObj_GX` and has no visibility gate.
@@ -251,7 +251,7 @@ Stadium elements, 9 symbols each. Suffix `1`/`2`/`4`.
 
 `CityHUD_CreateStatChart(ply, view)` (0x80128bb8):
 
-1. Picks the background model by player count (`Gm_GetPlyViewNum` -> 1/2/4P slot) from `Game3dData` and loads it with `HUD_CreateMiscGObj(jobj, 0x1b, 0x15, 1)` - `p_link` 27 (`PAUSEHUD`), `gx_link` 21, `gx_pri` 1
+1. Picks the background model by player count (`Gm_GetPlyViewNum` -> 1/2/4P slot) from `Game3dData` and loads it with `HUD_CreateMiscElement(jobj, 0x1b, 0x15, 1)` - `p_link` 27 (`PAUSEHUD`), `gx_link` 21, `gx_pri` 1
 2. Attaches `HUDElementData` via `HUD_AddElementData(..., kind = HUDKIND_CITYSTATBG)`; the GObj's `entity_class` is still 27
 3. Extracts world positions with `JObj_GetWorldPosition` (0x80053f34) from background child JObjs 1-9, the 9 stat slot positions
 4. Stores those 9 `Vec3`s in the background's `HUDElementData` starting at +0x14
@@ -259,7 +259,7 @@ Stadium elements, 9 symbols each. Suffix `1`/`2`/`4`.
 
 `CityHUD_CreateStatBar(ply, view, stat_kind)` (0x80129154):
 
-1. Loads the gauge from IfAll1c (`ScInfPausegaugect_scene_models`) with the same `HUD_CreateMiscGObj` parameters
+1. Loads the gauge from IfAll1c (`ScInfPausegaugect_scene_models`) with the same `HUD_CreateMiscElement` parameters
 2. Attaches `HUDElementData` via `HUD_AddElementData(..., kind = HUDKIND_CITYSTATBAR)` and stores `stat_kind` at +0x14
 3. Caches child JObjs by depth-first index: 1 -> `bar_j`, 6 -> `sign_j`, 5 -> `num_left_j`, 4 -> `num_right_j`
 4. Reads its slot position out of the background's stored positions (`background_data + 0x14 + stat_kind * 0xc`), writes it into the gauge root JObj `trans`, then marks the matrix dirty
@@ -296,7 +296,7 @@ The anchor model is a root plus six geometry-less joints in one row: joints 1-3 
 
 Two variants live in IfAll1c: `ScInfTime_scene_models` (1-2 player, cached at `Game3dData + 0xb4`) and `ScInfTime4_scene_models` (3-4 player, `Game3dData + 0xb8`).
 
-`3DHud_CreateTimer` (0x80119218) picks between them on `Gm_GetPlyViewNum()`: `<= 1` takes the +0xb4 model, otherwise +0xb8. It then calls `HUD_CreateMiscGObj(jobj, p_link, 0x15, 1)` with `p_link` = 27 in the Air Ride Free Run path (major 4, `airride_mode` 2) and 26 elsewhere, and adds `3DHud_TimerUpdate` (0x80118f50) as a proc at priority 20.
+`3DHud_CreateTimer` (0x80119218) picks between them on `Gm_GetPlyViewNum()`: `<= 1` takes the +0xb4 model, otherwise +0xb8. It then calls `HUD_CreateMiscElement(jobj, p_link, 0x15, 1)` with `p_link` = 27 in the Air Ride Free Run path (major 4, `airride_mode` 2) and 26 elsewhere, and adds `3DHud_TimerUpdate` (0x80118f50) as a proc at priority 20.
 
 The model has 6 digit JObjs at child indices 1-6, in MM:SS:FF order from the least significant: index 1 is frames/centiseconds ones, 2 is their tens, 3 and 4 are seconds, 5 and 6 are minutes. Each uses the same frame-based animation as the stat bar, so `HUD_UpdateElement(jobj, digit)` drives it. Repurposed as a numeric readout it gives 6 digits (max 999999); unused slots can be hidden with `JOBJ_HIDDEN`, but the model may carry visible separator geometry between digit pairs.
 

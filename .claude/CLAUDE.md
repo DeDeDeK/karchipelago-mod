@@ -32,6 +32,10 @@ make deploy INCLUDE_MODS=archipelago,custom_machines
 
 **Source files are auto-discovered.** The Makefile globs all `*.c`/`*.s` under each included mod's `src/`, so adding a source file (or a whole new mod folder with a `src/`) needs no manual registration - don't grep the Makefile for it. One exception: a new mod's **public** `include/` dir must be added to the Makefile's `INCLUDES` list (those are explicit, not globbed).
 
+## Local Paths and Usernames
+
+**Never commit or `git add` a machine-specific path or a personal name.** No absolute home paths (anything under `/home`, `/Users` or a Windows user profile) and no usernames or real names, in any tracked file - source, string literals, scripts, docs, skills, configs, the hoshi submodule. Point at other checkouts by relative path (`../KARchipelago`), at user directories through `$(HOME)`, `~` or an overridable variable (as the Makefile does for Dolphin), and let tools resolve paths at runtime. Before committing, `git grep --cached -n -i -E '/(home|Users)/|[A-Z]:\\Users'` (and the same in `externals/hoshi`) must come back empty.
+
 ## Important Files - Do NOT Read Directly
 
 - **`externals/hoshi/GKYE01.map`** - Symbol map file (~20k lines). Never read the full file. Search for specific symbols with grep when needed.

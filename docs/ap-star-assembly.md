@@ -315,7 +315,7 @@ because all six of its anchors are already spoken for. It needs no position mode
 own: an icon goes where vanilla would put one on the same anchor - the anchor joint's world
 position in the viewport's own instance of the vanilla position model,
 `Game3dData.legendary_hud_gobj[view]` - shifted 3.4 HUD units down. The instance rather
-than the descriptor is what carries the viewport: `HUD_CreateElement` (`0x80114ba4`) moves
+than the descriptor is what carries the viewport: `HUD_CreatePlyElement` (`0x80114ba4`) moves
 an element's root to a per-viewport offset whenever more than one viewport is up, so a
 position read off the descriptor would land every split-screen row at the single-screen
 spot. The instance also carries the per-player-count spacing (2.5 / 2.4 / 2.1 units). Vanilla
@@ -326,7 +326,7 @@ Vanilla builds a row only for a viewport that is on (`Gm_IsViewOn`, checked at
 `0x80113ed8`), so only a player with a screen has one. The AP row does the same: a CPU's
 spheres are tracked in the mask but drawn nowhere, rather than over a human's row.
 
-An icon is created exactly the way a vanilla one is: `HUD_CreateElement` on the
+An icon is created exactly the way a vanilla one is: `HUD_CreatePlyElement` on the
 collecting player's viewport - its first argument is the viewport, not the player -
 relinked to `GAMEPLINK_PAUSEHUD` with `GObj_SetPLink`, given element data of
 `HUDKIND_LEGENDARYPIECE` (59) with the player and the viewport, and positioned at its

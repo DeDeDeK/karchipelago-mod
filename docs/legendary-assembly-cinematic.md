@@ -83,7 +83,7 @@ end frame. Then it destroys the camera with `PlyCam_DestroySlot`, calls
 
 **Phase 3**, three frames later, closes out: `Gm_SetCinematicFreezeStage(2)` unfreezes and
 restores the HUD, `Ptcl_DestroyCinematicRenderPass` (`0x80233b30`) drops the render pass,
-`FGM_ResumeAllKinds` (`0x80061b08`) and `BGM_ResumeAll` (`0x8005e728`) bring audio back, and
+`FGM_ResumeAll` (`0x80061b08`) and `BGM_ResumeAll` (`0x8005e728`) bring audio back, and
 `BGM_PlayLegendaryTheme` (`0x8006215c`) ends both BGM slots and starts
 `BGM_LEGENDARYAIRRIDEMACHINE` with a fade. `Sky_SetDragoonPreset` (`0x800d5490`, preset 13) or
 `Sky_SetHydraPreset` (`0x800d54d8`, preset 14) swaps the sky, and that swap **stays up after

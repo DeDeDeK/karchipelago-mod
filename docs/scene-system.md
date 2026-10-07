@@ -97,7 +97,7 @@ Top Ride gameplay runs as **minor 19** (`MNRKIND_TOPRIDE`), *not* the shared min
 
 - `On3DLoadStart` (0x80014448) and `On3DLoadEnd` (0x80014d3c) **do not fire** for Top Ride.
 - `OnTopRideLoadEnd` (hook at 0x80008fac, inside minor 19's `cb_Load` `TopRide_SceneLoad` at 0x80008df8) is the Top Ride load notification. Any mod that needs to initialize per-round Top Ride state must use it.
-- `On3DPause` / `On3DUnpause` / `On3DExit` are likewise 3D-only.
+- `On3DPauseStart` / `On3DPauseEnd` / `On3DUnpause` / `On3DExit` are likewise 3D-only.
 
 ## Scene Transition API
 
@@ -169,7 +169,8 @@ Hoshi provides `ModDesc` callbacks (`externals/hoshi/include/hoshi/mod.h`) that 
 | `OnPlayerSelectLoad` | 0x8003b48c, 0x8002a358 | City Trial CSS (minor 10) via `CitySelect_MinorLoad`, Air Ride CSS (minor 8) via `CSS_airRide_ModeDispatch` |
 | `On3DLoadStart` | 0x80014448 | Before 3D scene instantiation |
 | `On3DLoadEnd` | 0x80014d3c | After 3D scene fully instantiated (players, machines, map exist) |
-| `On3DPause` | 0x80041160 | Game paused (receives pause player index) |
+| `On3DPauseStart` | 0x80041160 | Game paused, before the pause HUD is built (receives pause player index) |
+| `On3DPauseEnd` | 0x80041174 | Game paused, after the pause HUD, camera zoom and rumble stop (receives pause player index) |
 | `On3DUnpause` | 0x80113a30 | Game unpaused (receives pause player index) |
 | `On3DExit` | 0x80015274 | Exiting 3D scene |
 | `OnTopRideLoadEnd` | 0x80008fac | After Top Ride gameplay fully initialized (minor 19) |

@@ -91,7 +91,7 @@ static void OnSaveLoaded(void);
 static void OnMainMenuLoad(void);
 static void OnPlayerSelectLoad(void);
 static void On3DLoadEnd(void);
-static void On3DPause(int pause_ply);
+static void On3DPauseStart(int pause_ply);
 static void On3DUnpause(int pause_ply);
 static void On3DExit(void);
 static void OnSceneChange(void);
@@ -115,7 +115,7 @@ ModDesc mod_desc = {
     .OnPlayerSelectLoad = OnPlayerSelectLoad,
     .On3DLoadStart = APPatches_On3DLoadStart,
     .On3DLoadEnd = On3DLoadEnd,
-    .On3DPause = On3DPause,
+    .On3DPauseStart = On3DPauseStart,
     .On3DUnpause = On3DUnpause,
     .On3DExit = On3DExit,
     .OnSceneChange = OnSceneChange,
@@ -381,7 +381,7 @@ static void OnTopRideLoadEnd(void)
         DropAbility_OnTopRideLoadEnd();
 }
 
-static void On3DPause(int pause_ply)
+static void On3DPauseStart(int pause_ply)
 {
     OSReport("[Main] Paused by player %d\n", pause_ply + 1);
 }

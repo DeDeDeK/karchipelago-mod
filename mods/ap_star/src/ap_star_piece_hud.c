@@ -37,7 +37,7 @@ static int ViewForPly(int ply)
 }
 
 // Where vanilla would put an icon on that anchor of the viewport's own row, shifted down
-// onto the AP row. The row's instance carries HUD_CreateElement's per-viewport offset.
+// onto the AP row. The row's instance carries HUD_CreatePlyElement's per-viewport offset.
 static int AnchorPos(int view, int slot, Vec3 *out)
 {
     GOBJ *row = Gm_Get3dData()->legendary_hud_gobj[view];
@@ -66,7 +66,7 @@ static void ShowPieceIcon(int ply, int view, int piece)
     if (icon_sets[piece] == NULL || icon_sets[piece]->jobj == NULL || !AnchorPos(view, slot, &pos))
         return;
 
-    GOBJ *g = HUD_CreateElement(view, icon_sets[piece]->jobj);
+    GOBJ *g = HUD_CreatePlyElement(view, icon_sets[piece]->jobj);
     if (g == NULL)
         return;
     GObj_SetPLink(g, GAMEPLINK_PAUSEHUD, 0);
