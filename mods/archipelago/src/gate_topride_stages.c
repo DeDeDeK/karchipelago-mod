@@ -1,7 +1,10 @@
 #include "game.h"
 #include "os.h"
 #include "audio.h"
+#include "scene.h"
+#include "menu.h"
 #include "code_patch/code_patch.h"
+#include "hoshi/func.h"
 
 #include "main.h"
 #include "gate_topride_stages.h"
@@ -9,12 +12,14 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// The course-select grid: 0-6 the courses, 7 the random button (the grid-to-course table
-// at 0x805d51a8 maps 7 to 8), which needs at least one unlocked course.
-#define TR_GRID_NUM 8
-
 // A, Start, L and R rising edges, the launch press TopRide_CourseSelectThink tests.
 #define TR_LAUNCH_BUTTONS (PAD_BUTTON_A | PAD_BUTTON_START | PAD_TRIGGER_L | PAD_TRIGGER_R)
+
+static void (*course_select_load_vanilla)();
+static void (*course_select_exit_vanilla)(void *data);
+static void (*course_select_think_vanilla)();
+
+// The random button needs at least one unlocked course.
 static int GateTopRideStages_IsGridPosSelectable(int pos)
 {
     if (pos >= TOPRIDE_NUM)
@@ -22,40 +27,77 @@ static int GateTopRideStages_IsGridPosSelectable(int pos)
     return (ap_save->topride_stage_unlocked_mask & (1 << pos)) ? 1 : 0;
 }
 
-static void GateTopRideStages_AdjustCursorToUnlocked(void)
+static s8 GateTopRideStages_VanillaGridValue(int pos)
 {
-    u8 *cursor_ptr = &Gm_GetGameData()->topride_course_select.cursor;
-    int pos = *cursor_ptr;
-
-    if (GateTopRideStages_IsGridPosSelectable(pos))
-        return;
-
-    for (int i = 1; i < TR_GRID_NUM; i++)
-    {
-        int next = (pos + i) % TR_GRID_NUM;
-        if (GateTopRideStages_IsGridPosSelectable(next))
-        {
-            *cursor_ptr = (u8)next;
-            return;
-        }
-    }
+    return pos < TOPRIDE_NUM ? pos : TOPRIDE_GRID_RANDOM;
 }
 
-// It runs every frame, so feedback waits for a launch press. Returns 1 to block the launch.
+static s8 GateTopRideStages_GridValue(int pos)
+{
+    if (!GateTopRideStages_IsGridPosSelectable(pos))
+        return TOPRIDE_GRID_LOCKED;
+    return GateTopRideStages_VanillaGridValue(pos);
+}
+
+// Minor 7 cb_Load wrapper. Everything the scene shows for a position comes from the grid
+// table, so a locked one gets the lock icon, a blank panorama and the random button's
+// laps and best time.
+static void GateTopRideStages_CourseSelectLoad(void)
+{
+    for (int pos = 0; pos < TOPRIDE_GRID_NUM; pos++)
+        stc_topride_course_grid[pos] = GateTopRideStages_GridValue(pos);
+
+    course_select_load_vanilla();
+}
+
+// Minor 7 cb_Exit wrapper. With course selection Off, TopRide_CourseSelectRandomInit picks
+// the course in place of this scene and maps the pick through the table, where a course
+// unlocked since would still read locked.
+static void GateTopRideStages_CourseSelectExit(void *data)
+{
+    course_select_exit_vanilla(data);
+
+    for (int pos = 0; pos < TOPRIDE_GRID_NUM; pos++)
+        stc_topride_course_grid[pos] = GateTopRideStages_VanillaGridValue(pos);
+}
+
+// Minor 7 cb_ThinkPreGObjProc wrapper. Applies unlocks that arrive while the screen is up,
+// before TopRide_CourseSelectThink reads the table for a launch.
+static void GateTopRideStages_CourseSelectThink(void)
+{
+    GameData *gd = Gm_GetGameData();
+    ScMenuCommon *menu = Gm_GetMenuData();
+
+    for (int pos = 0; pos < TOPRIDE_GRID_NUM; pos++)
+    {
+        s8 value = GateTopRideStages_GridValue(pos);
+        if (stc_topride_course_grid[pos] == value)
+            continue;
+
+        stc_topride_course_grid[pos] = value;
+        if (pos < TOPRIDE_NUM)
+            gd->topride_course_select.laps[pos] = value < TOPRIDE_NUM ? TopRide_GetCourseDefaultLaps(value) : -1;
+
+        GOBJ *icon = menu->main.topride_course_select.icon_gobj[pos];
+        if (icon != 0)
+            MainMenu_SetTexAnimFrame(icon->hsd_object, value, 0.0f);
+        if (pos == gd->topride_course_select.cursor)
+            TopRide_CourseSelectSetPanorama(value);
+    }
+
+    course_select_think_vanilla();
+}
+
+// It runs every frame, so the buzzer waits for a launch press. Returns 1 to block the launch.
 static int GateTopRideStages_CourseSelectCanLaunch(u32 launch_buttons)
 {
     if (!(launch_buttons & TR_LAUNCH_BUTTONS))
         return 0;
 
-    int cursor = Gm_GetGameData()->topride_course_select.cursor;
-    if (GateTopRideStages_IsGridPosSelectable(cursor))
+    if (GateTopRideStages_IsGridPosSelectable(Gm_GetGameData()->topride_course_select.cursor))
         return 0;
 
     playSoundFX_errorNoise();
-    if (cursor < TOPRIDE_NUM)
-        tb_api->EnqueueColoredNoun("Unlock the ", TopRideCourse_Names[cursor], tb_api->StageColor, " course to play!");
-    else
-        tb_api->EnqueueColoredNoun("Unlock a ", "Top Ride course", tb_api->StageColor, " to play!");
     return 1;
 }
 
@@ -74,16 +116,6 @@ CODEPATCH_HOOKCONDITIONALCREATE(
     "addi 1, 1, 16\n\t",
     0,
     0x8003cc18
-);
-
-// Hook at 0x8003cd18 (lbz r0, 0x2(r31)) in TopRide_CourseSelectThink, where every D-pad
-// path meets after writing the cursor, so the re-run lbz highlights the corrected one.
-CODEPATCH_HOOKCREATE(
-    0x8003cd18,
-    "",
-    GateTopRideStages_AdjustCursorToUnlocked,
-    "",
-    0
 );
 
 // Replaces the vanilla HSD_Randi(7) course picks, which consult only the used history. The
@@ -120,8 +152,25 @@ static int GateTopRideStages_RandomPick(int unused)
 
 void GateTopRideStages_OnBoot()
 {
+    MinorSceneDesc *minor_descs = Hoshi_GetMinorScenes();
+    MinorSceneDesc *desc = &minor_descs[MNRKIND_TOPRIDECOURSESELECT];
+
+    course_select_load_vanilla = desc->cb_Load;
+    desc->cb_Load = GateTopRideStages_CourseSelectLoad;
+    course_select_exit_vanilla = desc->cb_Exit;
+    desc->cb_Exit = GateTopRideStages_CourseSelectExit;
+    course_select_think_vanilla = desc->cb_ThinkPreGObjProc;
+    desc->cb_ThinkPreGObjProc = GateTopRideStages_CourseSelectThink;
+
     CODEPATCH_HOOKAPPLY(0x8003ca78);
-    CODEPATCH_HOOKAPPLY(0x8003cd18);
+
+    // The scene tests a grid value with cmpwi 8 / bne before indexing per-course data with
+    // it; blt sends TOPRIDE_GRID_LOCKED down the random button's path as well.
+    CODEPATCH_REPLACEINSTRUCTION(0x8003d150, 0x41800010); // blt, laps in TopRide_CourseSelectInit
+    CODEPATCH_REPLACEINSTRUCTION(0x8003d20c, 0x4180000c); // blt, Time Attack best time at load
+    CODEPATCH_REPLACEINSTRUCTION(0x8003d354, 0x4180000c); // blt, Free Run best time at load
+    CODEPATCH_REPLACEINSTRUCTION(0x8003cdbc, 0x4180000c); // blt, Time Attack best time in TopRide_CourseSelectThink
+    CODEPATCH_REPLACEINSTRUCTION(0x8003cf04, 0x4180000c); // blt, Free Run best time in TopRide_CourseSelectThink
 
     CODEPATCH_REPLACECALL(0x8003c798, GateTopRideStages_RandomPick); // in TopRide_CourseSelectRandomInit (0x8003c754)
     CODEPATCH_REPLACECALL(0x8003cac0, GateTopRideStages_RandomPick); // A on the random button, in TopRide_CourseSelectThink
