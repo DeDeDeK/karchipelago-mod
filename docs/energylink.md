@@ -2,7 +2,7 @@
 
 EnergyLink is the Archipelago link mechanic that lets players generate a shared "energy" currency from in-game activity and spend it on items via an in-game shop. The mod owns local accumulation; the AP client owns the actual pool total.
 
-Source: `mods/archipelago/src/energylink.c`, `mods/archipelago/src/energylink_spend.c`. Settings, under Archipelago Settings -> Energy Link:
+Source: `mods/archipelago/src/energylink.c`, `mods/archipelago/src/energylink_spend.c`. Settings, under Archipelago Settings -> Links -> Energy Link:
 
 - **Energy Link** (`ap_menu_settings.energylink_enabled`, `SettingsMenu_EnergyLinkEnabled`) - Off / On. Gates generation, Auto-Charge and the shop. A save's first client connect seeds it from the slot's `energy_link` option.
 - **Machine Charge** (`ap_menu_settings.auto_charge`, `APAutoCharge`) - Off / Slow / Med / Fast, the Auto-Charge rate. Only runs while Energy Link is on.
@@ -94,7 +94,7 @@ Prices are deliberately high. EnergyLink mints fast in City Trial (5 MJ per full
 
 **No purchasable progression.** Every code sold maps to a filler/useful/trap item - the Copy Abilities sell the direct copy-item gives (328-338), the City Trial Events the event gives (200-215) and the Top Ride Items the `AP_TOPRIDE_ITEM_GIVE_*` codes, never the progression `*_UNLOCK` codes. There is no Upgrades category: Patch Cap Increase is AP progression (it gates logic and can itself be the City Trial goal), so energy must never buy it, and Spawn Rate Up is excluded alongside it so no persistent run-altering upgrade is energy-buyable.
 
-`Buy` rejects in this order, each with its own TextBox: Energy Link set to Off; a City Trial Event give item whose `EventKind` bit is unset in `ap_save->event_unlocked_mask` (the same mapping the give path in `ap_item_handler.c` uses, so energy cannot fire an event the seed has not granted); a Legendary Pieces entry whose pieces are not unlocked (`IsGoalPieceLocked`); `balance < cost`; and a full unprocessed queue (`ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS`, 512).
+`Buy` rejects in this order, each with its own TextBox: Energy Link set to Off; a City Trial Event give item whose `EventKind` bit is unset in `ap_save->event_unlocked_mask` (`IsEventLocked`, the same mapping the give path in `ap_item_handler.c` uses, so energy cannot fire an event the seed has not granted); a Legendary Pieces entry whose pieces are not unlocked (`IsGoalPieceLocked`); `balance < cost`; and a full unprocessed queue (`ap_save->unprocessed_count >= MAX_RECEIVED_ITEMS`, 512).
 
 The Legendary Pieces gate holds energy to what the goal logic requires, since the full machines finish the assembly goals and the AP Star check outright. The pieces ride the red carrier box, so every entry needs the Red Box unlocked (`GateBoxes_IsUnlocked`). A Hydra or Dragoon part then needs its own `ITUNLOCK` bit (`GateItems_IsItemLocked`), and a sphere its bit in `ap_star_piece_unlocked_mask`. Full Hydra and Full Dragoon need all three of their parts, and Full AP Star needs all six spheres. A category the seed leaves ungated has its mask pre-filled at connect, so the gate only bites where the seed gates the pieces or the goal forces them.
 

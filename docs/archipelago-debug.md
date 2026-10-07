@@ -48,7 +48,8 @@ the title screen's attract demo runs a real round, but under `MJRKIND_TITLE`.
 | R + D-Pad Up | Set the `traplink_receive` side-channel flag | round |
 | Z | Unlock the checklist cell under the cursor | checklist screen |
 
-The two drops read the **Target Player** row on the root menu rather than always using slot 0,
+The two drops read the **Target Player** row on the root menu (1-4, `DebugMenu_TargetPlayer`
+returns it 0-based) rather than always using slot 0,
 so per-player behavior - which is where three shipped bugs came from - can be exercised against
 any of the four slots.
 
@@ -204,7 +205,7 @@ rows do not.
 
 ### The boot replay rule
 
-hoshi replays every `OPTKIND_VALUE` `on_change` once at boot, right after every mod's
+hoshi replays every `OPTKIND_VALUE` and `OPTKIND_NUM` `on_change` once at boot, right after every mod's
 `OnSaveLoaded`, recursing into submenus. `no_save` does not exempt a row. So any row here that
 writes AP state would, at every launch, push the menu's idea of the world back over the seed's.
 
@@ -295,7 +296,8 @@ completes the check. None of the eight writes the memory card as it is moved -
 that would be a blocking card write per D-pad tick - so they ride in the save block to the game's
 own next save point.
 
-The six mask rows offer None / Partial / All rather than a count: Partial writes all but one
+All Ups collected and Purple SR1 wins are `OPTKIND_NUM` rows over 0 to their target. The six
+mask rows offer None / Partial / All rather than a count: Partial writes all but one
 bit - the last course, drag race or color, and Party Ball for the Top Ride items - and any live
 mask that is neither empty nor complete displays as Partial.
 

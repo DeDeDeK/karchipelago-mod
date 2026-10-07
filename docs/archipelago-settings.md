@@ -15,12 +15,12 @@ scene with no in-round overlay, so a change always lands before the next round l
 
 | Path | Values | Default | Read by |
 |---|---|---|---|
-| Death Link | Off / On | Off, seeded on first connect | DeathLink sends and its round-load receive proc |
-| Energy Link -> Energy Link | Off / On | Off, seeded on first connect | EnergyLink deposits, Auto-Charge, the Spend shop |
-| Energy Link -> Machine Charge | Off / Slow / Med / Fast | Off | Auto-Charge |
-| Energy Link -> Sources -> Objects / Patches / Charge | Off / On | On | The matching EnergyLink deposit |
-| Energy Link -> Spend | submenu | - | The energy shop |
-| Trap Link | Off / On | Off, seeded on first connect | TrapLink sends and its round-load receive proc |
+| Links -> Death Link | Off / On | Off, seeded on first connect | DeathLink sends and its round-load receive proc |
+| Links -> Trap Link | Off / On | Off, seeded on first connect | TrapLink sends and its round-load receive proc |
+| Links -> Energy Link -> Energy Link | Off / On | Off, seeded on first connect | EnergyLink deposits, Auto-Charge, the Spend shop |
+| Links -> Energy Link -> Machine Charge | Off / Slow / Med / Fast | Off | Auto-Charge |
+| Links -> Energy Link -> Sources -> Objects / Patches / Charge | Off / On | On | The matching EnergyLink deposit |
+| Links -> Energy Link -> Spend | submenu | - | The energy shop |
 | Messages -> Checks / Items / Hints / Status / Links | Off / On | On | Client-composed lines of that kind |
 | Messages -> Chat | Off / On | Off | Client-composed chat lines |
 | Messages -> Local -> Checks / Items / Links | Off / On | Off | Lines the mod writes itself |
@@ -45,8 +45,9 @@ value option's `on_change` once at boot, after every mod's `OnSaveLoaded`
 hoshi keeps a mod's menu values in their own rows of the mod's save block, beside the `APSave`
 user data. Each row is a 16-bit hash and a value. `Option_Hash` hashes the name of the option's
 immediate parent menu concatenated with the option's own name - "Archipelago Settings" for the
-root rows, "Energy Link" for its toggle and Machine Charge, "Local" for the local message rows - so the two "Checks" rows
-under Messages and Messages -> Local save separately.
+root rows, "Links" for Death Link and Trap Link, "Energy Link" for its toggle and Machine Charge,
+"Local" for the local message rows - so the two "Checks" rows under Messages and
+Messages -> Local save separately.
 
 - **Load.** `Mod_CopyFromSave` runs when the card's block is read and needs no re-init, before
   the mod's `OnSaveLoaded`. It writes each saved value over the default. A value at or past the

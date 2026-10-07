@@ -191,19 +191,31 @@ static MenuDesc energylink_menu = {
     },
 };
 
-static MenuDesc root_menu = {
-    .option_num = 10,
+static MenuDesc links_menu = {
+    .option_num = 3,
     .options = {
         OFF_ON_OPTION("Death Link", "Enable or Disable Death Link",
                       &ap_menu_settings.deathlink_enabled, OnToggleDeathLink),
+        OFF_ON_OPTION("Trap Link", "Enable or Disable Trap Link",
+                      &ap_menu_settings.traplink_enabled, OnToggleTrapLink),
         &(OptionDesc){
             .name = "Energy Link",
             .description = "Energy Link settings and shop",
             .kind = OPTKIND_MENU,
             .menu_ptr = &energylink_menu,
         },
-        OFF_ON_OPTION("Trap Link", "Enable or Disable Trap Link",
-                      &ap_menu_settings.traplink_enabled, OnToggleTrapLink),
+    },
+};
+
+static MenuDesc root_menu = {
+    .option_num = 8,
+    .options = {
+        &(OptionDesc){
+            .name = "Links",
+            .description = "Death Link, Trap Link and Energy Link",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &links_menu,
+        },
         &(OptionDesc){
             .name = "Messages",
             .description = "Choose which Archipelago messages appear in the text box",

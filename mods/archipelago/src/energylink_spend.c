@@ -50,6 +50,12 @@ static int IsGoalPieceLocked(APItemId id)
     return PartsLocked(id == AP_ITEM_GIVE_DRAGOON ? ITKIND_DRAGOON1 : ITKIND_HYDRA1);
 }
 
+// Energy can't fire an event the seed hasn't unlocked.
+static int IsEventLocked(APItemId id)
+{
+    return id >= AP_EVENT_BASE && id < AP_EVENT_BASE + EVKIND_NUM && !GateEvents_IsUnlocked(id - AP_EVENT_BASE);
+}
+
 static int Buy(OptionDesc *self)
 {
     SpendEntry *entry = self->user_data;
@@ -63,17 +69,12 @@ static int Buy(OptionDesc *self)
         return 0;
     }
 
-    // Energy can't fire an event the seed hasn't unlocked.
-    if (entry->item_id >= AP_EVENT_BASE && entry->item_id < AP_EVENT_BASE + EVKIND_NUM)
+    if (IsEventLocked(entry->item_id))
     {
-        int kind = entry->item_id - AP_EVENT_BASE;
-        if (!GateEvents_IsUnlocked(kind))
-        {
-            OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: event not unlocked (mask = %s)\n",
-                     self->name, entry->item_id, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
-            tb_api->EnqueueColoredNoun("Event not unlocked: ", self->name, tb_api->EventColor, NULL);
-            return 0;
-        }
+        OSReport("[EnergyLinkSpend] Buy '%s' (id=%d) rejected: event not unlocked (mask = %s)\n",
+                 self->name, entry->item_id, MaskBits(ap_save->event_unlocked_mask, EVKIND_NUM));
+        tb_api->EnqueueColoredNoun("Event not unlocked: ", self->name, tb_api->EventColor, NULL);
+        return 0;
     }
 
     if (IsGoalPieceLocked(entry->item_id))

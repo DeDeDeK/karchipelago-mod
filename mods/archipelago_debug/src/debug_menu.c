@@ -553,6 +553,18 @@ static int GiveEnergy1000(OptionDesc *self)
         .on_change = cb, \
     }
 
+#define N(label, desc, var, lo, hi, cb) \
+    &(OptionDesc){ \
+        .name = label, \
+        .description = desc, \
+        .kind = OPTKIND_NUM, \
+        .no_save = 1, \
+        .val = &var, \
+        .min = lo, \
+        .max = hi, \
+        .on_change = cb, \
+    }
+
 #define T(label, desc, var, cb) \
     &(OptionDesc){ \
         .name = label, \
@@ -842,8 +854,8 @@ static int SlotOptDbgReapply(OptionDesc *self)
 
 // Cross-session checklist progress, mirroring the live counters. Setting a row one
 // short of its target lets the next real event in a round complete the check.
-static char *allup_values[] = {"0", "1", "2", "3", "4", "5"};
-static char *purple_values[] = {"0", "1", "2", "3"};
+#define ALLUP_TARGET 5
+#define PURPLE_TARGET 3
 static char *race_color_values[] = {"None", "Partial", "All"};
 static const int race_color_map[] = {0x00, 0x7F, ((1 << KIRBYCOLOR_NUM) - 1)};
 static const int steer_win_map[] = {0x00, 0x3F, ((1 << TOPRIDE_NUM) - 1)};
@@ -934,9 +946,9 @@ static int MaskRow(int mask, int all)
 static void RefreshCheckProgress(void)
 {
     allup_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_ALLUP_TOTAL) : 0;
-    if (allup_state > 5) allup_state = 5;
+    if (allup_state > ALLUP_TARGET) allup_state = ALLUP_TARGET;
     purple_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_PURPLE_SR1) : 0;
-    if (purple_state > 3) purple_state = 3;
+    if (purple_state > PURPLE_TARGET) purple_state = PURPLE_TARGET;
     race_color_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_RACE_COLORS) : 0, race_color_map[2]);
     tr_color_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_TR_COLORS) : 0, race_color_map[2]);
     steer_win_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_TR_STEER_WINS) : 0, steer_win_map[2]);
@@ -976,18 +988,17 @@ static void RefreshEnergy(void)
     energy_synced = energy_state;
 }
 
-// Which player slot the pad bindings that drop an item act on.
-static char *target_player_values[] = {"1", "2", "3", "4"};
-static int target_player_state;
+// Which player the pad bindings that drop an item act on, numbered from 1 as on screen.
+static int target_player_state = 1;
 
 int DebugMenu_TargetPlayer(void)
 {
-    return target_player_state;
+    return target_player_state - 1;
 }
 
 static void OnTargetPlayerChange(int v)
 {
-    OSReport("[ApDebug] Debug drops target player %d\n", v + 1);
+    OSReport("[ApDebug] Debug drops target player %d\n", v);
 }
 
 static int MsgDbgSend(int kind, const char *name)
@@ -1699,8 +1710,8 @@ static MenuDesc slot_options_menu = {
 static MenuDesc progress_menu = {
     .option_num = 8,
     .options = {
-        V("All Ups Collected", "Lifetime CT All Ups, toward the 5 that check needs",  allup_state,      allup_values,       OnAllUpProgressChange),
-        V("Purple SR1 Wins",   "SINGLE RACE 1 wins as Purple Kirby, toward 3",        purple_state,     purple_values,      OnPurpleProgressChange),
+        N("All Ups Collected", "Lifetime CT All Ups, toward the 5 that check needs",  allup_state,  0, ALLUP_TARGET,  OnAllUpProgressChange),
+        N("Purple SR1 Wins",   "SINGLE RACE 1 wins as Purple Kirby, toward 3",        purple_state, 0, PURPLE_TARGET, OnPurpleProgressChange),
         V("Race Colors",       "Which Kirby colors have finished an Air Ride race",   race_color_state, race_color_values,  OnRaceColorProgressChange),
         V("Top Ride Colors",   "Which Kirby colors have finished a Top Ride race",    tr_color_state,   race_color_values,  OnTopRideColorProgressChange),
         V("Steer Star Wins",   "Which Top Ride courses have been won on Steer Star",  steer_win_state,  race_color_values,  OnSteerWinProgressChange),
@@ -1752,7 +1763,7 @@ static MenuDesc debug_menu = {
         S("Messages",       "Render canned client text messages",           messages_menu),
         S("Links",          "Arm a DeathLink or TrapLink receive",          links_menu),
         S("EnergyLink",     "Set the energy balance the spend menu reads",  energy_menu),
-        V("Target Player",  "Player slot the pad drops act on", target_player_state, target_player_values, OnTargetPlayerChange),
+        N("Target Player",  "Player slot the pad drops act on", target_player_state, 1, 4, OnTargetPlayerChange),
         A("Report State",   "Log every mask, counter and goal to the console",    StateDbgReport),
         A("Reset Progression", "Roll received-item progression back to pre-connect", StateDbgResetProgression),
     },

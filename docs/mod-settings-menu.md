@@ -14,7 +14,7 @@ pause-menu page, no hotkey. A value therefore changes only while the player is i
 and every option holds one value from a round's load to its end.
 
 `Settings_Init` builds the root at boot from every mod whose `option_desc` is set and sorts the
-entries by `pri` (`MenuPriority`) ascending, then `OptionKind` descending, then name.
+entries by `pri` (`MenuPriority`) ascending, then `OptionKind` ascending, then name.
 
 ## Option kinds
 
@@ -24,11 +24,14 @@ kind, and a kind-specific payload:
 | Kind | Payload | Behavior |
 |---|---|---|
 | `OPTKIND_VALUE` | `val`, `value_num`, `value_names`, `on_change` | Left/right steps `*val` through `0..value_num-1`, wrapping, and calls `on_change(*val)` after each step |
+| `OPTKIND_NUM` | `val`, `min`, `max`, `on_change` | Left/right steps `*val` through `min..max` inclusive, wrapping, shows it as a decimal number, and calls `on_change(*val)` after each step |
 | `OPTKIND_MENU` | `menu_ptr` | Opens a nested `MenuDesc` |
 | `OPTKIND_SCENE` | `major_idx` | Writes the save and leaves for that major scene |
-| `OPTKIND_ACTION` | `on_action`, `user_data` | Calls `on_action(self)`; a nonzero return plays the confirm sound and redraws the menu |
+| `OPTKIND_ACTION` | `on_action`, `user_data` | Calls `on_action(self)`; a nonzero return plays the confirm sound and redraws the menu, zero plays the cancel sound |
 
-`no_save` keeps a value option out of the memory card.
+`VALUE` and `NUM` are the two value kinds: they draw on the value frame (a name plus a value
+box the cursor sits on) and are the only kinds that persist. The other kinds draw on the button
+frame. `no_save` keeps a value option out of the memory card.
 
 ## When `on_change` runs
 
@@ -44,14 +47,16 @@ directly.
 ## Persistence
 
 Each saved value is a `MenuSave` row in the mod's memory-card block: a 16-bit hash and a `u8`
-value. `Option_Hash` hashes the name of the option's immediate parent menu concatenated with the
+index - the value itself for `VALUE`, its offset from `min` for `NUM`, so a saved `NUM` spans at
+most 256 values. `Option_CopyToSave` skips a `NUM` whose offset does not fit, leaving the row as
+it was. `Option_Hash` hashes the name of the option's immediate parent menu concatenated with the
 option's own name (`hashstr_16`), so two options with the same name under different submenus
 save separately.
 
 - **Load.** `Mod_CopyFromSave` walks the tree when the card's block is read and
-  `Option_CopyFromSave` writes each matching row over the default. A saved value at or past the
-  option's `value_num` keeps the default, so a mod never sees an out-of-range index from the
-  card. An option whose hash has no row keeps its default too - which is what renaming the
+  `Option_CopyFromSave` writes each matching row over the default. A saved index at or past the
+  option's value count (`value_num`, or `max - min + 1`) keeps the default, so a mod never sees
+  an out-of-range value from the card. An option whose hash has no row keeps its default too - which is what renaming the
   option, or its parent menu, does to its saved value.
 - **Store.** `KARPlusSave_Write` calls `Mod_CopyAllToSave` before every card write, so current
   values go out with any save write, not only the menu's own write on exit.

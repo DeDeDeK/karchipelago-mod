@@ -187,7 +187,7 @@ Mods boot in alphabetical order, so an import of another mod's API resolves in `
 
 ```
 Main Menu (minor 2)
-  -> Air Ride Settings (minor 3) - mode select: Race / Time Attack / Free Run
+  -> Air Ride Rules (minor 3) - rules screen (laps/time, damage, speed help, ...)
     -> Map Select (minor 6) - stage select
       -> Player Select (minor 8) - CSS: character/color select
         -> 3D Gameplay (minor 18) - actual race
@@ -199,7 +199,7 @@ Major transition: `MJRKIND_MENU` -> `MJRKIND_AIR` when entering 3D.
 
 ```
 Main Menu (minor 2)
-  -> City Trial Settings (minor 5) - game settings
+  -> City Trial Rules (minor 5) - rules screen (time, tempo, stadium, events)
     -> Player Select (minor 10) - CSS: player/machine/color select
       -> 3D Gameplay (minor 18) - city trial round
         -> Stadium Splash (minor 17)

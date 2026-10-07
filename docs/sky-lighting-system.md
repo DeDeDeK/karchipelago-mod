@@ -588,7 +588,7 @@ Ride projected path into the CT scene.
 ## Adding a Custom Light
 
 Putting a real positioned light into City Trial takes four calls, mirroring the menu code
-in `CitySettings_CreateLObj`: `GObj_Create(38, 32, 0)`, `LObj_LoadDesc(&desc)`,
+in `RuleMenu_CreateLObj`: `GObj_Create(38, 32, 0)`, `LObj_LoadDesc(&desc)`,
 `GObj_AddObject(g, HSD_OBJKIND_LOBJ, l)`, `GObj_AddGXLink(g, LObj_GX, 0, 0)`, then
 `LObj_SetPosition` / `LObj_SetInterest` to place it (each allocates a backing WObj on first
 call). `HSD_LObjAddCurrent` is **not** needed - `LObj_GX -> HSD_LObjSetCurrentAll` rebuilds

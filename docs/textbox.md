@@ -110,7 +110,7 @@ Bound to `textbox_settings` in `textbox.c`, beside the menu. Each option's store
 | Colored Names | Off / On | On | Off forces every segment to `DefaultColor` |
 | Background | Off / Dim / Solid | Solid | `viewport_color.a` target 0 / 100 / 200 |
 | Spacing | Tight / Normal / Wide | Tight | Extra gap 0 / 0.25 / 0.5 x rendered text height; reflows live |
-| Max On Screen | 3 / 4 / 6 / 8 | 6 | Queue cap; enqueuing over it drops oldest |
+| Max On Screen | 1 - 8 (`OPTKIND_NUM`) | 6 | Queue cap; enqueuing over it drops oldest |
 | Display Time | Short / Med / Long | Med | 180 / 300 / 480 frames on the shared counter before the oldest message fades |
 | Typewriter | Off / Slow / Med / Fast | Fast | 0 / 8 / 4 / 2 frames per glyph (`temp.char_delay`); 0 reveals at once. Sampled per message at enqueue |
 

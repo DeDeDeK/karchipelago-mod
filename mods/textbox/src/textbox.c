@@ -46,7 +46,7 @@ typedef enum TextBoxCorner
     TEXTBOX_CORNER_NUM,
 } TextBoxCorner;
 
-// Each is an index into its option's preset table below.
+// Each is an index into its option's preset table below, except max_visible, a count.
 static struct
 {
     int enabled;
@@ -65,7 +65,7 @@ static struct
     .colored_names = 1,
     .background    = 2,
     .spacing       = 0,
-    .max_visible   = 2,
+    .max_visible   = 6,
     .display_time  = 1,
     .typewriter    = 3,
 };
@@ -85,8 +85,6 @@ static char *background_names[]    = {"Off", "Dim", "Solid"};
 static const float spacing_extras[] = {0.0f, 0.25f, 0.5f};
 static char *spacing_names[]        = {"Tight", "Normal", "Wide"};
 
-static const u8 max_visible_caps[] = {3, 4, 6, 8};
-static char *max_visible_names[]   = {"3", "4", "6", "8"};
 
 static const u16 display_wait_frames[] = {180, 300, 480};
 static char *display_time_names[]      = {"Short", "Med", "Long"};
@@ -554,7 +552,7 @@ int TextBox_EnqueueSegments(const TextSegment *segs, int seg_count)
         return 0;
     }
 
-    while (TextBoxQueue_Count() >= max_visible_caps[textbox_settings.max_visible])
+    while (TextBoxQueue_Count() >= textbox_settings.max_visible)
         TextBox_Dequeue();
 
     // Built in the free tail slot. The text is copied so callers may pass stack buffers; a segment
@@ -676,10 +674,10 @@ static void TextBox_OnChangeSpacing(int val)
 
 static void TextBox_OnChangeMaxVisible(int val)
 {
-    while (TextBoxQueue_Count() > max_visible_caps[val])
+    while (TextBoxQueue_Count() > val)
         TextBox_Dequeue();
     TextBoxQueue_RepositionAll();
-    OSReport("[TextBox] Max on screen %s\n", max_visible_names[val]);
+    OSReport("[TextBox] Max on screen %d\n", val);
 }
 
 static void TextBox_OnChangeTypewriter(int val)
@@ -744,10 +742,10 @@ static MenuDesc textbox_menu = {
         &(OptionDesc){
             .name = "Max On Screen",
             .description = "Maximum number of messages visible at once",
-            .kind = OPTKIND_VALUE,
+            .kind = OPTKIND_NUM,
             .val = &textbox_settings.max_visible,
-            .value_num = GetElementsIn(max_visible_caps),
-            .value_names = max_visible_names,
+            .min = 1,
+            .max = TEXTBOX_QUEUE_SIZE - 1,
             .on_change = TextBox_OnChangeMaxVisible,
         },
         &(OptionDesc){

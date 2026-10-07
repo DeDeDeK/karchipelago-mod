@@ -204,23 +204,22 @@ Per slot the loop takes `p = 0..4` where `Ply_GetPKind(p) == 0` (human), reads
 reads `GameData` live rather than the latched results block, there is no `rank_skip[p]`
 validity gate.
 
-### Unlock-gated settings menus (City Trial rules)
+### Unlock-gated rules options (Top Ride)
 
-The City Trial pre-game **settings/rules menu** (minor scene `MNRKIND_CITYSETTINGS`,
-minor 5) is a *consumer* of `ClearChecker_CheckUnlocked`, distinct from the checklist
-grid. Some rule-option rows (the "Extra Rules" reward category) only appear once
-unlocked, so the menu builder gates them on the clear-checker.
+The Top Ride rules screen (minor scene `MNRKIND_4`, minor 4) is a *consumer* of
+`ClearChecker_CheckUnlocked`, distinct from the checklist grid. Some options of three rows
+(Camera Angle, Features and the item set - the "Extra Rules" reward category) only appear
+once unlocked.
 
-`CitySettings_BuildMenu` (`0x8001eaac`) is the menu's build/enter handler, registered in
-its `{build, update, destroy}` table at `0x807e0508`. It delegates the row list to
-`CitySettings_BuildCellList` (`0x8001da14`), which for the unlock-gated control-kinds
-emits a row only if at least one of that kind's candidate `clear_kind`s passes
-`ClearChecker_CheckUnlocked(mode=2, ...)`; ungated kinds are copied verbatim.
+`TopRideRules_MinorLoad` (`0x8001eaac`) builds its row list with `TopRideRules_BuildRows`
+(`0x8001da14`) before creating the screen. For each gated option it keeps the option only
+if its `clear_kind` passes `ClearChecker_CheckUnlocked(GMMODE_TOPRIDE, ...)`, and it drops
+a gated row with no unlocked option; ungated rows are copied verbatim.
 
 Because `ClearChecker_CheckUnlocked` is `REPLACEFUNC`'d to
 `ChecklistRewards_CheckUnlocked` (keyed on AP `received_checklist_rewards`), these rule
-options unlock on AP delivery like every other non-gated reward category. The Top Ride
-rules-menu builder is the analogous consumer on that side.
+options unlock on AP delivery like every other non-gated reward category. The Options
+movie list makes the same call for Air Ride clear_kind `0x23`.
 
 ## AP Rewards (Inbound)
 
