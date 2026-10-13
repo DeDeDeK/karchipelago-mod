@@ -209,10 +209,12 @@ bytes, listing the donor ranges for the mod to read at runtime.
 - `scripts/authoring/make_menu_logo.py` - author `MnTitleKarchi.dat`, a
   `_scene_models` model archive of textured quads for the title screen.
 
-See `docs/sky-backdrop-system.md` (backdrop consumption via the
-`CreateStageModel_3D` hook), `docs/custom-items.md` (custom item discovery +
-`CustomItemDesc`), `docs/ap-checklist.md` and `docs/custom-menu.md` for how
-each authored file is used at runtime.
+See `docs/game-systems/sky-backdrops.md` and
+`docs/mods/custom_weather/backdrops.md` (backdrop consumption via the
+`CreateStageModel_3D` hook), `docs/mods/custom_items/custom-items.md` (custom
+item discovery + `CustomItemDesc`), `docs/mods/archipelago/checklist-tab.md` and
+`docs/mods/archipelago/title-screen.md` for how each authored file is used at
+runtime.
 
 Sizing is delicate - a misclassified blob silently corrupts the output - so
 always `verify_carved.py` a new carve. To add a new carve target, write a thin

@@ -49,10 +49,10 @@ git log --oneline -15 -- mods/<mod>
   build set for step 5.
 - The line count sizes the fan-out in step 2.
 
-Then read the `docs/*.md` for every system the mod touches. Find them by
-filename; a mod's systems usually map one-to-one onto doc names
-(`gate_boxes.c` -> `docs/gate-boxes.md`). Read `docs/frame-loop.md` when the mod
-has frame hooks or procs, and `docs/mod-settings-menu.md` when it has options.
+Then read the mod's docs in `docs/mods/<mod>/`, and the `docs/game-systems/`
+and `docs/hoshi/` docs for every system it touches - find them by path. Read
+`docs/game-systems/frame-loop.md` when the mod has frame hooks or procs, and
+`docs/hoshi/settings-menu.md` when it has options.
 Read the docs before the code: most of what looks like a bug is a documented
 engine constraint, and most stale comments are stale because the doc moved on.
 
@@ -236,7 +236,7 @@ Every patch site's containing function needs a named symbol in `GKYE01.map` and
 
 `OnFrameStart` and `OnFrameEnd` run in every scene for the whole game, and
 `OnFrameEnd` keeps running through the match pause and the hitstops
-(`docs/frame-loop.md`). Every handler on either hook has to justify running
+(`docs/game-systems/frame-loop.md`). Every handler on either hook has to justify running
 there. The ones that do:
 
 - Reading what the AP client writes into memory. It must work in every scene,
@@ -291,7 +291,7 @@ through - report it as a behavior change to test.
 Save layout. hoshi matches a mod's card block by name hash and size only, so
 every mod with a save struct opens it with a stamp (`APSAVE_STAMP`,
 `CC_SAVE_STAMP`) and reinitializes on a mismatch
-(`docs/memcard-save-system.md`). Any layout change - a field added, removed,
+(`docs/hoshi/save-file.md`). Any layout change - a field added, removed,
 reordered or retyped, or a hash or ordering the save keys on - bumps the stamp;
 one that leaves the stamp alone is a bug. A save field derivable from another
 field is one field too many.
@@ -310,7 +310,7 @@ Options:
   out-of-range saved index, and the menu wraps within range.
 
 Options change only in the main menu, plus one `on_change` replay at boot
-(`docs/mod-settings-menu.md`), so every option holds still for a whole round.
+(`docs/hoshi/settings-menu.md`), so every option holds still for a whole round.
 Delete what assumes otherwise:
 
 - An `on_change` that tears down live round state.
@@ -356,12 +356,12 @@ Confirm which of these applies before deleting code that handles a change.
 
 Only for mods whose memory the Python client reads or writes. `APData` and
 `APSlotOptions` in `mods/archipelago/src/main.h` are a wire contract with
-the apworld in `../KARchipelago` (`docs/client-game-protocol.md`):
+the apworld in `../KARchipelago` (`docs/mods/archipelago/client-protocol.md`):
 
 - The client restates every `APData` offset by hand. A new, resized or
   reordered field moves its offset table too.
 - `APItemId` in `archipelago_api.h`, the checklist reward-index ordering, and
-  `docs/checklist-mappings.csv` must agree with the apworld's IDs.
+  `docs/data/checklist-cells.csv` must agree with the apworld's IDs.
 - Everything the client writes is untrusted: every index, id, count and length
   is range-checked before use, and a bad value is rejected and logged once
   rather than indexing past a table.
@@ -506,7 +506,7 @@ than preserving it.
 
 Prefer the game RNG to a private one: `main` seeds `HSD_Randi` from `OSGetTick`
 at boot, and vanilla uses it for the same jobs. Work the frame loop already
-does every frame (`docs/frame-loop.md`), such as invalidating the GX caches, is
+does every frame (`docs/game-systems/frame-loop.md`), such as invalidating the GX caches, is
 the same kind of finding.
 
 Mods link against the game's own C library through `link.ld`, not newlib, and
@@ -537,7 +537,7 @@ periods, hex masks). Read for the rest:
 
 - Comments that restate the code, and RE narration the lint's keywords miss.
 - Prose that outgrew a few lines. Move the substance into the system's
-  `docs/*.md` and leave the one grounded fact (function name + address) in the
+  doc under `docs/` and leave the one grounded fact (function name + address) in the
   code.
 - Struct-member comments running past one short line.
 - OSReport on a per-frame or per-tick path, on a retried path without a latch,
@@ -550,8 +550,8 @@ constraint the code shape depends on that the code cannot show.
 
 ### D2. Docs
 
-For every system the pass changed, update its `docs/*.md` to CLAUDE.md's Docs
-rules. A system with no doc gets one. Write for a human reader: explain the
+For every system the pass changed, update its doc under `docs/` to the
+`docs-review` skill's rules. A system with no doc gets one. Write for a human reader: explain the
 mechanism and why it is shaped that way, not a line-by-line transcription of the
 source. Engine facts a finding relied on that no doc records go into the doc
 for that engine system, so the next review reads them instead of re-deriving

@@ -1,0 +1,80 @@
+kind,name,tier,data_index,archive,flags,descriptor,state_table,state_count,init_cb,copy_ability
+0x00,Broom Hatter,0,0,EmBroomData.dat,0,0x804b2dd8,0x804b2d88,4,0x8020ea44,
+0x01,Broom Hatter B,0,0,EmBroomData.dat,0,0x804b2dd8,0x804b2d88,4,0x8020ea44,
+0x02,Bronto Burt,0,1,EmBrontData.dat,0,0x804b2ecc,0x804b2e68,5,0x8020f308,
+0x03,Bronto Burt B,0,1,EmBrontData.dat,0,0x804b2ecc,0x804b2e68,5,0x8020f308,
+0x04,Scarfy,0,2,EmScarfyData.dat,0,0x804b2ff8,0x804b2f80,6,0x8020fe74,
+0x05,Sword Knight,0,3,EmSwordData.dat,0,0x804b3168,0x804b3118,4,0x802111d8,Sword
+0x06,Cappy,0,4,EmCappyData.dat,0,0x804b325c,0x804b31f8,5,0x802124ec,
+0x07,Cappy B,0,4,EmCappyData.dat,4,0x804b3324,0x804b3310,1,,
+0x08,Wheelie,0,5,EmWheelieData.dat,0,0x804b338c,0x804b3350,3,0x802132ec,Wheel
+0x09,Phan Phan,0,6,EmElephantData.dat,0,0x804b347c,0x804b3418,5,0x802139a8,Fire
+0x0a,Noddy,0,7,EmNoddyData.dat,0,0x804b3558,0x804b3530,2,0x8021463c,Sleep
+0x0b,Chilly,0,8,EmChillyData.dat,0,0x804b360c,0x804b35d0,3,0x802149d8,Freeze
+0x0c,Flappy,0,9,EmFlappyData.dat,0,0x804b36c0,0x804b3698,2,0x80215050,Wing
+0x0d,Plasma Wisp,0,10,EmPlasmaData.dat,0,0x804b3778,0x804b3750,2,0x80215540,Plasma
+0x0e,Gordo,0,11,EmGordoData.dat,0,0x804b3844,0x804b3808,3,0x80215a00,
+0x0f,Bomber,0,12,EmBombboneData.dat,0,0x804b390c,0x804b38d0,3,0x802160b4,Bomb
+0x10,Pichikuri,0,13,EmPichicriData.dat,0,0x804b39ec,0x804b39b0,3,0x802168a8,Needle
+0x11,Pichikuri B,0,13,EmPichicriData.dat,0,0x804b39ec,0x804b39b0,3,0x802168a8,Needle
+0x12,Dayl,0,14,EmDaylData.dat,0,0x804b3ab4,0x804b3a78,3,0x80216eb0,Fire
+0x13,Dayl B,0,14,EmDaylData.dat,4,0x804b3b90,0x804b3b40,4,0x802177b8,Fire
+0x14,Caller,0,15,EmShaturnData.dat,0,0x804b3be0,0x804b3bb8,2,0x80217d68,Tornado
+0x15,Walky,0,16,EmWalkyData.dat,0,0x804b3c98,0x804b3c70,2,0x80218360,Mic
+0x16,Waddle Dee Truck,0,17,EmDeeTruckData.dat,0,0x804b3d9c,0x804b3d10,7,0x802186e4,
+0x17,Waddle Dee,0,18,EmDeeData.dat,0,0x804b3edc,0x804b3e78,5,0x80219448,
+0x18,Broom Hatter,1,0,EmBroomData.dat,1,0x804b2e3c,0x804b2e00,3,0x8020efc8,
+0x19,Broom Hatter B,1,0,EmBroomData.dat,1,0x804b2e3c,0x804b2e00,3,0x8020efc8,
+0x1a,Bronto Burt,1,1,EmBrontData.dat,1,0x804b2f58,0x804b2ef4,5,0x8020f920,
+0x1b,Bronto Burt B,1,1,EmBrontData.dat,1,0x804b2f58,0x804b2ef4,5,0x8020f920,
+0x1c,Scarfy,1,2,EmScarfyData.dat,1,0x804b30ec,0x804b30b0,3,0x80210c28,
+0x1d,Sword Knight,1,3,EmSwordData.dat,1,0x804b31cc,0x804b3190,3,0x80211e28,Sword
+0x1e,Cappy,1,4,EmCappyData.dat,1,0x804b32e8,0x804b3284,5,0x80212aa0,
+0x1f,Cappy B,1,4,EmCappyData.dat,4,0x804b3324,0x804b3310,1,,
+0x20,Wheelie,1,5,EmWheelieData.dat,1,0x804b33f0,0x804b33b4,3,0x80213724,Wheel
+0x21,Heat Phan Phan,1,6,EmElephantData.dat,1,0x804b3508,0x804b34a4,5,0x80214178,Fire
+0x22,Noddy,1,7,EmNoddyData.dat,1,0x804b35a8,0x804b3580,2,0x80214844,Sleep
+0x23,Chilly,1,8,EmChillyData.dat,1,0x804b3670,0x804b3634,3,0x80214dcc,Freeze
+0x24,Flappy,1,9,EmFlappyData.dat,1,0x804b3724,0x804b36e8,3,0x802152bc,Wing
+0x25,Plasma Wisp,1,10,EmPlasmaData.dat,1,0x804b37dc,0x804b37a0,3,0x8021575c,Plasma
+0x26,Gordo,1,11,EmGordoData.dat,1,0x804b38a8,0x804b386c,3,0x80215db4,
+0x27,Bomber,1,12,EmBombboneData.dat,1,0x804b3984,0x804b3934,4,0x80216518,Bomb
+0x28,Pichikuri,1,13,EmPichicriData.dat,1,0x804b3a50,0x804b3a14,3,0x80216c1c,Needle
+0x29,Pichikuri B,1,13,EmPichicriData.dat,1,0x804b3a50,0x804b3a14,3,0x80216c1c,Needle
+0x2a,Dayl,1,14,EmDaylData.dat,1,0x804b3b18,0x804b3adc,3,0x80217364,Fire
+0x2b,Dayl B,1,14,EmDaylData.dat,4,0x804b3b90,0x804b3b40,4,0x802177b8,Fire
+0x2c,Caller,1,15,EmShaturnData.dat,1,0x804b3c44,0x804b3c08,3,0x802180dc,Tornado
+0x2d,Walky,1,16,EmWalkyData.dat,1,0x804b3ce8,0x804b3cc0,2,0x80218550,Mic
+0x2e,Waddle Dee Truck,1,17,EmDeeTruckData.dat,1,0x804b3e00,0x804b3dc4,3,0x80218fd0,
+0x2f,Waddle Dee,1,18,EmDeeData.dat,1,0x804b3f2c,0x804b3f04,2,0x80219ce8,
+0x30,Broom Hatter,2,0,EmBroomData.dat,1,0x804b2e3c,0x804b2e00,3,0x8020efc8,
+0x31,Broom Hatter B,2,0,EmBroomData.dat,1,0x804b2e3c,0x804b2e00,3,0x8020efc8,
+0x32,Bronto Burt,2,1,EmBrontData.dat,1,0x804b2f58,0x804b2ef4,5,0x8020f920,
+0x33,Bronto Burt B,2,1,EmBrontData.dat,1,0x804b2f58,0x804b2ef4,5,0x8020f920,
+0x34,Scarfy,2,2,EmScarfyData.dat,1,0x804b30ec,0x804b30b0,3,0x80210c28,
+0x35,Sword Knight,2,3,EmSwordData.dat,1,0x804b31cc,0x804b3190,3,0x80211e28,Sword
+0x36,Cappy,2,4,EmCappyData.dat,1,0x804b32e8,0x804b3284,5,0x80212aa0,
+0x37,Cappy B,2,4,EmCappyData.dat,4,0x804b3324,0x804b3310,1,,
+0x38,Wheelie,2,5,EmWheelieData.dat,1,0x804b33f0,0x804b33b4,3,0x80213724,Wheel
+0x39,Heat Phan Phan,2,6,EmElephantData.dat,1,0x804b3508,0x804b34a4,5,0x80214178,Fire
+0x3a,Noddy,2,7,EmNoddyData.dat,1,0x804b35a8,0x804b3580,2,0x80214844,Sleep
+0x3b,Chilly,2,8,EmChillyData.dat,1,0x804b3670,0x804b3634,3,0x80214dcc,Freeze
+0x3c,Flappy,2,9,EmFlappyData.dat,1,0x804b3724,0x804b36e8,3,0x802152bc,Wing
+0x3d,Plasma Wisp,2,10,EmPlasmaData.dat,1,0x804b37dc,0x804b37a0,3,0x8021575c,Plasma
+0x3e,Gordo,2,11,EmGordoData.dat,1,0x804b38a8,0x804b386c,3,0x80215db4,
+0x3f,Bomber,2,12,EmBombboneData.dat,1,0x804b3984,0x804b3934,4,0x80216518,Bomb
+0x40,Pichikuri,2,13,EmPichicriData.dat,1,0x804b3a50,0x804b3a14,3,0x80216c1c,Needle
+0x41,Pichikuri B,2,13,EmPichicriData.dat,1,0x804b3a50,0x804b3a14,3,0x80216c1c,Needle
+0x42,Dayl,2,14,EmDaylData.dat,1,0x804b3b18,0x804b3adc,3,0x80217364,Fire
+0x43,Dayl B,2,14,EmDaylData.dat,4,0x804b3b90,0x804b3b40,4,0x802177b8,Fire
+0x44,Caller,2,15,EmShaturnData.dat,1,0x804b3c44,0x804b3c08,3,0x802180dc,Tornado
+0x45,Walky,2,16,EmWalkyData.dat,1,0x804b3ce8,0x804b3cc0,2,0x80218550,Mic
+0x46,Waddle Dee Truck,2,17,EmDeeTruckData.dat,1,0x804b3e00,0x804b3dc4,3,0x80218fd0,
+0x47,Waddle Dee,2,18,EmDeeData.dat,1,0x804b3f2c,0x804b3f04,2,0x80219ce8,
+0x48,SP Broom Hatter (rider of 0x00),special,0,EmBroomData.dat,2,0x804b3f80,0x804b3f58,2,,
+0x49,SP Sword Knight (rider of 0x05),special,3,EmSwordData.dat,2,0x804b3fe4,0x804b3fa8,3,,
+0x4a,SP Waddle Dee Truck (cart of 0x16),special,17,EmDeeTruckData.dat,2,0x804b4060,0x804b4010,4,,
+0x4b,Event Gordo,special,11,EmGordoData.dat,3,0x804b3e50,0x804b3e28,2,0x802192b0,
+0x4c,TAC,special,19,EmTacData.dat,0,0x804b4178,0x804b4088,12,0x8021a534,
+0x4d,Dyna Blade,special,20,EmDynaData.dat,0,0x804b4288,0x804b41e8,8,0x8021c9dc,
+0x4e,Meteor,special,21,EmMeteoData.dat,0,0x804b4310,0x804b42c0,4,0x8021dfc0,
