@@ -42,7 +42,7 @@ walks the windows while queries read `coll`, so a record reachable only through
 `YakumonoTable.spawn_data_array` block and every generic yakumono entry into it, then makes one
 `HSD_MemAlloc` per array sized exactly `count * stride`. `grColl_Free` (0x800d7060) frees them
 field by field; it frees `coll.zone` and `coll.moving_rough` twice each and never frees
-`coll.aux` or `coll.moving_zone`, which the scene-change heap reset covers.
+`coll.zone_vtx` or `coll.moving_zone`, which the scene-change heap reset covers.
 
 So a mod must not swap a `coll.*` pointer for its own buffer - the original leaks and `HSD_Free`
 later receives a foreign pointer. The supported way to get room is to raise a `coll_max` count
@@ -50,9 +50,21 @@ before the allocation: the fill pass leaves the surplus as slack at the tail of 
 owned and freed by the game. The later prop-attach path asserts that each attach still fits, so
 a raised count must be raised in `coll_max` too.
 
+The fill pass, `grColl_Build` (0x800d6d88), turns each baked node into records and
+`grColl_BakeRecords` (0x800d6a70) transforms their vertices by the joints' world matrices, the
+stage scale included. The vertex pool is therefore in final world units. In the stage file each
+collision joint's vertices sit in its own joint's frame: City Trial's `GrCity1.dat` mesh is
+authored unscaled, and only the terrain root's slice reads as plain file units times 0.7. Every
+other slice - the houses, trees, lighthouse, star pole - needs its joint's matrix from the
+terrain model, whose root scale `CreateStageModel_3D` (0x800dcbf0) replaces with the stage scale.
+Zone boxes (`grZone_BakeRecord`, 0x800dd2a4) are baked the same way. The bake uses the rest
+pose, and moving records are rebaked from their animated joints every frame.
+
 ### Queries
 
 Every query runs two passes; nothing in gameplay scans the whole triangle array.
+`mpColl_ProbeRaysAllTris` (0x8024ae90) is such a brute-force scan, but it never runs: its enable
+bit is only ever cleared.
 
 - **Moving pass** - a brute-force walk of `coll.moving_record`, each record AABB-tested and then
   its triangle slice scanned. Moving geometry is absent from the KD-tree.
@@ -63,7 +75,8 @@ Both end in two narrowphase primitives, `grColl_RayVsTri` (0x800d95dc) and
 `grColl_SweptSphereVsTri` (0x802448b0), which take a triangle **index**; the moving pass derives
 it from the triangle's byte offset into `coll.tri` divided by 0x40, so every triangle must live
 in that one array. Both passes keep the nearest hit and return its triangle id (-1 for none),
-writing the hit point to the caller's `out_pos`.
+writing the hit point to the caller's `out_pos`. The ray test is one-sided: a triangle is hit
+only from the side its normal faces.
 
 | Entry point | Address | Role |
 |---|---|---|
@@ -75,7 +88,9 @@ writing the hit point to the caller's `out_pos`.
 `Raycast_Do` is called through four wrappers that differ only in the kind mask and filter:
 `Raycast_Any` (0x800d1a54, mask 7), `Raycast_Ground` (0x800d1ac4, mask 1), `Raycast_Wall`
 (0x800d1b34, mask 2) and `Raycast_AnyTagged` (0x800d1ba4, mask 7 with a filter that also drops
-any non-ground triangle without flag 0x8000).
+any non-ground triangle without flag 0x8000). `SphereCast_Any` (0x800d1c14, mask 7) and
+`SphereCast_Ground` (0x800d1ca8, mask 1) are the same over `grColl_SweptSphereQuery`, moving pass
+on, with a radius.
 
 ### Kind and state gates
 
@@ -84,7 +99,8 @@ any non-ground triangle without flag 0x8000).
 normal test - decides whether a triangle can be stood on, walled off, or hit at all.
 `Raycast_Ground` cannot see a wall. A surface built at runtime must set the bits to match its
 own facing, or the consumers it belongs to never look at it. Bits 4-11 carry the ground type
-`grGetGroundTypeFromTriangleID` (0x800cec28) returns.
+`grGetGroundTypeFromTriangleID` (0x800cec28) returns. City Trial's sea is ground type 29 with
+the floor category, so `Raycast_Ground` hits it, from above only.
 
 The primitives then require `GrCollTri.state` bit 6 (`GRCOLL_STATE_COLLIDABLE`) set and bit 7
 (`GRCOLL_STATE_DEGENERATE`) clear. The swept-sphere test uses `GrCollTri.normal` as the plane
@@ -106,9 +122,21 @@ freelist pool, allocates its shape data and its `mpCollInfo` (the contact result
 `mpColl_Destroy` (0x80245ed0) undoes all of it. The only shape is a sphere whose radius
 `mpColl_GetSphereRadius` (0x802415a8) lerps between two endpoints.
 
-Each frame the owner calls `mpColl_Update` (0x80245f70) with the new position, direction,
-extents and two radii; it sets `pos_delta = pos - prev_pos` (`+0x14`), which the rest of the
-system treats as the body's velocity. `mpColl_ProcessMapColl` (0x802460d4) then clears the
+The sphere is described in the owner's body frame: the owner's position plus two axes.
+`mpColl_Init` (0x80245c10) stores both radii and `CollShapeData.offset`, the sphere center in that
+frame, and nothing else writes the first radius or the offset. Machines also get three
+`CollProbe` points from `mpColl_SetProbes` (0x802463a8), which `mpColl_RoughProbe` (0x8024c5b4)
+sweeps from their previous to their current world position. A star's offset is (0, 1.2, 0) with
+radius 1.2, so a machine's position is its sphere's ground contact point.
+`mpColl_UpdateShapeExtents` (0x8024625c) writes the owner position back from the resolved center
+minus the offset.
+
+Each frame the owner calls `mpColl_Update` (0x80245f70) with the new position, the two axes and
+two radii. The first goes to `CollData.radius` (+0x344), which on a machine is a mass for
+breaking props rather than a size, and the second replaces the shape's second radius unless it is
+-1: grounded machine states pass their own radius, airborne, jumping and rail states pass -1. It
+sets `pos_delta = pos - prev_pos` (`+0x14`), which the rest of the system treats as the body's
+velocity. `mpColl_ProcessMapColl` (0x802460d4) then clears the
 contact info and drives `mpColl_UpdateCollision` (0x802485e0) for up to 10 pushback substeps.
 
 `mpCollInfo` holds one `mpCollRec` per substep plus three lists pointing at the substeps that
@@ -131,8 +159,9 @@ have no geometry of their own outside this mesh: a prop's triangles are an ordin
 and whose `desc_kind` (`+0x8c`) is 3 for a breakable. The same sweep that stops a machine at a
 house is the path that breaks it. `mpColl_UpdateCollision` runs two phases:
 
-1. **Sweep** (`mpColl_SphereSceneObjColl`, 0x8024d414) finds the nearest facing triangle without
-   checking the collidable bit. If the collider may break props (`mpColl_SceneObjBreakGate`,
+1. **Sweep** (`mpColl_SphereSceneObjColl`, 0x8024d414) finds the nearest facing triangle through
+   `grColl_SweptSphereVsTri`, so a triangle with its collidable bit clear is never found. If the
+   collider may break props (`mpColl_SceneObjBreakGate`,
    0x80241574: `CollData+0x34c` bit 2 set and `desc_kind == 3`), it runs the prop's break
    handler through `collideWithObject` (0x800f5004). `mpColl_Create` clears that bit and only
    the machine's collision init sets it; `mpColl_SetSceneObjBreak` (0x80247e58) arms any other
@@ -140,9 +169,9 @@ house is the path that breaks it. `mpColl_UpdateCollision` runs two phases:
 2. **Response** (`mpResponse_DispatchSceneObjColl`, 0x80248bb4) walks the accumulated contacts
    and drops every one whose triangle has state bit 6 clear, so the body is not pushed out.
 
-That split is the lever for passing through a prop: clearing the collidable bit across a
-record's triangles with `grScene_SetInstanceColl(record, 0)` (0x800d7ad0) leaves the prop
-visible but pass-through. Only break and init code writes the bit, so a clear sticks. The break
+The collidable bit is the lever for passing through a prop: clearing it across a record's
+triangles with `grScene_SetInstanceColl(record, 0)` (0x800d7ad0) leaves the prop visible but
+pass-through. Only break and init code writes the bit, so a clear sticks. The break
 tail does exactly this; a mod that moves a prop's model away must do it too, because the
 triangles stay where the prop was placed.
 
@@ -169,9 +198,13 @@ kind = *(u32 *)(zone_record + 0x24) & 0x01ffffff;
 ```
 
 The mpColl sweep fills `CollData.zone_hit[20]` (`+0x48`) and `zone_hit_num` (`+0x98`) with the
-indices of every zone the body is inside this frame, and moving zones in a parallel list at
-`+0x9c`. A family of per-kind lookups (0x80246584-0x802478c4), one function per queried kind,
-scans that list for the first zone of its kind. Every consumer is an equality compare against
+indices of every zone the body is inside this frame, and every zone face its path crossed at
+`+0x9c` (`zone_cross`, 0x20 stride: zone index, face group, crossing point; count at `+0x31c`).
+A family of per-kind lookups (0x80246584-0x802478c4), one function per queried kind, scans those
+lists for the first zone of its kind. A dash ring fires from a crossing, not from being inside:
+its flagged face (kind word `0x02000004`) must be crossed within the zone's radius of that
+face's center. Each ring is two boxes with opposite +Z axes, so the one that fires pushes
+along the direction flown. Every consumer is an equality compare against
 the masked kind - there is no jump table - so **a kind no compare mentions does nothing**,
 whatever the stage data says. A new zone behavior needs both the box and mod code to test for
 it.
@@ -187,6 +220,8 @@ The kinds the engine names, from its assert strings and the enum `GrCollZoneKind
 | 9 | `GrCZK_Jump` | `grGetJumpZoneParam` (0x800d25a8) |
 | 10 | `GrCZK_Spin` | `grGetSpinZoneParam` (0x800d2654) |
 | 15 | ground copy panel | gives a random copy ability |
+| 18 | `GrCZK_Catch` | `mpColl_GetCatchZoneIndex` (0x802471c0): hands a machine to the gondola or cannon yakumono that owns the zone |
+| 22 | `GrCZK_Cannon` | `mpColl_GetCannonZoneIndex` (0x80247348): only the cannon camera reads it |
 | 25 | `GrCZK_LocalDead` | `grGetLocalDeadZoneParam` (0x800d50f8), `mpColl_GetDeadZoneIndex` (0x80247fac) |
 | 32 | area light | the most common kind; nearly every stage boxes its lighting |
 

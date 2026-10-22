@@ -21,35 +21,54 @@ effects) are not in that table; the spawn body special-cases them.
 |---|---|---|
 | `0x3a982` (240002) | 24 / 2 | inhale whirlwind, spawned by `Rider_StartInhale` (0x801ad2c4) |
 | `0x5a592` (370066) | 37 / 66 | machine hit, `Machine_SpawnHitEffect`'s fallback when the caller gives none |
-| `0x5a59f`-`0x5a5a1` (370079-370081) | 37 / 79-81 | event-actor effect kinds 1-3 (`EventActor_SpawnEffect`, 0x8020d30c) |
+| `0x3a992` (240018) | 24 / 18 | camera-shake model; its animated root drives a quake source |
+| `0x5a59a`-`0x5a59e` (370074-370078) | 37 / 74-78 | one player's view: small, medium and large quake, looping, timed |
+| `0x5a59f`-`0x5a5a3` (370079-370083) | 37 / 79-83 | every view: the same five; `EventActor_SpawnEffect` (0x8020d30c) picks the first three |
 | `0x5a5b9` (370105) | 37 / 105 | default kind; built from a fixed record, not the descriptor table |
 
 ## Spawning
 
 ```c
-u32 Effect_SpawnSync(GOBJ *parent, int id, int efgroup, int anchor_mode, ...); // 0x80236c40
+u64 Effect_SpawnSync(GOBJ *parent, int id, int efgroup, int anchor_mode, ...); // 0x80236c40
 ```
 
 - **`parent`** may be NULL; an effect needs no owning object.
 - **`efgroup`** is an EfGroup bucket, not an owner. -1 trips `__assert("efrequest.c", ...,
-  "group!=EfGroup_None")`. Borrowing a live rider's `RiderData.efgroup` or `efgroup2` works.
+  "group!=EfGroup_None")`. `Effect_AllocEfGroup` (0x802364e0) hands out a fresh group. A live
+  rider's `RiderData.efgroup` or `efgroup2` also works, but `RiderStateChange` (0x8018e5c4)
+  retires `efgroup2` on every state change whose flags have bit 0 clear, and the inhale's own
+  state change is one, so an effect borrowed into that group dies with the rider's next one.
 - **`anchor_mode`** decides how many varargs follow and what they mean.
 - The call returns `{0,0}` without spawning while effects are globally suppressed (the word at
   0x805dd8b8 is nonzero) or when `Effect_CheckSplitScreenAllowed` (0x802410d4) rejects it.
-- The return is a 64-bit handle in `{r3, r4}`; hoshi declares only the low word, enough to test
-  for failure. One call can fan out into several sub-effects and returns only the primary handle.
+- The return is a 64-bit handle, `{0,0}` on failure. Its high word is the spawn counter shifted
+  right by 14, so it stays 0 for the first 16384 spawns; only the whole value tells success from
+  failure. `Effect_FindNode` (0x802342f8) maps a handle back to its spawn node while the effect
+  lives. One call can fan out into several sub-effects and returns only the primary handle.
   Most callers discard it, so nothing points back at the effect.
 
 | Mode | Varargs | Meaning |
 |---|---|---|
 | 0 | none | no placement |
 | 1 | one `void (*)(void *node)` | world-anchored: the callback receives the spawn node once the effect exists |
-| 100-112 | varies | follow a `JOBJ *` |
+| 100 | `Vec3 *pos` | particle IDs: a generator at a world position |
+| 103 | `Vec3 *pos, float *scale` | particle IDs: the same at a uniform scale |
+| 101, 102, 104-112 | varies | follow a `JOBJ *` |
 | 200-220 | varies | follow a `JOBJ *`; 218 is the rider mouth anchor `Rider_StartInhale` uses |
-| 510 | varies | what `EventActor_SpawnEffect` passes |
+| 506, 507 | `int ply, int, Vec3 *pos` (507: `, int frames`) | one player's quake |
+| 510, 511 | `int, Vec3 *pos` (511: `, int frames`) | a quake on every view; a NULL `pos` has no falloff |
 
-No mode takes a raw world position. To place an effect in the world, spawn with mode 1 and take
-the effect GObj from the node in the callback (`node + 0x5c`, `EFFECT_NODE_GOBJ`).
+Particle IDs (below 240000) place in the world through modes 100 and 103, with no anchor: the
+stage's break debris (`GrYaku_SpawnBreakEffect`, 0x800f7044) and the dust event actors kick up both
+spawn this way, and any efgroup but -1 works, 0 included. Model effects take no raw position. To
+place one in the world, spawn with mode 1 and take the effect GObj from the node in the callback
+(`node + 0x5c`, `EFFECT_NODE_GOBJ`).
+
+| Particle ID | Bank | Effect |
+|---|---|---|
+| 20067 | `common2` | the ground dust event actors raise while running |
+| 20118 | `common2` | water splash |
+| 50007, 50012 | `yakumono` | the ground burst the pillar event raises at a pillar's base, at scale 3 |
 
 ## The model-effect GObj
 
@@ -199,8 +218,9 @@ generator templates), `<name>_texg` (sprite textures), `<name>_ref` (`EffectBank
 `psInitDataBanks` (0x8042a734) installs them into per-bank tables that only the particle path
 reads; model-effect lookup reads only `stc_effect_mgr + 0x24`.
 
-`Effect_Init` (0x80233908) runs at boot: it builds `stc_effect_mgr` (`Effect_InitObjAllocs`,
-0x802332c4), allocates the particle pools, and loads `EfCommon.dat` (`Effect_LoadEfCommon`,
+`Effect_Init` (0x80233908) runs at every 3D scene load, from `SceneLoad_3D`: it builds
+`stc_effect_mgr` (`Effect_InitObjAllocs`, 0x802332c4), allocates the particle pools, creates the
+quake GObj, and loads `EfCommon.dat` (`Effect_LoadEfCommon`,
 0x80235524) and `EfPtclVehicle.dat` (`Ptcl_LoadEfPtclVehicle`, 0x80235394). Effect files go
 through the preload system as `PRELOADFILEKIND_EFFECT`; `EfCommon` and `A2EfCom` also carry
 `PRELOADFLAG_PERSIST` and stay resident.
@@ -223,5 +243,6 @@ through the preload system as `PRELOADFILEKIND_EFFECT`; `EfCommon` and `A2EfCom`
 | (follow proc) | 0x8023ce1c | re-anchors the root SRT to the target joint each frame |
 | (loop watcher) | 0x8023e6bc | arms AOBJ looping once the intro ends |
 | (efgroup kill) | 0x80236358 | destroys every effect in a group |
+| `Effect_AllocEfGroup` | 0x802364e0 | hand out a free EfGroup |
 | `MObjSetupTev` | 0x803faba0 | per-render TEV setup that re-reads the color registers |
 | `ColAnim_Resolve` | 0x8006ae7c | pick the body overlay colour a rider or machine draws with |

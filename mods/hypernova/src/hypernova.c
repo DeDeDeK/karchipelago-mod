@@ -397,7 +397,7 @@ static void RecolorWhirlwinds(GXColor rgb)
         Effect *eff = g_eff->userdata;
         if (eff == NULL)
             continue;
-        if (eff->kind != HYPERNOVA_INHALE_EFFECT_ID)
+        if (eff->kind != EFFECT_ID_INHALE_WHIRLWIND)
             continue;
         RecolorEffectTree((JOBJ *)g_eff->hsd_object, rgb);
     }

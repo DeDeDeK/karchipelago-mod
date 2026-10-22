@@ -52,18 +52,22 @@ event:
 - **State 3 (cleanup).** Calls `end` each frame; after `cleanup_delay` calls `end2`, stops the
   secondary BGM, rolls a fresh delay between `delay_min` and `delay_max`, and returns to state 0.
 
-**Starting an event.** `CustomEvent_Do(kind)`, exported as the API's `Do`, returns 0 when the kind
-is not a custom one, when the round has no event system (`CityEvent_Init` leaves
-`stc_eventcheck_gobj` NULL with City Trial events off), or when an event is already running.
-Otherwise it sets state 1, the kind and the timer, and plays the siren intro `CityEvent_Decide`
-plays for a vanilla pick: `Gm_FadeOutMusic(music_fadeout_frames)`, the siren
-(`SFX_PlayFullVolume(EVENT_SIREN_SFX)`) and the sky transition.
+**Starting an event.** The API's `Do(kind)` returns 0 when the kind is not a custom one, when the
+scene is not a City Trial round with events on, when an event is already running, or when the
+event's `can_start` says it cannot run this round. The round's event GObj comes from the mod's own
+copy, taken at `On3DLoadEnd` of a City Trial round and dropped at `On3DExit`, not from
+`stc_eventcheck_gobj`: `CityEvent_Init` leaves that NULL with events off, but nothing clears it when
+the round ends, so it points into a freed heap until the next stage load. Otherwise `Do` sets
+state 1, the kind and the timer, and plays the siren intro `CityEvent_Decide` plays for a vanilla
+pick: `Gm_FadeOutMusic(music_fadeout_frames)`, the siren (`SFX_PlayFullVolume(EVENT_SIREN_SFX)`)
+and the sky transition.
 
 **The natural roll.** `CODEPATCH_REPLACECALL` swaps the `bl Gm_Roll(chance_arr, 16)` inside
 `CityEvent_Decide` (at 0x800ee098) for an extended roll. It sums the 16 vanilla weights - already
-filtered by history and once-only - and the custom weights, and rolls over both. A roll in the
-vanilla range calls the real `Gm_Roll`, so vanilla weighting is unchanged; a custom pick starts its
-event through `CustomEvent_Do` and returns -1. On -1 `CityEvent_Decide` only sets a new
+filtered by history and once-only - and the custom weights, counting an event whose `can_start`
+fails as weight 0, and rolls over both. A roll in the vanilla range calls the real `Gm_Roll`, so
+vanilla weighting is unchanged; one in the custom range picks the event with a `Gm_Roll` over the
+custom weights, starts it as `Do` does and returns -1. On -1 `CityEvent_Decide` only sets a new
 `event_time` and zeroes the timer - the same path it takes when `Gm_Roll` finds every weight zero -
 and never writes the state or kind, so the custom event, already in state 1, proceeds under the
 wrappers. A kind waiting in the reserve queue is retried before this call and never reaches it.
@@ -102,7 +106,7 @@ destructor is a bare `HSD_Free`, so `end2` never runs. Idle stops starting event
 `min_time` (2200) frames remain, but a long event can still be cut off, and a direct trigger skips
 that gate.
 
-The framework tracks the running custom event from `CustomEvent_Do` until state 3 finishes, and its
+The framework tracks the running custom event from its trigger until state 3 finishes, and its
 `On3DExit` - which runs at the end of minor 18's exit callback, before the scene heaps are reset -
 calls the running event's optional `abort`. An `abort` resets only mod state that would outlive the
 scene and must not touch GObjs, which are about to be reclaimed. An event whose `start` resets
@@ -119,15 +123,15 @@ array, so the vanilla popup renders it with its normal slide-in and no per-trigg
   SIS treats bytes below 0x20 as commands and everything else as 2-byte character codes; a space is
   a command, not a character.
 - **The array.** Every 3D scene reloads `stc_sis_data[0]` (0x8059a85c) with `SisCitytrial.dat`'s
-  42 entries before `On3DLoadEnd`, so on every City Trial load the mod copies those pointers into
-  its own larger array with `Text_ExtendSis`, points slot 0 at it, and appends the custom buffers as
-  SIS ids 42 and up. The next scene's reload discards the extension.
+  42 entries before `On3DLoadEnd`, so on every City Trial load with events on the mod copies those
+  pointers into its own larger array with `Text_ExtendSis`, points slot 0 at it, and appends the
+  custom buffers as SIS ids 42 and up. The next scene's reload discards the extension.
 - **The id table.** `stadiumPrediction` resolves the argument of `CityEvent_ShowHudText` through
   `stc_event_sis_id_table`, which cannot grow in place. The mod copies its 40 ids into its own table,
   appends the custom ids at index 40 and up, and rewrites the `lis`/`addi` pair in each of the three
   readers - `CityEvent_HudPredictionShow` (0x80127624), `CityEvent_HudPredictionThink` (0x801276c0)
   and `stadiumPrediction` (0x80127864) - to point at the copy. The ids are read back as signed
-  bytes, so 42 plus the custom event count must stay below 128.
+  bytes, so 42 plus the custom event count must not exceed 128.
 
 ## Registering an Event
 
@@ -143,8 +147,9 @@ siren event. A `CustomEventDesc` holds:
 | `sky_preset` | Sky preset for the transition; -1 leaves the sky alone |
 | `bgm_file` | Secondary BGM index |
 | `weight` | Natural roll weight; 0 never rolls |
-| `start`, `end2` | Required: once entering state 2, once when state 3 finishes |
-| `active`, `end`, `abort` | Optional: every frame of state 2, every frame of state 3, round cut off |
+| `can_start` | Optional: whether the event can run this round; a failing event neither rolls nor starts through `Do` |
+| `start` | Required: once, entering state 2 |
+| `active`, `end`, `end2`, `abort` | Optional: every frame of state 2, every frame of state 3, once when state 3 finishes, round cut off |
 
 Vanilla events bias item drops through `CityEvent_ModifyItemFallDesc(kind)`, and every step of that
 path indexes by kind against 16-wide storage, so a custom kind matches nothing and reads past the
@@ -155,4 +160,5 @@ or writes the box-spawn fields directly.
 
 `CustomEventsAPI` is published with `Hoshi_ExportMod` and resolved with
 `Hoshi_ImportMod(CUSTOM_EVENTS_MOD_NAME, CUSTOM_EVENTS_API_MAJOR, CUSTOM_EVENTS_API_MINOR)`. It
-exports one function, `Do(kind)`, described above.
+exports `Do(kind)`, described above, and `DoDangerRain(rain)`, which starts Danger Rain with a
+chosen `DangerRainKind` instead of a random one.

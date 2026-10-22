@@ -14,7 +14,6 @@
 #include "weather_fx.h"
 
 #define STAR_MAX   220  // field capacity; resolved density clamps to this
-#define STAR_SEGS  6    // rim vertices of each soft dot (a coarse circle is plenty)
 
 // Each star sits at P = eye + skydir*dist, so panning sweeps a world-fixed field
 // with no parallax swim.
@@ -24,9 +23,6 @@
 
 // Only seed stars above this elevation so they read as sky, not horizon haze.
 #define STAR_MIN_ELEV_DEG  10.0f
-
-// Global baseline star-size multiplier over every preset's resolved size.
-#define STAR_SIZE_SCALE  1.0f
 
 // Per-star base brightness floor: some stars are dim, none fully dark.
 #define STAR_BRIGHT_MIN  0.35f
@@ -39,7 +35,7 @@
 
 // Defaults applied when a preset leaves the matching StarDef field 0; the color
 // alpha is the base brightness before luminosity/twinkle.
-#define STAR_DEF_COLOR     RGBA(228, 234, 248, 170)
+static const GXColor star_def_color = {228, 234, 248, 170};
 #define STAR_DEF_DENSITY   120
 #define STAR_DEF_TWINKLE   0.5f
 #define STAR_DEF_LUM       1.0f
@@ -61,13 +57,10 @@
 #define SHOOT_FADE_IN      4     // brighten-in frames
 #define SHOOT_FADE_OUT     12    // fade-out frames
 
-#define STAR_GOBJ_CLASS  208
-#define STAR_GOBJ_PLINK  32
-
 typedef struct Star
 {
     Vec3  dir;       // world sky direction (celestial), seeded once
-    float size;      // world radius at STAR_REF_DIST
+    float size;      // world radius at WEATHER_DOME_REF_DIST
     float bright;    // per-star base brightness, 0..1
     float tw_phase;  // twinkle phase offset
     float tw_speed;  // twinkle angular speed (rad/frame)
@@ -83,7 +76,6 @@ typedef struct Shoot
     float arc;    // angular length of the path (radians)
 } Shoot;
 
-// Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_star_gobj = NULL;
 
 static int   stc_active = 0;
@@ -94,39 +86,39 @@ static Star stc_stars[STAR_MAX];
 static int  stc_count = 0;
 
 static Shoot stc_shoot[SHOOT_MAX];
-static int   stc_shoot_timer = 0;   // frames until the next meteor
-static int   stc_shoot_level = 3;   // active preset's cadence level (1 Off..4 Frequent)
+static int   stc_shoot_timer = 0;                     // frames until the next meteor
+static int   stc_shoot_level = SHOOT_FREQ_OCCASIONAL; // active preset's cadence
 
 // Resolved per-preset config (StarDef + defaults), before the menu scalars.
-static GXColor stc_color = {228, 234, 248, 170};
-static int     stc_base_density = STAR_DEF_DENSITY;
-static float   stc_twinkle = STAR_DEF_TWINKLE;
-static float   stc_lum = STAR_DEF_LUM;
-static float   stc_base_size = STAR_DEF_SIZE;
-static float   stc_size_var = STAR_DEF_SIZE_VAR;
+static GXColor stc_color;
+static int     stc_base_density;
+static float   stc_twinkle;
+static float   stc_lum;
+static float   stc_base_size;
+static float   stc_size_var;
 
-// Index 0 ("Preset") is the pass-through value on every knob below.
+// Index 0 ("Preset") is the pass-through value on every starfield knob.
 static int   show_index = 0;
 
-static const float density_factors[] = {1.0f, 0.5f, 1.0f, 1.7f};
-static char *density_names[] = {"Preset", "Sparse", "Normal", "Dense"};
-#define STAR_DENSITY_NUM ((int)GetElementsIn(density_factors))
+static const float density_factors[] = {1.0f, 0.5f, 1.7f};
+static char *density_names[] = {"Preset", "Sparse", "Dense"};
+WEATHER_KNOB_CHECK(density_factors, density_names);
 static int density_index = 0;
 
-static const float twinkle_factors[] = {1.0f, 0.0f, 1.0f, 2.0f};
-static char *twinkle_names[] = {"Preset", "None", "Gentle", "Lively"};
-#define STAR_TWINKLE_NUM ((int)GetElementsIn(twinkle_factors))
+static const float twinkle_factors[] = {1.0f, 0.0f, 2.0f};
+static char *twinkle_names[] = {"Preset", "None", "Lively"};
+WEATHER_KNOB_CHECK(twinkle_factors, twinkle_names);
 static int twinkle_index = 0;
 
-static const float lum_factors[] = {1.0f, 0.6f, 1.0f, 1.4f};
-static char *lum_names[] = {"Preset", "Dim", "Normal", "Bright"};
-#define STAR_LUM_NUM ((int)GetElementsIn(lum_factors))
+static const float lum_factors[] = {1.0f, 0.6f, 1.4f};
+static char *lum_names[] = {"Preset", "Dim", "Bright"};
+WEATHER_KNOB_CHECK(lum_factors, lum_names);
 static int lum_index = 0;
 
-// Master scalar over the preset's per-star size spread (resolved var clamped 0..1).
-static const float variance_factors[] = {1.0f, 0.2f, 1.0f, 1.8f};
-static char *variance_names[] = {"Preset", "Uniform", "Normal", "Varied"};
-#define STAR_VARIANCE_NUM ((int)GetElementsIn(variance_factors))
+// Master scalar over the preset's per-star size spread (resolved var clamped to 1).
+static const float variance_factors[] = {1.0f, 0.2f, 1.8f};
+static char *variance_names[] = {"Preset", "Uniform", "Varied"};
+WEATHER_KNOB_CHECK(variance_factors, variance_names);
 static int variance_index = 0;
 
 // Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the base
@@ -134,86 +126,76 @@ static int variance_index = 0;
 static const u32 color_overrides[] = {0, RGBA(255, 255, 255, 255), RGBA(255, 240, 214, 255),
                                       RGBA(210, 224, 255, 255)};
 static char *color_names[] = {"Preset", "White", "Warm", "Cool"};
-#define STAR_COLOR_NUM ((int)GetElementsIn(color_overrides))
+WEATHER_KNOB_CHECK(color_overrides, color_names);
 static int color_index = 0;
 
-// Random lull range (frames) between meteors, indexed by cadence level. Slots 0
-// (Preset) and 1 (Off) are never read - RandLull remaps both to a real level - but
-// keep the arrays lined up with shoot_names.
-static const int shoot_lull_min[] = {600, 0, 1200, 600, 240};
-static const int shoot_lull_max[] = {1500, 0, 3000, 1500, 600};
+// Random lull range (frames) between meteors, indexed by ShootFreq. Default and Off
+// are resolved before a lull is drawn, so their slots are never read.
+static const int shoot_lull_min[] = {0, 0, 1200, 600, 240};
+static const int shoot_lull_max[] = {0, 0, 3000, 1500, 600};
 static char *shoot_names[] = {"Preset", "Off", "Rare", "Occasional", "Frequent"};
-#define STAR_SHOOT_NUM ((int)GetElementsIn(shoot_names))
+_Static_assert(GetElementsIn(shoot_names) == SHOOT_FREQ_NUM, "shoot_names must cover ShootFreq");
+WEATHER_KNOB_CHECK(shoot_lull_min, shoot_names);
+WEATHER_KNOB_CHECK(shoot_lull_max, shoot_names);
 static int shoot_index = 0;
 
-// Effective cadence level 1..4; Preset (0) resolves to the preset's latched level.
+// Effective cadence; Preset (0) resolves to the preset's latched level.
 static int ShootLevel(void)
 {
-    return (shoot_index == 0) ? stc_shoot_level : shoot_index;
+    return (shoot_index == SHOOT_FREQ_DEFAULT) ? stc_shoot_level : shoot_index;
 }
 
-// Meteor head/trail size multiplier.
-static const float shoot_size_factors[] = {1.0f, 0.65f, 1.0f, 1.5f};
-static char *shoot_size_names[] = {"Preset", "Small", "Normal", "Large"};
-#define SHOOT_SIZE_NUM ((int)GetElementsIn(shoot_size_factors))
-static int shoot_size_index = 0;
+// The meteor knobs have no per-preset field behind them, so none has a Preset value.
+static const float shoot_size_factors[] = {0.65f, 1.0f, 1.5f};
+static char *shoot_size_names[] = {"Small", "Normal", "Large"};
+WEATHER_KNOB_CHECK(shoot_size_factors, shoot_size_names);
+static int shoot_size_index = 1;
 
 // Life multiplier: a slower meteor lives longer, crossing its arc more slowly.
-static const float shoot_speed_factors[] = {1.0f, 1.6f, 1.0f, 0.6f};
-static char *shoot_speed_names[] = {"Preset", "Slow", "Normal", "Fast"};
-#define SHOOT_SPEED_NUM ((int)GetElementsIn(shoot_speed_factors))
-static int shoot_speed_index = 0;
+static const float shoot_speed_factors[] = {1.6f, 1.0f, 0.6f};
+static char *shoot_speed_names[] = {"Slow", "Normal", "Fast"};
+WEATHER_KNOB_CHECK(shoot_speed_factors, shoot_speed_names);
+static int shoot_speed_index = 1;
 
 // Additive peak-brightness multiplier over SHOOT_BRIGHT.
-static const float shoot_bright_factors[] = {1.0f, 0.6f, 1.0f, 1.5f};
-static char *shoot_bright_names[] = {"Preset", "Dim", "Normal", "Bright"};
-#define SHOOT_BRIGHT_NUM ((int)GetElementsIn(shoot_bright_factors))
-static int shoot_bright_index = 0;
+static const float shoot_bright_factors[] = {0.6f, 1.0f, 1.5f};
+static char *shoot_bright_names[] = {"Dim", "Normal", "Bright"};
+WEATHER_KNOB_CHECK(shoot_bright_factors, shoot_bright_names);
+static int shoot_bright_index = 1;
 
 // Index 0 follows the resolved starfield color; the rest force an RGB.
 static const u32 shoot_color_overrides[] = {0, RGBA(255, 255, 255, 255), RGBA(255, 236, 200, 255),
                                             RGBA(200, 224, 255, 255)};
 static char *shoot_color_names[] = {"Star", "White", "Warm", "Cool"};
-#define SHOOT_COLOR_NUM ((int)GetElementsIn(shoot_color_overrides))
+WEATHER_KNOB_CHECK(shoot_color_overrides, shoot_color_names);
 static int shoot_color_index = 0;
-
-static void Star_GX(GOBJ *g, int pass);
 
 // Seed one star: a direction uniformly over the sky cap above the min elevation,
 // a size scaled by the resolved variance, and a random twinkle.
 static void SeedStar(Star *s, float sin_min, float var)
 {
-    float z = Weather_RandRange(sin_min, 1.0f);
+    float z = RandomInRangef(sin_min, 1.0f);
     float rh = 1.0f - z * z;
     rh = (rh > 0.0f) ? sqrtf(rh) : 0.0f;
-    float az = HSD_Randf() * 2.0f * M_PI;
+    float az = RandomAngle();
     s->dir.X = rh * cosf(az);
     s->dir.Y = z;
     s->dir.Z = rh * sinf(az);
 
-    float scale = 1.0f + Weather_Randf2() * var;
-    if (scale < 0.3f)
-        scale = 0.3f;
-    s->size = stc_base_size * STAR_SIZE_SCALE * scale;
-
-    s->bright = Weather_RandRange(STAR_BRIGHT_MIN, 1.0f);
-    s->tw_phase = HSD_Randf() * 2.0f * M_PI;
-    s->tw_speed = Weather_RandRange(STAR_TW_SPEED_MIN, STAR_TW_SPEED_MAX);
+    s->size = stc_base_size * Weather_RandScale(var, 0.3f);
+    s->bright = RandomInRangef(STAR_BRIGHT_MIN, 1.0f);
+    s->tw_phase = RandomAngle();
+    s->tw_speed = RandomInRangef(STAR_TW_SPEED_MIN, STAR_TW_SPEED_MAX);
 }
 
 // No stage dependency, so this always succeeds.
 static void Star_Arm(void)
 {
     float var = stc_size_var * variance_factors[variance_index];
-    if (var < 0.0f) var = 0.0f;
-    if (var > 1.0f) var = 1.0f;
+    if (var > 1.0f)
+        var = 1.0f;
 
-    int want = (int)(stc_base_density * density_factors[density_index] + 0.5f);
-    if (want > STAR_MAX)
-        want = STAR_MAX;
-    if (want < 0)
-        want = 0;
-    stc_count = want;
+    stc_count = Weather_ScaleCount(stc_base_density, density_factors[density_index], STAR_MAX);
 
     float sin_min = sinf(MTXDegToRad(STAR_MIN_ELEV_DEG));
     for (int i = 0; i < stc_count; i++)
@@ -223,25 +205,27 @@ static void Star_Arm(void)
     OSReport("[Stars] Armed %d stars\n", stc_count);
 }
 
-static void Star_Ensure(void)
-{
-    if (stc_star_gobj)
-        return;
-    stc_star_gobj = WeatherGX_EnsureLayer(STAR_GOBJ_CLASS, STAR_GOBJ_PLINK, Star_GX, "Stars");
-}
-
 static float PlaceOnDome(const Vec3 *dir, const Vec3 *eye, float e2, float maxd, Vec3 *P)
 {
     return WeatherGX_PlaceOnDome(dir, eye, e2, STAR_MAX_DIST, STAR_DOME_FRAC, maxd, P);
 }
 
+// The unit direction `p` of the way along a meteor's great-circle path.
+static void ShootDir(const Shoot *sh, float p, Vec3 *out)
+{
+    float a = sh->arc * p;
+    float ca = cosf(a), sa = sinf(a);
+    out->X = sh->d0.X * ca + sh->t.X * sa;
+    out->Y = sh->d0.Y * ca + sh->t.Y * sa;
+    out->Z = sh->d0.Z * ca + sh->t.Z * sa;
+}
+
 // GX callback on the world camera link, XLU pass. Stars and meteors draw additively
-// and fog-free (bracketed HSD_FogSet) so the distant dots are not washed to the fog
-// color.
+// and fog-free so the distant dots are not washed to the fog color.
 static void Star_GX(GOBJ *g, int pass)
 {
     (void)g;
-    if (pass != 1)
+    if (pass != GXPASS_TEXEDGE)
         return;
     if (!stc_active || stc_count <= 0)
         return;
@@ -259,15 +243,11 @@ static void Star_GX(GOBJ *g, int pass)
     float maxd = cam->far * STAR_FAR_FRAC;
 
     float tw = stc_twinkle * twinkle_factors[twinkle_index];
-    if (tw < 0.0f) tw = 0.0f;
-    if (tw > 1.0f) tw = 1.0f;
+    if (tw > 1.0f)
+        tw = 1.0f;
     float lum = stc_lum * lum_factors[lum_index];
 
-    HSD_Fog *fog = Weather_LiveFog();
-
-    GX_BeginXlu(cam, 2, GX_BL_ONE); // additive: dots glow, never darken the sky
-    if (fog)
-        HSD_FogSet(NULL);
+    WeatherGX_BeginSky(cam, GX_BL_ONE); // additive: dots glow, never darken the sky
 
     for (int i = 0; i < stc_count; i++)
     {
@@ -279,32 +259,19 @@ static void Star_GX(GOBJ *g, int pass)
             continue;
         if (a > 255.0f)
             a = 255.0f;
-        u8 A = (u8)a;
 
         Vec3 P;
         float dist = PlaceOnDome(&s->dir, &eye, e2, maxd, &P);
-        float r = s->size * (dist / WEATHER_DOME_REF_DIST);
-
-        GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, STAR_SEGS + 2);
-        GX_BillboardVert(&P, &rightW, &upW, 0.0f, 0.0f, stc_color, A);
-        for (int sgm = 0; sgm <= STAR_SEGS; sgm++)
-        {
-            float ang = 2.0f * M_PI * (float)sgm / (float)STAR_SEGS;
-            GX_BillboardVert(&P, &rightW, &upW, cosf(ang) * r, sinf(ang) * r,
-                             stc_color, 0);
-        }
+        WeatherGX_SoftDot(&P, &rightW, &upW, s->size * (dist / WEATHER_DOME_REF_DIST),
+                          stc_color, (u8)a);
     }
 
     // Meteors: the trail samples the great-circle path just behind the head and
     // fades to transparent at the tail.
-    if (ShootLevel() != 1) // 1 = Off
+    if (ShootLevel() != SHOOT_FREQ_OFF)
     {
         GXColor sc = stc_color;
-        if (shoot_color_index > 0)
-        {
-            GXColor ov = GXColor_Unpack(shoot_color_overrides[shoot_color_index]);
-            sc = (GXColor){ov.r, ov.g, ov.b, sc.a};
-        }
+        Weather_OverrideRGB(&sc, shoot_color_overrides[shoot_color_index]);
         float peak = (float)SHOOT_BRIGHT * shoot_bright_factors[shoot_bright_index];
         if (peak > 255.0f)
             peak = 255.0f;
@@ -312,7 +279,7 @@ static void Star_GX(GOBJ *g, int pass)
         int lw = (int)(SHOOT_LINE_WIDTH * shoot_size_factors[shoot_size_index]);
         if (lw < 1)
             lw = 1;
-        GXSetLineWidth((u8)lw, 5);
+        GXSetLineWidth((u8)lw, GX_TO_ONE);
 
         for (int i = 0; i < SHOOT_MAX; i++)
         {
@@ -338,48 +305,29 @@ static void Star_GX(GOBJ *g, int pass)
                 float pp = p - SHOOT_TRAIL_SPAN * (1.0f - f);
                 if (pp < 0.0f)
                     pp = 0.0f;
-                float a = sh->arc * pp;
-                float ca = cosf(a), sa = sinf(a);
-                Vec3 d = {sh->d0.X * ca + sh->t.X * sa,
-                          sh->d0.Y * ca + sh->t.Y * sa,
-                          sh->d0.Z * ca + sh->t.Z * sa};
-                Vec3 TP;
+                Vec3 d, TP;
+                ShootDir(sh, pp, &d);
                 PlaceOnDome(&d, &eye, e2, maxd, &TP);
-                u8 A = (u8)(peak * env * f);
                 GXPosition3f32(TP.X, TP.Y, TP.Z);
-                GXColor4u8(sc.r, sc.g, sc.b, A);
+                GXColor4u8(sc.r, sc.g, sc.b, (u8)(peak * env * f));
             }
 
-            float ah = sh->arc * p;
-            float ch = cosf(ah), shh = sinf(ah);
-            Vec3 hd = {sh->d0.X * ch + sh->t.X * shh,
-                       sh->d0.Y * ch + sh->t.Y * shh,
-                       sh->d0.Z * ch + sh->t.Z * shh};
-            Vec3 HP;
+            Vec3 hd, HP;
+            ShootDir(sh, p, &hd);
             float hdist = PlaceOnDome(&hd, &eye, e2, maxd, &HP);
-            float hr = head_size * (hdist / WEATHER_DOME_REF_DIST);
-            u8 HA = (u8)(peak * env);
-            GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, STAR_SEGS + 2);
-            GX_BillboardVert(&HP, &rightW, &upW, 0.0f, 0.0f, sc, HA);
-            for (int sgm = 0; sgm <= STAR_SEGS; sgm++)
-            {
-                float ang = 2.0f * M_PI * (float)sgm / (float)STAR_SEGS;
-                GX_BillboardVert(&HP, &rightW, &upW, cosf(ang) * hr, sinf(ang) * hr,
-                                 sc, 0);
-            }
+            WeatherGX_SoftDot(&HP, &rightW, &upW, head_size * (hdist / WEATHER_DOME_REF_DIST),
+                              sc, (u8)(peak * env));
         }
     }
 
-    if (fog)
-        HSD_FogSet(fog); // restore world fog for later geometry on this pass
-    HSD_StateInvalidate(-1);
+    WeatherGX_EndSky();
 }
 
 static int RandLull(void)
 {
     int lvl = ShootLevel();
-    if (lvl == 1) // Off falls back to Occasional for the (unused) seed delay
-        lvl = 3;
+    if (lvl == SHOOT_FREQ_OFF) // the seed delay of a field that never launches
+        lvl = SHOOT_FREQ_OCCASIONAL;
     return RandomInRange(shoot_lull_min[lvl], shoot_lull_max[lvl]);
 }
 
@@ -399,8 +347,8 @@ static void Shoot_Spawn(void)
     if (!sh)
         return; // pool full; skip this launch
 
-    float el = MTXDegToRad(Weather_RandRange(25.0f, 75.0f));
-    float az = HSD_Randf() * 2.0f * M_PI;
+    float el = MTXDegToRad(RandomInRangef(25.0f, 75.0f));
+    float az = RandomAngle();
     float ce = cosf(el), se = sinf(el);
     Vec3 d0 = {ce * sinf(az), se, ce * cosf(az)};
 
@@ -409,7 +357,7 @@ static void Shoot_Spawn(void)
     Vec3 e1, e2;
     VEC_CrossNormalizeSnap(&d0, &(Vec3){0.0f, 1.0f, 0.0f}, &e1);
     VECCrossProduct(&d0, &e1, &e2);
-    float roll = HSD_Randf() * 2.0f * M_PI;
+    float roll = RandomAngle();
     float cr = cosf(roll), sr = sinf(roll);
     Vec3 t = {e1.X * cr + e2.X * sr, e1.Y * cr + e2.Y * sr, e1.Z * cr + e2.Z * sr};
     if (t.Y > 0.0f)
@@ -419,7 +367,7 @@ static void Shoot_Spawn(void)
 
     sh->d0 = d0;
     sh->t = t;
-    sh->arc = Weather_RandRange(SHOOT_ARC_MIN, SHOOT_ARC_MAX);
+    sh->arc = RandomInRangef(SHOOT_ARC_MIN, SHOOT_ARC_MAX);
     int base_life = RandomInRange(SHOOT_LIFE_MIN, SHOOT_LIFE_MAX);
     sh->life = (int)(base_life * shoot_speed_factors[shoot_speed_index]);
     if (sh->life < 1)
@@ -447,8 +395,8 @@ static void Shoot_Tick(void)
         if (sh->age >= sh->life)
             sh->active = 0;
     }
-    if (ShootLevel() == 1)
-        return; // Off
+    if (ShootLevel() == SHOOT_FREQ_OFF)
+        return;
     if (stc_shoot_timer > 0)
     {
         stc_shoot_timer--;
@@ -468,16 +416,10 @@ void Star_SetActive(const StarDef *def)
     }
     stc_active = 1;
 
-    stc_color = GXColor_Unpack((def && def->color) ? def->color : STAR_DEF_COLOR);
-    if (color_index > 0)
-    {
-        GXColor ov = GXColor_Unpack(color_overrides[color_index]);
-        stc_color = (GXColor){ov.r, ov.g, ov.b, stc_color.a};
-    }
+    stc_color = (def && def->color) ? GXColor_Unpack(def->color) : star_def_color;
+    Weather_OverrideRGB(&stc_color, color_overrides[color_index]);
 
     stc_base_density = (def && def->density > 0) ? def->density : STAR_DEF_DENSITY;
-    if (stc_base_density > STAR_MAX)
-        stc_base_density = STAR_MAX;
     stc_twinkle = (def && def->twinkle > 0.0f) ? def->twinkle : STAR_DEF_TWINKLE;
     stc_lum = (def && def->luminosity > 0.0f) ? def->luminosity : STAR_DEF_LUM;
     stc_base_size = (def && def->size > 0.0f) ? def->size : STAR_DEF_SIZE;
@@ -498,7 +440,7 @@ void Star_Tick(void)
         return;
     if (!stc_inited)
         Star_Arm();
-    Star_Ensure();
+    WeatherGX_EnsureLayer(&stc_star_gobj, Star_GX, "Stars");
     stc_time += 1.0f;
     Shoot_Tick();
 }
@@ -521,7 +463,7 @@ static MenuDesc shooting_menu = {
             .description = "How often meteors streak across the sky (Preset = each preset's own cadence, Off disables them)",
             .kind = OPTKIND_VALUE,
             .val = &shoot_index,
-            .value_num = STAR_SHOOT_NUM,
+            .value_num = GetElementsIn(shoot_names),
             .value_names = shoot_names,
         },
         &(OptionDesc){
@@ -529,7 +471,7 @@ static MenuDesc shooting_menu = {
             .description = "How large the meteor heads and trails are",
             .kind = OPTKIND_VALUE,
             .val = &shoot_size_index,
-            .value_num = SHOOT_SIZE_NUM,
+            .value_num = GetElementsIn(shoot_size_factors),
             .value_names = shoot_size_names,
         },
         &(OptionDesc){
@@ -537,7 +479,7 @@ static MenuDesc shooting_menu = {
             .description = "How fast the meteors streak across the sky",
             .kind = OPTKIND_VALUE,
             .val = &shoot_speed_index,
-            .value_num = SHOOT_SPEED_NUM,
+            .value_num = GetElementsIn(shoot_speed_factors),
             .value_names = shoot_speed_names,
         },
         &(OptionDesc){
@@ -545,7 +487,7 @@ static MenuDesc shooting_menu = {
             .description = "How bright the meteors glow",
             .kind = OPTKIND_VALUE,
             .val = &shoot_bright_index,
-            .value_num = SHOOT_BRIGHT_NUM,
+            .value_num = GetElementsIn(shoot_bright_factors),
             .value_names = shoot_bright_names,
         },
         &(OptionDesc){
@@ -553,7 +495,7 @@ static MenuDesc shooting_menu = {
             .description = "Meteor tint (Star = follow the starfield color)",
             .kind = OPTKIND_VALUE,
             .val = &shoot_color_index,
-            .value_num = SHOOT_COLOR_NUM,
+            .value_num = GetElementsIn(shoot_color_overrides),
             .value_names = shoot_color_names,
         },
     },
@@ -567,15 +509,15 @@ MenuDesc stars_menu = {
             .description = "Show stars: Preset = only presets that set them, Off = never, On = every CT preset",
             .kind = OPTKIND_VALUE,
             .val = &show_index,
-            .value_num = 3,
+            .value_num = WEATHER_TOGGLE_NUM,
             .value_names = weather_toggle_names,
         },
         &(OptionDesc){
             .name = "Density",
-            .description = "How many stars fill the sky over every CT preset",
+            .description = "Scales the star count on presets with stars",
             .kind = OPTKIND_VALUE,
             .val = &density_index,
-            .value_num = STAR_DENSITY_NUM,
+            .value_num = GetElementsIn(density_factors),
             .value_names = density_names,
         },
         &(OptionDesc){
@@ -583,7 +525,7 @@ MenuDesc stars_menu = {
             .description = "How much the stars shimmer in brightness (None = steady)",
             .kind = OPTKIND_VALUE,
             .val = &twinkle_index,
-            .value_num = STAR_TWINKLE_NUM,
+            .value_num = GetElementsIn(twinkle_factors),
             .value_names = twinkle_names,
         },
         &(OptionDesc){
@@ -591,7 +533,7 @@ MenuDesc stars_menu = {
             .description = "How bright the stars glow",
             .kind = OPTKIND_VALUE,
             .val = &lum_index,
-            .value_num = STAR_LUM_NUM,
+            .value_num = GetElementsIn(lum_factors),
             .value_names = lum_names,
         },
         &(OptionDesc){
@@ -599,7 +541,7 @@ MenuDesc stars_menu = {
             .description = "How much the stars vary in size (Uniform = even, Varied = mixed)",
             .kind = OPTKIND_VALUE,
             .val = &variance_index,
-            .value_num = STAR_VARIANCE_NUM,
+            .value_num = GetElementsIn(variance_factors),
             .value_names = variance_names,
         },
         &(OptionDesc){
@@ -607,7 +549,7 @@ MenuDesc stars_menu = {
             .description = "Override the star tint across every preset (Preset = each preset's own)",
             .kind = OPTKIND_VALUE,
             .val = &color_index,
-            .value_num = STAR_COLOR_NUM,
+            .value_num = GetElementsIn(color_overrides),
             .value_names = color_names,
         },
         &(OptionDesc){

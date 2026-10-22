@@ -87,6 +87,17 @@ flags:
 A full transition also re-initializes the animation script with its timer at -1.0, so the first
 command fires immediately.
 
+### Spawn fade-in
+
+Every per-type spawn state's `anim_cb` starts with `EventActor_StartFadeIn` (0x801ff754): it sets
+`alpha` (`ed+0x364`) to 0.1, switches the model to translucent rendering and adds
+`EventActorGObj_ProcFadeIn` (0x801ff520) at priority 0. The proc raises `alpha` by 0.1 a frame
+(0.02 for TAC, Dyna Blade and the Meteor), so a regular enemy fades in over about ten frames. At
+1.0 it frees and rebuilds the model and the HurtData, re-enters the current state through
+`EventActor_ChangeState` with flag 0x10 - or calls `fadein_cb` (`ed+0xAB4`) instead when one is
+set - and removes itself. The re-entry installs the state's callbacks again and clears
+`trigger_cb`, so a mod that replaces an actor's callbacks has to reinstall them after it too.
+
 ### Common states
 
 | State | Role | Callbacks |
@@ -141,17 +152,28 @@ Tier-0 Waddle Dee (0x17) shows the shape:
 
 | State | `anim_cb` | `phys_cb` | `envcoll_cb` | `pri6_cb` | Role |
 |---|---|---|---|---|---|
-| 0x0E | 0x80219638 | - | - | - | Spawn: zero velocity, attach to a spline, go to 0x0F |
-| 0x0F | - | - | 0x802196e0 | 0x80219704 | Patrol; `pri6_cb` scans with `EventActor_FindNearestPlayerAhead`, a hit goes to 0x10 |
-| 0x10 | 0x802197ac | 0x802197e8 | 0x802197ec | - | Wind up and turn toward the target |
-| 0x11 | 0x80219908 | 0x80219988 | 0x80219a48 | 0x80219a84 | Lunge |
-| 0x12 | 0x80219b4c | - | 0x80219c40 | 0x80219c64 | Recover, then back to patrol |
+| 0x0E | 0x80219638 | - | - | - | Spawn: fade in, snap onto its spline, go to 0x0F |
+| 0x0F | - | - | 0x802196e0 | 0x80219704 | Patrol; `pri6_cb` scans with `EventActor_FindNearestPlayerAhead` and goes to 0x10 the first time it finds someone |
+| 0x10 | 0x802197ac | 0x802197e8 | 0x802197ec | - | Surprised hop in place, then 0x11 when the animation ends |
+| 0x11 | 0x80219908 | 0x80219988 | 0x80219a48 | 0x80219a84 | Dash sideways to the far edge of its path, interpolating between its two splines |
+| 0x12 | 0x80219b4c | - | 0x80219c40 | 0x80219c64 | Turn back, then patrol |
+
+The hop is 27 frames: a crouch, then the body joint up 2 units (times the actor's scale) from
+frame 6 to 23. Every one of these states arms the same attack region from its animation script:
+3 damage and 25 knockback with no speed scaling, radius 2.0, rehitting a victim every 30 frames.
 
 Sword Knight (0x05) decides in `anim_cb` instead: `SwordKnight_State0FDecide` (0x80211520) locks
 the nearest player who crosses from behind to in front within attack range and, after a windup,
 slashes. Composite enemies spawn a rider part in their init (Broom Hatter's 0x48, Sword Knight's
 0x49, the Waddle Dee Truck's 0x4A); the parts mirror their parent through
 `EventActor_FollowParent` (0x80219eec) and `parent_gobj`.
+
+The Waddle Dee Truck (0x16) never targets anyone. It drives its spline with
+`EventActor_AIPhysicsTick` from state 0x0F, dropping into an airborne state 0x10 off the road and
+back, with two look-back (0x11, 0x12) and two lean-turn (0x13, 0x14) states. Each driver state
+change puts its cart in the matching state (`DeeTruckCart_EnterDrive`, 0x8021a2d4, and its three
+siblings), and every cart state copies the driver's position and facing with
+`DeeTruckCart_FollowDriver` (0x8021a494).
 
 ### Targeting
 
@@ -189,14 +211,23 @@ following and falling under gravity. `EventActor_GroundSnap` (0x80204fac) casts 
 up*5` to `pos - up*50`, places the actor `param_ground_clearance` above the hit and clears
 `is_airborne`, or sets it on a miss.
 
+Path speed accelerates. `movement_speed` is in spline parameter per frame. When
+`idle_wander_speed` (`ed+0x974`) is 1.0, `EventActor_UpdatePathSpeed` (0x80208010) adds
+`param_accel` (`ed+0x39C`) each frame and clamps the magnitude between `param_speed`
+(`ed+0x390`) and `param_speed_max` (`ed+0x394`), each divided by the current spline's length;
+otherwise the speed is `idle_wander_speed` times `param_speed` over that length.
+`EventActor_InitGroundMove` (0x80207dec) grounds the actor and starts the speed at
+`param_speed`.
+
 Bronto Burt, Bomber and Scarfy are the true flyers. They never ground-snap their position;
 `EventActor_FlyMovement` (0x8020354c) hovers around the anchor `pos_initial` or homes, and
 `EventActor_FlyForward` (0x8020335c) moves along the facing by the animation's root motion.
 
 ## Taking a hit
 
-An enemy's two attack regions are rewritten from the current animation frame each frame by
-`EventActor_RefreshAttackParams` (0x80201ba4) and switched off by script command 13. The enemy's
+An enemy's attack regions are armed by animation-script command 12 and stay armed until script
+command 13 or the next state change, where `EventActor_ChangeState` clears them with
+`HurtData_ClearStateRegions` (0x8018c824) before the new state's script re-arms them. The enemy's
 own hit pass (priority 9) runs only while `damage_accum_1` (`ed+0x994`) is below the archive's
 `param_hp` (`ed+0x3B0`) and the model alpha is 1.0; the child parts 0x48-0x4A skip it. Most
 enemies have `param_hp` 1, so one hit makes them untouchable while they are knocked out; TAC's
@@ -226,6 +257,16 @@ attacking actor, along the hit vectors for riders, machines and projectiles) and
 state `mode`. The common callbacks hold the actor shaking for the stun, launch it at the tier's
 speed, and once the intangibility runs out run the death (the actor's `custom_death_callback` at
 `ed+0xAEC` if set) and destroy it 30 frames later.
+
+## Inhale
+
+`EventActorGObj_IsInhalable` (0x802041c8) decides which actors a rider can swallow: every kind
+below 0x48 except Gordo (0x0E, 0x26, 0x3E), while it has no captor (`captor_gobj`) and its
+rendering is enabled (bit 4 of `render_flags` clear). Three callers gate on it -
+`Rider_TryStartInhale` (0x8019c5ac) to start an inhale, `Rider_InhaleCaptureScan` (0x8019c63c) to
+capture, and `Rider_CPUScanInhaleTargets` (0x8026cfec), the CPU's inhale check - each before
+testing the actor's touch region (`ed+0x45C`) against the rider's inhale region. A capture puts
+the actor in common state 0x0A, which destroys it.
 
 ## Actor data and parameters
 
@@ -263,12 +304,15 @@ per-enemy detection range.
 - **Retuning every enemy.** Write `EnemyParamTable` after `Enemy_LoadCommonParams` stores it.
   `lbLoadArchive` reuses a preloaded copy of `Enemy.dat` in place, so a write survives into the
   next scene load; restore from a saved copy rather than scaling the live values.
-- **Per-frame logic on one actor.** Point `trigger_cb` (`ed+0xAC8`) at a function taking
-  `EnemyData*`; the priority-7 proc calls it every frame. Every state change clears it, so set
-  it again from your own proc. From there a mod can overwrite `target_ply` and `turn_to` after
-  vanilla targeting, re-assert `movement_speed` (`ed+0x964`) and `idle_wander_speed`
-  (`ed+0x974`), which the state callbacks rewrite each frame, or force a state. Adding a GObj
-  proc of its own to the actor works too.
+- **Per-frame logic on one actor.** Add a GObj proc of its own to the actor. At priority 2 it
+  runs right after the state machine: it follows the fade-in's re-entry (priority 0) and
+  `anim_cb`'s transitions (1) before any other callback runs, so it can reinstall its own
+  callbacks and retune the attack regions the animation script armed. Only a knockback
+  (priority 10) changes state after it. `trigger_cb` (`ed+0xAC8`) is
+  the in-struct alternative, cleared by every state change: the priority-7 proc calls it after
+  the state's own callbacks, so it can overwrite `target_ply` and `turn_to` after vanilla
+  targeting, or re-assert `movement_speed` (`ed+0x964`) and `idle_wander_speed` (`ed+0x974`),
+  which those callbacks rewrite each frame.
 - **Leave the common states alone.** 0x00-0x0D are shared by every type.
 - A standalone actor has no `parent_gobj` and no spline until `EventActor_PathInit` runs.
   `EventActorGObj_GetAnimRate` (0x802049b8) dereferences the parent without a check but is only

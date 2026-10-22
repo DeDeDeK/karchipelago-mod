@@ -122,7 +122,21 @@ Pass the entry index to `Weapon_StateChange`, not the `state_id`; two kinds repe
 The per-kind state index enums (`BombState`, `GordoState` and the rest) are in hoshi's weapon
 header. The cases to know:
 
+- **Bomb** index 1 falls under stage gravity and calls `Bomb_DetonationTrigger` (0x80225c8c) on
+  its first floor, wall or ceiling contact: a quake, a flash and a sound, then index 2, which
+  holds the bomb still and harmless for `BombParams.blast_delay` (14) frames. Index 3 is the
+  blast. On entry it saves both attack regions' base radius, then ramps a scale from
+  `blast_scale_start` (1.0) toward `blast_scale_end` (170) over `ramp_frames` (450), multiplying
+  the regions' radius, the fireball and the wind by it, until the fireball effect ends and the
+  bomb destroys itself. The bomb has no hurtbox, so nothing but terrain or a call sets it off.
+  `kind_params` is the bomb's own copy of `BombParams`, so one bomb's blast can be resized
+  without touching the rest; `WeaponData.model_scale` shrinks the model alone, where `scale`
+  would also shrink the hitbox.
 - **Sensor bomb** index 2 (armed) and index 4 (fade) share `state_id` 2, with different callbacks.
+  Index 1 falls until a floor contact, where `SensorBomb_Land` (0x802290bc) embeds the bomb in
+  index 2 and installs `SensorBomb_SensorThink` (0x802292f8) as its `trigger_callback`. After a
+  60-frame arm delay that sensor detonates the bomb when any rider's hand bone, the owner's
+  included, comes within 30 units. Both armed states also burn the fuse described under Lifetime.
 - **Gordo** index 1 scales the model up in flight and moves itself to index 2, which locks the scale
   and starts the despawn timer. Index 3 is the sentinel: `Weapon_StateChange` zeroes `wp + 0x38`
   there but still installs its callbacks, so its `anim_callback` runs once to spawn the despawn
@@ -278,7 +292,9 @@ from the rider GObj, then:
 
 The throw wrappers do not fit a custom path. `WeaponGObj_TryThrowBomb` (0x801a9580) reads a
 hand-bone matrix that exists only while a rider holds the bomb. `WeaponGObj_TryThrowSensorBomb`
-(0x801a9fe8) silently does nothing without the ready flag `post_init` sets.
+(0x801a9fe8) does nothing once the bomb's fuse is spent, and it ends in
+`SensorBomb_EnforceMaxActive` (0x8022a270), which counts every armed sensor bomb on the weapon list
+whatever its owner and fades each one past the second.
 `WeaponGObj_IsGordoThrowable` (0x801aa008) is a predicate, not a throw.
 
 **Ownerless spawns.** A projectile from the world, a stage hazard for instance, can pass NULL owners.
@@ -295,15 +311,17 @@ reads the owner through `RiderGObj_GetHandBonePos` (0x80191ffc), `RiderGObj_GetU
 | 14 Firecracker | Yes | Keeps `desc.vel`; bursts on any surface or on its own fuse |
 | 4 Bomb, 15 Sensor Bomb | Yes, if moved to state 1 before any proc runs | State 0 snaps to the hand bone |
 | 2 Fire Bullet | Only with a live rider as owner during create | `FireBullet_Init` (0x80224cc8) reads the owner; clearing `owner_gobj` afterwards is safe |
-| 0/1 Spit, 9/10 Plasma C/D | No | `init` reads the owner, and their homing rewrites velocity every frame |
+| 0/1 Spit, 9 Plasma C | No | `init` reads the owner, and their homing rewrites velocity every frame |
+| 10 Plasma D | With a stand-in owner during create | `PlasmaD_Init` and `PlasmaD_PostInit` read the owner's player through `RiderGObj_GetPly`; a class-0 GObj whose `RiderData.ply` is `PLY_NUM` (no player) carries the create, and clearing both owner fields afterwards is safe. Its homing `phys_callback` needs replacing |
 | 3/12/13 Auras | No | Every state snaps to the owner's hand; no aura can fly |
-| 16 Gordo | No | The thrown transition reads the owner |
+| 16 Gordo | Only with a live rider as owner during the thrown transition | The transition reads the owner's rider basis; clearing `owner_gobj` afterwards is safe |
 
 **Gravity.** Nothing applies gravity. Priority 0 zeroes `accel` and priority 4 integrates it, so a
 one-shot write does not survive. Write the acceleration every frame from `framestart_callback`,
 which runs right after the zeroing. Set it after any `Weapon_StateChange`, which clears it. The
-flying `phys_callback`s of bomb, firecracker, sensor bomb and fire bullet add a stage air current
-(0x800ceb18) to accel rather than overwriting it. Plasma and the spit stars are purely ballistic.
+flying `phys_callback`s of bomb, firecracker, sensor bomb and fire bullet add stage gravity
+(`Gr_GetDownVector`, 0x800ceb18: the down direction times its strength, 0.025 on City Trial)
+to accel rather than overwriting it, so a written acceleration adds to theirs. Plasma and the spit stars are purely ballistic.
 
 **Lifetime.** `Weapon_InitRuntimeState` seeds `lifetime` from `params.lifetime`, and 0 means
 infinite:
@@ -314,6 +332,8 @@ infinite:
 
 Overwrite `wp->lifetime` after create and after any state change; nothing else reads it.
 Firecracker also burns an independent fuse at `wp + 0x1b8` / `0x1bc` and bursts when it runs out.
+Sensor bomb burns one at `wp + 0x1bc`, seeded by `SensorBomb_PostInit` (0x80228d8c) from its
+parameter block (2400 frames); `SensorBomb_FuseThink` (0x80229e64) detonates it when the fuse runs out.
 
 **Owner-derived scratch.** `FireBullet_Init` caches the owner's Fire charge as `wp + 0x1b8`
 (charge / max) and `wp + 0x1bc` (charge). On impact, `FireBullet_ApplyChargeScale` (0x80224ef8)

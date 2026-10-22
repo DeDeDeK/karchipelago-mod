@@ -66,7 +66,7 @@ _Static_assert(sizeof(ShotState) <= sizeof(((WeaponData *)0)->kind_scratch),
 
 static ShotState *ShotStateOf(void *proj)
 {
-    return (ShotState *)((WeaponData *)proj)->kind_scratch;
+    return (ShotState *)((WeaponData *)proj)->kind_scratch.raw;
 }
 
 // Down from just above `at` to well below it. 0 over a gap.
@@ -336,8 +336,8 @@ static const u32 stc_vtable_sites[][2] = {
     { 0x8021ff94, 0x8021ff98 }, // Weapon_UserDataDtor (0x8021ff54)
     { 0x8022036c, 0x80220374 }, // Weapon_Despawn (0x80220364)
     { 0x802205f0, 0x802205f8 }, // Weapon_LoadKindParams (0x802205e8)
-    { 0x8022065c, 0x80220664 }, // Weapon_ReloadKindParams (0x80220654), load_render_state
-    { 0x802206bc, 0x802206c0 }, // Weapon_ReloadKindParams, reset_render_state
+    { 0x8022065c, 0x80220664 }, // Weapon_ReloadKindParams (0x80220654), load_kind_params
+    { 0x802206bc, 0x802206c0 }, // Weapon_ReloadKindParams, reload_kind_params
 };
 
 static void RegisterShotKind(void)

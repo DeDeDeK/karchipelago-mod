@@ -144,5 +144,5 @@ A mod that writes `charge_value` directly bypasses the engine's crossing logic:
 |---|---|---|
 | `AS_StarChargeHold` | 0x801ab940 | Rider state 0x28's think |
 | `chargeMain` | 0x801abad0 | Shared per-frame charge routine for the rider's charge states; also tests for dismount |
-| `Rider_UpdateCharge` | 0x801cceb8 | Rider-side ground update during the charge |
+| `Machine_UpdateMapColl` | 0x801cceb8 | The machine's per-frame map collision update, which keeps running through the charge |
 | `Machine_RotateDuringCharge` | 0x801ec5cc | Turns the machine while it charges, from its own handling terms |

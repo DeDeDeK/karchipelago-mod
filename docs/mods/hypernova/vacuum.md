@@ -116,7 +116,8 @@ families.
 (`CollData.pos_delta`) projected onto the contacted triangle's outward normal and negated, with a
 non-positive result clamped to 0. A delta must point into the surface to count.
 
-So the vacuum breaks a prop by calling `collideWithObject` itself with a fabricated collider:
+So the vacuum breaks a prop with hoshi's `Gr_BreakInstance`, which calls `collideWithObject`
+itself with a fabricated collider:
 
 - the prop's collision is re-armed for the call, so the family's "still collidable?" guard passes;
 - `gcp` is the stage's live `GrCollParam` (`Gr_GetCollParam`), and `tri_idx` the global index of

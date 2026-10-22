@@ -15,6 +15,7 @@
 #define inline
 
 /* Foundation: forward-decl typedefs + scalar base types. */
+#include <stddef.h>
 #include "structs.h"
 #include "datatypes.h"
 

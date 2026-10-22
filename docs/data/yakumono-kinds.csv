@@ -18,7 +18,7 @@ kind,name,source_file,coll_func,creator,placed_by,notes
 33,YAKUKIND_CORAL,gryakubreakcoll.c,hitWeakObject,0x80107bfc,City Trial,weak family
 34,YAKUKIND_TREE,gryakubreakcoll.c,hitWeakObject,0x80107d64,City Trial,weak family
 35,YAKUKIND_ROCK,gryakubreakcoll.c,hitWeakObject,0x80107ecc,City Trial,weak family
-36,YAKUKIND_BREAKHPCOLLDOOR,gryakubreakhpcoll.c,hitStrongObject,0x80108ce8,City Trial,volcano rock walls; strong family
+36,YAKUKIND_BREAKHPCOLLDOOR,gryakubreakhpcoll.c,hitStrongObject,0x80108ce8,City Trial,one rock wall underground below the garden in the sky; strong family
 37,YAKUKIND_BREAKHPCOLLHOLE,gryakubreakhpcoll.c,hitStrongObject,0x80108f10,City Trial,volcano-base hole covers; strong family
 38,YAKUKIND_BREAKHPCOLLHOUSE,gryakubreakhpcoll.c,hitStrongObject,0x80109138,City Trial,houses; strong family
 39,,gryakubreakrock.c,,,Frozen Hillside x4,
@@ -42,7 +42,7 @@ kind,name,source_file,coll_func,creator,placed_by,notes
 57,YAKUKIND_LASERGATE,gryakulasergate.c,,0x80106144,Frozen Hillside x4,
 58,YAKUKIND_LASERGATECTRL,gryakulasergate.c,,0x801063bc,Frozen Hillside x1,
 59-60,,,,,,descriptors with no creator
-61,,,,0x80109db4,City Trial x2; Magma Flows x3,classic single-instance animated prop
+61,YAKUKIND_LAVADRAGON,,,GrYakuLavaDragon_Create,City Trial x2; Magma Flows x3,leaping lava dragon; stage joints animated by its motion; the motion script arms the hitbox
 62-63,,,,,,adhere_update_func and get_point_func only; no creator
 64,,grairglider.c,,0x8010a450,Air Glider stadium,created at a given translation
 65,YAKUKIND_RAILFIRE,,,0x8010a5dc,Rail Fire event,

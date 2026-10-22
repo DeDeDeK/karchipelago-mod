@@ -77,4 +77,9 @@ get the subtree:
   backdrops and about 1.2 MB for the largest.
 - **Lifetime.** `Archive_LoadFile` and `Heap_Alloc(0, ...)` both allocate from the per-scene heap,
   which is reclaimed when the 3D scene exits. A graft is rebuilt every round, and nothing needs
-  freeing.
+  freeing. The stage's own `Gr<X>Model.dat`, though, can be a resident preload
+  (`Preload_LoadStageFiles`, 0x800ce964, heap ALLM) that the archive loader reuses as-is in the
+  next round, so a rewritten `ModelSection.backdrop` slot outlives the heap it points into and
+  has to be put back before the scene exits. It is still read after the backdrop is built:
+  `Gr_SetBackdropAnim` (0x800dbc2c), right after `CreateStageModel_3D`, reads the record's word 1
+  as the backdrop's motion array and binds entry 0.

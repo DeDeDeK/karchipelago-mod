@@ -2,7 +2,8 @@
 //
 // Three tasks, selected by the `task` key:
 //   parse    run Ghidra's C parser over the body-stripped hoshi headers into the
-//            program's DataTypeManager, then drop orphaned CParser conflicts
+//            program's DataTypeManager, fold in the copies a moved type left
+//            behind, then drop orphaned anonymous types
 //   names    give each listed function its name, in the global namespace
 //   globals  retype + label each fixed-address engine global in the listing
 //
@@ -27,12 +28,14 @@ import ghidra.app.util.cparser.C.CParserUtils;
 import ghidra.app.util.cparser.C.CParserUtils.CParseResults;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.data.Array;
 import ghidra.program.model.data.ArrayDataType;
 import ghidra.program.model.data.CharDataType;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeConflictHandler;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.DoubleDataType;
+import ghidra.program.model.data.FileDataTypeManager;
 import ghidra.program.model.data.FloatDataType;
 import ghidra.program.model.data.FunctionDefinition;
 import ghidra.program.model.data.IntegerDataType;
@@ -60,19 +63,22 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 public class HoshiSync extends GhidraScript {
 
-    // CParser names anonymous inner records `_struct_N` / `_union_N` by parse
-    // order, so a re-import cannot match the previous run's numbering and banks
-    // a `.conflict` copy of each. Unreferenced ones are pure litter.
-    private static final Pattern ANON_CONFLICT =
-            Pattern.compile("^_(?:struct|union|enum)_\\d+\\.conflict\\d*$");
+    // CParser names anonymous records and function-pointer signatures `_struct_N`,
+    // `_union_N`, `_func_N` by parse order, so a re-import cannot match the
+    // previous run's numbering and banks a `.conflict` copy of each. Every hoshi
+    // anonymous type is a member, so an unreferenced one is pure litter.
+    private static final Pattern ANON_TYPE =
+            Pattern.compile("^_(?:struct|union|enum|func)_\\d+(?:\\.conflict\\d*)?$");
 
     private final StringBuilder report = new StringBuilder();
 
@@ -130,6 +136,14 @@ public class HoshiSync extends GhidraScript {
             rpt("defines : " + String.join(" ", defines));
         }
 
+        Set<String> fresh = null;
+        try {
+            fresh = parsedPaths(files, includes, defines);
+        } catch (Throwable t) {
+            rpt("note    : scratch parse failed, moved types not merged: "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+
         CParseResults res = null;
         Throwable failure = null;
         int tx = currentProgram.startTransaction("Parse hoshi headers");
@@ -141,12 +155,14 @@ public class HoshiSync extends GhidraScript {
             currentProgram.endTransaction(tx, true);
         }
 
-        int pruned = pruneOrphanConflicts(dtm);
+        int merged = fresh != null ? mergeMovedTypes(dtm, fresh) : 0;
+        int pruned = pruneOrphanAnonymous(dtm);
         int renamed = disambiguateCallbackTypedefs(dtm);
         int after = dtm.getDataTypeCount(true);
 
         rpt("types   : " + before + " -> " + after + " (delta " + (after - before)
-                + ", pruned " + pruned + " orphaned conflicts, resolved " + renamed
+                + ", merged " + merged + " moved types, pruned " + pruned
+                + " orphaned anonymous types, resolved " + renamed
                 + " shadowed function definitions)");
         if (res != null) {
             rpt("parsed  : successful=" + res.successful());
@@ -161,27 +177,100 @@ public class HoshiSync extends GhidraScript {
         rpt("--- C parse messages ---");
         rpt(res != null && res.cParseMessages() != null ? res.cParseMessages() : "(none)");
 
-        return "delta=" + (after - before) + " pruned=" + pruned + " renamed=" + renamed
+        return "delta=" + (after - before) + " merged=" + merged + " pruned=" + pruned
+                + " renamed=" + renamed
                 + (res != null ? " successful=" + res.successful() : " FAILED");
     }
 
-    // Removing one conflict can orphan another that only it referenced, so
-    // repeat until a pass finds nothing.
-    private int pruneOrphanConflicts(DataTypeManager dtm) {
+    // The path of every type the headers produce, from a parse into a throwaway
+    // archive. No other archive is open to it: the parser copies a matching type
+    // from one with that type's old path.
+    private Set<String> parsedPaths(String[] files, String[] includes, String[] defines)
+            throws Exception {
+        File gdt = File.createTempFile("hoshi-scratch", FileDataTypeManager.SUFFIX);
+        gdt.delete();
+        FileDataTypeManager scratch = CParserUtils.parseHeaderFiles(null, files, includes,
+                defines, gdt.getPath(), currentProgram.getLanguageID().getIdAsString(),
+                currentProgram.getCompilerSpec().getCompilerSpecID().getIdAsString(), monitor);
+        try {
+            Set<String> paths = new HashSet<>();
+            Iterator<DataType> it = scratch.getAllDataTypes();
+            while (it.hasNext()) {
+                paths.add(it.next().getPathName());
+            }
+            return paths;
+        } finally {
+            scratch.close();
+            gdt.delete();
+        }
+    }
+
+    // A type lives in the category of the header that first names it, so moving
+    // a declaration to an earlier header makes the parse build a new copy there
+    // and stop updating the old one. The name then matches two types, which
+    // FunctionSignatureParser refuses, so each old copy's users are re-pointed at
+    // the new one and the old copy goes.
+    private int mergeMovedTypes(DataTypeManager dtm, Set<String> fresh) {
+        Map<String, DataType> current = new HashMap<>();
+        List<DataType> others = new ArrayList<>();
+        Iterator<DataType> it = dtm.getAllDataTypes();
+        while (it.hasNext()) {
+            DataType d = it.next();
+            if (d instanceof Pointer || d instanceof Array
+                    || ANON_TYPE.matcher(d.getName()).matches()) {
+                continue;
+            }
+            if (fresh.contains(d.getPathName())) {
+                current.put(kindKey(d), d);
+            } else {
+                others.add(d);
+            }
+        }
+        int merged = 0;
+        int tx = currentProgram.startTransaction("Merge moved hoshi types");
+        try {
+            for (DataType d : others) {
+                DataType keep = current.get(kindKey(d));
+                if (keep == null) {
+                    continue;
+                }
+                String old = d.getPathName();
+                try {
+                    dtm.replaceDataType(d, keep, false);
+                    rpt("merged  : " + old + " -> " + keep.getPathName());
+                    merged++;
+                } catch (Exception e) {
+                    rpt("note    : merge failed for " + old + ": "
+                            + e.getClass().getSimpleName() + ": " + e.getMessage());
+                }
+            }
+        } finally {
+            currentProgram.endTransaction(tx, true);
+        }
+        return merged;
+    }
+
+    private static String kindKey(DataType d) {
+        return d.getClass().getSimpleName() + ":" + d.getName();
+    }
+
+    // Removing one type can orphan another that only it referenced, so repeat
+    // until a pass finds nothing.
+    private int pruneOrphanAnonymous(DataTypeManager dtm) {
         int total = 0;
         for (int pass = 0; pass < 8; pass++) {
             List<DataType> doomed = new ArrayList<>();
             Iterator<DataType> it = dtm.getAllDataTypes();
             while (it.hasNext()) {
                 DataType d = it.next();
-                if (ANON_CONFLICT.matcher(d.getName()).matches() && d.getParents().isEmpty()) {
+                if (ANON_TYPE.matcher(d.getName()).matches() && d.getParents().isEmpty()) {
                     doomed.add(d);
                 }
             }
             if (doomed.isEmpty()) {
                 break;
             }
-            int tx = currentProgram.startTransaction("Prune orphaned CParser conflicts");
+            int tx = currentProgram.startTransaction("Prune orphaned anonymous types");
             try {
                 dtm.remove(doomed, monitor);
                 total += doomed.size();

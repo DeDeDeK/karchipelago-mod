@@ -161,9 +161,9 @@ def phase_types(project, dry_run):
 
     Ghidra's C parser aborts on function bodies, so the headers are mirrored
     with every body and file-scope initializer replaced by `;`, and the parser
-    searches that mirror ahead of the originals. Empty stubs shadow the system
-    includes and the inline/networking headers we skip; hoshi_all.h pulls in the
-    rest in dependency order.
+    searches that mirror ahead of the originals. Stubs shadow the system includes
+    (empty but for stddef.h's size_t) and the inline/networking headers we skip;
+    hoshi_all.h pulls in the rest in dependency order.
     """
     if dry_run:
         print(f"[types] would parse {MASTER_HEADER}")

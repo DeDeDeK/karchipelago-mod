@@ -6,10 +6,10 @@ cooldown, and the winner gets All Up patches when the event ends. It runs throug
 `custom_events` framework with a siren intro, no sky change, BGM file 0x34
 (`event_supercharge`), a 3600-frame duration and roll weight 20.
 
-It uses two callbacks. `GourmetRace_Start` resets the scores, spawns the food, and creates a
-watcher GObj and the score display; `GourmetRace_End2` tears all of it down and awards the prize.
-A watcher proc does every per-frame job, and `Start` resets everything a cut-off run leaves behind,
-so the event needs no `active`, `end` or `abort`.
+It uses two callbacks. `start` resets the scores, spawns the food, and creates a watcher GObj and
+the score display; `end2` tears all of it down and awards the prize. A watcher proc does every
+per-frame job, and `start` resets everything a cut-off run leaves behind, so the event needs no
+`active`, `end` or `abort`.
 
 ## Spawning Food
 
@@ -44,8 +44,9 @@ squashes the model into an invisible sliver that can still be picked up. The spa
 (0, 0, 1) and no up, so the food tilts to the ground on landing - but landing zeroes
 `ItemData.forward`, so the watcher writes it back on every live food every frame.
 
-The collision kind is `Item_InitDesc`'s collision parameter: 3, the point collision most items
-use, for the high drops; 2 for the underground and fixed spots.
+The collision kind is `Item_InitDesc`'s collision parameter: `ITEM_COLL_POINT` (3), the point
+collision most items use, for the high drops; `ITEM_COLL_CAST` (2), which re-casts the ground every
+frame, for the underground and fixed spots.
 
 ## Scoring and Respawn
 

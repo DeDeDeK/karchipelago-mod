@@ -9,24 +9,28 @@ submenu. The volcano and the tornado, which spawn and move game objects, are not
 ## Shared building blocks
 
 **World-space geometry, per camera.** Every drawn layer is immediate-mode GX geometry built in
-world coordinates and emitted from a GX callback on the world camera's XLU pass: depth-tested so
+world coordinates and emitted from a GX callback in the world camera's pass 1 (`GXPASS_TEXEDGE`,
+between the opaque and the no-Z-update translucent passes): depth-tested so
 stage geometry hides what is behind it, never depth-writing, unculled. Each camera's pass emits it
 again, so split-screen works with no per-camera state, and the cost scales with the number of
-players.
+players. Round dots - snowflakes, stars, the meteor head - share one camera-facing fan over a
+unit circle computed once.
 
-**Camera-following boxes.** Rain and snow keep a fixed pool of random offsets in a 1000-unit cube.
-All drops share one drift vector advanced each frame by the fall and wind velocity, and a drop's
-position is `eye + wrap(offset + drift) - 500` per axis, so the field re-centres on each camera
-every frame and can never be outrun. The eye comes from the view matrix as a rigid inverse
+**Camera-following boxes.** Rain and snow keep a pool of random offsets in a 1000-unit cube,
+allocated from the scene heap and seeded the first time the layer runs in a round. All drops
+share one drift vector advanced each frame by the fall and wind velocity, and a drop's position
+is `eye + wrap(offset + drift) - 500` per axis, so the field re-centres on each camera every frame
+and can never be outrun. The eye comes from the view matrix as a rigid inverse
 (`eye = -R^T * t`).
 
-**The sky dome.** City Trial's backdrop is a depth-writing sphere at the world origin, which the mod
-takes to be 2500 units in radius - its size at the default Backdrop Distance of 125%. A celestial
-layer sits at `P = eye + direction * dist`, with `dist` the smallest of its desired distance, a
-fraction of the eye-to-dome distance along that direction, and a fraction of the camera's far plane,
-so it is never hidden behind the dome or clipped. Its size scales with `dist` about a reference of
-1800 units, so it looks the same size wherever the clamp lands. Celestial layers draw fog-free
-(`HSD_FogSet(NULL)`, then restore the live fog) so distance does not wash them to the fog colour.
+**The sky dome.** City Trial's backdrop is a depth-writing sphere at the world origin: 2000 units
+in radius at 100% Backdrop Distance, scaled by that setting (2500 at its default of 125%). A
+celestial layer sits at `P = eye + direction * dist`, with `dist` the smallest of its desired
+distance, a fraction of the eye-to-dome distance along that direction, and a fraction of the
+camera's far plane, so it is never hidden behind the dome or clipped. Its size scales with `dist`
+about a reference of 1800 units, so it looks the same size wherever the clamp lands. Celestial
+layers draw fog-free (`HSD_FogSet(NULL)`, then `HSD_FogSet(HSD_FogGetCurrent())`) so distance does
+not wash them to the fog colour.
 
 **Round progress.** `grBoxGeneInfo.match_progress` (+0x2a4) runs 0 to 1 over a City Trial round
 and freezes through pauses. The mod reads it as -1 during the pre-round intro
@@ -34,23 +38,30 @@ and freezes through pauses. The mod reads it as -1 during the pre-round intro
 waits for it to go non-negative: riders count as airborne while boarding, so a push during the
 intro would shove them off the start line.
 
+**Lights.** The lightning flash, the bolt's point light and the moonlight are `LOBJ`s on light
+GObjs of their own, drawn on GX link 0 ahead of the stage's primary light. Since every `LObj_GX`
+replaces the whole active light set and riders and machines load sets of their own, these lights
+reach no geometry yet; lighting riders would go through the AreaLight.
+
 ## Wind
 
 One global horizontal vector that the other layers read: rain, snow and hail slant with it,
-clouds drift with it, trees lean with it, airborne items are blown and gliding machines pushed.
+clouds drift with it, trees lean with it, falling items are blown and airborne machines pushed.
 The wind owns no GObj and installs no hook.
 
 Speed and heading are each a smoothed random walk around the preset's base: a fresh target every
 40 frames (speed) or 90 frames (heading), eased toward at 0.04 or 0.02 per frame. Heading
 deviation is bounded by 75 degrees times `chaos`; speed pulses by `gustiness`. Defaults are 6
-units/frame at heading 90 (0 = +Z, 90 = +X), gustiness 0.35, chaos 0.25.
+units/frame at heading 90 (0 = +Z, 90 = +X; a preset writes +Z as 360), gustiness 0.35, chaos
+0.25.
 
-Once the round timer runs, each frame adds 8% of the wind to the velocity of every item whose
-`ItemData.is_airborne` is nonzero, and 1.2% times a glide factor to every machine whose
-`is_airborne` is 1. The glide factor lerps from 0.40 to 1.0 by the machine's glide stat ratio, so
-a Winged Star catches far more wind than a Wheelie Bike and a negative stat never pushes upwind.
-`ITEM_X35A_GROUNDED` is not an airborne test: it latches the first time the ground raycast finds
-anything below the item, which for a sky drop is its first frame.
+Once the round timer runs, each frame pushes every falling item (`ItemData.is_airborne` 1) by 8%
+of the wind speed along the wind, until its velocity along the wind reaches the wind's own speed;
+resting items (0) and held ones (-1) are left alone. Airborne machines (`is_airborne` 1) get 1.2%
+of the wind times a glide factor that lerps from 0.40 to 1.0 by `Machine_GetStatRatio`'s glide
+ratio - which counts the Glide patches collected - so a negative stat never pushes upwind. The
+menu scales the strength (Preset, Off, 50%, 150%, 200%), can roll a random heading each round,
+and can spare machines or items.
 
 ## Rain
 
@@ -58,16 +69,17 @@ Translucent line streaks drawn in the stage, not as a screen overlay, so buildin
 behind them. The field is one `GX_LINES` batch of up to 1600 drops; a drop's streak is its
 per-frame velocity (fall plus wind) times `streak`. `density` is the dominant cost and is drawn
 once per camera. Defaults: pale blue-grey, 900 drops, 26 units/frame, line width 10, streak 1.5.
-The menu scales intensity and fall speed and can turn the wind slant off.
+The menu scales intensity (Preset, Off, Light, Heavy, Downpour) and fall speed (Preset, Slow,
+Fast), and can turn the wind slant off.
 
 ## Snow
 
-The same camera-following box (1000-flake pool), but each flake is a small camera-facing
-`GX_TRIANGLEFAN` with an opaque centre and transparent rim, alpha-blended so it reads white rather
-than glowing, and fogged with the world. Flakes fall slowly (default 3 units/frame) and each
-flutters sideways along its own seeded direction by `flutter * sin(time * freq + phase)`, with
-per-flake size varying +/-50%. Defaults: soft white, 600 flakes, radius 4, flutter 1.6.
-Volcanic reuses the layer as grey ashfall.
+The same camera-following box (1000-flake pool), but each flake is a small camera-facing dot with
+an opaque centre and transparent rim, alpha-blended so it reads white rather than glowing, and
+fogged with the world. Flakes fall slowly (default 3 units/frame) and each flutters sideways along
+its own seeded direction by `flutter * sin(time * freq + phase)`, with per-flake size varying
++/-50%. Defaults: soft white, 600 flakes, radius 4, flutter 1.6. Volcanic reuses the layer as
+grey ashfall.
 
 ## Hail
 
@@ -78,6 +90,8 @@ recycled once 90 units below or 300 units away. The box follows the machine but 
 so speed cannot outrun the storm. A stone that enters a 20-unit sphere 10 units above the machine's
 origin calls `Machine_GiveDamage(md, 1, ...)` and respawns, with a 10-frame per-machine cooldown
 capping it to chip damage; a machine worn to nothing dies through the engine's own path.
+`Machine_GiveDamage` does not test vulnerability itself, so a stone only damages a machine whose
+`HurtData.vuln.kind` is 0 - candy and respawn invulnerability are honoured.
 
 Cover works: every 8 frames each machine casts a ray down from just above the stage's
 out-of-bounds ceiling to 20 units above itself, and a machine with geometry overhead has its whole
@@ -88,25 +102,28 @@ triangles are wound. Only Hailstorm ships hail; the menu's amount forces it onto
 
 Shallow translucent pools on the ground that drag machines driving through. Each pool slot runs
 its own cycle - dormant, fade in (24 frames), hold (300-900), fade out (36), gap (120-480) - with
-first appearances spread over the round's opening. On waking it picks a new spot: up to six
-downward raycasts inside 72% of the out-of-bounds box, keeping only ground whose normal Y is at
-least 0.85, then lays an ellipse (short axis 0.55-1.0 of the radius) flat on that surface, lifted 2
-units along the normal against z-fighting.
+first appearances spread over the round's opening. On waking it picks a new spot: up to twelve
+downward raycasts inside 72% of the out-of-bounds box, keeping only ground that is not the sea
+(ground type 29) and whose normal Y is at least 0.85, then lays an ellipse (short axis 0.55-1.0 of the radius) flat on that surface, lifted 2
+units along the normal against z-fighting. The cast keeps the highest floor under the spot, so a
+pool can sit on a roof.
 
-Once the round timer runs, a grounded machine inside a pool has its horizontal velocity scaled by `1
-- (1 - slow_factor) * strength * alpha` each frame, where `alpha` is the pool's current opacity,
-capped at a 99% cut - a drag that fades with the pool and releases on exit. Only one pool applies
-per frame. Defaults: 24 pools, radius 32, factor 0.90, at most 64. The menu can scale or remove the
-slowdown, stop the pools roaming, or hide them while keeping the drag; with both slowdown and
-display off the layer does no work at all.
+Once the round timer runs, a grounded machine inside a pool - its footprint, and within 30 units
+of the pool's height, so a pool on a roof does not drag the street below - has its horizontal
+velocity scaled by `1 - (1 - slow_factor) * strength * alpha` each frame, where `alpha` is the
+pool's current opacity, capped at a 99% cut: a drag that fades with the pool and releases on exit.
+Only one pool applies per frame. Defaults: 24 pools, radius 32, factor 0.90, at most 64. The menu
+scales the slowdown (Preset, Off, 50%, 150%, 200%), the pool count (Preset, Few, Many) and the
+radius (Preset, Small, Large), can stop the pools roaming, or hide them while keeping the drag;
+with both slowdown and display off the layer does no work at all.
 
 ## Clouds
 
 A low deck of fly-through clouds. Each cloud is five overlapping flattened spheres (4 latitude
 bands by 8 sectors, squashed to 0.55 height) - real geometry, not billboards - so a rider flying
 into one has the view swallowed. One puff anchors the core; the others scatter around it and
-shrink by `puff_var`, while `size_var` varies whole clouds. A per-vertex silhouette alpha
-(`|normal . view|`, floored at 0.12) feathers each sphere's edge and hides most of the unsorted
+shrink by `puff_var`, while `size_var` varies whole clouds. A per-vertex silhouette alpha,
+`|normal . view|` remapped to 0.12-1, feathers each sphere's edge and hides most of the unsorted
 overlap.
 
 The deck sits at the preset's `height`, or 35% of the way up the out-of-bounds box, plus the menu
@@ -121,11 +138,12 @@ hidden. Defaults: 12 clouds, puff radius 58 times a global 1.2, at most 30.
 The wind leans City Trial's forest trees (yakumono kind `YAKUKIND_TREE`). Once per round the mod
 collects the stage's placed-instance records owned by a tree yakumono GObj and caches each
 joint's authored rotation. Each frame it tips every intact trunk downwind by writing that joint's
-`rot.X` / `rot.Z`: 0.018 rad per unit of wind speed, capped at 0.25 rad, modulated +/-22% by a
-per-tree sine so the grove does not move in lockstep. The engine rebuilds each tree's world matrix
-from its joint every frame, so the write is all it takes. Only the model moves; collision stays.
-A tree whose collision is retired (`grScene_IsInstanceCollAll(record, 1)` false) has been knocked
-down and is left alone. Trees have no per-preset config.
+`rot.X` / `rot.Z`: 0.018 rad per unit of wind speed, modulated +/-22% by a per-tree sine so the
+grove does not move in lockstep, and capped at 0.25 rad. The engine rebuilds each tree's world
+matrix from its joint every frame, so the write is all it takes. Only the model moves; collision
+stays. A tree whose collision is retired (`grScene_IsInstanceCollAll(record, 1)` false) has been
+knocked down and is left alone. Once a calm wind has put every tree back, the layer writes
+nothing. Trees have no per-preset config; the menu scales the lean (Subtle, Normal, Strong).
 
 ## Lightning
 
@@ -133,23 +151,22 @@ Random lulls (180-420 frames by default, the first 30 frames into the preset) pu
 brief strobing flash. Each strike rolls its own length, peak brightness and strobe pattern.
 
 Stage geometry ignores hardware lights, so the flash on the city comes from fog: during a strike the
-mod lerps `HSD_Fog.color` and the EFB clear colour toward the flash colour and pulls `HSD_Fog.start`
-in so near geometry lights up too. `Sky_Update` rewrites both every frame, so nothing needs
-restoring. An overhead INFINITE light flashes alongside for riders and machines, which do read
-hardware lights. Both lights are built the standard way (`GObj_Create`, `LObj_LoadDesc`,
-`GObj_AddObject`, `GObj_AddGXLink(LObj_GX)`).
+mod lerps `HSD_Fog.color` and the EFB clear colour toward the flash colour (`GXColor_Lerp`) and
+pulls `HSD_Fog.start` in so near geometry lights up too. `Sky_Update` rewrites both every frame,
+so nothing needs restoring. An overhead INFINITE light carries the flash colour alongside.
 
 `lightning.bolt` adds a visible bolt: a jagged world-space polyline from y = 820 to y = -40 (13
 segments plus a 4-segment fork from the upper third) at a random point inside the out-of-bounds
-box, drawn additively as a wide glow pass and a thin white core, strobing with the flash. A POINT
-light at its midpoint lights nearby riders. `augment` keeps the fog flash; `replace` draws only the
-bolt. Until the stage is built there is no box to aim at, so an early strike flashes without a
-bolt. Blood Rain, Storm and Tornado use `augment`.
+box, drawn additively as a wide glow pass and a thin white core, strobing with the flash from the
+brightness the tick latches. A POINT light sits at its midpoint. Until the stage is built there is
+no box to aim at, so an early strike flashes without a bolt. Blood Rain, Storm and Tornado draw
+bolts; the menu's Lightning Bolts (Preset, Off, On) can turn them off, or onto every lightning
+preset. The bolt's GObj and light are created only when bolts are on.
 
 ## Moon
 
 A disc on the sky dome that crosses the sky once per round, shows one of eight phases, and can
-light the scene. Its sky direction comes from round progress `p` (held at 0 through the intro):
+cast a light. Its sky direction comes from round progress `p` (held at 0 through the intro):
 
 ```
 el  = arc_height * sin(p * pi)        // 0 at the ends, peak mid-round
@@ -157,22 +174,23 @@ az  = rise_bearing + 180 * p          // sets opposite where it rose
 dir = (cos el * sin az, sin el, cos el * cos az)
 ```
 
-Defaults are a 26-degree peak and a 95-degree (roughly east) rise. Below the horizon it and its
-light are skipped. It is anchored 1800 units out, clamped to 82% of the way to the dome and 85% of
-the far plane.
+Defaults are a 26-degree peak and a 95-degree (roughly east) rise. The elevation is 0 through the
+intro and at both ends of the round, and the moon and its light are hidden there. It is anchored
+1800 units out, clamped to 82% of the way to the dome and 85% of the far plane.
 
 The lit part is 28 horizontal bands of six columns each. At band height `v` the disc's half-width
 is `w = sqrt(r^2 - v^2)` and the terminator an ellipse of half-width `|k| * w`; a phase maps to
 `k` and a lit side (Full 1, gibbous 0.5, quarter 0, crescent -0.5, New not drawn), with the lit
 side relative to the camera. Alpha fades to 0 over the outer 15% of the radius, and 13 darker
-crater patches are drawn only where they fit wholly inside the lit interior.
+crater patches are drawn only where they fit wholly inside the lit interior, decided once per
+preset since the fit depends only on the phase. The menu's Brightness scales the disc's and the
+light's RGB; the disc's opacity stays the colour's alpha.
 
-With `moon.light` set, the mod adds an INFINITE light pointed along the moon's direction each
-frame, coloured `light_color` times brightness. To make it the dominant light it zeroes the stage's
-secondary INFINITE light (the first INFINITE in hardware slots 0-7 that is neither the primary
-stage light nor its own), caching the colour and restoring it when moonlight ends. The primary is
-left to the runtime's terrain tint, so each light has one owner. Zeroing holds because the engine
-reassigns slots every frame but never rewrites a light's colour.
+With `moon.light` set, the mod points an INFINITE light along the moon's direction each frame,
+coloured `light_color` times brightness. It also zeroes the first INFINITE light other than the
+primary stage light and its own that it finds in hardware slots 0-7, caching the colour and
+restoring it when moonlight ends. Read from game logic, those slots hold whichever light chain
+was drawn last the frame before, which is not reliably the stage's secondary light.
 
 ## Stars
 
@@ -187,4 +205,5 @@ Shooting stars ride along in the same callback: a pool of four, each launched wh
 expires (Rare 1200-3000 frames, Occasional 600-1500, Frequent 240-600; `StarDef.shoot` picks the
 cadence, Default meaning Occasional). A meteor follows a great-circle arc from a start 25-75
 degrees up along a downward-biased tangent, crossing 0.4-1.0 rad in 26-46 frames, drawn as an
-8-segment fading `GX_LINESTRIP` trail and a glowing head.
+8-segment fading `GX_LINESTRIP` trail and a glowing head. Their size, speed and brightness knobs
+have no per-preset field behind them and default to Normal.

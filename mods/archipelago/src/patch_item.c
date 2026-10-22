@@ -44,8 +44,8 @@ int PatchItem_Give(PatchKind kind)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
-        GOBJ *mg = Ply_GetMachineGObj(i);
-        if (!mg)
+        MachineData *md = Ply_GetMachineData(i);
+        if (!md)
             continue;
 
         if (use_item_spawn)
@@ -54,7 +54,7 @@ int PatchItem_Give(PatchKind kind)
         }
         else
         {
-            Machine_GivePatch(mg->userdata, kind, 1);
+            Machine_GivePatch(md, kind, 1);
             EnergyLink_RebaseStats(i);
         }
         applied++;
@@ -75,8 +75,8 @@ int PatchItem_GiveAllUp(int num)
     {
         if (Ply_GetPKind(i) != PKIND_HMN)
             continue;
-        GOBJ *mg = Ply_GetMachineGObj(i);
-        if (!mg)
+        MachineData *md = Ply_GetMachineData(i);
+        if (!md)
             continue;
 
         if (use_item_spawn)
@@ -86,7 +86,7 @@ int PatchItem_GiveAllUp(int num)
         }
         else
         {
-            Machine_GiveAllUp(mg->userdata, num);
+            Machine_GiveAllUp(md, num);
             EnergyLink_RebaseStats(i);
         }
         applied++;

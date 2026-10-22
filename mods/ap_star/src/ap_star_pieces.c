@@ -442,14 +442,13 @@ int ApStarPieces_SpawnPiece(int piece, int ply)
         return 0;
     }
 
-    GOBJ *mg = Ply_GetMachineGObj(ply);
-    if (mg == NULL)
+    MachineData *md = Ply_GetMachineData(ply);
+    if (md == NULL)
     {
         OSReport("[ApStarPieces] Player %d has no machine to spawn in front of\n", ply + 1);
         return 0;
     }
 
-    MachineData *md = mg->userdata;
     Vec3 pos;
     pos.X = md->pos.X + AP_PIECE_SPAWN_FORWARD * md->forward.X;
     pos.Y = md->pos.Y + AP_PIECE_SPAWN_FORWARD * md->forward.Y;

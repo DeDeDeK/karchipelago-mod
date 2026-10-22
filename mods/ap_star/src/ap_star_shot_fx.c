@@ -220,7 +220,7 @@ static void DrawHalo(const ShotFx *fx, const Vec3 *right, const Vec3 *up)
 static void FxGX(GOBJ *g, int pass)
 {
     (void)g;
-    if (pass != 1 || stc_fx_num == 0)
+    if (pass != GXPASS_TEXEDGE || stc_fx_num == 0)
         return;
 
     COBJ *cam = COBJ_GetCurrent();
@@ -245,7 +245,7 @@ static void FxGX(GOBJ *g, int pass)
             DrawHalo(&stc_fx[i], &right, &up);
     }
 
-    HSD_StateInvalidate(-1);
+    HSD_StateInvalidate(HSD_STATE_ALL);
 }
 
 // Made on the first shot of a scene. The scene's teardown frees it along with the

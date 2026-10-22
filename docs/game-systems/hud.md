@@ -41,8 +41,10 @@ update procs, so a custom element may pass any kind it does not collide with.
 Rendering has two levels. **Camera GObjs** each own a GX link of 64 or above, and their
 `cobj_links` bitmask selects which links (0-63) they draw. **Renderable GObjs** sit on one of those
 links with a `gx_cb`. For each camera, `CObjThink_Common` (0x8042a29c) sets up the projection and
-calls `CObj_RenderGXLinks` (0x8042a0b4) with passes 0-2 (opaque, translucent, extra), which walks
-every object on each selected link and calls its `gx_cb`. Only the camera's `cobj_links` matters:
+calls `CObj_RenderGXLinks` (0x8042a0b4) with passes 0-2, which walks every object on each selected
+link and calls its `gx_cb`, one pass at a time across all links. `HSD_GetRenderPass` (0x8042a0a0)
+maps each pass to the DObj bucket it draws (hoshi's `GXRenderPass`): 0 opaque, 1 TEXEDGE
+(`RENDER_XLU` materials that still update Z), 2 XLU (those that also set `RENDER_NO_ZUPDATE`). Only the camera's `cobj_links` matters:
 `GObj_Create` zeroes it on every object and nothing reads it on a non-camera.
 
 | Callback | Address | Behavior |

@@ -191,23 +191,36 @@ flag, set by `HurtData_SetCandyInvincible` (0x8018cbc8) and cleared by
 
 ## Enemy attack regions
 
-An enemy's two attack regions are rewritten from its animation every frame:
-`EventActor_RefreshAttackParams` (0x80201ba4) reads the current animation frame's hurt
-descriptor, copies the parameters into `EnemyData.hit_region` (+0x45C) and enables the region
-through `Trigger_SetState1` (0x8018a0e8); animation-script command 13
-(`EnemyAnimCmd_DisableHit`, 0x80201138) turns one off through `Hit_SetInactive` (0x80189d1c). A
-mod that writes an enemy's region parameters therefore loses them on the next frame.
+An enemy's attack regions come from its animation script. Command 12
+(`EnemyAnimCmd_SetHitDesc`, 0x80200eb8) decodes a hit descriptor into a `HurtParams` and arms
+the region through `EventActor_EmitHitDesc` (0x80201e18) and `HurtData_SetAttackRegion`
+(0x8018c8c4); command 13 (`EnemyAnimCmd_DisableHit`, 0x80201138) turns one off through
+`Hit_SetInactive` (0x80189d1c). The script runs once per state, so a region keeps its
+parameters until the next state change. `EventActor_ChangeState` then calls
+`HurtData_ClearStateRegions` (0x8018c824), which deactivates the regions the script armed, and
+the new state's script arms them again with a fresh victim list.
+
+A mod can retune or switch off a live enemy region by writing `HurtData.regions` before the
+machines' hit pass at priority 9 - from the actor's `trigger_cb` (priority 7), say - and must
+repeat the write after every state change.
+
+`EnemyData.hit_region` (+0x45C) is not an attack region. It is the touch region the inhale scans
+test, placed once at create by `EventActor_RefreshAttackParams` (0x80201ba4) with an offset and
+radius and no damage.
 
 ## Dealing damage from mod code
 
 - **HP only.** `Machine_GiveDamage(md, amount, &md->hurt_data->hitcoll_log_idx)` takes HP with
   no visible reaction. Above 8 in the city it also knocks patches out, as a vanilla heavy hit
   does.
-- **A real hit.** Zero a `HurtParams` with `Trigger_ClearParameterStruct` (0x8018a0c0), fill
-  in `base_damage`, `base_knockback` and the two factors (0 for fixed values), and call
-  `Machine_ApplyHurt(hurt_data, slot, &params)` (0x8018d1a8). It runs `Trigger_InitParameters`
-  and `HitColl_SetDamageLog` against a static dummy attacker, so the victim's normal
-  resolution - attacker bookkeeping, `Machine_DmgApply`, the bounce - runs on it.
+- **A logged hit.** `Machine_ApplyHurt(hurt_data, slot, &params)` (0x8018d1a8) runs
+  `Trigger_InitParameters` and `HitColl_SetDamageLog` from a `HurtParams` (zeroed with
+  `Trigger_ClearParameterStruct`, 0x8018a0c0, then `base_damage`, `base_knockback` and the two
+  factors filled in) against a static dummy attacker. That only logs the hit. Called from a proc
+  of its own it does nothing: `HitColl_Init` clears the log at the start of the victim's next
+  pass, before `HitColl_ActOnCollision` reads it. The hit has to be logged inside the victim's
+  pass, between `HitColl_Init` and `HitColl_ActOnCollision`, for the normal resolution -
+  attacker bookkeeping, `Machine_DmgApply`, the bounce - to run on it.
 
 ## Key functions
 
@@ -222,4 +235,6 @@ mod that writes an enemy's region parameters therefore loses them on the next fr
 | `Machine_DmgApply` | 0x801c6834 | Applies a logged hit: damage, then the hit reaction |
 | `Machine_GiveDamage` | 0x801e1ee8 | HP and patch drops, no reaction |
 | `Machine_ApplyHurt` | 0x8018d1a8 | Logs a hit from a `HurtParams` |
+| `HurtData_SetAttackRegion` | 0x8018c8c4 | Arms one attack region from a `HurtParams` |
+| `HurtData_ClearStateRegions` | 0x8018c824 | Deactivates the state's attack regions on a state change |
 | `Machine_UpdateMovingHitbox` | 0x801d7604 | Drives the boost, Candy and ram regions |

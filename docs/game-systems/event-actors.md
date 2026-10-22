@@ -26,16 +26,31 @@ drawing from their column of the event-source drop table; neither touches a ride
 
 ## TAC (0x4C)
 
-Descriptor 0x804b4178, 12 states from 0x804b4088, init `Tac_Init` (0x8021a534). From spawn it
-randomly chases or wanders. While chasing, its `pri6_cb` (0x8021aa6c) probes ahead with
-`EventActor_FindPlayerInRangeFwd` (0x801fe764); with a rider in range and in front it dashes and
-grabs, steering toward the target each frame. After a grab it can dash again or flee, climbing
-until it is off screen and destroying itself. A hit drops it into its own hit reaction.
+Descriptor 0x804b4178, 12 states from 0x804b4088, init `Tac_Init` (0x8021a534). TAC never
+follows a spline and has no attack region: it does no contact damage and grabs nothing. It spawns
+into an idle (0x0F, with two look-around idles 0x10 and 0x11) or a walk round a 7-unit circle about
+its spawn point (0x12, pausing in 0x13). The idle and circle states' `pri6_cb` probe ahead with
+`EventActor_FindPlayerInRangeFwd` (0x801fe764); a rider within 30 units and 60 degrees of its
+forward makes it notice (0x14) and then run (0x15) for good. The run is free ground roaming: every
+30 frames it turns up to 30 degrees at random, it deflects off walls and falls off ledges, and
+now and then it stops a moment (0x16). Its speeds and timings come from the per-type block of
+`EmTacData.dat`, which every TAC shares. TAC reads no event globals, so it can be spawned
+anywhere; one spawned in the air floats, since its idle states apply no gravity.
+
+`EnemyData.variant`, set from `desc.variant`, is TAC's stay. At every animation end the state's
+`anim_cb` sends TAC fleeing (0x17, `Tac_EnterFlee` 0x8021c3bc) once its grounded frame count
+reaches the stay, compared unsigned, or once `damage_accum_2` reaches `param_hp` (40). The TAC
+event passes `CityEvent_GetDuration`; 0 flees at the first animation end and -1 never does. The
+flee rises, fades out once above 1000 units and destroys itself in its `envcoll_cb`.
+
+A hit with knockback runs `hit_reaction_cb2`, `Tac_OnHit` (0x8021c62c): TAC turns intangible and
+enters 0x19, whose animation end flees or runs on by the same test. TAC never dies otherwise:
+kinds 0x4C and up zero `damage_accum_1` every frame, and the installed reaction bypasses the
+common knockback and death states.
 
 The "steal" is not a steal. `Tac_ScatterItems` (0x8021c8ec) throws new pickups in a fan around
-TAC's forward, mid-dash on a timer and again when hit; nothing in TAC writes a player's
-collected items. Its contact damage is an ordinary attack region. Its tuning (detect range, dash
-speed, item counts) is per-type data in the archive.
+TAC's forward: one now and then while it runs, a few while it flees, and three from `Tac_OnHit`.
+Nothing in TAC writes a player's collected items.
 
 ## Dyna Blade (0x4D)
 
@@ -59,12 +74,13 @@ state block, NULL outside the event) and `stc_meteor_event_data` (r13+0x654, the
 block). The event then creates meteors at random positions inside its zones.
 
 The spawner packs the fall into the descriptor's `variant`, which lands in
-`EnemyData.tier_flags`:
+`EnemyData.variant`:
 
 | Bits | Field | Resolves through |
 |---|---|---|
-| 0-7 | zone index | `stc_meteor_event_data->+0x0C`, stride 12: height offset, fall speed, angle |
-| 8-15 | speed index | `stc_meteor_event_data->+0x04`, stride 8: overrides the angle |
+| 0-7 | zone index | `stc_meteor_event_data->+0x0C`, stride 12 (`MeteorZone`): height offset, fall speed, and the scale the event spawns the meteor at (5 to 33) |
+| 8-15 | speed index | `stc_meteor_event_data->+0x04`, stride 8 (`MeteorSpeed`): a location offset and the approach angle in degrees |
+| 16-21 | item count | items the landing throws from the meteor's drop column |
 | 22-31 | approach angle | degrees from vertical; 0 is straight down |
 
 The descriptor (0x804b4310) has four states, 14-17:
@@ -78,7 +94,7 @@ The descriptor (0x804b4310) has four states, 14-17:
 
 `Meteor_BehaviorInit` (0x8021e1a0) is the only reader of the event globals. It bails when either
 is NULL; otherwise it zeroes velocity, enters state 15, looks up the zone and speed entries from
-`tier_flags`, and either drops the meteor straight down (`pos.Y = initial_pos.Y + zone offset`,
+`variant`, and either drops the meteor straight down (`pos.Y = initial_pos.Y + zone offset`,
 `vel.Y = -speed`) or tilts its basis by the approach angle and spreads the speed across all
 three axes.
 
@@ -101,8 +117,8 @@ init to read them. Build the descriptor with the standalone values (`spawn_index
 
 1. Save `*stc_meteor_data` and `*stc_meteor_event_data`.
 2. Write a non-zero value to `*stc_meteor_data` and point `*stc_meteor_event_data` at a fake
-   event block laid out like the two tables above (one zone with the wanted fall speed, angles
-   0).
+   `MeteorEventData` (one zone with the wanted height and fall speed, one speed entry with
+   angle 0).
 3. `EventActor_Create`, which leaves the meteor in state 14.
 4. Call `Meteor_BehaviorInit` on it directly, putting it in state 15 with its velocity set.
 5. Restore both globals.
@@ -113,3 +129,9 @@ the real globals are back. The restore matters because during a live meteor even
 globals point at event data. To land on a moving rider, lead the position by its velocity times
 the fall time. The vanilla chain then destroys the meteor the same way it destroys an event one,
 so no cleanup is needed.
+
+The model, its trail and landing particles, its light and its landing effect all scale with
+`final_scale`, so a small meteor looks small. Two things do not: `Meteor_Landing` rumbles every
+player within `MeteorParams.rumble_radius` (500, in the archive's per-kind block every meteor
+shares), and `Meteor_HitTransition` starts the same every-view quake (effect 0x5a5a2,
+`Quake_SetAmplitude` 0.2) whatever the size.

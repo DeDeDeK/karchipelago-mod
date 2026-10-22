@@ -49,9 +49,12 @@ collision allocation reserves room once per entry; spawning an entry more often 
 lists it asserts.
 
 City Trial ships no entries, only the hook `grDataCity1_CreateYakumono` (0x8010f268), which
-makes exactly 31 creator calls (`data_idx` 0-30). Its `data_array` has 33 slots, so slots 31 and
-32 are spare: a mod can point them at its own parameter block and create a yakumono without
-disturbing a vanilla one. `GrObj.yaku_num` (+0x6fc) counts yakumono GObjs; `GrObj.yaku` (+0x710)
+makes exactly 31 creator calls (`data_idx` 0-30) with the kind hardcoded per index. Its
+`data_array` has 33 slots, and `fn_grSetupCityEventData` (0x8010f7c4) fills the last two from
+`GrCity1Event.dat` at load: slot 31 is Rail Fire's (kind 65) and slot 32 the Secret Chamber's
+(66), along with `spawn_data_array`. No slot is free. `GrYaku_Create` reads its slot once and
+copies the block pointer into the new `YakumonoData`, so a mod can lend itself a slot for the
+length of one `GrYaku_Create` call and put the vanilla pointer straight back. `GrObj.yaku_num` (+0x6fc) counts yakumono GObjs; `GrObj.yaku` (+0x710)
 is sized from the entry count and is therefore NULL in City Trial, so code that enumerates live
 props must walk the p_link 8 list instead.
 
@@ -96,12 +99,12 @@ installs any others after it.
 | 0 | 17 | catch zone | trigger volume |
 | 1 | 18 | trigger zone | trigger volume |
 | 2-17 | 46 | gondola cars | zone-backed, one GObj per car |
-| 18-19 | 61 | small animated props | classic: own model JObj |
+| 18-19 | 61 | lava dragons at the volcano | stage joints driven by a stage motion |
 | 20 | 68 | Lighthouse | zone-backed, multi-part |
 | 21 | 69 | Whispy Woods (Forest event) | single-prop break shape |
 | 22-23 | 32 | forest pitfall | single prop, multi-stage crack |
 | 24 | 37 | volcano-base hole covers | strong break family |
-| 25 | 36 | volcano rock walls | strong break family |
+| 25 | 36 | one rock wall in a passage under the garden in the sky | strong break family |
 | 26 | 38 | houses (30 placed) | strong break family |
 | 27 | 33 | coral (10) | weak break family |
 | 28 | 34 | trees (53) | weak break family |
@@ -119,9 +122,19 @@ Where a prop's geometry lives depends on its family:
   the GObj. The weak families (33-35) keep the count at `+0x134`; the strong ones (36-38) keep
   per-prop HP at `+0x134` and the count at `+0x140`. The parent's own `pos`, `model_jobj` and
   `xform_jobj` are unused.
-- **Single-prop** kinds (29, 32, 69) store one record directly at `+0x130`.
+- **Single-prop** kinds (29, 32, 69) store one record directly at `+0x130`. The star pole's
+  (`GrYakuStarPole_Create`, 0x801043c8) is the star alone, a static unanimated joint that is
+  the record's own `jobj`; the pole under it is plain terrain.
 - **Zone-backed** kinds (17, 18, 46, 68) claim a collision zone instead of a record and write
   the owner GObj into the zone record at `+0x138`.
+- **The lava dragon** (61) has no record, zone or model of its own. Its parameter block is
+  `{YakuLavaDragonDesc *desc, 0, 0, 0, 0, audio}`, and the descriptor names its root stage joint
+  and a `GrData.motion` entry. `Gr_StateChange` plays that motion on the root and the six bones
+  its body is skinned to, and the motion's event script arms the two attack regions on the head
+  and neck bones by stage joint index. With an idle time of 0, `GrYakuLavaDragon_LeapThink`
+  (0x8010a0ec) restarts the three-leap motion as soon as it ends, so the dragons never rest. A
+  hit from one sets a flag through `Ply_SetBumpedFlamingDragon` (0x802310e0) that only Magma
+  Flows' checklist reads.
 
 So scanning the collision records for a non-NULL `yaku_gobj` reaches every breakable prop and
 nothing else (terrain records leave it NULL); zones, gondolas and the Lighthouse are only in
@@ -159,7 +172,10 @@ only its direction and the collider's radius set the force.
 - `GrYaku_ApplyImpactDamage` (0x80104be0) subtracts the force from the prop's own HP and breaks
   at 0, so hits accumulate; `hitStrongObject` (0x801086d0) uses it.
 
-Both cap the collider's speed afterwards (`CollData.yaku_break_speed_cap`). The weak handler
+Both cap the collider's speed afterwards (`CollData.yaku_break_speed_cap`). The City Trial star
+pole has no second phase, so one threshold hit breaks it: its collision is retired, its joint
+set `JOBJ_HIDDEN`, and once the break effects end `GrYakuBreakCoral_BrokenThink` (0x80103db4)
+destroys the GObj. Nothing re-creates it, so it stays busted for the rest of the round. The weak handler
 swaps the prop into a broken-state model at its placed spot; the strong handler breaks it
 visibly at the contact point. `hitBreakableFloor` (0x80106bd0) advances one crack stage per
 call, and `hitBigStar` (0x80103eb8) arms a second phase on a weak hit that the next contact
@@ -187,6 +203,45 @@ collision - a mod that moves one must retire its collision or leave an invisible
   `YakumonoGObj_Proc7`, for all of a break family's props at once. The rendered model is scaled
   through each JObj's own scale.
 
+## The cannon
+
+Machine Passage's cannon (kind 48) is built from four pieces of stage data, created by
+`grDataMachine2_CreateYakumono` (0x8010ea40) with data_idx 0 for the catch zone and 1 for the
+cannon:
+
+1. **Catch.** `GrYakuCatchZone_Create` (0x800fa2a0) claims a kind-18 collision zone; its
+   parameter `YakuCatchZoneDesc` is `{joint, target_ids, target_num, target_kind}`. While a
+   machine is not adhered, `Machine_ProcessEnvColl` sets `MachineData.adhere_yaku` (+0xaf8) from
+   `mpColl_GetCatchZoneIndex` and `Gr_GetCatchZoneTarget` (0x800d2790). For a cannon target that
+   also calls `GrYakuCannon_Enqueue` (0x800ff220), which adds the machine to the queue with a
+   timer of `desc->wait`.
+2. **Enter.** On the priority-6 model-matrix think, `Machine_TryEnterAdhereYaku` (0x801e5014)
+   calls the class's cannon entry, star state 0x1a or bike state 0x20. That entry runs
+   `Machine_EnterCannonCommon` (0x801e6ed4). It sets `is_adhered` and the in-cannon bit, takes
+   `cannon_path` from `Gr_GetCannonPath` (0x800d297c) and snaps the machine to
+   `GrYakuCannon_GetPose` (0x800ff3e4): the world position, Z axis and Y axis of `desc->joint`.
+   The cannon state then runs only collision.
+3. **Fire.** The parameter block is `{YakuCannonDesc *desc, 0, 0, 0, 0, audio_desc}`, and
+   `YakuCannonDesc` is `{id, joint, wait, cooldown, path_idx, sfx}`; Machine Passage's is
+   `{2, 3, 60, 4, 0, 0x000f0006}`. The yakumono keeps a ring of ten `{gobj, timer}` entries in
+   its tail. In state 0 every timer counts down. The first to expire launches: a machine through
+   `MachineGObj_LaunchFromCannon` (0x801c8458) with `sfx`, an enemy through
+   `Enemy_LaunchFromCannon` (0x80204628). State 1 then waits `cooldown` frames. A queued machine
+   is launched from wherever it is, in the cannon state or not, and the queue asserts on a NULL
+   entry.
+4. **Fly.** `GrData.subanim` (+0x24) slot `cannon` (+0x0c) holds the flight AnimJoints, indexed
+   by `path_idx`. Each has one node with ROTX, ROTY and PATH tracks, the PATH track following a
+   spline joint. `Machine_InitPathJump` (0x801e40e4) plays it on an empty root JObj and adds the
+   launch quake, rumble and flash. `Machine_PathJumpPhys` (0x801e441c) takes the machine's
+   orientation from the absolute rotation tracks and its velocity from the frame-to-frame change
+   of the translate times `grGetStageScale()`. While the machine is in the barrel, the cannon
+   camera `PlyCam_CannonThink` (0x800caee0) plays the same flight and aims at its position
+   itself, so the spline is in absolute stage units. Machine Passage's starts exactly on the
+   barrel joint. At the anim's end a star enters `VCSTATE_FLY`.
+
+The kind-22 Canon zone only sets a bit the camera reads. Nothing in the flow checks the ground
+kind, and only the Air Ride checklist cell for simultaneous launches belongs to Machine Passage.
+
 ## Notes for modders
 
 - **Gating damage**: hook `YakumonoGObj_Proc9_HitColl` (the whole hit pass) or a kind's
@@ -207,6 +262,7 @@ collision - a mod that moves one must retire its collision or leave an invisible
   every prop while the props' meshes keep rendering. Break a single prop instead.
 - **Spawning a kind on a stage that does not ship it** works at the framework level:
   `GrYaku_Create` plus the kind's tail-init runs, the procs tick and the HurtData and state
-  machine work. What a foreign stage lacks is the asset side - the cannon, for one, takes its
-  mesh and barrel anchor joints from `GrMachine2Model.dat`'s scene graph, and loading that whole
-  archive into City Trial exhausts the heap.
+  machine work. What a foreign stage lacks is the stage data the kind reads. The cannon reads a
+  barrel joint (through `GrYakuCannon_GetPose`), a flight (`GrData.subanim->cannon`) and a catch
+  zone, and its mesh is part of `GrMachine2Model.dat`'s terrain; loading that whole archive into
+  City Trial exhausts the heap.

@@ -22,11 +22,11 @@
 #define CLOUD_SPHERE_SECTORS  8      // longitude divisions
 #define CLOUD_SPHERE_VERTS    ((CLOUD_SPHERE_RINGS + 1) * (CLOUD_SPHERE_SECTORS + 1))
 #define CLOUD_FLATTEN         0.55f  // spheroid vertical squash (ry = r * this)
-#define CLOUD_RIM_MIN         0.12f  // silhouette alpha floor (0 = fully wispy edge)
+#define CLOUD_RIM_MIN         0.12f  // silhouette alpha at a grazing normal (0 = fully wispy edge)
 
 // Defaults applied when a preset leaves the matching CloudDef field 0; the color
 // alpha is the base per-cloud opacity before the menu scalar.
-#define CLOUD_DEF_COLOR       RGBA(236, 240, 248, 205)
+static const GXColor cloud_def_color = {236, 240, 248, 205};
 #define CLOUD_DEF_COUNT       12
 #define CLOUD_DEF_SIZE        58.0f   // base puff radius (world units)
 #define CLOUD_DEF_SIZE_VAR    0.35f   // +/- fractional per-cloud size spread
@@ -60,9 +60,6 @@
 // ghosts in/out at the walls rather than popping. Y clearance is ignored.
 #define CLOUD_EDGE_FADE  260.0f
 
-#define CLOUD_GOBJ_CLASS  205
-#define CLOUD_GOBJ_PLINK  29
-
 typedef struct CloudPuff
 {
     Vec3  off;   // offset from the cloud center in world axes (clouds don't rotate)
@@ -76,7 +73,6 @@ typedef struct Cloud
     float     alpha_scale;       // subtle per-cloud opacity variety, 0..1
 } Cloud;
 
-// Cached only to avoid recreating the GObj every frame; never dereferenced.
 static GOBJ *stc_cloud_gobj = NULL;
 
 static int stc_active = 0;
@@ -86,50 +82,48 @@ static Cloud stc_clouds[CLOUD_MAX];
 static int   stc_count = 0;
 
 // Resolved per-preset config (CloudDef + defaults), before the menu scalars.
-static GXColor stc_color = {236, 240, 248, 205};
-static int     stc_base_count = CLOUD_DEF_COUNT;
-static float   stc_base_size = CLOUD_DEF_SIZE;
-static float   stc_size_var = CLOUD_DEF_SIZE_VAR;
-static float   stc_puff_var = CLOUD_DEF_PUFF_VAR;
-static float   stc_pre_height = 0.0f;   // absolute preset height, or 0 = derive from OOB box
-static float   stc_height_var = CLOUD_DEF_HEIGHT_VAR;
+static GXColor stc_color;
+static int     stc_base_count;
+static float   stc_base_size;
+static float   stc_size_var;
+static float   stc_puff_var;
+static float   stc_pre_height;   // absolute preset height, or 0 = derive from OOB box
+static float   stc_height_var;
 
 // Index 0 ("Preset") is the pass-through value on every knob below.
-static const float cover_factors[] = {1.0f, 0.0f, 0.55f, 1.0f, 1.6f};
-static char *cover_names[] = {"Preset", "Off", "Sparse", "Normal", "Dense"};
-#define CLOUD_COVER_NUM ((int)GetElementsIn(cover_factors))
+static const float cover_factors[] = {1.0f, 0.0f, 0.55f, 1.6f};
+static char *cover_names[] = {"Preset", "Off", "Sparse", "Dense"};
+WEATHER_KNOB_CHECK(cover_factors, cover_names);
 static int cover_index = 0;
 
-static const float opacity_factors[] = {1.0f, 0.6f, 1.0f, 1.35f};
-static char *opacity_names[] = {"Preset", "Thin", "Normal", "Thick"};
-#define CLOUD_OPACITY_NUM ((int)GetElementsIn(opacity_factors))
+static const float opacity_factors[] = {1.0f, 0.6f, 1.35f};
+static char *opacity_names[] = {"Preset", "Thin", "Thick"};
+WEATHER_KNOB_CHECK(opacity_factors, opacity_names);
 static int opacity_index = 0;
 
-static const float size_factors[] = {1.0f, 0.7f, 1.0f, 1.4f};
-static char *size_names[] = {"Preset", "Small", "Normal", "Large"};
-#define CLOUD_SIZE_NUM ((int)GetElementsIn(size_factors))
+static const float size_factors[] = {1.0f, 0.7f, 1.4f};
+static char *size_names[] = {"Preset", "Small", "Large"};
+WEATHER_KNOB_CHECK(size_factors, size_names);
 static int size_index = 0;
 
-// Master scalar over the preset's per-puff variance (resolved var clamped 0..1).
-static const float variance_factors[] = {1.0f, 0.2f, 1.0f, 1.7f};
-static char *variance_names[] = {"Preset", "Uniform", "Normal", "Varied"};
-#define CLOUD_VARIANCE_NUM ((int)GetElementsIn(variance_factors))
+// Master scalar over the preset's per-puff variance (resolved var clamped to 1).
+static const float variance_factors[] = {1.0f, 0.2f, 1.7f};
+static char *variance_names[] = {"Preset", "Uniform", "Varied"};
+WEATHER_KNOB_CHECK(variance_factors, variance_names);
 static int variance_index = 0;
 
 // Additive world-unit offset applied to the resolved deck height.
-static const float height_offsets[] = {0.0f, -220.0f, 0.0f, 220.0f};
-static char *height_names[] = {"Preset", "Low", "Normal", "High"};
-#define CLOUD_HEIGHT_NUM ((int)GetElementsIn(height_offsets))
+static const float height_offsets[] = {0.0f, -220.0f, 220.0f};
+static char *height_names[] = {"Preset", "Low", "High"};
+WEATHER_KNOB_CHECK(height_offsets, height_names);
 static int height_index = 0;
 
 // Index 0 keeps the per-preset RGB; the rest force an RGB, leaving the alpha from
 // the preset opacity * the Opacity scalar.
 static const u32 color_overrides[] = {0, RGBA(246, 249, 255, 255), RGBA(150, 160, 175, 255), RGBA(66, 72, 86, 255)};
 static char *color_names[] = {"Preset", "White", "Gray", "Storm"};
-#define CLOUD_COLOR_NUM ((int)GetElementsIn(color_overrides))
+WEATHER_KNOB_CHECK(color_overrides, color_names);
 static int color_index = 0;
-
-static void Cloud_GX(GOBJ *g, int pass);
 
 // Unit-sphere vertex directions (latitude rows x longitude), doubling as vertex
 // normals; each puff scales/translates these into world space.
@@ -170,15 +164,13 @@ static float DeckBaseY(StageNode *sn)
 // Roll a fresh cluster shape (puff offsets + radii) and per-cloud opacity variety.
 static void SeedShape(Cloud *c)
 {
-    float scale = 1.0f + Weather_Randf2() * stc_size_var;
-    if (scale < 0.4f)
-        scale = 0.4f;
+    float scale = Weather_RandScale(stc_size_var, 0.4f);
     float r = stc_base_size * size_factors[size_index] * scale * CLOUD_SIZE_SCALE;
 
     // Resolved variance -> smallest scattered puff as a fraction of r.
     float var = stc_puff_var * variance_factors[variance_index];
-    if (var < 0.0f) var = 0.0f;
-    if (var > 1.0f) var = 1.0f;
+    if (var > 1.0f)
+        var = 1.0f;
     float puff_min = 1.0f - var * CLOUD_PUFF_SPREAD;
     if (puff_min < CLOUD_PUFF_FLOOR)
         puff_min = CLOUD_PUFF_FLOOR;
@@ -190,10 +182,10 @@ static void SeedShape(Cloud *c)
         c->puff[p].off.X = Weather_Randf2() * r * CLOUD_SPREAD_H;
         c->puff[p].off.Z = Weather_Randf2() * r * CLOUD_SPREAD_H;
         c->puff[p].off.Y = Weather_Randf2() * r * CLOUD_SPREAD_V;
-        c->puff[p].r = r * Weather_RandRange(puff_min, 1.0f);
+        c->puff[p].r = r * RandomInRangef(puff_min, 1.0f);
     }
 
-    c->alpha_scale = Weather_RandRange(0.82f, 1.0f);
+    c->alpha_scale = RandomInRangef(0.82f, 1.0f);
 }
 
 // Leaves stc_inited 0 to retry next frame when the stage is not loaded yet.
@@ -203,21 +195,12 @@ static void Cloud_Arm(void)
     if (!sn)
         return;
 
-    int want = (int)(stc_base_count * cover_factors[cover_index] + 0.5f);
-    if (want > CLOUD_MAX)
-        want = CLOUD_MAX;
-    if (want < 0)
-        want = 0;
-    stc_count = want;
-
-    float cx, cz, hx, hz;
-    Weather_PlayBox(sn, &cx, &cz, &hx, &hz);
+    stc_count = Weather_ScaleCount(stc_base_count, cover_factors[cover_index], CLOUD_MAX);
 
     for (int i = 0; i < stc_count; i++)
     {
         Cloud *c = &stc_clouds[i];
-        c->pos.X = cx + Weather_Randf2() * hx;
-        c->pos.Z = cz + Weather_Randf2() * hz;
+        Weather_RandBoxPoint(sn, 1.0f, &c->pos.X, &c->pos.Z);
         c->pos.Y = DeckBaseY(sn) + Weather_Randf2() * stc_height_var;
         SeedShape(c);
     }
@@ -226,20 +209,12 @@ static void Cloud_Arm(void)
     OSReport("[Clouds] Armed %d clouds\n", stc_count);
 }
 
-static void Cloud_Ensure(void)
-{
-    if (stc_cloud_gobj)
-        return;
-    stc_cloud_gobj = WeatherGX_EnsureLayer(CLOUD_GOBJ_CLASS, CLOUD_GOBJ_PLINK,
-                                           Cloud_GX, "Clouds");
-}
-
 // GX callback on the world camera link, XLU pass. Each cloud is a cluster of
 // translucent spheroids.
 static void Cloud_GX(GOBJ *g, int pass)
 {
     (void)g;
-    if (pass != 1)
+    if (pass != GXPASS_TEXEDGE)
         return;
     if (!stc_active || stc_count <= 0)
         return;
@@ -253,17 +228,16 @@ static void Cloud_GX(GOBJ *g, int pass)
 
     SeedSphere();
 
-    // Camera forward axis in world space (row 2 of the world->view rotation). Only
-    // |n . fwd| is used, so a spheroid's front and back both stay opaque while its
-    // silhouette (normals grazing the view) fades.
-    float (*m)[4] = cam->view_mtx;
-    Vec3 fwd = {m[2][0], m[2][1], m[2][2]};
+    // Only |n . fwd| is used, so a spheroid's front and back both stay opaque while
+    // its silhouette (normals grazing the view) fades.
+    Vec3 fwd;
+    COBJ_GetViewForward(cam, &fwd);
 
     float minx = sn->oob_min.X, maxx = sn->oob_max.X;
     float minz = sn->oob_min.Z, maxz = sn->oob_max.Z;
     float opacity = opacity_factors[opacity_index];
 
-    GX_BeginXlu(cam, 2, GX_BL_INVSRCALPHA);
+    GX_BeginXlu(cam, RENDER_VERTEX, GX_BL_INVSRCALPHA);
 
     for (int i = 0; i < stc_count; i++)
     {
@@ -324,7 +298,7 @@ static void Cloud_GX(GOBJ *g, int pass)
         }
     }
 
-    HSD_StateInvalidate(-1);
+    HSD_StateInvalidate(HSD_STATE_ALL);
 }
 
 void Cloud_SetActive(const CloudDef *def)
@@ -336,21 +310,14 @@ void Cloud_SetActive(const CloudDef *def)
     }
     stc_active = 1;
 
-    stc_color = GXColor_Unpack(def->color ? def->color : CLOUD_DEF_COLOR);
-    if (color_index > 0)
-    {
-        GXColor ov = GXColor_Unpack(color_overrides[color_index]);
-        stc_color = (GXColor){ov.r, ov.g, ov.b, stc_color.a};
-    }
+    stc_color = def->color ? GXColor_Unpack(def->color) : cloud_def_color;
+    Weather_OverrideRGB(&stc_color, color_overrides[color_index]);
 
     stc_base_count = def->count > 0 ? def->count : CLOUD_DEF_COUNT;
-    if (stc_base_count > CLOUD_MAX)
-        stc_base_count = CLOUD_MAX;
-
     stc_base_size = def->size > 0.0f ? def->size : CLOUD_DEF_SIZE;
     stc_size_var = def->size_var > 0.0f ? def->size_var : CLOUD_DEF_SIZE_VAR;
     stc_puff_var = def->puff_var > 0.0f ? def->puff_var : CLOUD_DEF_PUFF_VAR;
-    stc_pre_height = def->height; // 0 => derive from the OOB box at arm
+    stc_pre_height = def->height;
     stc_height_var = def->height_var > 0.0f ? def->height_var : CLOUD_DEF_HEIGHT_VAR;
 
     stc_inited = 0;
@@ -364,7 +331,7 @@ void Cloud_Tick(void)
 
     if (!stc_inited)
         Cloud_Arm();
-    Cloud_Ensure();
+    WeatherGX_EnsureLayer(&stc_cloud_gobj, Cloud_GX, "Clouds");
     if (stc_count <= 0)
         return;
 
@@ -374,22 +341,13 @@ void Cloud_Tick(void)
 
     // Drift direction from the wind, speed damped/floored/capped. Calm wind gives
     // no direction, so fall back to a fixed heading at the floor speed.
-    Vec3 w;
-    Wind_GetVector(&w);
-    float mag = sqrtf(w.X * w.X + w.Z * w.Z);
-    float dirx, dirz, speed;
-    if (mag > 1e-4f)
-    {
-        dirx = w.X / mag;
-        dirz = w.Z / mag;
-        speed = mag * CLOUD_WIND_FACTOR;
-    }
-    else
+    float dirx, dirz;
+    float speed = Wind_GetHeading(&dirx, &dirz) * CLOUD_WIND_FACTOR;
+    if (speed <= 0.0f)
     {
         float rad = MTXDegToRad(CLOUD_CALM_HEADING);
         dirx = sinf(rad);
         dirz = cosf(rad);
-        speed = 0.0f;
     }
     if (speed < CLOUD_DRIFT_MIN)
         speed = CLOUD_DRIFT_MIN;
@@ -451,10 +409,10 @@ MenuDesc clouds_menu = {
     .options = {
         &(OptionDesc){
             .name = "Coverage",
-            .description = "How many clouds fill the sky over every CT preset (Off disables clouds entirely)",
+            .description = "Scales the cloud count on presets with clouds (Off disables clouds entirely)",
             .kind = OPTKIND_VALUE,
             .val = &cover_index,
-            .value_num = CLOUD_COVER_NUM,
+            .value_num = GetElementsIn(cover_factors),
             .value_names = cover_names,
         },
         &(OptionDesc){
@@ -462,7 +420,7 @@ MenuDesc clouds_menu = {
             .description = "How thick the clouds are - how much they obscure vision when you fly through",
             .kind = OPTKIND_VALUE,
             .val = &opacity_index,
-            .value_num = CLOUD_OPACITY_NUM,
+            .value_num = GetElementsIn(opacity_factors),
             .value_names = opacity_names,
         },
         &(OptionDesc){
@@ -470,7 +428,7 @@ MenuDesc clouds_menu = {
             .description = "How large each cloud is",
             .kind = OPTKIND_VALUE,
             .val = &size_index,
-            .value_num = CLOUD_SIZE_NUM,
+            .value_num = GetElementsIn(size_factors),
             .value_names = size_names,
         },
         &(OptionDesc){
@@ -478,15 +436,15 @@ MenuDesc clouds_menu = {
             .description = "How much the puffs within each cloud vary in size (Uniform = even, Varied = lumpy)",
             .kind = OPTKIND_VALUE,
             .val = &variance_index,
-            .value_num = CLOUD_VARIANCE_NUM,
+            .value_num = GetElementsIn(variance_factors),
             .value_names = variance_names,
         },
         &(OptionDesc){
             .name = "Height",
-            .description = "Raise or lower the cloud deck from its default (about a third up the play volume)",
+            .description = "Raise or lower the cloud deck from the preset's height",
             .kind = OPTKIND_VALUE,
             .val = &height_index,
-            .value_num = CLOUD_HEIGHT_NUM,
+            .value_num = GetElementsIn(height_offsets),
             .value_names = height_names,
         },
         &(OptionDesc){
@@ -494,7 +452,7 @@ MenuDesc clouds_menu = {
             .description = "Override the cloud tint across every preset (Preset = each preset's own color)",
             .kind = OPTKIND_VALUE,
             .val = &color_index,
-            .value_num = CLOUD_COLOR_NUM,
+            .value_num = GetElementsIn(color_overrides),
             .value_names = color_names,
         },
     },

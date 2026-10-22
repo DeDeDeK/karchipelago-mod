@@ -72,10 +72,9 @@ static void PermanentPatch_DoApply(void)
     {
         if (Ply_GetPKind(p) != PKIND_HMN)
             continue;
-        GOBJ *mg = Ply_GetMachineGObj(p);
-        if (!mg)
+        MachineData *md = Ply_GetMachineData(p);
+        if (!md)
             continue;
-        MachineData *md = mg->userdata;
 
         float before[PATCHKIND_NUM];
         memcpy(before, md->stats.values, sizeof(before));

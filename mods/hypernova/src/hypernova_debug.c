@@ -73,13 +73,13 @@ static void DrawConeGX(Vec3 *apex, Vec3 *aim, GXColor *col)
         GXPosition3f32(a->X, a->Y, a->Z);
         GXColor4u8(col->r, col->g, col->b, col->a);
     }
-    HSD_StateInvalidate(-1);
+    HSD_StateInvalidate(HSD_STATE_ALL);
 }
 
 // Drawn on the XLU pass (1) so the cone blends over already-rendered opaque world geometry.
 static void Hypernova_DebugConeGX(GOBJ *g, int pass)
 {
-    if (pass != 1)
+    if (pass != GXPASS_TEXEDGE)
         return;
 
     GXColor col = GXColor_Unpack(HYPERNOVA_DEBUG_CONE_RGBA);

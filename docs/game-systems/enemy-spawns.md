@@ -49,7 +49,7 @@ The descriptor fields with non-obvious meaning:
   `lifetime` (+0x38) only applies when `spawn_index` is not -1.
 - `leash_radius` (+0x50) of -1.0 means no leash and enables path following; any other value
   clamps the actor to that horizontal radius around `leash_center` (+0x44).
-- `variant` (+0x3C) is copied to `EnemyData.tier_flags`. For the rider parts 0x48-0x4A it
+- `variant` (+0x3C) is copied to `EnemyData.variant`. For the rider parts 0x48-0x4A it
   carries the parent GObj instead; the meteor packs its fall parameters into it.
 - `is_airborne` (+0x40) seeds `EnemyData.is_airborne`.
 

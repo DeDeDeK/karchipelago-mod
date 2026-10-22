@@ -94,9 +94,11 @@ mod most often races:
 | Priority | Proc |
 |---|---|
 | 0 | City Trial event procs |
+| 1 | `Gr_Think` (0x800ce618), the stage GObj's proc on p_link 7 (`GAMEPLINK_STAGE`) |
 | 4 | `Machine_PhysicsThink` (0x801c6368), `CityItem_PhysicsThink` |
 | 5 | `Machine_EnvCollThink` and its `mpColl_Update` (0x80245f70), the item ground snap |
 | 6 | Model-matrix appliers: `Machine_ApplyModelMatrix` (0x801c9074), `Rider_ModelMatrixThink` (0x8018f79c), the item matrix proc (0x8024f848) |
+| 11 | The quake proc `Quake_Think` (0x8006d95c), which rewrites every view's `CamShakeRec` from the live quake sources (zeroing it when there are none) |
 | 13 | `PlyCamGObj_Think` |
 
 A write that must win over physics and collision - a forced position, a clamped velocity - goes

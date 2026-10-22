@@ -60,19 +60,12 @@
 // Whirlwind rainbow strength (0..1): 1.0 = full rainbow, 0.0 = white. Opacity stays vanilla.
 #define HYPERNOVA_WHIRLWIND_TINT       0.45f
 
-#define HYPERNOVA_INHALE_EFFECT_ID   0x3a982  // inhale suction whirlwind Effect kind
-
-// Fabricated break collider: force = radius * impactSpeed^2, so FORCE_RADIUS is huge (but under
-// FLT_MAX) for a one-hit break. Only FORCE_DELTA's direction matters (it points into the surface).
-#define HYPERNOVA_BREAK_FORCE_RADIUS 1.0e9f
-#define HYPERNOVA_BREAK_FORCE_DELTA  100.0f
-
 #define HYPERNOVA_DEBUG_CONE_RGBA   RGBA(255, 0, 0, 64)
 #define HYPERNOVA_DEBUG_CONE_SEGS   24                  // base-circle subdivisions (15deg steps)
 
 // GX link 0 is the world camera's 3D-scene link, so the cone is occluded by world geometry.
-// The p_link is past GAMEPLINK_CARDCAM (28) and clear of custom_weather's 25-34, so no other
-// bucket walker sees this GObj.
+// The p_link is past GAMEPLINK_CARDCAM (28), the last engine bucket, so no bucket walker
+// sees this GObj.
 #define HYPERNOVA_DEBUG_GOBJ_CLASS  200
 #define HYPERNOVA_DEBUG_GOBJ_PLINK  35
 #define HYPERNOVA_DEBUG_GX_LINK     0

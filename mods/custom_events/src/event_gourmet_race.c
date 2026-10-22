@@ -13,6 +13,7 @@
 #include "obj.h"
 #include "text.h"
 
+#include "custom_events.h"
 #include "event_gourmet_race.h"
 
 #define GOURMET_MAX_FOOD            60
@@ -32,28 +33,11 @@
 #define GOURMET_CITY_RADIUS         (350.0f * 350.0f)
 #define GOURMET_CITY_CENTER_X       15.0f
 #define GOURMET_CITY_CENTER_Z       (-267.4f)
-#define MAX_CANDIDATES              802 // City Trial's Spline_GetCount
 
 #define GOURMET_RESPAWN_TIME_BIG    (20 * 60)
 #define GOURMET_RESPAWN_TIME        (10 * 60)
 #define GOURMET_BIG_POINTS          10
 #define GOURMET_REGULAR_POINTS      1
-
-static const ItemKind food_kinds[] = {
-    ITKIND_FOODMAXIMTOMATO,
-    ITKIND_FOODENERGYDRINK,
-    ITKIND_FOODICECREAM,
-    ITKIND_FOODRICEBALL,
-    ITKIND_FOODCHICKEN,
-    ITKIND_FOODCURRY,
-    ITKIND_FOODRAMEN,
-    ITKIND_FOODOMELET,
-    ITKIND_FOODHAMBURGER,
-    ITKIND_FOODSUSHI,
-    ITKIND_FOODHOTDOG,
-    ITKIND_FOODAPPLE,
-};
-#define NUM_FOOD_KINDS GetElementsIn(food_kinds)
 
 static const Vec3 big_food_positions[GOURMET_BIG_COUNT] = {
     { 71.00f, 140.00f, -345.00f },   // tower high
@@ -251,11 +235,11 @@ static int FoodSlot_Spawn(FoodSlot *slot)
     // collapses the model to an invisible, still pickable sliver. up stays NULL so
     // the food tilts to the ground normal.
     Vec3 forward = { 0.0f, 0.0f, 1.0f };
-    ItemKind kind = food_kinds[HSD_Randi(NUM_FOOD_KINDS)];
+    ItemKind kind = RandomInRange(ITKIND_FOODMAXIMTOMATO, ITKIND_FOODAPPLE);
     float scale = slot->is_big ? GOURMET_BIG_ITEM_SCALE : GOURMET_ITEM_SCALE;
 
     ItemDesc desc;
-    Item_InitDesc(&desc, kind, scale, 0,
+    Item_InitDesc(&desc, kind, scale, ITSPAWN_DIRECT,
                   &slot->spawn_pos, NULL, &forward, -1, -1,
                   0, slot->coll_kind, -1, -1);
     GOBJ *item = CityItem_Create(&desc);
@@ -276,17 +260,11 @@ static int FoodSlot_Spawn(FoodSlot *slot)
 // another item; kind and base_scale tell ours apart.
 static ItemData *FoodSlot_GetLive(FoodSlot *slot)
 {
-    for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_ITEM]; g; g = g->next)
-    {
-        if (g != slot->gobj)
-            continue;
-
-        ItemData *id = g->userdata;
-        if (id->kind == slot->kind && id->base_scale == slot->base_scale)
-            return id;
+    if (!CustomEvents_IsOnPLink(slot->gobj, GAMEPLINK_ITEM))
         return NULL;
-    }
-    return NULL;
+
+    ItemData *id = slot->gobj->userdata;
+    return id->kind == slot->kind && id->base_scale == slot->base_scale ? id : NULL;
 }
 
 static int IsTooClose(const Vec3 *pos)
@@ -322,19 +300,13 @@ static int PlaceFood(const Vec3 *base, float height, int coll_kind, int is_big)
 }
 
 // Spline midpoints within the city radius.
-static int CollectCandidates(Vec3 *out, int max_out)
+static int CollectCandidates(Vec3 *out, int spline_count)
 {
-    int spline_count = Spline_GetCount();
     int num = 0;
-
-    for (int seg = 0; seg < spline_count && num < max_out; seg++)
+    for (int seg = 0; seg < spline_count; seg++)
     {
-        void *spline = Spline_GetForward(seg);
-        if (!spline)
-            continue;
-
         Vec3 pt;
-        splGetSplinePoint(&pt, spline, 0.5f);
+        splGetSplinePoint(&pt, Spline_GetForward(seg), 0.5f);
 
         float dx = pt.X - GOURMET_CITY_CENTER_X;
         float dz = pt.Z - GOURMET_CITY_CENTER_Z;
@@ -369,7 +341,7 @@ static void GourmetRace_SpawnFood(void)
     num_food_slots = 0;
 
     for (int i = 0; i < GOURMET_BIG_COUNT; i++)
-        PlaceFood(&big_food_positions[i], GOURMET_PREPLACED_HEIGHT, 2, 1);
+        PlaceFood(&big_food_positions[i], GOURMET_PREPLACED_HEIGHT, ITEM_COLL_CAST, 1);
 
     Vec3 preplaced[GOURMET_PREPLACED_COUNT];
     memcpy(preplaced, preplaced_positions, sizeof(preplaced));
@@ -378,41 +350,21 @@ static void GourmetRace_SpawnFood(void)
     int preplaced_target = RandomInRange(GOURMET_PREPLACED_MIN, GOURMET_PREPLACED_MAX);
     int spawned = 0;
     for (int i = 0; i < GOURMET_PREPLACED_COUNT && spawned < preplaced_target; i++)
-        spawned += PlaceFood(&preplaced[i], GOURMET_PREPLACED_HEIGHT, 2, 0);
+        spawned += PlaceFood(&preplaced[i], GOURMET_PREPLACED_HEIGHT, ITEM_COLL_CAST, 0);
 
-    static Vec3 candidates[MAX_CANDIDATES];
-    int num = CollectCandidates(candidates, MAX_CANDIDATES);
+    int spline_count = Spline_GetCount();
+    Vec3 *candidates = HSD_MemAlloc(spline_count * sizeof(Vec3));
+    int num = CollectCandidates(candidates, spline_count);
     int remaining = GOURMET_MAX_FOOD - num_food_slots;
 
     int surface = PlaceOnSplines(candidates, num, remaining / 2,
-                                 GOURMET_SURFACE_HEIGHT, 3, GOURMET_ANY_Y);
+                                 GOURMET_SURFACE_HEIGHT, ITEM_COLL_POINT, GOURMET_ANY_Y);
     int underground_target = remaining - surface;
     int underground = PlaceOnSplines(candidates, num, underground_target,
-                                     GOURMET_ABOVE_SPLINE_HEIGHT, 2, GOURMET_UNDERGROUND_Y);
+                                     GOURMET_ABOVE_SPLINE_HEIGHT, ITEM_COLL_CAST, GOURMET_UNDERGROUND_Y);
     PlaceOnSplines(candidates, num, underground_target - underground,
-                   GOURMET_SURFACE_HEIGHT, 3, GOURMET_ANY_Y);
-}
-
-// Returns a player index, or -1 if no slot has a rider.
-static int FindNearestPlayer(const Vec3 *pos)
-{
-    int best = -1;
-    float best_dist = FLT_MAX;
-    for (int i = 0; i < PLY_NUM; i++)
-    {
-        GOBJ *rg = Ply_GetRiderGObj(i);
-        if (!rg)
-            continue;
-
-        RiderData *rd = rg->userdata;
-        float dist = VECSquareDistance(&rd->pos, (Vec3 *)pos);
-        if (dist < best_dist)
-        {
-            best_dist = dist;
-            best = i;
-        }
-    }
-    return best;
+                   GOURMET_SURFACE_HEIGHT, ITEM_COLL_POINT, GOURMET_ANY_Y);
+    HSD_Free(candidates);
 }
 
 // Scores eaten foods and runs their respawn timers. GAMEPLINK_1 freezes with the
@@ -437,7 +389,7 @@ static void GourmetRace_WatcherProc(GOBJ *gobj)
                 continue;
             }
 
-            int ply = FindNearestPlayer(&slot->last_pos);
+            int ply = CustomEvents_NearestRider(&slot->last_pos, FLT_MAX, 0);
             if (ply >= 0)
                 scores[ply] += slot->is_big ? GOURMET_BIG_POINTS : GOURMET_REGULAR_POINTS;
 

@@ -62,9 +62,10 @@ When reverse engineering game functions and discovering their purpose, **always*
   - `decomp` - Ghidra decompilation as plain C; `ghidra decompile` itself only emits JSON.
   - `rename` - names an unnamed symbol in `GKYE01.map` and `link.ld` at once.
   - `check` - hoshi prototypes missing from `link.ld` or the map, and `link.ld` names whose map row is still `zz_`.
+- **Stage geometry:** `uv run python scripts/hsd/stage.py <cmd> <stage>` answers spatial questions about a stage in world units - what is at or under a point, where a named place is, open spots to place something, clearance along a path, top-down and cross-section renders, positions/zones/props/rails/course laps, and live player positions from Dolphin. Use it instead of hand-reading collision or guessing a coordinate. Named places live in `docs/data/stage-landmarks.csv`.
 - **Review lint:** `uv run python scripts/review_lint.py <mod>` (or `--all`) lists mechanical rule hits - non-ASCII, comment banners and file pointers, OSReport prefixes, literal game addresses, raw struct offsets, layout asserts, unreferenced identifiers, unauthored assets. Every hit is a candidate to confirm, not a verdict.
 - **Docs lint:** `uv run python scripts/docs_lint.py [<doc or folder> ...]` lists mechanical doc hits - cross-references, repo file names, narration, non-ASCII, backticked identifiers no code or map row contains, name/address pairs the map disagrees with, missing titles, long docs. Candidates, not verdicts.
-- **Skills:** `dolphin-memory` (live memory while Dolphin runs), `dat-explore` (HSD `.dat` archives), `ghidra-cli` (decompilation, xrefs, types), `docs-review` (doc audit and rewrite).
+- **Skills:** `dolphin-memory` (live memory while Dolphin runs), `dat-explore` (HSD `.dat` archives), `stage-map` (stage geometry, placement and landmarks), `ghidra-cli` (decompilation, xrefs, types), `docs-review` (doc audit and rewrite).
 - **Ghidra constraints:** use the pre-configured project/program only - never `ghidra setup`/`config` or load another binary. Inline `ghidra script python`/`script java` are unavailable in bridge mode, and `script run` needs the copy-and-report plumbing in `scripts/ghidra/sync.py` - drive new `.java` scripts through that rather than rebuilding it.
 
 ## Comments

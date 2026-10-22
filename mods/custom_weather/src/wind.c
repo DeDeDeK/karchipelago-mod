@@ -29,7 +29,7 @@
 
 // Per-consumer coupling: the wind vector is one shared magnitude that each consumer
 // scales by its own susceptibility (rain uses it directly, at factor 1).
-#define WIND_ITEM_FACTOR        0.08f  // fraction of wind added to an airborne item's velocity/frame
+#define WIND_ITEM_FACTOR        0.08f  // fraction of the wind speed added to a falling item's velocity/frame
 #define WIND_MACHINE_FACTOR     0.012f // fraction added to an airborne machine's velocity/frame at full glide
 #define WIND_MACHINE_GLIDE_BASE 0.40f  // floor of the glide-stat susceptibility scale
 
@@ -47,24 +47,20 @@ static float stc_head_cur = 0.0f, stc_head_target = 0.0f; // heading offset, deg
 static int   stc_head_timer = 0;
 
 // Index 0 ("Preset") is the pass-through value.
-static const float wind_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f};
-static char *wind_strength_names[] = {"Preset", "Off", "50%", "100%", "150%", "200%"};
-#define WIND_STRENGTH_NUM GetElementsIn(wind_strength_factors)
+static const float wind_strength_factors[] = {1.0f, 0.0f, 0.5f, 1.5f, 2.0f};
+static char *wind_strength_names[] = {"Preset", "Off", "50%", "150%", "200%"};
+WEATHER_KNOB_CHECK(wind_strength_factors, wind_strength_names);
 static int wind_strength_index = 0;
 
 static int wind_randomize_dir = 0;
 static int wind_affect_machines = 1;
 static int wind_affect_items = 1;
 
-static float WindStrength(void)
-{
-    return wind_strength_factors[wind_strength_index];
-}
-
 // Also re-seeds the gust and heading random walks.
 void Wind_SetActive(const WindDef *def)
 {
-    if (!def || !def->enabled || WindStrength() <= 0.0f)
+    float strength = wind_strength_factors[wind_strength_index];
+    if (!def || !def->enabled || strength <= 0.0f)
     {
         stc_active = 0;
         stc_vx = stc_vz = 0.0f;
@@ -73,7 +69,7 @@ void Wind_SetActive(const WindDef *def)
     stc_active = 1;
 
     float speed = def->speed > 0.0f ? def->speed : WIND_DEF_SPEED;
-    stc_base_speed = speed * WindStrength();
+    stc_base_speed = speed * strength;
 
     if (wind_randomize_dir)
         stc_base_heading = HSD_Randf() * 360.0f;
@@ -93,67 +89,74 @@ void Wind_SetActive(const WindDef *def)
 
 void Wind_GetVector(Vec3 *out)
 {
-    if (!out)
-        return;
     out->X = stc_vx;
     out->Y = 0.0f;
     out->Z = stc_vz;
 }
 
-// Blow airborne items sideways and leave resting ones alone, so wind never drags an
-// item across the ground. ItemData.is_airborne is 0 only while the item sits on a
-// surface, which ITEM_X35A_GROUNDED is not.
-static void Wind_ApplyToItems(float wx, float wz)
+float Wind_GetHeading(float *dx, float *dz)
 {
-    float ax = wx * WIND_ITEM_FACTOR;
-    float az = wz * WIND_ITEM_FACTOR;
+    float speed = sqrtf(stc_vx * stc_vx + stc_vz * stc_vz);
+    if (speed <= 1e-4f)
+    {
+        *dx = *dz = 0.0f;
+        return 0.0f;
+    }
+    *dx = stc_vx / speed;
+    *dz = stc_vz / speed;
+    return speed;
+}
+
+// Blow falling items downwind until they travel with it, never past the wind's own
+// speed. Resting items (is_airborne 0) and held ones (-1) are left alone.
+static void Wind_ApplyToItems(void)
+{
+    float dx, dz;
+    float speed = Wind_GetHeading(&dx, &dz);
+    if (speed <= 0.0f)
+        return;
+    float push = speed * WIND_ITEM_FACTOR;
+
     for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_ITEM]; g != NULL; g = g->next)
     {
-        if (g->entity_class != GAMEENTITY_ITEM)
-            continue;
         ItemData *id = (ItemData *)g->userdata;
-        if (id == NULL)
+        if (id->is_airborne != 1)
             continue;
-        if (id->is_airborne == 0)
+
+        float room = speed - (id->vel.X * dx + id->vel.Z * dz);
+        if (room <= 0.0f)
             continue;
-        id->vel.X += ax;
-        id->vel.Z += az;
+        float a = (push < room) ? push : room;
+        id->vel.X += dx * a;
+        id->vel.Z += dz * a;
     }
 }
 
-// Push gliding machines: only airborne ones (is_airborne == 1), scaled by
-// their glide stat so a Winged Star catches far more wind than a Wheelie Bike.
-static void Wind_ApplyToMachines(float wx, float wz)
+// Push airborne machines (is_airborne == 1), scaled by Machine_GetStatRatio's glide
+// ratio, which counts the Glide patches the machine has collected.
+static void Wind_ApplyToMachines(void)
 {
     for (int ply = 0; ply < PLY_NUM; ply++)
     {
-        GOBJ *mg = Ply_GetMachineGObj(ply);
-        if (mg == NULL)
-            continue;
-        MachineData *md = (MachineData *)mg->userdata;
+        MachineData *md = Ply_GetMachineData(ply);
         if (md == NULL)
             continue;
-        if (md->is_airborne != 1) // grounded -> not gliding
-            continue;
-        if (md->is_dead)
+        if (md->is_airborne != 1 || md->is_dead)
             continue;
 
         // The ratio is [-1,1]; lerp clamps a negative Glide stat to the base share
         // so it never pushes the machine upwind.
         float glide = Machine_GetStatRatio(md, MACHINESTAT_GLIDE);
         float scale = WIND_MACHINE_FACTOR * lerp(WIND_MACHINE_GLIDE_BASE, 1.0f, glide);
-        md->velocity.X += wx * scale;
-        md->velocity.Z += wz * scale;
+        md->velocity.X += stc_vx * scale;
+        md->velocity.Z += stc_vz * scale;
     }
 }
 
 void Wind_Tick(void)
 {
     if (!stc_active)
-    {
-        stc_vx = stc_vz = 0.0f;
         return;
-    }
 
     if (--stc_gust_timer <= 0)
     {
@@ -186,9 +189,9 @@ void Wind_Tick(void)
         return;
 
     if (wind_affect_items)
-        Wind_ApplyToItems(stc_vx, stc_vz);
+        Wind_ApplyToItems();
     if (wind_affect_machines)
-        Wind_ApplyToMachines(stc_vx, stc_vz);
+        Wind_ApplyToMachines();
 }
 
 void Wind_Reset(void)
@@ -225,7 +228,7 @@ MenuDesc wind_menu = {
             .description = "Master wind multiplier for every CT preset (Off disables wind entirely)",
             .kind = OPTKIND_VALUE,
             .val = &wind_strength_index,
-            .value_num = WIND_STRENGTH_NUM,
+            .value_num = GetElementsIn(wind_strength_factors),
             .value_names = wind_strength_names,
             .on_change = OnWindStrengthChange,
         },
@@ -234,16 +237,16 @@ MenuDesc wind_menu = {
             .description = "Roll a random wind heading each round instead of the preset's authored direction",
             .kind = OPTKIND_VALUE,
             .val = &wind_randomize_dir,
-            .value_num = 2,
+            .value_num = WEATHER_ONOFF_NUM,
             .value_names = weather_onoff_names,
             .on_change = OnWindRandomizeChange,
         },
         &(OptionDesc){
             .name = "Affect Machines",
-            .description = "Let wind push gliding/airborne machines (scaled by their glide stat)",
+            .description = "Let wind push airborne machines, harder the more Glide patches they carry",
             .kind = OPTKIND_VALUE,
             .val = &wind_affect_machines,
-            .value_num = 2,
+            .value_num = WEATHER_ONOFF_NUM,
             .value_names = weather_onoff_names,
             .on_change = OnWindMachinesChange,
         },
@@ -252,7 +255,7 @@ MenuDesc wind_menu = {
             .description = "Let wind blow falling items sideways",
             .kind = OPTKIND_VALUE,
             .val = &wind_affect_items,
-            .value_num = 2,
+            .value_num = WEATHER_ONOFF_NUM,
             .value_names = weather_onoff_names,
             .on_change = OnWindItemsChange,
         },

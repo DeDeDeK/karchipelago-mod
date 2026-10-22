@@ -1,6 +1,7 @@
 #include "os.h"
 #include "game.h"
 #include "hsd.h"
+#include "inline.h"
 #include "hoshi/mod.h"
 #include "hoshi/func.h"
 
@@ -14,6 +15,35 @@ static const CustomEventsAPI *ce_api = 0;
 
 // Which Archipelago Star sphere the next R + D-Pad Down drops. Per round.
 static int next_sphere;
+
+// D-Pad Up cycles through these custom events. rain picks Danger Rain's drop, -1 for
+// any other event.
+static const struct
+{
+    int kind;
+    int rain;
+    const char *label;
+} debug_events[] = {
+    {CUSTOM_EVKIND_SKY_RINGS, -1, "Sky Rings"},
+    {CUSTOM_EVKIND_DRIVE_BACKWARDS, -1, "Drive Backwards"},
+    {CUSTOM_EVKIND_REVERSE_CONTROLS, -1, "Reverse Controls"},
+    {CUSTOM_EVKIND_BOMB_TACS, -1, "Bomb TACs"},
+    {CUSTOM_EVKIND_TREASURE_RAIN, -1, "Treasure Rain"},
+    {CUSTOM_EVKIND_MINI_UFOS, -1, "Mini UFOs"},
+    {CUSTOM_EVKIND_DANGER_RAIN, DANGER_RAIN_METEOR, "Meteor Rain"},
+    {CUSTOM_EVKIND_DANGER_RAIN, DANGER_RAIN_GORDO, "Gordo Rain"},
+    {CUSTOM_EVKIND_DANGER_RAIN, DANGER_RAIN_SENSOR_BOMB, "Sensor Bomb Rain"},
+    {CUSTOM_EVKIND_DANGER_RAIN, DANGER_RAIN_BOMB, "Bomb Rain"},
+    {CUSTOM_EVKIND_DANGER_RAIN, DANGER_RAIN_DRAGON, "Dragon Rain"},
+    {CUSTOM_EVKIND_STAT_SHUFFLE, -1, "Stat Shuffle"},
+    {CUSTOM_EVKIND_JUMPING_ITEMS, -1, "Jumping Items"},
+    {CUSTOM_EVKIND_MINEFIELD, -1, "Minefield"},
+    {CUSTOM_EVKIND_CANNON, -1, "Cannon"},
+    {CUSTOM_EVKIND_TRUCK_STORM, -1, "Truck Storm"},
+    {CUSTOM_EVKIND_GIANT_MODE, -1, "Giant Mode"},
+    {CUSTOM_EVKIND_TINY_MODE, -1, "Tiny Mode"},
+};
+static int next_event;
 
 static void TryImportApi(void)
 {
@@ -39,7 +69,7 @@ static void OnSaveLoaded(void)
         return;
     }
     if (!ce_api)
-        OSReport("[ApDebug] custom_events API unavailable, Scale Change trigger disabled\n");
+        OSReport("[ApDebug] custom_events API unavailable, event trigger disabled\n");
     if (!tb_api)
         OSReport("[ApDebug] textbox API unavailable, debug actions post no messages\n");
     DebugMenu_RefreshState();
@@ -221,10 +251,19 @@ static void OnFrameStart(void)
         {
             // Do() returns 0 with no eventcheck GObj (outside City Trial) or when an
             // event is already running.
-            if (ce_api && ce_api->Do(CUSTOM_EVKIND_SCALE_CHANGE))
-                OSReport("[ApDebug] Triggered Scale Change event\n");
+            const char *label = debug_events[next_event].label;
+            int rain = debug_events[next_event].rain;
+            int started = ce_api && (rain >= 0 ? ce_api->DoDangerRain(rain)
+                                               : ce_api->Do(debug_events[next_event].kind));
+            if (started)
+            {
+                OSReport("[ApDebug] Triggered %s event\n", label);
+                next_event = (next_event + 1) % GetElementsIn(debug_events);
+            }
             else
-                OSReport("[ApDebug] Scale Change trigger unavailable, needs City Trial with no active event\n");
+            {
+                OSReport("[ApDebug] %s trigger unavailable, needs City Trial with no active event\n", label);
+            }
         }
     }
 }

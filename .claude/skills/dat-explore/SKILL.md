@@ -49,6 +49,10 @@ Library modules:
 - `gx` - `FORMAT_BLOCK`/`FORMAT_NAME`, `image_size`, `align32`, RGB5A3 / RGBA8 / I4 encoders.
 - `fobj` - packed keyframe streams (`decode` / `encode` / `Key`) and `JOINT_TRACK`.
 - `symbols` - `classify_symbol` (public name -> HSDLib root type).
+- `payload` - `plan_payload` (lay kept data-section spans out as 32-byte-aligned
+  disc ranges plus precomputed pointer values, optionally rebasing a partly kept
+  vertex array) and `indexed_spans` (the slice of each vertex array a set of
+  POBJs' display lists actually index) - what a runtime-rebuild manifest is made of.
 
 **Always invoke via `uv run python`** (see project rule in CLAUDE.md).
 
@@ -185,7 +189,7 @@ standalone `.dat` with its own public(s), through one pipeline: `Walker.walk`
 (collect reachable offsets + sizes) -> `carve_ranges` (concatenate + realign the
 kept byte ranges, rebuild the reloc table into carved coordinates) ->
 `build_archive` (serialize). A manifest plans the same walk without carrying the
-bytes, listing the donor ranges for the mod to read at runtime.
+bytes, listing the donor ranges for the mod to read at runtime (`payload.plan_payload`).
 
 - `scripts/authoring/make_backdrop_manifest.py` - plan every backdrop in
   `iso/files/Gr*Model.dat` into `BackdropManifest.dat`: the donor file, the
@@ -193,6 +197,12 @@ bytes, listing the donor ranges for the mod to read at runtime.
   normalization factor. `--dry-run` reports the plan without writing.
   `verify_backdrop_manifest.py` replays it and compares the rebuilt object
   graph against the donor's.
+- `scripts/authoring/make_cannon_manifest.py` - plan Machine Passage's cannon (seven
+  DObjs on `GrMachine2Model.dat`'s terrain joint) into custom_events'
+  `CannonManifest.dat`: the ranges, the relocations with the shared vertex arrays
+  rebased onto the slice the cannon indexes, the DObj list, and the pivot / barrel
+  anchor transforms. `verify_cannon_manifest.py` replays it and checks every
+  indexed vertex read against the donor.
 - `scripts/hsd/carve_custom_item.py` - carve an `Item.dat` model (by
   ItemKind) into a `customItem` .dat for the custom_items mod, optionally
   re-encoding a PNG into one texture slot:
@@ -236,6 +246,10 @@ same `sys.path` insert (both directories sit one level under `scripts/`).
   nonzero on any bad reloc or pointer. The root is auto-detected
   (`customItem` descriptor, backdrop ModelSection, or the public's
   classified type); `--root`/`--root-type` override it.
+- `scripts/hsd/stage.py` - a stage's collision, zones, positions, props and
+  splines baked into world units, with spatial queries and renders over
+  them; the `stage-map` skill covers it. Reach for it instead of `grdata`
+  whenever the question is where something is.
 - `scripts/hsd/geom_bounds.py <Model.dat> <grModelX> [slot]` - measure a
   model subtree's bounding box / radius about the root origin (root scale
   forced to 1, since `CreateStageModel_3D` overwrites it). Parses each

@@ -34,7 +34,7 @@ also keeps the title's attract demo out, which runs a real round under `MJRKIND_
 | D-Pad Down | Drop an AP Box in front of the target player |
 | R + D-Pad Down | Drop the next Archipelago Star sphere in front of the target player |
 | L + D-Pad Down | Arm a DeathLink receive |
-| D-Pad Up | Start the Scale Change event (custom_events, City Trial with no event running) |
+| D-Pad Up | Start Sky Rings, then Drive Backwards, Reverse Controls, Bomb TACs, Treasure Rain, then Mini UFOs, then Danger Rain raining meteors, Gordos, sensor bombs, bombs and dragons, then Stat Shuffle, Jumping Items, Minefield, Cannon, Truck Storm, Giant Mode and Tiny Mode, one per press (custom_events, City Trial with no event running) |
 | L + D-Pad Up | Queue one random item that suits the running mode |
 | R + D-Pad Up | Arm a TrapLink receive |
 | Z (checklist screen) | Complete the cell under the cursor |

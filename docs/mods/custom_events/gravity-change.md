@@ -12,13 +12,13 @@ The game's gravity is a strength scalar and a unit direction in two adjacent `St
 and `Gr_GetDownVector` (0x800ceb18) hands both to every machine, item, enemy and the camera. City
 Trial's open map has no gravity zones, so every query there falls through to those two fields.
 
-`GravityChange_Start` picks a multiplier with `HSD_Randi(2)` - 0.5 or 2.0 - saves the stage's
+`start` picks a multiplier with `HSD_Randi(2)` - 0.5 or 2.0 - saves the stage's
 `gravity_strength` (+0x0C) and a pointer to it, and writes the scaled value once. Nothing in the
 game writes that field at runtime, so the one write holds for the whole event. It scales the
 strength and never `gravity_dir`: machines derive their up vector by negating the raw direction,
 so a scaled direction would leave that up vector non-unit and break orientation and air control.
 
-`GravityChange_End2` writes the saved value back and clears the pointer, so a second call does
+`end2` writes the saved value back and clears the pointer, so a second call does
 nothing. It is also the event's `abort`, which the framework runs when the round ends mid-event:
 `Preload_LoadStageFiles` (0x800ce964) preloads `GrCity1.dat` into a heap that can survive into the
 next round, and the archive loader reuses a resident preload as-is, so a strength left scaled

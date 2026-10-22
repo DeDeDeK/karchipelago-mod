@@ -153,10 +153,9 @@ static void DeathLink_PerFrame(GOBJ *g)
         if (!Rider_IsOnMachine(rd))
             continue;
 
-        GOBJ *mg = Ply_GetMachineGObj(i);
-        if (!mg)
+        MachineData *md = Ply_GetMachineData(i);
+        if (!md)
             continue;
-        MachineData *md = mg->userdata;
 
         SuppressSend(i);
         KillPlayer(rd, md);

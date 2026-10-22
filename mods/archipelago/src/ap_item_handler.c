@@ -119,10 +119,9 @@ int APItems_SpawnForward(int ply, ItemKind kind, int box_kind, int size)
 {
     if (ply < 0 || ply >= PLY_NUM)
         return 0;
-    GOBJ *mg = Ply_GetMachineGObj(ply);
-    if (!mg)
+    MachineData *md = Ply_GetMachineData(ply);
+    if (!md)
         return 0;
-    MachineData *md = mg->userdata;
 
     Vec3 pos;
     pos.X = md->pos.X + AP_SPAWN_FORWARD * md->forward.X;
@@ -382,10 +381,9 @@ int APItems_HandleItem(uint ap_item_id)
         {
             if (Ply_GetPKind(i) != PKIND_HMN)
                 continue;
-            GOBJ *mg = Ply_GetMachineGObj(i);
-            if (!mg)
+            MachineData *md = Ply_GetMachineData(i);
+            if (!md)
                 continue;
-            MachineData *md = mg->userdata;
             float damage = md->hp - 1.0f;
             if (damage > 0.0f)
             {

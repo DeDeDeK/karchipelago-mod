@@ -71,3 +71,16 @@ An `is_airborne` of -1 skips the spawn raycast. The engine's own sky spawner,
 2), (1, 1) or (1, 3) for styles 0-4, and (-1, 0) otherwise. With `coll_kind` 1 the `CollData`
 cleanup is automatic: the landing destroys it, and an item destroyed early frees it in its
 destructor.
+
+## Launching a resting item
+
+Every non-box family rests in state 4 and falls in state 5 (`ITSTATE_POWERUP_REST`/`_FALL`). Boxes
+rest in 4 and fall in 6 (`ITSTATE_BOX_REST`/`_FALL`). The fall entries are `ItemGObj_PowerUpEnterFall`
+(0x80258698), shared in effect by every non-box family, and the box family's `ItemGObj_EnterFall`
+(0x802578c8). Each sets `is_airborne` and gravity `accel` and changes state, and none touches `vel`.
+To throw an item that already exists the way `CityItem_Throw` throws a new one:
+
+1. Call `CityItem_UpdateGravity`, since a resting item's `fall_dir` is stale.
+2. Run the fall entry, then write `vel`.
+3. Call `CityItem_AllocCollData(id, 1)` (0x80254318), then `CityItem_InitCollData` (0x80254384),
+   which sizes the sphere from the kind's attributes. The landing frees the CollData again.
