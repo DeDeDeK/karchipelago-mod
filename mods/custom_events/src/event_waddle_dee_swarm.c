@@ -1,24 +1,36 @@
+#include <float.h>
 #include <string.h>
 
 #include "game.h"
 #include "hsd.h"
 #include "obj.h"
 #include "enemy.h"
+#include "inline.h"
 
+#include "custom_events.h"
 #include "event_waddle_dee_swarm.h"
 
 #define WADDLE_DEE_MAX_COUNT      10
-#define WADDLE_DEE_CHASE_SPEED    0.6f
-#define WADDLE_DEE_HIT_RADIUS     1.0f
 #define WADDLE_DEE_SPAWN_INTERVAL 20
 #define WADDLE_DEE_FADE_FRAMES    20
+
+#define WADDLE_DEE_HOP_RANGE      15.0f
+// The hop animation runs 27 frames, off the ground from 4 to 25.
+#define WADDLE_DEE_HOP_FRAMES     27
+#define WADDLE_DEE_HOP_TAKEOFF    4
+#define WADDLE_DEE_HOP_LANDING    25
+#define WADDLE_DEE_LUNGE_SCALE    1.5f // airborne hop speed over the target's top speed
+
+// Vanilla's hitbox deals 3 damage and 25 knockback.
+#define WADDLE_DEE_DAMAGE         8
+#define WADDLE_DEE_KNOCKBACK      60.0f
 
 typedef struct SwarmSlot
 {
     GOBJ *gobj;        // NULL = free
-    Vec3 saved_pos;    // position at the end of the last chase proc
-    int saved_state;   // state at the end of the last chase proc
-    int chase_active;  // chase callbacks installed
+    Vec3 spawn_pos;
+    int chasing;       // chase callbacks installed
+    int hop_frame;     // frames into the current hop
     int fade_timer;    // >0 = fading out
     float fade_scale0; // final_scale when the fade started
 } SwarmSlot;
@@ -26,62 +38,6 @@ typedef struct SwarmSlot
 static SwarmSlot swarm[WADDLE_DEE_MAX_COUNT];
 static int spawn_timer;
 static int swarm_active;
-
-// func2 (priority 4): velocity toward the nearest rider, CPUs included.
-static void WaddleDeeChaseMovement(EnemyData *ed)
-{
-    // EnemyActor_FindNearestPlayer caps detection range; pre-setting a target
-    // bypasses that so the swarm can hunt across the whole map. The distance to an
-    // empty slot is FLT_MAX.
-    float best_dist = 1e30f;
-    int best = -1;
-    for (int i = 0; i < 4; i++)
-    {
-        float d = EnemyActor_DistToPlayer(i, &ed->pos.X);
-        if (d < best_dist)
-        {
-            best_dist = d;
-            best = i;
-        }
-    }
-    ed->target_player_idx = best;
-
-    // A non-zero cooldown makes FindNearestPlayer keep our target and just
-    // compute chase_direction/orientation from it.
-    ed->chase_flag = 0.0f;
-    ed->retarget_cooldown = 2;
-    EnemyActor_FindNearestPlayer(ed);
-
-    if (ed->target_player_idx >= 0)
-    {
-        // chase_direction points away from the player.
-        ed->vel.X = -ed->chase_direction.X * WADDLE_DEE_CHASE_SPEED;
-        ed->vel.Z = -ed->chase_direction.Z * WADDLE_DEE_CHASE_SPEED;
-    }
-
-    // GroundSnap owns Y; zeroing here stops gravity accumulating.
-    ed->vel.Y = 0.0f;
-}
-
-// func3 (priority 5): the ground snap the vanilla per-type states run.
-static void WaddleDeeChaseGroundSnap(EnemyData *ed)
-{
-    EventActor_GroundSnap(ed, ed->param_move_speed);
-}
-
-// func4 (priority 6). Must run after GroundSnap, which rewrites up and
-// re-orthogonalizes forward, and before EventActor_SharedUpdate builds the
-// model matrix.
-static void WaddleDeeChaseOrientation(EnemyData *ed)
-{
-    if (ed->target_player_idx >= 0)
-    {
-        ed->forward.X = -ed->chase_direction.X;
-        ed->forward.Y = 0.0f;
-        ed->forward.Z = -ed->chase_direction.Z;
-        EventActor_UpdateOrientation(ed);
-    }
-}
 
 static SwarmSlot *WaddleDeeFindSlot(GOBJ *gobj)
 {
@@ -93,7 +49,137 @@ static SwarmSlot *WaddleDeeFindSlot(GOBJ *gobj)
     return NULL;
 }
 
-// GObj proc (priority 10): installs the chase callbacks and handles despawn.
+// The cruise cap of the player's machine, or their walk cap on foot.
+static float WaddleDeeTargetSpeed(int ply)
+{
+    GOBJ *rg = Ply_GetRiderGObj(ply);
+    if (!rg)
+        return 0.0f;
+    RiderData *rd = rg->userdata;
+    if (rd->machine_gobj)
+        return ((MachineData *)rd->machine_gobj->userdata)->top_speed_ground;
+    return rd->walk_speed_max;
+}
+
+// Zero while fading out and through the hop's crouch and landing.
+static float WaddleDeeChaseSpeed(EnemyData *ed)
+{
+    SwarmSlot *s = WaddleDeeFindSlot(ed->gobj);
+    if (!s || s->fade_timer > 0)
+        return 0.0f;
+    float speed = WaddleDeeTargetSpeed(ed->target_ply);
+    if (ed->state != WADDLE_DEE_STATE_HOP)
+        return speed;
+    if (s->hop_frame < WADDLE_DEE_HOP_TAKEOFF || s->hop_frame >= WADDLE_DEE_HOP_LANDING)
+        return 0.0f;
+    return speed * WADDLE_DEE_LUNGE_SCALE;
+}
+
+// phys_cb (priority 4): velocity toward the nearest rider, CPUs included.
+// EventActor_FindNearestPlayer only looks within detect_range (50), far too short for
+// a swarm.
+static void WaddleDeeChaseMovement(EnemyData *ed)
+{
+    ed->target_ply = CustomEvents_NearestRider(&ed->pos, FLT_MAX, 0);
+
+    float speed = 0.0f;
+    if (ed->target_ply >= 0)
+    {
+        // turn_to points from the target to the actor, as vanilla's targeting fills it.
+        Vec3 target;
+        Ply_GetPosition(ed->target_ply, &target);
+        Vec3 away = {ed->pos.X - target.X, 0.0f, ed->pos.Z - target.Z};
+        if (VECMag(&away) > 0.0001f)
+            VECNormalize(&away, &ed->turn_to);
+        speed = WaddleDeeChaseSpeed(ed);
+    }
+    ed->vel.X = -ed->turn_to.X * speed;
+    ed->vel.Z = -ed->turn_to.Z * speed;
+
+    // GroundSnap owns Y; zeroing here stops gravity accumulating.
+    ed->vel.Y = 0.0f;
+}
+
+// envcoll_cb (priority 5): drops the actor onto the ground below it.
+static void WaddleDeeChaseGroundSnap(EnemyData *ed)
+{
+    EventActor_GroundSnap(ed, ed->param_ground_clearance);
+}
+
+// pri6_cb (priority 6). Runs after GroundSnap, which rewrites up, and before
+// EventActor_SharedUpdate builds the model matrix from forward and up, so forward
+// has to be a unit vector perpendicular to up.
+static void WaddleDeeChaseOrientation(EnemyData *ed)
+{
+    if (ed->target_ply < 0)
+        return;
+
+    Vec3 fwd = {-ed->turn_to.X, 0.0f, -ed->turn_to.Z};
+    float d = VECDotProduct(&fwd, &ed->up);
+    fwd.X -= d * ed->up.X;
+    fwd.Y -= d * ed->up.Y;
+    fwd.Z -= d * ed->up.Z;
+    if (VECMag(&fwd) > 0.0001f)
+        VECNormalize(&fwd, &ed->forward);
+    EventActor_UpdateGravity(ed);
+}
+
+// Whether the hitbox has struck a rider, or the machine a mounted rider is hit
+// through. A region lists each victim it strikes for its rehit interval.
+static int WaddleDeeLandedHit(EnemyData *ed)
+{
+    HurtData *hd = ed->hurt_data;
+    for (int i = 0; i < PLY_NUM; i++)
+    {
+        GOBJ *rg = Ply_GetRiderGObj(i);
+        if (!rg)
+            continue;
+
+        RiderData *rd = rg->userdata;
+        HurtData *victim = rd->machine_gobj ? MachineGObj_GetHurtData(rd->machine_gobj) : rd->hurt_data;
+        for (int r = 0; r < hd->region_count; r++)
+        {
+            if (Hit_IsVictimRecorded(victim, &hd->regions[r]))
+                return 1;
+        }
+    }
+    return 0;
+}
+
+// The animation script arms the hitbox at vanilla strength on every state change.
+static void WaddleDeeTuneHitbox(HurtData *hd, int spent)
+{
+    for (int i = 0; i < hd->region_count; i++)
+    {
+        HitRegion *r = &hd->regions[i];
+        if (spent)
+        {
+            r->state = TRIGGERSTATUS_INACTIVE;
+            continue;
+        }
+        r->params.base_damage = WADDLE_DEE_DAMAGE;
+        r->params.base_knockback = WADDLE_DEE_KNOCKBACK;
+    }
+}
+
+static void WaddleDeeUpdateHop(SwarmSlot *s, EnemyData *ed)
+{
+    if (ed->state == WADDLE_DEE_STATE_HOP)
+    {
+        if (++s->hop_frame >= WADDLE_DEE_HOP_FRAMES)
+            EventActor_ChangeState(ed, WADDLE_DEE_STATE_PATROL, 0, 0.0f, 1.0f);
+    }
+    else if (ed->target_ply >= 0 &&
+             Enemy_DistToPlayer(ed->target_ply, &ed->pos) < WADDLE_DEE_HOP_RANGE)
+    {
+        EventActor_ChangeState(ed, WADDLE_DEE_STATE_HOP, 0, 0.0f, 1.0f);
+        s->hop_frame = 0;
+    }
+}
+
+// GObj proc at priority 2, right after the state machine (1). Whatever changed the
+// state this frame, it follows before any callback runs, so vanilla's per-type callbacks
+// never get a frame and the hit passes (priority 9) see the retuned hitbox.
 static void WaddleDeeChaseProc(GOBJ *gobj)
 {
     SwarmSlot *s = WaddleDeeFindSlot(gobj);
@@ -112,51 +198,48 @@ static void WaddleDeeChaseProc(GOBJ *gobj)
     if (!swarm_active)
     {
         s->gobj = NULL;
-        EventActor_Destroy(gobj);
+        EventActorGObj_Destroy(gobj);
         return;
     }
 
-    // Spawn, knockback, launched and sliding stay vanilla.
-    if (ed->state < ENEMYSTATE_PERTYPE)
+    // The spawn state and the common ones (knockback and what follows it) stay vanilla.
+    if (ed->state < WADDLE_DEE_STATE_PATROL)
         return;
 
-    // Entering a per-type state runs its func1, which snaps pos to the nearest
-    // spline point; put the actor back where it was. The first time, saved_pos is
-    // the spawn position.
-    if (!s->chase_active || ed->state != s->saved_state)
-        ed->pos = s->saved_pos;
-    s->chase_active = 1;
-    s->saved_state = ed->state;
-
-    // Vanilla resets these on every state change.
-    ed->state_func2 = (void *)WaddleDeeChaseMovement;
-    ed->state_func3 = (void *)WaddleDeeChaseGroundSnap;
-    ed->state_func4 = (void *)WaddleDeeChaseOrientation;
+    // The spawn state's anim_cb snapped the actor onto the nearest stage spline.
+    if (!s->chasing)
+    {
+        ed->pos = s->spawn_pos;
+        s->chasing = 1;
+    }
 
     if (s->fade_timer > 0)
     {
         if (--s->fade_timer == 0)
         {
             s->gobj = NULL;
-            EventActor_Destroy(gobj);
+            EventActorGObj_Destroy(gobj);
             return;
         }
         ed->final_scale = s->fade_scale0 * (float)s->fade_timer / (float)WADDLE_DEE_FADE_FRAMES;
-        ed->vel.X = 0.0f;
-        ed->vel.Z = 0.0f;
-        return;
     }
-
-    // Contact starts the fade-out.
-    if (ed->target_player_idx >= 0 &&
-        EnemyActor_DistToPlayer(ed->target_player_idx, &ed->pos.X) < WADDLE_DEE_HIT_RADIUS)
+    // A Dee is spent once it lands a hit.
+    else if (WaddleDeeLandedHit(ed))
     {
         s->fade_timer = WADDLE_DEE_FADE_FRAMES;
         s->fade_scale0 = ed->final_scale;
-        return;
     }
+    else
+        WaddleDeeUpdateHop(s, ed);
 
-    s->saved_pos = ed->pos;
+    WaddleDeeTuneHitbox(ed->hurt_data, s->fade_timer > 0);
+
+    // Every state change installs the state's own callbacks. The hop's anim_cb would
+    // move on to the sideways dash when the animation ends.
+    ed->anim_cb = NULL;
+    ed->phys_cb = WaddleDeeChaseMovement;
+    ed->envcoll_cb = WaddleDeeChaseGroundSnap;
+    ed->pri6_cb = WaddleDeeChaseOrientation;
 }
 
 // Frees the slots of actors vanilla destroyed outside the death and inhale states
@@ -165,21 +248,8 @@ static void WaddleDeePruneSlots(void)
 {
     for (int i = 0; i < WADDLE_DEE_MAX_COUNT; i++)
     {
-        SwarmSlot *s = &swarm[i];
-        if (!s->gobj)
-            continue;
-
-        int live = 0;
-        for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_ENEMY]; g; g = g->next)
-        {
-            if (g == s->gobj)
-            {
-                live = ((EnemyData *)g->userdata)->kind == ACTORID_WADDLE_DEE;
-                break;
-            }
-        }
-        if (!live)
-            s->gobj = NULL;
+        if (swarm[i].gobj && !CustomEvents_IsActorLive(swarm[i].gobj, ENEMYKIND_WADDLE_DEE))
+            swarm[i].gobj = NULL;
     }
 }
 
@@ -189,9 +259,9 @@ static void WaddleDeeSpawnOne(void)
     if (!s)
         return;
 
-    GOBJ *candidates[5];
+    GOBJ *candidates[PLY_NUM];
     int count = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < PLY_NUM; i++)
     {
         GOBJ *rg = Ply_GetRiderGObj(i);
         if (rg && Ply_GetPKind(i) == PKIND_HMN)
@@ -209,32 +279,23 @@ static void WaddleDeeSpawnOne(void)
         {-28.3f,  28.3f}, { 28.3f, -28.3f}, {-28.3f, -28.3f},
         { 40.0f,   0.0f}, {-40.0f,   0.0f}, {  0.0f, -40.0f},
     };
-    int ofs_idx = HSD_Randi(sizeof(offsets) / sizeof(offsets[0]));
+    int ofs_idx = HSD_Randi(GetElementsIn(offsets));
 
+    Vec3 pos = {rd->pos.X + offsets[ofs_idx][0], rd->pos.Y, rd->pos.Z + offsets[ofs_idx][1]};
     EventActorDesc desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.actor_id = ACTORID_WADDLE_DEE;
-    desc.position.X = rd->pos.X + offsets[ofs_idx][0];
-    desc.position.Y = rd->pos.Y;
-    desc.position.Z = rd->pos.Z + offsets[ofs_idx][1];
-    desc.forward.Z = 1.0f;
-    desc.up.Y = 1.0f;
-    desc.scale = 1.0f;
-    desc.spawn_index = -1;
-    desc.spawn_slot = -1;
-    desc.bounds_flag = -1.0f;
+    CustomEvents_InitActorDesc(&desc, ENEMYKIND_WADDLE_DEE, &pos, 1.0f);
 
     GOBJ *actor = EventActor_Create(&desc);
     if (!actor)
         return;
 
-    *s = (SwarmSlot){.gobj = actor, .saved_pos = desc.position};
-    GObj_AddProc(actor, WaddleDeeChaseProc, 10);
+    *s = (SwarmSlot){.gobj = actor, .spawn_pos = desc.position};
+    GObj_AddProc(actor, WaddleDeeChaseProc, ENEMYPRI_ANIM + 1);
 }
 
 void WaddleDeeSwarm_Start(void)
 {
-    Enemy_CheckAndLoad(ACTORID_WADDLE_DEE);
+    Enemy_CheckAndLoad(ENEMYKIND_WADDLE_DEE);
 
     // A round cut off mid-swarm leaves dead pointers behind.
     memset(swarm, 0, sizeof(swarm));

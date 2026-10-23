@@ -36,8 +36,13 @@ model motion). `ModelSection.backdrop` points at it.
 
 Exports one public:
 
-  backdropManifest  - BackdropManifest, layout mirrored in
-                      mods/custom_weather/src/custom_weather.h
+  backdropManifest  - BackdropManifest {magic, version, entry_num, entries}, each
+                      entry {key, donor, payload_size, scale, root_off, ranges,
+                      range_num, relocs, reloc_num}
+
+Donors whose rebuilt payload is byte-identical to an earlier donor's are left out,
+as are City1 (it would duplicate City Trial's own backdrop) and Simple (a 4 KB
+placeholder), so every entry is a distinct look.
 
 Run from the repo root:
     uv run python scripts/authoring/make_backdrop_manifest.py
@@ -45,6 +50,7 @@ Run from the repo root:
 
 import argparse
 import glob
+import hashlib
 import os
 import struct
 import sys
@@ -53,21 +59,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hsd.archive import Archive, NotAnHSDArchive, build_archive, u32
 from hsd.geom_bounds import backdrop_root, measure_root
-from hsd.walker import Walker, merge_intervals
+from hsd.payload import plan_payload
+from hsd.walker import Walker
 
 INPUT_GLOB = "iso/files/Gr*Model.dat"
 OUTPUT = "mods/custom_weather/assets/BackdropManifest.dat"
 CITY_MODEL = "iso/files/GrCity1Model.dat"
 CITY_SYMBOL = "grModelCity1"
 
-HSD_HEADER = 0x20  # donor file offset of data offset 0
-ALIGN = 32  # File_Read granularity, and GX's cache-line requirement
 PP_SLOT = 0x20  # payload prefix: the grModel<X>[1]-shaped pp slot
 
 MANIFEST_MAGIC = 0x42444D46  # 'BDMF'
 MANIFEST_VERSION = 1
 
-# Mirrors mods/custom_weather/src/custom_weather.h.
+SKIP_KEYS = {"City1", "Simple"}
+
 ENTRY_SIZE = 0x24
 HEADER_SIZE = 0x10
 
@@ -75,39 +81,28 @@ HEADER_SIZE = 0x10
 def plan(arc, root):
     """Lay the backdrop subtree out into a runtime payload.
 
-    Returns (size, ranges, relocs): `ranges` as (donor_file_off, dest_off, length)
-    with every field a multiple of 32, `relocs` as (dest_off, dest_val) pairs.
+    Returns (size, ranges, relocs, root_off): `ranges` as (donor_file_off, dest_off,
+    length) with every field a multiple of 32, `relocs` as (dest_off, dest_val)
+    pairs, and the root JOBJDesc's payload offset.
     """
     visited = Walker(arc).walk(root, "JOBJDesc")
+    spans = [(off, off + sz) for off, (_, sz) in visited.items()]
+    p = plan_payload(arc, spans, PP_SLOT)
+    return p.size, p.ranges, p.relocs, p.remap[root]
 
-    # Expanding each interval to 32-byte boundaries can make neighbours overlap,
-    # so merge again afterwards rather than trusting the first pass.
-    spans = [
-        (off & ~(ALIGN - 1), (off + sz + ALIGN - 1) & ~(ALIGN - 1))
-        for off, (_, sz) in visited.items()
-    ]
-    intervals = merge_intervals(spans, gap=ALIGN)
 
-    ranges = []
-    remap = {}
-    cursor = PP_SLOT
-    for s, e in intervals:
-        ranges.append((HSD_HEADER + s, cursor, e - s))
-        for o in range(s, e):
-            remap[o] = cursor + (o - s)
-        cursor += e - s
-
-    relocs = []
-    for src in arc.relocs:
-        if src not in remap:
-            continue
-        tgt = u32(arc.data, src)
-        if tgt in remap:
-            relocs.append((remap[src], remap[tgt]))
-        # A pointer whose target fell outside the kept ranges is a dangling one in
-        # slop the merge pulled in; leaving it out means the runtime zeroes it.
-
-    return cursor, ranges, relocs, remap[root]
+def payload_digest(path, size, ranges, relocs, root_off):
+    """Hash of the payload the runtime rebuilds, with pointers in payload offsets, so
+    two donors carrying the same backdrop at different file offsets compare equal."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    payload = bytearray(size)
+    for donor_off, dest_off, length in ranges:
+        payload[dest_off : dest_off + length] = raw[donor_off : donor_off + length]
+    for dest_off, dest_val in relocs:
+        struct.pack_into(">I", payload, dest_off, dest_val)
+    struct.pack_into(">I", payload, 0, root_off)
+    return hashlib.sha1(payload).digest()
 
 
 def build(donors, out_path):
@@ -184,6 +179,7 @@ def main(argv):
     print(f"City reference backdrop radius = {target_radius:.1f}\n")
 
     donors = []
+    seen = {}
     for path in sorted(glob.glob(INPUT_GLOB)):
         name = os.path.basename(path)
         try:
@@ -197,8 +193,15 @@ def main(argv):
             continue
 
         key = sym[len("grModel") :]
+        if key in SKIP_KEYS:
+            continue
         root = u32(arc.data, skybox_slot(arc, sym))
         size, ranges, relocs, root_off = plan(arc, root)
+
+        twin = seen.setdefault(payload_digest(path, size, ranges, relocs, root_off), key)
+        if twin != key:
+            print(f"  {key:12s} same backdrop as {twin}; skipped")
+            continue
 
         radius = measure_root(arc, root)["radius"]
         if radius <= 0:

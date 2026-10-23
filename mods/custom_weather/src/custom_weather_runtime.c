@@ -1,38 +1,124 @@
+#include <string.h>
+
 #include "os.h"
 #include "game.h"
 #include "hsd.h"
 #include "stage.h"
 #include "obj.h"
 #include "code_patch/code_patch.h"
+#include "inline.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
 
-// `grobj` is reused across CT exit/re-entry, so it can't signal a fresh entry.
-// GrObj.fade_slot_id can: ScreenFade_Alloc hands out an incrementing id per entry.
-static GrObj *s_last_grobj = 0;
-static u32 s_last_slot_id = 0;
+// A stage light a preset can recolour, and the colours it loaded with, which the
+// vanilla presets get back.
+typedef struct LightTint
+{
+    LOBJ   *light;
+    GXColor color;
+    GXColor hw_color;
+} LightTint;
 
-static GXColor s_orig_terrain_color;
-static GXColor s_orig_terrain_hw_color;
-static int s_terrain_cached = 0;
-
-static LOBJ *s_ambient_lobj = 0;     // slot-8 ambient, resolved lazily from the HW slot table
-static GXColor s_orig_ambient_color;
-static GXColor s_orig_ambient_hw_color;
-static int s_ambient_cached = 0;
+static int       s_lights_resolved = 0;
+static LightTint s_terrain;  // *stc_main_light, the primary chain's INFINITE light
+static LightTint s_ambient;  // the primary chain's ambient light
 
 static int s_last_seen_preset_idx = -1;
-static const CustomPresetDef *s_active_def = 0;
 
-static void ResetPerStage(GrObj *grobj)
+static void LightTint_Capture(LightTint *t, LOBJ *l)
 {
-    s_last_grobj = grobj;
-    s_terrain_cached = 0;
-    s_ambient_lobj = 0;
-    s_ambient_cached = 0;
+    t->light = l;
+    if (l)
+    {
+        t->color = l->color;
+        t->hw_color = l->hw_color;
+    }
+}
+
+static void LightTint_Apply(const LightTint *t, u32 color, u32 hw_color)
+{
+    if (!t->light)
+        return;
+    t->light->color = color ? GXColor_Unpack(color) : t->color;
+    t->light->hw_color = hw_color ? GXColor_Unpack(hw_color) : t->hw_color;
+}
+
+// The primary chain - an ambient, then the INFINITE light *stc_main_light caches - is
+// the object of the light GObj Light_CreateForStage (0x800d5fd0) builds on p_link 1.
+static LOBJ *StageAmbientLight(void)
+{
+    LOBJ *main_light = *stc_main_light;
+    if (!main_light)
+        return NULL;
+
+    for (GOBJ *g = (*stc_gobj_lookup)[GAMEPLINK_1]; g != NULL; g = g->next)
+    {
+        if (g->obj_kind != HSD_OBJKIND_LOBJ)
+            continue;
+        LOBJ *ambient = NULL;
+        int has_main = 0;
+        for (LOBJ *l = g->hsd_object; l != NULL; l = l->next)
+        {
+            if (l == main_light)
+                has_main = 1;
+            else if (!ambient && (l->flags & LOBJ_TYPE_MASK) == LOBJ_AMBIENT)
+                ambient = l;
+        }
+        if (has_main)
+            return ambient;
+    }
+    return NULL;
+}
+
+// Comma-joins the layers the preset itself switches on; the menu's overrides can add
+// or remove some. `out` is sized for every name plus its separator.
+static void ListPresetLayers(const CustomPresetDef *def, char *out)
+{
+    out[0] = '\0';
+    if (def)
+    {
+        const struct
+        {
+            const char *name;
+            int on;
+        } layers[] = {
+            {"terrain", def->terrain_diffuse || def->terrain_specular
+                        || def->terrain_ambient || def->terrain_ambient_specular},
+            {"tint", def->screen_tint != 0},
+            {"rain", def->rain.enabled},
+            {"hail", def->hail.enabled},
+            {"snow", def->snow.enabled},
+            {"lightning", def->lightning.enabled},
+            {"wind", def->wind.enabled},
+            {"puddles", def->puddles.enabled},
+            {"clouds", def->clouds.enabled},
+            {"moon", def->moon.enabled},
+            {"stars", def->stars.enabled},
+            {"volcano", def->volcano.enabled},
+            {"tornado", def->tornado.enabled},
+            {"earthquake", def->earthquake.enabled},
+            {"tsunami", def->tsunami.enabled},
+            {"glow", def->glow.enabled},
+            {"starlight", def->starlight.enabled},
+        };
+        for (int i = 0; i < (int)GetElementsIn(layers); i++)
+        {
+            if (!layers[i].on)
+                continue;
+            if (out[0])
+                strcat(out, ", ");
+            strcat(out, layers[i].name);
+        }
+    }
+    if (!out[0])
+        strcpy(out, "none");
+}
+
+void CustomWeatherRuntime_Reset(void)
+{
+    s_lights_resolved = 0;
     s_last_seen_preset_idx = -1;
-    s_active_def = 0;
     Rain_Reset();
     Snow_Reset();
     Lightning_Reset();
@@ -45,139 +131,18 @@ static void ResetPerStage(GrObj *grobj)
     Star_Reset();
     Volcano_Reset();
     Tornado_Reset();
-}
-
-static void ApplyTerrainTint(const CustomPresetDef *def)
-{
-    LOBJ *l = *stc_main_light;
-    if (!l)
-        return;
-    if (!s_terrain_cached)
-    {
-        s_orig_terrain_color = l->color;
-        s_orig_terrain_hw_color = l->hw_color;
-        s_terrain_cached = 1;
-    }
-    l->color = (def && def->terrain_diffuse)
-                   ? GXColor_Unpack(def->terrain_diffuse)
-                   : s_orig_terrain_color;
-    l->hw_color = (def && def->terrain_specular)
-                      ? GXColor_Unpack(def->terrain_specular)
-                      : s_orig_terrain_hw_color;
-}
-
-// CT's ambient LOBJ (slot 8) is full white, so it keeps unlit faces bright when
-// only the directional sun is dimmed. The HW slot table is populated by GX
-// rendering, which lags the think hook by a frame, so the slot resolves lazily.
-static void ApplyAmbientTint(const CustomPresetDef *def)
-{
-    if (!s_ambient_lobj)
-        s_ambient_lobj = stc_lobj_hw_slot_table[HSD_LOBJ_HW_SLOT_AMBIENT];
-    if (!s_ambient_lobj)
-        return; // not yet populated; retried later
-
-    if (!s_ambient_cached)
-    {
-        s_orig_ambient_color = s_ambient_lobj->color;
-        s_orig_ambient_hw_color = s_ambient_lobj->hw_color;
-        s_ambient_cached = 1;
-    }
-    s_ambient_lobj->color = (def && def->char_ambient)
-                                ? GXColor_Unpack(def->char_ambient)
-                                : s_orig_ambient_color;
-    s_ambient_lobj->hw_color = (def && def->char_ambient_specular)
-                                   ? GXColor_Unpack(def->char_ambient_specular)
-                                   : s_orig_ambient_hw_color;
-}
-
-// CT always loads GX_FOG_PERSP_LIN, so inherit and linear both resolve to it.
-static u32 FogCurveToGX(u32 curve)
-{
-    switch (curve)
-    {
-    case FOG_CURVE_EXP:     return GX_FOG_PERSP_EXP;
-    case FOG_CURVE_EXP2:    return GX_FOG_PERSP_EXP2;
-    case FOG_CURVE_REVEXP:  return GX_FOG_PERSP_REVEXP;
-    case FOG_CURVE_REVEXP2: return GX_FOG_PERSP_REVEXP2;
-    default:                return GX_FOG_PERSP_LIN;
-    }
-}
-
-// Sky_Update never touches HSD_Fog.type, so a single write on preset change
-// holds for the whole preset.
-static void ApplyFogCurve(HSD_Fog *fog, const CustomPresetDef *def)
-{
-    if (!fog)
-        return;
-    fog->type = FogCurveToGX(def ? def->fog_curve : FOG_CURVE_INHERIT);
-}
-
-// Comma-joins the names of the layers this preset switched on. Sized for every
-// name plus its separator.
-static char stc_fx_list[224];
-
-static void ListActiveFx(const CustomPresetDef *def)
-{
-    static const char *const names[] = {
-        "terrain", "ambient", "tint", "rain", "hail", "snow", "lightning",
-        "wind", "puddles", "clouds", "moon", "stars", "volcano", "tornado",
-    };
-    int on[sizeof(names) / sizeof(names[0])] = {0};
-
-    if (def)
-    {
-        on[0] = def->terrain_diffuse != 0;
-        on[1] = def->char_ambient != 0 || def->char_ambient_specular != 0;
-        on[2] = def->screen_tint != 0;
-        on[3] = def->rain.enabled;
-        on[4] = def->hail.enabled;
-        on[5] = def->snow.enabled;
-        on[6] = def->lightning.enabled;
-        on[7] = def->wind.enabled;
-        on[8] = def->puddles.enabled;
-        on[9] = def->clouds.enabled;
-        on[10] = def->moon.enabled;
-        on[11] = def->stars.enabled;
-        on[12] = def->volcano.enabled;
-        on[13] = def->tornado.enabled;
-    }
-
-    int pos = 0;
-    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++)
-    {
-        if (!on[i])
-            continue;
-        if (pos)
-        {
-            stc_fx_list[pos++] = ',';
-            stc_fx_list[pos++] = ' ';
-        }
-        for (const char *c = names[i]; *c; c++)
-            stc_fx_list[pos++] = *c;
-    }
-    if (pos == 0)
-    {
-        const char *none = "none";
-        while (*none)
-            stc_fx_list[pos++] = *none++;
-    }
-    stc_fx_list[pos] = '\0';
+    Earthquake_Reset();
+    Tsunami_Reset();
+    Glow_Reset();
+    StarLight_Reset();
 }
 
 void CustomWeatherRuntime_Tick(GrObj *grobj)
 {
-    if (!grobj)
-        return;
-
-    // Every other mode keeps its own fog and sky.
+    // The City Trial ground: City Trial, Free Run and the Destruction Derby 4 and 5
+    // stadiums. Every other stage keeps its own fog and sky.
     if (grobj->gr_kind != GR_CITY1)
         return;
-
-    if (grobj != s_last_grobj || grobj->fade_slot_id != s_last_slot_id)
-    {
-        ResetPerStage(grobj);
-        s_last_slot_id = grobj->fade_slot_id;
-    }
 
     GOBJ *fog_gobj = grobj->sky_gobj;
     if (!fog_gobj)
@@ -188,51 +153,63 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
 
     HSD_Fog *fog = (HSD_Fog *)fog_gobj->hsd_object;
 
+    if (!s_lights_resolved)
+    {
+        LightTint_Capture(&s_terrain, *stc_main_light);
+        LightTint_Capture(&s_ambient, StageAmbientLight());
+        s_lights_resolved = 1;
+    }
+
     int idx = sky_state->current_preset_index;
     if (idx != s_last_seen_preset_idx)
     {
         s_last_seen_preset_idx = idx;
-        s_active_def = CustomWeather_GetPresetDef(idx);
-        ApplyTerrainTint(s_active_def);
-        ApplyAmbientTint(s_active_def);
-        ApplyFogCurve(fog, s_active_def);
-        Rain_SetActive(s_active_def ? &s_active_def->rain : 0);
-        Snow_SetActive(s_active_def ? &s_active_def->snow : 0);
-        Hail_SetActive(s_active_def ? &s_active_def->hail : 0);
-        Lightning_SetActive(s_active_def ? &s_active_def->lightning : 0);
-        Wind_SetActive(s_active_def ? &s_active_def->wind : 0);
-        Puddle_SetActive(s_active_def ? &s_active_def->puddles : 0);
-        Cloud_SetActive(s_active_def ? &s_active_def->clouds : 0);
-        Moon_SetActive(s_active_def ? &s_active_def->moon : 0);
-        Star_SetActive(s_active_def ? &s_active_def->stars : 0);
-        Volcano_SetActive(s_active_def ? &s_active_def->volcano : 0);
-        Tornado_SetActive(s_active_def ? &s_active_def->tornado : 0);
+        const CustomPresetDef *def = CustomWeather_GetPresetDef(idx);
+        LightTint_Apply(&s_terrain, def ? def->terrain_diffuse : 0,
+                        def ? def->terrain_specular : 0);
+        LightTint_Apply(&s_ambient, def ? def->terrain_ambient : 0,
+                        def ? def->terrain_ambient_specular : 0);
 
-        // Sky_BeginFade lerps the lbfade slot-3 overlay to the tint over 30
-        // frames, then holds it.
-        if (grobj->fade_slot_id && s_active_def && s_active_def->screen_tint)
+        // Sky_Update never writes HSD_Fog.type or scale, so one write holds until the
+        // next preset change.
+        if (fog)
         {
-            u32 tint = s_active_def->screen_tint;
+            fog->type = (def && def->fog_type) ? def->fog_type : GX_FOG_PERSP_LIN;
+            fog->scale = CustomWeather_GetFogScale();
+        }
+
+        Rain_SetActive(def ? &def->rain : 0);
+        Snow_SetActive(def ? &def->snow : 0);
+        Hail_SetActive(def ? &def->hail : 0);
+        Lightning_SetActive(def ? &def->lightning : 0);
+        Wind_SetActive(def ? &def->wind : 0);
+        Puddle_SetActive(def ? &def->puddles : 0);
+        Cloud_SetActive(def ? &def->clouds : 0);
+        Moon_SetActive(def ? &def->moon : 0);
+        Star_SetActive(def ? &def->stars : 0);
+        Volcano_SetActive(def ? &def->volcano : 0);
+        Tornado_SetActive(def ? &def->tornado : 0);
+        Earthquake_SetActive(def ? &def->earthquake : 0);
+        Tsunami_SetActive(def ? &def->tsunami : 0);
+        Glow_SetActive(def ? &def->glow : 0);
+        StarLight_SetActive(def ? &def->starlight : 0);
+
+        // The round's first preset arrives through Sky_LoadPreset, which fires no
+        // overlay, so the tint is driven here: lerped over 30 frames, then held.
+        if (grobj->fade_slot_id && def && def->screen_tint)
+        {
+            u32 tint = def->screen_tint;
             Sky_BeginFade(grobj, &tint, 30);
         }
 
-        ListActiveFx(s_active_def);
-        OSReport("[WeatherRuntime] Preset %d (%s) active: %s\n",
-                 idx, CustomWeather_GetPresetName(idx), stc_fx_list);
+        char layers[128];
+        ListPresetLayers(def, layers);
+        OSReport("[WeatherRuntime] Preset %d (%s) applied, preset layers: %s\n",
+                 idx, CustomWeather_GetPresetName(idx), layers);
     }
-    else if (s_active_def && !s_ambient_lobj
-             && (s_active_def->char_ambient || s_active_def->char_ambient_specular))
-    {
-        ApplyAmbientTint(s_active_def);  // slot table not up yet on the first CT frame
-    }
-
-    // Sky_Update leaves HSD_Fog.scale at 1.0, so this field is ours. Written every
-    // frame so a live menu change lands immediately, vanilla presets included.
-    if (fog)
-        fog->scale = CustomWeather_GetFogScale();
 
     Lightning_Tick(fog);
-    // Advance the wind first so rain, snow, hail, and trees read the fresh vector.
+    // Wind first, so every layer that reads it sees this frame's vector.
     Wind_Tick();
     Rain_Tick();
     Snow_Tick();
@@ -244,6 +221,11 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     Star_Tick();
     Volcano_Tick();
     Tornado_Tick();
+    Earthquake_Tick();
+    Tsunami_Tick();
+    // The star before the glow, whose map draw picks up the star's TObjs.
+    StarLight_Tick();
+    Glow_Tick();
 }
 
 // In Gr_Think (0x800ce618), immediately after `bl Sky_Update`; r31 = grobj,

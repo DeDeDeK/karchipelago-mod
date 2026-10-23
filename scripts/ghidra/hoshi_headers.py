@@ -16,8 +16,8 @@ import re
 # overrunning into an adjacent global, so this stays curated.
 ARRAY_SIZES = {
     "stc_playerdata": 5,  # PlayerData[5] (slots 0-4); the headline indexed global
-    "psGeneratorCount": 64,  # one per particle bank; Ptcl_Alloc checks bank < 0x40
-    "psGeneratorDesc": 64,
+    "stc_ps_generator_count": 64,  # one per particle bank; Ptcl_Alloc checks bank < 0x40
+    "stc_ps_generator_desc": 64,
 }
 
 # Exotic declarators a cast regex can't parse: a pointer-to-array and a
@@ -256,7 +256,7 @@ _STATIC_RE = re.compile(
     r"(?P<addr>" + _ADDR + r")\s*;"
 )
 
-# #define stc_actor_data_table  ((int *)0x804b22b4)
+# #define stc_enemy_kind_archive  ((int *)0x804b22b4)
 # #define stc_enemy_param_table (*(void **)0x805dd878)
 _DEFINE_RE = re.compile(
     r"^\s*#\s*define\s+(?P<name>\w+)\s+"

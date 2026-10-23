@@ -5,11 +5,64 @@
 #include "stage.h"
 #include "obj.h"
 #include "hsd.h"
+#include "preload.h"
 #include "code_patch/code_patch.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
+
+// BackdropManifest.dat holds no game data: each entry is a recipe for rebuilding one
+// stage's backdrop subtree out of the retail disc, so no vanilla geometry or texture
+// ships with the mod.
+#define BACKDROP_MANIFEST_FILE    "BackdropManifest.dat"
+#define BACKDROP_MANIFEST_SYMBOL  "backdropManifest"
+#define BACKDROP_MANIFEST_MAGIC   0x42444D46u  // 'BDMF'
+#define BACKDROP_MANIFEST_VERSION 1
+
+// Bytes the payload reserves before the first range, holding a pp slot shaped like a
+// vanilla stage's grModel<X>[1]: word 0 is the backdrop root, the rest reads as zero.
+#define BACKDROP_PP_SLOT 0x20
+
+// All three fields are multiples of 32, which is what File_Read requires of an
+// offset, a length and a destination alike.
+typedef struct BackdropRange
+{
+    u32 donor_off;   // 0x00 absolute offset in the donor file
+    u32 dest_off;    // 0x04 offset in the payload
+    u32 length;      // 0x08
+} BackdropRange;
+
+// The bytes arrive raw off the disc, so every pointer still holds a donor offset;
+// dest_val is that offset already in payload coordinates, leaving the runtime to add
+// the payload base.
+typedef struct BackdropReloc
+{
+    u32 dest_off;    // 0x00 where the pointer sits in the payload
+    u32 dest_val;    // 0x04 payload offset it should point at
+} BackdropReloc;
+
+typedef struct BackdropManifestEntry
+{
+    const char *key;              // 0x00 grModel<X> suffix, e.g. "Check2"
+    const char *donor;            // 0x04 e.g. "GrCheck2Model.dat"
+    u32 payload_size;             // 0x08
+    float scale;                  // 0x0C normalizes the dome to City's radius
+    u32 root_off;                 // 0x10 backdrop JOBJDesc, payload-relative
+    const BackdropRange *ranges;  // 0x14
+    u32 range_num;                // 0x18
+    const BackdropReloc *relocs;  // 0x1C
+    u32 reloc_num;                // 0x20
+} BackdropManifestEntry;          // 0x24
+
+typedef struct BackdropManifest
+{
+    u32 magic;                            // 0x00 BACKDROP_MANIFEST_MAGIC
+    u32 version;                          // 0x04
+    u32 entry_num;                        // 0x08
+    const BackdropManifestEntry *entries; // 0x0C
+} BackdropManifest;
 
 // Index 0 ("Vanilla") is the no-override path: the stock loader keeps CT's own
 // backdrop, so nothing is rebuilt.
@@ -29,7 +82,6 @@ static const BackdropDef backdrop_defs[] = {
     { "Colosseum 5", "Colosseum5" },
     { "Dedede 1",    "Dedede1"    },
     { "Desert 1",    "Desert1"    },
-    { "Heat 2",      "Heat2"      },
     { "Ice 1",       "Ice1"       },
     { "Jump 1",      "Jump1"      },
     { "Jump 2",      "Jump2"      },
@@ -37,32 +89,26 @@ static const BackdropDef backdrop_defs[] = {
     { "Machine 2",   "Machine2"   },
     { "Pasture 1",   "Pasture1"   },
     { "Plants 1",    "Plants1"    },
-    { "Sky 2",       "Sky2"       },
-    { "Space 2",     "Space2"     },
-    { "Valley 2",    "Valley2"    },
     { "Zeroyon 1",   "Zeroyon1"   },
-    { "Zeroyon 3",   "Zeroyon3"   },
-    { "Zeroyon 4",   "Zeroyon4"   },
-    { "Zeroyon 5",   "Zeroyon5"   },
 };
-#define BACKDROP_NUM (sizeof(backdrop_defs) / sizeof(backdrop_defs[0]))
+#define BACKDROP_NUM ((int)GetElementsIn(backdrop_defs))
 
 // Per-entry enable toggle, persisted by hoshi menu save (keyed by option name hash).
-static int backdrop_enabled[BACKDROP_NUM] = {
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1,
-};
-_Static_assert(sizeof(backdrop_enabled) / sizeof(backdrop_enabled[0]) == BACKDROP_NUM,
-               "backdrop_enabled init must match BACKDROP_NUM");
+static int backdrop_enabled[BACKDROP_NUM] = {[0 ... BACKDROP_NUM - 1] = 1};
 
-// Multiplies the root-joint scale the loader stamps into every backdrop, pushing
-// the whole sky dome out or pulling it in.
+static WeatherPool backdrop_pool = {backdrop_enabled, BACKDROP_NUM, NULL};
+
+// Multiplies the root-joint scale the loader stamps into every backdrop, pushing the
+// whole sky dome out.
 static const float backdrop_distance_factors[] = {1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
 static char *backdrop_distance_names[] = {"100%", "125%", "150%", "175%", "200%"};
-#define BACKDROP_DISTANCE_NUM \
-    ((int)(sizeof(backdrop_distance_factors) / sizeof(backdrop_distance_factors[0])))
+WEATHER_KNOB_CHECK(backdrop_distance_factors, backdrop_distance_names);
 static int backdrop_distance_index = 1; // default 125%
+
+float CustomBackdrop_GetDistance(void)
+{
+    return backdrop_distance_factors[backdrop_distance_index];
+}
 
 // Normalizes the picked backdrop's dome to City Trial's radius. Donors are modelled
 // anywhere from ~1300 to ~10000 units and the loader stamps City's StageScale over
@@ -70,8 +116,11 @@ static int backdrop_distance_index = 1; // default 125%
 // the distance hook.
 static float backdrop_geom_scale = 1.0f;
 
-// Manifest and payload live in the per-scene heap, zeroed on 3D scene exit, so
-// nothing here is freed or cached across rounds.
+// GrCity1Model.dat is preloaded into a heap that can outlive the round, and the loader
+// reuses a resident preload as-is, so the overridden ModelSection slot is put back at
+// the 3D exit, before the scene heap holding the payload is reset.
+static ModelSection *stc_override_ms = NULL;
+static JOBJDesc **stc_vanilla_backdrop = NULL;
 
 // A backdrop failure is a permanent condition (file missing, donor absent) and the
 // override runs once per City Trial entry, so the reports latch.
@@ -109,30 +158,28 @@ static void *RebuildBackdrop(const BackdropManifestEntry *e)
         return NULL;
     }
 
-    // File_Read DMAs straight into the buffer, so the base has to be 32-byte
-    // aligned; the ranges are already sized and placed in multiples of 32.
-    u8 *alloc = Heap_Alloc(0, e->payload_size + 31);
-    if (alloc == NULL)
+    // The heap hands out 32-byte-aligned blocks, which File_Read's DMA requires of the
+    // destination; the ranges are already sized and placed in multiples of 32.
+    u8 *base = Heap_Alloc(PRELOADHEAPKIND_HSD, e->payload_size);
+    if (base == NULL)
     {
         if (BackdropShouldWarn())
             OSReport("[CustomBackdrop] %s alloc failed (%d bytes)\n",
-                     e->donor, e->payload_size + 31);
+                     e->donor, e->payload_size);
         return NULL;
     }
-    u8 *base = (u8 *)(((u32)alloc + 31) & ~31);
 
     // No range covers the leading pp slot, and the heap hands back dirty memory, so
     // clear it here: everything past word 0 must read as "no model motion".
-    for (u32 i = 0; i < BACKDROP_PP_SLOT / 4; i++)
-        ((u32 *)base)[i] = 0;
+    memset(base, 0, BACKDROP_PP_SLOT);
 
     for (u32 i = 0; i < e->range_num; i++)
     {
         const BackdropRange *r = &e->ranges[i];
         *stc_file_read_done = 0;
         File_Read(entrynum, r->donor_off, base + r->dest_off, r->length,
-                  0x21, 1, File_ReadDone, NULL);
-        while (File_Wait() == 0)
+                  DEVCOMSRC_DVD | DEVCOMDEST_DRAM, 1, File_ReadDone, NULL);
+        while (File_PollReadDone() == 0)
             ;
     }
 
@@ -142,19 +189,18 @@ static void *RebuildBackdrop(const BackdropManifestEntry *e)
         *(u32 *)(base + rl->dest_off) = (u32)base + rl->dest_val;
     }
 
-    // Word 0 of the pp slot is the backdrop root; the rest stays zero (no motion).
     *(u32 *)base = (u32)base + e->root_off;
     return base;
 }
 
 static void CustomBackdrop_Override(GrObj *grobj)
 {
-    if (grobj == NULL || grobj->gr_kind != GR_CITY1)
+    if (grobj->gr_kind != GR_CITY1)
         return;
 
     backdrop_geom_scale = 1.0f;
 
-    int picked = Weather_PickEnabled(backdrop_enabled, (int)BACKDROP_NUM);
+    int picked = Gm_Roll(backdrop_enabled, BACKDROP_NUM);
     if (picked < 0)
         picked = BACKDROP_VANILLA_INDEX;
 
@@ -170,13 +216,14 @@ static void CustomBackdrop_Override(GrObj *grobj)
     if (ct_ms == NULL)
         return;
 
-    HSD_Archive *arc = Archive_LoadFile(BACKDROP_MANIFEST_FILE);
-    if (arc == NULL)
+    // Archive_LoadFile asserts on a missing file rather than returning NULL.
+    if (DVDConvertPathToEntrynum(BACKDROP_MANIFEST_FILE) < 0)
     {
         if (BackdropShouldWarn())
             OSReport("[CustomBackdrop] %s missing\n", BACKDROP_MANIFEST_FILE);
         return;
     }
+    HSD_Archive *arc = Archive_LoadFile(BACKDROP_MANIFEST_FILE);
 
     const BackdropManifest *m = Archive_GetPublicAddress(arc, BACKDROP_MANIFEST_SYMBOL);
     if (m == NULL || m->magic != BACKDROP_MANIFEST_MAGIC
@@ -199,10 +246,20 @@ static void CustomBackdrop_Override(GrObj *grobj)
     if (payload == NULL)
         return;
 
+    stc_override_ms = ct_ms;
+    stc_vanilla_backdrop = ct_ms->backdrop;
     ct_ms->backdrop = (JOBJDesc **)payload;
     backdrop_geom_scale = e->scale;
     OSReport("[CustomBackdrop] Selected %s (%d KB from %s)\n",
              def->display_name, e->payload_size / 1024, e->donor);
+}
+
+void CustomBackdrop_On3DExit(void)
+{
+    if (!stc_override_ms)
+        return;
+    stc_override_ms->backdrop = stc_vanilla_backdrop;
+    stc_override_ms = NULL;
 }
 
 // Inside CreateStageModel_3D (0x800dcbf0), after r30 = grobj and just before it
@@ -219,13 +276,10 @@ CODEPATCH_HOOKCREATE(0x800dcc18,
 // the user's distance factor then moves the whole dome.
 static void CustomBackdrop_ScaleDistance(GrObj *grobj, JOBJ *backdrop)
 {
-    if (grobj == NULL || backdrop == NULL || grobj->gr_kind != GR_CITY1)
+    if (grobj->gr_kind != GR_CITY1)
         return;
 
-    float f = backdrop_distance_factors[backdrop_distance_index] * backdrop_geom_scale;
-    if (f == 1.0f)
-        return;
-
+    float f = CustomBackdrop_GetDistance() * backdrop_geom_scale;
     backdrop->scale.X *= f;
     backdrop->scale.Y *= f;
     backdrop->scale.Z *= f;
@@ -233,8 +287,8 @@ static void CustomBackdrop_ScaleDistance(GrObj *grobj, JOBJ *backdrop)
 
 // Inside CreateStageModel_3D (0x800dcbf0), immediately after the backdrop branch
 // stamps the scale into the root joint; r30 = grobj, r29 = backdrop JObj (both
-// non-volatile). The macro replays the clobbered `lwz r0, 20(r29)`, so the
-// classical-scaling flag check that follows sees the rescaled joint.
+// non-volatile). The macro replays the clobbered `lwz r0, 20(r29)`, so the rescale
+// lands before the loader's JOBJ_MTS_INDEPEND_SRT test and matrix-dirty mark.
 CODEPATCH_HOOKCREATE(0x800dce84,
     "mr 3, 30\n\t"
     "mr 4, 29\n\t",
@@ -246,22 +300,7 @@ void CustomBackdrop_OnBoot(void)
 {
     CODEPATCH_HOOKAPPLY(0x800dcc18);
     CODEPATCH_HOOKAPPLY(0x800dce84);
-    OSReport("[CustomBackdrop] Hooks installed (%d backdrops in pool)\n",
-             (int)BACKDROP_NUM);
-}
-
-static int EnableAllBackdrops(OptionDesc *self)
-{
-    (void)self;
-    Weather_SetAllEnabled(backdrop_enabled, (int)BACKDROP_NUM, 1);
-    return 1;
-}
-
-static int DisableAllBackdrops(OptionDesc *self)
-{
-    (void)self;
-    Weather_SetAllEnabled(backdrop_enabled, (int)BACKDROP_NUM, 0);
-    return 1;
+    OSReport("[CustomBackdrop] Hooks installed (%d backdrops in pool)\n", BACKDROP_NUM);
 }
 
 static void OnBackdropDistanceChange(int val)
@@ -275,7 +314,7 @@ static void OnBackdropDistanceChange(int val)
         .description = "Let this backdrop appear in the City Trial skybox roll", \
         .kind = OPTKIND_VALUE, \
         .val = &backdrop_enabled[idx], \
-        .value_num = 2, \
+        .value_num = WEATHER_ONOFF_NUM, \
         .value_names = weather_enable_names, \
     }
 
@@ -287,7 +326,7 @@ MenuDesc backdrop_menu = {
             .description = "How far the City Trial sky backdrop renders (scales all backdrops, including Vanilla)",
             .kind = OPTKIND_VALUE,
             .val = &backdrop_distance_index,
-            .value_num = BACKDROP_DISTANCE_NUM,
+            .value_num = GetElementsIn(backdrop_distance_factors),
             .value_names = backdrop_distance_names,
             .on_change = OnBackdropDistanceChange,
         },
@@ -295,13 +334,15 @@ MenuDesc backdrop_menu = {
             .name = "Enable All",
             .description = "Enable all backdrops",
             .kind = OPTKIND_ACTION,
-            .on_action = EnableAllBackdrops,
+            .on_action = WeatherPool_EnableAll,
+            .user_data = &backdrop_pool,
         },
         &(OptionDesc){
             .name = "Disable All",
             .description = "Disable all backdrops",
             .kind = OPTKIND_ACTION,
-            .on_action = DisableAllBackdrops,
+            .on_action = WeatherPool_DisableAll,
+            .user_data = &backdrop_pool,
         },
         BACKDROP_TOGGLE(0,  "Vanilla"),
         BACKDROP_TOGGLE(1,  "Check 2"),
@@ -310,20 +351,13 @@ MenuDesc backdrop_menu = {
         BACKDROP_TOGGLE(4,  "Colosseum 5"),
         BACKDROP_TOGGLE(5,  "Dedede 1"),
         BACKDROP_TOGGLE(6,  "Desert 1"),
-        BACKDROP_TOGGLE(7,  "Heat 2"),
-        BACKDROP_TOGGLE(8,  "Ice 1"),
-        BACKDROP_TOGGLE(9,  "Jump 1"),
-        BACKDROP_TOGGLE(10, "Jump 2"),
-        BACKDROP_TOGGLE(11, "Jump 3"),
-        BACKDROP_TOGGLE(12, "Machine 2"),
-        BACKDROP_TOGGLE(13, "Pasture 1"),
-        BACKDROP_TOGGLE(14, "Plants 1"),
-        BACKDROP_TOGGLE(15, "Sky 2"),
-        BACKDROP_TOGGLE(16, "Space 2"),
-        BACKDROP_TOGGLE(17, "Valley 2"),
-        BACKDROP_TOGGLE(18, "Zeroyon 1"),
-        BACKDROP_TOGGLE(19, "Zeroyon 3"),
-        BACKDROP_TOGGLE(20, "Zeroyon 4"),
-        BACKDROP_TOGGLE(21, "Zeroyon 5"),
+        BACKDROP_TOGGLE(7,  "Ice 1"),
+        BACKDROP_TOGGLE(8,  "Jump 1"),
+        BACKDROP_TOGGLE(9,  "Jump 2"),
+        BACKDROP_TOGGLE(10, "Jump 3"),
+        BACKDROP_TOGGLE(11, "Machine 2"),
+        BACKDROP_TOGGLE(12, "Pasture 1"),
+        BACKDROP_TOGGLE(13, "Plants 1"),
+        BACKDROP_TOGGLE(14, "Zeroyon 1"),
     },
 };

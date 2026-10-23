@@ -1,12 +1,8 @@
-// Grows every UI art bank that picks its frame by kind, so the appended machines have
-// frames. Twenty banks across eight menu archives are TexAnims whose animation frame is
-// the CharacterKind, and the two HUD machine icon banks are keyed by registry order; each gains
-// CUSTOM_MACHINE_MAX frames out of the CmUiFrames.dat side-car, plus the quad-scale tracks
-// that size the menu ones, every time its archive loads through Gm_LoadGameFile
-// (0x80059818).
+#include <string.h>
 
 #include "os.h"
 #include "hsd.h"
+#include "inline.h"
 #include "obj.h"
 #include "menu.h"
 #include "code_patch/code_patch.h"
@@ -37,10 +33,14 @@
 // Every `addi rD, rS, 20` forming King Dedede's diverted frame. Meta Knight's
 // `addi rD, rS, 30` is 0x14 past each of them, in the same if/else chain.
 static const u32 stc_divert_sites[] = {
-    0x80151b08, 0x80151bd4, // AirRideSelect_SetSIcon2Color / _SetSIcon2Character
-    0x8015c5c8, 0x8015c694, // CitySelect_SetSIcon2Color / _SetSIcon2Character
-    0x801672bc, 0x8016b064, // MnResult_CreateSiconBig / MnResult2_
-    0x8016e9bc, 0x80177b5c, // MnResult4_CreateSiconBig / MnResultCt_
+    0x80151b08, // AirRideSelect_SetSIcon2Color (0x80151ab4)
+    0x80151bd4, // AirRideSelect_SetSIcon2Character (0x80151b78)
+    0x8015c5c8, // CitySelect_SetSIcon2Color (0x8015c574)
+    0x8015c694, // CitySelect_SetSIcon2Character (0x8015c638)
+    0x801672bc, // MnResult_CreateSiconBig (0x80167250)
+    0x8016b064, // MnResult2_CreateSiconBig (0x8016aff4)
+    0x8016e9bc, // MnResult4_CreateSiconBig (0x8016e924)
+    0x80177b5c, // MnResultCt_CreateSiconBig (0x80177ae8)
 };
 #define DIVERT_METAKNIGHT_OFF 0x14
 
@@ -197,8 +197,7 @@ static int PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
 
         HSD_TlutDesc **tluts = stc_tlut_pool[slot];
 
-        for (i = 0; i < nt; i++)
-            tluts[i] = tex->tluttbl[i];
+        memcpy(tluts, tex->tluttbl, nt * sizeof(tluts[0]));
         for (i = 0; i < a; i++)
             tluts[nt + i] = tluts[bank->src];
         tex->tluttbl = tluts;
@@ -207,8 +206,7 @@ static int PatchBank(HSD_Archive *archive, UiFrameBank *bank, int slot)
     }
 
     images = stc_image_pool[slot];
-    for (i = 0; i < n; i++)
-        images[i] = tex->imagetbl[i];
+    memcpy(images, tex->imagetbl, n * sizeof(images[0]));
     for (i = 0; i < a; i++)
         images[n + i] = AppendedImage(bank, i);
     tex->imagetbl = images;
@@ -324,13 +322,13 @@ static int LoadMachineArt(void)
 // the one instruction.
 static void MoveDiverts(void)
 {
-    for (int i = 0; i < (int)(sizeof(stc_divert_sites) / sizeof(u32)); i++)
+    for (int i = 0; i < GetElementsIn(stc_divert_sites); i++)
     {
         u32 dedede = stc_divert_sites[i];
         u32 metaknight = dedede + DIVERT_METAKNIGHT_OFF;
 
-        CustomMachines_SetImmediate(dedede, DIVERT_DEDEDE_FRAME + stc_appended);
-        CustomMachines_SetImmediate(metaknight, DIVERT_METAKNIGHT_FRAME + stc_appended);
+        CODEPATCH_REPLACEIMMEDIATE(dedede, DIVERT_DEDEDE_FRAME + stc_appended);
+        CODEPATCH_REPLACEIMMEDIATE(metaknight, DIVERT_METAKNIGHT_FRAME + stc_appended);
     }
 }
 

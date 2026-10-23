@@ -5,15 +5,16 @@
 #include "hsd.h"
 #include "stage.h"
 #include "code_patch/code_patch.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
 
-// Custom presets in enum order, WEATHER_BLOOD_RAIN .. WEATHER_TORNADO.
-const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
+// Custom presets in enum order, WEATHER_BLOOD_RAIN .. WEATHER_BEACON.
+static const CustomPresetDef custom_defs[] = {
     // Blood Rain
-    { .base_preset = WEATHER_RED_VIGNETTE,
+    { .base_preset = CITYSKY_RED_VIGNETTE,
       .fog_color = RGBA(130, 36, 14, 255),
       .fog_start = 60.0f,
       .fog_end = 480.0f,
@@ -22,7 +23,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(245, 110, 70, 255),
       .char_dir = { -0.30f, 0.80f, 0.40f },
       .char_dir_lit = 1,
-      .char_ambient = RGBA(90, 35, 25, 255),
+      .terrain_ambient = RGBA(90, 35, 25, 255),
       .screen_tint = RGBA(36, 6, 4, 85),
       .rain = {
           .enabled = 1,
@@ -33,11 +34,11 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .lightning = {
           .enabled = 1,
           .flash_color = RGBA(255, 80, 50, 255),
-          .bolt = LTNG_BOLT_AUGMENT,
+          .bolt = 1,
       },
     },
     // Storm
-    { .base_preset = WEATHER_DARK_VIGNETTE,
+    { .base_preset = CITYSKY_DARK_VIGNETTE,
       .fog_color = RGBA(14, 18, 28, 255),
       .fog_start = 10.0f,
       .fog_end = 220.0f,
@@ -48,13 +49,13 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(60, 70, 95, 255),
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
-      .char_ambient = RGBA(35, 40, 60, 255),
-      .char_ambient_specular = RGBA(30, 35, 50, 255),
+      .terrain_ambient = RGBA(35, 40, 60, 255),
+      .terrain_ambient_specular = RGBA(30, 35, 50, 255),
       .screen_tint = RGBA(0, 0, 8, 110),
       .lightning = {
           .enabled = 1,
           .flash_color = RGBA(255, 250, 240, 255),
-          .bolt = LTNG_BOLT_AUGMENT,
+          .bolt = 1,
       },
       .rain = {
           .enabled = 1,
@@ -87,7 +88,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Rain
-    { .base_preset = WEATHER_GRAY_SKY,
+    { .base_preset = CITYSKY_GRAY_SKY,
       .fog_color = RGBA(90, 110, 140, 255),
       .fog_start = 600.0f,
       .fog_end = 1300.0f,
@@ -96,7 +97,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(175, 195, 230, 255),
       .char_dir = { -0.20f, 0.85f, 0.40f },
       .char_dir_lit = 0,
-      .char_ambient = RGBA(120, 135, 165, 255),
+      .terrain_ambient = RGBA(120, 135, 165, 255),
       .rain = {
           .enabled = 1,
           .color = RGBA(150, 175, 215, 130),
@@ -119,7 +120,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Hailstorm
-    { .base_preset = WEATHER_GRAY_SKY,
+    { .base_preset = CITYSKY_GRAY_SKY,
       .fog_color = RGBA(50, 60, 78, 255),
       .fog_start = 200.0f,
       .fog_end = 900.0f,
@@ -128,7 +129,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(150, 165, 195, 255),
       .char_dir = { -0.20f, 0.85f, 0.40f },
       .char_dir_lit = 0,
-      .char_ambient = RGBA(85, 95, 115, 255),
+      .terrain_ambient = RGBA(85, 95, 115, 255),
       .screen_tint = RGBA(10, 14, 22, 70),
       .rain = {
           .enabled = 1,
@@ -160,7 +161,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Snowstorm
-    { .base_preset = WEATHER_DENSE_FOG,
+    { .base_preset = CITYSKY_DENSE_FOG,
       .fog_color = RGBA(225, 230, 240, 255),
       .fog_start = 150.0f,
       .fog_end = 700.0f,
@@ -171,8 +172,8 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(230, 236, 248, 255),
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
-      .char_ambient = RGBA(200, 208, 222, 255),
-      .fog_curve = FOG_CURVE_EXP2,
+      .terrain_ambient = RGBA(200, 208, 222, 255),
+      .fog_type = GX_FOG_PERSP_EXP2,
       .snow = {
           .enabled = 1,
           .color = RGBA(248, 250, 255, 235),
@@ -196,7 +197,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Moonlight
-    { .base_preset = WEATHER_MIDNIGHT,
+    { .base_preset = CITYSKY_MIDNIGHT,
       .fog_color = RGBA(4, 6, 16, 255),
       .fog_start = 300.0f,
       .fog_end = 1100.0f,
@@ -207,13 +208,17 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(80, 96, 140, 255),
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
-      .char_ambient = RGBA(22, 26, 44, 255),
-      .char_ambient_specular = RGBA(18, 22, 38, 255),
+      .terrain_ambient = RGBA(22, 26, 44, 255),
+      .terrain_ambient_specular = RGBA(18, 22, 38, 255),
       .screen_tint = RGBA(0, 2, 10, 90),
       .moon = {
           .enabled = 1,
           .phase = MOON_WAXING_GIBBOUS,
           .light = 1,
+      },
+      .glow = {
+          .enabled = 1,
+          .ambient = RGBA(90, 100, 140, 255),
       },
       .stars = {
           .enabled = 1,
@@ -224,7 +229,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Cotton Candy
-    { .base_preset = WEATHER_PINK_SKY,
+    { .base_preset = CITYSKY_PINK_SKY,
       .fog_color = RGBA(0, 160, 160, 255),
       .fog_start = 200.0f,
       .fog_end = 900.0f,
@@ -242,7 +247,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Toxic
-    { .base_preset = WEATHER_DARK_VIGNETTE,
+    { .base_preset = CITYSKY_DARK_VIGNETTE,
       .fog_color = RGBA(24, 72, 28, 255),
       .fog_start = 80.0f,
       .fog_end = 450.0f,
@@ -251,7 +256,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(130, 180, 110, 255),
       .char_dir = { -0.30f, 0.80f, 0.40f },
       .char_dir_lit = 0,
-      .char_ambient = RGBA(45, 75, 40, 255),
+      .terrain_ambient = RGBA(45, 75, 40, 255),
       .screen_tint = RGBA(8, 30, 10, 70),
       .rain = {
           .enabled = 1,
@@ -277,7 +282,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Bubblegum
-    { .base_preset = WEATHER_PINK_SKY,
+    { .base_preset = CITYSKY_PINK_SKY,
       .fog_color = RGBA(255, 150, 205, 255),
       .fog_start = 250.0f,
       .fog_end = 1000.0f,
@@ -286,7 +291,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(255, 190, 220, 255),
       .char_dir = { -0.40f, 0.80f, 0.50f },
       .char_dir_lit = 1,
-      .char_ambient = RGBA(230, 160, 195, 255),
+      .terrain_ambient = RGBA(230, 160, 195, 255),
       .clouds = {
           .enabled = 1,
           .color = RGBA(255, 190, 225, 210),
@@ -296,7 +301,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Volcanic
-    { .base_preset = WEATHER_DARK_VIGNETTE,
+    { .base_preset = CITYSKY_DARK_VIGNETTE,
       .fog_color = RGBA(58, 30, 22, 255),
       .fog_start = 120.0f,
       .fog_end = 620.0f,
@@ -307,8 +312,8 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(240, 130, 70, 255),
       .char_dir = { -0.25f, 0.75f, 0.45f },
       .char_dir_lit = 1,
-      .char_ambient = RGBA(80, 45, 35, 255),
-      .char_ambient_specular = RGBA(70, 38, 28, 255),
+      .terrain_ambient = RGBA(80, 45, 35, 255),
+      .terrain_ambient_specular = RGBA(70, 38, 28, 255),
       .screen_tint = RGBA(30, 8, 2, 70),
       // Ashfall, drawn by the snow layer in soot grey.
       .snow = {
@@ -342,7 +347,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       },
     },
     // Tornado
-    { .base_preset = WEATHER_GRAY_SKY,
+    { .base_preset = CITYSKY_GRAY_SKY,
       .fog_color = RGBA(98, 106, 78, 255),
       .fog_start = 90.0f,
       .fog_end = 700.0f,
@@ -353,8 +358,8 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .char_specular = RGBA(150, 160, 124, 255),
       .char_dir = { 0.00f, 1.00f, 0.00f },
       .char_dir_lit = 0,
-      .char_ambient = RGBA(88, 94, 74, 255),
-      .char_ambient_specular = RGBA(74, 80, 62, 255),
+      .terrain_ambient = RGBA(88, 94, 74, 255),
+      .terrain_ambient_specular = RGBA(74, 80, 62, 255),
       .screen_tint = RGBA(26, 30, 10, 70),
       .rain = {
           .enabled = 1,
@@ -365,7 +370,7 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
       .lightning = {
           .enabled = 1,
           .flash_color = RGBA(255, 250, 225, 255),
-          .bolt = LTNG_BOLT_AUGMENT,
+          .bolt = 1,
       },
       .wind = {
           .enabled = 1,
@@ -388,9 +393,113 @@ const CustomPresetDef custom_defs[WEATHER_CUSTOM_NUM] = {
           .count = 3,
       },
     },
+    // Earthquake
+    { .base_preset = CITYSKY_DUSKY_CLOUDS,
+      .fog_color = RGBA(118, 94, 68, 255),
+      .fog_start = 160.0f,
+      .fog_end = 820.0f,
+      .sky_color = RGBA(150, 118, 82, 170),
+      .terrain_diffuse = RGBA(172, 150, 118, 255),
+      .terrain_specular = RGBA(150, 128, 98, 255),
+      .char_diffuse = RGBA(222, 196, 158, 255),
+      .char_specular = RGBA(210, 180, 138, 255),
+      .char_dir = { -0.35f, 0.80f, 0.45f },
+      .char_dir_lit = 1,
+      .terrain_ambient = RGBA(110, 92, 68, 255),
+      .screen_tint = RGBA(30, 20, 6, 55),
+      // Drifting dust, drawn by the snow layer.
+      .snow = {
+          .enabled = 1,
+          .color = RGBA(150, 126, 96, 140),
+          .density = 350,
+          .fall_speed = 0.8f,
+          .flutter = 1.6f,
+          .size = 3.0f,
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 2.0f,
+          .heading = 140.0f,
+          .gustiness = 0.4f,
+          .chaos = 0.3f,
+      },
+      .earthquake = {
+          .enabled = 1,
+          .count = 3,
+      },
+    },
+    // Tsunami
+    { .base_preset = CITYSKY_GRAY_SKY,
+      .fog_color = RGBA(60, 84, 104, 255),
+      .fog_start = 150.0f,
+      .fog_end = 850.0f,
+      .sky_color = RGBA(78, 104, 128, 190),
+      .terrain_diffuse = RGBA(120, 136, 150, 255),
+      .terrain_specular = RGBA(100, 118, 136, 255),
+      .char_diffuse = RGBA(160, 180, 200, 255),
+      .char_specular = RGBA(150, 175, 205, 255),
+      .char_dir = { -0.20f, 0.85f, 0.40f },
+      .char_dir_lit = 0,
+      .terrain_ambient = RGBA(80, 96, 112, 255),
+      .screen_tint = RGBA(4, 14, 26, 60),
+      .rain = {
+          .enabled = 1,
+          .color = RGBA(160, 185, 210, 130),
+          .density = 900,
+          .fall_speed = 30.0f,
+      },
+      .wind = {
+          .enabled = 1,
+          .speed = 6.0f,
+          .heading = 250.0f,
+          .gustiness = 0.55f,
+          .chaos = 0.4f,
+      },
+      .puddles = {
+          .enabled = 1,
+          .color = RGBA(120, 160, 195, 180),
+          .count = 20,
+          .radius = 34.0f,
+          .slow_factor = 0.92f,
+      },
+      .clouds = {
+          .enabled = 1,
+          .color = RGBA(70, 86, 102, 220),
+          .count = 15,
+          .size = 74.0f,
+          .size_var = 0.45f,
+          .puff_var = 0.85f,
+          .height_var = 110.0f,
+      },
+      .tsunami = {
+          .enabled = 1,
+          .count = 3,
+      },
+    },
+    // Beacon
+    { .base_preset = CITYSKY_MIDNIGHT,
+      .fog_color = RGBA(2, 2, 5, 255),
+      .fog_start = 500.0f,
+      .fog_end = 2000.0f,
+      .sky_color = RGBA(2, 3, 8, 235),
+      .terrain_diffuse = RGBA(16, 16, 24, 255),
+      .terrain_specular = RGBA(12, 12, 20, 255),
+      .char_diffuse = RGBA(70, 60, 40, 255),
+      .char_specular = RGBA(90, 76, 46, 255),
+      .char_dir = { 0.00f, 1.00f, 0.00f },
+      .char_dir_lit = 0,
+      .terrain_ambient = RGBA(10, 10, 16, 255),
+      .terrain_ambient_specular = RGBA(8, 8, 14, 255),
+      .glow = {
+          .ambient = RGBA(16, 16, 26, 255),
+      },
+      .starlight = {
+          .enabled = 1,
+      },
+    },
 };
 
-_Static_assert(sizeof(custom_defs) / sizeof(custom_defs[0]) == WEATHER_CUSTOM_NUM,
+_Static_assert(GetElementsIn(custom_defs) == WEATHER_CUSTOM_NUM,
                "custom_defs must carry one entry per custom preset");
 
 const CustomPresetDef *CustomWeather_GetPresetDef(int weather_kind)
@@ -400,17 +509,17 @@ const CustomPresetDef *CustomWeather_GetPresetDef(int weather_kind)
     return &custom_defs[weather_kind - WEATHER_VANILLA_NUM];
 }
 
-static const char *preset_names[WEATHER_TOTAL] = {
+static const char *preset_names[] = {
     "Day", "Midnight", "Light Fog", "Dusk 2", "Dusky Clouds",
     "Dark Vignette", "Day 2", "Blue Sky", "Pink Sky", "Dense Fog",
     "Foggy", "Dusk", "Night", "Gray Sky", "Dark Purple",
     "Red Vignette", "Dark Low Vis",
     "Blood Rain", "Storm", "Rain", "Hailstorm", "Snowstorm",
     "Moonlight", "Cotton Candy", "Toxic", "Bubblegum", "Volcanic",
-    "Tornado",
+    "Tornado", "Earthquake", "Tsunami", "Beacon",
 };
 
-_Static_assert(sizeof(preset_names) / sizeof(preset_names[0]) == WEATHER_TOTAL,
+_Static_assert(GetElementsIn(preset_names) == WEATHER_TOTAL,
                "preset_names must carry one name per preset");
 
 const char *CustomWeather_GetPresetName(int weather_kind)
@@ -424,19 +533,17 @@ const char *CustomWeather_GetPresetName(int weather_kind)
 static SkyPresetEntry extended_presets[WEATHER_TOTAL];
 
 // Per-preset pool toggle, persisted by hoshi menu save.
-static int weather_enabled[WEATHER_TOTAL] = {
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1,
-};
-_Static_assert(sizeof(weather_enabled) / sizeof(weather_enabled[0]) == WEATHER_TOTAL,
-               "weather_enabled init must match WEATHER_TOTAL");
+static int weather_enabled[WEATHER_TOTAL] = {[0 ... WEATHER_TOTAL - 1] = 1};
+
+static void OnWeatherPoolChange(int val);
+
+static WeatherPool weather_pool = {weather_enabled, WEATHER_TOTAL, OnWeatherPoolChange};
 
 // Written into HSD_Fog.scale. HSD_FogSet emits GXSetFog(..., end * scale, ...), so
 // <1 pulls the fog wall in and >1 pushes it out.
-static const float fog_distance_factors[] = {1.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
-static char *fog_distance_names[] = {"Preset", "50%", "75%", "100%", "125%", "150%", "200%"};
-#define FOG_DISTANCE_NUM (sizeof(fog_distance_factors) / sizeof(fog_distance_factors[0]))
+static const float fog_distance_factors[] = {1.0f, 0.5f, 0.75f, 1.25f, 1.5f, 2.0f};
+static char *fog_distance_names[] = {"Preset", "50%", "75%", "125%", "150%", "200%"};
+WEATHER_KNOB_CHECK(fog_distance_factors, fog_distance_names);
 static int fog_distance_index = 0;
 
 float CustomWeather_GetFogScale(void)
@@ -444,37 +551,21 @@ float CustomWeather_GetFogScale(void)
     return fog_distance_factors[fog_distance_index];
 }
 
-// Idempotent; runs on every stage load.
-static void CustomWeather_ExtendPresetArray(GrObj *grobj)
+// The stage file can stay resident across rounds with the extended array still in
+// place, so the copy only runs from the stage's own array.
+static void CustomWeather_ExtendPresetArray(SkyPresetSubHeader *sub_header)
 {
-    SkyBlock *sky_block = grobj->gr_data->sky_block;
-    SkyPresetSubHeader *sub_header = sky_block->preset_header;
-    SkyPresetEntry *vanilla_array = sub_header->preset_array;
-
-    // WeatherKind pins the custom indices at WEATHER_VANILLA_NUM, so a stage that
-    // shipped a different count would put every enum value on the wrong preset.
-    static int count_warned = 0;
-    if (sub_header->preset_count != WEATHER_VANILLA_NUM && !count_warned)
-    {
-        OSReport("[CustomWeather] Stage ships %d vanilla presets, expected %d\n",
-                 sub_header->preset_count, WEATHER_VANILLA_NUM);
-        count_warned = 1;
-    }
-
-    memcpy(extended_presets, vanilla_array,
-           WEATHER_VANILLA_NUM * sizeof(SkyPresetEntry));
+    if (sub_header->preset_array != extended_presets)
+        memcpy(extended_presets, sub_header->preset_array,
+               WEATHER_VANILLA_NUM * sizeof(SkyPresetEntry));
 
     for (int i = 0; i < WEATHER_CUSTOM_NUM; i++)
     {
         const CustomPresetDef *def = &custom_defs[i];
         SkyPresetEntry *entry = &extended_presets[WEATHER_VANILLA_NUM + i];
 
-        int base = def->base_preset;
-        if (base < 0 || base >= WEATHER_VANILLA_NUM)
-            base = WEATHER_DAY;
-
-        // Inherits the base's un-overridden AreaLight params (flags, attn, header)
-        *entry = extended_presets[base];
+        // Keeps the base's AreaLight flags and attenuation.
+        *entry = extended_presets[def->base_preset];
 
         entry->fog_color = def->fog_color;
         entry->fog_start = def->fog_start;
@@ -497,11 +588,27 @@ static void CustomWeather_ExtendPresetArray(GrObj *grobj)
 
 static void CustomWeather_OverrideSky(GrObj *grobj)
 {
-    CustomWeather_ExtendPresetArray(grobj);
+    // WeatherKind pins the custom indices at WEATHER_VANILLA_NUM. GrCity1.dat ships 19
+    // presets, and the two past it (the Meteor and Lighthouse event skies) are dropped.
+    SkyPresetSubHeader *sub_header = grobj->gr_data->sky_block->preset_header;
+    if (sub_header->preset_count < WEATHER_VANILLA_NUM)
+    {
+        static int count_warned = 0;
+        if (!count_warned)
+        {
+            OSReport("[CustomWeather] Stage ships %d presets, needs %d; custom weather off\n",
+                     sub_header->preset_count, WEATHER_VANILLA_NUM);
+            count_warned = 1;
+        }
+        Sky_SetPresetIndex(grobj, CITYSKY_DAY);
+        return;
+    }
 
-    int preset = Weather_PickEnabled(weather_enabled, WEATHER_TOTAL);
+    CustomWeather_ExtendPresetArray(sub_header);
+
+    int preset = Gm_Roll(weather_enabled, WEATHER_TOTAL);
     if (preset < 0)
-        preset = WEATHER_DAY;
+        preset = CITYSKY_DAY;
 
     OSReport("[CustomWeather] Rolled %s\n", CustomWeather_GetPresetName(preset));
 
@@ -529,18 +636,11 @@ void CustomWeather_OnBoot()
     OSReport("[CustomWeather] Hooks installed (City Trial + City Trial Free Run)\n");
 }
 
-static int EnableAllWeather(OptionDesc *self)
+static void OnWeatherPoolChange(int val)
 {
-    (void)self;
-    Weather_SetAllEnabled(weather_enabled, WEATHER_TOTAL, 1);
-    return 1;
-}
-
-static int DisableAllWeather(OptionDesc *self)
-{
-    (void)self;
-    Weather_SetAllEnabled(weather_enabled, WEATHER_TOTAL, 0);
-    return 1;
+    (void)val;
+    OSReport("[CustomWeather] Preset pool %s\n",
+             MaskBits(WeatherPool_Mask(&weather_pool), WEATHER_TOTAL));
 }
 
 static void OnFogDistanceChange(int val)
@@ -554,8 +654,9 @@ static void OnFogDistanceChange(int val)
         .description = "Let this preset appear in the City Trial weather roll", \
         .kind = OPTKIND_VALUE, \
         .val = &weather_enabled[idx], \
-        .value_num = 2, \
+        .value_num = WEATHER_ONOFF_NUM, \
         .value_names = weather_enable_names, \
+        .on_change = OnWeatherPoolChange, \
     }
 
 MenuDesc weather_menu = {
@@ -566,7 +667,7 @@ MenuDesc weather_menu = {
             .description = "Scale how far the fog wall sits in every CT preset (lower = denser/closer)",
             .kind = OPTKIND_VALUE,
             .val = &fog_distance_index,
-            .value_num = FOG_DISTANCE_NUM,
+            .value_num = GetElementsIn(fog_distance_factors),
             .value_names = fog_distance_names,
             .on_change = OnFogDistanceChange,
         },
@@ -574,31 +675,33 @@ MenuDesc weather_menu = {
             .name = "Enable All",
             .description = "Enable all weather presets",
             .kind = OPTKIND_ACTION,
-            .on_action = EnableAllWeather,
+            .on_action = WeatherPool_EnableAll,
+            .user_data = &weather_pool,
         },
         &(OptionDesc){
             .name = "Disable All",
             .description = "Disable all weather presets",
             .kind = OPTKIND_ACTION,
-            .on_action = DisableAllWeather,
+            .on_action = WeatherPool_DisableAll,
+            .user_data = &weather_pool,
         },
-        WEATHER_TOGGLE(WEATHER_DAY,            "Day"),
-        WEATHER_TOGGLE(WEATHER_MIDNIGHT,       "Midnight"),
-        WEATHER_TOGGLE(WEATHER_LIGHT_FOG,      "Light Fog"),
-        WEATHER_TOGGLE(WEATHER_DUSK_2,         "Dusk 2"),
-        WEATHER_TOGGLE(WEATHER_DUSKY_CLOUDS,   "Dusky Clouds"),
-        WEATHER_TOGGLE(WEATHER_DARK_VIGNETTE,  "Dark Vignette"),
-        WEATHER_TOGGLE(WEATHER_DAY_2,          "Day 2"),
-        WEATHER_TOGGLE(WEATHER_BLUE_SKY,       "Blue Sky"),
-        WEATHER_TOGGLE(WEATHER_PINK_SKY,       "Pink Sky"),
-        WEATHER_TOGGLE(WEATHER_DENSE_FOG,      "Dense Fog"),
-        WEATHER_TOGGLE(WEATHER_FOGGY,          "Foggy"),
-        WEATHER_TOGGLE(WEATHER_DUSK,           "Dusk"),
-        WEATHER_TOGGLE(WEATHER_NIGHT,          "Night"),
-        WEATHER_TOGGLE(WEATHER_GRAY_SKY,       "Gray Sky"),
-        WEATHER_TOGGLE(WEATHER_DARK_PURPLE,    "Dark Purple"),
-        WEATHER_TOGGLE(WEATHER_RED_VIGNETTE,   "Red Vignette"),
-        WEATHER_TOGGLE(WEATHER_DARK_LOW_VIS,   "Dark Low Vis"),
+        WEATHER_TOGGLE(CITYSKY_DAY,            "Day"),
+        WEATHER_TOGGLE(CITYSKY_MIDNIGHT,       "Midnight"),
+        WEATHER_TOGGLE(CITYSKY_LIGHT_FOG,      "Light Fog"),
+        WEATHER_TOGGLE(CITYSKY_DUSK_2,         "Dusk 2"),
+        WEATHER_TOGGLE(CITYSKY_DUSKY_CLOUDS,   "Dusky Clouds"),
+        WEATHER_TOGGLE(CITYSKY_DARK_VIGNETTE,  "Dark Vignette"),
+        WEATHER_TOGGLE(CITYSKY_DAY_2,          "Day 2"),
+        WEATHER_TOGGLE(CITYSKY_BLUE_SKY,       "Blue Sky"),
+        WEATHER_TOGGLE(CITYSKY_PINK_SKY,       "Pink Sky"),
+        WEATHER_TOGGLE(CITYSKY_DENSE_FOG,      "Dense Fog"),
+        WEATHER_TOGGLE(CITYSKY_FOGGY,          "Foggy"),
+        WEATHER_TOGGLE(CITYSKY_DUSK,           "Dusk"),
+        WEATHER_TOGGLE(CITYSKY_NIGHT,          "Night"),
+        WEATHER_TOGGLE(CITYSKY_GRAY_SKY,       "Gray Sky"),
+        WEATHER_TOGGLE(CITYSKY_DARK_PURPLE,    "Dark Purple"),
+        WEATHER_TOGGLE(CITYSKY_RED_VIGNETTE,   "Red Vignette"),
+        WEATHER_TOGGLE(CITYSKY_DARK_LOW_VIS,   "Dark Low Vis"),
         WEATHER_TOGGLE(WEATHER_BLOOD_RAIN,     "Blood Rain"),
         WEATHER_TOGGLE(WEATHER_STORM,          "Storm"),
         WEATHER_TOGGLE(WEATHER_RAIN,           "Rain"),
@@ -610,5 +713,8 @@ MenuDesc weather_menu = {
         WEATHER_TOGGLE(WEATHER_BUBBLEGUM,      "Bubblegum"),
         WEATHER_TOGGLE(WEATHER_VOLCANIC,       "Volcanic"),
         WEATHER_TOGGLE(WEATHER_TORNADO,        "Tornado"),
+        WEATHER_TOGGLE(WEATHER_EARTHQUAKE,     "Earthquake"),
+        WEATHER_TOGGLE(WEATHER_TSUNAMI,        "Tsunami"),
+        WEATHER_TOGGLE(WEATHER_BEACON,         "Beacon"),
     },
 };

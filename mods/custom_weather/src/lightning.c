@@ -7,13 +7,14 @@
 #include "stage.h"
 #include "obj.h"
 #include "gx.h"
+#include "inline.h"
 #include "hoshi/settings.h"
 
 #include "custom_weather.h"
 #include "weather_fx.h"
 
 // Defaults applied when a preset leaves the matching LightningDef field 0.
-#define LTNG_DEF_FLASH_COLOR   RGBA(255, 250, 240, 255) // near-white strike
+static const GXColor ltng_def_flash_color = {255, 250, 240, 255}; // near-white strike
 #define LTNG_DEF_FLASH_FRAMES  18                       // flash envelope length
 #define LTNG_DEF_MIN_LULL      180                      // 3s at 60fps
 #define LTNG_DEF_MAX_LULL      420                      // 7s at 60fps
@@ -38,7 +39,8 @@
 #define BOLT_MAX_SEG      (BOLT_SEGMENTS + BOLT_FORK_SEGS)
 #define BOLT_JITTER       42.0f          // max horizontal wander per main step
 #define BOLT_FORK_JITTER  60.0f
-#define BOLT_DEF_COLOR    RGBA(210, 225, 255, 255) // fallback blue-white
+static const GXColor bolt_def_color = {210, 225, 255, 255}; // fallback blue-white
+static const GXColor bolt_core_color = {255, 255, 255, 255}; // white-hot core
 #define BOLT_GLOW_WIDTH   44             // wide dim glow pass (1/6-px units)
 #define BOLT_CORE_WIDTH   14             // thin bright core pass
 #define BOLT_GLOW_ALPHA   0.5f           // glow alpha relative to the core
@@ -48,16 +50,7 @@
 #define BOLT_LIGHT_REF_DIST  520.0f
 #define BOLT_LIGHT_REF_BR    0.5f
 
-// Entity class / p_link high enough to avoid the engine's own.
-#define BOLT_GOBJ_CLASS   202
-#define BOLT_GOBJ_PLINK   26
-
-// Light-carrier GObjs (the overhead flash LOBJ and the bolt-midpoint point LOBJ).
-#define LTNG_LOBJ_GOBJ_CLASS  38
-#define LTNG_LOBJ_GOBJ_PLINK  32
-
-// Overhead INFINITE flash LOBJ (the global rider flash). For INFINITE (flags & 3
-// == 1) LObjLoad allocates a WObj from `position` and ignores the union; the WObj
+// Overhead INFINITE flash LOBJ (the global rider flash). For INFINITE LObjLoad allocates a WObj from `position` and ignores the union; the WObj
 // pos vector is the direction, shining toward the origin from that point.
 static WOBJDesc s_flash_pos_desc = {
     .class_name = 0,
@@ -68,15 +61,15 @@ static WOBJDesc s_flash_pos_desc = {
 static LObjDesc s_flash_lobj_desc = {
     .class_name = 0,
     .next = 0,
-    .flags = LOBJ_INFINITE | LOBJ_DIFFUSE | LOBJ_SPECULAR, // 0x0D
+    .flags = LOBJ_INFINITE | LOBJ_DIFFUSE | LOBJ_SPECULAR,
     .attnflags = 0,
     .color = { 0, 0, 0, 0xFF },
-    .position = (struct _HSD_WObjDesc *)&s_flash_pos_desc,
+    .position = &s_flash_pos_desc,
     .interest = 0,
     .u = { .p = 0 },
 };
 
-// POINT LOBJ at the bolt midpoint. For POINT (flags & 3 == 2) LObjLoad loads
+// POINT LOBJ at the bolt midpoint. For POINT LObjLoad loads
 // `position` as the world point; a clear attnflags bit 0 selects the computed
 // ref-brightness/ref-distance falloff.
 static WOBJDesc s_bolt_pos_desc = {
@@ -95,13 +88,15 @@ static struct _HSD_LightPointDesc s_bolt_point = {
 static LObjDesc s_bolt_lobj_desc = {
     .class_name = 0,
     .next = 0,
-    .flags = LOBJ_POINT | LOBJ_DIFFUSE | LOBJ_SPECULAR, // 0x0E
+    .flags = LOBJ_POINT | LOBJ_DIFFUSE | LOBJ_SPECULAR,
     .attnflags = 0,        // computed (ref_br/ref_dist) attenuation, not raw
     .color = { 0, 0, 0, 0xFF },
-    .position = (struct _HSD_WObjDesc *)&s_bolt_pos_desc,
+    .position = &s_bolt_pos_desc,
     .interest = 0,
     .u = { .point = &s_bolt_point },
 };
+
+static const GXColor black = {0, 0, 0, 0xFF};
 
 static LOBJ *s_flash_lobj = 0;
 static LOBJ *s_bolt_lobj = 0;
@@ -110,23 +105,26 @@ static GOBJ *s_bolt_render = 0;
 static int stc_active = 0;
 
 // Resolved appearance/timing for the active preset (LightningDef + defaults).
-static GXColor stc_flash_color = {255, 250, 240, 255};
-static GXColor stc_bolt_color = {210, 225, 255, 255};
-static int     stc_flash_len = LTNG_DEF_FLASH_FRAMES;
-static int     stc_min_lull = LTNG_DEF_MIN_LULL;
-static int     stc_max_lull = LTNG_DEF_MAX_LULL;
-static int     stc_preset_bolt = LTNG_BOLT_OFF; // this preset's bolt mode
+static GXColor stc_flash_color;
+static GXColor stc_bolt_color;
+static int     stc_flash_len;
+static int     stc_min_lull;
+static int     stc_max_lull;
+static int     stc_preset_bolt;  // this preset's LightningDef.bolt
 
 // Strike state machine: counts down lull, then counts down a flash envelope.
 static int s_lull_frames = LTNG_INITIAL_LULL;
 static int s_flash_frames = 0;
 
+// This frame's flash brightness, latched by the tick so the bolt draws in step.
+static float s_bright = 0.0f;
+
 // Per-strike appearance, rolled when a strike fires.
-static int   s_strike_len = LTNG_DEF_FLASH_FRAMES; // this strike's envelope length
-static float s_strike_intensity = 1.0f;            // this strike's peak brightness
-static int   s_strike_on = LTNG_STROBE_ON_MAX;     // frames at full per strobe cycle
-static int   s_strike_gap = LTNG_STROBE_GAP_MAX;   // frames at the dim floor per cycle
-static float s_strike_floor = LTNG_STROBE_FLOOR_MIN; // this strike's dim floor level
+static int   s_strike_len;        // this strike's envelope length
+static float s_strike_intensity;  // this strike's peak brightness
+static int   s_strike_on;         // frames at full per strobe cycle
+static int   s_strike_gap;        // frames at the dim floor per cycle
+static float s_strike_floor;      // this strike's dim floor level
 
 // Bolt geometry (world space), generated per strike. Segments are point pairs so
 // the fork is just extra entries past the main channel.
@@ -135,20 +133,12 @@ static Vec3 s_seg_b[BOLT_MAX_SEG];
 static int  s_seg_count = 0;
 static Vec3 s_bolt_mid = {0.0f, 0.0f, 0.0f};
 
-static char *bolt_override_names[] = {"Auto", "Off", "Force"};
-static int   bolt_override_index = 0;
+// Preset / Off / On, where On adds bolts to every preset with lightning.
+static int bolt_override_index = 0;
 
-// Effective bolt mode from the preset's setting and the menu override. Force lifts
-// an off/augment preset to augment, but honors a preset that asked to replace the
-// flash.
-static int EffectiveBoltMode(void)
+static int BoltsOn(void)
 {
-    switch (bolt_override_index)
-    {
-    case 1: return LTNG_BOLT_OFF;
-    case 2: return (stc_preset_bolt == LTNG_BOLT_REPLACE) ? LTNG_BOLT_REPLACE : LTNG_BOLT_AUGMENT;
-    default: return stc_preset_bolt;
-    }
+    return WeatherToggle(bolt_override_index, stc_preset_bolt);
 }
 
 // Strobe brightness in [0,1] for the current frame of the flash window: a few sharp
@@ -164,62 +154,19 @@ static float FlashBrightness(void)
     return decay * strobe * s_strike_intensity;
 }
 
-// Ground anchor for a strike: a uniform random XZ inside the out-of-bounds box.
-// Returns 0 before the scene is built, when no bolt is drawn.
-static int StrikeAnchor(float *ax, float *az)
+// Build a fresh jagged bolt at a random point in the out-of-bounds box and move the
+// midpoint point light onto it. Before the scene is built there is no box, and the
+// strike flashes without a bolt.
+static void GenerateBolt(void)
 {
     StageNode *sn = Weather_StageNode();
     if (!sn)
-        return 0;
-    *ax = Weather_RandRange(sn->oob_min.X, sn->oob_max.X);
-    *az = Weather_RandRange(sn->oob_min.Z, sn->oob_max.Z);
-    return 1;
-}
-
-static void Lightning_SetLightColor(LOBJ *l, u8 r, u8 g, u8 b)
-{
-    if (!l)
-        return;
-    l->color.r = r;
-    l->color.g = g;
-    l->color.b = b;
-    l->color.a = 0xFF;
-    l->hw_color = l->color;
-}
-
-static void Lightning_SetLightColorScaled(LOBJ *l, GXColor c, float s)
-{
-    Lightning_SetLightColor(l, (u8)(c.r * s), (u8)(c.g * s), (u8)(c.b * s));
-}
-
-// Build the carrier GObj for one LOBJ. Destroying it on a failed load keeps a
-// retry from orphaning a GObj per frame.
-static LOBJ *Lightning_LoadLight(LObjDesc *desc)
-{
-    GOBJ *gobj = GObj_Create(LTNG_LOBJ_GOBJ_CLASS, LTNG_LOBJ_GOBJ_PLINK, 0);
-    if (!gobj)
-        return NULL;
-    LOBJ *l = LObj_LoadDesc(desc);
-    if (!l)
     {
-        GObj_Destroy(gobj);
-        return NULL;
+        s_seg_count = 0;
+        return;
     }
-    GObj_AddObject(gobj, HSD_OBJKIND_LOBJ, l);
-    GObj_AddGXLink(gobj, LObj_GX, 0, 0);
-    return l;
-}
-
-// Build a fresh jagged bolt at a random anchor and move the midpoint point light
-// onto it.
-static void GenerateBolt(void)
-{
     float x, z;
-    if (!StrikeAnchor(&x, &z))
-    {
-        s_seg_count = 0;  // flash only until the scene is built
-        return;
-    }
+    Weather_RandBoxPoint(sn, 1.0f, &x, &z);
     float y = BOLT_TOP_Y;
     float dy = (BOLT_TOP_Y - BOLT_GROUND_Y) / (float)BOLT_SEGMENTS;
 
@@ -262,13 +209,14 @@ static void GenerateBolt(void)
     }
     s_seg_count = n;
 
-    if (s_bolt_lobj && s_bolt_lobj->position)
-        s_bolt_lobj->position->pos = s_bolt_mid;
+    if (s_bolt_lobj)
+        LObj_SetPosition(s_bolt_lobj, &s_bolt_mid);
 }
 
 static void DrawBoltPass(COBJ *cam, GXColor col, int width, u8 alpha)
 {
-    WeatherGX_BeginXlu(cam, 1, width); // additive so the core glows
+    GX_BeginXlu(cam, RENDER_VERTEX, GX_BL_ONE); // additive so the core glows
+    GXSetLineWidth((u8)width, GX_TO_ONE);
 
     GXBegin(GX_LINES, GX_VTXFMT0, s_seg_count * 2);
     for (int i = 0; i < s_seg_count; i++)
@@ -278,41 +226,25 @@ static void DrawBoltPass(COBJ *cam, GXColor col, int width, u8 alpha)
         GXPosition3f32(s_seg_b[i].X, s_seg_b[i].Y, s_seg_b[i].Z);
         GXColor4u8(col.r, col.g, col.b, alpha);
     }
-    HSD_StateInvalidate(-1);
+    HSD_StateInvalidate(HSD_STATE_ALL);
 }
-
-static const GXColor s_bolt_core = {255, 255, 255, 255}; // white-hot core
 
 static void Bolt_GX(GOBJ *g, int pass)
 {
     (void)g;
-    if (pass != 1)
+    if (pass != GXPASS_TEXEDGE)
+        return;
+    if (!stc_active || s_bright <= 0.0f || s_seg_count <= 0 || !BoltsOn())
         return;
 
     COBJ *cam = COBJ_GetCurrent();
     if (!cam)
         return;
 
-    if (!stc_active || s_flash_frames <= 0 || s_seg_count <= 0)
-        return;
-    if (EffectiveBoltMode() == LTNG_BOLT_OFF)
-        return;
-
-    float bright = FlashBrightness();
-    if (bright <= 0.0f)
-        return;
-
     // Wide dim glow, then a thin white-hot core, both strobing with the flash.
-    DrawBoltPass(cam, stc_bolt_color, BOLT_GLOW_WIDTH, (u8)(stc_bolt_color.a * BOLT_GLOW_ALPHA * bright));
-    DrawBoltPass(cam, s_bolt_core, BOLT_CORE_WIDTH, (u8)(255.0f * bright));
-}
-
-static void EnsureBoltRender(void)
-{
-    if (s_bolt_render)
-        return;
-    s_bolt_render = WeatherGX_EnsureLayer(BOLT_GOBJ_CLASS, BOLT_GOBJ_PLINK, Bolt_GX,
-                                          "Lightning bolt");
+    DrawBoltPass(cam, stc_bolt_color, BOLT_GLOW_WIDTH,
+                 (u8)(stc_bolt_color.a * BOLT_GLOW_ALPHA * s_bright));
+    DrawBoltPass(cam, bolt_core_color, BOLT_CORE_WIDTH, (u8)(255.0f * s_bright));
 }
 
 // Also re-arms the strike timers.
@@ -322,17 +254,18 @@ void Lightning_SetActive(const LightningDef *def)
     {
         // Only Lightning_Tick clears the lights, and it early-outs while inactive,
         // so a preset change mid-flash would strand them lit.
-        Lightning_SetLightColor(s_flash_lobj, 0, 0, 0);
-        Lightning_SetLightColor(s_bolt_lobj, 0, 0, 0);
+        Weather_SetLightColor(s_flash_lobj, black);
+        Weather_SetLightColor(s_bolt_lobj, black);
         s_flash_frames = 0;
+        s_bright = 0.0f;
         stc_active = 0;
         return;
     }
     stc_active = 1;
 
-    stc_flash_color = GXColor_Unpack(def->flash_color ? def->flash_color : LTNG_DEF_FLASH_COLOR);
+    stc_flash_color = def->flash_color ? GXColor_Unpack(def->flash_color) : ltng_def_flash_color;
     // The bolt glow inherits the preset's flash color; the core is always white-hot.
-    stc_bolt_color = GXColor_Unpack(def->flash_color ? def->flash_color : BOLT_DEF_COLOR);
+    stc_bolt_color = def->flash_color ? GXColor_Unpack(def->flash_color) : bolt_def_color;
     stc_flash_len = def->flash_frames > 0 ? def->flash_frames : LTNG_DEF_FLASH_FRAMES;
     stc_min_lull = def->min_lull > 0 ? def->min_lull : LTNG_DEF_MIN_LULL;
     stc_max_lull = def->max_lull > 0 ? def->max_lull : LTNG_DEF_MAX_LULL;
@@ -342,32 +275,23 @@ void Lightning_SetActive(const LightningDef *def)
 
     s_lull_frames = LTNG_INITIAL_LULL;
     s_flash_frames = 0;
+    s_bright = 0.0f;
 }
 
 // This is what lights the LOBJ-blind stage geometry on a strike: lerp the fog/EFB
 // color toward the flash and pull the fog wall in so it reaches near terrain.
 static void ApplyScreenFlash(HSD_Fog *fog, float bright)
 {
-    u8 fr = stc_flash_color.r, fg = stc_flash_color.g, fb = stc_flash_color.b;
-
+    GXColor flash = stc_flash_color;
     if (fog)
     {
-        u8 br = fog->color.r, bg = fog->color.g, bb = fog->color.b;
-        fog->color.r = (u8)(br + (int)((fr - br) * bright));
-        fog->color.g = (u8)(bg + (int)((fg - bg) * bright));
-        fog->color.b = (u8)(bb + (int)((fb - bb) * bright));
+        flash.a = fog->color.a;
+        GXColor_Lerp(&fog->color, &flash, &fog->color, bright);
         fog->start = fog->start * (1.0f - bright);
     }
 
-    u32 efb_base = *stc_global_fog_color;
-    u8 br = (efb_base >> 24) & 0xFF;
-    u8 bg = (efb_base >> 16) & 0xFF;
-    u8 bb = (efb_base >> 8) & 0xFF;
-    u8 ba = efb_base & 0xFF;
-    u8 nr = (u8)(br + (int)((fr - br) * bright));
-    u8 ng = (u8)(bg + (int)((fg - bg) * bright));
-    u8 nb = (u8)(bb + (int)((fb - bb) * bright));
-    *stc_global_fog_color = RGBA(nr, ng, nb, ba);
+    flash.a = stc_global_fog_color->a;
+    GXColor_Lerp(stc_global_fog_color, &flash, stc_global_fog_color, bright);
 }
 
 // Per-frame strike driver. `fog` is the active HSD_Fog, already written this frame
@@ -377,57 +301,45 @@ void Lightning_Tick(HSD_Fog *fog)
     if (!stc_active)
         return;
     if (!s_flash_lobj)
-        s_flash_lobj = Lightning_LoadLight(&s_flash_lobj_desc);
-    if (!s_bolt_lobj)
-        s_bolt_lobj = Lightning_LoadLight(&s_bolt_lobj_desc);
-    EnsureBoltRender();
-
-    int mode = EffectiveBoltMode();
+        s_flash_lobj = Weather_LoadLight(&s_flash_lobj_desc);
+    int bolts = BoltsOn();
+    if (bolts)
+    {
+        if (!s_bolt_lobj)
+            s_bolt_lobj = Weather_LoadLight(&s_bolt_lobj_desc);
+        WeatherGX_EnsureLayer(&s_bolt_render, Bolt_GX, "Lightning bolt");
+    }
 
     if (s_flash_frames > 0)
     {
-        float bright = FlashBrightness();
-
-        // Screen flash + global rider light, unless a bolt fully replaces them.
-        if (mode != LTNG_BOLT_REPLACE)
-        {
-            ApplyScreenFlash(fog, bright);
-            Lightning_SetLightColorScaled(s_flash_lobj, stc_flash_color, bright);
-        }
-        else
-        {
-            Lightning_SetLightColor(s_flash_lobj, 0, 0, 0);
-        }
-
-        // Localized point light at the bolt midpoint pulses with the bolt.
-        if (mode != LTNG_BOLT_OFF)
-            Lightning_SetLightColorScaled(s_bolt_lobj, stc_bolt_color, bright);
-        else
-            Lightning_SetLightColor(s_bolt_lobj, 0, 0, 0);
-
+        s_bright = FlashBrightness();
+        ApplyScreenFlash(fog, s_bright);
+        Weather_SetLightColor(s_flash_lobj, Weather_ScaleRGB(stc_flash_color, s_bright));
+        // The point light at the bolt midpoint pulses with the bolt.
+        Weather_SetLightColor(s_bolt_lobj,
+                              bolts ? Weather_ScaleRGB(stc_bolt_color, s_bright) : black);
         s_flash_frames--;
+        return;
     }
-    else
-    {
-        Lightning_SetLightColor(s_flash_lobj, 0, 0, 0);
-        Lightning_SetLightColor(s_bolt_lobj, 0, 0, 0);
-        s_lull_frames--;
-        if (s_lull_frames <= 0)
-        {
-            float lenscale = Weather_RandRange(LTNG_LEN_MIN_SCALE, LTNG_LEN_MAX_SCALE);
-            s_strike_len = (int)(stc_flash_len * lenscale);
-            if (s_strike_len < 1)
-                s_strike_len = 1;
-            s_strike_intensity = Weather_RandRange(LTNG_INTENSITY_MIN, 1.0f);
-            s_strike_on = Weather_RandRangeI(LTNG_STROBE_ON_MIN, LTNG_STROBE_ON_MAX);
-            s_strike_gap = Weather_RandRangeI(LTNG_STROBE_GAP_MIN, LTNG_STROBE_GAP_MAX);
-            s_strike_floor = Weather_RandRange(LTNG_STROBE_FLOOR_MIN, LTNG_STROBE_FLOOR_MAX);
-            s_flash_frames = s_strike_len;
 
-            s_lull_frames = Weather_RandRangeI(stc_min_lull, stc_max_lull);
-            GenerateBolt();
-        }
-    }
+    s_bright = 0.0f;
+    Weather_SetLightColor(s_flash_lobj, black);
+    Weather_SetLightColor(s_bolt_lobj, black);
+    if (--s_lull_frames > 0)
+        return;
+
+    float lenscale = RandomInRangef(LTNG_LEN_MIN_SCALE, LTNG_LEN_MAX_SCALE);
+    s_strike_len = (int)(stc_flash_len * lenscale);
+    if (s_strike_len < 1)
+        s_strike_len = 1;
+    s_strike_intensity = RandomInRangef(LTNG_INTENSITY_MIN, 1.0f);
+    s_strike_on = RandomInRange(LTNG_STROBE_ON_MIN, LTNG_STROBE_ON_MAX);
+    s_strike_gap = RandomInRange(LTNG_STROBE_GAP_MIN, LTNG_STROBE_GAP_MAX);
+    s_strike_floor = RandomInRangef(LTNG_STROBE_FLOOR_MIN, LTNG_STROBE_FLOOR_MAX);
+    s_flash_frames = s_strike_len;
+
+    s_lull_frames = RandomInRange(stc_min_lull, stc_max_lull);
+    GenerateBolt();
 }
 
 void Lightning_Reset(void)
@@ -438,6 +350,7 @@ void Lightning_Reset(void)
     s_seg_count = 0;
     s_lull_frames = LTNG_INITIAL_LULL;
     s_flash_frames = 0;
+    s_bright = 0.0f;
     stc_active = 0;
 }
 
@@ -446,11 +359,11 @@ MenuDesc lightning_menu = {
     .options = {
         &(OptionDesc){
             .name = "Lightning Bolts",
-            .description = "Visible bolts in storms: Auto = per-preset, Off = flash only, Force = bolts on every lightning preset",
+            .description = "Visible bolts in storms: Preset = per-preset, Off = flash only, On = bolts on every lightning preset",
             .kind = OPTKIND_VALUE,
             .val = &bolt_override_index,
-            .value_num = 3,
-            .value_names = bolt_override_names,
+            .value_num = WEATHER_TOGGLE_NUM,
+            .value_names = weather_toggle_names,
         },
     },
 };

@@ -14,6 +14,12 @@
 
 static char *toggle_values[] = {"Disabled", "Enabled"};
 
+static void DebugMenu_Notify(const char *msg)
+{
+    if (tb_api)
+        tb_api->Enqueue("%s", msg);
+}
+
 static int machine_state[AP_MACHINE_BIT_NUM];
 static int ability_state[COPYKIND_NUM];
 static int event_state[EVKIND_NUM];
@@ -37,15 +43,21 @@ static int ap_patch_count_state;
 // must not replay a bucketed value back over a seed that sits between rows.
 static int ap_patch_count_synced = -1;
 
-// Nearest row at or below the live count, so a seed's own value shows as the
-// closest offered size rather than snapping the option back to Off.
+// Nearest offered row at or below a live value, so a seed between rows shows as the
+// closest size rather than snapping the option to its first entry.
+static int NearestRow(const int *map, int num, int live)
+{
+    int row = 0;
+    for (int i = 1; i < num; i++)
+        if (live >= map[i])
+            row = i;
+    return row;
+}
+
 static void RefreshApPatchCount(void)
 {
     int n = ap_api ? ap_api->GetApPatchCount() : 0;
-    ap_patch_count_state = 0;
-    for (int i = 1; i < (int)(sizeof(ap_patch_count_map) / sizeof(ap_patch_count_map[0])); i++)
-        if (n >= ap_patch_count_map[i])
-            ap_patch_count_state = i;
+    ap_patch_count_state = NearestRow(ap_patch_count_map, GetElementsIn(ap_patch_count_map), n);
     ap_patch_count_synced = ap_patch_count_state;
 }
 
@@ -139,7 +151,7 @@ static void RefreshStateFromMasks(void)
         for (int i = 0; i < n; i++) arr[i] = 1; \
         synced_mask[cat] = m; \
         OSReport("[ApDebug] Unlocked all " label ": " #cat " = %s\n", MaskBits(m, n)); \
-        ap_api->Textbox("All " label " unlocked"); \
+        DebugMenu_Notify("All " label " unlocked"); \
         return 1; \
     } \
     static int prefix##LockAll(OptionDesc *self) { \
@@ -150,7 +162,7 @@ static void RefreshStateFromMasks(void)
         for (int i = 0; i < n; i++) arr[i] = 0; \
         synced_mask[cat] = 0; \
         OSReport("[ApDebug] Locked all " label ": " #cat " = %s\n", MaskBits(0, n)); \
-        ap_api->Textbox("All " label " locked"); \
+        DebugMenu_Notify("All " label " locked"); \
         return 1; \
     }
 
@@ -210,8 +222,8 @@ GIVE_FN(GiveCopyWing,    AP_ITKIND_COPYBIRD)
 GIVE_FN(GiveCopyPlasma,  AP_ITKIND_COPYPLASMA)
 GIVE_FN(GiveCopyTornado, AP_ITKIND_COPYTORNADO)
 GIVE_FN(GiveCopySword,   AP_ITKIND_COPYSWORD)
-GIVE_FN(GiveCopyNeedle,  AP_ITKIND_COPYSPIKE)
-GIVE_FN(GiveCopyMike,    AP_ITKIND_COPYMIC)
+GIVE_FN(GiveCopyNeedle,  AP_ITKIND_COPYNEEDLE)
+GIVE_FN(GiveCopyMike,    AP_ITKIND_COPYMIKE)
 
 GIVE_FN(GiveUnlockInhale,    AP_BASE_ABILITY_UNLOCK_INHALE)
 GIVE_FN(GiveUnlockQuickSpin, AP_BASE_ABILITY_UNLOCK_QUICKSPIN)
@@ -476,13 +488,12 @@ void DebugMenu_GiveRandomModeItem(MajorKind major)
     {
         // Only copy abilities are honored outside CT; every other ITKIND no-ops
         // behind the Gm_IsInCity gate.
-        picked = AP_ITKIND_COPYBOMB + HSD_Randi(AP_ITKIND_COPYMIC - AP_ITKIND_COPYBOMB + 1);
+        picked = RandomInRange(AP_ITKIND_COPYBOMB, AP_ITKIND_COPYMIKE);
         mode_name = "AR";
     }
     else if (major == MJRKIND_TOP)
     {
-        picked = AP_TOPRIDE_ITEM_GIVE_BASE +
-                 HSD_Randi(AP_TOPRIDE_ITEM_GIVE_PARTY_BALL - AP_TOPRIDE_ITEM_GIVE_BASE + 1);
+        picked = RandomInRange(AP_TOPRIDE_ITEM_GIVE_BASE, AP_TOPRIDE_ITEM_GIVE_PARTY_BALL);
         mode_name = "TR";
     }
     else
@@ -500,9 +511,9 @@ static int GiveEnergy1000(OptionDesc *self)
 {
     (void)self;
     if (!ap_api) return 1;
-    ap_api->AddEnergy(1000.0f);
+    ap_api->DebugSetEnergyBalance(ap_api->GetEnergyBalance() + 1000);
     OSReport("[ApDebug] Added 1000 energy\n");
-    ap_api->Textbox("Added 1000 energy");
+    DebugMenu_Notify("Added 1000 energy");
     return 1;
 }
 
@@ -542,6 +553,18 @@ static int GiveEnergy1000(OptionDesc *self)
         .on_change = cb, \
     }
 
+#define N(label, desc, var, lo, hi, cb) \
+    &(OptionDesc){ \
+        .name = label, \
+        .description = desc, \
+        .kind = OPTKIND_NUM, \
+        .no_save = 1, \
+        .val = &var, \
+        .min = lo, \
+        .max = hi, \
+        .on_change = cb, \
+    }
+
 #define T(label, desc, var, cb) \
     &(OptionDesc){ \
         .name = label, \
@@ -559,7 +582,7 @@ static int CheckDbgClearAll(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugClearAllSentChecks();
-    ap_api->Textbox("Cleared all sent_checks");
+    DebugMenu_Notify("Cleared all sent_checks");
     return 1;
 }
 
@@ -568,7 +591,7 @@ static int CheckDbgForceMarkAll(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugForceMarkAllChecks();
-    ap_api->Textbox("Force-marked all sent_checks");
+    DebugMenu_Notify("Force-marked all sent_checks");
     return 1;
 }
 
@@ -579,7 +602,7 @@ static void OnApPatchCountChange(int v)
     ap_patch_count_synced = v;
     int n = ap_patch_count_map[v];
     ap_api->DebugSetApPatchCount(n);
-    OSReport("[ApDebug] ap_patches = %d, registers on the next round load\n", n);
+    OSReport("[ApDebug] ap_patches = %d\n", n);
 }
 
 static int ApPatchDbgCollect(OptionDesc *self)
@@ -587,9 +610,9 @@ static int ApPatchDbgCollect(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     if (ap_api->DebugCollectApPatch())
-        ap_api->Textbox("Collected an AP Patch");
+        DebugMenu_Notify("Collected an AP Patch");
     else
-        ap_api->Textbox("No AP Patch left to collect");
+        DebugMenu_Notify("No AP Patch left to collect");
     return 1;
 }
 
@@ -598,7 +621,7 @@ static int CheckDbgTriggerGoal(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugTriggerGoalComplete();
-    ap_api->Textbox("Goal triggered");
+    DebugMenu_Notify("Goal triggered");
     return 1;
 }
 
@@ -607,7 +630,7 @@ static int CheckDbgRevealAll(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugRevealAllChecklists();
-    ap_api->Textbox("All checklists revealed");
+    DebugMenu_Notify("All checklists revealed");
     return 1;
 }
 
@@ -615,7 +638,7 @@ static int RevealChecklistRow(int row, const char *msg)
 {
     if (!ap_api) return 1;
     ap_api->DebugRevealChecklist(row);
-    ap_api->Textbox(msg);
+    DebugMenu_Notify(msg);
     return 1;
 }
 
@@ -648,7 +671,7 @@ static int CheckDbgSimulateLocationData(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugSimulateLocationData();
-    ap_api->Textbox("Simulated location data applied");
+    DebugMenu_Notify("Simulated location data applied");
     return 1;
 }
 
@@ -657,7 +680,7 @@ static int CheckDbgClearAllChecklistData(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugClearAllChecklistData();
-    ap_api->Textbox("Cleared all checklist data");
+    DebugMenu_Notify("Cleared all checklist data");
     return 1;
 }
 
@@ -694,17 +717,6 @@ static char *goal_amount_values[] = {"1", "5", "10", "25", "50", "100", "120"};
 static const int goal_amount_map[] = {1, 5, 10, 25, 50, 100, 120};
 static int goal_amount_state;
 
-// Nearest offered row at or below a live value, so a seed between rows shows as the
-// closest size rather than snapping the option to its first entry.
-static int NearestRow(const int *map, int num, int live)
-{
-    int row = 0;
-    for (int i = 1; i < num; i++)
-        if (live >= map[i])
-            row = i;
-    return row;
-}
-
 // The amount is one row for four goals, so it follows the first row actually on the
 // count goal; with none there it keeps whatever it was left at.
 static void RefreshGoals(void)
@@ -735,7 +747,7 @@ static int GoalDbgApply(OptionDesc *self)
     ap_api->DebugSetGoals(goal_state, goal_amount_map[goal_amount_state]);
     for (int r = 0; r < CHECKLIST_MODE_NUM; r++)
         OSReport("[ApDebug] %s goal = %s\n", checklist_row_names[r], goal_values[goal_state[r]]);
-    ap_api->Textbox("Goals applied");
+    DebugMenu_Notify("Goals applied");
     return 1;
 }
 
@@ -836,22 +848,38 @@ static int SlotOptDbgReapply(OptionDesc *self)
     ap_api->DebugReapplySlotOptions();
     RefreshStateFromMasks();
     OSReport("[ApDebug] Re-applied slot options over a cleared mask set\n");
-    ap_api->Textbox("Slot options re-applied");
+    DebugMenu_Notify("Slot options re-applied");
     return 1;
 }
 
 // Cross-session checklist progress, mirroring the live counters. Setting a row one
 // short of its target lets the next real event in a round complete the check.
-static char *allup_values[] = {"0", "1", "2", "3", "4", "5"};
-static char *purple_values[] = {"0", "1", "2", "3"};
+#define ALLUP_TARGET 5
+#define PURPLE_TARGET 3
 static char *race_color_values[] = {"None", "Partial", "All"};
 static const int race_color_map[] = {0x00, 0x7F, ((1 << KIRBYCOLOR_NUM) - 1)};
+static const int steer_win_map[] = {0x00, 0x3F, ((1 << TOPRIDE_NUM) - 1)};
+static const int drag_win_map[] = {0x0, 0x7, 0xF};
+static const int ar_course_win_map[] = {0x000, 0x0FF, 0x1FF};
+// Slot 21 never spawns and is never recorded, so the full mask is slots 0-20.
+static const int tr_item_use_map[] = {0, ((1 << TRITEM_PARTY_BALL) - 1) & ~(1 << TRITEM_PARTY_BALL_ALT),
+                                  (1 << TRITEM_PARTY_BALL) - 1};
 static int allup_state;
 static int purple_state;
 static int race_color_state;
+static int tr_color_state;
+static int steer_win_state;
+static int drag_win_state;
+static int ar_course_win_state;
+static int tr_item_use_state;
 static int allup_synced = -1;
 static int purple_synced = -1;
 static int race_color_synced = -1;
+static int tr_color_synced = -1;
+static int steer_win_synced = -1;
+static int drag_win_synced = -1;
+static int ar_course_win_synced = -1;
+static int tr_item_use_synced = -1;
 
 static void OnAllUpProgressChange(int v)
 {
@@ -874,18 +902,67 @@ static void OnRaceColorProgressChange(int v)
     ap_api->DebugSetCheckProgress(AP_PROGRESS_RACE_COLORS, race_color_map[v]);
 }
 
+static void OnTopRideColorProgressChange(int v)
+{
+    if (!ap_api || v == tr_color_synced) return;
+    tr_color_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_TR_COLORS, race_color_map[v]);
+}
+
+static void OnSteerWinProgressChange(int v)
+{
+    if (!ap_api || v == steer_win_synced) return;
+    steer_win_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_TR_STEER_WINS, steer_win_map[v]);
+}
+
+static void OnDragWinProgressChange(int v)
+{
+    if (!ap_api || v == drag_win_synced) return;
+    drag_win_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_DRAG_WINS, drag_win_map[v]);
+}
+
+static void OnAirRideCourseWinProgressChange(int v)
+{
+    if (!ap_api || v == ar_course_win_synced) return;
+    ar_course_win_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_AR_COURSE_WINS, ar_course_win_map[v]);
+}
+
+static void OnTopRideItemProgressChange(int v)
+{
+    if (!ap_api || v == tr_item_use_synced) return;
+    tr_item_use_synced = v;
+    ap_api->DebugSetCheckProgress(AP_PROGRESS_TR_ITEMS, tr_item_use_map[v]);
+}
+
+// A mask shows as None, All, or Partial for everything in between.
+static int MaskRow(int mask, int all)
+{
+    return (mask == 0) ? 0 : ((mask == all) ? 2 : 1);
+}
+
 static void RefreshCheckProgress(void)
 {
     allup_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_ALLUP_TOTAL) : 0;
-    if (allup_state > 5) allup_state = 5;
+    if (allup_state > ALLUP_TARGET) allup_state = ALLUP_TARGET;
     purple_state = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_PURPLE_SR1) : 0;
-    if (purple_state > 3) purple_state = 3;
-    // A mask, so the middle row stands for every partial state rather than one value.
-    int colors = ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_RACE_COLORS) : 0;
-    race_color_state = (colors == 0) ? 0 : ((colors == race_color_map[2]) ? 2 : 1);
+    if (purple_state > PURPLE_TARGET) purple_state = PURPLE_TARGET;
+    race_color_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_RACE_COLORS) : 0, race_color_map[2]);
+    tr_color_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_TR_COLORS) : 0, race_color_map[2]);
+    steer_win_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_TR_STEER_WINS) : 0, steer_win_map[2]);
+    drag_win_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_DRAG_WINS) : 0, drag_win_map[2]);
+    ar_course_win_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_AR_COURSE_WINS) : 0, ar_course_win_map[2]);
+    tr_item_use_state = MaskRow(ap_api ? ap_api->GetCheckProgress(AP_PROGRESS_TR_ITEMS) : 0, tr_item_use_map[2]);
     allup_synced = allup_state;
     purple_synced = purple_state;
     race_color_synced = race_color_state;
+    tr_color_synced = tr_color_state;
+    steer_win_synced = steer_win_state;
+    drag_win_synced = drag_win_state;
+    ar_course_win_synced = ar_course_win_state;
+    tr_item_use_synced = tr_item_use_state;
 }
 
 // EnergyLink balance. The cheapest purchase is 200 MJ and the dearest 50000, so the
@@ -911,18 +988,17 @@ static void RefreshEnergy(void)
     energy_synced = energy_state;
 }
 
-// Which player slot the pad bindings that drop an item act on.
-static char *target_player_values[] = {"1", "2", "3", "4"};
-static int target_player_state;
+// Which player the pad bindings that drop an item act on, numbered from 1 as on screen.
+static int target_player_state = 1;
 
 int DebugMenu_TargetPlayer(void)
 {
-    return target_player_state;
+    return target_player_state - 1;
 }
 
 static void OnTargetPlayerChange(int v)
 {
-    OSReport("[ApDebug] Debug drops target player %d\n", v + 1);
+    OSReport("[ApDebug] Debug drops target player %d\n", v);
 }
 
 static int MsgDbgSend(int kind, const char *name)
@@ -959,7 +1035,7 @@ static int LinkDbgDeathlink(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugTriggerDeathlinkReceive();
     OSReport("[ApDebug] Armed deathlink_receive\n");
-    ap_api->Textbox("DeathLink armed");
+    DebugMenu_Notify("DeathLink armed");
     return 1;
 }
 
@@ -969,7 +1045,7 @@ static int LinkDbgTraplink(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugTriggerTraplinkReceive();
     OSReport("[ApDebug] Armed traplink_receive\n");
-    ap_api->Textbox("TrapLink armed");
+    DebugMenu_Notify("TrapLink armed");
     return 1;
 }
 
@@ -980,7 +1056,7 @@ static int EnergyDbgDrain(OptionDesc *self)
     ap_api->DebugSetEnergyBalance(0);
     RefreshEnergy();
     OSReport("[ApDebug] Energy balance drained to 0\n");
-    ap_api->Textbox("Energy drained");
+    DebugMenu_Notify("Energy drained");
     return 1;
 }
 
@@ -989,7 +1065,7 @@ static int ApPatchDbgClearCollected(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugClearApPatchCollected();
-    ap_api->Textbox("Cleared collected AP Patches");
+    DebugMenu_Notify("Cleared collected AP Patches");
     return 1;
 }
 
@@ -998,7 +1074,7 @@ static int StateDbgReport(OptionDesc *self)
     (void)self;
     if (!ap_api) return 1;
     ap_api->DebugReportState();
-    ap_api->Textbox("AP state written to the console");
+    DebugMenu_Notify("AP state written to the console");
     return 1;
 }
 
@@ -1008,7 +1084,7 @@ static int StateDbgResetProgression(OptionDesc *self)
     if (!ap_api) return 1;
     ap_api->DebugResetProgression();
     RefreshCheckProgress();
-    ap_api->Textbox("Progression reset");
+    DebugMenu_Notify("Progression reset");
     return 1;
 }
 
@@ -1071,14 +1147,14 @@ static MenuDesc abilities_menu = {
         A("Lock All",   "Lock all copy abilities",   AblLockAll),
         A("Give Random", "Queue one random copy ability unlock item", AblGiveRandom),
         G("Fire",    ability_state, COPYKIND_FIRE,    SyncAbilities),
-        G("Wheel",   ability_state, COPYKIND_WHEEL,   SyncAbilities),
+        G("Wheel",   ability_state, COPYKIND_TIRE,   SyncAbilities),
         G("Sleep",   ability_state, COPYKIND_SLEEP,   SyncAbilities),
         G("Sword",   ability_state, COPYKIND_SWORD,   SyncAbilities),
         G("Bomb",    ability_state, COPYKIND_BOMB,    SyncAbilities),
         G("Plasma",  ability_state, COPYKIND_PLASMA,  SyncAbilities),
         G("Needle",  ability_state, COPYKIND_NEEDLE,  SyncAbilities),
-        G("Mic",     ability_state, COPYKIND_MIC,     SyncAbilities),
-        G("Freeze",  ability_state, COPYKIND_FREEZE,  SyncAbilities),
+        G("Mic",     ability_state, COPYKIND_MIKE,     SyncAbilities),
+        G("Freeze",  ability_state, COPYKIND_ICE,  SyncAbilities),
         G("Tornado", ability_state, COPYKIND_TORNADO, SyncAbilities),
         G("Wing",    ability_state, COPYKIND_BIRD,    SyncAbilities),
     },
@@ -1564,17 +1640,8 @@ static MenuDesc checks_menu = {
         A("Trigger goal_complete",   "Set only goal_complete (sent_checks unchanged)", CheckDbgTriggerGoal),
         S("Reveal Checklists",       "Make checkboxes visible (visual only)",       reveal_menu),
         A("Simulate Location Data",  "Fill location arrays with a random shuffle",  CheckDbgSimulateLocationData),
-        A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, and location shuffle", CheckDbgClearAllChecklistData),
-        &(OptionDesc){
-            .name = "AP Patches",
-            .description = "Override the seed's AP Patch location count; the drop-ins register at the next round load.",
-            .kind = OPTKIND_VALUE,
-            .no_save = 1,
-            .val = &ap_patch_count_state,
-            .value_num = 4,
-            .value_names = ap_patch_count_values,
-            .on_change = OnApPatchCountChange,
-        },
+        A("Clear All Checklist Data", "Wipe every checkbox flag, sent_checks, AP objective progress and location shuffle", CheckDbgClearAllChecklistData),
+        V("AP Patches",              "Override the seed's AP Patch location count", ap_patch_count_state, ap_patch_count_values, OnApPatchCountChange),
         A("Collect AP Patch",        "Claim the lowest unclaimed AP Patch",         ApPatchDbgCollect),
         A("Clear Collected AP Patches", "Clear every collected bit, so they can be claimed again", ApPatchDbgClearCollected),
     },
@@ -1641,11 +1708,16 @@ static MenuDesc slot_options_menu = {
 };
 
 static MenuDesc progress_menu = {
-    .option_num = 3,
+    .option_num = 8,
     .options = {
-        V("All Ups Collected", "Lifetime CT All Ups, toward the 5 that check needs",  allup_state,      allup_values,       OnAllUpProgressChange),
-        V("Purple SR1 Wins",   "SINGLE RACE 1 wins as Purple Kirby, toward 3",        purple_state,     purple_values,      OnPurpleProgressChange),
+        N("All Ups Collected", "Lifetime CT All Ups, toward the 5 that check needs",  allup_state,  0, ALLUP_TARGET,  OnAllUpProgressChange),
+        N("Purple SR1 Wins",   "SINGLE RACE 1 wins as Purple Kirby, toward 3",        purple_state, 0, PURPLE_TARGET, OnPurpleProgressChange),
         V("Race Colors",       "Which Kirby colors have finished an Air Ride race",   race_color_state, race_color_values,  OnRaceColorProgressChange),
+        V("Top Ride Colors",   "Which Kirby colors have finished a Top Ride race",    tr_color_state,   race_color_values,  OnTopRideColorProgressChange),
+        V("Steer Star Wins",   "Which Top Ride courses have been won on Steer Star",  steer_win_state,  race_color_values,  OnSteerWinProgressChange),
+        V("Drag Race Wins",    "Which DRAG RACE stadiums have been won",              drag_win_state,   race_color_values,  OnDragWinProgressChange),
+        V("Air Ride Wins",     "Which Air Ride courses have been won",                ar_course_win_state, race_color_values, OnAirRideCourseWinProgressChange),
+        V("TR Items Used",     "Which Top Ride items have been used",                 tr_item_use_state, race_color_values,  OnTopRideItemProgressChange),
     },
 };
 
@@ -1665,7 +1737,7 @@ static MenuDesc messages_menu = {
 static MenuDesc links_menu = {
     .option_num = 2,
     .options = {
-        A("Arm DeathLink", "Set deathlink_receive; it lands at the next round", LinkDbgDeathlink),
+        A("Arm DeathLink", "Set deathlink_receive", LinkDbgDeathlink),
         A("Arm TrapLink",  "Set traplink_receive; the mode picks the trap",     LinkDbgTraplink),
     },
 };
@@ -1691,7 +1763,7 @@ static MenuDesc debug_menu = {
         S("Messages",       "Render canned client text messages",           messages_menu),
         S("Links",          "Arm a DeathLink or TrapLink receive",          links_menu),
         S("EnergyLink",     "Set the energy balance the spend menu reads",  energy_menu),
-        V("Target Player",  "Player slot the pad drops act on", target_player_state, target_player_values, OnTargetPlayerChange),
+        N("Target Player",  "Player slot the pad drops act on", target_player_state, 1, 4, OnTargetPlayerChange),
         A("Report State",   "Log every mask, counter and goal to the console",    StateDbgReport),
         A("Reset Progression", "Roll received-item progression back to pre-connect", StateDbgResetProgression),
     },

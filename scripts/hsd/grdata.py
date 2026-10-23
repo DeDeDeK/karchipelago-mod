@@ -505,8 +505,8 @@ def _yakumono(arc, yn):
 
 
 # YakumonoNode+0x10 is the spawn list the generic walker in grInitYakumono reads, independent of the
-# data_array above it. Each entry is {kind, data_idx, common_group}; kind indexes grYakuFuncTable, and
-# kind 12 is the ground copy panel.
+# data_array above it. Each entry is {kind, data_idx, common_group}; kind indexes the 16-entry common-kind
+# create table at 0x804a5ba8 (hoshi's stc_yaku_common_create), and kind 12 is the ground copy panel.
 def _yaku_entries(arc, yn):
     entries = _deref(arc, yn + 0x10)
     count = u32(arc.data, yn + 0x14)

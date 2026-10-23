@@ -4,31 +4,17 @@
 #include "datatypes.h"
 #include "menu.h"
 
-// New air ride machines loaded from .dat archives in the FST machines/ folder.
-//
-// A custom machine is a star or a bike appended past its class's vanilla slots - star
-// slot 19 and up, bike slot 7 and up - with a MachineKind appended past VCKIND_NUM in
-// registration order, whatever its class. hoshi's MachineKind_ClassIndex /
-// MachineKind_FromClassIndex describe vanilla only; resolve through KindFromClassIndex /
-// ClassIndexFromKind below.
-//
-// This mod owns both select screens' packing and the City Trial field spawn roll,
-// because it widened the tables they read. With no consumer attached both
-// reproduce the engine's own behavior; a consumer narrows them through
-// SetAvailabilityFilter and SetSpawnWeightFilter.
-
 #define CUSTOM_MACHINES_MOD_NAME  "custom_machines"
 #define CUSTOM_MACHINES_API_MAJOR 4
-#define CUSTOM_MACHINES_API_MINOR 0
+#define CUSTOM_MACHINES_API_MINOR 1
 
 struct JOBJ;
 struct MachineData;
 struct DmgLog;
 
 // Gates who gets packed into a select screen's icon list. `default_available` is the
-// engine's own answer for that CharacterKind on the screen being packed - its
-// checklist unlock for a vanilla character, 1 for an appended one. Returns 1 to give
-// the character an icon.
+// screen's own answer for that CharacterKind - its unlock or the mode's roster for a
+// vanilla character, 1 for an appended one. Returns 1 to give the character an icon.
 typedef int (*CustomMachineAvailabilityFilter)(int character_kind, int default_available);
 
 // Weighs one MachineKind in the City Trial field spawn roll. `default_weight` is
@@ -46,7 +32,7 @@ typedef void (*CustomMachineDeathHandler)(int victim, struct DmgLog *dmg_log,
 
 // A per-kind handler. `Init` runs once as a machine of that kind is created, `Think`
 // once per frame for every one of them on the field, each at the end of its class's own.
-// `Anim` also runs once per frame per machine, at the end of Machine_AnimThink once the
+// `Anim` also runs once per frame per machine, at the end of MachineGObj_AnimThink once the
 // ColAnim overlays are applied, so a material written there is what draws.
 typedef void (*CustomMachineHandler)(struct MachineData *md);
 
@@ -106,11 +92,15 @@ typedef struct CustomMachinesAPI
     int (*StartAssembly)(int kind, int ply);
 
     // Put a player straight onto `kind` with no presentation, through the same recreate
-    // the cutscene ends in. It happens at the start of the next frame, so it is safe
-    // from inside a collision or item callback, and the player's starting machine
-    // follows it. Returns 0 for a kind past the ceiling or a player with no rider; a
-    // mount still owed when a scene loads is dropped.
+    // the cutscene ends in. It happens on the rider's next update, so it is safe from
+    // inside a collision or item callback, waits out any pause that freezes the rider,
+    // and GetRespawnKind reports it afterward. Returns 0 for a kind past the ceiling or
+    // a player with no rider; a mount still owed at a scene change is dropped.
     int (*MountMachine)(int kind, int ply);
+
+    // The kind of the player's last MountMachine or registered machine's cutscene mount this
+    // scene, or -1.
+    int (*GetRespawnKind)(int ply);
 } CustomMachinesAPI;
 
 // The widened kind space, for a consumer that has to write both a gated and an
@@ -133,6 +123,11 @@ static inline MachineKind CustomMachines_ResolveKind(const CustomMachinesAPI *ap
     if (api != NULL)
         return (MachineKind)api->KindFromClassIndex(is_bike, class_index);
     return MachineKind_FromClassIndex(is_bike, class_index);
+}
+
+static inline int CustomMachines_GetRespawnKind(const CustomMachinesAPI *api, int ply)
+{
+    return api != NULL ? api->GetRespawnKind(ply) : -1;
 }
 
 static inline int CustomMachines_ClassIndexOf(const CustomMachinesAPI *api,

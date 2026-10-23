@@ -1,0 +1,33 @@
+stage,name,aliases,shape,x,y,z,r,hx,hy,hz,source,note
+GrCity1,Castle Hall,castle,box,390.0,190.0,-556.0,,140.0,190.0,118.0,derived,the walled hill in the north-east; the high ground around the flower
+GrCity1,Castle Hall flower,castle flower;flower on top of Castle Hall,sphere,408.7,370.8,-564.6,2.0,,,,derived,AP check position; on the hall's top floor
+GrCity1,Castle Hall secret chamber,secret chamber;castle chamber,box,408.1,84.6,-635.2,,20.0,12.5,20.0,stage,zone 36; the Secret Chamber event's item origin (event position 70) is inside
+GrCity1,Garden in the sky,sky garden;central tower,cylinder,-70.0,410.0,0.0,124.0,,92.0,,derived,the dome on the central tower over the city centre; its three prongs top out at y 503.3
+GrCity1,Garden in the sky top,sky garden roof,sphere,-67.9,463.8,-0.3,5.0,,,,derived,AP check position; roof floor 461.9 under it
+GrCity1,Model City,,sphere,-422.7,12.7,-168.9,10.0,,,,derived,AP check position; a room under the forest floor
+GrCity1,Forest,woods;Whispy's forest,box,-416.5,31.0,18.5,,105.5,20.0,184.5,derived,the extent of the 53 tree props
+GrCity1,Whispy Woods,Whispy;talk to Whispy Woods,sphere,-445.2,35.7,-59.9,3.0,,,,live,forest floor in front of the face; captured standing in game
+GrCity1,Whispy Woods face,,point,-446.0,44.3,-68.4,,,,,stage,the WHISPYWOODS prop's joint (293); faces +Z
+GrCity1,Volcano crater mouth,volcano;crater rim,point,-366.2,115.0,-575.4,,,,,derived,where the volcano weather's eruptions launch from; the slope under it is lava at y 88
+GrCity1,Crater super jump,crater launch,box,-368.8,50.0,-591.5,,30.5,47.0,31.5,stage,zone 42 (SuperJump); launches out of the crater; the crater floor is ice at y 3.4
+GrCity1,Volcanic cliffs flower,volcano flower,sphere,-107.0,205.1,-847.3,5.0,,,,derived,AP check position on the island's north edge
+GrCity1,Lighthouse,,box,191.2,72.4,290.8,,25.3,70.6,29.7,stage,the LIGHTHOUSE prop's collision (joints 147-153)
+GrCity1,Lighthouse top,lighthouse head,cylinder,191.8,139.0,291.2,31.0,,7.0,,derived,AP check volume around the rotating head; head floor 133.7
+GrCity1,Waterwheel,wheel;gondola wheel,box,-322.0,-17.0,651.0,,20.0,82.0,82.0,stage,the 16 GONDOLA cars turn in the y-z plane around this hub
+GrCity1,Under the waterwheel,underneath the waterwheel,box,-321.8,-7.5,625.5,,20.4,15.6,23.5,live,AP check volume: the ramp and ledge under the wheel
+GrCity1,Waterwheel pickup,claw start,box,-322.0,-12.7,569.1,,19.0,9.0,16.5,stage,zone 207 (ClawStart); where the wheel picks a rider up
+GrCity1,Waterwheel drop-off,claw end,box,-322.0,38.8,717.2,,31.5,13.5,29.0,stage,zone 208 (ClawEnd); where the wheel sets a rider down
+GrCity1,Rail station NW,raised station;station 0,point,-514.6,120.9,-398.3,,,,,stage,midpoint of event positions 60 and 61 (Rail Fire)
+GrCity1,Rail station NE,station 1,point,463.8,70.2,-561.2,,,,,stage,midpoint of event positions 62 and 63 (Rail Fire)
+GrCity1,Rail station E,station 2,point,471.1,29.7,-6.3,,,,,stage,midpoint of event positions 64 and 65 (Rail Fire)
+GrCity1,Rail station S,station 3,point,252.1,22.4,683.7,,,,,stage,midpoint of event positions 66 and 67 (Rail Fire)
+GrCity1,Rail station SW,station 4,point,-468.2,16.2,456.1,,,,,stage,midpoint of event positions 68 and 69 (Rail Fire)
+GrCity1,Star pole,star;star light,cylinder,141.9,144.8,-187.0,18.0,,17.7,,stage,the STARPOLE prop's collision (joint 38); stands on a roof at y 132.3
+GrCity1,Copy panel (rooftop),random ability panel;random panel,box,-76.3,134.5,-480.2,,7.0,3.0,7.0,stage,zone 77 (RandomAbility) on a rooftop
+GrCity1,Building super jump ramp,super jump ramp,box,-155.9,83.4,-427.2,,5.0,11.0,5.5,stage,zone 31 (SuperJump) and its camera trailer zone 30
+GrCity1,Underground tunnel,parking tunnel,box,0.0,18.4,0.0,,185.0,13.0,24.0,stage,zone 197 (Reverb); the east-west tunnel under the centre where the parked machines start
+GrCity1,Underground garage,,box,0.0,14.0,-78.1,,50.5,13.5,54.0,stage,zone 198 (Reverb); off the tunnel
+GrCity1,Underpass,under building 1,box,-68.5,63.0,-262.6,,40.5,14.0,26.0,stage,zone 199 (Reverb); a passage under a city building
+GrCity1,Stacked dash gates,stacked jump pads,box,199.8,53.9,490.0,,122.5,29.5,28.2,stage,zones 43-51 (DashGate2); three tiers at y 29.4 / 53.9 / 78.4
+GrCity1,City district,downtown,cylinder,15.0,100.0,-267.4,350.0,,150.0,,derived,the urban blocks north of the garden in the sky; the disc Gourmet Race draws its spots from
+GrCity1,Respawn point,global dead position,point,372.9,31.9,6.0,,,,,stage,where a fall death respawns; beside start position 0

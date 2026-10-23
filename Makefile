@@ -53,7 +53,8 @@ INCLUDES = -I$(INC_DIR) -I$(LIB_ROOT_DIR) \
            -I$(MODS_ROOT_DIR)/hypernova/include \
            -I$(MODS_ROOT_DIR)/custom_items/include \
            -I$(MODS_ROOT_DIR)/custom_machines/include \
-           -I$(MODS_ROOT_DIR)/custom_checklist/include
+           -I$(MODS_ROOT_DIR)/custom_checklist/include \
+           -I$(MODS_ROOT_DIR)/custom_ai/include
 
 # --- Source File Discovery ---
 

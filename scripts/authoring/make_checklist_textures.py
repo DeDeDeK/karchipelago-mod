@@ -8,9 +8,9 @@ publics:
   apBannerImg  - _HSD_ImageDesc for the scrolling banner watermark (RGB5A3 248x128)
   apEmblemImg  - _HSD_ImageDesc for the top-right tab emblem    (I4    64x64)
 
-The archipelago mod loads this file (Gm_LoadGameFile "ApChecklistTex") once and
-points the checklist's banner / tab-emblem TObjs at these descriptors, so the art
-ships as a data file rather than a compiled-in C array.
+The AP tab names this file as its tex_file; custom_checklist loads it each time the
+tab is built and points the checklist's banner / tab-emblem TObjs at these
+descriptors, so the art ships as a data file rather than a compiled-in C array.
 
 1. Banner watermark (RGB5A3): the vertically-scrolling per-mode banner is an
    opaque gray panel that backs the checkbox grid with a very subtle logo embossed

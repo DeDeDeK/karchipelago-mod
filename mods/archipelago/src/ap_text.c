@@ -1,14 +1,14 @@
 #include <string.h>
 
+#include "text.h"
+
 #include "main.h"
 #include "ap_text.h"
 #include "settings_menu.h"
 #include "textbox_api.h"
 
-// Archipelago's CommonClient GUI palette, indexed by APTextColor. Black is lifted off
-// 000000 so it stays readable on the textbox's dark background; the rest are AP's own
-// hex values, which were already picked for a dark UI. APTEXTCOLOR_DEFAULT has no row -
-// APText_Color answers it from the textbox's own default first.
+// Archipelago's CommonClient palette by APTextColor, black lifted for the dark textbox.
+// APTEXTCOLOR_DEFAULT maps to the textbox's own default.
 static const GXColor ap_text_colors[APTEXTCOLOR_NUM] = {
     [APTEXTCOLOR_BLACK]     = { 80,  80,  80, 255},
     [APTEXTCOLOR_RED]       = {238,   0,   0, 255},
@@ -42,8 +42,7 @@ static void APText_Render(const APTextMessage *msg)
     if (n <= 0 || n > AP_TEXT_SEG_NUM || !APText_KindEnabled(msg->kind))
         return;
 
-    // The blob holds seg_count NUL-terminated strings back to back. The extra
-    // terminator bounds the walk if the client sent an unterminated tail.
+    // The extra terminator bounds the walk over an unterminated tail.
     char buf[AP_TEXT_BLOB_LEN + 1];
     memcpy(buf, msg->text, AP_TEXT_BLOB_LEN);
     buf[AP_TEXT_BLOB_LEN] = '\0';
@@ -63,14 +62,11 @@ static void APText_Render(const APTextMessage *msg)
         tb_api->EnqueueSegments(segs, used);
 }
 
+// Held only while no screen canvas exists, so a scene load backpressures the client
+// instead of losing the message. A disabled or absent textbox drops it on render.
 void APText_OnFrameStart(void)
 {
-    if (!ap_data)
-        return;
-
-    // Holding the mailbox while the textbox has no canvas (scene transitions) is what
-    // backpressures the client instead of losing the message across a load.
-    if (ap_data->text_pending && tb_api->IsReady())
+    if (ap_data->text_pending && *stc_textcanvas_first != NULL)
     {
         APText_Render(&ap_data->text_msg);
         ap_data->text_pending = 0;
@@ -103,7 +99,7 @@ static const APTextDebugRun dbg_item[] = {
 };
 
 static const APTextDebugRun dbg_hint[] = {
-    {"Hint: ", APTEXTCOLOR_DEFAULT},
+    {"Hint (priority): ", APTEXTCOLOR_PLUM},
     {"Kirby64's ", APTEXTCOLOR_YELLOW},
     {"Progressive Sword", APTEXTCOLOR_PLUM},
     {" is at ", APTEXTCOLOR_DEFAULT},
@@ -111,14 +107,14 @@ static const APTextDebugRun dbg_hint[] = {
     {0, 0},
 };
 
-// Status and chat arrive from the server as one uncolored run the client tints by kind.
 static const APTextDebugRun dbg_status[] = {
-    {"Archipelago client connected", APTEXTCOLOR_WHITE},
+    {"Archipelago client", APTEXTCOLOR_GREEN},
+    {" connected", APTEXTCOLOR_DEFAULT},
     {0, 0},
 };
 
 static const APTextDebugRun dbg_chat[] = {
-    {"Kirby64: glhf", APTEXTCOLOR_CYAN},
+    {"Kirby64: glhf", APTEXTCOLOR_DEFAULT},
     {0, 0},
 };
 
@@ -154,12 +150,11 @@ static const APTextDebugRun dbg_overlong[] = {
     {0, 0},
 };
 
-// Fills the mailbox the way the client does - whole record first, pending flag last -
-// so the IsReady hold and the single-slot handshake behave identically. Returns 0 if
-// an earlier message has not been rendered yet, which is the client's own precondition.
+// Fills the mailbox the way the client does - whole record first, pending flag last.
+// Returns 0 while an earlier message is still pending, the client's own precondition.
 static int APText_DebugPost(int kind, const APTextDebugRun *runs)
 {
-    if (!ap_data || ap_data->text_pending)
+    if (ap_data->text_pending)
         return 0;
 
     APTextMessage *msg = &ap_data->text_msg;

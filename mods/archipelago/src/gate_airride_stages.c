@@ -8,12 +8,12 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// Replaces AirRide_CheckCourseUnlocked (0x8000c0e0), which only checks stage_kind 8
-// (Nebula Belt) against the checklist. Stage kind 9 (random button) needs at least one
-// unlocked stage, otherwise AirRide_RandomStageSelect soft-locks.
+// Replaces AirRide_CheckCourseUnlocked (0x8000c0e0), which checks only Nebula Belt (8)
+// against the checklist. The random button (9) needs one unlocked stage, or
+// AirRide_RandomStageSelect soft-locks.
 static int GateAirRideStages_CheckCourseUnlocked(s8 stage_kind)
 {
-    if (!ap_save || stage_kind < 0)
+    if (stage_kind < 0)
         return 0;
     if (stage_kind >= AIRRIDE_NUM)
         return ap_save->airride_stage_unlocked_mask != 0 ? 1 : 0;
@@ -24,32 +24,31 @@ void GateAirRideStages_OnBoot()
 {
     CODEPATCH_REPLACEFUNC(AirRide_CheckCourseUnlocked, GateAirRideStages_CheckCourseUnlocked);
 
-    // Every caller guards the unlock check with `cmpwi rX, 8 / bne skip / li r3, 8`, so
-    // only Nebula Belt ever reaches it. Patching the guard to `mr r3, rX / nop / nop`
-    // routes all stages through.
+    // Every caller guards the check with cmpwi rX, 8 / bne skip / li r3, 8, so only Nebula
+    // Belt reached it; mr r3, rX / nop / nop routes every stage through.
 
     // AirRideSelect_Init (0x8003c114)
     CODEPATCH_REPLACEINSTRUCTION(0x8003c210, 0x7c030378); // mr r3, r0
-    CODEPATCH_REPLACEINSTRUCTION(0x8003c214, 0x60000000); // nop
-    CODEPATCH_REPLACEINSTRUCTION(0x8003c218, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8003c214, PPC_NOP);
+    CODEPATCH_REPLACEINSTRUCTION(0x8003c218, PPC_NOP);
 
     // AirRideSelect_StartRandomCourse (0x8003b4e8)
     CODEPATCH_REPLACEINSTRUCTION(0x8003b520, 0x7c030378); // mr r3, r0
-    CODEPATCH_REPLACEINSTRUCTION(0x8003b524, 0x60000000); // nop
-    CODEPATCH_REPLACEINSTRUCTION(0x8003b528, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8003b524, PPC_NOP);
+    CODEPATCH_REPLACEINSTRUCTION(0x8003b528, PPC_NOP);
 
-    // AirRide_RandomStageSelect (0x8000dd4c), loop var r27
+    // AirRide_RandomStageSelect (0x8000dd4c), loop variable r27
     CODEPATCH_REPLACEINSTRUCTION(0x8000ddc4, 0x7f63db78); // mr r3, r27
-    CODEPATCH_REPLACEINSTRUCTION(0x8000ddc8, 0x60000000); // nop
-    CODEPATCH_REPLACEINSTRUCTION(0x8000ddcc, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x8000ddc8, PPC_NOP);
+    CODEPATCH_REPLACEINSTRUCTION(0x8000ddcc, PPC_NOP);
 
-    // gmLanMenu_RenderMainMenuUI (0x80052028) has a longer guard
-    // (cmpwi r28, 8 / beq check / li r0, 1 / b past / li r3, 8), so it takes five.
+    // gmLanMenu_RenderMainMenuUI (0x80052028): the longer cmpwi r28, 8 / beq / li r0, 1 /
+    // b / li r3, 8 guard takes five.
     CODEPATCH_REPLACEINSTRUCTION(0x80052070, 0x7f83e378); // mr r3, r28
-    CODEPATCH_REPLACEINSTRUCTION(0x80052074, 0x60000000); // nop
-    CODEPATCH_REPLACEINSTRUCTION(0x80052078, 0x60000000); // nop
-    CODEPATCH_REPLACEINSTRUCTION(0x8005207c, 0x60000000); // nop
-    CODEPATCH_REPLACEINSTRUCTION(0x80052080, 0x60000000); // nop
+    CODEPATCH_REPLACEINSTRUCTION(0x80052074, PPC_NOP);
+    CODEPATCH_REPLACEINSTRUCTION(0x80052078, PPC_NOP);
+    CODEPATCH_REPLACEINSTRUCTION(0x8005207c, PPC_NOP);
+    CODEPATCH_REPLACEINSTRUCTION(0x80052080, PPC_NOP);
 
     OSReport("[GateAirRideStages] Hooks installed\n");
 }

@@ -1,10 +1,3 @@
-// Some of the patch-stat scale pairs are kept one row per kind rather than one per class:
-// blocks in the class table at MachineData.stat_scale - 19 rows for the star class, 7 for the
-// bike class - indexed by MachineData.kind with no bound, so an appended slot would read
-// the first rows of the block after its own. Each of those reads is rewritten in place to
-// ask ScaleRow for the pair instead: six in Machine_ApplyStarStatScaling (0x801e81e4) and
-// ten in Machine_ApplyBikeStatScaling (0x801f3d44).
-
 #include "os.h"
 #include "machine.h"
 #include "code_patch/code_patch.h"
@@ -17,7 +10,6 @@
 #define PPC_FMR_F31_F1   0xffe00890 // fmr f31, f1
 #define PPC_LWZ_R31_ATTR 0x83fe0650 // lwz r31, 0x650(r30)
 #define PPC_LWZ_R29_ATTR 0x83be0650 // lwz r29, 0x650(r30)
-#define PPC_NOP          0x60000000
 
 #define BIKE_TURN_ROW_NUM 8
 
@@ -50,8 +42,8 @@ static float ScaleFromRow(MachineData *md, int row, float ratio)
 }
 
 // Four instructions in place of a pair address: ask ScaleRow, then put the ratio back
-// in f1 for the Machine_ScaleFromRatio call that follows. The ratio is held in f31 and
-// the table bases in r29 and r31, which the call preserves.
+// in f1 for the scale call that follows. The ratio is held in f31 and the table bases in
+// r29 and r31, which the call preserves.
 static void EmitRowCall(u32 at, int row)
 {
     CODEPATCH_REPLACEINSTRUCTION(at, PPC_MR_R3_R30);
@@ -110,8 +102,6 @@ static void PatchBikeRows(void)
 
 void CustomMachineStatScaling_OnBoot(void)
 {
-    // Each class's reads are rewritten only when it has a machine, so a class without
-    // one runs the engine's own.
     if (CustomMachines_GetClassCount(0) > 0)
         PatchStarRows();
     if (CustomMachines_GetClassCount(1) > 0)

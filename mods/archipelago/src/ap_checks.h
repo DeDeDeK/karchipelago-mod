@@ -10,21 +10,19 @@ static inline int APChecks_PopcountRow(int row)
     return Popcount64(ap_save->sent_checks[row][0]) + Popcount64(ap_save->sent_checks[row][1]);
 }
 
-// Install the ClearChecker seam and the meta auto-unlock hooks. Call from OnBoot.
 void APChecks_OnBoot(void);
 
-// Mirror sent_checks and goal_complete into shared memory, run initial goal eval.
-// Call from OnSaveLoaded.
+// Mirrors sent_checks into APData and publishes the goal state.
 void APChecks_OnSaveLoaded(void);
 
-// Apply the checks the client backfilled. Call only while ap_data->backfill_valid is set.
+// Applies the checks the client backfilled. Call only while ap_data->backfill_valid is set.
 void APChecks_ApplyBackfill(void);
 
-// Reset all sent_checks and goal state in both save and shared-memory mirror.
-// Does NOT persist or re-evaluate the goal - the caller owns those.
+// Clears sent_checks and the goal state in save and mirror; neither writes the card nor
+// re-evaluates the goal.
 void APChecks_ResetAll(void);
 
-// Debug menu helpers.
+// Debug menu helpers; both also cover the AP Patches.
 void APChecks_DebugClearAll(void);
 void APChecks_DebugForceMarkAll(void);
 

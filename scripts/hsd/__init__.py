@@ -32,6 +32,9 @@ mod's shipped assets live in `scripts/authoring/`.
   HSDraw types, so the model can be opened in a viewer.
 - `make_machine_art.py` - build a machine's .art UI side-car from two renders.
 - `verify_carved.py` - sanity-check a carved .dat for in-bounds relocs and pointers.
+- `stage.py` - spatial queries and renders over a stage in world units, built on
+  `world` (the baked stage), `spline` (HSD spline evaluation), `stage_render`
+  and `stage_live` (player positions from a running Dolphin).
 """
 
 from .archive import (

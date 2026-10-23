@@ -1,13 +1,11 @@
 #ifndef ARCHIPELAGO_DROP_ABILITY_H
 #define ARCHIPELAGO_DROP_ABILITY_H
 
-// Spawns the per-frame "press Z to drop your copy ability" applier for the
-// current City Trial / Air Ride round. Gated by
-// ap_menu_settings.drop_ability_enabled.
+// Press Z to drop the held copy ability (City Trial / Air Ride), gated by
+// drop_ability_enabled.
 void DropAbility_On3DLoadEnd(void);
 
-// Top Ride counterpart: press Z to discard a held ability-power item (Fire /
-// Freeze Fan / Bomb / Walky). Same setting.
+// Top Ride: Z discards a held ability power (Fire / Freeze Fan / Bomb / Walky).
 void DropAbility_OnTopRideLoadEnd(void);
 
 #endif // ARCHIPELAGO_DROP_ABILITY_H

@@ -4,137 +4,99 @@
 #include "main.h"
 #include "ap_goal.h"
 #include "patch_cap.h"
+#include "gate_items.h"
 #include "goal_max_stats_ct.h"
 
-// Multiplier on +1 patch and All-Up spawn weights while this goal is active, so
-// patches dominate the rolls without fully suppressing other drops.
-#define MAX_STATS_PATCH_BIAS 8
+// All-Up weights where a pool lacks it, sized to sit beside the vanilla +1 patch weights.
+#define ALLUP_BOX_POOL_CHANCE      8
+#define ALLUP_CHANCE_DESTRUCTIBLE  16
+#define ALLUP_CHANCE_DYNA          4
+
+static int GoalActive(void)
+{
+    return ap_save->options.goal[GMMODE_CITYTRIAL] == GOAL_MAX_STATS_CT &&
+           Gm_IsInCity() && Gm_GetCityMode() == CITYMODE_TRIAL;
+}
 
 static void GoalMaxStatsCT_PerFrame(GOBJ *rg)
 {
     if (ap_save->max_stats_ct_achieved)
         return;
 
-    float threshold = (float)ap_save->options.city_trial_patch_cap_max;
+    int target = PatchCap_GetMax();
     RiderData *rd = rg->userdata;
     for (int i = 0; i < PATCHKIND_NUM; i++)
     {
-        // Stats spawn at PatchCap_GetStatStart(i) (-2, or 0 for HP) and the target
-        // counts patches collected, so the threshold is start + target. Without the
-        // offset every non-HP stat would need two extra patches versus HP.
-        float start = PatchCap_GetStatStart(i);
-        if (rd->stats.values[i] < start + threshold)
+        if (!PatchCap_IsStatAt(rd->stats.values, i, target))
             return;
     }
 
     ap_save->max_stats_ct_achieved = 1;
-    OSReport("[GoalMaxStatsCT] Player %d reached patch target %d on all %d stats - goal latched\n",
-             rd->ply + 1, (int)threshold, PATCHKIND_NUM);
+    OSReport("[GoalMaxStatsCT] Player %d reached %d patches on all %d stats, goal latched\n",
+             rd->ply + 1, target, PATCHKIND_NUM);
     APGoal_Evaluate();
 }
 
 void GoalMaxStatsCT_On3DLoadEnd(void)
 {
-    if (Gm_IsAutoDemo())
+    if (Gm_IsAutoDemo() || !GoalActive() || ap_save->max_stats_ct_achieved)
         return;
 
-    if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
-        return;
-
-    // Trial mode only - Free Run and Stadium don't count as a "CT run".
-    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
-        return;
-
-    if (ap_save->max_stats_ct_achieved)
-        return;
-
-    int attached = 0;
-    for (int i = 0; i < 5; i++)
-    {
-        if (Ply_GetPKind(i) != PKIND_HMN)
-            continue;
-        GOBJ *r = Ply_GetRiderGObj(i);
-        if (!r)
-            continue;
-        GObj_AddProc(r, GoalMaxStatsCT_PerFrame, RDPRI_HITCOLL + 1);
-        attached++;
-    }
+    int attached = AP_AttachHumanRiderProcs(GoalMaxStatsCT_PerFrame);
     if (attached)
-        OSReport("[GoalMaxStatsCT] Active (%d players, target %d, %dx patch drop bias)\n",
-                 attached, (int)ap_save->options.city_trial_patch_cap_max,
-                 MAX_STATS_PATCH_BIAS);
+        OSReport("[GoalMaxStatsCT] Active (%d players, target %d)\n",
+                 attached, PatchCap_GetMax());
 }
 
-static u8 ScaleU8(u8 v)
+static void EnsureItemInPool(u8 *kinds, u8 *chances, u8 *num, int max_entries, u8 it_kind, u8 weight)
 {
-    int s = (int)v * MAX_STATS_PATCH_BIAS;
-    if (s > 255) s = 255;
-    return (u8)s;
-}
-
-static u16 ScaleU16(u16 v)
-{
-    int s = (int)v * MAX_STATS_PATCH_BIAS;
-    if (s > 65535) s = 65535;
-    return (u16)s;
-}
-
-static void BiasBoxPool(u8 *kinds, u8 *chances, u8 num)
-{
-    for (u8 i = 0; i < num; i++)
+    for (u8 i = 0; i < *num; i++)
     {
-        if (Item_IsStatUpKind(kinds[i]))
-            chances[i] = ScaleU8(chances[i]);
+        if (kinds[i] == it_kind)
+            return;
     }
+    if (*num >= max_entries)
+        return;
+    kinds[*num] = it_kind;
+    chances[*num] = weight;
+    *num += 1;
 }
 
-static int drop_bias_latched;
-
-void GoalMaxStatsCT_On3DLoadStart(void)
-{
-    drop_bias_latched = 0;
-}
-
-void GoalMaxStatsCT_ApplyDropBias(void)
+// Makes All Up reachable from every patch source the vanilla tables miss: the three box
+// pools, the Same Item and subsequent pools, and the destructible and Dyna Blade columns.
+void GoalMaxStatsCT_EnsureAllUpInPools(void)
 {
     if (ap_save->options.goal[GMMODE_CITYTRIAL] != GOAL_MAX_STATS_CT)
         return;
-    if (!Gm_IsInCity() || Gm_GetCityMode() != CITYMODE_TRIAL)
+    if (GateItems_IsItemLocked(ITKIND_ALLUP))
         return;
 
     grBoxGeneObj *obj = *stc_grBoxGeneObj;
     if (obj)
     {
         for (int box = 0; box < BOXKIND_NUM; box++)
-        {
-            BiasBoxPool(obj->item_group_spawn[box].it_kind,
-                        obj->item_group_spawn[box].chance,
-                        obj->item_group_spawn[box].num);
-        }
-        BiasBoxPool(obj->sameitem_it_kind, obj->sameitem_chance, obj->sameitem_num);
-        BiasBoxPool(obj->subsequent_it_kind, obj->subsequent_chance, obj->subsequent_num);
+            EnsureItemInPool(obj->item_group_spawn[box].it_kind, obj->item_group_spawn[box].chance,
+                             &obj->item_group_spawn[box].num, sizeof(obj->item_group_spawn[box].it_kind),
+                             ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
+        EnsureItemInPool(obj->sameitem_it_kind, obj->sameitem_chance, &obj->sameitem_num,
+                         sizeof(obj->sameitem_it_kind), ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
+        EnsureItemInPool(obj->subsequent_it_kind, obj->subsequent_chance, &obj->subsequent_num,
+                         sizeof(obj->subsequent_it_kind), ITKIND_ALLUP, ALLUP_BOX_POOL_CHANCE);
     }
-
-    // grBoxGeneObj above is rebuilt from the archive by CityItemSpawn_InitItemFallChances
-    // on every call, so scaling it is self-limiting. event_source_drop is the archive
-    // table itself, so its scale compounds and runs once per round.
-    if (drop_bias_latched)
-        return;
-    drop_bias_latched = 1;
 
     grBoxGeneInfo *info = *stc_grBoxGeneInfo;
     if (info && info->item_desc)
     {
         for (int i = 0; i < info->item_desc->event_source_drop_num; i++)
         {
-            if (!Item_IsStatUpKind(info->item_desc->event_source_drop[i].it_kind))
+            ItemEventSourceDrop *row = &info->item_desc->event_source_drop[i];
+            if (row->it_kind != ITKIND_ALLUP)
                 continue;
-            info->item_desc->event_source_drop[i].chance_dyna         = ScaleU16(info->item_desc->event_source_drop[i].chance_dyna);
-            info->item_desc->event_source_drop[i].chance_tac          = ScaleU16(info->item_desc->event_source_drop[i].chance_tac);
-            info->item_desc->event_source_drop[i].chance_meteor       = ScaleU16(info->item_desc->event_source_drop[i].chance_meteor);
-            info->item_desc->event_source_drop[i].chance_destructible = ScaleU16(info->item_desc->event_source_drop[i].chance_destructible);
-            info->item_desc->event_source_drop[i].chance_chamber      = ScaleU16(info->item_desc->event_source_drop[i].chance_chamber);
-            info->item_desc->event_source_drop[i].chance_ufo          = ScaleU16(info->item_desc->event_source_drop[i].chance_ufo);
+            if (row->chance_destructible == 0)
+                row->chance_destructible = ALLUP_CHANCE_DESTRUCTIBLE;
+            if (row->chance_dyna == 0)
+                row->chance_dyna = ALLUP_CHANCE_DYNA;
+            break;
         }
     }
 }

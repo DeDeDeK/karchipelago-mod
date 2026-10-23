@@ -11,8 +11,8 @@ The target platform is PowerPC (GameCube), cross-compiled with devkitPPC.
 - `mods/` - one subdirectory per mod: sources in `src/`, and a public API header at `include/<mod>_api.h` if the mod exports one (other mods import it via `Hoshi_ImportMod`). `INCLUDE_MODS` chooses which are built. A mod's `assets/` is the **disc staging folder** - its contents are copied into the FST root keeping their paths under `assets/`, so only things the game loads belong there.
 - `art/` - source assets the authoring scripts read: PNGs for `scripts/authoring/` and `scripts/hsd/`, WAVs for `scripts/audio/`. Kept out of `mods/*/assets/` because nothing on disc reads them and staging them just pads the package.
 - `externals/hoshi/` - the hoshi modding framework (submodule): headers, linker script, symbol map (`GKYE01.map`), framework source.
-- `docs/` - per-system reference docs and data files; one doc per system, found by filename.
-- `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), plus `ghidra/` (type pipeline), `hsd/` (the general `.dat` toolchain - anything that works on any archive), `authoring/` (per-mod asset authors: one script per shipped `.dat`, writing to a fixed path under `mods/<mod>/assets/`), `audio/` (machine sound / SSM toolchain), `devkitpro/` (toolchain build), `utility/` (ISO / DOL / memcard-tile helpers).
+- `docs/` - reference docs, found by path: `game-systems/` (vanilla engine), `hoshi/` (the framework), `mods/<mod>/` (one folder per mod), `data/` (CSV tables).
+- `scripts/` - `kar.py` (the RE tool over `mem1.raw` + `GKYE01.map` + `link.ld`), `review_lint.py` (mechanical review checks over a mod), plus `ghidra/` (type pipeline), `hsd/` (the general `.dat` toolchain - anything that works on any archive), `authoring/` (per-mod asset authors: one script per shipped `.dat`, writing to a fixed path under `mods/<mod>/assets/`), `audio/` (machine sound / SSM toolchain), `devkitpro/` (toolchain build), `utility/` (ISO / DOL helpers).
 - `out/` - build output; `out/Riivolution/` is the deployable package. Do not hand-edit.
 - `iso/` - extracted contents of `kar.iso` - original game assets for inspection.
 
@@ -31,6 +31,10 @@ make deploy INCLUDE_MODS=archipelago,custom_machines
 **A successful `make deploy` (or `make package`) is sufficient verification.** The build fails on any compile or link error, so if it completes you do **not** need to grep its output for "error" or "warning". Pre-existing warnings in hoshi/devkitPPC headers are noise - don't re-run the build to inspect them.
 
 **Source files are auto-discovered.** The Makefile globs all `*.c`/`*.s` under each included mod's `src/`, so adding a source file (or a whole new mod folder with a `src/`) needs no manual registration - don't grep the Makefile for it. One exception: a new mod's **public** `include/` dir must be added to the Makefile's `INCLUDES` list (those are explicit, not globbed).
+
+## Local Paths and Usernames
+
+**Never commit or `git add` a machine-specific path or a personal name.** No absolute home paths (anything under `/home`, `/Users` or a Windows user profile) and no usernames or real names, in any tracked file - source, string literals, scripts, docs, skills, configs, the hoshi submodule. Point at other checkouts by relative path (`../KARchipelago`), at user directories through `$(HOME)`, `~` or an overridable variable (as the Makefile does for Dolphin), and let tools resolve paths at runtime. Before committing, `git grep --cached -n -i -E '/(home|Users)/|[A-Z]:\\Users'` (and the same in `externals/hoshi`) must come back empty.
 
 ## Important Files - Do NOT Read Directly
 
@@ -58,7 +62,10 @@ When reverse engineering game functions and discovering their purpose, **always*
   - `decomp` - Ghidra decompilation as plain C; `ghidra decompile` itself only emits JSON.
   - `rename` - names an unnamed symbol in `GKYE01.map` and `link.ld` at once.
   - `check` - hoshi prototypes missing from `link.ld` or the map, and `link.ld` names whose map row is still `zz_`.
-- **Skills:** `dolphin-memory` (live memory while Dolphin runs), `dat-explore` (HSD `.dat` archives), `ghidra-cli` (decompilation, xrefs, types).
+- **Stage geometry:** `uv run python scripts/hsd/stage.py <cmd> <stage>` answers spatial questions about a stage in world units - what is at or under a point, where a named place is, open spots to place something, clearance along a path, top-down and cross-section renders, positions/zones/props/rails/course laps, and live player positions from Dolphin. Use it instead of hand-reading collision or guessing a coordinate. Named places live in `docs/data/stage-landmarks.csv`.
+- **Review lint:** `uv run python scripts/review_lint.py <mod>` (or `--all`) lists mechanical rule hits - non-ASCII, comment banners and file pointers, OSReport prefixes, literal game addresses, raw struct offsets, layout asserts, unreferenced identifiers, unauthored assets. Every hit is a candidate to confirm, not a verdict.
+- **Docs lint:** `uv run python scripts/docs_lint.py [<doc or folder> ...]` lists mechanical doc hits - cross-references, repo file names, narration, non-ASCII, backticked identifiers no code or map row contains, name/address pairs the map disagrees with, missing titles, long docs. Candidates, not verdicts.
+- **Skills:** `dolphin-memory` (live memory while Dolphin runs), `dat-explore` (HSD `.dat` archives), `stage-map` (stage geometry, placement and landmarks), `ghidra-cli` (decompilation, xrefs, types), `docs-review` (doc audit and rewrite).
 - **Ghidra constraints:** use the pre-configured project/program only - never `ghidra setup`/`config` or load another binary. Inline `ghidra script python`/`script java` are unavailable in bridge mode, and `script run` needs the copy-and-report plumbing in `scripts/ghidra/sync.py` - drive new `.java` scripts through that rather than rebuilding it.
 
 ## Comments
@@ -70,24 +77,28 @@ Keep comments short and minimal - state only what the reader needs, prefer no co
 - **Minimal by default.** A comment earns its place by carrying information the code cannot. Delete restatements of the code, rationale for decisions no reader will question, and background that belongs in `docs/`. Struct-member comments are fine but stay to one short line.
 - **No section markers.** Don't use comments to label regions of a file or function (`// --- setup ---`, `// helpers below`); let the code's structure do that.
 - **Current-state only.** Say what the code does now and why it is shaped that way. No "how we got here" narration - no RE process, dated/"verified live" notes, past failed/"naive" attempts, or "used to be X" corrections.
-- **No references to other files.** A comment must stand on its own. Don't point at `docs/*.md` (no `see docs/foo.md`, section names, or `docs/*.csv`) or any other file - the target drifts independently and the pointer goes stale silently. State the fact inline.
-- **Large explanations belong in docs.** If a comment outgrows a few lines, move the prose to the relevant `docs/*.md` and leave only the essential fact in the code (grounded in a function name + address where relevant).
+- **No references to other files.** A comment must stand on its own. Don't point at a doc (no `see docs/foo.md`, section names, or `docs/data/*.csv`) or any other file - the target drifts independently and the pointer goes stale silently. State the fact inline.
+- **Large explanations belong in docs.** If a comment outgrows a few lines, move the prose to the relevant doc under `docs/` and leave only the essential fact in the code (grounded in a function name + address where relevant).
 
 ## Docs
 
-`docs/` holds per-system reference material - one file per engine/mod system, plus `checklist-mappings.csv`. Find the relevant doc by filename and read it before working on that system. Each doc stands on its own:
+`docs/` is a reference for human modders: how the game's systems work and how each mod builds on them. `game-systems/` covers vanilla engine behavior, `hoshi/` the framework, `mods/<mod>/` one mod (folder named as under `mods/`), and `data/` CSV lookup tables. Find the relevant doc by path and read it before working on that system. The `docs-review` skill holds the full standard; in short:
 
-- **Self-contained, no cross-references.** One file fully covers its system; a reader shouldn't need to open another doc. Don't point from one `docs/*.md` to another (no "see `foo.md`", section names, "sister doc") - restate the fact instead. Docs are discovered by filename, not by links.
-- **Current-state only**, same rule as comments: what the code/engine does *now* and why, never how we got here. Ground facts in the code (function name + address). Forward-looking notes for WIP features are fine - just drop the "RE gap / needs live confirm" framing.
+- **Accurate.** The code wins any disagreement - update the doc in the same change that invalidates it.
+- **Self-contained, no cross-references.** One file fully covers its system; a reader shouldn't need to open another doc. Don't point at another doc or data file (no "see `foo.md`", section names, "sister doc") - restate the fact instead.
+- **Nothing that goes stale quietly.** No repo file names or paths, no internal mod helpers, no counts or lists the code grows. Ground game facts in function name + address; for mods, name only the public API, hook sites and contract data.
+- **Current-state only**, same rule as comments: what the code/engine does *now* and why, never how we got here. Forward-looking notes for WIP features are fine - just drop the "RE gap / needs live confirm" framing.
+- **Concise.** The idea, the implementation shape, and the key components and data structures - not a walkthrough of the code. Most docs land at 50-200 lines.
 
 ## Code Style
 
-- C, targeting PowerPC 750 (GameCube CPU). No `-std=` flag is passed, so the toolchain default applies (C23 on the current devkitPPC GCC); `_Static_assert` and designated initializers are used freely.
+- C, targeting PowerPC 750 (GameCube CPU). No `-std=` flag is passed, so the toolchain default applies (C23 on the current devkitPPC GCC); designated initializers are used freely. `_Static_assert` checks that a count fits its storage or that a table covers an enum - never a struct's size or member offsets.
 - Compiled `-O1 -ffreestanding -fno-exceptions`, no libc beyond what hoshi provides.
 - The r13 register (SDA base) is `0x805DD0E0`; game globals in this range are accessed as r13-relative offsets. The r2 register (SDA2 base) is `0x805E6700`; read-only small data (float constants, etc.) are accessed as r2-relative offsets.
 - **Brace style: Allman.** Opening brace on its own line, matching hoshi style. The one exception in practice is a one-line wrapper or menu callback kept on a single line (`settings_menu.c`, `machine_registry.c`).
 - All headers use `#ifndef`/`#define`/`#endif` include guards; no `#pragma once` anywhere. New hoshi game headers use `KAR_H_<NAME>` (roughly half still carry the legacy `MEX_H_<NAME>` from m-ex; `externals/hoshi/include/hoshi/*.h` use `HOSHI<NAME>_H`). Mod headers - including the public API headers on the global include path - use plain name-based guards.
 - Game memory addresses and structures are defined in hoshi headers under `externals/hoshi/include/`. Don't redeclare them in mod code - include the appropriate hoshi header instead.
+- **Colors are `GXColor`** (`gx.h`) - variables, fields, params and constants alike, even when alpha is unused (say so). Not separate `r, g, b` values and not `Vec3`. A packed `u32` built with `RGBA()` is for table or descriptor entries where 0 means "use the default"; unpack it with `GXColor_Unpack`.
 
 **Naming follows the object hierarchy.** Name functions and structs for the level they operate at - a function that modifies `MachineData.stats` uses the `Machine_` prefix, not a generic `Stats_`.
 

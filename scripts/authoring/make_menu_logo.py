@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Author the custom main-menu logo pieces into a loadable HSD archive.
 
-The archipelago mod's main_menu subsystem keeps the vanilla title's "KIRBY" logo
+The archipelago mod's ap_title subsystem keeps the vanilla title's "KIRBY" logo
 and blue swoosh and hides only the vanilla "AIR RIDE" subtitle (foreground joint
 14). This script builds the pieces that go back in its place, each a single RGBA8
 textured quad:
