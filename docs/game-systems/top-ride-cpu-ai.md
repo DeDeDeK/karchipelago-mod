@@ -40,7 +40,9 @@ by the brain.
 | Rival aggression | 0x804d8094 | 0, 8, 15, 40, 100 |
 | Ram aggression | 0x804d806c | 0, 10, 20, 40, 100 |
 
-A higher level turns harder, re-decides faster and grabs items, blocks and rams more often. A
+A higher level turns harder, re-decides faster and grabs items, blocks and rams more often.
+`TopRide_CpuDetectObstacle` also reads the ram aggression row, so it governs how readily a CPU
+reacts to walls, edges and air currents as well as rams. A
 separate reaction budget (`reader->reaction_budget`, +0x14) comes from the table at 0x804d7f90
 (4, 1, 2, 3, 5) indexed by `reader->x18`, not by difficulty.
 

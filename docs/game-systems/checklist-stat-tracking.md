@@ -47,7 +47,7 @@ Air Ride's two driver tables pair handler pointers with clear kinds: Table A at 
 it and the driver completes the cell; one handler may serve several cells, receiving the
 clear_kind to pick its threshold. Every Table A handler that says "take 1st" first requires Air
 Ride Race mode and a finished round - a lap race some human has completed, or a timed race whose
-clock has run out - then a human with `player_finish_rank` 0.
+clock has run out - then a human with `player_rank` 0.
 
 The two dispatchers each have one call site: `AirRide_DispatchRaceTimeAttackObjectives`
 (0x8004a994) runs from `race3D_isFinished` (`bl` at 0x80010d68) as each player crosses the line,

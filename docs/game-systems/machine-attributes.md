@@ -88,10 +88,10 @@ star-class):
 |---|---|---|
 | Boost | `top_speed_ground`, `slope_speed_up`, `boost_gain_any`, `boost_gain_sliding`, `takeoff_speed`, `+0x1a4` | `accel_floor`, `accel_turn_keep`, `pitch_max_up`, `air_accel`, `x040[0..4]`, `x054[4]` |
 | Top Speed | `top_speed_ground`, `top_speed_air` (per kind), `+0x1a0` | `accel_floor`, `air_accel`, `air_impulse`, `x040[0..4]`, `x054[4]` |
-| Turn | `glide_up_speed`, `glide_down_speed`, `+0x18c`, `+0x190`, `+0x19c` | `turn_rate_rest`, `turn_rate_top`, `x054[3..4]`, `x068[0]`, `x068[2..4]` |
+| Turn | `fly_pitch_up_step`, `fly_pitch_down_step`, `fly_yaw_max`, `fly_yaw_step`, `fly_yaw_turn` | `turn_rate_rest`, `turn_rate_top`, `x054[3..4]`, `x068[0]`, `x068[2..4]` |
 | Charge | `charge_full_duration`, `charge_cooldown_duration`, `charge_rate`, `charge_rate_turning` | `x040[0..4]` |
-| Weight | `top_speed_ground`, `slope_speed_up`, `slope_speed_down`, `ground_grip`, `air_grip`, `base_defense`, `coll_radius`, `boost_gain_any`, `turn_speed_on_slope`, `glide_up_speed`, `glide_down_speed`, `+0x03c`, `+0x044`, `+0x078`, `+0x18c`..`+0x19c`, `+0x1a4`, `+0x1a8` | `accel_floor`, `turn_rate_rest`, `turn_rate_top`, `x014`, `x024[0..1]`, `x040[0..4]`, `x054[4]`, `x068[2]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `x0cc[0]`, `x0cc[3]`; adds to `air_impulse` and `air_recover_len` (per kind) |
-| Glide | `coll_radius`, `base_defense`, `slope_speed_up`, `slope_speed_down`, `ground_grip`, `takeoff_speed`, `glide_up_speed`, `glide_down_speed`, `turn_speed_on_slope`, `+0x03c`, `+0x044`, `+0x078`, `+0x164`..`+0x170`, `+0x190`, `+0x1a4`, `+0x1a8`; adds to `air_grip` | `lift_ceiling`, `x024[0..1]`, `x040[0..4]`, `x068[3..4]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `x0cc[0]`; adds to `air_impulse` and `air_recover_len` (per kind) |
+| Weight | `top_speed_ground`, `slope_speed_up`, `slope_speed_down`, `ground_grip`, `air_grip`, `base_defense`, `coll_radius`, `boost_gain_any`, `turn_speed_on_slope`, `fly_pitch_up_step`, `fly_pitch_down_step`, `+0x03c`, `+0x044`, `+0x078`, `fly_yaw_max`..`fly_yaw_turn`, `+0x1a4`, `+0x1a8` | `accel_floor`, `turn_rate_rest`, `turn_rate_top`, `x014`, `x024[0..1]`, `x040[0..4]`, `x054[4]`, `x068[2]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `dive_speed`, `x0d0[2]`; adds to `air_impulse` and `air_recover_len` (per kind) |
+| Glide | `coll_radius`, `base_defense`, `slope_speed_up`, `slope_speed_down`, `ground_grip`, `takeoff_speed`, `fly_pitch_up_step`, `fly_pitch_down_step`, `turn_speed_on_slope`, `+0x03c`, `+0x044`, `+0x078`, `+0x164`..`+0x170`, `fly_yaw_step`, `+0x1a4`, `+0x1a8`; adds to `air_grip` | `lift_ceiling`, `x024[0..1]`, `x040[0..4]`, `x068[3..4]`, `air_accel`, `air_accel_fwd`, `air_accel_back`, `dive_speed`; adds to `air_impulse` and `air_recover_len` (per kind) |
 | Offense | `hitbox_size`, `weapon_charge_scale` | - |
 | Defense | `coll_radius`, `base_defense`, `+0x03c`, `+0x044` | - |
 | HP | `hp_max`, through `Machine_GetStatRatio2` (0x801cabd4) and a pair in `VcCommon.dat` | - |
@@ -148,26 +148,44 @@ active top speed and `handling.accel_floor` on the ground, or `handling.air_acce
 capped at that top speed. `Machine_Star_ApplyGroundThrust` (0x801ecae4) spends it into
 `MachineData.accel`. As slip grows it scales the thrust toward `handling.accel_turn_keep`, and it
 biases the thrust by `slope_speed_up` / `slope_speed_down`. `Machine_Star_ApplyAirThrust`
-(0x801ed4d8) is the airborne twin. It applies `handling.air_accel_fwd` while the stick agrees with
-the heading and `air_accel_back` while it opposes it.
+(0x801ed4d8) is the airborne twin. It scales the thrust by the flight pitch, not the stick: with
+`d = dot(body_forward, gravity_up)`, a raised nose multiplies it by `1 + d * (air_accel_fwd - 1)`
+and a lowered one by `1 + |d| * (air_accel_back - 1)`.
 
 **Charge and boost.** `charge_rate` / `charge_rate_turning` (`+0x09c` / `+0x0a0`) fill the charge
 meter, and `boost_gain[11]` (`+0x0a8`) is what a release is worth at each tenth of the meter.
 `charge_deplete_rate` (`+0x0a4`) is how fast the boost bleeds off. `charge_full_duration` /
 `charge_cooldown_duration` (`+0x050` / `+0x054`) time the auto-discharge and the overcharge lockout.
+A ground release multiplies the gain by `boost_gain_any` (`+0x0d8`, 1.0) rising to
+`boost_gain_sliding` (`+0x0dc`, 2.1 on most) as the slip angle goes from 5 to 180 degrees, and on
+its first frame turns `boost_redirect` (`+0x0d4`) of the velocity onto the heading: 0.6 on most,
+1.0 on Rocket Star and Wagon Star, 0.07 on Formula Star. A flying star also fills the meter by
+`air_charge_rate` (`+0x160`, 0.0025 on most) every frame without A.
 
-**Air and glide.** `Machine_Star_ApplyAirThrust` blends the airborne thrust from the heading toward
-its reflection off the surface normal at `MachineData + 0x774`. The blend happens over
-`handling.air_recover_len` (`+0x0c8`) frames, which is where the gliders live: 1800 on Flight Warp
-Star and 1500 on Dragoon, against 500 on Warp Star and 20 on Formula Star. `handling.air_impulse`
-(`+0x0c4`) scales the kick `Machine_Star_ApplyAirImpulse` (0x801ebe88) adds to `MachineData.accel`
-in flight. It ships between 0.002 and 0.04 on most stars, 0.19 on Bulk Star and 0 on Formula and
-Rocket Star. On the attribute side, `glide_up_speed` / `glide_up_amount` / `glide_down_speed` /
-`glide_down_amount` (`+0x174`..`+0x180`) are the glide itself. The four descent terms at
-`+0x190`..`+0x19c` set how fast a machine sinks: Flight Warp Star runs 1.5 / 0.4 / 0.38 / 0.015,
-where Warp Star runs 1.8 / 0.5 / 0.45 / 0.02. `takeoff_speed` (`+0x13c`) is the pop off a lip. Jet
-Star's 3.0375 is about ten times the usual, and it is why that machine leaves the ground off
-anything.
+**Air and glide.** `Machine_Star_ApplyAirThrust` blends the airborne thrust from the nose
+(`body_forward`) toward its projection onto the plane normal to `gravity_up` (`MachineData +
+0x774`); `VEC_Reflection` (0x80064c18) is, despite its name, that plane projection
+`v - n * dot(n, v)`. The blend happens over `handling.air_recover_len` (`+0x0c8`) frames, which is
+where the gliders live: 1800 on Flight Warp Star and 1500 on Dragoon, against 500 on Warp Star and
+20 on Formula Star. `handling.air_impulse` (`+0x0c4`) scales the lift kick
+`Machine_Star_ApplyAirImpulse` (0x801ebe88) adds to `MachineData.accel` in flight, ramped in over
+`handling.lift_ramp_frames` (`+0x0b4`) after a flight starts. It ships between 0.002 and 0.04 on
+most stars, 0.19 on Bulk Star and 0 on Formula and Rocket Star. A held A in flight (FlyPush) dives
+instead, dropping `handling.dive_speed` (`+0x0cc`) a frame along gravity. `takeoff_speed`
+(`+0x13c`) is the pop off a lip. Jet Star's 3.0375 is about ten times the usual, and it is why that
+machine leaves the ground off anything.
+
+**Flight steering.** `Machine_UpdateFlyPitch` (0x801d98a0) moves `MachineData.fly_pitch`
+(`+0xb74`, radians, nose up negative) toward `stick_y` times `fly_pitch_up_max` (stick back) or
+`fly_pitch_down_max` (stick forward), closing `fly_pitch_approach` of the gap each frame within
+`fly_pitch_up_step` / `fly_pitch_down_step`. With the stick centred it steps back to level by
+`fly_pitch_return`, which is 0 on Hydra, Bulk, Turbo and Jet Star, so they hold their pitch. The
+pitch turns the model's body joint, whose basis `body_forward` / `body_up` / `body_left`
+(`+0x43c` / `+0x448` / `+0x454`) the thrust reads. `Machine_UpdateFlyYaw` (0x801d9c38) does the
+same for `fly_yaw_lean` (`+0xb78`) from `stick_x` with `fly_yaw_max` / `fly_yaw_step` /
+`fly_yaw_approach` / `fly_yaw_return` (`+0x18c`..`+0x198`), banks the model by it, and turns the
+heading by `fly_yaw_lean * fly_yaw_turn` (`+0x19c`) a frame. The angle fields are degrees: a
+typical star pitches to 80 degrees and leans to 60.
 
 **Presentation.** Handling `+0x090`..`+0x0ac` is the model's lean, in degrees.
 `pitch_max_down` / `pitch_max_up` clamp the pitch (36 / 36 on most stars, 5 / 5 on Formula Star,

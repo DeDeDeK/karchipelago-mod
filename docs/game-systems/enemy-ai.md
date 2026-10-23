@@ -128,7 +128,7 @@ handlers take `EnemyData*` and the script state:
 | Cmd | Handler | Effect |
 |---:|---|---|
 | 11 | 0x80200e58 | Set attribute bits at `ed+0xB00` and a float at `ed+0xB04` |
-| 12 | `EnemyAnimCmd_SetHitDesc` (0x80200eb8) | Decode and arm an attack region in the HurtData |
+| 12 | `EnemyAnimCmd_SetHitDesc` (0x80200eb8) | Decode an attack region's `HurtParams` onto its stack and arm it through `EventActor_EmitHitDesc` (0x80201e18, called at 0x8020111c), a `HurtData_SetAttackRegion` on the named joint |
 | 13 | `EnemyAnimCmd_DisableHit` (0x80201138) | Turn one attack region off |
 | 14 | 0x80201180 | Turn every attack region off |
 | 15 | 0x802011bc | Spawn a projectile or sub-actor (`EventActor_SpawnWeapon`) |

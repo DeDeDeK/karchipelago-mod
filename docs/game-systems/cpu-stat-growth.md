@@ -49,10 +49,11 @@ level 0-8:
 
 ## Related handicaps
 
-Two other CPU handicaps are separate mechanisms: the King Dedede fight's catch-up
+Two other handicaps feed CPUs and are separate mechanisms: the King Dedede fight's catch-up
 (`vsDedede_CPU_Cheating`, 0x80040b80), which compares slot 4 against the field's average HP, and
-a finish-rank adjustment (0x800155d4) that sets CPU stats from finishing rank and CPU level
-through `Ply_SetStatAux`.
+Air Ride's Speed Help (`AirRide_ApplySpeedHelp`, 0x800155d4). Speed Help runs in races with the Air
+Ride Speed Help rule on; it rewrites every player's boost and top-speed `stat_aux` from how far
+behind the leader they are, and adds per-level CPU bonuses on top.
 
 ## Notes for modders
 

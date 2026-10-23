@@ -50,8 +50,10 @@ a    = angle between r and md->forward          (0 below 1e-5 of either length)
 rate = base_charge_rate + (a / pi) * (turning_charge_rate - base_charge_rate)
 ```
 
-So a stationary machine charges at the base rate. The two rates are `vcAttributes.charge_rate` and
-`charge_rate_turning` after stat scaling.
+`VEC_Reflection` (0x80064c18) is, despite its name, a plane projection `v - n * dot(n, v)`, so `a`
+is the slip angle between the ground-plane velocity and the heading, the value
+`Machine_GetSlipAngle` (0x801cc2fc) returns. A stationary machine charges at the base rate. The
+two rates are `vcAttributes.charge_rate` and `charge_rate_turning` after stat scaling.
 
 Three things skip the add: `+0xc35` bit 0x01, the sign bit of the byte at `+0xc36`, and a running
 `charge_cooldown_timer`. Otherwise the rate is added to a meter below 1.0. If that crosses 1.0, the
@@ -64,8 +66,10 @@ frame the add runs. The machine audio tests that pair to keep the charge loop pl
 dies the frame an add is skipped. Bit 0x08 is set whenever the computed rate is nonzero and the
 meter is not full, even on a skipped frame.
 
-Two siblings take an explicit rate in `f1`, for vehicle phases that compute their own (star glide,
-rail run, the wheelie push). Both apply the same three skips, clamp, play the cue and set the glow:
+Two siblings take an explicit rate in `f1`, for vehicle phases that compute their own (star flight,
+rail run, the wheelie push). Both apply the same three skips, clamp, play the cue and set the glow.
+Star flight is a passive fill: every frame of the Fly state adds `vcAttributes.air_charge_rate`
+(`+0x160`, 0.0025 on most stars, not stat-scaled) through `Machine_AddCharge`, A or not.
 
 | Function | Arms the auto-discharge | Flags |
 |---|---|---|
@@ -96,13 +100,29 @@ the machine. It applies no boost itself; the machine's next state spends the met
 | Ground | Run, Landing | `Machine_ApplyGroundChargeBoost` (0x801d93a0) |
 | Rail | RailRun, RailChange | `Machine_ApplyChargeBoost` (0x801da3c0) |
 
-Stars and bikes share both functions, and each does nothing while `charge_display_value` is 0. Both
-call `LerpTable(0.1, charge_display_value, boost_gain)` (0x80062c4c) over the eleven floats of
-`vcAttributes.boost_gain` (`+0x0a8`, `MachineData + 0x508`). `LerpTable` takes
-`i = (int)(charge / 0.1)` and lerps between entries `i` and `i + 1`, so entry `n` is the gain at
-`n / 10` charge. The result is scaled by `boost_gain_any` (`+0x0d8`, 1.0 on every machine) and
-becomes the boost velocity. `charge_deplete_rate` (`+0x0a4`) then sets how fast it bleeds off: 1.0
-on most machines, 0.00012 on Hydra, whose boost is near-permanent once earned.
+Stars and bikes share both functions. Each does nothing while `charge_display_value` is 0 or while
+`xc32` bit 0x40 says charge was added this frame, and each runs every frame of the release:
+
+- **Gain.** `LerpTable(0.1, charge_display_value, boost_gain)` (0x80062c4c) over the eleven floats
+  of `vcAttributes.boost_gain` (`+0x0a8`, `MachineData + 0x508`). `LerpTable` takes
+  `i = (int)(charge / 0.1)` and lerps between entries `i` and `i + 1`, so entry `n` is the gain at
+  `n / 10` charge. The rail version scales it by `boost_gain_any` (`+0x0d8`, 1.0 on every machine).
+  The ground version lerps that multiplier up to `boost_gain_sliding` (`+0x0dc`, 2.1 on most
+  machines) as the slip angle goes from 5 to 180 degrees, so a release while sliding sideways is
+  worth up to twice as much. The result is this frame's `boost_accel` (`+0x79c`); a star's ground
+  release (`Machine_Star_UpdateGroundBoost`, 0x801ecd00) also adds it to `star_dash_accum`.
+- **Redirect.** On its first frame the ground version turns the velocity onto the heading,
+  `v = forward * |v| * k + v * (1 - k)` with `k = boost_redirect` (`+0x0d4`): 0.6 on most machines,
+  1.0 on Rocket Star and Wagon Star, 0.07 on Formula Star. The rail version has no redirect.
+- **Bleed.** `Machine_DepleteCharge` (0x801ca3f8) takes `charge_deplete_rate` (`+0x0a4`) off the
+  meter and `min(rate, 0.1)` off `charge_display_value`. The gain tapers as the display falls, and
+  the release ends when it reaches 0, clearing `xc32` bit 0x10. At the usual rate of 1.0 a full
+  release lasts 10 frames; Wagon Star's 0.06 stretches it to about 17 and Bulk Star's 0.0036 to
+  about 280, and Hydra's 0.00012 makes its boost near-permanent once earned.
+
+`xc32` bit 0x10 marks a release in progress. `xc34` bit 0x02 is set on each frame a boost is
+applied and cleared by `Machine_FrameStartThink`; `Machine_UpdateBoostHitbox` (0x801d7bf4) arms the
+boost hitbox on its rising edge and runs it for `boost_hitbox_timer` (`+0xb38`) frames.
 
 | Machine | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
