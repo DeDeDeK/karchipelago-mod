@@ -406,6 +406,7 @@ static void OnSceneChange(void)
              Scene_GetCurrentMajor(), Scene_GetCurrentMinor());
 
     KirbyScale_OnSceneChange();
+    APPatches_OnSceneChange();
 }
 
 static void OnFrameStart(void)

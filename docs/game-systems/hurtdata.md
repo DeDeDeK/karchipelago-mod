@@ -14,6 +14,12 @@ with their own damage and knockback parameters. **Sub-regions** (stride 0x44) ar
 hurtboxes, built by `HurtData_InitRegion` (0x8018c598) from model joints - a joint index, an
 offset and a radius scale each.
 
+A machine's hurtboxes come from its `vcData` (`+0x08`, a `{descriptors, count}` pair read by
+`Machine_InitHurtData`, 0x801d6e84), with each radius scaled by `MachineData.model_scale`. Every
+vanilla machine has one: a sphere of radius 2.27 on the Warp Star (4.2 on the Hydra, 0.95-1.95 on
+the bikes), centered on the machine body. It is much smaller than the machine and its rider look,
+and a mounted rider has no hurtbox of its own, so an attack has to reach that sphere.
+
 | Owner | HurtData | Attack regions | p_link | GetHurtData |
 |---|---|---|---|---|
 | `MachineData` | +0x660 | 4 | 9 | `MachineGObj_GetHurtData` (0x801c8660) |

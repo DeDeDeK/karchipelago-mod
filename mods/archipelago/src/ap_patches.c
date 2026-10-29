@@ -353,16 +353,21 @@ void APPatches_OnBoot(void)
     OSReport("[APPatches] Hooks installed\n");
 }
 
-void APPatches_On3DLoadStart(void)
+// The kinds belong to the City Trial round that armed them. Top Ride and the menus never
+// reach On3DLoadStart, so a kind left set there would aim the debug spawn at the freed
+// round's box generator and machines.
+void APPatches_OnSceneChange(void)
 {
-    // Per-scene kinds, cleared here because On3DLoadEnd does not run for Top Ride.
     patch_kind = -1;
     box_kind = -1;
     round_armed = 0;
     boxes_rolled = 0;
     box_gate_frames = INT_MAX; // open, so the round's first roll is not held back
     ptcl_state = 0;
+}
 
+void APPatches_On3DLoadStart(void)
+{
     if (ci_api == NULL)
         return;
 

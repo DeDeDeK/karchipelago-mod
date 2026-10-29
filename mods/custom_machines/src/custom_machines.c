@@ -194,7 +194,7 @@ static void TakeDescriptor(char *path, int entrynum, HSD_Archive *arc, CustomMac
 
     vcData *vc = (vcData *)Archive_GetPublicAddress(arc, (char *)desc->symbol);
     if (vc == NULL || vc->attr == NULL || vc->model == NULL || vc->model->model_root == NULL ||
-        vc->unk_collision_group == NULL || vc->coll_attr == NULL || vc->coll_sphere == NULL ||
+        vc->hurt == NULL || vc->coll_attr == NULL || vc->coll_sphere == NULL ||
         vc->handling_attr == NULL || vc->anim == NULL)
     {
         OSReport("[CustomMachines] %s vcData public '%s' is missing or incomplete\n",

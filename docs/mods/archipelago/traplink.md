@@ -93,5 +93,5 @@ the window.
 ## Debug
 
 `ArchipelagoAPI.DebugTriggerTraplinkReceive` sets `traplink_receive` as the client would.
-archipelago_debug binds it to **R + D-Pad Up** and to Links -> Arm TrapLink; the receiving round
+archipelago_debug exposes it as Links -> Arm TrapLink; the receiving round
 picks the trap, exactly as for a real Bounce.

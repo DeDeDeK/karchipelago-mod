@@ -96,5 +96,5 @@ into NaN. As in 3D, the flag clears only once a human Kirby was hit.
 ## Debug
 
 `ArchipelagoAPI.DebugTriggerDeathlinkReceive` sets `deathlink_receive` as the client would.
-archipelago_debug binds it to **L + D-Pad Down** and to Links -> Arm DeathLink. The flag waits
+archipelago_debug exposes it as Links -> Arm DeathLink. The flag waits
 for a round with a receive proc, so one armed from the menu lands in the next round.

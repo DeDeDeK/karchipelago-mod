@@ -101,7 +101,7 @@ typedef enum APCheckKind
 
     APCK_MAGMA_TA_METAKNIGHT,    // 78
     APCK_AIRRIDE_1ST_AP_STAR,    // 79
-    APCK_MELEE_DEDEDE_KO_30,     // 80
+    APCK_MELEE_DEDEDE_KO_20,     // 80
     APCK_VSKD_METAKNIGHT_KO,     // 81
 
     APCK_TR_FREEZE_FAN_3,        // 82

@@ -16,14 +16,6 @@ extern OptionDesc DebugMod_RootOption;
 // outside the menu, and before boot replays every on_change.
 void DebugMenu_RefreshState(void);
 
-// Player slot the pad bindings that drop an item act on, 0-3.
-int DebugMenu_TargetPlayer(void);
-
 int DebugMenu_ShouldAutoGrantOnUnlock(void);
-
-// Queue one item at random: any AP unlock or persistent progression item, or one
-// appropriate to the major mode a round is running under.
-void DebugMenu_GiveRandomUnlock(void);
-void DebugMenu_GiveRandomModeItem(MajorKind major);
 
 #endif // ARCHIPELAGO_DEBUG_MENU_H

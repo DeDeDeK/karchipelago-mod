@@ -6,73 +6,37 @@ every gated, granted or checked thing can be exercised without a server or a see
 reach it. It ships no game content and drives the other mods only through their exported APIs,
 so a build without it behaves identically.
 
-It has two surfaces. The **settings menu** page, "Archipelago Debug", holds everything that arms
-state or acts outside a round. **Pad bindings** on controller 1 cover what only makes sense
-inside a running round. The split exists because hoshi's settings menu is a main-menu scene with
-no in-round overlay.
+Everything lives on its **settings menu** page, "Archipelago Debug", except one checklist binding.
+It has no in-round pad bindings: Top Ride's pause and results menus, the settings menu and the
+checklist grid are all navigated with the D-Pad on controller 1, so any binding there would fire
+while a tester moves a cursor.
 
 ## Imports
 
 The archipelago side goes through `ArchipelagoAPI`, imported at `OnSaveLoaded` (the first point
-every mod has exported). Without it every row and binding does nothing. It also imports
-custom_events, for the Scale Change binding, and textbox, for the confirmation line most menu
-actions post; without either, only that feature is lost.
+every mod has exported). Without it every row and the binding do nothing. It also imports textbox,
+for the confirmation line most menu actions post; without it, only that line is lost.
 
-## Pad bindings
+## The Z unlock
 
-All read controller port 1 (`stc_engine_pads[0]`) on the rising edge, from `OnFrameStart`.
-Everything but Z is limited to a live round - minor `MNRKIND_3D` (Air Ride and City Trial) or
-`MNRKIND_TOPRIDE`, under the City Trial, Air Ride or Top Ride major - because the settings menu
-and the checklist grid are both navigated with the D-Pad on the same controller. The major test
-also keeps the title's attract demo out, which runs a real round under `MJRKIND_TITLE`.
-
-| Binding | Action |
-|---|---|
-| D-Pad Left | Grant one checklist reward the seed placed remotely, chosen at random |
-| L + D-Pad Left | End the round now |
-| D-Pad Right | Queue one random unlock or persistent progression item |
-| D-Pad Down | Drop an AP Box in front of the target player |
-| R + D-Pad Down | Drop the next Archipelago Star sphere in front of the target player |
-| L + D-Pad Down | Arm a DeathLink receive |
-| D-Pad Up | Start Sky Rings, then Drive Backwards, Reverse Controls, Bomb TACs, Treasure Rain, then Mini UFOs, then Danger Rain raining meteors, Gordos, sensor bombs, bombs and dragons, then Stat Shuffle, Jumping Items, Minefield, Cannon, Truck Storm, Giant Mode and Tiny Mode, one per press (custom_events, City Trial with no event running) |
-| L + D-Pad Up | Queue one random item that suits the running mode |
-| R + D-Pad Up | Arm a TrapLink receive |
-| Z (checklist screen) | Complete the cell under the cursor |
-
-The two drops act on the **Target Player** row (slots 1-4), so per-player behavior can be tested
-on any slot. The sphere cycle restarts at the first sphere each round and skips a locked one. An
-AP Box only exists in a round that loaded with `ap_patches` above 0.
-
-**Ending the round** zeroes `GameData.time_seconds`, the configured limit. Each mode's branch of
-`Game_Think` ends the round on `seconds_passed >= time_seconds` once its own end condition has not
-fired, so the round ends through the engine's own timeout - results, the closing stadium and every
-round-end check run as at a natural finish. A lap-limited Air Ride race ends on laps instead. The
-limit is re-seeded for the next round. This is what makes the round-end goals (Hydra and Dragoon,
-King Dedede) testable at all.
-
-**The Z unlock** asks `ArchipelagoAPI.GetHoveredCell` for the cell under the checklist cursor (0
-with no checklist up, so Z elsewhere does nothing; vanilla navigation does not use Z), then calls
+On the checklist screen, Z on controller 1 completes the cell under the cursor. `OnFrameStart`
+reads the rising edge and asks `ArchipelagoAPI.GetHoveredCell` for the cell (0 with no checklist
+up, so Z elsewhere does nothing; vanilla navigation does not use Z), then calls
 `ClearChecker_SetNewUnlock` (0x8004a054), which the archipelago mod has replaced - so the check is
 recorded and the goals evaluated exactly as for a real completion. The replacement only sets
 `is_new`, so the binding sets `is_unlocked` and `is_visible` too. With **Auto-Grant on Z Unlock**
 on (Checks page, off by default) it also grants the reward placed on that cell; off is right with
 a client attached, which delivers the reward itself.
 
-**The random items.** D-Pad Right draws one ID uniformly from every unlock ID plus the
-progression items (permanent patches, Permanent All Up, Patch Cap Increase, Spawn Rate Up),
-skipping the machine IDs the apworld never ships. L + D-Pad Up draws from what the mode can
-apply: in City Trial the events, every `ItemKind` give and the standalone gives; in Air Ride
-only copy abilities, since other items need the city; in Top Ride the Top Ride item gives.
-
 ## The menu
 
 The page holds submenus for unlock gates, item gives, checks, goals, slot options, cross-session
-check progress, canned messages, link triggers and the EnergyLink balance, plus the Target Player
-row, **Report State** (logs every mask with its gating flag, the patch cap and spawn rate, the
-permanent patches, each row's goal and square count, the goal latches, AP Patches, the energy
-counters and the check progress) and **Reset Progression** (rolls back what receipts accumulate -
-patch cap, spawn rate, permanent patches, check progress, the max-stats flag, the received count
-and the queue - leaving unlock masks and slot options alone).
+check progress, canned messages, link triggers and the EnergyLink balance, plus **Report State**
+(logs every mask with its gating flag, the patch cap and spawn rate, the permanent patches, each
+row's goal and square count, the goal latches, AP Patches, the energy counters and the check
+progress) and **Reset Progression** (rolls back what receipts accumulate - patch cap, spawn rate,
+permanent patches, check progress, the max-stats flag, the received count and the queue - leaving
+unlock masks and slot options alone).
 
 Most rows are thin: a give row queues one AP item through `QueueItem`, so it takes the receive
 path a client delivery would; a gate row is one bit of one unlock mask. The design rules are in

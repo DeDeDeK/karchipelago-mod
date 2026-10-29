@@ -55,7 +55,7 @@ NULL-checked where it is called, so the kind fills only what it uses:
 | Slot | What it does |
 |---|---|
 | `state_table` | one state, below |
-| `post_init` | enters the state and sets the live velocity to the spawn velocity, with no muzzle kick |
+| `post_init` | enters the state, sets the live velocity to the spawn velocity with no muzzle kick, and seeds the sphere's grow |
 | `on_hit` | stops the homing once the shot has hit anything; returns 0, so the shot flies on |
 | `aux_a` | run by the dtor on every ending; detaches the trail so it drains |
 
@@ -86,16 +86,23 @@ returns and before any of the shot's procs run.
 
 ## Size
 
-`WeaponData.scale` is the shot's only size. `Weapon_SyncRootMtx` scales the root joint by
-`scale * model_scale`, the prio-7 HurtData refresh sizes the hitbox by `scale`, and the render
-cull uses `scale` too. At `scale` 1 the drawn sphere and the hitbox are both radius 4.5, and
-they stay equal through the grow and the fade.
+Two fields size a projectile. `Weapon_SyncRootMtx` (0x80220310) scales the root joint by
+`WeaponData.scale * WeaponData.model_scale`. The prio-7 HurtData refresh hands `scale` alone to
+`Trigger_UpdatePosition` (0x8018a188), which sets the hitbox radius to the script's radius times
+it, and the render cull uses `scale` too. `model_scale` is seeded from the kind data and sizes
+the model alone. At full size the drawn sphere and the hitbox are both radius 4.5.
 
-The shot is created at `scale` 0.05 (`desc.scale`), grows to 1 over its first 30 frames and
-shrinks back to 0.05 over its last 30. The fade is needed because the kind has no despawn of its
-own, so a shot that ran out of life would otherwise vanish between two frames; prio 1 runs ahead
-of that frame's lifetime decrement, so a shot with one frame left is already down. The ends sit at
-0.05 rather than 0 because a shot with no extent at all is degenerate for a frame.
+The sphere grows from 0.05 of its size to full over the shot's first 30 frames, through
+`model_scale`, while `scale` stays at 1, so the hitbox is full size from the muzzle. A rival's
+hurtbox is one sphere around its machine's body, radius 2.27 on the Warp Star, well inside the
+machine and its rider, and a ground shot rides with its center 5 units up. A hitbox as small as
+the growing sphere would pass through a nearby rival's model without reaching that hurtbox. `post_init` seeds `model_scale` and rebuilds the root matrix, since
+`Weapon_Create` built it at full size. Over the last 30 frames the shot shrinks back to 0.05
+through `scale`, so the hitbox fades with the sphere. The fade is needed because the kind has no
+despawn of its own, so a shot that ran out of life would otherwise vanish between two frames;
+prio 1 runs ahead of that frame's lifetime decrement, so a shot with one frame left is already
+down. The fade ends at 0.05 rather than 0 because a shot with no extent at all is degenerate for
+a frame.
 
 ## Model and color
 
@@ -167,7 +174,7 @@ and the proc frees the slot once the tail has drained and the flare has run out.
 
 - **Halo.** An additive, camera-facing disc through the shot's center, 1.9 times its radius,
   bright in the middle and gone at the rim. The sphere hides the middle, so what shows is a glow
-  around the edge. It follows `scale`, so it grows and fades with the shot.
+  around the edge. It follows the drawn size, so it grows and fades with the sphere.
 - **Trail.** A camera-facing ribbon through the shot's last 12 positions, one sampled per frame,
   with the live position as its head so it always meets the sphere. It is three vertices across
   with alpha only on the center line, so the edges are soft without a texture, and it narrows and

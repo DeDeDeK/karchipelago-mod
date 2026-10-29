@@ -34,7 +34,9 @@ are found) and enables them only when `ap_patches > 0` and the round is a Trial 
 and not the title's attract demo - whose CPUs would otherwise claim locations. custom_items
 registers enabled items at the end of `CityItemSpawn_Init` and skips disabled ones, so a held-out
 item never gets an `ItemKind`. The kinds it hands out are read at `On3DLoadEnd` and are valid
-for that scene only.
+for that scene only, so every scene change clears them - Top Ride and the menus never reach
+`On3DLoadStart`, and a kind left over from City Trial would point `DebugSpawnApBox` at that round's
+freed box generator and machines.
 
 ## The seams
 
@@ -84,7 +86,7 @@ Each floor is paired with its share so the two bind at about the same count on a
 gated or not, a round then pays out at the same rate. The floor needs no timer of its own: the
 seam stores a deadline in terms of `grBoxGeneInfo.match_frames_left`, the round clock the
 spawner already rebuilds every frame, so pauses and round length are handled for free. The
-deadline starts open at `On3DLoadStart`.
+deadline starts open at each scene change.
 
 The roll is skipped while the round is not armed or no AP Patch is left to collect. When box
 gating has left no vanilla color eligible the picker returns -1 and writes nothing; an AP Box
@@ -147,8 +149,6 @@ moves an `APData` offset; the apworld's option tops out at 200.
 
 ## Debug
 
-archipelago_debug drops an AP Box in front of its target player on **D-Pad Down** during a
-round (it fails while the items are unregistered, until a round loads with `ap_patches` above 0),
-and its Checks page can override `ap_patches`, claim the next patch, or clear every collected
-bit - clearing the save, the wire mirror and any pending backfill together, since any one left
-would restore the others.
+archipelago_debug's Checks page can override `ap_patches`, claim the next patch, or clear every
+collected bit - clearing the save, the wire mirror and any pending backfill together, since any one
+left would restore the others.

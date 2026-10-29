@@ -116,7 +116,7 @@ static const CustomCheck ap_checks[] = {
 
     AP_CHECK(APCK_MAGMA_TA_METAKNIGHT, "Time Attack: MAGMA FLOWS Finish in\nunder 03:15:00 as Meta Knight!"),
     AP_CHECK(APCK_AIRRIDE_1ST_AP_STAR, "Air Ride: Finish in 1st place\non Archipelago Star!"),
-    AP_CHECK(APCK_MELEE_DEDEDE_KO_30,  "Stadium: KIRBY MELEE (All) In one game,\nKO 30 enemies as King Dedede!"),
+    AP_CHECK(APCK_MELEE_DEDEDE_KO_20,  "Stadium: KIRBY MELEE (All) In one game,\nKO 20 enemies as King Dedede!"),
     AP_CHECK(APCK_VSKD_METAKNIGHT_KO,  "Stadium: VS. KING DEDEDE\nKO King Dedede as Meta Knight!"),
 
     AP_CHECK(APCK_TR_FREEZE_FAN_3,      "Top Ride: Freeze 3 or more rivals\nusing one Freeze Fan item!"),

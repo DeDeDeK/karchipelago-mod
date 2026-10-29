@@ -357,53 +357,27 @@ static const struct
     { AP_UNLOCK_AP_STAR_PIECE, AP_STAR_PIECE_UNLOCK_BASE,        AP_STAR_PIECE_NUM                           },
 };
 
-// Progression, not unlocks: applied globally or at the next round start rather than
-// spawning a pickup, so they belong to no category and only the all-pools draw
-// reaches them.
-static const struct
-{
-    u16 base;
-    u8 count;
-} progression_pools[] = {
-    { AP_PERM_PATCH_BASE,         PATCHKIND_NUM },
-    { AP_ITEM_PERM_PATCH_ALL_UP,  1             },
-    { AP_ITEM_PATCH_CAP_INCREASE, 1             },
-    { AP_ITEM_SPAWN_RATE_UP,      1             },
-};
-
-// Uniform pick over one category's ids, or over every category plus the progression
-// items when cat is -1. Returns -1 when the filter matched nothing.
+// Uniform pick over one category's ids. Returns -1 when the category matched nothing.
 static int PickUnlockId(int cat)
 {
     int run_num = GetElementsIn(unlock_runs);
-    int prog_num = GetElementsIn(progression_pools);
 
     int total = 0;
     for (int i = 0; i < run_num; i++)
-        if (cat < 0 || unlock_runs[i].cat == cat)
+        if (unlock_runs[i].cat == cat)
             total += unlock_runs[i].count;
-    if (cat < 0)
-        for (int i = 0; i < prog_num; i++)
-            total += progression_pools[i].count;
     if (total <= 0)
         return -1;
 
     int pick = HSD_Randi(total);
     for (int i = 0; i < run_num; i++)
     {
-        if (cat >= 0 && unlock_runs[i].cat != cat)
+        if (unlock_runs[i].cat != cat)
             continue;
         if (pick < unlock_runs[i].count)
             return unlock_runs[i].base + pick;
         pick -= unlock_runs[i].count;
     }
-    if (cat < 0)
-        for (int i = 0; i < prog_num; i++)
-        {
-            if (pick < progression_pools[i].count)
-                return progression_pools[i].base + pick;
-            pick -= progression_pools[i].count;
-        }
     return -1;
 }
 
@@ -418,13 +392,6 @@ static void QueueDrawn(int id, const char *what)
         OSReport("[ApDebug] Queued %s id=%d\n", what, id);
     else
         OSReport("[ApDebug] Queue full, dropped %s id=%d\n", what, id);
-}
-
-void DebugMenu_GiveRandomUnlock(void)
-{
-    if (!ap_api)
-        return;
-    QueueDrawn(PickUnlockId(-1), "unlock/progression");
 }
 
 #define DEF_GIVE_RANDOM(prefix, cat, label) \
@@ -448,64 +415,6 @@ DEF_GIVE_RANDOM(Clr, AP_UNLOCK_COLOR,         "color")
 DEF_GIVE_RANDOM(Std, AP_UNLOCK_STADIUM,       "stadium")
 DEF_GIVE_RANDOM(Bab, AP_UNLOCK_BASE_ABILITY,  "base ability")
 DEF_GIVE_RANDOM(Sph, AP_UNLOCK_AP_STAR_PIECE, "AP Star sphere")
-
-// The standalone City Trial gives in the 1-99 block; the rest of that block is
-// global or save-only progression.
-static const u16 ct_singletons[] = {
-    AP_ITEM_ALL_UP,
-    AP_ITEM_ALL_DOWN,
-    AP_ITEM_GIVE_DRAGOON,
-    AP_ITEM_GIVE_HYDRA,
-    AP_ITEM_GIVE_AP_STAR,
-    AP_ITEM_1_HP_TRAP,
-    AP_ITEM_DROP_PATCHES_TRAP,
-};
-
-void DebugMenu_GiveRandomModeItem(MajorKind major)
-{
-    if (!ap_api)
-        return;
-
-    int picked;
-    const char *mode_name;
-    if (major == MJRKIND_CITY)
-    {
-        // One uniform pool over the three CT give segments: the event range, the
-        // full ITKIND range, and the standalone gives.
-        int n_evt = EVKIND_NUM;
-        int n_it = AP_ITKIND_WEIGHTFAKE - AP_ITKIND_BASE + 1;
-        int n_one = GetElementsIn(ct_singletons);
-        int r = HSD_Randi(n_evt + n_it + n_one);
-        if (r < n_evt)
-            picked = AP_EVENT_BASE + r;
-        else if (r < n_evt + n_it)
-            picked = AP_ITKIND_BASE + (r - n_evt);
-        else
-            picked = ct_singletons[r - n_evt - n_it];
-        mode_name = "CT";
-    }
-    else if (major == MJRKIND_AIR)
-    {
-        // Only copy abilities are honored outside CT; every other ITKIND no-ops
-        // behind the Gm_IsInCity gate.
-        picked = RandomInRange(AP_ITKIND_COPYBOMB, AP_ITKIND_COPYMIKE);
-        mode_name = "AR";
-    }
-    else if (major == MJRKIND_TOP)
-    {
-        picked = RandomInRange(AP_TOPRIDE_ITEM_GIVE_BASE, AP_TOPRIDE_ITEM_GIVE_PARTY_BALL);
-        mode_name = "TR";
-    }
-    else
-    {
-        return;
-    }
-
-    if (ap_api->QueueItem(picked))
-        OSReport("[ApDebug] Queued %s item id=%d\n", mode_name, picked);
-    else
-        OSReport("[ApDebug] Queue full, dropped %s item id=%d\n", mode_name, picked);
-}
 
 static int GiveEnergy1000(OptionDesc *self)
 {
@@ -986,19 +895,6 @@ static void RefreshEnergy(void)
     int clamped = live < 0 ? 0 : (live > 100000 ? 100000 : (int)live);
     energy_state = NearestRow(energy_map, GetElementsIn(energy_map), clamped);
     energy_synced = energy_state;
-}
-
-// Which player the pad bindings that drop an item act on, numbered from 1 as on screen.
-static int target_player_state = 1;
-
-int DebugMenu_TargetPlayer(void)
-{
-    return target_player_state - 1;
-}
-
-static void OnTargetPlayerChange(int v)
-{
-    OSReport("[ApDebug] Debug drops target player %d\n", v);
 }
 
 static int MsgDbgSend(int kind, const char *name)
@@ -1752,7 +1648,7 @@ static MenuDesc energy_menu = {
 };
 
 static MenuDesc debug_menu = {
-    .option_num = 12,
+    .option_num = 11,
     .options = {
         S("Unlock Gates",   "Toggle the unlock gate masks by category",     gates_menu),
         S("Give Items",     "Give items directly (free)",                   give_items_menu),
@@ -1763,7 +1659,6 @@ static MenuDesc debug_menu = {
         S("Messages",       "Render canned client text messages",           messages_menu),
         S("Links",          "Arm a DeathLink or TrapLink receive",          links_menu),
         S("EnergyLink",     "Set the energy balance the spend menu reads",  energy_menu),
-        N("Target Player",  "Player slot the pad drops act on", target_player_state, 1, 4, OnTargetPlayerChange),
         A("Report State",   "Log every mask, counter and goal to the console",    StateDbgReport),
         A("Reset Progression", "Roll received-item progression back to pre-connect", StateDbgResetProgression),
     },

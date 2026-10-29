@@ -252,7 +252,7 @@ static int mic_enemy_kos[PLY_NUM];
 static int in_kirby_melee;
 
 #define AP_MIC_ENEMY_KO_NEED    10
-#define AP_MELEE_DEDEDE_KO_NEED 30
+#define AP_MELEE_DEDEDE_KO_NEED 20
 
 // King Dedede's slot in his own stadium, the victim Ply_AddDeath stamps
 // king_dedede_ko_frame for.
@@ -1040,7 +1040,7 @@ static void SampleStadium(const StadiumResults *r, StadiumKind st)
                 APCheckDetect_Observe(APCK_MELEE2_60);
             if (kos >= AP_MELEE_DEDEDE_KO_NEED &&
                 Ply_GetDescRiderKind(p) == RDKIND_DEDEDE)
-                APCheckDetect_Observe(APCK_MELEE_DEDEDE_KO_30);
+                APCheckDetect_Observe(APCK_MELEE_DEDEDE_KO_20);
         }
         else if (st >= STKIND_DESTRUCTION1 && st <= STKIND_DESTRUCTION5)
         {

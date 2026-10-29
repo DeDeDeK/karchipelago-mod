@@ -11,6 +11,7 @@
 #define AP_BOX_ITEM_NAME   "AP Box"
 
 void APPatches_OnBoot(void);
+void APPatches_OnSceneChange(void);
 void APPatches_On3DLoadStart(void);
 void APPatches_On3DLoadEnd(void);
 void APPatches_On3DExit(void);
