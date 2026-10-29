@@ -144,11 +144,11 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
     if (grobj->gr_kind != GR_CITY1)
         return;
 
-    GOBJ *fog_gobj = grobj->sky_gobj;
+    GOBJ *fog_gobj = grobj->fog_gobj;
     if (!fog_gobj)
         return;
-    SkyState *sky_state = (SkyState *)fog_gobj->userdata;
-    if (!sky_state)
+    GrFogData *fog_data = (GrFogData *)fog_gobj->userdata;
+    if (!fog_data)
         return;
 
     HSD_Fog *fog = (HSD_Fog *)fog_gobj->hsd_object;
@@ -160,7 +160,7 @@ void CustomWeatherRuntime_Tick(GrObj *grobj)
         s_lights_resolved = 1;
     }
 
-    int idx = sky_state->current_preset_index;
+    int idx = fog_data->fog_kind;
     if (idx != s_last_seen_preset_idx)
     {
         s_last_seen_preset_idx = idx;

@@ -530,7 +530,7 @@ const char *CustomWeather_GetPresetName(int weather_kind)
 }
 
 // Vanilla entries copied from the stage file, custom entries appended.
-static SkyPresetEntry extended_presets[WEATHER_TOTAL];
+static GrFogDesc extended_presets[WEATHER_TOTAL];
 
 // Per-preset pool toggle, persisted by hoshi menu save.
 static int weather_enabled[WEATHER_TOTAL] = {[0 ... WEATHER_TOTAL - 1] = 1};
@@ -553,28 +553,28 @@ float CustomWeather_GetFogScale(void)
 
 // The stage file can stay resident across rounds with the extended array still in
 // place, so the copy only runs from the stage's own array.
-static void CustomWeather_ExtendPresetArray(SkyPresetSubHeader *sub_header)
+static void CustomWeather_ExtendPresetArray(GrData *gr_data)
 {
-    if (sub_header->preset_array != extended_presets)
-        memcpy(extended_presets, sub_header->preset_array,
-               WEATHER_VANILLA_NUM * sizeof(SkyPresetEntry));
+    if (gr_data->fog->colors->desc_arr != extended_presets)
+        memcpy(extended_presets, gr_data->fog->colors->desc_arr,
+               WEATHER_VANILLA_NUM * sizeof(GrFogDesc));
 
     for (int i = 0; i < WEATHER_CUSTOM_NUM; i++)
     {
         const CustomPresetDef *def = &custom_defs[i];
-        SkyPresetEntry *entry = &extended_presets[WEATHER_VANILLA_NUM + i];
+        GrFogDesc *entry = &extended_presets[WEATHER_VANILLA_NUM + i];
 
         // Keeps the base's AreaLight flags and attenuation.
         *entry = extended_presets[def->base_preset];
 
-        entry->fog_color = def->fog_color;
-        entry->fog_start = def->fog_start;
-        entry->fog_end = def->fog_end;
-        entry->sky_ambient_color = def->sky_color;
+        entry->fog_color = GXColor_Unpack(def->fog_color);
+        entry->fog_near = def->fog_start;
+        entry->fog_far = def->fog_end;
+        entry->sky_color = GXColor_Unpack(def->sky_color);
         // Sky_BeginTransition (0x800dc354) re-drives the lbfade slot to this field on
         // every transition, so an event's sky swap and the restore afterwards both
         // reproduce the preset's tint instead of clearing it.
-        entry->fade_color = def->screen_tint;
+        entry->map_color = GXColor_Unpack(def->screen_tint);
         entry->area_light.color = def->char_diffuse;
         entry->area_light.hw_color = def->char_specular;
         entry->area_light.direction = def->char_dir;
@@ -582,29 +582,29 @@ static void CustomWeather_ExtendPresetArray(SkyPresetSubHeader *sub_header)
         entry->transition_frames = 1;
     }
 
-    sub_header->preset_array = extended_presets;
-    sub_header->preset_count = WEATHER_TOTAL;
+    gr_data->fog->colors->desc_arr = extended_presets;
+    gr_data->fog->colors->num = WEATHER_TOTAL;
 }
 
 static void CustomWeather_OverrideSky(GrObj *grobj)
 {
     // WeatherKind pins the custom indices at WEATHER_VANILLA_NUM. GrCity1.dat ships 19
     // presets, and the two past it (the Meteor and Lighthouse event skies) are dropped.
-    SkyPresetSubHeader *sub_header = grobj->gr_data->sky_block->preset_header;
-    if (sub_header->preset_count < WEATHER_VANILLA_NUM)
+    int preset_num = grobj->gr_data->fog->colors->num;
+    if (preset_num < WEATHER_VANILLA_NUM)
     {
         static int count_warned = 0;
         if (!count_warned)
         {
             OSReport("[CustomWeather] Stage ships %d presets, needs %d; custom weather off\n",
-                     sub_header->preset_count, WEATHER_VANILLA_NUM);
+                     preset_num, WEATHER_VANILLA_NUM);
             count_warned = 1;
         }
         Sky_SetPresetIndex(grobj, CITYSKY_DAY);
         return;
     }
 
-    CustomWeather_ExtendPresetArray(sub_header);
+    CustomWeather_ExtendPresetArray(grobj->gr_data);
 
     int preset = Gm_Roll(weather_enabled, WEATHER_TOTAL);
     if (preset < 0)

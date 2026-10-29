@@ -11,8 +11,8 @@ extension, the hooks, the per-frame runtime, the presets and the settings.
 
 ## The engine it builds on
 
-City Trial's look comes from a table of 0x48-byte `SkyPresetEntry` records reached through
-`GrData.sky_block->preset_header->{preset_array, preset_count}`. `Sky_Init` (0x8010f114) picks the
+City Trial's look comes from a table of 0x48-byte `GrFogDesc` records reached through
+`GrData.fog->colors->{desc_arr, num}`. `Sky_Init` (0x8010f114) picks the
 round's preset (a weighted roll over `{0, 10, 11, 12}` for City Trial, preset 0 for Free Run),
 stores it with `Sky_SetPresetIndex` and applies it with `Sky_LoadPreset`. Each frame `Sky_Update`
 (0x800dc640) lerps toward the target preset and writes `HSD_Fog.color/start/end`, the global EFB
@@ -22,13 +22,13 @@ writes `HSD_Fog.type`, `HSD_Fog.scale` or any `LOBJ` colour, so a mod owns those
 City Trial's terrain is almost entirely unlit - its colour is baked into vertex colours - so no
 hardware light changes the look of the city. City-wide change has to go through fog, the EFB
 clear colour, or the lbfade overlay that `Sky_BeginTransition` drives from a preset's
-`fade_color`. The stage's hardware lights reach only a few lit surfaces, and riders and machines
+`map_color`. The stage's hardware lights reach only a few lit surfaces, and riders and machines
 draw under light sets of their own, shaded by the AreaLight.
 
 ## Preset extension
 
 On every City Trial and Free Run `Sky_Init` the mod copies the stage's vanilla presets into a
-static array, appends its own, and repoints `{preset_array, preset_count}` at the longer array.
+static array, appends its own, and repoints `fog->colors->{desc_arr, num}` at the longer array.
 Since that pair is all `Sky_GetPresetCount` and `Sky_BeginTransition` read, vanilla code - event
 transitions included - indexes the custom presets like any other. `GrCity1.dat` can stay resident
 into the next round with the extended array still in place, so the copy runs only from the
@@ -37,8 +37,8 @@ stage's own array.
 Each custom entry is a copy of a vanilla `base_preset` (inheriting its AreaLight flags and
 attenuation) with the fog colour and distances, sky colour, AreaLight colour, specular colour and
 direction, and `light_vis_flag` overridden. `transition_frames` is forced to 1 so the change
-snaps. `fade_color` carries the preset's `screen_tint`, and that is load-bearing:
-`Sky_BeginTransition` fires the lbfade overlay with the target's `fade_color` on every
+snaps. `map_color` carries the preset's `screen_tint`, and that is load-bearing:
+`Sky_BeginTransition` fires the lbfade overlay with the target's `map_color` on every
 transition, and the overlay holds whatever it was last driven to. If the custom entries left it
 0, the first event that swapped the sky would end with the restore fading the round's tint away
 for good. With it filled in, the restore reproduces the tint by itself.
@@ -75,7 +75,7 @@ The runtime runs every frame on the City Trial ground. `On3DLoadEnd` resets it b
 first frame, dropping cached handles and per-round state: the previous round's GObjs and lights
 went with the scene heap, so nothing is written through them.
 
-**A preset change.** The runtime watches `SkyState.current_preset_index`, which only
+**A preset change.** The runtime watches `GrFogData.fog_kind`, which only
 `Sky_SetPresetIndex` writes. It therefore never sees an event's temporary sky, and the layers stay
 on through events. It does see the legendary-machine skies: assembling the Dragoon or Hydra stores
 vanilla preset 13 or 14 as the round's new base, which turns the custom preset's layers and tints

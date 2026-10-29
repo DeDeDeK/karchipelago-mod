@@ -26,9 +26,9 @@ void EventSky_RestoreGlobal(void)
     GrObj *gr = *stc_grobj;
     if (!event_sky_changes)
     {
-        SkyState *ss = (SkyState *)gr->sky_gobj->userdata;
-        SkyPresetEntry *presets = gr->gr_data->sky_block->preset_header->preset_array;
-        if (ss->target_preset == &presets[ss->current_preset_index])
+        GrFogData *fd = (GrFogData *)gr->fog_gobj->userdata;
+        GrFogDesc *presets = gr->gr_data->fog->colors->desc_arr;
+        if (fd->target_preset == &presets[fd->fog_kind])
             return;
     }
     Sky_ApplyStoredIndex(gr);

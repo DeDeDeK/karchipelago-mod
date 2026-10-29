@@ -10,18 +10,19 @@ update, fog, and the fade overlay.
 
 ## The pieces
 
-- **Sky preset** - a 0x48-byte `SkyPresetEntry` in the stage's `GrData.sky_block`, reached as
-  `sky_block->preset_header->{preset_array, preset_count}`.
-- **The sky GObj** at `GrObj+0x168` (`sky_gobj`), built by `Sky_InitFog` (0x800dbfa8). Its
-  object is the live `HSD_Fog` and its userdata the `SkyState` lerp state: target preset,
+- **Sky preset** - a 0x48-byte `GrFogDesc` in the stage's `GrData.fog`, reached as
+  `fog->colors->{desc_arr, num}`. The block's other half, `fog->data->desc`, is the initial
+  `HSD_FogDesc`.
+- **The sky GObj** at `GrObj+0x168` (`fog_gobj`), built by `Sky_InitFog` (0x800dbfa8). Its
+  object is the live `HSD_Fog` and its userdata the `GrFogData` lerp state: target preset,
   transition counter, the lerp start of every field, the current sky colour (+0x18) and the
   stored preset index (+0x1c).
 - **The AreaLight** at `GrObj+0x718`, a KAR-specific directional light that shades riders and
   machines. It is not an HSD `LOBJ` and drives no hardware light slot.
 - **The fade overlay**, lbfade slot 3, whose slot id the stage keeps at `GrObj+0x714`.
 
-A preset carries `transition_frames` (the lerp length), the fog colour, start and end,
-`fade_color` (the overlay target, used only on transitions), `sky_ambient_color` (the sky tint), a
+A preset carries `transition_frames` (the lerp length), the fog colour, `fog_near` and `fog_far`,
+`map_color` (the overlay target, used only on transitions), `sky_color` (the sky tint), a
 0x2c-byte `AreaLightData` at +0x18 (colour, specular colour, direction) and `light_vis_flag` at
 +0x44. Colours are packed RGBA8888 with red in the high byte, a `GXColor`'s byte order.
 
@@ -70,7 +71,7 @@ StageKind, not the ground. Any other kind asserts.
 
 The roll is `Gm_Roll` (0x800db2b8) over four weights pointed to by `GrData+0x08` sub-block
 `+0x0c`, indexing the table `{0, 10, 11, 12}` at 0x804a77e4. `Sky_SetPresetIndex` (0x800dc630)
-stores the result in `SkyState+0x1c` and `Sky_LoadPreset` (0x800dc1b4) applies it at once: no
+stores the result in `GrFogData.fog_kind` and `Sky_LoadPreset` (0x800dc1b4) applies it at once: no
 transition and no overlay. `Gm_Roll` returns -1 when every weight is 0.
 
 `Sky_SetupLights` (0x800db774), called from `Sky_Init`, creates no light despite its name. It sets
@@ -92,7 +93,7 @@ The stored index is the round's base sky; everything else transitions away from 
 
 `Sky_TransitionGlobal` and `Sky_RestoreGlobal` are the only routes events take, so replacing the
 two is enough to keep events from touching the sky. `Sky_BeginTransition` (0x800dc354) never
-writes `SkyState+0x1c`: code that watches that field sees the round's base preset, not the event
+writes `GrFogData.fog_kind`: code that watches that field sees the round's base preset, not the event
 skies laid over it.
 
 The Dense Fog event (`event_denseFog`, 0x801118dc) does nothing to fog itself. Its visual is
@@ -104,14 +105,14 @@ entirely the transition to preset 9; the handler only counts down its duration.
 there is no target preset or its `transition_frames` is 0. Otherwise it advances the counter
 (capped) and, with `ratio = counter / transition_frames`:
 
-1. Lerps the fog colour from `SkyState+0x08` toward the target's with `GXColor_Lerp`
+1. Lerps the fog colour from `GrFogData+0x08` toward the target's with `GXColor_Lerp`
    (0x80079c04) and writes it to `HSD_Fog.color` and to the global EFB clear colour at
    0x80557484 (`stc_global_fog_color`).
 2. Lerps `HSD_Fog.start` and `HSD_Fog.end`.
-3. Lerps the sky colour from `SkyState+0x14` toward `sky_ambient_color` into `SkyState+0x18`.
+3. Lerps the sky colour from `GrFogData+0x14` toward `sky_color` into `GrFogData+0x18`.
 4. Lerps the AreaLight through `AreaLight_LerpToLive` (0x800ef864).
 
-`Sky_GetCurrentSkyColor` (0x800dc7a4) returns `SkyState+0x18`, and `Sky_DrawTintQuad`
+`Sky_GetCurrentSkyColor` (0x800dc7a4) returns `GrFogData+0x18`, and `Sky_DrawTintQuad`
 (0x800d7e78) draws it as a translucent, fogged quad across the view behind the scene; an alpha of
 0 draws nothing. That quad is the visible sky tint. The skybox's own material colour is set once
 at load and never touched by a preset.
@@ -153,7 +154,7 @@ The sky wrappers are `Sky_AllocFade` (0x800eef04), `Sky_BeginFade(grobj, &color,
 (0x800eef50) and `Sky_FreeFade` (0x800eefb0).
 
 - **Only transitions fire it.** `Sky_BeginTransition` calls `Sky_BeginFade` with the target's
-  `fade_color` and `transition_frames`; `Sky_LoadPreset` does not, so the round's first preset
+  `map_color` and `transition_frames`; `Sky_LoadPreset` does not, so the round's first preset
   never tints.
 - **It holds.** `ScreenFade_Begin` (0x800665f8) lerps to the target and stays there; clearing it
   means fading to `0x00000000`.
@@ -180,6 +181,6 @@ state - including whether `Sky_BeginFade` has been called on this slot yet.
 | `Sky_ApplyStoredIndex` | 0x800dc4c0 | transition back to the stored preset |
 | `Sky_Update` | 0x800dc640 | per-frame lerp |
 | `Sky_TransitionGlobal` / `Sky_RestoreGlobal` | 0x800d5444 / 0x800d546c | the event start and end wrappers |
-| `Sky_GetPresetCount` | 0x800d5414 | `preset_count` of the live stage |
+| `Sky_GetPresetCount` | 0x800d5414 | `fog->colors->num` of the live stage |
 | `Sky_BeginFade` | 0x800eef50 | drive the lbfade overlay |
 | `HSD_FogSet` | 0x8041b0fc | emit the fog to GX |
