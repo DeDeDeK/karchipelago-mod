@@ -11,8 +11,8 @@ The material ships white. The mod writes the ambient and diffuse of the loaded
 copy per shot, taking the color of whichever pod launched it, which reaches a
 pixel because the material renders CONSTANT with no texture stage over it.
 
-`Projectile_Create` reads the model through a two-word block at the kind's
-`ProjKindData+0x08`: word 0 is this tree's root, and the top byte of word 1 is
+`Weapon_Create` reads the model through a two-word block at the kind's
+`WeaponKindData+0x08`: word 0 is this tree's root, and the top byte of word 1 is
 how many joints the tree has. The joint walker at 0x80221914 asserts on a
 mismatch and on any count above 10, which is why the tree is kept to two.
 

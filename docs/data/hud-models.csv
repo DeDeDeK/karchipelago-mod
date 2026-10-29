@@ -1,0 +1,306 @@
+archive,public,loaded,description
+IfAll11.dat,ScInfAbilityefx_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Ability effect indicator
+IfAll11.dat,ScInfAbilityefxd_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Ability effect indicator
+IfAll11.dat,ScInfBoost_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Boost gauge
+IfAll11.dat,ScInfBoostbreak_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll11.dat,ScInfBoostbreakd_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll11.dat,ScInfBoostbreakm_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll11.dat,ScInfBoostcut_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Boost cut indicator
+IfAll11.dat,ScInfBoostd_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Boost gauge
+IfAll11.dat,ScInfCPGoal_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Checkpoint / goal indicator
+IfAll11.dat,ScInfDamageE_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Damage indicator (E / P)
+IfAll11.dat,ScInfDamageP_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Damage indicator (E / P)
+IfAll11.dat,ScInfDistance1_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Distance display
+IfAll11.dat,ScInfHp_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll11.dat,ScInfHpd_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll11.dat,ScInfHpm_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll11.dat,ScInfLapcount_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Lap counter
+IfAll11.dat,ScInfMap_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive","Minimap (base, dots, Kirby and other markers)"
+IfAll11.dat,ScInfPause_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Pause screen
+IfAll11.dat,ScInfPausect_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive","Pause screen, City Trial"
+IfAll11.dat,ScInfPausepmct_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Pause stat chart background (CityHUD_CreateStatChart)
+IfAll11.dat,ScInfRanking_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Race ranking
+IfAll11.dat,ScInfResultfree_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive","Results element (Free Run, time record, time score)"
+IfAll11.dat,ScInfResulttimenew_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive","Results element (Free Run, time record, time score)"
+IfAll11.dat,ScInfResulttimescore_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive","Results element (Free Run, time record, time score)"
+IfAll11.dat,ScInfRetire1_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Retire prompt
+IfAll11.dat,ScInfSpeed_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll11.dat,ScInfSpeedd_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll11.dat,ScInfSpeedm_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll11.dat,ScInfWalkkby_scene_models,"3D round with 1 view, outside the open city; Gm_GetIfAllScreenArchive",Walking Kirby
+IfAll11s.dat,ScInfAbilityefx_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Ability effect indicator
+IfAll11s.dat,ScInfBoost_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Boost gauge
+IfAll11s.dat,ScInfBoostbreak_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Boost break indicator
+IfAll11s.dat,ScInfBoostcut_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Boost cut indicator
+IfAll11s.dat,ScInfDamageE_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Damage indicator (E / P)
+IfAll11s.dat,ScInfDamageP_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Damage indicator (E / P)
+IfAll11s.dat,ScInfHp_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,HP bar (normal / d / m variants)
+IfAll11s.dat,ScInfPausect_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,"Pause screen, City Trial"
+IfAll11s.dat,ScInfPausepmct_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Pause stat chart background (CityHUD_CreateStatChart)
+IfAll11s.dat,ScInfRetire1_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Retire prompt
+IfAll11s.dat,ScInfSpeed_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Speedometer (normal / d / m variants)
+IfAll11s.dat,ScInfWalkkby_scene_models,open City Trial map with 1 view; Gm_GetIfAllScreenArchive,Walking Kirby
+IfAll12.dat,ScInfAbilityefx2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Ability effect indicator
+IfAll12.dat,ScInfAbilityefxd2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Ability effect indicator
+IfAll12.dat,ScInfBoost2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Boost gauge
+IfAll12.dat,ScInfBoostbreak2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll12.dat,ScInfBoostbreakd2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll12.dat,ScInfBoostbreakm2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll12.dat,ScInfBoostcut2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Boost cut indicator
+IfAll12.dat,ScInfBoostd2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Boost gauge
+IfAll12.dat,ScInfCPGoal2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Checkpoint / goal indicator
+IfAll12.dat,ScInfDamageE2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Damage indicator (E / P)
+IfAll12.dat,ScInfDamageP2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Damage indicator (E / P)
+IfAll12.dat,ScInfDistance2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Distance display
+IfAll12.dat,ScInfFrame2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Frame overlay
+IfAll12.dat,ScInfGpos2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Position overlay
+IfAll12.dat,ScInfHp2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll12.dat,ScInfHpd2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll12.dat,ScInfHpm2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll12.dat,ScInfLapcount2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Lap counter
+IfAll12.dat,ScInfPause2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Pause screen
+IfAll12.dat,ScInfPausect2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive","Pause screen, City Trial"
+IfAll12.dat,ScInfPausepmct2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Pause stat chart background (CityHUD_CreateStatChart)
+IfAll12.dat,ScInfPlynm2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Player name (normal / d / m variants)
+IfAll12.dat,ScInfPlynmd2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Player name (normal / d / m variants)
+IfAll12.dat,ScInfPlynmm2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Player name (normal / d / m variants)
+IfAll12.dat,ScInfRanking2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Race ranking
+IfAll12.dat,ScInfRetire2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Retire prompt
+IfAll12.dat,ScInfSpeed2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll12.dat,ScInfSpeedd2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll12.dat,ScInfSpeedm2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll12.dat,ScInfWalkkby2_scene_models,"3D round with 2 views, outside the open city; Gm_GetIfAllScreenArchive",Walking Kirby
+IfAll12s.dat,ScInfAbilityefx2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Ability effect indicator
+IfAll12s.dat,ScInfBoost2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Boost gauge
+IfAll12s.dat,ScInfBoostbreak2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Boost break indicator
+IfAll12s.dat,ScInfBoostcut2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Boost cut indicator
+IfAll12s.dat,ScInfDamageE2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Damage indicator (E / P)
+IfAll12s.dat,ScInfDamageP2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Damage indicator (E / P)
+IfAll12s.dat,ScInfFrame2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Frame overlay
+IfAll12s.dat,ScInfGpos2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Position overlay
+IfAll12s.dat,ScInfHp2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,HP bar (normal / d / m variants)
+IfAll12s.dat,ScInfPausect2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,"Pause screen, City Trial"
+IfAll12s.dat,ScInfPausepmct2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Pause stat chart background (CityHUD_CreateStatChart)
+IfAll12s.dat,ScInfPlynm2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Player name (normal / d / m variants)
+IfAll12s.dat,ScInfRetire2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Retire prompt
+IfAll12s.dat,ScInfSpeed2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Speedometer (normal / d / m variants)
+IfAll12s.dat,ScInfWalkkby2_scene_models,open City Trial map with 2 views; Gm_GetIfAllScreenArchive,Walking Kirby
+IfAll14.dat,ScInfAbilityefx4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Ability effect indicator
+IfAll14.dat,ScInfAbilityefxd4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Ability effect indicator
+IfAll14.dat,ScInfBoost4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Boost gauge
+IfAll14.dat,ScInfBoostbreak4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll14.dat,ScInfBoostbreakd4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll14.dat,ScInfBoostbreakm4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Boost break indicator
+IfAll14.dat,ScInfBoostcut4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Boost cut indicator
+IfAll14.dat,ScInfBoostd4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Boost gauge
+IfAll14.dat,ScInfCPGoal4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Checkpoint / goal indicator
+IfAll14.dat,ScInfDamageE4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Damage indicator (E / P)
+IfAll14.dat,ScInfDamageP4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Damage indicator (E / P)
+IfAll14.dat,ScInfDistance4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Distance display
+IfAll14.dat,ScInfFrame4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Frame overlay
+IfAll14.dat,ScInfGpos4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Position overlay
+IfAll14.dat,ScInfHp4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll14.dat,ScInfHpd4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll14.dat,ScInfHpm4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",HP bar (normal / d / m variants)
+IfAll14.dat,ScInfLapcount4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Lap counter
+IfAll14.dat,ScInfMap4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive","Minimap (base, dots, Kirby and other markers)"
+IfAll14.dat,ScInfMapbase_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive","Minimap (base, dots, Kirby and other markers)"
+IfAll14.dat,ScInfPause4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Pause screen
+IfAll14.dat,ScInfPausect4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive","Pause screen, City Trial"
+IfAll14.dat,ScInfPausepmct4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Pause stat chart background (CityHUD_CreateStatChart)
+IfAll14.dat,ScInfPlynm4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Player name (normal / d / m variants)
+IfAll14.dat,ScInfPlynmd4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Player name (normal / d / m variants)
+IfAll14.dat,ScInfPlynmm4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Player name (normal / d / m variants)
+IfAll14.dat,ScInfRanking4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Race ranking
+IfAll14.dat,ScInfRetire4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Retire prompt
+IfAll14.dat,ScInfSpeed4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll14.dat,ScInfSpeedd4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll14.dat,ScInfSpeedm4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Speedometer (normal / d / m variants)
+IfAll14.dat,ScInfWalkkby4_scene_models,"3D round with 3-4 views, outside the open city; Gm_GetIfAllScreenArchive",Walking Kirby
+IfAll14s.dat,ScInfAbilityefx4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Ability effect indicator
+IfAll14s.dat,ScInfBoost4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Boost gauge
+IfAll14s.dat,ScInfBoostbreak4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Boost break indicator
+IfAll14s.dat,ScInfBoostcut4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Boost cut indicator
+IfAll14s.dat,ScInfDamageE4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Damage indicator (E / P)
+IfAll14s.dat,ScInfDamageP4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Damage indicator (E / P)
+IfAll14s.dat,ScInfFrame4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Frame overlay
+IfAll14s.dat,ScInfGpos4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Position overlay
+IfAll14s.dat,ScInfHp4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,HP bar (normal / d / m variants)
+IfAll14s.dat,ScInfMapbase_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,"Minimap (base, dots, Kirby and other markers)"
+IfAll14s.dat,ScInfPausect4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,"Pause screen, City Trial"
+IfAll14s.dat,ScInfPausepmct4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Pause stat chart background (CityHUD_CreateStatChart)
+IfAll14s.dat,ScInfPlynm4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Player name (normal / d / m variants)
+IfAll14s.dat,ScInfRetire4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Retire prompt
+IfAll14s.dat,ScInfSpeed4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Speedometer (normal / d / m variants)
+IfAll14s.dat,ScInfWalkkby4_scene_models,open City Trial map with 3-4 views; Gm_GetIfAllScreenArchive,Walking Kirby
+IfAll1c.dat,ScInfAbility_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: none
+IfAll1c.dat,ScInfAbilitybmb_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Bomb
+IfAll1c.dat,ScInfAbilityfir_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Fire
+IfAll1c.dat,ScInfAbilityfrz_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Freeze
+IfAll1c.dat,ScInfAbilitymik_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Mike
+IfAll1c.dat,ScInfAbilityndl_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Needle
+IfAll1c.dat,ScInfAbilitypla_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Plasma
+IfAll1c.dat,ScInfAbilityslp_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Sleep
+IfAll1c.dat,ScInfAbilityswd_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Sword
+IfAll1c.dat,ScInfAbilitytrn_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Tornado
+IfAll1c.dat,ScInfAbilitywhl_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Wheel
+IfAll1c.dat,ScInfAbilitywin_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Copy ability icon: Wing
+IfAll1c.dat,ScInfCitymap_scene_models,always (preloaded); Gm_GetIfAllCityArchive,City map (event overlay)
+IfAll1c.dat,ScInfCitymapevent_scene_models,always (preloaded); Gm_GetIfAllCityArchive,City map (event overlay)
+IfAll1c.dat,ScInfEnemyAbility_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Enemy ability indicator
+IfAll1c.dat,ScInfFinallap_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Final lap
+IfAll1c.dat,ScInfFinish_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Finish
+IfAll1c.dat,ScInfGpanel_scene_data,always (preloaded); Gm_GetIfAllCityArchive,Gauge panel scene (scene_data)
+IfAll1c.dat,ScInfKeyBom_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Key prompt (bomb, lever, plasma)"
+IfAll1c.dat,ScInfKeyLever_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Key prompt (bomb, lever, plasma)"
+IfAll1c.dat,ScInfKeyPla_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Key prompt (bomb, lever, plasma)"
+IfAll1c.dat,ScInfLaprec_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Lap record
+IfAll1c.dat,ScInfLaptime_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Lap time
+IfAll1c.dat,ScInfMapbase4_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Minimap (base, dots, Kirby and other markers)"
+IfAll1c.dat,ScInfMapd4_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Minimap (base, dots, Kirby and other markers)"
+IfAll1c.dat,ScInfMapkirby4_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Minimap (base, dots, Kirby and other markers)"
+IfAll1c.dat,ScInfMapm4_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Minimap (base, dots, Kirby and other markers)"
+IfAll1c.dat,ScInfMmapply_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Minimap player marker / start point
+IfAll1c.dat,ScInfMmapstart_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Minimap player marker / start point
+IfAll1c.dat,ScInfPausegaugect_scene_models,always (preloaded); Gm_GetIfAllCityArchive,"Stat gauge: fill bar, two digits, minus sign"
+IfAll1c.dat,ScInfPlicon_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Player character icon (normal / d / m variants)
+IfAll1c.dat,ScInfPlicond_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Player character icon (normal / d / m variants)
+IfAll1c.dat,ScInfPliconm_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Player character icon (normal / d / m variants)
+IfAll1c.dat,ScInfPlynum_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Player number label (P1-P4 by animation frame)
+IfAll1c.dat,ScInfReadygo_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Ready / Go
+IfAll1c.dat,ScInfReplay_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Replay label
+IfAll1c.dat,ScInfTime4_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Timer digits (1-2 views / 3-4 views)
+IfAll1c.dat,ScInfTime_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Timer digits (1-2 views / 3-4 views)
+IfAll1c.dat,ScInfTimeup_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Time up
+IfAll1c.dat,ScInfWarningfall_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Falling warning
+IfAll1c.dat,ScInfWrongway_scene_models,always (preloaded); Gm_GetIfAllCityArchive,Wrong way
+IfAll1cs.dat,ScInfAbility_scene_models,,Copy ability icon: none
+IfAll1cs.dat,ScInfAbilitybmb_scene_models,,Copy ability icon: Bomb
+IfAll1cs.dat,ScInfAbilityfir_scene_models,,Copy ability icon: Fire
+IfAll1cs.dat,ScInfAbilityfrz_scene_models,,Copy ability icon: Freeze
+IfAll1cs.dat,ScInfAbilitymik_scene_models,,Copy ability icon: Mike
+IfAll1cs.dat,ScInfAbilityndl_scene_models,,Copy ability icon: Needle
+IfAll1cs.dat,ScInfAbilitypla_scene_models,,Copy ability icon: Plasma
+IfAll1cs.dat,ScInfAbilityslp_scene_models,,Copy ability icon: Sleep
+IfAll1cs.dat,ScInfAbilityswd_scene_models,,Copy ability icon: Sword
+IfAll1cs.dat,ScInfAbilitytrn_scene_models,,Copy ability icon: Tornado
+IfAll1cs.dat,ScInfAbilitywhl_scene_models,,Copy ability icon: Wheel
+IfAll1cs.dat,ScInfAbilitywin_scene_models,,Copy ability icon: Wing
+IfAll1cs.dat,ScInfCitymap_scene_models,,City map (event overlay)
+IfAll1cs.dat,ScInfCitymapevent_scene_models,,City map (event overlay)
+IfAll1cs.dat,ScInfFinish_scene_models,,Finish
+IfAll1cs.dat,ScInfGpanel_scene_data,,Gauge panel scene (scene_data)
+IfAll1cs.dat,ScInfKeyBom_scene_models,,"Key prompt (bomb, lever, plasma)"
+IfAll1cs.dat,ScInfKeyLever_scene_models,,"Key prompt (bomb, lever, plasma)"
+IfAll1cs.dat,ScInfKeyPla_scene_models,,"Key prompt (bomb, lever, plasma)"
+IfAll1cs.dat,ScInfMmapply_scene_models,,Minimap player marker / start point
+IfAll1cs.dat,ScInfMmapstart_scene_models,,Minimap player marker / start point
+IfAll1cs.dat,ScInfPausegaugect_scene_models,,"Stat gauge: fill bar, two digits, minus sign"
+IfAll1cs.dat,ScInfPlicon_scene_models,,Player character icon (normal / d / m variants)
+IfAll1cs.dat,ScInfPlicond_scene_models,,Player character icon (normal / d / m variants)
+IfAll1cs.dat,ScInfPliconm_scene_models,,Player character icon (normal / d / m variants)
+IfAll1cs.dat,ScInfPlynum_scene_models,,Player number label (P1-P4 by animation frame)
+IfAll1cs.dat,ScInfReadygo_scene_models,,Ready / Go
+IfAll1cs.dat,ScInfTime4_scene_models,,Timer digits (1-2 views / 3-4 views)
+IfAll1cs.dat,ScInfTime_scene_models,,Timer digits (1-2 views / 3-4 views)
+IfAll1cs.dat,ScInfTimeup_scene_models,,Time up
+IfAll1cs.dat,ScInfWarningfall_scene_models,,Falling warning
+IfAll21.dat,ScInfEventmarkct_scene_models,open City Trial map with 1 view,Event marker
+IfAll21.dat,ScInfSpDragoonA1_scene_models,open City Trial map with 1 view,Legendary machine piece icon
+IfAll21.dat,ScInfSpDragoonB1_scene_models,open City Trial map with 1 view,Legendary machine piece icon
+IfAll21.dat,ScInfSpDragoonC1_scene_models,open City Trial map with 1 view,Legendary machine piece icon
+IfAll21.dat,ScInfSpEfx1_scene_models,open City Trial map with 1 view,Legendary piece set-complete effect
+IfAll21.dat,ScInfSpHydraA1_scene_models,open City Trial map with 1 view,Legendary machine piece icon
+IfAll21.dat,ScInfSpHydraB1_scene_models,open City Trial map with 1 view,Legendary machine piece icon
+IfAll21.dat,ScInfSpHydraC1_scene_models,open City Trial map with 1 view,Legendary machine piece icon
+IfAll21.dat,ScInfSpPos1_scene_models,open City Trial map with 1 view,Legendary piece anchor row
+IfAll22.dat,ScInfEventmark2ct_scene_models,open City Trial map with 2 views,Event marker
+IfAll22.dat,ScInfSpDragoonA2_scene_models,open City Trial map with 2 views,Legendary machine piece icon
+IfAll22.dat,ScInfSpDragoonB2_scene_models,open City Trial map with 2 views,Legendary machine piece icon
+IfAll22.dat,ScInfSpDragoonC2_scene_models,open City Trial map with 2 views,Legendary machine piece icon
+IfAll22.dat,ScInfSpEfx2_scene_models,open City Trial map with 2 views,Legendary piece set-complete effect
+IfAll22.dat,ScInfSpHydraA2_scene_models,open City Trial map with 2 views,Legendary machine piece icon
+IfAll22.dat,ScInfSpHydraB2_scene_models,open City Trial map with 2 views,Legendary machine piece icon
+IfAll22.dat,ScInfSpHydraC2_scene_models,open City Trial map with 2 views,Legendary machine piece icon
+IfAll22.dat,ScInfSpPos2_scene_models,open City Trial map with 2 views,Legendary piece anchor row
+IfAll24.dat,ScInfEventmark4ct_scene_models,open City Trial map with 3-4 views,Event marker
+IfAll24.dat,ScInfSpDragoonA4_scene_models,open City Trial map with 3-4 views,Legendary machine piece icon
+IfAll24.dat,ScInfSpDragoonB4_scene_models,open City Trial map with 3-4 views,Legendary machine piece icon
+IfAll24.dat,ScInfSpDragoonC4_scene_models,open City Trial map with 3-4 views,Legendary machine piece icon
+IfAll24.dat,ScInfSpEfx4_scene_models,open City Trial map with 3-4 views,Legendary piece set-complete effect
+IfAll24.dat,ScInfSpHydraA4_scene_models,open City Trial map with 3-4 views,Legendary machine piece icon
+IfAll24.dat,ScInfSpHydraB4_scene_models,open City Trial map with 3-4 views,Legendary machine piece icon
+IfAll24.dat,ScInfSpHydraC4_scene_models,open City Trial map with 3-4 views,Legendary machine piece icon
+IfAll24.dat,ScInfSpPos4_scene_models,open City Trial map with 3-4 views,Legendary piece anchor row
+IfAll2c.dat,ScInfBoxct_scene_models,open City Trial map,Box indicator
+IfAll2c.dat,ScInfEvent4ct_scene_models,open City Trial map,Event announcement banner (1-2 views / 3-4 views)
+IfAll2c.dat,ScInfEventct_scene_models,open City Trial map,Event announcement banner (1-2 views / 3-4 views)
+IfAll2c.dat,ScInfIgetAccelct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetAcceldwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetAllct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetAlldwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetAttackct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetAttackdwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetChargect_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetChargedwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetDefensect_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetDefensedwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetFlightct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetFlightdwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetHpct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetHpdwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetMaxspct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetMaxspdwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetTurnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetTurndwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetWaitct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfIgetWaitdwnct_scene_models,open City Trial map,"Stat item pickup feedback (+1, or -1 for dwn)"
+IfAll2c.dat,ScInfWarpstarct_scene_models,open City Trial map,Warp star indicator
+IfAll31.dat,ScInfDmIcon1_scene_models,stadium with 1 view,Stadium damage icon (and anchor)
+IfAll31.dat,ScInfDmIconPos1_scene_models,stadium with 1 view,Stadium damage icon (and anchor)
+IfAll31.dat,ScInfHeight1_scene_models,stadium with 1 view,Stadium height / width readout
+IfAll31.dat,ScInfLapPt1_scene_models,stadium with 1 view,Stadium lap / point counter
+IfAll31.dat,ScInfLapTen1_scene_models,stadium with 1 view,Stadium lap / point counter
+IfAll31.dat,ScInfOut1_scene_models,stadium with 1 view,Stadium out / safe indicator
+IfAll31.dat,ScInfSafe1_scene_models,stadium with 1 view,Stadium out / safe indicator
+IfAll31.dat,ScInfScoreAg1_scene_models,stadium with 1 view,Stadium score display
+IfAll31.dat,ScInfScoreHj1_scene_models,stadium with 1 view,Stadium score display
+IfAll31.dat,ScInfScorePs1_scene_models,stadium with 1 view,Stadium score display
+IfAll31.dat,ScInfScorePt1_scene_models,stadium with 1 view,Stadium score display
+IfAll31.dat,ScInfSignalGo1_scene_models,stadium with 1 view,Stadium start signal
+IfAll31.dat,ScInfStIcon1_scene_models,stadium with 1 view,Stadium star icon
+IfAll31.dat,ScInfWidth1_scene_models,stadium with 1 view,Stadium height / width readout
+IfAll32.dat,ScInfDmIcon2_scene_models,stadium with 2 views,Stadium damage icon (and anchor)
+IfAll32.dat,ScInfDmIconPos2_scene_models,stadium with 2 views,Stadium damage icon (and anchor)
+IfAll32.dat,ScInfHeight2_scene_models,stadium with 2 views,Stadium height / width readout
+IfAll32.dat,ScInfLapPt2_scene_models,stadium with 2 views,Stadium lap / point counter
+IfAll32.dat,ScInfLapTen2_scene_models,stadium with 2 views,Stadium lap / point counter
+IfAll32.dat,ScInfOut2_scene_models,stadium with 2 views,Stadium out / safe indicator
+IfAll32.dat,ScInfSafe2_scene_models,stadium with 2 views,Stadium out / safe indicator
+IfAll32.dat,ScInfScoreAg2_scene_models,stadium with 2 views,Stadium score display
+IfAll32.dat,ScInfScoreHj2_scene_models,stadium with 2 views,Stadium score display
+IfAll32.dat,ScInfScorePs2_scene_models,stadium with 2 views,Stadium score display
+IfAll32.dat,ScInfScorePt2_scene_models,stadium with 2 views,Stadium score display
+IfAll32.dat,ScInfSignalGo2_scene_models,stadium with 2 views,Stadium start signal
+IfAll32.dat,ScInfStIcon2_scene_models,stadium with 2 views,Stadium star icon
+IfAll32.dat,ScInfWidth2_scene_models,stadium with 2 views,Stadium height / width readout
+IfAll34.dat,ScInfDmIcon4_scene_models,stadium with 3-4 views,Stadium damage icon (and anchor)
+IfAll34.dat,ScInfDmIconPos4_scene_models,stadium with 3-4 views,Stadium damage icon (and anchor)
+IfAll34.dat,ScInfHeight4_scene_models,stadium with 3-4 views,Stadium height / width readout
+IfAll34.dat,ScInfLapPt4_scene_models,stadium with 3-4 views,Stadium lap / point counter
+IfAll34.dat,ScInfLapTen4_scene_models,stadium with 3-4 views,Stadium lap / point counter
+IfAll34.dat,ScInfOut4_scene_models,stadium with 3-4 views,Stadium out / safe indicator
+IfAll34.dat,ScInfSafe4_scene_models,stadium with 3-4 views,Stadium out / safe indicator
+IfAll34.dat,ScInfScoreAg4_scene_models,stadium with 3-4 views,Stadium score display
+IfAll34.dat,ScInfScoreHj4_scene_models,stadium with 3-4 views,Stadium score display
+IfAll34.dat,ScInfScorePs4_scene_models,stadium with 3-4 views,Stadium score display
+IfAll34.dat,ScInfScorePt4_scene_models,stadium with 3-4 views,Stadium score display
+IfAll34.dat,ScInfSignalGo4_scene_models,stadium with 3-4 views,Stadium start signal
+IfAll34.dat,ScInfStIcon4_scene_models,stadium with 3-4 views,Stadium star icon
+IfAll34.dat,ScInfWidth4_scene_models,stadium with 3-4 views,Stadium height / width readout
+IfAll3c.dat,ScInfRound1_scene_models,stadium,Round indicator
+IfAll3c.dat,ScInfRound2_scene_models,stadium,Round indicator
+IfAll3c.dat,ScInfRound3_scene_models,stadium,Round indicator
+IfAll3c.dat,ScInfStarIcon_scene_models,stadium,Star icon
+IfAllTMP.dat,ScInfResultM2d_scene_models,,Results models
+IfAllTMP.dat,ScInfResult_scene_models,,Results models

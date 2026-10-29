@@ -1,24 +1,19 @@
 #ifndef ARCHIPELAGO_AP_GOAL_H
 #define ARCHIPELAGO_AP_GOAL_H
 
-// Installs the goal-aware checklist filler gate. Call from OnBoot.
 void APGoal_OnBoot(void);
 
-// Re-run goal evaluation. Idempotent and sticky - once goal_complete is set, further
-// calls are no-ops. For state changes that flip a goal-relevant save bit outside the
-// sent_checks flow.
+// Latches every row goal now met, announces it, and republishes goal_satisfied_mask and
+// goal_complete. A no-op until the slot options arrive.
 void APGoal_Evaluate(void);
 
-// Clear goal_complete, the per-row announce flags and the published satisfied mask.
+// Clears the goal latches, max_stats_ct_achieved and the published goal state.
 void APGoal_Reset(void);
 
-// The goal set for a checklist-mode row, and the square count its count form needs.
-// out_amount may be null.
+// A row's goal; *out_amount (nullable) gets the count goal's square count.
 int APGoal_Get(int row, int *out_amount);
 
-// Debug menu helpers. DebugSetGoals overrides all CHECKLIST_MODE_NUM slot options at
-// once and re-evaluates; `amount` is the square count the count goal needs and reaches
-// only the rows set to it.
+// Debug menu helpers.
 void APGoal_DebugSetGoals(const int *goals, int amount);
 void APGoal_DebugComplete(void);
 

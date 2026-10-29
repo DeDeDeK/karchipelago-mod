@@ -1,0 +1,361 @@
+Checklist,ClearKind,Address,Checkbox,Reward,Evaluator,Condition
+Air Ride Checklist,0,805367BC,Race over 100 laps!,New Course: Nebula Belt,AirRide_CheckLapTotalObjective,"records.total_laps >= 100 (laps of humans, plus CPUs in Time Attack)"
+Air Ride Checklist,1,805367BD,Race over 300 laps!,Music: Nebula (X or Y Button on Select Course),AirRide_CheckLapTotalObjective,records.total_laps >= 300
+Air Ride Checklist,2,805367BE,Glide for more than 30 minutes!,META KNIGHT: Available on normal courses,AirRide_CheckObjective_GlideTime,records.total_glide_time + this race's total_time_spent_airborne >= 108000 frames (30 min)
+Air Ride Checklist,3,805367BF,Glide for more than 1 hour!,Bonus Movie: Special machine intros,AirRide_CheckObjective_GlideTime,records.total_glide_time + this race's total_time_spent_airborne >= 216000 frames (1 h)
+Air Ride Checklist,4,805367C0,Defeat over 300 of your enemies!,None,AirRide_CheckObjective_EnemiesDefeated,records.total_enemies_defeated + this race's enemies_defeated + enemies_swallowed >= 300
+Air Ride Checklist,5,805367C1,"Defeat over 1,000 of your enemies!",KING DEDEDE: Available on normal courses,AirRide_CheckObjective_EnemiesDefeated,records.total_enemies_defeated + this race's enemies_defeated + enemies_swallowed >= 1000
+Air Ride Checklist,6,805367C2,Swallow Chilly (snowman enemy) 3 or more times and take 1st place!,None,AirRide_CheckSwallowEnemyObjective,"Race, 1st with Chilly (EnemyKind 0x0b, all three tiers) swallowed >= 3 times"
+Air Ride Checklist,7,805367C3,Swallow Plasma Wisp (electrical enemy) 3 or more times and take 1st place!,None,AirRide_CheckSwallowEnemyObjective,"Race, 1st with Plasma Wisp (EnemyKind 0x0d, all three tiers) swallowed >= 3 times"
+Air Ride Checklist,8,805367C4,Swallow Sword Knight (sword-wielding enemy) 3 time or more and take 1st place!,Green Kirby: (X or Y Button on Player Entry),AirRide_CheckSwallowEnemyObjective,"Race, 1st with Sword Knight (EnemyKind 0x05, all three tiers) swallowed >= 3 times"
+Air Ride Checklist,9,805367C5,Swallow Wheelie (motorcycle enemy) 3 times or more and take 1st place!,None,AirRide_CheckSwallowEnemyObjective,"Race, 1st with Wheelie (EnemyKind 0x08, all three tiers) swallowed >= 3 times"
+Air Ride Checklist,10,805367C6,"In any mode other than Free Run, reach the goal a total of 3 times!",New Machine: WAGON STAR,AirRide_CheckReachGoalTotalObjective,records.goals_reached (humans who finished a non-Free Run race) >= 3
+Air Ride Checklist,11,805367C7,"Air Ride: CHECKER KNIGHTS Race over 5,500 feet in 2 minutes!",None,AirRide_CheckRaceDistanceObjectives,GR_CHECK2: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 5500 ft
+Air Ride Checklist,12,805367C8,"Air Ride: MAGMA FLOWS Race over 4,800 feet in 2 minutes!",Sound Test: MAGMA FLOWS,AirRide_CheckRaceDistanceObjectives,GR_HEAT2: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 4800 ft
+Air Ride Checklist,13,805367C9,Air Ride: MAGMA FLOWS Finish 2 laps in under 02:20:00!,None,AirRide_CheckRaceLapObjectives,GR_HEAT2: lap total at the course default (2); player_finish_time[p] != 0 && <= 8400 frames
+Air Ride Checklist,14,805367CA,Swallow 200 or more enemies!,Check off an empty box of your choice!,AirRide_CheckObjective_EnemiesSwallowed,records.enemies_swallowed + this race's enemies_swallowed >= 200
+Air Ride Checklist,15,805367CB,Defeat 100 or more enemies with exhaled stars!,New Machine: REX WHEELIE,AirRide_CheckObjective_ExhaledStarDefeats,records.exhaled_star_defeats + this race's enemy_defeat_by_method[0xf] + [0x15] >= 100
+Air Ride Checklist,16,805367CC,Air Ride: Swallow 5 consecutive garbage enemies (with no copy abilities) and take 1st!!,None,AirRide_CheckConsecutiveGarbageSwallowObjective,"Race, 1st with consec_garbage_swallow >= 5"
+Air Ride Checklist,17,805367CD,Air Ride: BEANSTALK PARK Finish 2 laps in under 02:18:00!,Purple Kirby: (X or Y Button on Player Entry),AirRide_CheckRaceLapObjectives,GR_SKY2: lap total at the course default (2); player_finish_time[p] != 0 && <= 8280 frames
+Air Ride Checklist,18,805367CE,Air Ride: MACHINE PASSAGE Finish 2 laps in under 02:10:00!,None,AirRide_CheckRaceLapObjectives,GR_MACHINE2: lap total at the course default (2); player_finish_time[p] != 0 && <= 7800 frames
+Air Ride Checklist,19,805367CF,Air Ride: CHECKER KNIGHTS Finish 2 laps in under 03:05:00!,New Machine: SLICK STAR,AirRide_CheckRaceLapObjectives,GR_CHECK2: lap total at the course default (2); player_finish_time[p] != 0 && <= 11100 frames
+Air Ride Checklist,20,805367D0,"Air Ride: FANTASY MEADOWS Race over 4,500 feet in 2 minutes!",None,AirRide_CheckRaceDistanceObjectives,GR_PLANTS1: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 4500 ft
+Air Ride Checklist,21,805367D1,"Air Ride: CELESTIAL VALLEY Race over 6,000 feet in 2 minutes!",None,AirRide_CheckRaceDistanceObjectives,GR_VALLEY2: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 6000 ft
+Air Ride Checklist,22,805367D2,"Air Ride: SKY SANDS Race over 4,000 feet in 2 minutes!",None,AirRide_CheckRaceDistanceObjectives,GR_DESERT1: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 4000 ft
+Air Ride Checklist,23,805367D3,"Air Ride: FROZEN HILLSIDE Race over 5,300 feet in 2 minutes!",None,AirRide_CheckRaceDistanceObjectives,GR_ICE1: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 5300 ft
+Air Ride Checklist,24,805367D4,Fill in over 100 Checklist blocks!,Ending: View with the A button,Checklist_ProcessUnlock,"auto-unlock: 100 or more of the mode's cells have is_unlocked or is_filler; stored by a direct stb, not SetNewUnlock"
+Air Ride Checklist,25,805367D5,Air Ride: FANTASY MEADOWS Finish 3 laps in under 01:20:00!,None,AirRide_CheckRaceLapObjectives,GR_PLANTS1: lap total at the course default (3); player_finish_time[p] != 0 && <= 4800 frames
+Air Ride Checklist,26,805367D6,Air Ride: CELESTIAL VALLEY Finish 2 laps in under 02:20:00!,White Kirby: (X or Y button on Player Entry),AirRide_CheckRaceLapObjectives,GR_VALLEY2: lap total at the course default (2); player_finish_time[p] != 0 && <= 8400 frames
+Air Ride Checklist,27,805367D7,Air Ride: SKY SANDS Finish 2 laps in under 02:05:00!,New Machine: SWERVE STAR,AirRide_CheckRaceLapObjectives,GR_DESERT1: lap total at the course default (2); player_finish_time[p] != 0 && <= 7500 frames
+Air Ride Checklist,28,805367D8,"Sword Challenge: During a race, swing your sword exactly 10 times and take 1st!",None,AirRide_CheckSwordSwingObjective,"Race, 1st with sword_swings_this_race == 10 exactly"
+Air Ride Checklist,29,805367D9,Air Ride: FROZEN HILLSIDE Race 2 laps in under 02:20:00!,None,AirRide_CheckRaceLapObjectives,GR_ICE1: lap total at the course default (2); player_finish_time[p] != 0 && <= 8400 frames
+Air Ride Checklist,30,805367DA,Tornado Challenge: Defeat over 15 enemies as Tornado Kirby and finish in 1st place!,None,AirRide_CheckTornadoKOObjective,"Race, 1st with tornado_kos >= 15"
+Air Ride Checklist,31,805367DB,Defeat 10 or more enemies using the Quick Spin!,New Machine: SHADOW STAR,AirRide_CheckObjective_QuickSpinDefeats,records.quick_spin_defeats + this race's enemy_defeat_by_method[0x10] >= 10
+Air Ride Checklist,32,805367DC,Hit 20 or more rivals with your Quick Spin!,None,AirRide_CheckObjective_QuickSpinRivalHits,records.quick_spin_rival_hits + this race's rival_hit_by_method[0x10] >= 20
+Air Ride Checklist,33,805367DD,"Air Ride: MACHINE PASSAGE Race over 4,500 feet in 2 minutes!",New Machine: JET STAR,AirRide_CheckRaceDistanceObjectives,GR_MACHINE2: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 4500 ft
+Air Ride Checklist,34,805367DE,"Air Ride: BEANSTALK PARK Race over 5,500 feet in 2 minutes!",None,AirRide_CheckRaceDistanceObjectives,GR_SKY2: timed race with the limit set to 120 s; a human's Gm_GetPlayerRaceDistance / 0.3048 >= 5500 ft
+Air Ride Checklist,35,805367DF,Air Ride: FANTASY MEADOWS Finish 3 laps in under 01:03:00!,None,AirRide_CheckRaceLapObjectives,GR_PLANTS1: lap total at the course default (3); player_finish_time[p] != 0 && <= 3780 frames
+Air Ride Checklist,36,805367E0,Air Ride: CELESTIAL VALLEY Finish 2 laps in under 01:56:00!,None,AirRide_CheckRaceLapObjectives,GR_VALLEY2: lap total at the course default (2); player_finish_time[p] != 0 && <= 6960 frames
+Air Ride Checklist,37,805367E1,Air Ride: SKY SANDS Finish 2 laps in under 01:45:00!,None,AirRide_CheckRaceLapObjectives,GR_DESERT1: lap total at the course default (2); player_finish_time[p] != 0 && <= 6300 frames
+Air Ride Checklist,38,805367E2,Air Ride: FROZEN HILLSIDE Finish 2 laps in under 01:56:00!,Music: Hillside (X or Y Button on Select Course),AirRide_CheckRaceLapObjectives,GR_ICE1: lap total at the course default (2); player_finish_time[p] != 0 && <= 6960 frames
+Air Ride Checklist,39,805367E3,Air Ride: MAGMA FLOWS Finish 2 laps in under 02:01:00!,None,AirRide_CheckRaceLapObjectives,GR_HEAT2: lap total at the course default (2); player_finish_time[p] != 0 && <= 7260 frames
+Air Ride Checklist,40,805367E4,Air Ride: BEANSTALK PARK Finish 2 laps in under 01:56:00!,None,AirRide_CheckRaceLapObjectives,GR_SKY2: lap total at the course default (2); player_finish_time[p] != 0 && <= 6960 frames
+Air Ride Checklist,41,805367E5,Air Ride: MACHINE PASSAGE Finish 2 laps in under 01:48:00!,None,AirRide_CheckRaceLapObjectives,GR_MACHINE2: lap total at the course default (2); player_finish_time[p] != 0 && <= 6480 frames
+Air Ride Checklist,42,805367E6,Air Ride: CHECKER KNIGHTS Finish 2 laps in under 02:40:00!,Sound Test: CHECKER KNIGHTS,AirRide_CheckRaceLapObjectives,GR_CHECK2: lap total at the course default (2); player_finish_time[p] != 0 && <= 9600 frames
+Air Ride Checklist,43,805367E7,Time Attack: FANTASY MEADOWS Finish in under 01:12:00!,None,AirRide_CheckTimeAttackObjectives,GR_PLANTS1: Time Attack player_finish_time[p] != 0 && <= 4320 frames
+Air Ride Checklist,44,805367E8,Time Attack: FANTASY MEADOWS Finish in under 01:00:00!,Music: Meadows (X or Y Button on Select Course),AirRide_CheckTimeAttackObjectives,GR_PLANTS1: Time Attack player_finish_time[p] != 0 && <= 3600 frames
+Air Ride Checklist,45,805367E9,Time Attack: CELESTIAL VALLEY Finish in under 03:20:00!,New Machine: BULK STAR,AirRide_CheckTimeAttackObjectives,GR_VALLEY2: Time Attack player_finish_time[p] != 0 && <= 12000 frames
+Air Ride Checklist,46,805367EA,Time Attack: CELESTIAL VALLEY Finish in under 02:56:00!,None,AirRide_CheckTimeAttackObjectives,GR_VALLEY2: Time Attack player_finish_time[p] != 0 && <= 10560 frames
+Air Ride Checklist,47,805367EB,Time Attack: SKY SANDS Finish in under 03:10:00!,Sound Test: SKY SANDS,AirRide_CheckTimeAttackObjectives,GR_DESERT1: Time Attack player_finish_time[p] != 0 && <= 11400 frames
+Air Ride Checklist,48,805367EC,Time Attack: SKY SANDS Finish in under 02:40:00!,None,AirRide_CheckTimeAttackObjectives,GR_DESERT1: Time Attack player_finish_time[p] != 0 && <= 9600 frames
+Air Ride Checklist,49,805367ED,Time Attack: FROZEN HILLSIDE Finish in under 03:14:00!,New Machine: FORMULA STAR,AirRide_CheckTimeAttackObjectives,GR_ICE1: Time Attack player_finish_time[p] != 0 && <= 11640 frames
+Air Ride Checklist,50,805367EE,Time Attack: FROZEN HILLSIDE Finish in under 02:50:00!,None,AirRide_CheckTimeAttackObjectives,GR_ICE1: Time Attack player_finish_time[p] != 0 && <= 10200 frames
+Air Ride Checklist,51,805367EF,Time Attack: MAGMA FLOWS Finish in under 03:20:00!,Music: Magma (X or Y Button on Select Course),AirRide_CheckTimeAttackObjectives,GR_HEAT2: Time Attack player_finish_time[p] != 0 && <= 12000 frames
+Air Ride Checklist,52,805367F0,Time Attack: MAGMA FLOWS Finish in under 03:04:00!,None,AirRide_CheckTimeAttackObjectives,GR_HEAT2: Time Attack player_finish_time[p] != 0 && <= 11040 frames
+Air Ride Checklist,53,805367F1,Time Attack: BEANSTALK PARK Finish in under 03:10:00!,None,AirRide_CheckTimeAttackObjectives,GR_SKY2: Time Attack player_finish_time[p] != 0 && <= 11400 frames
+Air Ride Checklist,54,805367F2,Time Attack: BEANSTALK PARK Finish in under 02:55:00!,Music: Beanstalk (X or Y Button on Select Course),AirRide_CheckTimeAttackObjectives,GR_SKY2: Time Attack player_finish_time[p] != 0 && <= 10500 frames
+Air Ride Checklist,55,805367F3,Time Attack: MACHINE PASSAGE Finish in under 03:10:00!,Sound Test: MACHINE PASSAGE,AirRide_CheckTimeAttackObjectives,GR_MACHINE2: Time Attack player_finish_time[p] != 0 && <= 11400 frames
+Air Ride Checklist,56,805367F4,Time Attack: MACHINE PASSAGE Finish in under 02:48:00!,None,AirRide_CheckTimeAttackObjectives,GR_MACHINE2: Time Attack player_finish_time[p] != 0 && <= 10080 frames
+Air Ride Checklist,57,805367F5,Time Attack: CHECKER KNIGHTS Finish in under 04:30:00!,None,AirRide_CheckTimeAttackObjectives,GR_CHECK2: Time Attack player_finish_time[p] != 0 && <= 16200 frames
+Air Ride Checklist,58,805367F6,Time Attack: CHECKER KNIGHTS Finish in under 04:00:00!,None,AirRide_CheckTimeAttackObjectives,GR_CHECK2: Time Attack player_finish_time[p] != 0 && <= 14400 frames
+Air Ride Checklist,59,805367F7,Free Run: FANTASY MEADOWS Finish 1 lap in under 00:24:00!,None,AirRide_CheckFreeRunLapObjectives,GR_PLANTS1: Free Run player_best_lap_time[p] != 0 && <= 1440 frames
+Air Ride Checklist,60,805367F8,Free Run: FANTASY MEADOWS Finish 1 lap in under 00:21:00!,Sound Test: FANTASY MEADOWS,AirRide_CheckFreeRunLapObjectives,GR_PLANTS1: Free Run player_best_lap_time[p] != 0 && <= 1260 frames
+Air Ride Checklist,61,805367F9,Free Run: FANTASY MEADOWS Do 1 lap under 00:23:00 on Wagon Star!,None,AirRide_CheckFreeRunLapObjectives,"GR_PLANTS1: Free Run on Wagon Star, player_best_lap_time[p] != 0 && <= 1380 frames"
+Air Ride Checklist,62,805367FA,Free Run: CELESTIAL VALLEY Finish 1 lap in under 01:10:00!,None,AirRide_CheckFreeRunLapObjectives,GR_VALLEY2: Free Run player_best_lap_time[p] != 0 && <= 4200 frames
+Air Ride Checklist,63,805367FB,Free Run: CELESTIAL VALLEY Finish 1 lap in under 00:57:00!,Sound Test: CELESTIAL VALLEY,AirRide_CheckFreeRunLapObjectives,GR_VALLEY2: Free Run player_best_lap_time[p] != 0 && <= 3420 frames
+Air Ride Checklist,64,805367FC,Free Run: CELESTIAL VALLEY Do 1 lap under 01:02:00 on Slick Star!,None,AirRide_CheckFreeRunLapObjectives,"GR_VALLEY2: Free Run on Slick Star, player_best_lap_time[p] != 0 && <= 3720 frames"
+Air Ride Checklist,65,805367FD,Free Run: SKY SANDS Finish 1 lap in under 01:05:00!,None,AirRide_CheckFreeRunLapObjectives,GR_DESERT1: Free Run player_best_lap_time[p] != 0 && <= 3900 frames
+Air Ride Checklist,66,805367FE,Free Run: SKY SANDS Finish 1 lap in under 00:53:00!,None,AirRide_CheckFreeRunLapObjectives,GR_DESERT1: Free Run player_best_lap_time[p] != 0 && <= 3180 frames
+Air Ride Checklist,67,805367FF,Free Run: SKY SANDS Do 1 lap under 01:05:00 on Bulk Star!,Brown Kirby: (X or Y Button on Player Entry),AirRide_CheckFreeRunLapObjectives,"GR_DESERT1: Free Run on Bulk Star, player_best_lap_time[p] != 0 && <= 3900 frames"
+Air Ride Checklist,68,80536800,Free Run: FROZEN HILLSIDE Finish 1 lap in under 01:10:00!,None,AirRide_CheckFreeRunLapObjectives,GR_ICE1: Free Run player_best_lap_time[p] != 0 && <= 4200 frames
+Air Ride Checklist,69,80536801,Free Run: FROZEN HILLSIDE Finish 1 lap in under 00:58:00!,Sound Test: FROZEN HILLSIDE,AirRide_CheckFreeRunLapObjectives,GR_ICE1: Free Run player_best_lap_time[p] != 0 && <= 3480 frames
+Air Ride Checklist,70,80536802,Free Run: FROZEN HILLSIDE Do 1 lap under 01:10:00 on Formula Star!,None,AirRide_CheckFreeRunLapObjectives,"GR_ICE1: Free Run on Formula Star, player_best_lap_time[p] != 0 && <= 4200 frames"
+Air Ride Checklist,71,80536803,Free Run: MAGMA FLOWS Finish 1 lap in under 01:10:00!,None,AirRide_CheckFreeRunLapObjectives,GR_HEAT2: Free Run player_best_lap_time[p] != 0 && <= 4200 frames
+Air Ride Checklist,72,80536804,Free Run: MAGMA FLOWS Finish 1 lap in under 01:01:00!,None,AirRide_CheckFreeRunLapObjectives,GR_HEAT2: Free Run player_best_lap_time[p] != 0 && <= 3660 frames
+Air Ride Checklist,73,80536805,Free Run: MAGMA FLOWS Do 1 lap under 01:02:00 on Turbo Star!,None,AirRide_CheckFreeRunLapObjectives,"GR_HEAT2: Free Run on Turbo Star, player_best_lap_time[p] != 0 && <= 3720 frames"
+Air Ride Checklist,74,80536806,Free Run: BEANSTALK PARK Finish 1 lap in under 01:07:00!,None,AirRide_CheckFreeRunLapObjectives,GR_SKY2: Free Run player_best_lap_time[p] != 0 && <= 4020 frames
+Air Ride Checklist,75,80536807,Free Run: BEANSTALK PARK Finish 1 lap in under 00:58:00!,None,AirRide_CheckFreeRunLapObjectives,GR_SKY2: Free Run player_best_lap_time[p] != 0 && <= 3480 frames
+Air Ride Checklist,76,80536808,Free Run: BEANSTALK PARK Do 1 lap under 00:58:00 on Winged Star!,Sound Test: BEANSTALK PARK,AirRide_CheckFreeRunLapObjectives,"GR_SKY2: Free Run on Winged Star, player_best_lap_time[p] != 0 && <= 3480 frames"
+Air Ride Checklist,77,80536809,Free Run: MACHINE PASSAGE Finish 1 lap in under 01:05:00!,New Machine: ROCKET STAR,AirRide_CheckFreeRunLapObjectives,GR_MACHINE2: Free Run player_best_lap_time[p] != 0 && <= 3900 frames
+Air Ride Checklist,78,8053680A,Free Run: MACHINE PASSAGE Finish 1 lap in under 00:56:00!,None,AirRide_CheckFreeRunLapObjectives,GR_MACHINE2: Free Run player_best_lap_time[p] != 0 && <= 3360 frames
+Air Ride Checklist,79,8053680B,Free Run: MACHINE PASSAGE Do 1 lap under 00:57:00 on Swerve Star!,None,AirRide_CheckFreeRunLapObjectives,"GR_MACHINE2: Free Run on Swerve Star, player_best_lap_time[p] != 0 && <= 3420 frames"
+Air Ride Checklist,80,8053680C,Free Run: CHECKER KNIGHTS Finish 1 lap in under 01:35:00!,None,AirRide_CheckFreeRunLapObjectives,GR_CHECK2: Free Run player_best_lap_time[p] != 0 && <= 5700 frames
+Air Ride Checklist,81,8053680D,Free Run: CHECKER KNIGHTS Finish 1 lap in under 01:20:00!,None,AirRide_CheckFreeRunLapObjectives,GR_CHECK2: Free Run player_best_lap_time[p] != 0 && <= 4800 frames
+Air Ride Checklist,82,8053680E,Free Run: CHECKER KNIGHTS Do 1 lap under 01:25:00 on Rocket Star!,None,AirRide_CheckFreeRunLapObjectives,"GR_CHECK2: Free Run on Rocket Star, player_best_lap_time[p] != 0 && <= 5100 frames"
+Air Ride Checklist,83,8053680F,Make your lap time's last two digits the same!,Sound Test: Results Screen,AirRide_CheckObjective_LapTimeLastTwoDigitsEqual,a human has flags_84d bit 6 (lap time's last two digits equal)
+Air Ride Checklist,84,80536810,Race all of the standard Air Ride courses!,New Machine: WHEELIE BIKE,AirRide_CheckObjective_RaceAllStandardCourses,"records.played_courses_mask holds GroundKinds 0-5, 7 and 8 (every course but Nebula Belt)"
+Air Ride Checklist,85,80536811,Air Ride: Start the final lap in 4th place and move to 1st to win.,New Machine: WHEELIE SCOOTER,AirRide_CheckFinalLapComebackObjective,"Race, 1st with final_lap_comeback >= 3 (4th at the final lap's start)"
+Air Ride Checklist,86,80536812,Air Ride: Cross the finish line while spinning and take 1st place!,None,AirRide_CheckFinishSpinningObjective,"Race, 1st with flags_854 bit 7 (crossed the line Quick Spinning)"
+Air Ride Checklist,87,80536813,Air Ride: Finish in 1st place while taking damage!,None,AirRide_CheckFinishWhileDamagedObjective,"Race, 1st with flags_854 bit 5 (crossed the line taking damage)"
+Air Ride Checklist,88,80536814,Air Ride: Finish in 1st place while flying through the air!,New Machine: WINGED STAR,AirRide_CheckFinishFlyingObjective,"Race, 1st with flags_854 bit 6 (crossed the line airborne)"
+Air Ride Checklist,89,80536815,Air Ride: Finish in 1st place with Sleep ability!,None,AirRide_CheckFinishWithSleepObjective,"Race, 1st with flags_854 bit 2 (finished holding Sleep)"
+Air Ride Checklist,90,80536816,Air Ride: Finish in 1st place with Fire ability!,None,AirRide_CheckObj_FinishFireAbility,"Race, 1st with flags_854 bit 1 (finished holding Fire)"
+Air Ride Checklist,91,80536817,Air Ride: Finish in 1st place with Needle ability!,None,AirRide_CheckObj_FinishNeedleAbility,"Race, 1st with flags_854 bit 0 (finished holding Needle)"
+Air Ride Checklist,92,80536818,Air Ride: Finish in 1st place with Wing ability!,None,AirRide_CheckObj_FinishWingAbility,"Race, 1st with flags_855 bit 7 (finished holding Wing)"
+Air Ride Checklist,93,80536819,Time Attack: FANTASY MEADOWS Finish in under 01:05:00 on Slick Star!,None,AirRide_CheckTimeAttackObjectives,"GR_PLANTS1: Time Attack on Slick Star, player_finish_time[p] != 0 && <= 3900 frames"
+Air Ride Checklist,94,8053681A,"In one game, drop from the cliffs 3 times!",Check off an empty box of your choice!,AirRide_CheckObjective_CliffDrop3InOneGame,a human's cliff_drops >= 3
+Air Ride Checklist,95,8053681B,FANTASY MEADOWS: Swallow over 20 enemies and take 1st place!,None,AirRide_CheckObj_FantasyMeadowsSwallow20,"Race, GR_PLANTS1: 1st with swallowed_this_race >= 20"
+Air Ride Checklist,96,8053681C,FANTASY MEADOWS: Race 1 lap without dropping below 20 mph!,None,AirRide_CheckObjective_FantasyMeadowsLapAbove20mph,GR_PLANTS1: a human has flags_84c bit 5 (a whole lap at >= 20 mph)
+Air Ride Checklist,97,8053681D,BEANSTALK PARK: Race over 3 laps without riding the Ferris wheel!,None,AirRide_CheckObjective_BeanstalkNoFerris3Laps,GR_SKY2: a human's laps_no_ferris >= 3
+Air Ride Checklist,98,8053681E,BEANSTALK PARK: Swallow over 20 enemies and take 1st place!,None,AirRide_CheckObj_BeanstalkSwallow20,"Race, GR_SKY2: 1st with swallowed_this_race >= 20"
+Air Ride Checklist,99,8053681F,CHECKER KNIGHTS: Use spin panels 7 times or more and take 1st place!,Music: Checker (X or Y Button on Select Course),AirRide_CheckObj_CheckerSpinPanels7,"Race, GR_CHECK2: 1st with spin_panel_uses >= 7"
+Air Ride Checklist,100,80536820,CHECKER KNIGHTS: Break at least 2 walls and finish in 1st place!,None,AirRide_CheckObj_CheckerBreak2Walls,"Race, GR_CHECK2: 1st with objects_destroyed_num >= 2"
+Air Ride Checklist,101,80536821,CHECKER KNIGHTS: Swallow over 20 enemies and finish in 1st place!,None,AirRide_CheckObj_CheckerSwallow20,"Race, GR_CHECK2: 1st with swallowed_this_race >= 20"
+Air Ride Checklist,102,80536822,FROZEN HILLSIDE: Split at least 20 ice platforms and finish in 1st place!,None,AirRide_CheckObj_FrozenSplit20IcePlatforms,"Race, GR_ICE1: 1st with yakumono_break[BREAKFLOOR] >= 20"
+Air Ride Checklist,103,80536823,SKY SANDS: Break all of the coral and finish in 1st place!,Check off an empty box of your choice!,AirRide_CheckObj_SkySandsBreakAllCoral,"Race, GR_DESERT1: 1st with yakumono_break[BREAKCORAL] == Gr_GetYakumonoSpawnTotal(BREAKCORAL), nonzero"
+Air Ride Checklist,104,80536824,SKY SANDS: Enter the quicksand 3 times and finish in 1st place!,None,AirRide_CheckObj_SkySandsQuicksand3,"Race, GR_DESERT1: 1st with quicksand_entries == 3 exactly"
+Air Ride Checklist,105,80536825,Time Attack: CELESTIAL VALLEY Finish in under 02:58:00 on Jet Star!,None,AirRide_CheckTimeAttackObjectives,"GR_VALLEY2: Time Attack on Jet Star, player_finish_time[p] != 0 && <= 10680 frames"
+Air Ride Checklist,106,80536826,SKY SANDS: Open the trapdoor exactly 3 times and finish in 1st place!,Music: Sky Sands (X or Y Button on Select Course),AirRide_CheckObj_SkySandsTrapdoor3,"Race, GR_DESERT1: 1st with trapdoor_opens == 3 exactly"
+Air Ride Checklist,107,80536827,MACHINE PASSAGE: Shoot 3 characters out of the cannon at one time!,Music: Machine (X or Y Button on Select Course),AirRide_CheckObjective_MachinePassageCannon3,GR_MACHINE2: a human's cannon_simul_launch >= 3
+Air Ride Checklist,108,80536828,Time Attack: SKY SANDS Finish in under 02:40:00 on Wagon Star!,None,AirRide_CheckTimeAttackObjectives,"GR_DESERT1: Time Attack on Wagon Star, player_finish_time[p] != 0 && <= 9600 frames"
+Air Ride Checklist,109,80536829,MACHINE PASSAGE: Finish in 1st place without touching the walls even once!,None,AirRide_CheckObj_MachinePassageNoWalls,"Race, GR_MACHINE2: 1st with flags_84c bit 6 clear (never touched a wall)"
+Air Ride Checklist,110,8053682A,MAGMA FLOWS: Use all the volcano rails and finish in 1st place!,New Machine: TURBO STAR,AirRide_CheckObj_MagmaAllVolcanoRails,"Race, GR_HEAT2: 1st with rail_bits covering every volcano rail"
+Air Ride Checklist,111,8053682B,MAGMA FLOWS: Bump into a flaming dragon!,Check off an empty box of your choice!,AirRide_CheckObjective_MagmaFlowsFlamingDragon,GR_HEAT2: a human has flags_84c bit 2 (bumped a flaming dragon)
+Air Ride Checklist,112,8053682C,MAGMA FLOWS: Use all of the Boost Panels and finish in 1st place!,None,AirRide_CheckObj_MagmaAllBoostPanels,"Race, GR_HEAT2: 1st with zone_bits covering every Boost Panel (Ply_GetAllBoostPanelsUsedFlag)"
+Air Ride Checklist,113,8053682D,Time Attack: FROZEN HILLSIDE Finish in under 03:10:00 on Turbo Star!,None,AirRide_CheckTimeAttackObjectives,"GR_ICE1: Time Attack on Turbo Star, player_finish_time[p] != 0 && <= 11400 frames"
+Air Ride Checklist,114,8053682E,"CELESTIAL VALLEY: Over one race, ride on both the left and right bridge railings!",Music: Celestial (X or Y Button on Select Course),AirRide_CheckObjective_CelestialBothBridgeRails,GR_VALLEY2: rail_bits holds both bridge railings
+Air Ride Checklist,115,8053682F,Time Attack: MAGMA FLOWS Finish in under 03:15:00 on Shadow Star!,None,AirRide_CheckTimeAttackObjectives,"GR_HEAT2: Time Attack on Shadow Star, player_finish_time[p] != 0 && <= 11700 frames"
+Air Ride Checklist,116,80536830,CELESTIAL VALLEY: Use the Copy Chance Wheel on top of the tree!,Check off an empty box of your choice!,AirRide_CheckObjective_CelestialCopyChanceOnTree,GR_VALLEY2: a human's copy_chance_on_tree != 0
+Air Ride Checklist,117,80536831,Time Attack: BEANSTALK PARK Finish in under 03:00:00 on Rocket Star!,Sound Test: NEBULA BELT,AirRide_CheckTimeAttackObjectives,"GR_SKY2: Time Attack on Rocket Star, player_finish_time[p] != 0 && <= 10800 frames"
+Air Ride Checklist,118,80536832,Time Attack: MACHINE PASSAGE Finish in under 02:50:00 on Rex Wheelie!,None,AirRide_CheckTimeAttackObjectives,"GR_MACHINE2: Time Attack on Rex Wheelie, player_finish_time[p] != 0 && <= 10200 frames"
+Air Ride Checklist,119,80536833,Time Attack: CHECKER KNIGHTS Finish in under 03:55:00 on Warpstar!,None,AirRide_CheckTimeAttackObjectives,"GR_CHECK2: Time Attack on Warpstar, player_finish_time[p] != 0 && <= 14100 frames"
+City Trial Checklist,0,805369FC,City Trial: race over 60 miles!,Check off an empty box of your choice!,CityTrial_CheckForNewUnlocks,"records.distance_total (humans' Ply_GetTotalDistance summed, capped at 8.75e7) * 11.4285717 / 160934.4 >= 60"
+City Trial Checklist,1,805369FD,City Trial: Race over 200 miles!,None,CityTrial_CheckForNewUnlocks,"records.distance_total (humans' Ply_GetTotalDistance summed, capped at 8.75e7) * 11.4285717 / 160934.4 >= 200"
+City Trial Checklist,2,805369FE,City Trial: Pick up a total of over 100 items!,Sound Test: Item bounce,CityTrial_CheckForNewUnlocks,"records.item_total (humans' Ply_GetItemCollectTotal summed, boxes excluded) >= 100"
+City Trial Checklist,3,805369FF,City Trial: pick up a total of over 500 items!,Bonus: Pause screen power-ups,CityTrial_CheckForNewUnlocks,"records.item_total (humans' Ply_GetItemCollectTotal summed, boxes excluded) >= 500"
+City Trial Checklist,4,80536A00,City Trial: pick up a total of over 1000 items!,Music: City (All: X or Y button + Start/Pause),CityTrial_CheckForNewUnlocks,"records.item_total (humans' Ply_GetItemCollectTotal summed, boxes excluded) >= 1000"
+City Trial Checklist,5,80536A01,City Trial: Pick up a total of over 3000 items!,None,CityTrial_CheckForNewUnlocks,"records.item_total (humans' Ply_GetItemCollectTotal summed, boxes excluded) >= 3000"
+City Trial Checklist,6,80536A02,Free Run: Change Air Ride Machines 10 times or more!,Sound Test: Legendary Air Ride Machine,CityTrial_CheckFreeRunObjectives,Free Run: one human's Ply_GetMachineChangeCount (sum of machine_mount_kind_num) >= 10
+City Trial Checklist,7,80536A03,City Trial: break more than 500 boxes!,Sound Test: dense fog today,CityTrial_CheckForNewUnlocks,records.box_total (humans' Ply_GetBoxCollectTotal summed) >= 500
+City Trial Checklist,8,80536A04,City Trial: break more than 1000 boxes!,Meta Knight: Select in free run mode,CityTrial_CheckForNewUnlocks,records.box_total >= 1000
+City Trial Checklist,9,80536A05,Free Run: Drive for a total of 10 minutes or more!,None,CityTrial_CheckFreeRunObjectives,Free Run: this run's humans' total_time_spent_grounded + total_time_spent_airborne + records.free_run_drive_time >= 36000 frames (10 min)
+City Trial Checklist,10,80536A06,Free Run: Drive for a total of 30 minutes or more!,Sound Test: City Trial,CityTrial_CheckFreeRunObjectives,Free Run: this run's humans' total_time_spent_grounded + total_time_spent_airborne + records.free_run_drive_time >= 108000 frames (30 min)
+City Trial Checklist,11,80536A07,Free Run: Drive for a total of 2 hours or more!,Check off an empty box of your choice!,CityTrial_CheckFreeRunObjectives,Free Run: this run's humans' total_time_spent_grounded + total_time_spent_airborne + records.free_run_drive_time >= 432000 frames (2 h)
+City Trial Checklist,12,80536A08,Stadium: play in over 10 stadium modes!,New Stadium: Single Race (Nebula Belt),CityTrial_CheckStadiumPlayedObjectives / CityTrial_CheckStadiumResultObjectives,"Gm_StadiumIsAvailable true for >= 10 of the 24 StadiumKinds - unlocked, not played"
+City Trial Checklist,13,80536A09,Stadium: play in over 20 stadium modes!,None,CityTrial_CheckStadiumPlayedObjectives / CityTrial_CheckStadiumResultObjectives,Gm_StadiumIsAvailable true for >= 20 of the 24 StadiumKinds
+City Trial Checklist,14,80536A0A,Stadium: DRAG RACE 1 Finish in less than 00:24:00!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 1: GameData.player_finish_time[p] <= 1440 frames
+City Trial Checklist,15,80536A0B,Stadium: DRAG RACE 1 Finish in less than 00:20:00!,Sound Test: rowdy charge tank,CityTrial_CheckStadiumResultObjectives,DRAG RACE 1: GameData.player_finish_time[p] <= 1200 frames
+City Trial Checklist,16,80536A0C,Stadium: DRAG RACE 2 Finish in less than 00:24:00!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 2: GameData.player_finish_time[p] <= 1440 frames
+City Trial Checklist,17,80536A0D,Stadium: DRAG RACE 2 Finish in less than 00:20:00!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 2: GameData.player_finish_time[p] <= 1200 frames
+City Trial Checklist,18,80536A0E,Stadium: DRAG RACE 3 Finish in less than 00:35:00!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 3: GameData.player_finish_time[p] <= 2100 frames
+City Trial Checklist,19,80536A0F,Stadium: DRAG RACE 3 Finish in less than 00:27:00!,New Stadium: Drag Race 4,CityTrial_CheckStadiumResultObjectives,DRAG RACE 3: GameData.player_finish_time[p] <= 1620 frames
+City Trial Checklist,20,80536A10,Stadium: DRAG RACE 4 Finish in less than 00:24:00!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 4: GameData.player_finish_time[p] <= 1440 frames
+City Trial Checklist,21,80536A11,Stadium: DRAG RACE 4 Finish in less than 00:19:00!,Sound Test: Drag Race,CityTrial_CheckStadiumResultObjectives,DRAG RACE 4: GameData.player_finish_time[p] <= 1140 frames
+City Trial Checklist,22,80536A12,Stadium: HIGH JUMP Jump higher than 500 feet!,None,CityTrial_CheckStadiumScoreObjectives,HIGH JUMP: GameData.player_race_distance[p] / 0.3048 >= 500 ft
+City Trial Checklist,23,80536A13,"Stadium: HIGH JUMP Jump higher than 1,000 feet!",Dragoon Part A: Use 3 to complete Dragoon,CityTrial_CheckStadiumScoreObjectives,HIGH JUMP: GameData.player_race_distance[p] / 0.3048 >= 1000 ft
+City Trial Checklist,24,80536A14,Stadium: HIGH JUMP Stay airborne longer than 10 seconds!,None,CityTrial_CheckStadiumScoreObjectives,HIGH JUMP: max_time_spent_airborne >= 600 frames
+City Trial Checklist,25,80536A15,"Stadium: TARGET FLIGHT In one game, get over 150 points!",None,CityTrial_CheckStadiumResultObjectives,TARGET FLIGHT: stadium score (GameData+0xa38[p]) >= 150
+City Trial Checklist,26,80536A16,"Stadium: TARGET FLIGHT In one game, get exactly 90 points!",None,CityTrial_CheckStadiumResultObjectives,TARGET FLIGHT: stadium score == 90 exactly
+City Trial Checklist,27,80536A17,"Stadium: TARGET FLIGHT In one game, get a perfect score: 200 points!",None,CityTrial_CheckStadiumResultObjectives,TARGET FLIGHT: stadium score >= 200
+City Trial Checklist,28,80536A18,Stadium: TARGET FLIGHT stay airborne longer than 15 seconds!,Sound Test: Target Flight,CityTrial_CheckStadiumScoreObjectives,TARGET FLIGHT: max_time_spent_airborne >= 900 frames
+City Trial Checklist,29,80536A19,Stadium: TARGET FLIGHT play 15 times or more!,None,CityTrial_CheckStadiumResultObjectives,records.tf_games_played >= 15
+City Trial Checklist,30,80536A1A,"Stadium: TARGET FLIGHT get more than 1,500 points!",None,CityTrial_CheckStadiumScoreObjectives,records.tf_points_total >= 1500
+City Trial Checklist,31,80536A1B,Stadium: AIR GLIDER fly more than 330 feet!,None,CityTrial_CheckStadiumResultObjectives,AIR GLIDER: GameData.player_race_distance[p] / 0.3048 >= 330 ft
+City Trial Checklist,32,80536A1C,Stadium: AIR GLIDER fly more than 660 feet!,None,CityTrial_CheckStadiumResultObjectives,AIR GLIDER: GameData.player_race_distance[p] / 0.3048 >= 660 ft
+City Trial Checklist,33,80536A1D,"Stadium: AIR GLIDER fly more than 1,300 feet!",Dragoon Part C: Use 3 to complete Dragoon,CityTrial_CheckStadiumResultObjectives,AIR GLIDER: GameData.player_race_distance[p] / 0.3048 >= 1300 ft
+City Trial Checklist,34,80536A1E,Stadium: AIR GLIDER stay airborne longer than 30 seconds!,Sound Test: Air Glider,CityTrial_CheckStadiumResultObjectives,AIR GLIDER: max_time_spent_airborne >= 1800 frames
+City Trial Checklist,35,80536A1F,"Stadium: DESTRUCTION DERBY 1 In one game, KO your rivals 5 or more times!",None,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 1: stadium score (rival KOs) >= 5
+City Trial Checklist,36,80536A20,"Stadium: DESTRUCTION DERBY 2 In one game, KO your rivals 5 or more times!",None,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 2: stadium score (rival KOs) >= 5
+City Trial Checklist,37,80536A21,"Stadium: DESTRUCTION DERBY 3 In one game, KO your rivals 5 or more times!",New Stadium: Destruction Derby 4,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 3: stadium score (rival KOs) >= 5
+City Trial Checklist,38,80536A22,"Stadium: DESTRUCTION DERBY 4 In one game, KO your rivals 5 or more times!",None,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 4: stadium score (rival KOs) >= 5
+City Trial Checklist,39,80536A23,"Stadium: DESTRUCTION DERBY 5 In one game, KO your rivals 5 or more times!",None,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 5: stadium score (rival KOs) >= 5
+City Trial Checklist,40,80536A24,Stadium: DESTRUCTION DERBY 1 bust all the rocks on the field!,Check off an empty box of your choice!,CityTrial_CheckStadiumResultObjectives,DESTRUCTION DERBY 1: yakumono_break[kind 23] summed over present players >= 2
+City Trial Checklist,41,80536A25,Stadium: DESTRUCTION DERBY (All) KO enemies over 50 times!,None,CityTrial_CheckStadiumResultObjectives,records.dd_enemy_ko_total >= 50
+City Trial Checklist,42,80536A26,Stadium: DESTRUCTION DERBY (All) KO enemies over 150 times!,Hydra Part Y: Use 3 to complete Hydra,CityTrial_CheckStadiumResultObjectives,records.dd_enemy_ko_total >= 150
+City Trial Checklist,43,80536A27,"Stadium: KIRBY MELEE 1 In one game, KO enemies over 50 times!",None,CityTrial_CheckStadiumKOObjectives,KIRBY MELEE 1: stadium score (enemy KOs) >= 50
+City Trial Checklist,44,80536A28,"Stadium: KIRBY MELEE 2 In one game, KO enemies over 30 times!",Sound Test: What's in the box?,CityTrial_CheckStadiumKOObjectives,KIRBY MELEE 2: stadium score (enemy KOs) >= 30
+City Trial Checklist,45,80536A29,Stadium: KIRBY MELEE (All) KO over 500 enemies!,None,CityTrial_CheckStadiumResultObjectives,records.melee_enemy_ko_total >= 500
+City Trial Checklist,46,80536A2A,"Stadium: KIRBY MELEE (All) KO over 1,500 enemies!",Hydra Part Z: Use 3 to complete Hydra,CityTrial_CheckStadiumResultObjectives,records.melee_enemy_ko_total >= 1500
+City Trial Checklist,47,80536A2B,Stadium: VS. KING DEDEDE KO King Dedede in less than a minute!,King Dedede: Select in free run mode,CityTrial_CheckStadiumResultObjectives,VS. KING DEDEDE: king_dedede_ko_frame != 0 && <= 3600
+City Trial Checklist,48,80536A2C,City Trial: Do some damage to Dyna Blade!,Sound Test: Dyna Blade Intro,CityTrial_CheckForNewUnlocks,flags_84c bit 0 (damaged Dyna Blade)
+City Trial Checklist,49,80536A2D,City Trial: Get trampled by Dyna Blade!,Check off an empty box of your choice!,CityTrial_CheckForNewUnlocks,flags_84c bit 1 (trampled by Dyna Blade)
+City Trial Checklist,50,80536A2E,City Trial: Break 5 or more of the huge pillars that appear!,Sound Test: Huge Pillar,CityTrial_CheckForNewUnlocks,records.huge_pillars_broken (humans' yakumono_break[EVENTPILLAR]) >= 5
+City Trial Checklist,51,80536A2F,City Trial: Break a huge pillar within 40 seconds of the time it appears!,None,CityTrial_CheckForNewUnlocks,fastest_pillar_break 0..2400 frames (valid while yakumono_break[EVENTPILLAR] is set)
+City Trial Checklist,52,80536A30,City Trial: Steal over 8 items from Tac by yourself!,Sound Test: Tac Challenge,CityTrial_CheckForNewUnlocks,tac_stolen_items >= 8
+City Trial Checklist,53,80536A31,City Trial: The meteor attacks the city 3 or more times!,Sound Test: Flying Meteor,CityTrial_CheckForNewUnlocks,records.meteor_strikes (+= CityEvent_GetOccurrenceCount(2) per game) >= 3
+City Trial Checklist,54,80536A32,City Trial: Use up one of the restoration areas!,None,CityTrial_CheckForNewUnlocks,flags_84d bit 5 (used a restoration area)
+City Trial Checklist,55,80536A33,Fill in over 100 Checklist blocks!,Ending: view with the A button,Checklist_ProcessUnlock,"auto-unlock: 100 or more of the mode's cells have is_unlocked or is_filler; stored by a direct stb, not SetNewUnlock"
+City Trial Checklist,56,80536A34,City Trial: Go into the castle chamber when it opens!,None,CityTrial_CheckForNewUnlocks,flags_84d bit 4 (entered the castle chamber)
+City Trial Checklist,57,80536A35,"City Trial: During one game, fly through the rings in the sky 5 times or more!",Dragoon Part B: Use 3 to complete Dragoon,CityTrial_CheckForNewUnlocks,sky_rings >= 5
+City Trial Checklist,58,80536A36,City Trial: Bust the star pole!,None,CityTrial_CheckForNewUnlocks,yakumono_break[STARPOLE] != 0
+City Trial Checklist,59,80536A37,City Trial: Bust the star pole 10 times or more!,Check off an empty box of your choice!,CityTrial_CheckForNewUnlocks,records.starpole_busts (humans' yakumono_break[STARPOLE]) >= 10
+City Trial Checklist,60,80536A38,City Trial: Open up all the holes around the base of the volcano!,None,CityTrial_CheckForNewUnlocks,yakumono_break[BREAKHPCOLLHOLE] summed over present players >= 3
+City Trial Checklist,61,80536A39,City Trial: Let the waterwheel carry you 10 times or more!,None,CityTrial_CheckForNewUnlocks,records.waterwheel_rides >= 10
+City Trial Checklist,62,80536A3A,City Trial: Make your way to the garden in the sky!,None,CityTrial_CheckForNewUnlocks,flags_84d bit 1 (reached the sky garden)
+City Trial Checklist,63,80536A3B,City Trial: Open up the pitfall in the forest!,None,CityTrial_CheckForNewUnlocks,yakumono_break[BREAKFLOOR] != 0
+City Trial Checklist,64,80536A3C,"City Trial: During one game, go into the hole in the high plains 3 times or more!",None,CityTrial_CheckForNewUnlocks,highplains_hole_entries summed over humans >= 3
+City Trial Checklist,65,80536A3D,"City Trial: During one game, break all of the volcano rocks and high plains rocks!",None,CityTrial_CheckForNewUnlocks,yakumono_break[ROCK] summed over present players >= 41
+City Trial Checklist,66,80536A3E,City Trial: Use the grind rail to break into the crater!,None,CityTrial_CheckForNewUnlocks,grindrail_crater_flag != 0
+City Trial Checklist,67,80536A3F,City Trial: Jump on top of the building 10 times or more using the super jump ramp!,None,CityTrial_CheckForNewUnlocks,records.superjump_landings >= 10
+City Trial Checklist,68,80536A40,City Trial: Destroy all of the dilapidated houses!,Hydra Part X: Use 3 to complete Hydra,CityTrial_CheckForNewUnlocks,yakumono_break[BREAKHPCOLLHOUSE] summed over present players >= 30
+City Trial Checklist,69,80536A41,City Trial: Knock down all of the trees in the forest!,None,CityTrial_CheckForNewUnlocks,yakumono_break[TREE] summed over present players >= 53
+City Trial Checklist,70,80536A42,City Trial: Get the Bomb ability from the Copy Chance Wheel!,None,CityTrial_CheckForNewUnlocks,copy_chance_mask bit for COPYKIND Bomb (wheel only)
+City Trial Checklist,71,80536A43,City Trial: Get the Sleep ability from the Copy Chance Wheel!,None,CityTrial_CheckForNewUnlocks,copy_chance_mask bit for COPYKIND Sleep (wheel only)
+City Trial Checklist,72,80536A44,City Trial: Get 10 items within the first 20 seconds of the match!,None,CityTrial_CheckForNewUnlocks,item_collect_20s >= 10
+City Trial Checklist,73,80536A45,City Trial: Do damage to a rival within the first 10 seconds of a match!,None,CityTrial_CheckForNewUnlocks,flags_84c bit 7 (damaged a rival while timer_10s ran)
+City Trial Checklist,74,80536A46,City Trial: Have all players simultaneously get off of their machines!,None,CityTrial_CheckForNewUnlocks,all_off_machines_min != -1 && <= 60 frames
+City Trial Checklist,75,80536A47,City Trial: Let time run out while all players are off of their machines!,None,CityTrial_CheckForNewUnlocks,every present player has flags_854 bit 3 (off machine at timeout)
+City Trial Checklist,76,80536A48,City Trial: Let time run out while all players are on the rails!,None,CityTrial_CheckForNewUnlocks,every present player has flags_854 bit 4 (on rails at timeout)
+City Trial Checklist,77,80536A49,City Trial: Break a CPU's machine 5 times or more in the city!,Purple Kirby: (X or Y button on Player Entry),CityTrial_CheckForNewUnlocks,records.cpu_machine_breaks >= 5
+City Trial Checklist,78,80536A4A,City Trial: Enter a race with 3 CPU Players and do damage to all of them in the city!,None,CityTrial_CheckForNewUnlocks,Ply_GetRivalsDamagedCount (bits of rivals_damaged_mask) >= 3
+City Trial Checklist,79,80536A4B,"City Trial: In one game, get 50 or more items!",None,CityTrial_CheckForNewUnlocks,Ply_GetItemCollectTotal >= 50
+City Trial Checklist,80,80536A4C,"City Trial: In one game, get over 10 Boost patches!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_ACCEL] >= 10
+City Trial Checklist,81,80536A4D,"Stadium: DESTRUCTION DERBY 1 In one game, KO a rival 10 times or more!",None,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 1: stadium score >= 10
+City Trial Checklist,82,80536A4E,"City Trial: In one game, get 10 or more Top Speed Patches!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_TOPSPEED] >= 10
+City Trial Checklist,83,80536A4F,"Stadium: DESTRUCTION DERBY 2 In one game, KO a rival 10 times or more!",New Stadium: Destruction Derby 3,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 2: stadium score >= 10
+City Trial Checklist,84,80536A50,"City Trial: In one game, get 10 or more Turn Patches!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_TURN] >= 10
+City Trial Checklist,85,80536A51,"Stadium: DESTRUCTION DERBY 4 In one game, KO a rival 10 times or more!",New Stadium: Destruction Derby 5,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 4: stadium score >= 10
+City Trial Checklist,86,80536A52,"City Trial: In one game, get 10 or more Charge Patches!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_CHARGE] >= 10
+City Trial Checklist,87,80536A53,"Stadium: DESTRUCTION DERBY 5 In one game, KO a rival 10 times or more!",None,CityTrial_CheckStadiumKOObjectives,DESTRUCTION DERBY 5: stadium score >= 10
+City Trial Checklist,88,80536A54,"City Trial: In one game, get 10 or more Weight Patches!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_WEIGHT] >= 10
+City Trial Checklist,89,80536A55,"Stadium: KIRBY MELEE 1 In one game, KO over 75 enemies by yourself!",New Stadium: Kirby Melee 2,CityTrial_CheckStadiumKOObjectives,KIRBY MELEE 1: stadium score >= 75
+City Trial Checklist,90,80536A56,"City Trial: In one game, get 10 or more Defense Patches!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_DEFENSE] >= 10
+City Trial Checklist,91,80536A57,"Stadium: KIRBY MELEE 2 In one game, KO over 40 enemies by yourself!",Sound Test: Kirby Melee,CityTrial_CheckStadiumKOObjectives,KIRBY MELEE 2: stadium score >= 40
+City Trial Checklist,92,80536A58,"City Trial: In one game, get 10 or more Glide Patches!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_GLIDE] >= 10
+City Trial Checklist,93,80536A59,City Trial: Get 30 or more Glide Patches!,None,CityTrial_CheckForNewUnlocks,records.glide_patches (humans' item_collect[ITKIND_GLIDE]) >= 30
+City Trial Checklist,94,80536A5A,City Trial: Use Sensor Bombs to KO rivals 3 times or more!,None,CityTrial_CheckForNewUnlocks,records.sensor_bomb_kos (humans' ko_sensor_bomb) >= 3
+City Trial Checklist,95,80536A5B,City Trial: Use Gold Spikes to KO rivals 3 times or more!,None,CityTrial_CheckForNewUnlocks,records.gold_spike_kos (humans' ko_gold_spike) >= 3
+City Trial Checklist,96,80536A5C,City Trial: Use Fireworks to KO rivals 10 times or more!,Green Kirby:(X or Y button on player entry),CityTrial_CheckForNewUnlocks,records.firework_kos (humans' ko_firework) >= 10
+City Trial Checklist,97,80536A5D,"City Trial: In one game, eat 2 or more maxim tomatoes!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_FOODMAXIMTOMATO] >= 2
+City Trial Checklist,98,80536A5E,"City Trial: In one game, drink 3 or more energy drinks!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_FOODENERGYDRINK] >= 3
+City Trial Checklist,99,80536A5F,Stadium: DRAG RACE 1 Finish in less than 00:26:00 on Warpstar!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 1: player_finish_time[p] <= 1560 frames on Warpstar (star 0)
+City Trial Checklist,100,80536A60,Stadium: DRAG RACE 1 Finish in less than 00:17:00 on Formula Star!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 1: player_finish_time[p] <= 1020 frames on Formula Star (star 7)
+City Trial Checklist,101,80536A61,Stadium: DRAG RACE 2 Finish in less than 00:27:00 on Wagon Star!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 2: player_finish_time[p] <= 1620 frames on Wagon Star (star 9)
+City Trial Checklist,102,80536A62,Stadium: DRAG RACE 2 Finish in less than 00:29:00 on Winged Star!,Brown Kirby:(X or Y button on player entry),CityTrial_CheckStadiumResultObjectives,DRAG RACE 2: player_finish_time[p] <= 1740 frames on Winged Star (star 2)
+City Trial Checklist,103,80536A63,Stadium: DRAG RACE 3 Finish in less than 00:28:00 on Swerve Star!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 3: player_finish_time[p] <= 1680 frames on Swerve Star (star 11)
+City Trial Checklist,104,80536A64,Stadium: DRAG RACE 3 Finish in less than 00:31:00 on Wheelie Bike!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 3: player_finish_time[p] <= 1860 frames on Wheelie Bike (bike 2)
+City Trial Checklist,105,80536A65,Stadium: DRAG RACE 4 Finish in less than 00:33:00 on Turbo Star!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 4: player_finish_time[p] <= 1980 frames on Turbo Star (star 12)
+City Trial Checklist,106,80536A66,Stadium: DRAG RACE 4 Finish in less than 00:24:00 on Rex Wheelie!,None,CityTrial_CheckStadiumResultObjectives,DRAG RACE 4: player_finish_time[p] <= 1440 frames on Rex Wheelie (bike 3)
+City Trial Checklist,107,80536A67,"City Trial: In one race, eat 3 or more plates of sushi!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_FOODSUSHI] >= 3
+City Trial Checklist,108,80536A68,"City Trial: In one race, eat 3 or more Hot Dogs!",None,CityTrial_CheckForNewUnlocks,item_collect[ITKIND_FOODHOTDOG] >= 3
+City Trial Checklist,109,80536A69,"Unlock Dragoon Parts A, B, and C on the Checklist!",Dragoon: Select in Free Run mode,Checklist_ProcessUnlock,auto-unlock: the cells of Dragoon Parts A/B/C (CT reward indices 27-29) all have has_reward
+City Trial Checklist,110,80536A6A,"Unlock Hydra Parts X, Y, and Z on the Checklist!",Hydra: Select in Free Run mode,Checklist_ProcessUnlock,auto-unlock: the cells of Hydra Parts X/Y/Z (CT reward indices 31-33) all have has_reward
+City Trial Checklist,111,80536A6B,"City Trial: In the city, bust Wheelie Scooter while riding Compact Star!",None,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 15 (pair 0 of the bust table at 0x804b4c68)
+City Trial Checklist,112,80536A6C,"City Trial: In the city, bust Wheelie Bike while riding on Warpstar!",None,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 14 (pair 1 of the bust table at 0x804b4c68)
+City Trial Checklist,113,80536A6D,"City Trial: In the city, bust Swerve Star while riding on Wheelie Bike!",None,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 13 (pair 2 of the bust table at 0x804b4c68)
+City Trial Checklist,114,80536A6E,"City Trial: In the city, bust Warpstar while riding on Swerve Star!",Sound Test: The Lighthouse Light Burns,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 12 (pair 3 of the bust table at 0x804b4c68)
+City Trial Checklist,115,80536A6F,"City Trial: In the city, bust Formula Star while riding on Turbo Star!",None,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 11 (pair 4 of the bust table at 0x804b4c68)
+City Trial Checklist,116,80536A70,"City Trial: In the city, bust Slick Star while riding on Formula Star!",Sound Test: Station Fire,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 10 (pair 5 of the bust table at 0x804b4c68)
+City Trial Checklist,117,80536A71,"City Trial: In the city, bust Rocket Star while riding on Slick Star!",None,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 9 (pair 6 of the bust table at 0x804b4c68)
+City Trial Checklist,118,80536A72,"City Trial: In the city, bust Turbo Star while riding on Rocket Star!",None,CityTrial_CheckForNewUnlocks,vehicle_bust_mask bit 8 (pair 7 of the bust table at 0x804b4c68)
+City Trial Checklist,119,80536A73,"In one match, complete both Dragoon and Hydra!",White Kirby:(X or Y button on player entry),CityTrial_CheckForNewUnlocks,some present player has flags_84d bit 2 (Dragoon assembled) and some has bit 3 (Hydra)
+Top Ride Checklist,0,805368D4,Cross the goal 20 or more times!,Green Kirby (X or Y Button on Player Entry),TopRide_CheckSessionFinalizeObjectives,"TopRideStats+0x01 (goals crossed, every mode) >= 20"
+Top Ride Checklist,1,805368D5,Top Ride: Race over 300 laps!,None,TopRide_CheckPerCourseObjectives_B,TopRideStats+0x06 (u16 laps raced) >= 300
+Top Ride Checklist,2,805368D6,Top Ride: Compete in more than 10 multiplayer races!,None,TopRide_CheckSessionFinalizeObjectives,TopRideStats+0x03 (multiplayer races) >= 10
+Top Ride Checklist,3,805368D7,Top Ride: Compete in more than 50 multiplayer races!,Purple Kirby (X or Y Button on Player Entry),TopRide_CheckSessionFinalizeObjectives,TopRideStats+0x03 >= 50
+Top Ride Checklist,4,805368D8,Free Run: Race more than 100 laps!,None,TopRide_CheckPerCourseObjectives_B,TopRideStats+0x08 (Free Run laps) >= 100
+Top Ride Checklist,5,805368D9,Time Attack: Cross the goal 30 or more times!,None,TopRide_CheckSessionFinalizeObjectives,TopRideStats+0x04 (Time Attack goals) >= 30
+Top Ride Checklist,6,805368DA,Top Ride: Take 1st place on all courses!,Extra Rule: Diagonal Camera Angle,TopRide_CheckPerCourseObjectives,TopRideStats+0x09..+0x0f (per-course 1st-place counts) all nonzero
+Top Ride Checklist,7,805368DB,Top Ride: Race one lap without hitting a wall and finish 1st!,Extra Rule: Mystery Item Set,TopRide_CheckPerCourseObjectives,1st with the clean-lap flag (a lap without hitting a wall)
+Top Ride Checklist,8,805368DC,Top Ride: Do 20 or more Quick Spins in one lap and finish 1st!,None,TopRide_CheckPerCourseObjectives,1st with >= 20 Quick Spins in one lap
+Top Ride Checklist,9,805368DD,"Top Ride: (No ""Zero Items"" rule) Complete all courses without using items!",None,TopRide_CheckPerCourseObjectives_B,TopRideStats+0x2d (per-course finished-without-items bits) == 0x7f
+Top Ride Checklist,10,805368DE,"Top Ride: (No ""Zero Items"" rule) Finish 1st on all courses using no items!",New Item: Lantern,TopRide_CheckPerCourseObjectives_B,the seven per-course 'Take 1st without using items' cells all complete
+Top Ride Checklist,11,805368DF,Collect 500 items or more!,New Item: Who? Paint,TopRide_CheckPerCourseObjectives_B,GameHistory+0x10 (u16 items collected) >= 500
+Top Ride Checklist,12,805368E0,Top Ride: Finish all courses without using Boost!,Check off an empty box of your choice!,TopRide_CheckPerCourseObjectives_B,TopRideStats+0x2e (per-course finished-without-Boost bits) == 0x7f
+Top Ride Checklist,13,805368E1,Top Ride: Finish 1st on all courses without Boost!,None,TopRide_CheckPerCourseObjectives_B,the seven per-course 'Take 1st without using Boost' cells all complete
+Top Ride Checklist,14,805368E2,Top Ride: Get the same item 3 times in one race!,None,TopRide_CheckPerCourseObjectives,Race: one item kind picked up >= 3 times this race
+Top Ride Checklist,15,805368E3,Top Ride: Take 1st place while doing a Quick Spin!,None,TopRide_CheckPerCourseObjectives,"1st, finishing in the Quick Spin state"
+Top Ride Checklist,16,805368E4,Top Ride: Take 1st place while holding the Hammer!,None,TopRide_CheckPerCourseObjectives,"1st, finishing holding the Hammer"
+Top Ride Checklist,17,805368E5,Top Ride: Finish 1st with 1 lap between you and #2!,None,TopRide_CheckPerCourseObjectives,"1st, every rival's lap counter at least 2 below the winner's at the finish"
+Top Ride Checklist,18,805368E6,Top Ride: Finish 1st with 2 laps between you and #2!,None,TopRide_CheckPerCourseObjectives,"1st, every rival's lap counter at least 3 below the winner's at the finish"
+Top Ride Checklist,19,805368E7,Get more than 20 Spinner items!,None,TopRide_CheckPerCourseObjectives_B,TopRideStats+0x1b (Spinner items) >= 20
+Top Ride Checklist,20,805368E8,Get more than 20 Invincible Candy items!,None,TopRide_CheckPerCourseObjectives_B,TopRideStats+0x1d (Invincible Candy) >= 20
+Top Ride Checklist,21,805368E9,Get more than 20 Walky items!,None,TopRide_CheckPerCourseObjectives_B,TopRideStats+0x27 (Walky items) >= 20
+Top Ride Checklist,22,805368EA,Torch 3 or more rivals using one Fire item!,None,TopRide_CheckPerCourseObjectives_B,EmberMgr singleton +0x18 (rivals torched by one Fire item) >= 3
+Top Ride Checklist,23,805368EB,Send 3 or more rivals sailing using one Buzz Saw item!,None,TopRide_CheckPerCourseObjectives,holding the Buzz Saw with >= 3 rivals sent flying by it
+Top Ride Checklist,24,805368EC,"In one game, hit enemies 3 times or more with Bomb items!",None,TopRide_CheckPerCourseObjectives_B,GrenadeMgr singleton +0x1c (Bomb item hits) >= 3
+Top Ride Checklist,25,805368ED,Get over 18 different types of items!,New Item: Chickie,TopRide_CheckPerCourseObjectives_B,GameHistory+0x0e (distinct item kinds) >= 18
+Top Ride Checklist,26,805368EE,"Top Ride: GRASS (No ""Zero Items"" rule) Take 1st place without using items!",Sound Test: GRASS,TopRide_CheckPerCourseObjectives,GRASS: 1st without using items (not under the Zero Items rule)
+Top Ride Checklist,27,805368EF,Top Ride: GRASS Take 1st place without using Boost!,None,TopRide_CheckPerCourseObjectives,GRASS: 1st without using Boost
+Top Ride Checklist,28,805368F0,Top Ride: GRASS Finish 1st with CPUs set to level 5!,None,TopRide_CheckPerCourseObjectives,GRASS: 1st with a slot set to CPU level 5 (TopRideSlot.handicap 4)
+Top Ride Checklist,29,805368F1,Top Ride: GRASS Take 1st place 10 times or more!,None,TopRide_CheckPerCourseObjectives,GRASS: TopRideStats+0x09 (1st places on this course) >= 10
+Top Ride Checklist,30,805368F2,Top Ride: GRASS Finish 7 laps in under 00:43:00!,None,TopRide_CheckPerCourseObjectives,"GRASS: Race of 7 laps, finish time < 2580 frames"
+Top Ride Checklist,31,805368F3,Top Ride: GRASS Race more than 100 laps!,None,TopRide_CheckPerCourseObjectives_B,GRASS: TopRideStats+0x10 (laps on this course) >= 100
+Top Ride Checklist,32,805368F4,Top Ride: GRASS Finish 1st and hit 5 or more Dash Panels!,Music: Grass (X or Y Button on Select Course),TopRide_CheckPerCourseObjectives,GRASS: 1st with >= 5 Dash Panels hit
+Top Ride Checklist,33,805368F5,"Top Ride: GRASS In one race, drop 30 or more tree bombs!",None,TopRide_CheckPerCourseObjectives_B,GRASS: Race: >= 30 tree bombs dropped this race
+Top Ride Checklist,34,805368F6,Top Ride: GRASS Finish 1st 5 seconds faster than #2!,None,TopRide_CheckSessionFinalizeObjectives,"GRASS: 1st, runner-up's time - winner's >= 300 frames"
+Top Ride Checklist,35,805368F7,"Top Ride: SAND (No ""Zero Items"" rule) Take 1st place without using items!",None,TopRide_CheckPerCourseObjectives,SAND: 1st without using items (not under the Zero Items rule)
+Top Ride Checklist,36,805368F8,Top Ride: SAND Take 1st place without using Boost!,Sound Test: SAND,TopRide_CheckPerCourseObjectives,SAND: 1st without using Boost
+Top Ride Checklist,37,805368F9,Top Ride: SAND Finish 1st with CPUs set to level 5!,None,TopRide_CheckPerCourseObjectives,SAND: 1st with a slot set to CPU level 5 (TopRideSlot.handicap 4)
+Top Ride Checklist,38,805368FA,Top Ride: SAND Take 1st place 10 times or more!,None,TopRide_CheckPerCourseObjectives,SAND: TopRideStats+0x0a (1st places on this course) >= 10
+Top Ride Checklist,39,805368FB,Top Ride: SAND Finish 7 laps in under 00:52:00!,None,TopRide_CheckPerCourseObjectives,"SAND: Race of 7 laps, finish time < 3120 frames"
+Top Ride Checklist,40,805368FC,Top Ride: SAND Race more than 100 laps!,None,TopRide_CheckPerCourseObjectives_B,SAND: TopRideStats+0x11 (laps on this course) >= 100
+Top Ride Checklist,41,805368FD,Top Ride: SAND Take 1st and catch the worm 3 or more times!,None,TopRide_CheckPerCourseObjectives,SAND: 1st with the worm caught >= 3 times
+Top Ride Checklist,42,805368FE,Top Ride: SAND Drop into Ant Doom 50 times or more!,Check off an empty box of your choice!,TopRide_CheckPerCourseObjectives_B,"SAND: TopRideStats+0x30 (Ant Doom drops, cumulative) >= 50"
+Top Ride Checklist,43,805368FF,Top Ride: SAND Drop into Ant Doom 20 times in one game!,None,TopRide_CheckPerCourseObjectives_B,SAND: GameHistory+0x0c (Ant Doom drops this game) >= 20
+Top Ride Checklist,44,80536900,Top Ride: SAND Finish 1st 5 seconds faster than #2!,None,TopRide_CheckSessionFinalizeObjectives,"SAND: 1st, runner-up's time - winner's >= 300 frames"
+Top Ride Checklist,45,80536901,"Top Ride: SKY (No ""Zero Items"" rule) Take 1st place without using items!",None,TopRide_CheckPerCourseObjectives,SKY: 1st without using items (not under the Zero Items rule)
+Top Ride Checklist,46,80536902,Top Ride: SKY Take 1st place without using Boost!,None,TopRide_CheckPerCourseObjectives,SKY: 1st without using Boost
+Top Ride Checklist,47,80536903,Top Ride: SKY Finish 1st with CPUs set to level 5!,Brown Kirby (X or Y Button on Player Entry),TopRide_CheckPerCourseObjectives,SKY: 1st with a slot set to CPU level 5 (TopRideSlot.handicap 4)
+Top Ride Checklist,48,80536904,Top Ride: SKY Take 1st place 10 times or more!,None,TopRide_CheckPerCourseObjectives,SKY: TopRideStats+0x0b (1st places on this course) >= 10
+Top Ride Checklist,49,80536905,Top Ride: SKY Finish 6 laps in under 01:02:00!,None,TopRide_CheckPerCourseObjectives,"SKY: Race of 6 laps, finish time < 3720 frames"
+Top Ride Checklist,50,80536906,Top Ride: SKY Race more than 100 laps!,None,TopRide_CheckPerCourseObjectives_B,SKY: TopRideStats+0x12 (laps on this course) >= 100
+Top Ride Checklist,51,80536907,Top Ride: SKY Take 1st and hit the Isle Knob 5 or more times!,Sound Test: SKY,TopRide_CheckPerCourseObjectives,SKY: 1st with the Isle Knob hit >= 5 times
+Top Ride Checklist,52,80536908,Top Ride: SKY Finish 1st without using the Jump Plate!,None,TopRide_CheckPerCourseObjectives,SKY: 1st without using the Jump Plate
+Top Ride Checklist,53,80536909,Top Ride: SKY Finish 1st 5 seconds faster than #2!,None,TopRide_CheckSessionFinalizeObjectives,"SKY: 1st, runner-up's time - winner's >= 300 frames"
+Top Ride Checklist,54,8053690A,"Top Ride: FIRE (No ""Zero Items"" rule) Take 1st place without using items!",None,TopRide_CheckPerCourseObjectives,FIRE: 1st without using items (not under the Zero Items rule)
+Top Ride Checklist,55,8053690B,Top Ride: FIRE Take 1st place without using Boost!,None,TopRide_CheckPerCourseObjectives,FIRE: 1st without using Boost
+Top Ride Checklist,56,8053690C,Top Ride: FIRE Finish 1st with CPUs set to level 5!,None,TopRide_CheckPerCourseObjectives,FIRE: 1st with a slot set to CPU level 5 (TopRideSlot.handicap 4)
+Top Ride Checklist,57,8053690D,Top Ride: FIRE Take 1st place 10 times or more!,Sound Test: FIRE,TopRide_CheckPerCourseObjectives,FIRE: TopRideStats+0x0c (1st places on this course) >= 10
+Top Ride Checklist,58,8053690E,Top Ride: FIRE Finish 6 laps in under 00:53:00!,None,TopRide_CheckPerCourseObjectives,"FIRE: Race of 6 laps, finish time < 3180 frames"
+Top Ride Checklist,59,8053690F,Top Ride: FIRE Race more than 100 laps!,None,TopRide_CheckPerCourseObjectives_B,FIRE: TopRideStats+0x13 (laps on this course) >= 100
+Top Ride Checklist,60,80536910,Top Ride: FIRE Cause a huge eruption 3 times or more!,Check off an empty box of your choice!,TopRide_CheckPerCourseObjectives_B,FIRE: Race: >= 3 huge eruptions caused
+Top Ride Checklist,61,80536911,Top Ride: FIRE Finish 1st while holding the Fire item.,Music: Fire (X or Y Button on Select Course),TopRide_CheckPerCourseObjectives,FIRE: 1st finishing holding the Fire item
+Top Ride Checklist,62,80536912,Top Ride: FIRE Finish 1st 5 seconds faster than #2!,None,TopRide_CheckSessionFinalizeObjectives,"FIRE: 1st, runner-up's time - winner's >= 300 frames"
+Top Ride Checklist,63,80536913,"Top Ride: WATER (No ""Zero Items"" rule) Take 1st place without using items!",None,TopRide_CheckPerCourseObjectives,WATER: 1st without using items (not under the Zero Items rule)
+Top Ride Checklist,64,80536914,Top Ride: WATER Take 1st place without using Boost!,None,TopRide_CheckPerCourseObjectives,WATER: 1st without using Boost
+Top Ride Checklist,65,80536915,Top Ride: WATER Finish 1st with CPUs set to level 5!,None,TopRide_CheckPerCourseObjectives,WATER: 1st with a slot set to CPU level 5 (TopRideSlot.handicap 4)
+Top Ride Checklist,66,80536916,Top Ride: WATER Take 1st place 10 times or more!,None,TopRide_CheckPerCourseObjectives,WATER: TopRideStats+0x0e (1st places on this course) >= 10
+Top Ride Checklist,67,80536917,Top Ride: WATER Finish 5 laps in under 01:02:00!,Sound Test: WATER,TopRide_CheckPerCourseObjectives,"WATER: Race of 5 laps, finish time < 3720 frames"
+Top Ride Checklist,68,80536918,Top Ride: WATER Race more than 100 laps!,None,TopRide_CheckPerCourseObjectives_B,WATER: TopRideStats+0x15 (laps on this course) >= 100
+Top Ride Checklist,69,80536919,Top Ride: WATER Take 1st and enter the falls 5 times or more!,Extra Rule: Device Quantity,TopRide_CheckPerCourseObjectives,WATER: 1st with the falls entered >= 5 times
+Top Ride Checklist,70,8053691A,Top Ride: WATER Finish 1st 5 seconds faster than #2!,Music: Water (X or Y Button on Select Course),TopRide_CheckSessionFinalizeObjectives,"WATER: 1st, runner-up's time - winner's >= 300 frames"
+Top Ride Checklist,71,8053691B,"Top Ride: LIGHT (No ""Zero Items"" rule) Take 1st place without using items!",None,TopRide_CheckPerCourseObjectives,LIGHT: 1st without using items (not under the Zero Items rule)
+Top Ride Checklist,72,8053691C,Top Ride: LIGHT Take 1st place without using Boost!,None,TopRide_CheckPerCourseObjectives,LIGHT: 1st without using Boost
+Top Ride Checklist,73,8053691D,Top Ride: LIGHT Finish 1st with CPUs set to level 5!,None,TopRide_CheckPerCourseObjectives,LIGHT: 1st with a slot set to CPU level 5 (TopRideSlot.handicap 4)
+Top Ride Checklist,74,8053691E,Top Ride: LIGHT Take 1st place 10 times or more!,None,TopRide_CheckPerCourseObjectives,LIGHT: TopRideStats+0x0d (1st places on this course) >= 10
+Top Ride Checklist,75,8053691F,Top Ride: LIGHT Finish 6 laps in under 00:43:00!,None,TopRide_CheckPerCourseObjectives,"LIGHT: Race of 6 laps, finish time < 2580 frames"
+Top Ride Checklist,76,80536920,Top Ride: LIGHT Race more than 100 laps!,Sound Test: LIGHT,TopRide_CheckPerCourseObjectives_B,LIGHT: TopRideStats+0x14 (laps on this course) >= 100
+Top Ride Checklist,77,80536921,Top Ride: LIGHT Ride the grind rail 50 times or more!,None,TopRide_CheckPerCourseObjectives_B,"LIGHT: TopRideStats+0x31 (grind rail rides, cumulative) >= 50"
+Top Ride Checklist,78,80536922,Top Ride: LIGHT Take 1st place and grind the rail 5 times or more!,Check off an empty box of your choice!,TopRide_CheckPerCourseObjectives,LIGHT: 1st with the rail ground >= 5 times
+Top Ride Checklist,79,80536923,Top Ride: LIGHT Finish 1st and bust 6 or more columns!,None,TopRide_CheckPerCourseObjectives,LIGHT: 1st with >= 6 columns busted
+Top Ride Checklist,80,80536924,Top Ride: LIGHT Finish 1st 5 seconds faster than #2!,None,TopRide_CheckSessionFinalizeObjectives,"LIGHT: 1st, runner-up's time - winner's >= 300 frames"
+Top Ride Checklist,81,80536925,"Top Ride: METAL (No ""Zero Items"" rule) Take 1st place without using items!",None,TopRide_CheckPerCourseObjectives,METAL: 1st without using items (not under the Zero Items rule)
+Top Ride Checklist,82,80536926,Top Ride: METAL Take 1st place without using Boost!,Music: Metal (X or Y Button on Select Course),TopRide_CheckPerCourseObjectives,METAL: 1st without using Boost
+Top Ride Checklist,83,80536927,Top Ride: METAL Finish 1st with CPUs set to level 5!,None,TopRide_CheckPerCourseObjectives,METAL: 1st with a slot set to CPU level 5 (TopRideSlot.handicap 4)
+Top Ride Checklist,84,80536928,Top Ride: METAL Take 1st place 10 times or more!,None,TopRide_CheckPerCourseObjectives,METAL: TopRideStats+0x0f (1st places on this course) >= 10
+Top Ride Checklist,85,80536929,Top Ride: METAL Finish 5 laps in under 00:58:00!,None,TopRide_CheckPerCourseObjectives,"METAL: Race of 5 laps, finish time < 3480 frames"
+Top Ride Checklist,86,8053692A,Top Ride: METAL Race more than 100 laps!,None,TopRide_CheckPerCourseObjectives_B,METAL: TopRideStats+0x16 (laps on this course) >= 100
+Top Ride Checklist,87,8053692B,Top Ride: METAL Take 1st without breaking any gear walls!,None,TopRide_CheckPerCourseObjectives,METAL: 1st without breaking a gear wall
+Top Ride Checklist,88,8053692C,Top Ride: METAL Take 1st and hit the switch 10 times or more!,None,TopRide_CheckPerCourseObjectives,METAL: 1st with the switch hit >= 10 times
+Top Ride Checklist,89,8053692D,Top Ride: METAL Take 1st and break 5 or more gear walls!,Sound Test: METAL,TopRide_CheckPerCourseObjectives,METAL: 1st with >= 5 gear walls broken
+Top Ride Checklist,90,8053692E,Top Ride: METAL Finish 1st 5 seconds faster than #2!,White Kirby (X or Y Button on Player Entry),TopRide_CheckSessionFinalizeObjectives,"METAL: 1st, runner-up's time - winner's >= 300 frames"
+Top Ride Checklist,91,8053692F,Time Attack: GRASS Finish in under 00:33:00!,Check off an empty box of your choice!,TopRide_CheckPerCourseObjectives,GRASS: Time Attack finish time <= 1980 frames
+Top Ride Checklist,92,80536930,Time Attack: SAND Finish in under 00:35:00!,None,TopRide_CheckPerCourseObjectives,SAND: Time Attack finish time <= 2100 frames
+Top Ride Checklist,93,80536931,Time Attack: LIGHT Finish in under 00:38:00!,None,TopRide_CheckPerCourseObjectives,LIGHT: Time Attack finish time <= 2280 frames
+Top Ride Checklist,94,80536932,Time Attack: SKY Finish in under 00:57:00!,None,TopRide_CheckPerCourseObjectives,SKY: Time Attack finish time <= 3420 frames
+Top Ride Checklist,95,80536933,Time Attack: WATER Finish in under 01:06:00!,None,TopRide_CheckPerCourseObjectives,WATER: Time Attack finish time <= 3960 frames
+Top Ride Checklist,96,80536934,Time Attack: FIRE Finish in under 00:46:00!,None,TopRide_CheckPerCourseObjectives,FIRE: Time Attack finish time <= 2760 frames
+Top Ride Checklist,97,80536935,Time Attack: METAL Finish in under 00:57:00!,None,TopRide_CheckPerCourseObjectives,METAL: Time Attack finish time <= 3420 frames
+Top Ride Checklist,98,80536936,Time Attack: GRASS Finish in under 00:28:00!,None,TopRide_CheckPerCourseObjectives,GRASS: Time Attack finish time <= 1680 frames
+Top Ride Checklist,99,80536937,Time Attack: SAND Finish in under 00:29:00!,Music: Sand (X or Y Button on Select Course),TopRide_CheckPerCourseObjectives,SAND: Time Attack finish time <= 1740 frames
+Top Ride Checklist,100,80536938,Time Attack: LIGHT Finish in under 00:33:00!,Music: Light (X or Y Button on Select Course),TopRide_CheckPerCourseObjectives,LIGHT: Time Attack finish time <= 1980 frames
+Top Ride Checklist,101,80536939,Time Attack: SKY Finish in under 00:47:00!,None,TopRide_CheckPerCourseObjectives,SKY: Time Attack finish time <= 2820 frames
+Top Ride Checklist,102,8053693A,Time Attack: WATER Finish in under 00:56:00!,Extra Rule: Attack Item Set,TopRide_CheckPerCourseObjectives,WATER: Time Attack finish time <= 3360 frames
+Top Ride Checklist,103,8053693B,Time Attack: FIRE Finish in under 00:39:00!,None,TopRide_CheckPerCourseObjectives,FIRE: Time Attack finish time <= 2340 frames
+Top Ride Checklist,104,8053693C,Time Attack: METAL Finish in under 00:51:00!,None,TopRide_CheckPerCourseObjectives,METAL: Time Attack finish time <= 3060 frames
+Top Ride Checklist,105,8053693D,Free Run: GRASS Do one lap in under 00:06:00!,None,TopRide_CheckPerCourseObjectives_B,GRASS: Free Run best lap <= 360 frames
+Top Ride Checklist,106,8053693E,Free Run: SAND Do one lap in under 00:06:50!,None,TopRide_CheckPerCourseObjectives_B,SAND: Free Run best lap <= 390 frames
+Top Ride Checklist,107,8053693F,Free Run: LIGHT Do one lap in under 00:07:50!,Sound Test: Results Screen,TopRide_CheckPerCourseObjectives_B,LIGHT: Free Run best lap <= 450 frames
+Top Ride Checklist,108,80536940,Free Run: SKY Do one lap in under 00:11:00!,None,TopRide_CheckPerCourseObjectives_B,SKY: Free Run best lap <= 660 frames
+Top Ride Checklist,109,80536941,Free Run: WATER Do one lap in under 00:12:00!,None,TopRide_CheckPerCourseObjectives_B,WATER: Free Run best lap <= 720 frames
+Top Ride Checklist,110,80536942,Free Run: FIRE Do one lap in under 00:08:00!,None,TopRide_CheckPerCourseObjectives_B,FIRE: Free Run best lap <= 480 frames
+Top Ride Checklist,111,80536943,Free Run: METAL Do one lap in under 00:11:50!,None,TopRide_CheckPerCourseObjectives_B,METAL: Free Run best lap <= 690 frames
+Top Ride Checklist,112,80536944,Free Run: GRASS Do one lap in under 00:04:50!,None,TopRide_CheckPerCourseObjectives_B,GRASS: Free Run best lap <= 270 frames
+Top Ride Checklist,113,80536945,Free Run: SAND Do one lap in under 00:05:00!,None,TopRide_CheckPerCourseObjectives_B,SAND: Free Run best lap <= 300 frames
+Top Ride Checklist,114,80536946,Free Run: LIGHT Do one lap in under 00:06:00!,None,TopRide_CheckPerCourseObjectives_B,LIGHT: Free Run best lap <= 360 frames
+Top Ride Checklist,115,80536947,Free Run: SKY Do one lap in under 00:09:00!,Music: Sky (X or Y Button on Select Course),TopRide_CheckPerCourseObjectives_B,SKY: Free Run best lap <= 540 frames
+Top Ride Checklist,116,80536948,Free Run: WATER Do one lap in under 00:10:50!,Extra Rule: Side Camera Angle,TopRide_CheckPerCourseObjectives_B,WATER: Free Run best lap <= 630 frames
+Top Ride Checklist,117,80536949,Free Run: FIRE Do one lap in under 00:06:50!,None,TopRide_CheckPerCourseObjectives_B,FIRE: Free Run best lap <= 390 frames
+Top Ride Checklist,118,8053694A,Free Run: METAL Do one lap in under 00:09:50!,None,TopRide_CheckPerCourseObjectives_B,METAL: Free Run best lap <= 570 frames
+Top Ride Checklist,119,8053694B,Fill in over 100 Checklist blocks!,Ending: View by pressing the A Button,Checklist_ProcessUnlock,"auto-unlock: 100 or more of the mode's cells have is_unlocked or is_filler; stored by a direct stb, not SetNewUnlock"

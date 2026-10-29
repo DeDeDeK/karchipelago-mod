@@ -8,9 +8,15 @@
 #include "inline.h"
 #include "ap_announce.h"
 
-// Hook body at 0x800ede24 in CityEvent_Decide: chance_arr is the 16-entry stack chance
-// array (sp+0x08), already filled from the weights table but before history adjustment.
-void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
+int GateEvents_IsUnlocked(int kind)
+{
+    return kind >= 0 && kind < EVKIND_NUM && (ap_save->event_unlocked_mask & (1 << kind));
+}
+
+// Hook body at 0x800ede24 in CityEvent_Decide (0x800edcf8): chance_arr is the 16-entry
+// stack chance array (sp+0x08), filled from the weights table but before the history
+// adjustment.
+static void GateEvents_FilterChances(int *chance_arr, EventCheckData *ev_chk)
 {
     u32 mask = ap_save->event_unlocked_mask;
     int enabled_count = 0;

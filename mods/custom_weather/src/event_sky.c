@@ -18,12 +18,20 @@ void EventSky_TransitionGlobal(int preset_index)
 }
 
 // Reimplements Sky_RestoreGlobal (0x800d546c), the event-end wrapper that transitions
-// back to the round's stored preset.
+// back to the round's stored preset. With event skies off an event never moved the
+// sky, but a legendary machine finished mid-event still stores its preset and leaves
+// the transition to this restore (Sky_SetDragoonPreset, 0x800d5490).
 void EventSky_RestoreGlobal(void)
 {
+    GrObj *gr = *stc_grobj;
     if (!event_sky_changes)
-        return;
-    Sky_ApplyStoredIndex(*stc_grobj);
+    {
+        GrFogData *fd = (GrFogData *)gr->fog_gobj->userdata;
+        GrFogDesc *presets = gr->gr_data->fog->colors->desc_arr;
+        if (fd->target_preset == &presets[fd->fog_kind])
+            return;
+    }
+    Sky_ApplyStoredIndex(gr);
 }
 
 void EventSky_OnBoot(void)
@@ -43,7 +51,7 @@ OptionDesc event_sky_option = {
     .description = "Let City Trial events swap the sky while they run (Off keeps the current weather through events)",
     .kind = OPTKIND_VALUE,
     .val = &event_sky_changes,
-    .value_num = 2,
+    .value_num = WEATHER_ONOFF_NUM,
     .value_names = weather_onoff_names,
     .on_change = OnEventSkyChange,
 };

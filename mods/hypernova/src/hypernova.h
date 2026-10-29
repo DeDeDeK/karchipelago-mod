@@ -9,12 +9,12 @@
 #define HYPERNOVA_SCALE_NEUTRAL     1.0f
 #define HYPERNOVA_SCALE_ANIM_FRAMES 30      // ~0.5s ease @ 60fps
 
-// Suction cone: reach in world units, half-angle as its cosine (0.8660254 = cos(30deg)).
+// Suction cone: reach in world units, and the 30deg half-angle as its cosine.
 #define HYPERNOVA_RANGE             175.0f
-#define HYPERNOVA_HALF_ANGLE_COS    0.8660254f
+#define HYPERNOVA_HALF_ANGLE_COS    ((float)(M_SQRT3 / 2))
 
 // tan(30deg), for the debug cone's base radius; keep in sync with the cosine.
-#define HYPERNOVA_HALF_ANGLE_TAN    0.5773503f
+#define HYPERNOVA_HALF_ANGLE_TAN    ((float)(M_SQRT3 / 3))
 
 // Pull step shared by items, yakumono and machines: max(SPEED*dist, MIN) units/frame.
 #define HYPERNOVA_PULL_SPEED        0.030f
@@ -39,18 +39,8 @@
 // Machines are KO'd on arrival; wider than the yakumono radius so the model does not clip in.
 #define HYPERNOVA_MACHINE_BREAK_RADIUS 45.0f
 
-// The BreakDown state callback (Star 0x801f0234, Wheel 0x801fb3d0) runs Machine_KOExplode -
-// explosion, break SFX, GObj_Destroy - only if MachineData.x78 bit 0x40 is set. Machine_OnKO
-// enters BreakDown but never sets the bit, so a forced break has to.
-#define HYPERNOVA_MACHINE_KO_GATE_BIT  0x40
-
 // B, not A: A is the boost/charge button in Air Ride.
 #define HYPERNOVA_TRIGGER_BUTTON    PAD_BUTTON_B
-
-// Vanilla inhale action-states (RiderData.state_idx); they do NOT chain on their own.
-#define HYPERNOVA_INHALE_START      0x2f
-#define HYPERNOVA_INHALE_LOOP       0x30
-#define HYPERNOVA_INHALE_END        0x31
 
 // RiderData.inhale_timer is topped up to this each frame to keep the suck alive. Must be >= 2,
 // one decrement landing before the next write. It aliases copy_wheel_result, so other systems
@@ -70,19 +60,12 @@
 // Whirlwind rainbow strength (0..1): 1.0 = full rainbow, 0.0 = white. Opacity stays vanilla.
 #define HYPERNOVA_WHIRLWIND_TINT       0.45f
 
-#define HYPERNOVA_INHALE_EFFECT_ID   0x3a982  // inhale suction whirlwind Effect kind
-
-// Fabricated break collider: force = radius * impactSpeed^2, so FORCE_RADIUS is huge (but under
-// FLT_MAX) for a one-hit break. Only FORCE_DELTA's direction matters (it points into the surface).
-#define HYPERNOVA_BREAK_FORCE_RADIUS 1.0e9f
-#define HYPERNOVA_BREAK_FORCE_DELTA  100.0f
-
 #define HYPERNOVA_DEBUG_CONE_RGBA   RGBA(255, 0, 0, 64)
 #define HYPERNOVA_DEBUG_CONE_SEGS   24                  // base-circle subdivisions (15deg steps)
 
 // GX link 0 is the world camera's 3D-scene link, so the cone is occluded by world geometry.
-// The p_link is past GAMEPLINK_CARDCAM (28) and clear of custom_weather's 25-34, so no other
-// bucket walker sees this GObj.
+// The p_link is past GAMEPLINK_CARDCAM (28), the last engine bucket, so no bucket walker
+// sees this GObj.
 #define HYPERNOVA_DEBUG_GOBJ_CLASS  200
 #define HYPERNOVA_DEBUG_GOBJ_PLINK  35
 #define HYPERNOVA_DEBUG_GX_LINK     0
@@ -99,7 +82,7 @@ extern int hypernova_selftest;      // press D-Pad Up on port 1 in CT
 extern int hypernova_debug_cone;
 
 void Hypernova_OnBoot(void);
-void Hypernova_OnFrameEnd(void);
+void Hypernova_On3DLoadEnd(void);
 void Hypernova_OnSceneChange(void);
 
 int  Hypernova_Activate(int duration_frames);                   // all human players
@@ -127,9 +110,7 @@ void Hypernova_VacuumFinishClaimedPlayer(int player);
 // Drop all claims without touching the targets (scene change / leaving City Trial).
 void Hypernova_VacuumReset(void);
 
-// Lazily install the cone-visualizer render GObj (no-op if the toggle is off or it exists).
-void Hypernova_DebugConeEnsure(void);
-// Forget the cached overlay GObj (the engine frees it on scene teardown).
-void Hypernova_DebugConeReset(void);
+// Install the cone-visualizer render GObj; the engine frees it with the scene.
+void Hypernova_DebugConeCreate(void);
 
 #endif // HYPERNOVA_H

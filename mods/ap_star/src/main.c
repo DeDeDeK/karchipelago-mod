@@ -3,8 +3,8 @@
 #include "hoshi/settings.h"
 
 #include "ap_star.h"
-#include "ap_star_palette.h"
 #include "ap_star_pieces.h"
+#include "ap_star_ring.h"
 #include "ap_star_shot.h"
 
 // Hoshi's Mod_CopyFromSave overwrites these later if a saved hash exists.
@@ -48,9 +48,17 @@ static void OnBoot(void)
     ApStar_ExportApi();
 }
 
-static void On3DLoadStart(void)
+static void OnSaveLoaded(void)
 {
-    ApStarPieces_On3DLoadStart();
+    ApStar_OnSaveLoaded();
+    ApStarPieces_OnSaveLoaded();
+}
+
+static void OnSceneChange(void)
+{
+    ApStarPieces_OnSceneChange();
+    ApStarRing_OnSceneChange();
+    ApStarShot_OnSceneChange();
 }
 
 static void On3DLoadEnd(void)
@@ -59,22 +67,16 @@ static void On3DLoadEnd(void)
     ApStarShot_On3DLoadEnd();
 }
 
-static void OnFrameStart(void)
-{
-    ApStarPieces_OnFrameStart();
-    ApStarShot_OnFrameStart();
-}
-
 ModDesc mod_desc = {
-    .name = "ap_star",
+    .name = AP_STAR_MOD_NAME,
     .author = "DeDeDK",
     .version.major = AP_STAR_API_MAJOR,
     .version.minor = AP_STAR_API_MINOR,
     .affects_gameplay = 1,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
-    .OnSceneChange = ApStarPalette_OnSceneChange,
-    .On3DLoadStart = On3DLoadStart,
+    .OnSaveLoaded = OnSaveLoaded,
+    .OnSceneChange = OnSceneChange,
+    .On3DLoadStart = ApStarPieces_On3DLoadStart,
     .On3DLoadEnd = On3DLoadEnd,
-    .OnFrameStart = OnFrameStart,
 };

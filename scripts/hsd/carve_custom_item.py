@@ -309,6 +309,12 @@ def main(argv):
             print(
                 f"  warning: --weight-{label} {w} exceeds 255; the engine clamps box weights to 255"
             )
+    # Event-source chances are read sign-extended, so custom_items clamps them to 0x7fff.
+    for label, w in zip(("dyna", "tac", "meteor", "destructible", "chamber", "ufo"), weight_event):
+        if w > 0x7FFF:
+            print(
+                f"  warning: --ev-{label} {w} exceeds 32767; custom_items clamps event weights to 32767"
+            )
     print(
         f"Carving custom item '{args.name}' from {args.item_dat} kind {args.source_kind}:"
     )

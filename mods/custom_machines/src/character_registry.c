@@ -1,8 +1,4 @@
-// Appends a CharacterKind for each registered machine that asks for one. Three DOL roster
-// tables sit back to back with no slack, and each is read by exactly one accessor that
-// does nothing but form an address, so all three are relocated by rewriting the lis/addi
-// pair inside the accessor. The machine-to-CharacterKind map is replaced outright instead:
-// its bike half is reached r13-relative, which no lis/addi pair forms.
+#include <string.h>
 
 #include "os.h"
 #include "menu.h"
@@ -10,14 +6,14 @@
 
 #include "custom_machines.h"
 
-// One row past the last real character, so every availability predicate rejects it.
-// Its CharacterDesc stays zeroed, a valid row for any stray lookup.
+// Past every CharacterKind the registry can hand out, so every availability predicate
+// rejects it. Its CharacterDesc stays zeroed, a valid row for any stray lookup.
 #define SENTINEL_CKIND CUSTOM_CKIND_NUM
 
 #define MAX_GRID_COLS (SELICON_GRID_COLS + (CUSTOM_MACHINE_MAX + 1) / 2)
 
 static CharacterDesc stc_char_desc[CUSTOM_CKIND_NUM + 1];
-static u8 stc_icon_linear[CUSTOM_CKIND_NUM + 1];
+static u8 stc_icon_linear[CUSTOM_CKIND_NUM];
 // Flat, because its row stride is the runtime column count SelIcon_GetCKind is
 // patched to multiply by - not the compile-time maximum.
 static u8 stc_icon_grid[SELICON_GRID_ROWS * MAX_GRID_COLS];
@@ -51,11 +47,8 @@ static CharacterKind GetCKind(int is_bike, int class_slot)
 
 void CustomMachineCharacterRegistry_OnBoot(void)
 {
-    for (int i = 0; i < CKIND_NUM; i++)
-    {
-        stc_char_desc[i] = stc_character_desc[i];
-        stc_icon_linear[i] = stc_selicon_ckind_linear[i];
-    }
+    memcpy(stc_char_desc, stc_character_desc, CKIND_NUM * sizeof(stc_char_desc[0]));
+    memcpy(stc_icon_linear, stc_selicon_ckind_linear, CKIND_NUM * sizeof(stc_icon_linear[0]));
 
     int appended = 0;
     for (int i = 0; i < CustomMachines_GetCount(); i++)
@@ -70,7 +63,6 @@ void CustomMachineCharacterRegistry_OnBoot(void)
         stc_icon_linear[e->character_kind] = (u8)e->character_kind;
         appended++;
     }
-    stc_icon_linear[SENTINEL_CKIND] = SENTINEL_CKIND;
 
     stc_grid_cols = SELICON_GRID_COLS + (appended + 1) / 2;
     for (int row = 0; row < SELICON_GRID_ROWS; row++)
@@ -95,10 +87,10 @@ void CustomMachineCharacterRegistry_OnBoot(void)
         n++;
     }
 
-    CustomMachines_RepointTable(0x8000b9a8, 0x8000b9b0, stc_icon_linear);  // SelIcon_GetCKindLinear
-    CustomMachines_RepointTable(0x8000b9c0, 0x8000b9cc, stc_icon_grid);    // SelIcon_GetCKind
-    CustomMachines_RepointTable(0x8000b9e0, 0x8000b9e8, stc_char_desc);    // Character_GetDesc
-    CustomMachines_SetImmediate(0x8000b9c4, stc_grid_cols); // mulli r5, r0, cols
+    CODEPATCH_REPLACEADDRESS(0x8000b9a8, 0x8000b9b0, stc_icon_linear); // SelIcon_GetCKindLinear (0x8000b9a8)
+    CODEPATCH_REPLACEADDRESS(0x8000b9c0, 0x8000b9cc, stc_icon_grid);   // SelIcon_GetCKind (0x8000b9bc)
+    CODEPATCH_REPLACEADDRESS(0x8000b9e0, 0x8000b9e8, stc_char_desc);   // Character_GetDesc (0x8000b9dc)
+    CODEPATCH_REPLACEIMMEDIATE(0x8000b9c4, stc_grid_cols); // mulli r5, r0, cols
     CODEPATCH_REPLACEFUNC(Machine_GetCKind, GetCKind);
 
     OSReport("[CharacterRegistry] %d character(s) appended, grid is 2x%d\n",

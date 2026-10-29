@@ -18,6 +18,10 @@ extern MenuDesc moon_menu;
 extern MenuDesc stars_menu;
 extern MenuDesc volcano_menu;
 extern MenuDesc tornado_menu;
+extern MenuDesc earthquake_menu;
+extern MenuDesc tsunami_menu;
+extern MenuDesc glow_menu;
+extern MenuDesc starlight_menu;
 extern OptionDesc event_sky_option;
 
 static void OnBoot(void)
@@ -26,15 +30,19 @@ static void OnBoot(void)
     CustomWeatherRuntime_OnBoot();
     CustomBackdrop_OnBoot();
     EventSky_OnBoot();
+    Earthquake_OnBoot();
+    Glow_OnBoot();
 }
 
-static void OnFrameEnd(void)
+// The crack collision hook runs on every stage, so a quake must not outlive its round.
+static void On3DExit(void)
 {
-    Tornado_OnFrameEnd();
+    CustomBackdrop_On3DExit();
+    Earthquake_Reset();
 }
 
 static MenuDesc top_menu = {
-    .option_num = 14,
+    .option_num = 18,
     .options = {
         &(OptionDesc){
             .name = "Weather Presets",
@@ -68,7 +76,7 @@ static MenuDesc top_menu = {
         },
         &(OptionDesc){
             .name = "Lightning",
-            .description = "Visible lightning bolts in storm presets (Auto / Off / Force)",
+            .description = "Visible lightning bolts in storm presets",
             .kind = OPTKIND_MENU,
             .menu_ptr = &lightning_menu,
         },
@@ -114,6 +122,30 @@ static MenuDesc top_menu = {
             .kind = OPTKIND_MENU,
             .menu_ptr = &tornado_menu,
         },
+        &(OptionDesc){
+            .name = "Earthquake",
+            .description = "How often the ground quakes in City Trial, how long it shakes, and how big the cracks it opens are",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &earthquake_menu,
+        },
+        &(OptionDesc){
+            .name = "Tsunami",
+            .description = "How often waves roll in off the sea, how many, and how big, fast and strong they are",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &tsunami_menu,
+        },
+        &(OptionDesc){
+            .name = "Machine Glow",
+            .description = "A pool of light under every machine, and how dark the city is around it",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &glow_menu,
+        },
+        &(OptionDesc){
+            .name = "Star Light",
+            .description = "Light the city from the star pole's star, with shadows, and its colour, reach and brightness",
+            .kind = OPTKIND_MENU,
+            .menu_ptr = &starlight_menu,
+        },
         &event_sky_option,
     },
 };
@@ -133,5 +165,6 @@ ModDesc mod_desc = {
     .affects_gameplay = 1,
     .option_desc = &ModSettings,
     .OnBoot = OnBoot,
-    .OnFrameEnd = OnFrameEnd,
+    .On3DLoadEnd = CustomWeatherRuntime_Reset,
+    .On3DExit = On3DExit,
 };

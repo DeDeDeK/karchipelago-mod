@@ -1,0 +1,105 @@
+stage_kind,course,stage_file,enemy,copy_ability
+0,Fantasy Meadows,GrPlants1.dat,Bomber,Bomb
+0,Fantasy Meadows,GrPlants1.dat,Bronto Burt,
+0,Fantasy Meadows,GrPlants1.dat,Bronto Burt B,
+0,Fantasy Meadows,GrPlants1.dat,Broom Hatter,
+0,Fantasy Meadows,GrPlants1.dat,Cappy,
+0,Fantasy Meadows,GrPlants1.dat,Dayl,Fire
+0,Fantasy Meadows,GrPlants1.dat,Noddy,Sleep
+0,Fantasy Meadows,GrPlants1.dat,Phan Phan,Fire
+0,Fantasy Meadows,GrPlants1.dat,Pichikuri,Needle
+0,Fantasy Meadows,GrPlants1.dat,Pichikuri B,Needle
+0,Fantasy Meadows,GrPlants1.dat,Scarfy,
+0,Fantasy Meadows,GrPlants1.dat,Sword Knight,Sword
+0,Fantasy Meadows,GrPlants1.dat,Waddle Dee,
+0,Fantasy Meadows,GrPlants1.dat,Waddle Dee Truck,
+0,Fantasy Meadows,GrPlants1.dat,Walky,Mic
+1,Magma Flows,GrHeat2.dat,Bomber,Bomb
+1,Magma Flows,GrHeat2.dat,Bronto Burt,
+1,Magma Flows,GrHeat2.dat,Broom Hatter,
+1,Magma Flows,GrHeat2.dat,Dayl,Fire
+1,Magma Flows,GrHeat2.dat,Flappy,Wing
+1,Magma Flows,GrHeat2.dat,Noddy,Sleep
+1,Magma Flows,GrHeat2.dat,Phan Phan,Fire
+1,Magma Flows,GrHeat2.dat,Plasma Wisp,Plasma
+1,Magma Flows,GrHeat2.dat,Sword Knight,Sword
+1,Magma Flows,GrHeat2.dat,Walky,Mic
+2,Sky Sands,GrDesert1.dat,Bomber,Bomb
+2,Sky Sands,GrDesert1.dat,Bronto Burt,
+2,Sky Sands,GrDesert1.dat,Bronto Burt B,
+2,Sky Sands,GrDesert1.dat,Broom Hatter,
+2,Sky Sands,GrDesert1.dat,Caller,Tornado
+2,Sky Sands,GrDesert1.dat,Cappy,
+2,Sky Sands,GrDesert1.dat,Noddy,Sleep
+2,Sky Sands,GrDesert1.dat,Phan Phan,Fire
+2,Sky Sands,GrDesert1.dat,Pichikuri,Needle
+2,Sky Sands,GrDesert1.dat,Pichikuri B,Needle
+2,Sky Sands,GrDesert1.dat,Sword Knight,Sword
+2,Sky Sands,GrDesert1.dat,Waddle Dee,
+2,Sky Sands,GrDesert1.dat,Waddle Dee Truck,
+2,Sky Sands,GrDesert1.dat,Walky,Mic
+2,Sky Sands,GrDesert1.dat,Wheelie,Wheel
+3,Frozen Hillside,GrIce1.dat,Bomber,Bomb
+3,Frozen Hillside,GrIce1.dat,Bronto Burt B,
+3,Frozen Hillside,GrIce1.dat,Broom Hatter,
+3,Frozen Hillside,GrIce1.dat,Chilly,Freeze
+3,Frozen Hillside,GrIce1.dat,Dayl,Fire
+3,Frozen Hillside,GrIce1.dat,Noddy,Sleep
+3,Frozen Hillside,GrIce1.dat,Phan Phan,Fire
+3,Frozen Hillside,GrIce1.dat,Pichikuri,Needle
+3,Frozen Hillside,GrIce1.dat,Pichikuri B,Needle
+3,Frozen Hillside,GrIce1.dat,Scarfy,
+3,Frozen Hillside,GrIce1.dat,Sword Knight,Sword
+3,Frozen Hillside,GrIce1.dat,Waddle Dee Truck,
+4,Beanstalk Park,GrSky2.dat,Bomber,Bomb
+4,Beanstalk Park,GrSky2.dat,Bronto Burt,
+4,Beanstalk Park,GrSky2.dat,Broom Hatter,
+4,Beanstalk Park,GrSky2.dat,Caller,Tornado
+4,Beanstalk Park,GrSky2.dat,Cappy,
+4,Beanstalk Park,GrSky2.dat,Flappy,Wing
+4,Beanstalk Park,GrSky2.dat,Noddy,Sleep
+4,Beanstalk Park,GrSky2.dat,Phan Phan,Fire
+4,Beanstalk Park,GrSky2.dat,Pichikuri,Needle
+4,Beanstalk Park,GrSky2.dat,Pichikuri B,Needle
+4,Beanstalk Park,GrSky2.dat,Waddle Dee Truck,
+4,Beanstalk Park,GrSky2.dat,Walky,Mic
+5,Celestial Valley,GrValley2.dat,Bomber,Bomb
+5,Celestial Valley,GrValley2.dat,Bronto Burt,
+5,Celestial Valley,GrValley2.dat,Broom Hatter,
+5,Celestial Valley,GrValley2.dat,Caller,Tornado
+5,Celestial Valley,GrValley2.dat,Cappy,
+5,Celestial Valley,GrValley2.dat,Chilly,Freeze
+5,Celestial Valley,GrValley2.dat,Flappy,Wing
+5,Celestial Valley,GrValley2.dat,Pichikuri,Needle
+5,Celestial Valley,GrValley2.dat,Pichikuri B,Needle
+5,Celestial Valley,GrValley2.dat,Plasma Wisp,Plasma
+5,Celestial Valley,GrValley2.dat,Scarfy,
+5,Celestial Valley,GrValley2.dat,Sword Knight,Sword
+5,Celestial Valley,GrValley2.dat,Waddle Dee,
+5,Celestial Valley,GrValley2.dat,Waddle Dee Truck,
+6,Machine Passage,GrMachine2.dat,Bomber,Bomb
+6,Machine Passage,GrMachine2.dat,Bronto Burt B,
+6,Machine Passage,GrMachine2.dat,Dayl,Fire
+6,Machine Passage,GrMachine2.dat,Gordo,
+6,Machine Passage,GrMachine2.dat,Phan Phan,Fire
+6,Machine Passage,GrMachine2.dat,Pichikuri,Needle
+6,Machine Passage,GrMachine2.dat,Pichikuri B,Needle
+6,Machine Passage,GrMachine2.dat,Plasma Wisp,Plasma
+6,Machine Passage,GrMachine2.dat,Waddle Dee,
+6,Machine Passage,GrMachine2.dat,Waddle Dee Truck,
+6,Machine Passage,GrMachine2.dat,Walky,Mic
+6,Machine Passage,GrMachine2.dat,Wheelie,Wheel
+7,Checker Knights,GrCheck2.dat,Bomber,Bomb
+7,Checker Knights,GrCheck2.dat,Bronto Burt,
+7,Checker Knights,GrCheck2.dat,Broom Hatter,
+7,Checker Knights,GrCheck2.dat,Caller,Tornado
+7,Checker Knights,GrCheck2.dat,Chilly,Freeze
+7,Checker Knights,GrCheck2.dat,Flappy,Wing
+7,Checker Knights,GrCheck2.dat,Noddy,Sleep
+7,Checker Knights,GrCheck2.dat,Phan Phan,Fire
+7,Checker Knights,GrCheck2.dat,Plasma Wisp,Plasma
+7,Checker Knights,GrCheck2.dat,Sword Knight,Sword
+7,Checker Knights,GrCheck2.dat,Waddle Dee,
+7,Checker Knights,GrCheck2.dat,Waddle Dee Truck,
+7,Checker Knights,GrCheck2.dat,Walky,Mic
+7,Checker Knights,GrCheck2.dat,Wheelie,Wheel

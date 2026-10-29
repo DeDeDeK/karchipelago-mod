@@ -4,17 +4,16 @@
 #include "item.h"
 #include "obj.h"
 
-PatchKind Patch_ItKindToPatchKind(ItemKind it_kind);
+// The nine "+1" patches and their PatchKind; PATCHKIND_NUM for any other ItemKind.
+ItemKind PatchItem_PatchKindToItKind(PatchKind kind);
+PatchKind PatchItem_ItKindToPatchKind(ItemKind it_kind);
 
-// Both return the number of human riders they reached, 0 while every one of them
-// is on foot and has no machine to give to.
-int Patch_GiveItem(PatchKind kind);
-int Patch_AllUp_GiveItem(int num);
+// Each returns how many human riders it reached; 0 while every one is on foot.
+int PatchItem_Give(PatchKind kind);
+int PatchItem_GiveAllUp(int num);
 
-int PermanentPatch_GiveItem(PatchKind kind);
-int PermanentPatch_GiveAllUp();
-void PermanentPatch_On3DLoadEnd();
-
-int Patch_DropTrap();
+// Ejects each human rider's stats as patches. Open City Trial only: elsewhere
+// Rider_DropPatches crashes spawning the patch items.
+int PatchItem_DropTrap(void);
 
 #endif

@@ -1,0 +1,121 @@
+ClearKind,Location,Checkbox,Seam,Condition
+0,361,City Trial: Visit the flower on top of Castle Hall on foot!,city proc,"on foot within 2 units of (408.7, 370.8, -564.6)"
+1,362,City Trial: Break all the coral in one game!,break wrapper,"breaks of YAKUKIND_CORAL this round, by anyone, reach Gr_GetYakumonoSpawnTotal(YAKUKIND_CORAL) (10 on GrCity1)"
+2,363,"City Trial: In one game, get 10 or more HP Patches!",city proc,item_collect[ITKIND_HP] >= 10
+3,364,City Trial: Collect 5 All Ups in total!,city proc,"rises of item_collect[ITKIND_ALLUP] summed into APSave.checks.allup_collect_total >= 5, across rounds"
+4,365,"City Trial: In one game, eat 3 or more Ice Creams!",city proc,item_collect[ITKIND_FOODICECREAM] >= 3
+5,366,"City Trial: In one game, eat 3 or more Rice Balls!",city proc,item_collect[ITKIND_FOODRICEBALL] >= 3
+6,367,"City Trial: In one game, eat 3 or more Chickens!",city proc,item_collect[ITKIND_FOODCHICKEN] >= 3
+7,368,"City Trial: In one game, eat 3 or more plates of Curry!",city proc,item_collect[ITKIND_FOODCURRY] >= 3
+8,369,"City Trial: In one game, eat 3 or more bowls of Ramen!",city proc,item_collect[ITKIND_FOODRAMEN] >= 3
+9,370,"City Trial: In one game, eat 3 or more Omelets!",city proc,item_collect[ITKIND_FOODOMELET] >= 3
+10,371,"City Trial: In one game, eat 3 or more Hamburgers!",city proc,item_collect[ITKIND_FOODHAMBURGER] >= 3
+11,372,"City Trial: In one game, eat 3 or more Apples!",city proc,item_collect[ITKIND_FOODAPPLE] >= 3
+12,373,Stadium: SINGLE RACE 1 Finish in 1st place!,results,SINGLE RACE 1: won
+13,374,Stadium: SINGLE RACE 2 Finish in 1st place!,results,SINGLE RACE 2: won
+14,375,Stadium: SINGLE RACE 3 Finish in 1st place!,results,SINGLE RACE 3: won
+15,376,Stadium: SINGLE RACE 4 Finish in 1st place!,results,SINGLE RACE 4: won
+16,377,Stadium: SINGLE RACE 5 Finish in 1st place!,results,SINGLE RACE 5: won
+17,378,Stadium: SINGLE RACE 6 Finish in 1st place!,results,SINGLE RACE 6: won
+18,379,Stadium: SINGLE RACE 7 Finish in 1st place!,results,SINGLE RACE 7: won
+19,380,Stadium: SINGLE RACE 8 Finish in 1st place!,results,SINGLE RACE 8: won
+20,381,Stadium: SINGLE RACE 9 Finish in 1st place!,results,SINGLE RACE 9: won
+21,382,"Stadium: HIGH JUMP Jump higher than 1,500 feet!",results,HIGH JUMP: ply_dist / 0.3048 > 1500
+22,383,"Stadium: AIR GLIDER fly more than 2,000 feet!",results,AIR GLIDER: ply_dist / 0.3048 > 2000
+23,384,"Stadium: KIRBY MELEE 1 In one game, KO over 100 enemies by yourself!",results,KIRBY MELEE 1: ply_points > 100
+24,385,"Stadium: KIRBY MELEE 2 In one game, KO over 60 enemies by yourself!",results,KIRBY MELEE 2: ply_points > 60
+25,386,Stadium: SINGLE RACE 1 Finish in 1st place on Bulk Star!,results,SINGLE RACE 1: won on VCKIND_BULK
+26,387,Stadium: SINGLE RACE 1 Finish in 1st place 3 times as Purple Kirby!,results,SINGLE RACE 1: won as a Kirby rider in KIRBYCOLOR_PURPLE; APSave.checks.purple_sr1_wins >= 3
+27,388,"Stadium: In any DRAG RACE, have 2 players finish within 0.10 seconds!",results,any DRAG RACE: a finished human and any other finisher within 6 frames of ply_race_time
+28,389,"Air Ride: On any course, have 2 players finish within 0.10 seconds!",results,"Air Ride Race: a finished human and any other finisher within 6 frames, any course"
+29,390,Air Ride: Finish a race as every Kirby color!,results,Air Ride Race: each finish as a Kirby rider ORs its KirbyColor into APSave.checks.race_color_mask; all 8
+30,391,City Trial: Visit the model city on foot!,city proc,"on foot within 10 units of (-422.7, 12.7, -168.9)"
+31,392,City Trial: Visit the flower on top of the volcanic cliffs on foot!,city proc,"on foot within 5 units of (-107.0, 205.1, -847.3)"
+32,393,City Trial: Visit the top of the garden in the sky on foot!,city proc,"on foot within 5 units of (-67.9, 463.8, -0.3)"
+33,394,City Trial: Fly to the highest point possible!,city proc,RiderData.pos.Y >= 1000 (the city ceiling stops a climb at 1040.3)
+34,395,Air Ride: Finish in 1st place as Meta Knight!,results,"Air Ride Race: won as RDKIND_METAKNIGHT, any course"
+35,396,Air Ride: Finish in 1st place as King Dedede!,results,"Air Ride Race: won as RDKIND_DEDEDE, any course"
+36,397,Air Ride: NEBULA BELT Finish in 1st place!,results,Air Ride Race on GR_SPACE2: won
+37,398,"Air Ride: NEBULA BELT Race over 5,500 feet in 2 minutes!",results,GR_SPACE2: timed race with a 120 s limit; Gm_GetPlayerRaceDistance / 0.3048 >= 5500
+38,399,Air Ride: NEBULA BELT Finish 2 laps in under 02:30:00!,results,GR_SPACE2: lap race of 2 laps; ply_race_time != 0 && <= 9000 frames
+39,400,Air Ride: NEBULA BELT Finish in 1st place on Wheelie Scooter!,results,Air Ride Race on GR_SPACE2: won on VCKIND_WHEELIESCOOTER
+40,401,"Air Ride: NEBULA BELT Fly 10 seconds on Dragoon, Flight or Winged Star!",results,"Air Ride Race on GR_SPACE2: on VCKIND_DRAGOON, VCKIND_FLIGHT or VCKIND_WINGED with max_time_spent_airborne > 600"
+41,402,"Stadium: DESTRUCTION DERBY 3 In one game, KO a rival 10 times or more!",results,DESTRUCTION DERBY 3: ply_points >= 10
+42,403,"Stadium: DESTRUCTION DERBY (All) As King Dedede, KO 10 Kirbys in one game!",KO handler,any DESTRUCTION DERBY: a human King Dedede KOs Kirby riders 10 times in one game
+43,404,City Trial: Get the Mic ability from the Copy Chance Wheel!,city proc,copy_chance_mask holds the COPYKIND_MIKE bit (set only by the Copy Chance Wheel)
+44,405,"Stadium: KIRBY MELEE (All) In one game, KO 10 enemies as Mic Kirby!",enemy-defeat wrapper,"KIRBY MELEE 1 or 2: 10 defeats credited to a human holding Mic in RDSTATE_MIKESING or RDSTATE_MIKEEND, one round"
+45,406,"City Trial: In one game, break 20 or more blue boxes!",city proc,item_collect[ITKIND_BOXBLUE] >= 20
+46,407,"City Trial: In one game, break 10 or more green boxes!",city proc,item_collect[ITKIND_BOXGREEN] >= 10
+47,408,"City Trial: In one game, break 10 or more red boxes!",city proc,item_collect[ITKIND_BOXRED] >= 10
+48,409,Air Ride: FANTASY MEADOWS Take the shortcut!,meadows proc,"within 25 units of (249.7, 120.0, 19.2), any Air Ride mode"
+49,410,City Trial: Collect all 6 spheres and assemble the Archipelago Star!,ap_star handler,"a human assembles the Archipelago Star, from spheres or an item give"
+50,411,"City Trial: In one game, assemble Dragoon, Hydra and Archipelago Star!",city proc,"flags_84d has both PLYSTATS_DRAGOON_ASSEMBLED and PLYSTATS_HYDRA_ASSEMBLED, and GateApStar_AssembledThisRound"
+51,412,"City Trial: In one game, get 10 or more Offense Patches!",city proc,item_collect[ITKIND_OFFENSE] >= 10
+52,413,Air Ride: NEBULA BELT Finish 2 laps in under 02:06:00!,results,GR_SPACE2: lap race of 2 laps; ply_race_time != 0 && <= 7560 frames
+53,414,Time Attack: NEBULA BELT Finish in under 03:35:00!,timed-run wrappers,"Time Attack on GR_SPACE2, any machine: Gm_GetPlayerFinishTime != 0 && <= 12900 frames"
+54,415,Time Attack: NEBULA BELT Finish in under 03:10:00!,timed-run wrappers,"Time Attack on GR_SPACE2, any machine: Gm_GetPlayerFinishTime != 0 && <= 11400 frames"
+55,416,Time Attack: NEBULA BELT Finish in under 03:15:00 on Hydra!,timed-run wrappers,"Time Attack on GR_SPACE2, VCKIND_HYDRA: Gm_GetPlayerFinishTime != 0 && <= 11700 frames"
+56,417,Free Run: NEBULA BELT Finish 1 lap in under 01:15:00!,timed-run wrappers,"Free Run on GR_SPACE2, any machine: Gm_GetPlayerBestLapTime != 0 && <= 4500 frames"
+57,418,Free Run: NEBULA BELT Finish 1 lap in under 01:03:00!,timed-run wrappers,"Free Run on GR_SPACE2, any machine: Gm_GetPlayerBestLapTime != 0 && <= 3780 frames"
+58,419,Free Run: NEBULA BELT Do 1 lap under 01:10:00 on Warpstar!,timed-run wrappers,"Free Run on GR_SPACE2, VCKIND_WARP: Gm_GetPlayerBestLapTime != 0 && <= 4200 frames"
+59,420,Free Run: CELESTIAL VALLEY Do 1 lap under 01:00:00 on Archipelago Star!,timed-run wrappers,"Free Run on GR_VALLEY2, the Archipelago Star: Gm_GetPlayerBestLapTime != 0 && <= 3600 frames"
+60,421,Time Attack: CHECKER KNIGHTS Finish in under 04:00:00 on Flight Warp Star!,timed-run wrappers,"Time Attack on GR_CHECK2, VCKIND_FLIGHT: Gm_GetPlayerFinishTime != 0 && <= 14400 frames"
+61,422,Free Run: MACHINE PASSAGE Do 1 lap under 01:05:00 on Compact Star!,timed-run wrappers,"Free Run on GR_MACHINE2, VCKIND_COMPACT: Gm_GetPlayerBestLapTime != 0 && <= 3900 frames"
+62,423,Time Attack: FROZEN HILLSIDE Finish in under 03:00:00 on Wheelie Bike!,timed-run wrappers,"Time Attack on GR_ICE1, VCKIND_WHEELIEBIKE: Gm_GetPlayerFinishTime != 0 && <= 10800 frames"
+63,424,Time Attack: SKY SANDS Finish in under 02:50:00 on Flight Warp Star!,timed-run wrappers,"Time Attack on GR_DESERT1, VCKIND_FLIGHT: Gm_GetPlayerFinishTime != 0 && <= 10200 frames"
+64,425,"City Trial: While energy tanks run amok, travel over 1,000 feet!",city proc,Run Amok active: distance since it began * 0.375 ft per unit > 1000 ft
+65,426,City Trial: Catch fire at all 5 rail stations while they burn!,rail-fire wrapper,Rail Fire active: burned at each of the five stations (nearest rail_stations[] centre)
+66,427,"City Trial: When the boxes all hold the same item, get 20 of it!",item-collect wrapper,Same Item active: 20 pickups of one ItemKind
+67,428,City Trial: Go under both lights of the city lighthouse!,city proc,Lighthouse active and lit: inside each light's beam (CityLighthouse_InBeam per light)
+68,429,City Trial: Get a Stadium Prediction that turns out wrong!,prediction wrapper,the stadium a random Prediction named differs from the trial's stadium when it loads
+69,430,City Trial: Get the All Up on top of the UFO!,item-collect wrapper,ITKIND_ALLUP picked up with spawn type ITSPAWN_UFO while CityEvent_GetCurrentKind is UFO
+70,431,City Trial: Bump into the Air Ride machine formation!,bump hook,a human's machine bumps a machine whose formation_slot != MACHINE_FORMATION_NONE
+71,432,"City Trial: While the items bounce, get over 10 items!",item-collect wrapper,Bounce active: 11 pickups (box breaks excluded)
+72,433,City Trial: KO a rival while a dense fog covers the city!,KO handler,Fog active: a human KOs another slot
+73,434,"City Trial: Get 5 power-ups while some are fake, and touch no fakes!",item-collect wrapper,Fake Powerups active: 5 CityItem_IsGoodPatch pickups and no fake; judged as the event ends; ITSPAWN_DIRECT ignored
+74,435,"City Trial: In one game, get the same copy ability 3 times in a row!",city proc,the last three copy_history entries name one CopyKind
+75,436,"City Trial: In the city, bust Rex Wheelie while riding Wheelie Scooter!",KO handler,"in the city, a human on VCKIND_WHEELIESCOOTER KOs a rider on VCKIND_REXWHEELIE"
+76,437,"City Trial: In the city, bust Winged Star while riding Flight Warp Star!",KO handler,"in the city, a human on VCKIND_FLIGHT KOs a rider on VCKIND_WINGED"
+77,438,"City Trial: In the city, bust Shadow Star while riding Archipelago Star!",KO handler,"in the city, a human on the Archipelago Star KOs a rider on VCKIND_SHADOW"
+78,439,Time Attack: MAGMA FLOWS Finish in under 03:15:00 as Meta Knight!,timed-run wrappers,"Time Attack on GR_HEAT2, VCKIND_WINGMETAKNIGHT: Gm_GetPlayerFinishTime != 0 && <= 11700 frames"
+79,440,Air Ride: Finish in 1st place on Archipelago Star!,results,Air Ride Race: won on the Archipelago Star
+80,441,"Stadium: KIRBY MELEE (All) In one game, KO 30 enemies as King Dedede!",results,KIRBY MELEE 1 or 2: ply_points >= 30 as RDKIND_DEDEDE
+81,442,Stadium: VS. KING DEDEDE KO King Dedede as Meta Knight!,KO handler,VS. KING DEDEDE: a human RDKIND_METAKNIGHT KOs slot 4
+82,443,Top Ride: Freeze 3 or more rivals using one Freeze Fan item!,top ride wrapper,3 kirbys enter KirbyFreeze while one human holds the Freeze Fan power state
+83,444,Top Ride: FIRE Take 1st place without getting burned!,top ride wrapper,TOPRIDE_FIRE: won with no frame in KirbyBurn
+84,445,Top Ride: SAND Take 1st place without dropping into Ant Doom!,top ride wrapper,TOPRIDE_SAND: won with no frame in KirbyDoodlebug or KirbyDoodlebugOut
+85,446,Top Ride: Finish 1st against 3 CPUs set to level 5!,top ride wrapper,won with every other slot a TR_PKIND_CPU at TopRideSlot.handicap 4
+86,447,"Top Ride: On any course, have 2 players finish within 0.20 seconds!",top ride wrapper,Race: a finished human and another finished kirby within 12 frames of finish_time
+87,448,Top Ride: Finish a race as every Kirby color!,top ride wrapper,each human Race finish ORs TopRide_GetColor into APSave.checks.tr_color_mask; all 8
+88,449,Time Attack: GRASS Finish in under 00:33:00 on Steer Star!,top ride wrapper,"Time Attack on TOPRIDE_GRASS, TR_MACHINE_STEER: finish_time <= 1980 frames"
+89,450,Time Attack: METAL Finish in under 00:57:00 on Steer Star!,top ride wrapper,"Time Attack on TOPRIDE_METAL, TR_MACHINE_STEER: finish_time <= 3420 frames"
+90,451,Free Run: SKY Do 1 lap under 00:11:00 on Steer Star!,top ride wrapper,"Free Run on TOPRIDE_SKY, TR_MACHINE_STEER: a lap's prev_lap_frames <= 660"
+91,452,Top Ride: Take 1st place on all courses on Steer Star!,top ride wrapper,each win on TR_MACHINE_STEER ORs its course into APSave.checks.tr_steer_win_mask; all 7
+92,453,Top Ride: Take 1st place without getting hit once!,top ride wrapper,"won with no hit-state entry, item_rule not TOPRIDE_ITEM_RULE_ZERO"
+93,454,Top Ride: Take 1st after getting knocked around 5 times in one race!,top ride wrapper,won after >= 5 hit-state entries
+94,455,"Top Ride: In one race, use Fire, Freeze Fan, Bomb and Walky!",top ride wrapper,"Fire, Freeze Fan, Bomb and Walky all applied in one round"
+95,456,Top Ride: Get 3 Speed Down items in one race and still finish 1st!,top ride wrapper,won with >= 3 TRITEM_SPEED_DOWN applied
+96,457,"Top Ride: In Time Attack, keep every lap within 1 second of each other!",top ride wrapper,"Time Attack finish with >= 2 laps timed, slowest - fastest prev_lap_frames <= 60"
+97,458,City Trial: KO a CPU with a sphere shot from the Archipelago Star!,KO handler,"in the city, a PKIND_CPU victim and GateApStar_IsShotAttack(credited_attack)"
+98,459,"City Trial: In one game, ride 5 different machines!",city proc,5 distinct MachineKinds ridden this round (VCKIND_WINGKIRBY and VCKIND_WHEELKIRBY excluded)
+99,460,"City Trial: In the city, stay airborne longer than 20 seconds!",city proc,max_time_spent_airborne >= 1200 frames
+100,461,"City Trial: In one game, grab 5 items dropped by Dyna Blade!",item-collect wrapper,5 pickups with spawn type ITSPAWN_DYNABLADE this round
+101,462,City Trial: Use a Panic Spin to KO a rival!,KO handler,a human KOs another slot with credited_attack cause ATK_PANICSPIN
+102,463,City Trial: Talk to Whispy Woods on foot!,city proc,"on foot within 3 units of (-445.2, 35.7, -59.9)"
+103,464,City Trial: Visit the top of the lighthouse on foot!,city proc,"on foot and grounded within 31 units of the axis (191.8, z 291.2), Y 132-146"
+104,465,City Trial: Go underneath the waterwheel!,city proc,"on the ledge or ramp under the axle, X -342.2..-301.4, Z 602.0..649.0, within 12 above the floor"
+105,466,"City Trial: In one game, use all the grind rails in the city!",city proc,rail_bits holds one id of each station link (0/1 .. 8/9) and ids 10-13
+106,467,"City Trial: In one game, get 6 different copy abilities!",city proc,6 nonzero copy_obtain_count entries
+107,468,City Trial: Take no damage while the meteor attacks the city!,damage wrapper,Meteor active >= 60 frames with no machine damage and no rise in onfoot_dmg_total; judged as it ends
+108,469,"City Trial: In one game, max out a stat with patches!",city proc,a stat PatchCap_GetCap() patches above its start (PatchCap_IsStatAt)
+109,470,Stadium: DESTRUCTION DERBY (All) KO 5 rivals without getting knocked out!,results,DESTRUCTION DERBY 1-5: ply_points >= 5 and the human never knocked out this round
+110,471,Stadium: VS. KING DEDEDE KO King Dedede without taking any damage!,KO handler,VS. KING DEDEDE: a human KOs slot 4 without its machine taking damage this round
+111,472,Stadium: Take 1st place in every DRAG RACE!,results,a win on each DRAG RACE ORs into APSave.checks.drag_win_mask; all 4
+112,473,Air Ride: Take 1st place on every course!,results,Air Ride Race wins OR their GroundKind into APSave.checks.ar_course_win_mask; all 9
+113,474,Air Ride: BEANSTALK PARK Ride the Ferris wheel every lap and take 1st!,results,Air Ride Race on GR_SKY2: won with laps_no_ferris == 0 at the line
+114,475,Air Ride: SKY SANDS Take 1st place without entering the quicksand!,results,Air Ride Race on GR_DESERT1: won with quicksand_entries == 0 at the line
+115,476,Air Ride: CHECKER KNIGHTS Take 1st without using any spin panels!,results,Air Ride Race on GR_CHECK2: won with spin_panel_uses == 0 at the line
+116,477,Air Ride: MAGMA FLOWS Take 1st without using any Boost Panels!,results,Air Ride Race on GR_HEAT2: won with no zone_bits bit in GrMagma_GetBoostPanelRefMask at the line
+117,478,Top Ride: WATER Take 1st place without entering the falls!,top ride wrapper,TOPRIDE_WATER: won with no frame in KirbyWhirlpool
+118,479,Top Ride: LIGHT Take 1st place without grinding the rail!,top ride wrapper,TOPRIDE_LIGHT: won with no frame in KirbyGrind
+119,480,Top Ride: Use every kind of item at least once!,top ride wrapper,"every TopRideItemKind 0-20 applied (21 counts as 12), in APSave.checks.tr_item_mask"

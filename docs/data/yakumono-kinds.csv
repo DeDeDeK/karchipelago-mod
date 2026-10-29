@@ -1,0 +1,52 @@
+kind,name,source_file,coll_func,creator,placed_by,notes
+0-15,,,,GrYaku_Create_Generic via stc_yaku_common_create,stage YakumonoEntry lists,eight base kinds as even/odd (ctrl) pairs; the concrete object comes from Yakumono.dat
+16,YAKUKIND_DOWNFORCEZONE,gryakudownforcezone.c,,0x800f9d80,Sky Sands x7; Celestial Valley x2,zone-backed
+17,YAKUKIND_CATCHZONE,gryakucatchzone.c,,0x800fa2a0,City Trial; Machine Passage; Beanstalk Park,zone-backed trigger volume
+18,,,,0x800fa610,City Trial; Beanstalk Park,zone-backed trigger volume
+19,,,,,Fantasy Meadows x3; Magma Flows; Sky Sands; Checker Knights x2; Frozen Hillside x10,zone kind
+20,YAKUKIND_RECOVERYZONE,gryakurecoveryzone.c,,0x800faa98 (event spawn); 0x800fb378,Restoration Area event,
+21,,,0x800fc474,,Checker Knights x2,break kind
+22,YAKUKIND_BREAKHOUSE,gryakubreakhouse.c,GrYakuBreakHouse_DropItems,0x8010250c,GrSimple2 only,drops items
+23,,gryakubreakhouse.c,GrYakuBreakHouse_DropItems,,GrColosseum1 x2,Destruction Derby 1 rocks
+24,YAKUKIND_BREAKCORAL,gryakubreakcoral.c,hitBigStar,0x80103c58,Sky Sands x13,drops items
+25-27,,gryakubreakcoral.c,hitBigStar,,,descriptors no creator uses
+28,,gryakubreakcoral.c,hitBigStar,,Celestial Valley x2,drops items
+29,YAKUKIND_STARPOLE,gryakubreakcoral.c,hitBigStar,0x801043c8,City Trial,drops items
+30,YAKUKIND_BREAKFAN,gryakubreakfan.c,,0x80107120,Machine Passage x18,
+31,YAKUKIND_BREAKICICLE,gryakubreakicicle.c,,0x801044cc,Frozen Hillside x6,
+32,YAKUKIND_BREAKFLOOR,gryakubreakfloor.c,hitBreakableFloor,0x80106824,City Trial x2 (forest pitfall); Frozen Hillside x6 (ice platforms),multi-stage crack
+33,YAKUKIND_CORAL,gryakubreakcoll.c,hitWeakObject,0x80107bfc,City Trial,weak family
+34,YAKUKIND_TREE,gryakubreakcoll.c,hitWeakObject,0x80107d64,City Trial,weak family
+35,YAKUKIND_ROCK,gryakubreakcoll.c,hitWeakObject,0x80107ecc,City Trial,weak family
+36,YAKUKIND_BREAKHPCOLLDOOR,gryakubreakhpcoll.c,hitStrongObject,0x80108ce8,City Trial,one rock wall underground below the garden in the sky; strong family
+37,YAKUKIND_BREAKHPCOLLHOLE,gryakubreakhpcoll.c,hitStrongObject,0x80108f10,City Trial,volcano-base hole covers; strong family
+38,YAKUKIND_BREAKHPCOLLHOUSE,gryakubreakhpcoll.c,hitStrongObject,0x80109138,City Trial,houses; strong family
+39,,gryakubreakrock.c,,,Frozen Hillside x4,
+40,YAKUKIND_EVENTPILLAR,gryakubreakrock.c,,0x8010181c (event spawn),Pillar event,drops items through GrYakuBreakRock_DropItems
+41,YAKUKIND_ROTJUMPHILL,gryakurotjumphill.c,,0x800fb5d0,Checker Knights x18,
+42,YAKUKIND_ROTJUMPHILLCTRL,gryakurotjumphill.c,,0x800fbf60,Checker Knights x1,
+43,YAKUKIND_INVISIBLEBALL,gryakuinvisibleball.c,,0x800fc848,Sky Sands,
+44,YAKUKIND_RISINGCUBE,gryakurisingcube.c,,0x800fcd44,Checker Knights; GrZeroyon1; GrDedede1,
+45,YAKUKIND_RISINGCUBECTRL,gryakurisingcube.c,,0x800fdf6c,Checker Knights; GrZeroyon1; GrDedede1,
+46,YAKUKIND_GONDOLA,gryakugondola.c,,0x800fe5d4,City Trial x16; Beanstalk Park x8,zone-backed; animates its own transform
+47,YAKUKIND_GONDOLACTRL,gryakugondola.c,,0x800feb20,Beanstalk Park x1,
+48,YAKUKIND_CANNON,gryakucannon.c,,GrYakuCannon_Create,Machine Passage; GrSimple2,visible mesh is part of the stage model
+49,YAKUKIND_PUSHOUTWALL,gryakupushoutwall.c,,0x800ff50c,Frozen Hillside x6,
+50,YAKUKIND_PUSHOUTWALLCTRL,gryakupushoutwall.c,,0x800ffd04,Frozen Hillside x1,
+51,YAKUKIND_LIGHTTUNNEL,gryakulighttunnel.c,,0x80100224,Frozen Hillside,
+52,YAKUKIND_PILLAR,gryakupillar.c,,0x801007fc,Sky Sands x7,
+53,YAKUKIND_PILLARCTRL,gryakupillar.c,,0x80100fb4,Sky Sands x1,
+54,YAKUKIND_ANIMFLOOR,gryakuanimfloor.c,,0x80102c40,Magma Flows; Frozen Hillside x3,
+55,,,,,Machine Passage x3; Beanstalk Park,
+56,,,0x80106094,,Machine Passage x5,
+57,YAKUKIND_LASERGATE,gryakulasergate.c,,0x80106144,Frozen Hillside x4,
+58,YAKUKIND_LASERGATECTRL,gryakulasergate.c,,0x801063bc,Frozen Hillside x1,
+59-60,,,,,,descriptors with no creator
+61,YAKUKIND_LAVADRAGON,,,GrYakuLavaDragon_Create,City Trial x2; Magma Flows x3,leaping lava dragon; stage joints animated by its motion; the motion script arms the hitbox
+62-63,,,,,,adhere_update_func and get_point_func only; no creator
+64,,grairglider.c,,0x8010a450,Air Glider stadium,created at a given translation
+65,YAKUKIND_RAILFIRE,,,0x8010a5dc,Rail Fire event,
+66,YAKUKIND_SECRETCHAMBER,,,0x8010a8d4,Secret Chamber event,
+67,YAKUKIND_UFO,,,0x8010ab34 (event spawn),UFO event,drops items from chance_ufo
+68,YAKUKIND_LIGHTHOUSE,,,Lighthouse_Create,City Trial,zone-backed multi-part
+69,YAKUKIND_WHISPYWOODS,gryakuwhispywoods.c,,whispyLogic,City Trial,Forest event boss tree

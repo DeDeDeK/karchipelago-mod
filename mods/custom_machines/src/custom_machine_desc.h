@@ -17,7 +17,7 @@
 #define CUSTOM_MACHINE_AUDIO_EXT ".ssm"
 
 // It may drop a second side-car of the same basename holding its UI art -
-// machines/VcStarAp.dat and machines/VcStarAp.art - one image per distinct UI bank
+// machines/VcMine.dat and machines/VcMine.art - one image per distinct UI bank
 // geometry. A machine with no side-car shares the registry's placeholder frame.
 #define CUSTOM_MACHINE_ART_EXT ".art"
 
@@ -73,7 +73,8 @@ typedef enum CustomMachineStatRow
 } CustomMachineStatRow;
 
 // A bike's Top Speed pairs multiply the two top speeds, and its Turn pairs multiply eight
-// fields of the bike class's shared attribute block, named by their offset in it.
+// fields of the machine's live attribute block (MachineData.attr), named by their offset
+// in it.
 typedef enum CustomMachineBikeStatRow
 {
     CUSTOM_MACHINE_BIKE_STAT_ROW_TOP_SPEED_GROUND,
@@ -122,8 +123,8 @@ typedef struct CustomMachineCpu
     u8 has_charge_hold_gate;    // 0x06
     u8 has_release_level;       // 0x07
     float charge_release;       // 0x08 a charge-holding CPU holds while the gauge is <= this
-    float charge_hold_gate[2];  // 0x0c Machine_CPUGetChargeHoldGate's two outputs, in order
-    float release_level;        // 0x14 Machine_CPUGetChargeReleaseOverride's output
+    float charge_hold_gate[2];  // 0x0c MachineGObj_CPUGetChargeHoldGate's two outputs, in order
+    float release_level;        // 0x14 MachineGObj_CPUGetChargeReleaseOverride's output
     float align_cos_near;       // 0x18 heading dot above which steering needs no correction
     float align_cos_far;        // 0x1c heading dot below which it needs the larger one
     float turn_tolerance;       // 0x20 radians

@@ -5,6 +5,8 @@
 
 #include "archipelago_api.h"
 #include "main.h"
+#include "ap_unlock.h"
+#include "ap_options.h"
 #include "ap_item_handler.h"
 #include "checklist_rewards.h"
 #include "ap_checks.h"
@@ -14,64 +16,10 @@
 #include "ap_patches.h"
 #include "ap_text.h"
 #include "ap_check_detect.h"
-#include "textbox_api.h"
-
-u32 Unlock_GetMask(APUnlockCategory cat)
-{
-    switch (cat)
-    {
-        case AP_UNLOCK_MACHINE:        return ap_save->machine_unlocked_mask;
-        case AP_UNLOCK_ABILITY:        return ap_save->ability_unlocked_mask;
-        case AP_UNLOCK_EVENT:          return ap_save->event_unlocked_mask;
-        case AP_UNLOCK_PATCH:          return ap_save->patch_unlocked_mask;
-        case AP_UNLOCK_ITEM:           return ap_save->item_unlocked_mask;
-        case AP_UNLOCK_BOX:            return ap_save->box_unlocked_mask;
-        case AP_UNLOCK_AIRRIDE_STAGE:  return ap_save->airride_stage_unlocked_mask;
-        case AP_UNLOCK_TOPRIDE_STAGE:  return ap_save->topride_stage_unlocked_mask;
-        case AP_UNLOCK_TOPRIDE_ITEM:   return ap_save->topride_item_unlocked_mask;
-        case AP_UNLOCK_COLOR:          return ap_save->color_unlocked_mask;
-        case AP_UNLOCK_STADIUM:        return ap_save->stadium_unlocked_mask;
-        case AP_UNLOCK_BASE_ABILITY:   return ap_save->base_ability_unlocked_mask;
-        case AP_UNLOCK_AP_STAR_PIECE:  return ap_save->ap_star_piece_unlocked_mask;
-        default:                       return 0;
-    }
-}
-
-void Unlock_SetMask(APUnlockCategory cat, u32 mask)
-{
-    switch (cat)
-    {
-        case AP_UNLOCK_MACHINE:        ap_save->machine_unlocked_mask        = (u32)mask; break;
-        case AP_UNLOCK_ABILITY:        ap_save->ability_unlocked_mask        = (u16)mask; break;
-        case AP_UNLOCK_EVENT:          ap_save->event_unlocked_mask          = (u32)mask; break;
-        case AP_UNLOCK_PATCH:          ap_save->patch_unlocked_mask          = (u16)mask; break;
-        case AP_UNLOCK_ITEM:           ap_save->item_unlocked_mask           = (u32)mask; break;
-        case AP_UNLOCK_BOX:            ap_save->box_unlocked_mask            = (u8)mask;  break;
-        case AP_UNLOCK_AIRRIDE_STAGE:  ap_save->airride_stage_unlocked_mask  = (u16)mask; break;
-        case AP_UNLOCK_TOPRIDE_STAGE:  ap_save->topride_stage_unlocked_mask  = (u16)mask; break;
-        case AP_UNLOCK_TOPRIDE_ITEM:   ap_save->topride_item_unlocked_mask   = (u32)mask; break;
-        case AP_UNLOCK_COLOR:          ap_save->color_unlocked_mask          = (u8)mask;  break;
-        case AP_UNLOCK_STADIUM:        ap_save->stadium_unlocked_mask        = (u32)mask; break;
-        case AP_UNLOCK_BASE_ABILITY:   ap_save->base_ability_unlocked_mask   = (u8)mask;  break;
-        case AP_UNLOCK_AP_STAR_PIECE:  ap_save->ap_star_piece_unlocked_mask  = (u8)mask;  break;
-        default: break;
-    }
-
-    // ap_star reads its sphere gate at 3D load start, and it runs before this mod
-    // does, so the mask is pushed on every write rather than read back later. The box
-    // mask feeds it too - the spheres ride a red carrier box.
-    if (cat == AP_UNLOCK_AP_STAR_PIECE || cat == AP_UNLOCK_BOX)
-        GateApStar_PushMask();
-}
 
 static int ApiQueueItem(int ap_item_id)
 {
     return APItems_Queue((uint)ap_item_id);
-}
-
-static void ApiAddEnergy(float amount)
-{
-    EnergyLink_Deposit(amount);
 }
 
 static void ApiGrantReward(GameMode mode, u8 reward_index)
@@ -79,99 +27,9 @@ static void ApiGrantReward(GameMode mode, u8 reward_index)
     ChecklistRewards_Grant(mode, reward_index, /*announce=*/1);
 }
 
-static int ApiGetHoveredCell(u8 *out_mode, u8 *out_clear_kind)
-{
-    return ChecklistRewards_GetHoveredCell(out_mode, out_clear_kind);
-}
-
-static int ApiResolveCell(u8 mode, u8 clear_kind, u8 *out_src_mode, u8 *out_src_ri)
-{
-    return ChecklistRewards_ResolveCell(mode, clear_kind, out_src_mode, out_src_ri);
-}
-
-static int ApiGetRewardCount(GameMode mode)
-{
-    return ChecklistRewards_GetRewardCount(mode);
-}
-
-static u16 ApiGetShuffledReward(GameMode mode, u8 reward_index)
-{
-    return ChecklistRewards_GetShuffledReward(mode, reward_index);
-}
-
-static void ApiTextbox(const char *msg)
-{
-    tb_api->Enqueue("%s", msg);
-}
-
-static void ApiDebugRevealAllChecklists(void)
-{
-    RevealAllChecklists();
-}
-
-static void ApiDebugRevealChecklist(int mode)
-{
-    RevealChecklist(mode);
-}
-
-static void ApiDebugSimulateLocationData(void)
-{
-    ChecklistRewards_DebugSimulateLocationData();
-}
-
-static void ApiDebugClearAllChecklistData(void)
-{
-    ChecklistRewards_DebugClearAll();
-}
-
-static void ApiDebugClearAllSentChecks(void)
-{
-    APChecks_DebugClearAll();
-}
-
-static void ApiDebugForceMarkAllChecks(void)
-{
-    APChecks_DebugForceMarkAll();
-}
-
-static void ApiDebugTriggerGoalComplete(void)
-{
-    APGoal_DebugComplete();
-}
-
 static void ApiDebugTriggerDeathlinkReceive(void)
 {
     ap_data->deathlink_receive = 1;
-}
-
-static int ApiDebugSpawnApStarPiece(int piece, int ply)
-{
-    return GateApStar_SpawnPiece(piece, ply);
-}
-
-static int ApiDebugSpawnApBox(int ply)
-{
-    return ApPatches_DebugSpawnBox(ply);
-}
-
-static int ApiDebugCollectApPatch(void)
-{
-    return ApPatches_DebugClaim();
-}
-
-static int ApiGetApPatchCount(void)
-{
-    return ApPatches_GetCount();
-}
-
-static void ApiDebugSetApPatchCount(int count)
-{
-    ApPatches_DebugSetCount(count);
-}
-
-static void ApiDebugClearApPatchCollected(void)
-{
-    ApPatches_DebugClearCollected();
 }
 
 static void ApiDebugTriggerTraplinkReceive(void)
@@ -179,140 +37,48 @@ static void ApiDebugTriggerTraplinkReceive(void)
     ap_data->traplink_receive = 1;
 }
 
-static int ApiDebugSendText(int kind)
-{
-    return APText_DebugSend(kind);
-}
-
-static int ApiDebugSendOverlongText(void)
-{
-    return APText_DebugSendOverlong();
-}
-
-static int ApiGetGoal(int row, int *out_amount)
-{
-    return APGoal_Get(row, out_amount);
-}
-
-static void ApiDebugSetGoals(const int *goals, int amount)
-{
-    APGoal_DebugSetGoals(goals, amount);
-}
-
-static int ApiGetGating(APUnlockCategory cat)
-{
-    return APOptions_DebugGetGating(cat);
-}
-
-static void ApiDebugSetGating(APUnlockCategory cat, int enabled)
-{
-    APOptions_DebugSetGating(cat, enabled);
-}
-
-static void ApiGetPatchCapRange(int *out_min, int *out_max)
-{
-    APOptions_GetPatchCapRange(out_min, out_max);
-}
-
-static int ApiGetSpawnRateMin(void)
-{
-    return APOptions_GetSpawnRateMin();
-}
-
-static void ApiDebugSetPatchCapMin(int min)
-{
-    APOptions_DebugSetPatchCapMin(min);
-}
-
-static void ApiDebugSetPatchCapMax(int max)
-{
-    APOptions_DebugSetPatchCapMax(max);
-}
-
-static void ApiDebugSetSpawnRateMin(int percent)
-{
-    APOptions_DebugSetSpawnRateMin(percent);
-}
-
-static void ApiDebugReapplySlotOptions(void)
-{
-    APOptions_DebugReapply();
-}
-
-static int ApiGetCheckProgress(APCheckProgressKind which)
-{
-    return APCheckDetect_GetProgress(which);
-}
-
-static void ApiDebugSetCheckProgress(APCheckProgressKind which, int value)
-{
-    APCheckDetect_DebugSetProgress(which, value);
-}
-
-static s64 ApiGetEnergyBalance(void)
-{
-    return EnergyLink_GetBalance();
-}
-
-static void ApiDebugSetEnergyBalance(s64 mj)
-{
-    EnergyLink_DebugSetBalance(mj);
-}
-
-static void ApiDebugReportState(void)
-{
-    APDebug_ReportState();
-}
-
-static void ApiDebugResetProgression(void)
-{
-    APDebug_ResetProgression();
-}
-
 static const ArchipelagoAPI api = {
-    .GetUnlockMask                = Unlock_GetMask,
-    .SetUnlockMask                = Unlock_SetMask,
+    .GetUnlockMask                = APUnlock_GetMask,
+    .SetUnlockMask                = APUnlock_SetMask,
     .QueueItem                    = ApiQueueItem,
-    .AddEnergy                    = ApiAddEnergy,
     .GrantReward                  = ApiGrantReward,
-    .GetHoveredCell               = ApiGetHoveredCell,
-    .ResolveCell                  = ApiResolveCell,
-    .GetRewardCount               = ApiGetRewardCount,
-    .GetShuffledReward            = ApiGetShuffledReward,
-    .Textbox                      = ApiTextbox,
-    .DebugRevealAllChecklists     = ApiDebugRevealAllChecklists,
-    .DebugSimulateLocationData    = ApiDebugSimulateLocationData,
-    .DebugClearAllChecklistData   = ApiDebugClearAllChecklistData,
-    .DebugClearAllSentChecks      = ApiDebugClearAllSentChecks,
-    .DebugForceMarkAllChecks      = ApiDebugForceMarkAllChecks,
-    .DebugTriggerGoalComplete     = ApiDebugTriggerGoalComplete,
+    .GetHoveredCell               = ChecklistRewards_GetHoveredCell,
+    .ResolveCell                  = ChecklistRewards_ResolveCell,
+    .GetRewardCount               = ChecklistRewards_GetRewardCount,
+    .GetShuffledReward            = ChecklistRewards_GetShuffledReward,
+    .DebugRevealAllChecklists     = ChecklistRewards_RevealAll,
+    .DebugSimulateLocationData    = ChecklistRewards_DebugSimulateLocationData,
+    .DebugClearAllChecklistData   = ChecklistRewards_DebugClearAll,
+    .DebugClearAllSentChecks      = APChecks_DebugClearAll,
+    .DebugForceMarkAllChecks      = APChecks_DebugForceMarkAll,
+    .DebugTriggerGoalComplete     = APGoal_DebugComplete,
     .DebugTriggerDeathlinkReceive = ApiDebugTriggerDeathlinkReceive,
-    .DebugRevealChecklist         = ApiDebugRevealChecklist,
-    .DebugSpawnApStarPiece        = ApiDebugSpawnApStarPiece,
-    .DebugSpawnApBox              = ApiDebugSpawnApBox,
-    .DebugCollectApPatch          = ApiDebugCollectApPatch,
-    .GetApPatchCount              = ApiGetApPatchCount,
-    .DebugSetApPatchCount         = ApiDebugSetApPatchCount,
-    .DebugClearApPatchCollected   = ApiDebugClearApPatchCollected,
+    .DebugRevealChecklist         = ChecklistRewards_Reveal,
+    .DebugSpawnApStarPiece        = GateApStar_SpawnPiece,
+    .DebugSpawnApBox              = APPatches_DebugSpawnBox,
+    .DebugCollectApPatch          = APPatches_DebugClaim,
+    .GetApPatchCount              = APPatches_GetCount,
+    .DebugSetApPatchCount         = APPatches_DebugSetCount,
+    .DebugClearApPatchCollected   = APPatches_DebugClearCollected,
     .DebugTriggerTraplinkReceive  = ApiDebugTriggerTraplinkReceive,
-    .DebugSendText                = ApiDebugSendText,
-    .DebugSendOverlongText        = ApiDebugSendOverlongText,
-    .GetGoal                      = ApiGetGoal,
-    .DebugSetGoals                = ApiDebugSetGoals,
-    .GetGating                    = ApiGetGating,
-    .DebugSetGating               = ApiDebugSetGating,
-    .GetPatchCapRange             = ApiGetPatchCapRange,
-    .GetSpawnRateMin              = ApiGetSpawnRateMin,
-    .DebugSetPatchCapMin          = ApiDebugSetPatchCapMin,
-    .DebugSetPatchCapMax          = ApiDebugSetPatchCapMax,
-    .DebugSetSpawnRateMin         = ApiDebugSetSpawnRateMin,
-    .DebugReapplySlotOptions      = ApiDebugReapplySlotOptions,
-    .GetCheckProgress             = ApiGetCheckProgress,
-    .DebugSetCheckProgress        = ApiDebugSetCheckProgress,
-    .GetEnergyBalance             = ApiGetEnergyBalance,
-    .DebugSetEnergyBalance        = ApiDebugSetEnergyBalance,
-    .DebugReportState             = ApiDebugReportState,
-    .DebugResetProgression        = ApiDebugResetProgression,
+    .DebugSendText                = APText_DebugSend,
+    .DebugSendOverlongText        = APText_DebugSendOverlong,
+    .GetGoal                      = APGoal_Get,
+    .DebugSetGoals                = APGoal_DebugSetGoals,
+    .GetGating                    = APOptions_GetGating,
+    .DebugSetGating               = APOptions_DebugSetGating,
+    .GetPatchCapRange             = APOptions_GetPatchCapRange,
+    .GetSpawnRateMin              = APOptions_GetSpawnRateMin,
+    .DebugSetPatchCapMin          = APOptions_DebugSetPatchCapMin,
+    .DebugSetPatchCapMax          = APOptions_DebugSetPatchCapMax,
+    .DebugSetSpawnRateMin         = APOptions_DebugSetSpawnRateMin,
+    .DebugReapplySlotOptions      = APOptions_DebugReapply,
+    .GetCheckProgress             = APCheckDetect_GetProgress,
+    .DebugSetCheckProgress        = APCheckDetect_DebugSetProgress,
+    .GetEnergyBalance             = EnergyLink_GetBalance,
+    .DebugSetEnergyBalance        = EnergyLink_DebugSetBalance,
+    .DebugReportState             = APOptions_DebugReportState,
+    .DebugResetProgression        = APOptions_DebugResetProgression,
 };
 
 void ArchipelagoAPI_Export(void)
