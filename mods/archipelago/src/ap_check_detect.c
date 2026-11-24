@@ -1593,6 +1593,11 @@ void APCheckDetect_OnBoot(void)
     CODEPATCH_REPLACECALL(0x80105da0, APCheckDetect_YakumonoBreak);
     CODEPATCH_REPLACECALL(0x80010418, APCheckDetect_FreeRunLap);
     CODEPATCH_REPLACECALL(0x80010d68, APCheckDetect_RaceFinish);
+    // AirRide_CheckRaceLapObjectives (0x8004d248) has no Nebula Belt case: its jump table
+    // sends GR_SPACE2 into the checklist loop with the clear kinds and times uninitialized,
+    // and under the frame APCheckDetect_RaceFinish adds that garbage asserts in
+    // ClearChecker_GetKindClear. Point the entry at the epilogue.
+    CODEPATCH_REPLACEINSTRUCTION(0x804976a8 + GR_SPACE2 * 4, 0x8004d434);
     CODEPATCH_REPLACECALL(0x801db928, APCheckDetect_ItemCollect);
     CODEPATCH_REPLACECALL(0x801c68c0, APCheckDetect_GiveDamage);
     CODEPATCH_REPLACECALL(0x801c6990, APCheckDetect_GiveDamage);
